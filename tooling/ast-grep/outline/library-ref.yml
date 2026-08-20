@@ -1,0 +1,67 @@
+# ast-grep outline extractors for the CodeFabric library references.
+#
+# Sibling of specs.yml. Same mechanism (markdown is a built-in language, so
+# `--outline-rules` must be passed on every invocation -- see scripts/lib-outline.sh),
+# but a different level mapping, because the two corpora are rooted differently:
+#
+#   docs/upfront_design/*.md   h2-rooted: `## 5. Authority and precedence`  -> specs.yml
+#   docs/library_ref/*.md      h1-rooted: `# Rust MIR Advanced — 25) ...`   -> this file
+#
+# Level mapping:
+#   item   = `# Chapter`
+#   member = `## N.M Subsection`
+#
+# Applying specs.yml to a library reference is the failure this file exists to
+# prevent: every chapter heading is h1, so it matches nothing, and the h2
+# subsections are promoted to items -- yielding a flat wall with no chapter
+# structure. On rust_mir_cpg_continuous_reference that silently drops all 18
+# appendices, which are 42% of the document.
+#
+# Two properties of this mapping are load-bearing for these particular docs:
+#
+#   1. Fenced code is excluded by the markdown grammar, so `# Cargo.toml` and
+#      `# rust-toolchain.toml` inside ```toml blocks do not become chapters.
+#      A plain `rg '^# '` cannot make that distinction. library-ref.test.sh pins it.
+#
+#   2. Several of these docs carry an internal table of contents whose entries are
+#      `## 25) Title` -- textually indistinguishable from a body subsection. Under
+#      this mapping they become members of the `# Proposed comprehensive
+#      documentation map` item, while body subsections become members of their own
+#      chapter. The parent disambiguates what a flat grep cannot.
+#
+# h3 is deliberately unrepresented: outline exposes only item + direct member, so
+# extracting h1 as item makes h2 the member level and h3 has nowhere to go. These
+# docs use h3 sparingly (4-64 per file against 325-587 h2s), so the loss is small
+# and the chapter structure is worth more.
+#
+# `selector: section` is load-bearing. Without it the matched node is the heading
+# line alone, which contains no subsections, so members could never attach.
+#
+# The `context` values MUST stay quoted. Unquoted, YAML reads ` #` as a comment and
+# parses the value as null; ast-grep then rejects the file with "Cannot parse outline
+# rules ... did not match any variant of untagged enum PatternStyle", which is an
+# opaque way of saying the quotes are missing.
+#
+# `signature` is intentionally omitted: the fallback is the first non-empty line of
+# the matched node, which for a section is already the heading.
+
+id: libref-chapter
+language: markdown
+role: item
+symbolType: namespace
+rule:
+  pattern:
+    context: '# $TITLE'
+    selector: section
+name: $TITLE
+---
+id: libref-subsection
+language: markdown
+role: member
+symbolType: property
+parentRuleIds: [libref-chapter]
+rule:
+  pattern:
+    context: '## $TITLE'
+    selector: section
+name: $TITLE

@@ -1,0 +1,29 @@
+# Spelling and identifier hygiene (spec section 17).
+#
+# Misspellings are not merely cosmetic here: a wrong word in a serialized field, an
+# exception name, or a public Python symbol becomes an API defect. So source, snapshots,
+# error messages, and stubs are deliberately NOT excluded.
+
+[files]
+extend-exclude = [
+  "target/",
+  "dist/",
+  ".venv/",
+  "fuzz/corpus/",
+  "fuzz/artifacts/",
+  # ~9 MB of third-party-derived library reference prose. Not our vocabulary to correct,
+  # and large enough to bury real findings. docs/upfront_design/ is ours and stays in.
+  "docs/library_ref/",
+]
+
+[default.extend-words]
+# Genuine project/domain vocabulary only. Prefer a narrow word exception here over
+# excluding a whole directory. Seed this from real `typos` findings, not from guesses.
+#
+# Each entry needs a reason. Adding every finding to the dictionary to get a green run is
+# an anti-pattern (tooling-ref section 72.5).
+
+# A valid English variant, and the ontology uses it as a field name alongside `read_only`
+# (fact-ontology spec, "class member status"). Rewriting it to "writable" would be an
+# identifier change to the fact contract, not a spelling fix.
+writeable = "writeable"

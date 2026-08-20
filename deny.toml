@@ -1,0 +1,99 @@
+# Executable dependency policy (spec section 30).
+#
+# Generated with `cargo deny init` (cargo-deny 0.20.2), then edited deliberately. Spec
+# section 30.1 and tooling-ref section 31.3: do not copy another organization's license
+# policy, and do not derive an allow-list from whatever happens to be in the graph today.
+# The policy below states what this project is willing to depend on; the current graph
+# then either satisfies it or produces an exception that needs a reason.
+
+[graph]
+# Empty = all targets. This crate has no target-specific dependencies, so narrowing the
+# set would only hide findings.
+targets = []
+# The wheel ships with the `python` feature enabled, so the featureless graph is not the
+# graph that gets distributed. Auditing the wrong dependency graph is a named failure
+# mode (tooling-ref section 72.16): without this, pyo3 and its subtree are invisible to
+# every check below.
+all-features = true
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+# ------------------------------------------------------------------- advisories
+
+# A green scan means the resolved graph matches no known RustSec advisory under the
+# current database. It does not mean the dependencies have been security-audited
+# (spec section 31).
+[advisories]
+# Every entry needs a reason, an owner, and a review date. An indefinite ignore is
+# suppression, not policy (tooling-ref sections 67.1 and 72.5).
+ignore = []
+
+# --------------------------------------------------------------------- licenses
+
+# Permissive licenses only. CodeFabric distributes a Python wheel containing statically
+# linked Rust dependencies, so anything with a copyleft or source-disclosure obligation
+# would attach to the distributed artifact. Nothing here is currently distributed under a
+# chosen license, which is a separate open decision -- see `private.ignore` below.
+[licenses]
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  # Data-only license carried by unicode-ident and the wider unicode-rs family.
+  "Unicode-3.0",
+]
+confidence-threshold = 0.8
+# The allow-list is policy, not a mirror of today's graph, so entries that no current
+# dependency uses are expected and are not a finding (spec section 30.1).
+unused-allowed-license = "allow"
+# Narrow, version-aware exceptions with a rationale. Empty is the correct steady state.
+exceptions = []
+
+[licenses.private]
+# This package sets `publish = false` and deliberately declares no `license` field: no
+# license has been chosen for CodeFabric yet, and Cargo.toml is not the place to invent
+# one. Without this, cargo-deny reports our own crate as "Unlicensed" and fails.
+#
+# Revisit when the project picks a license.
+ignore = true
+registries = []
+
+# ------------------------------------------------------------------------- bans
+
+# Duplicate versions deserve attention, not automatic failure -- they are often forced by
+# transitive constraints (spec section 30.2). `warn` surfaces them; pair with
+# `cargo tree -d` before attempting a resolution.
+[bans]
+multiple-versions = "warn"
+# A wildcard version requirement is never intentional in a locked application.
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+allow-wildcard-paths = true
+deny = []
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------- sources
+
+# crates.io only. A Git dependency pinned to a branch is materially less reproducible
+# than one pinned to an immutable revision (tooling-ref section 31.5); if one becomes
+# necessary, add it here explicitly with its exact rev.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

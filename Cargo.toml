@@ -1,0 +1,72 @@
+# One Cargo package, one primary library crate (spec sections 0.3, 1.1, 77).
+#
+# There is deliberately no `[workspace]` table and no `crates/` directory. A second
+# crate requires a package/build justification from spec section 0.3 -- independent
+# reuse, dependency isolation, distinct platform requirements, an independent release
+# lifecycle, a separately built artifact, or *measured* compilation benefit. "The code
+# grew another conceptual area" is explicitly not sufficient.
+
+[package]
+name = "codefabric"
+version = "0.1.0"
+edition = "2024"
+description = "Rust core for CodeFabric, exposed to Python through a private PyO3 extension."
+# No `license` field and no `rust-version`:
+#   - no license has been chosen for this repository yet, and asserting one here would
+#     be a claim the repository does not otherwise make. `publish = false` keeps cargo
+#     from warning about the omission.
+#   - spec section 27: do not advertise an MSRV that is not actually verified.
+publish = false
+
+[lib]
+name = "codefabric"
+# rlib for ordinary Rust consumers and tests; cdylib for the Maturin/PyO3 extension.
+crate-type = ["rlib", "cdylib"]
+
+# Spec section 26: keep the feature surface small and semantically meaningful.
+#   no features -> pure Rust library compiles and tests without a Python runtime
+#   python      -> Rust library plus the PyO3 adapter
+[features]
+default = []
+python = ["dep:pyo3"]
+
+[dependencies]
+# Spec section 6.2 / anti-pattern 81.5: no `extension-module` feature here. Maturin sets
+# the extension-build environment for the build that needs it; enabling that feature
+# globally interferes with ordinary Rust test linking.
+pyo3 = { version = "0.29.2", optional = true }
+
+[dev-dependencies]
+# Keep this list intentionally small; add test-only crates only when justified.
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+# Spec section 9.2: line tables for first-party code give useful source locations while
+# keeping `target/` from inflating; dependencies carry no debug info at all.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+debug = false
+
+# Full debugger-quality information, on request.
+[profile.debugging]
+inherits = "dev"
+debug = "full"
+
+# Spec section 40.2: profiling needs release codegen with symbols preserved.
+[profile.profiling]
+inherits = "release"
+debug = "full"
+strip = "none"

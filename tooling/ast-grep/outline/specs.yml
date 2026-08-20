@@ -1,0 +1,48 @@
+# ast-grep outline extractors for the CodeFabric design specifications.
+#
+# Markdown is a built-in language with no bundled outline extractors, so these are
+# loaded explicitly via `--outline-rules` (see scripts/spec-outline.sh). There is no
+# sgconfig registration path for built-in languages -- `outlineRules` is only a
+# customLanguages field.
+#
+# Level mapping, chosen because these specs are cited by section number (§36, §95):
+#   item   = `## N. Section`
+#   member = `### N.N Subsection`
+# `# Part N` headings and h4 are deliberately not represented: outline exposes only
+# item + direct member, and a node nested inside an extracted item is demoted to a
+# member, so extracting Parts would push sections down and drop subsections entirely.
+#
+# `selector: section` is load-bearing. Without it the matched node is the heading
+# line alone, which contains no subsections, so members could never attach.
+#
+# The `context` values MUST stay quoted. Unquoted, YAML reads ` #` as a comment and
+# parses the value as null; ast-grep then rejects the file with "Cannot parse outline
+# rules ... did not match any variant of untagged enum PatternStyle", which is an
+# opaque way of saying the quotes are missing.
+#
+# The dangerous edit is subtler: changing `selector: section` to `atx_heading` still
+# produces items but silently drops every member. specs.test.sh asserts against that.
+#
+# `signature` is intentionally omitted: the fallback is the first non-empty line of
+# the matched node, which for a section is already `## 1. Purpose`.
+
+id: spec-section
+language: markdown
+role: item
+symbolType: namespace
+rule:
+  pattern:
+    context: '## $TITLE'
+    selector: section
+name: $TITLE
+---
+id: spec-subsection
+language: markdown
+role: member
+symbolType: property
+parentRuleIds: [spec-section]
+rule:
+  pattern:
+    context: '### $TITLE'
+    selector: section
+name: $TITLE

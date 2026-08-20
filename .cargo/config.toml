@@ -1,0 +1,10 @@
+# Spec section 13: make compiler caching explicit in version control rather than relying
+# on an undocumented shell environment, so agents and CI can see the intended wrapper.
+#
+# Section 13.1 caveat, accepted deliberately: this makes sccache a hard build
+# prerequisite. scripts/bootstrap.sh checks for it and reports its hit rate.
+#
+# Nothing host-specific belongs here -- no `-C target-cpu=native`, no absolute paths, no
+# one machine's linker. Those go in target-specific tables, the environment, or CI.
+[build]
+rustc-wrapper = "sccache"

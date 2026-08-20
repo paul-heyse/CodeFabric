@@ -1,0 +1,32 @@
+# cargo-nextest profiles (spec section 18).
+#
+# nextest does NOT run doctests. `cargo test --doc` is a separate, mandatory step; never
+# report "all Rust tests passed" from nextest alone (spec sections 18.2 and 62.2).
+
+[profile.default]
+fail-fast = true
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+[profile.ci]
+fail-fast = false
+# Retries are diagnostic, not a way to make a red test disappear. `flaky-result = "fail"`
+# means a test that only passes on rerun still fails the build (spec section 18.1).
+retries = { backoff = "exponential", count = 2, delay = "1s", max-delay = "10s", jitter = true }
+flaky-result = "fail"
+slow-timeout = { period = "60s", terminate-after = 3 }
+global-timeout = "2h"
+success-output = "never"
+failure-output = "immediate-final"
+
+[profile.ci.junit]
+path = "junit.xml"
+
+# When tests come to share a database, port, or other scarce resource, constrain them
+# with a test group rather than serializing the whole suite (spec section 18.3):
+#
+#   [test-groups.database]
+#   max-threads = 1
+#
+#   [[profile.default.overrides]]
+#   filter = 'test(database_)'
+#   test-group = 'database'
