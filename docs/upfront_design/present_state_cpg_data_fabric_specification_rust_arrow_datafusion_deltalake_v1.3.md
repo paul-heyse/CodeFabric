@@ -337,16 +337,66 @@ Utility crates such as `blake3`, `serde`, `tokio`, and `futures` MAY be used ins
 
 Resolver `3` is required: the pinned delta-rs workspace uses it, and it is the resolver that participates in Rust-version-aware dependency resolution — which matters once a `rust-version` floor is declared.
 
-Object-store backends are **not** in the default feature set. The mandatory `local-workstation-v1` profile writes to a local filesystem Delta namespace, so the baseline compiles neither the AWS SDK nor any other cloud dependency:
+Object-store backends are **not operationally enabled** by the default CodeFabric
+feature set. The mandatory `local-workstation-v1` profile writes to a local
+filesystem Delta namespace and SHALL accept neither cloud URL schemes nor cloud
+credentials, endpoints, or storage-option maps:
 
 ```toml
 [features]
 default = ["local-workstation"]
-local-workstation = []
-s3-storage = ["deltalake/s3"]
+canonical-json = [
+  "dep:base64", "dep:blake3", "dep:serde", "dep:serde_json",
+  "dep:serde_json_canonicalizer", "dep:thiserror",
+]
+contracts-tooling = ["canonical-json", "dep:serde_yaml_ng", "dep:tempfile"]
+data-fabric = [
+  "dep:arrow", "dep:arrow-array", "dep:arrow-buffer", "dep:arrow-cast",
+  "dep:arrow-ord", "dep:arrow-row", "dep:arrow-schema", "dep:arrow-select",
+  "dep:arrow-string", "dep:datafusion", "dep:deltalake", "dep:futures",
+  "dep:object_store", "dep:parquet", "dep:tracing",
+]
+rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
+repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
+compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
+local-workstation = ["contracts-tooling", "compatibility-probes"]
+proto-tooling = ["dep:prost-build", "dep:protoc-bin-vendored", "dep:tonic-prost-build"]
+s3-storage = ["data-fabric", "deltalake/s3"]
 ```
 
-A deployment profile that requires object-store durability SHALL enable the corresponding storage feature explicitly. Removing `s3` from the default set is dependency hygiene, not a correctness requirement; it does not change any durable-state contract in this specification.
+These are additive build-capability features inside the single stable root package, not
+deployment alternatives and not semantic source-decomposition rules. Narrow contract,
+Protobuf, and fuzz invocations SHALL disable default features and select only their owning
+capability. The default `local-workstation` aggregate SHALL retain the complete accepted
+local production graph. Source modules, required-feature binaries, the single integration
+test target, local recipes, and CI SHALL use the same feature ownership. The accepted
+correction and its proof obligations are specified in
+`docs/designs/codefabric_build_cache_and_feature_isolation_design_v1_2026-08-20.md`.
+
+A deployment profile that requires object-store durability SHALL enable the
+corresponding storage feature explicitly. In particular, the default resolved
+graph SHALL contain neither `deltalake-aws` nor the `aws-sdk-*` family, while
+`s3-storage` SHALL resolve `deltalake-aws` through `deltalake/s3`.
+
+The exact pinned graph has one important limitation that graph evidence SHALL
+report rather than hide: `buoyant_kernel` 0.25.x's `arrow-58` feature
+unconditionally requests `object_store` 0.13.2 with its `aws`, `azure`, `gcp`,
+and `http` features. Those latent implementations therefore compile in the
+default binary even though CodeFabric neither registers nor authorizes them
+under `local-workstation-v1`. Cargo feature unification cannot subtract those
+features, and a direct dependency declaration with fewer features does not
+change the downstream request.
+
+Accordingly, local-profile isolation is an application-owned provider and
+configuration boundary, not a claim that all cloud-related code is absent from
+the compiled graph. The resolved-feature report, the absence of
+`deltalake-aws`/AWS SDK packages, and negative provider-factory tests are all
+required evidence. Any advisory exception forced by this latent surface SHALL
+be exact-ID and exact-version bound, carry an owner and review trigger in a
+committed machine-readable registry, and be removed or explicitly re-approved
+before an S3-enabled release. Removing `s3` from the default set remains
+dependency and authority hygiene; it does not change any durable-state
+contract in this specification.
 
 ### 2.2 Version-alignment invariant
 

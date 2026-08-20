@@ -1,0 +1,8 @@
+{
+  "rust-analyzer.linkedProjects": [
+    "Cargo.toml",
+    "rustc-extractor/Cargo.toml",
+    "pyrefly-sidecar/Cargo.toml"
+  ],
+  "python.defaultInterpreterPath": "${workspaceFolder}/codefabric-cpg-mcp/.venv/bin/python"
+}

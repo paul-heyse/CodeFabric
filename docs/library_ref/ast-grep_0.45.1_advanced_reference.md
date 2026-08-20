@@ -4303,6 +4303,27 @@ ast-grep scan --format github
 
 For a repository that treats rule authoring as software engineering, also validate YAML/schema and any generated rule catalog docs.
 
+## 15.11 Exit status of `ast-grep test`
+
+`test` does **not** follow the grep-like `0`/`1` contract that `run` uses (section 3.14). It reports distinct nonzero codes per failure class. Measured against 0.45.1:
+
+| Code | Meaning |
+|---|---|
+| `0` | every selected case passed |
+| `3` | `--filter` selected no test case |
+| `4` | a `valid`/`invalid` assertion failed, **or** a snapshot is missing or mismatched |
+| `6` | a configured `testDir` does not exist |
+| `8` | a rule or config file could not be parsed |
+
+These numbers are not part of a published CLI stability contract, so treat **"zero versus nonzero" as the durable check** and the specific code as a diagnostic hint. In particular, do not write `if status == 1` — `test` never returns `1`.
+
+Two of these are silent-success hazards rather than failures:
+
+* **A test file naming a rule `id` that does not exist exits `0`.** The run reports `test result: ok. 0 passed; 0 failed;` — a typo in the `id` field does not fail, it deletes the test. Assert on the *number of cases executed*, not only on the exit code, whenever a suite is expected to be non-empty.
+* **`--filter` that matches nothing exits `3`, not `0`.** This is the desirable behavior and it is worth relying on: a CI slice whose filter has drifted out of date fails loudly instead of silently testing nothing.
+
+`--skip-snapshot-tests` suppresses the snapshot half of code `4`, which is why it is the right flag for a gate that runs before snapshots have been reviewed. `--update-all` rewrites the snapshots to match current output and then exits `0`, so it can never fail — that makes it a deliberate authoring step and never a step inside a gate (section 15.9).
+
 ### Agent checklist
 
 ```text

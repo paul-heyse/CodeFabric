@@ -26,12 +26,25 @@ mkdir -p target
   echo "--- installed cargo executables ---"
   cargo install --list
   echo
-  echo "--- python toolchain ---"
-  uv --version
-  uv run python --version
-  uv run maturin --version
-  uv run ruff --version
-  uv run pyrefly --version
+  echo "--- build domains ---"
+  echo "stable-root: Cargo.toml"
+  [ ! -f rustc-extractor/Cargo.toml ] || echo "rustc-extractor: rustc-extractor/Cargo.toml"
+  [ ! -f rustc-extractor/Cargo.toml ] || (cd rustc-extractor && rustc -vV)
+  [ ! -f pyrefly-sidecar/Cargo.toml ] || {
+    echo "pyrefly-sidecar: pyrefly-sidecar/Cargo.toml"
+    cat pyrefly-sidecar/toolchain-identity.json
+  }
+  [ ! -f codefabric-cpg-mcp/pyproject.toml ] || {
+    echo "FastMCP adapter: codefabric-cpg-mcp/pyproject.toml"
+    uv --version
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT \
+      uv run --project codefabric-cpg-mcp --frozen \
+      python -m codefabric_cpg_mcp --identity 2>&1 1>/dev/null
+  }
+  [ ! -f tooling/proto/toolchain-identity.json ] || {
+    echo "Protobuf generators: tooling/proto/toolchain-identity.json"
+    cat tooling/proto/toolchain-identity.json
+  }
   echo
   echo "--- sccache ---"
   sccache --show-stats || true

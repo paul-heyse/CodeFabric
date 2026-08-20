@@ -1,0 +1,6 @@
+# rustc_public is compiler-shipped and tied to this exact nightly. A date bump is
+# an API/provider upgrade requiring the extractor fixture and semantic-diff gates.
+[toolchain]
+channel = "nightly-2026-08-18"
+components = ["rustc-dev", "rust-src", "llvm-tools"]
+profile = "minimal"

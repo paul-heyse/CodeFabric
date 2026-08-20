@@ -1,0 +1,11 @@
+id: gix-boundary-only
+valid:
+  - |
+      fn convert(value: ObjectId) -> String {
+          value.to_string()
+      }
+invalid:
+  - |
+      fn open_repository() {
+          let _repository = gix::open(".");
+      }

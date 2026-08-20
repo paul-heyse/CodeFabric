@@ -1,0 +1,563 @@
+{
+  "schema_version": 1,
+  "plan_path": "docs/plans/codefabric_waves_0-3_foundation_implementation_plan_v3_2026-08-20.md",
+  "plan_version": "v3",
+  "plan_digest": "884a2fc3f5e31a910389fca730b5fb3d544c69d4dce978aadf4431bcdb818a04",
+  "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+  "design_version": "v1.0",
+  "design_digest": "749a032a21875589ea5e15eb850cb4008269856d6a3aeba9df3ef1ef6ee216fd",
+  "design_inputs": {
+    "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md": "749a032a21875589ea5e15eb850cb4008269856d6a3aeba9df3ef1ef6ee216fd",
+    "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md": "6af32718e3fe0bd5203a3754d7f7affecaefd05c73af6032021540db0dbda4af",
+    "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md": "601858214adcd1e0fbd204e54c27e43583d568b1bbe14e239832eaa9b6bcf5b0",
+    "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md": "47cc659848b562251f12885902c25240f76afa3e34001ca90dfc11b1c4bfb6ee",
+    "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md": "7154be4350e0e154c7771d35c79bfead491ffacaea5b8959e2eb5306a54ff191",
+    "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md": "b0754f97a36e19bf9e5224bc861891dbc5915fc27ae8b3b3c2e13361fa066e0f",
+    "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md": "8ee8ec7dbc06b1a8ac1b03d882abe33fef5d3dbe70e35446e56dbfd399f25524",
+    "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md": "b3cb6998065544052e3981880d06da94e21951583ecb0cd9a7716fa2bca2ab3d"
+  },
+  "baseline_commit": "e14e175071df5c98dfcdeba81dd8bcca3fe91fb0",
+  "accepted_execution_baseline_commit": "a689f1ddf712c0f8fe5cf93d9a50a559f84e4b91",
+  "current_head": "a689f1ddf712c0f8fe5cf93d9a50a559f84e4b91",
+  "status": "design_reopening_required",
+  "current_wave": "W0",
+  "current_packet": "WP01",
+  "acceptance": {
+    "plan_frontmatter_status": "draft",
+    "accepted_by": "user",
+    "accepted_at": "2026-08-20T15:54:04Z",
+    "evidence": "Explicit request to implement the entirety of v3 using impl-plan-exec."
+  },
+  "toolchain": {
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "python": "3.14.7",
+    "uv": "0.12.5",
+    "ast_grep": "0.45.1",
+    "ripgrep": "15.2.0"
+  },
+  "pre_existing_modifications": [
+    {
+      "path": ".codex/config.toml",
+      "file_sha256": "ba0504ec909ea15e0a821eca184b6edcc406a066b9f47bcaf10a44407ac2f704",
+      "diff_sha256": "98c76de7cf0f814fb74cda31374c92223d954335f8f5e1f14758a905adfef293",
+      "overlaps_packets": ["WP01", "WP05"],
+      "disposition": "Preserve the expanded session-context budget while extending editor and multi-root configuration only where the accepted plan requires it."
+    },
+    {
+      "path": "AGENTS.md",
+      "file_sha256": "ff1bb9f3c478d6436dac83aa34eec954df2483020e4435fc887f200db0672587",
+      "diff_sha256": "419dcfe8ef52a4f5653e9db6e91a0d8848fad0afedc941404a55df705900dd70",
+      "overlaps_packets": ["WP01", "WP05"],
+      "disposition": "Preserve the consolidated agent guidance and update its seed-era topology and command descriptions in place."
+    },
+    {
+      "path": "CLAUDE.md",
+      "file_sha256": "b85d89f03e2a74c7ec0155ef6a89b3f327ab1551f7f3ad0d4888f12c2caf0eea",
+      "diff_sha256": "95f171e033bdfa1bd5ffc712fb794920b59b3cc10cd406957e64635bd1736387",
+      "overlaps_packets": ["WP01"],
+      "disposition": "Preserve the thin-shim consolidation and keep it as the topology changes."
+    },
+    {
+      "path": "_typos.toml",
+      "file_sha256": "bc55d49419c6b9724260fb0343ad21f0699b3c86a31f39cf7eec9dacc909c848",
+      "diff_sha256": "765c3bf87390d9cb9719e95c3d0e9277074d656b5803340bfbc92c03c670738a",
+      "overlaps_packets": ["WP01", "WP05"],
+      "disposition": "Preserve the narrowly documented token exceptions; add only generated-tree exclusions required by the plan."
+    },
+    {
+      "path": "justfile",
+      "file_sha256": "9e10b094ee03370438e56fdcae5a79e0c2a103d9fc8aa02d7fe481680fe39794",
+      "diff_sha256": "09bfb5e66359d3623dda6566e44bc0b71ea5d7c5fc0bc2f42fbaa468050e5c63",
+      "overlaps_packets": ["WP01", "WP05"],
+      "disposition": "Preserve the baseline recipe while removing root-Python commands and later extending the four-domain command contract."
+    },
+    {
+      "path": "README.md",
+      "file_sha256": "9b247fa9a4c1d16a7157f777e53f4914bdf70b94d44fbeb1bfd10ba7536a0b12",
+      "diff_sha256": "fc4da65bda8405ea7d473a0edd2629196675243bb8871b2a6f318f9decaebd12",
+      "overlaps_packets": ["WP01", "WP05"],
+      "disposition": "Preserve the expanded tool and repository map while replacing its seed-era Python topology and commands."
+    },
+    {
+      "path": "docs/spec_index/README.md",
+      "file_sha256": "47bae324827a47fc742c2736b1309bf63ff39da3ad51367f719406c350c5903e",
+      "diff_sha256": "079eb279ea3820e2cbd6cea45f34fa4740c6133a4dfe2c92f9de1adb8c381866",
+      "overlaps_packets": ["WP05"],
+      "disposition": "Preserve the corrected design-corpus heading census; this derived navigation edit does not conflict with WP01."
+    },
+    {
+      "path": "scripts/bootstrap.sh",
+      "file_sha256": "746b7734adf6f670998d249ce01fca2239b64ef4b636c355a6fc9e3939cdbad7",
+      "diff_sha256": "26381bc34aee29dafc81827609e3e2d5922f44cee7030851d0e067c4ff66ba29",
+      "overlaps_packets": ["WP01", "WP05"],
+      "disposition": "Preserve and integrate baseline caching plus search-tool version reporting into the four-domain bootstrap rewrite."
+    }
+  ],
+  "packets": {
+    "WP01": {
+      "title": "Stable-domain re-baseline and seed decommission",
+      "status": "invalidated",
+      "dependencies": [],
+      "started_at": "2026-08-20T15:59:35Z",
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [
+        {
+          "command": "cargo check --all-targets",
+          "observed_at": "2026-08-20T16:04:00Z",
+          "summary": "The initial Arrow string-length probe supplied an obsolete offset generic; arrow-string 58.4.0 exposes a non-generic length(&dyn Array) API. The probe was corrected to the exact pinned API."
+        },
+        {
+          "command": "cargo test --all-targets --locked",
+          "observed_at": "2026-08-20T16:22:00Z",
+          "summary": "The first utility probe constructed and dropped an owned Tokio runtime inside an async test. The probe now uses the ambient runtime handle, preserving the Tokio compatibility check without an invalid nested-runtime lifecycle."
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "design_reopening",
+          "observed_at": "2026-08-20T16:35:13Z",
+          "summary": "The exact delta-rs revision selects buoyant_kernel 0.25.1 with arrow-58; that feature unconditionally enables object_store 0.13.2 aws, azure, gcp, and http features in the default graph. This contradicts FAB 2.1 and WP01/M01 claims that local-workstation compiles no cloud dependency. The same path selects quick-xml 0.39.4, which has RUSTSEC-2026-0194 and RUSTSEC-2026-0195 and cannot be lockfile-updated to the fixed 0.41 line under object_store 0.13.2's semver requirement."
+        }
+      ]
+    },
+    "WP02": {
+      "title": "Nightly rustc-extractor build domain shell",
+      "status": "invalidated",
+      "dependencies": ["WP01"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP03": {
+      "title": "Pyrefly sidecar build domain shell",
+      "status": "invalidated",
+      "dependencies": ["WP01"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP04": {
+      "title": "Python FastMCP adapter domain shell",
+      "status": "invalidated",
+      "dependencies": ["WP01"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP05": {
+      "title": "Protobuf toolchain, repository command contract, and four-domain CI",
+      "status": "invalidated",
+      "dependencies": ["WP01", "WP02", "WP03", "WP04"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP06": {
+      "title": "Contracts tree, canonical JSON, and verifier core",
+      "status": "not_started",
+      "dependencies": ["WP05"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP07": {
+      "title": "CBEF-v1 identity, path canonicalization, and KAT vectors",
+      "status": "not_started",
+      "dependencies": ["WP06"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP08": {
+      "title": "Ontology and categorical registries plus state machines",
+      "status": "not_started",
+      "dependencies": ["WP06", "WP07"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP08b": {
+      "title": "Phrase registry, controlled-language grammar, and model-pack schema",
+      "status": "not_started",
+      "dependencies": ["WP08"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP09": {
+      "title": "Schema generation",
+      "status": "not_started",
+      "dependencies": ["WP07", "WP08"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP10": {
+      "title": "Protocol generation",
+      "status": "not_started",
+      "dependencies": ["WP05", "WP08"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP11": {
+      "title": "Bundles, deployment profile, and CF-ID traceability",
+      "status": "not_started",
+      "dependencies": ["WP06", "WP07", "WP08", "WP08b", "WP09", "WP10"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP12": {
+      "title": "Daemon lifecycle kernel",
+      "status": "not_started",
+      "dependencies": ["WP11"],
+      "wave_entry_milestone": "M02",
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP13": {
+      "title": "Operational-state store",
+      "status": "not_started",
+      "dependencies": ["WP12", "WP09"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP14": {
+      "title": "Workspace registry, administrative lifecycle, and identity",
+      "status": "not_started",
+      "dependencies": ["WP13", "WP07"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP15": {
+      "title": "Root authorization, secure open, and path identity runtime",
+      "status": "not_started",
+      "dependencies": ["WP07", "WP13"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP16": {
+      "title": "Source images, blob store, inventory, and generations",
+      "status": "not_started",
+      "dependencies": ["WP13", "WP15"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP17": {
+      "title": "Read-only gix discovery and Git topology",
+      "status": "not_started",
+      "dependencies": ["WP12", "WP15", "WP16"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP18": {
+      "title": "WorkspaceCoordinator actor, bootstrap-without-watchers, and pre-ready health",
+      "status": "not_started",
+      "dependencies": ["WP12", "WP13", "WP14", "WP15", "WP16", "WP17"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP19": {
+      "title": "Schema-registry runtime, Delta namespace, and control-plane tables",
+      "status": "not_started",
+      "dependencies": ["WP09", "WP12", "WP13", "WP14", "WP18"],
+      "wave_entry_milestone": "M03",
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP20": {
+      "title": "Universal fact core, observation boundary, encoders, and batch validation",
+      "status": "not_started",
+      "dependencies": ["WP19"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP21": {
+      "title": "Mutation classes, owner replacement, and idempotency",
+      "status": "not_started",
+      "dependencies": ["WP20"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP22": {
+      "title": "Durable publication and current-pointer protocol",
+      "status": "not_started",
+      "dependencies": ["WP21"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP26": {
+      "title": "Snapshot provider/catalog substrate and access-profile factory",
+      "status": "not_started",
+      "dependencies": ["WP09", "WP19", "WP22"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP24": {
+      "title": "ServingSnapshot manifest, activation transaction, leases, and retention",
+      "status": "not_started",
+      "dependencies": ["WP13", "WP16", "WP22", "WP26"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP23": {
+      "title": "Hot overlay, consolidation, and rebase",
+      "status": "not_started",
+      "dependencies": ["WP21", "WP22", "WP24"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP25": {
+      "title": "Serving views, read-only DataFusion sessions, and pinned-query proof",
+      "status": "not_started",
+      "dependencies": ["WP23", "WP24", "WP26"],
+      "started_at": null,
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [],
+      "acceptance_evidence": [],
+      "checks": [],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M01": {"status": "not_started", "dependencies": ["WP01", "WP02", "WP03", "WP04", "WP05"], "checks": []},
+    "M02": {"status": "not_started", "dependencies": ["WP06", "WP07", "WP08", "WP08b", "WP09", "WP10", "WP11"], "checks": []},
+    "M03": {"status": "not_started", "dependencies": ["WP12", "WP13", "WP14", "WP15", "WP16", "WP17", "WP18"], "checks": []},
+    "M04": {"status": "not_started", "dependencies": ["WP19", "WP20", "WP21", "WP22", "WP26", "WP24", "WP23", "WP25"], "checks": []}
+  },
+  "decommission_batches": {
+    "DB01": {"status": "not_started", "dependencies": ["WP01", "WP04", "WP05"], "checks": []}
+  },
+  "baseline_failures": [
+    {
+      "command": "just ci-fast",
+      "status": "failed",
+      "exit_code": 2,
+      "observed_at": "2026-08-20T15:54:04Z",
+      "summary": "Rust fmt/check/clippy, Ruff, 9 nextest tests, 2 doctests, Maturin develop, and 12 pytest tests passed. Typos failed on two inherited documents (two wording hits in the v1 audit report and one hexadecimal revision-fragment hit in the delta-rs recommendation). Pyrefly exited 0 but warned that python/**/*.py was excluded."
+    }
+  ],
+  "discovered_obligations": [
+    {
+      "packet": "WP01",
+      "kind": "exact_dependency_selection",
+      "summary": "Preflight selected rusqlite 0.40.2 with default features disabled plus bundled and backup, and rustix 1.1.4 with fs; both exact versions are compile-probed and graph-validated."
+    },
+    {
+      "packet": "WP05",
+      "kind": "generator_dependency_selection",
+      "summary": "Crates.io preflight selected prost/prost-build 0.14.4, tonic/tonic-build 0.14.6, and protoc-bin-vendored 3.2.0 for the WP05 transport and deterministic-generation probes; compatibility remains to be proven in that packet."
+    },
+    {
+      "packet": "WP01",
+      "kind": "design_reopening",
+      "summary": "Reconcile FAB 2.1 and WP01/M01 no-cloud-default claims with buoyant_kernel 0.25.1 arrow-58 forcing object_store cloud features. Choose either a corrected delta/kernel baseline that preserves the invariant or an explicit design revision that accepts the transitive cloud surface and its advisory posture."
+    }
+  ],
+  "plan_deviations": [
+    {
+      "kind": "execution_acceptance",
+      "summary": "Plan frontmatter remains draft and immutable; the user's explicit instruction to execute v3 is the acceptance authority."
+    },
+    {
+      "kind": "baseline_reconciliation",
+      "summary": "The frontmatter baseline e14e175 predates the accepted plan/design commit. Execution uses a689f1d as the accepted artifact baseline and records every later working-tree overlap separately."
+    },
+    {
+      "kind": "user_directed_license_scope",
+      "summary": "At the user's direction, active policy gates exclude cargo-deny license evaluation for now; deny advisories, bans, sources, and cargo-audit remain active. The dormant license configuration is not completion evidence."
+    }
+  ],
+  "failed_approaches": [
+    {
+      "packet": "WP01",
+      "command": "cargo check --all-targets",
+      "summary": "Corrected an obsolete generic invocation of arrow_string::length after exact-pin compilation rejected it."
+    },
+    {
+      "packet": "WP01",
+      "command": "cargo test --all-targets --locked",
+      "summary": "Replaced an owned Tokio runtime probe dropped from async context with an ambient Handle probe after Tokio correctly rejected the nested runtime lifecycle."
+    },
+    {
+      "packet": "WP01",
+      "command": "just policy",
+      "summary": "The exact pinned graph exposed the false no-cloud premise and two quick-xml vulnerabilities. License findings were removed from the active gate by explicit user direction; advisory findings remain unresolved pending design reopening."
+    }
+  ],
+  "next_action": "Obtain design direction: preserve the no-cloud default invariant by changing the delta/kernel baseline, or revise the design to accept the forced object_store cloud feature surface with an explicit security-exception policy. Then issue a new executable plan version and resume WP01.",
+  "updated_at": "2026-08-20T16:35:13Z"
+}

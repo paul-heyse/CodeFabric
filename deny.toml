@@ -1,5 +1,9 @@
 # Executable dependency policy (spec section 30).
 #
+# License configuration is retained as a future decision aid but is intentionally not
+# invoked by the repository policy recipe or CI. The user excluded license
+# considerations from the current implementation on 2026-08-20.
+#
 # Generated with `cargo deny init` (cargo-deny 0.20.2), then edited deliberately. Spec
 # section 30.1 and tooling-ref section 31.3: do not copy another organization's license
 # policy, and do not derive an allow-list from whatever happens to be in the graph today.
@@ -10,10 +14,9 @@
 # Empty = all targets. This crate has no target-specific dependencies, so narrowing the
 # set would only hide findings.
 targets = []
-# The wheel ships with the `python` feature enabled, so the featureless graph is not the
-# graph that gets distributed. Auditing the wrong dependency graph is a named failure
-# mode (tooling-ref section 72.16): without this, pyo3 and its subtree are invisible to
-# every check below.
+# Include the optional S3 deployment profile in policy checks. The default local profile
+# is checked separately to prove that it activates neither deltalake-aws nor the AWS SDK;
+# the kernel-forced latent object_store cloud features are documented and registry-bound.
 all-features = true
 no-default-features = false
 
@@ -28,13 +31,21 @@ feature-depth = 1
 [advisories]
 # Every entry needs a reason, an owner, and a review date. An indefinite ignore is
 # suppression, not policy (tooling-ref sections 67.1 and 72.5).
-ignore = []
+# Exact package/version, rationale, owner, and review-trigger records live in
+# tooling/security/advisory-exceptions.json. scripts/advisory_policy_check.sh requires
+# exact equality and verifies the selected lockfile plus current RustSec result.
+ignore = [
+  "RUSTSEC-2024-0436",
+  "RUSTSEC-2026-0173",
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
+]
 
 # --------------------------------------------------------------------- licenses
 
-# Permissive licenses only. CodeFabric distributes a Python wheel containing statically
-# linked Rust dependencies, so anything with a copyleft or source-disclosure obligation
-# would attach to the distributed artifact. Nothing here is currently distributed under a
+# Permissive licenses only. CodeFabric's future distributed artifacts may statically link
+# Rust dependencies, so anything with a copyleft or source-disclosure obligation can
+# attach to the artifact. Nothing here is currently distributed under a
 # chosen license, which is a separate open decision -- see `private.ignore` below.
 [licenses]
 allow = [
@@ -66,11 +77,13 @@ registries = []
 
 # ------------------------------------------------------------------------- bans
 
-# Duplicate versions deserve attention, not automatic failure -- they are often forced by
-# transitive constraints (spec section 30.2). `warn` surfaces them; pair with
-# `cargo tree -d` before attempting a resolution.
+# Duplicate versions are denied by default. Exact temporary skips below acknowledge
+# transitive families that the current graph cannot unify; the Arrow, Parquet,
+# DataFusion, object_store, and buoyant-kernel families are deliberately never skipped.
+# scripts/duplicate_family_check.sh proves both the config shape and a second-Arrow
+# expected-failure fixture.
 [bans]
-multiple-versions = "warn"
+multiple-versions = "deny"
 # A wildcard version requirement is never intentional in a locked application.
 wildcards = "deny"
 highlight = "all"
@@ -79,7 +92,29 @@ external-default-features = "allow"
 allow = []
 allow-wildcard-paths = true
 deny = []
-skip = []
+skip = [
+  { crate = "block-buffer@0.10.4", reason = "transitive crypto ecosystem split; not a type-bearing CodeFabric family" },
+  { crate = "core-foundation@0.9.4", reason = "transitive macOS integration split" },
+  { crate = "cpufeatures@0.2.17", reason = "transitive crypto ecosystem split" },
+  { crate = "crypto-common@0.1.7", reason = "transitive crypto ecosystem split" },
+  { crate = "digest@0.10.7", reason = "transitive crypto ecosystem split" },
+  { crate = "foldhash@0.1.5", reason = "transitive collection ecosystem split" },
+  { crate = "getrandom@0.2.17", reason = "transitive random ecosystem split" },
+  { crate = "getrandom@0.3.4", reason = "transitive random ecosystem split" },
+  { crate = "hashbrown@0.14.5", reason = "transitive collection ecosystem split" },
+  { crate = "hashbrown@0.15.5", reason = "transitive collection ecosystem split" },
+  { crate = "hashbrown@0.16.1", reason = "transitive collection ecosystem split" },
+  { crate = "http@0.2.12", reason = "transitive HTTP ecosystem split" },
+  { crate = "http-body@0.4.6", reason = "transitive HTTP ecosystem split" },
+  { crate = "md-5@0.10.6", reason = "transitive crypto ecosystem split" },
+  { crate = "r-efi@5.3.0", reason = "transitive WASI support split" },
+  { crate = "rand@0.9.5", reason = "transitive random ecosystem split" },
+  { crate = "rand_core@0.9.5", reason = "transitive random ecosystem split" },
+  { crate = "reqwest@0.13.4", reason = "transitive HTTP ecosystem split" },
+  { crate = "sqlparser@0.62.0", reason = "transitive parser consumers currently require two lines" },
+  { crate = "syn@3.0.3", reason = "transitive procedural-macro ecosystem split" },
+  { crate = "windows-sys@0.52.0", reason = "transitive Windows support split" },
+]
 skip-tree = []
 
 # ---------------------------------------------------------------------- sources
@@ -91,7 +126,7 @@ skip-tree = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = ["https://github.com/delta-io/delta-rs.git"]
 
 [sources.allow-org]
 github = []

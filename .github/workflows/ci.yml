@@ -1,24 +1,14 @@
-# Tier A assurance: everything required on every meaningful change (spec section 49).
-#
-# Tier B (coverage, feature matrices, wheel-install tests, semver) and Tier C (Miri,
-# mutants, fuzz, udeps, geiger) are deliberately absent. There is no unsafe code, no fuzz
-# surface, and no benchmark baseline yet, and section 52 is explicit that a permanently
-# red deep-assurance workflow is worse than a smaller meaningful suite. Add them when the
-# surfaces they cover actually exist (spec section 93, step 6).
-#
-# Every step below mirrors a justfile recipe. Keep them in sync -- the justfile is the
-# operational API (spec section 14); this file exists to give CI per-step granularity.
-#
-# Action versions are pinned to commit SHAs, and Rust CLIs to explicit versions matching
-# the development workstation, so a tool release cannot silently change a merge gate
-# (spec section 50.1).
-
+# Four-domain Wave 0 CI. Every command maps to a justfile recipe; caches are telemetry
+# and acceleration only, never correctness authority.
 name: CI
 
 on:
   pull_request:
   push:
     branches: [master]
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,104 +19,209 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # .cargo/config.toml commits `rustc-wrapper = "sccache"`, so sccache is not optional
-  # here: without it on PATH every cargo invocation fails (spec section 13.1).
+  CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
-  rust:
-    name: Rust
+  changes:
+    name: Domain change routing
+    runs-on: ubuntu-latest
+    outputs:
+      extractor: ${{ steps.paths.outputs.extractor }}
+      sidecar: ${{ steps.paths.outputs.sidecar }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: paths
+        name: Select risk-triggered domains
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          extractor=false
+          sidecar=false
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            extractor=true
+            sidecar=true
+          else
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            if grep -Eq '^(rustc-extractor/|contracts/|tooling/proto/|rust-toolchain\.toml)' <<<"$changed"; then
+              extractor=true
+            fi
+            if grep -Eq '^(pyrefly-sidecar/|contracts/|rules/no-pyrefly-public-api\.yml)' <<<"$changed"; then
+              sidecar=true
+            fi
+          fi
+          echo "extractor=$extractor" >>"$GITHUB_OUTPUT"
+          echo "sidecar=$sidecar" >>"$GITHUB_OUTPUT"
+
+  stable-root:
+    name: Stable daemon/data plane
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # rust-toolchain.toml pins the channel; components are named here so the runner
-      # installs them in one step rather than on first use.
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: stable
           components: rustfmt, clippy, llvm-tools-preview
-
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
-
-      - name: Install Rust CLIs
+      - name: Install root gate tools
         run: |
+          cargo binstall --no-confirm just@1.58.0
           cargo binstall --no-confirm cargo-nextest@0.9.143
           cargo binstall --no-confirm cargo-deny@0.20.2
           cargo binstall --no-confirm cargo-audit@0.22.2
           cargo binstall --no-confirm cargo-shear@1.13.4
           cargo binstall --no-confirm cargo-machete@0.9.2
+          cargo binstall --no-confirm cargo-msrv@0.19.3
           cargo binstall --no-confirm typos-cli@1.49.0
-
-      # just fmt (Rust half)
-      - run: cargo fmt --all -- --check
-
-      # just check -- both compile surfaces (spec section 26.2)
-      - run: cargo check --all-targets
-      - run: cargo check --all-targets --features python
-
-      # just clippy
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo clippy --all-targets --features python -- -D warnings
-
-      # just test-rust, under the ci profile: retries are diagnostic and a test that only
-      # passes on rerun still fails the build (spec section 18.1).
-      - run: cargo nextest run -P ci
-
-      # nextest does not run doctests (spec section 18.2). This step is not optional.
-      - run: cargo test --doc
-
-      # just typos
-      - run: typos
-
-      # just deps-fast
-      - run: cargo machete
-      - run: cargo shear --deny-warnings
-
-      # just policy
-      - run: cargo deny check
-      - run: cargo audit
-
-      - name: Upload JUnit results
+      - name: Stable root routine gate
+        run: just root-ci-fast
+      - name: Stable root policy and MSRV
+        run: |
+          just policy
+          just msrv
+      - name: Upload nextest results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7e1c64a875d1fc6a0a # v7.0.1
         with:
-          name: nextest-junit
+          name: stable-root-nextest-junit
           path: target/nextest/ci/junit.xml
           if-no-files-found: warn
-
-      - name: sccache statistics
+      - name: sccache telemetry
         if: always()
         run: sccache --show-stats
 
-  python:
-    name: Python interface
+  adapter:
+    name: FastMCP adapter
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: stable
-
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
+          version: "0.12.5"
+          python-version: "3.14.7"
           enable-cache: true
+      - name: Install command runner
+        run: cargo binstall --no-confirm just@1.58.0
+      - name: Locked adapter environment
+        run: uv sync --frozen --project codefabric-cpg-mcp --python 3.14.7
+      - name: Adapter gate and STDIO smoke
+        run: just adapter-ci-fast
 
-      # Fail rather than silently rewrite lock state (spec section 50.2).
-      - run: uv sync --frozen
+  contracts:
+    name: Protobuf generation and interoperability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+          components: rustfmt
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.5"
+          python-version: "3.14.7"
+          enable-cache: true
+      - name: Install command runner
+        run: cargo binstall --no-confirm just@1.58.0
+      - name: Locked adapter environment
+        run: uv sync --frozen --project codefabric-cpg-mcp --python 3.14.7
+      - name: Two-root deterministic generation
+        run: just proto-repro-check
+      - name: Cross-language Protobuf round trips
+        run: |
+          cargo test --locked --no-default-features --features rpc --test integration integration::rpc::rust_protobuf_matches_the_shared_wire_fixture
+          uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py
+      - name: Canonical contract verification and reproducibility
+        run: |
+          just contracts-verify
+          just contracts-repro-check
+      - name: sccache telemetry
+        if: always()
+        run: sccache --show-stats
 
-      # just fmt (Python half), python-lint, python-type
-      - run: uv run ruff format --check python python_tests
-      - run: uv run ruff check python python_tests
-      - run: uv run pyrefly check
+  governance:
+    name: Structural and graph governance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+      - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+      - name: Install governance tools
+        run: |
+          cargo binstall --no-confirm just@1.58.0
+          cargo binstall --no-confirm cargo-deny@0.20.2
+          cargo binstall --no-confirm ast-grep@0.45.1
+      - name: Structural boundary rules
+        run: just governance-scan
+      - name: Duplicate-family policy and negative fixture
+        run: just duplicate-family-check
 
-      # just test-python. This is a development install, which is explicitly NOT
-      # packaging evidence (spec sections 44.2 and 62.3) -- clean-wheel validation is
-      # `just wheel-test` locally, and belongs in a wheel workflow when one exists.
-      - run: uv run maturin develop
-      - run: uv run pytest
+  extractor:
+    name: Dated-nightly rustc extractor
+    needs: changes
+    if: needs.changes.outputs.extractor == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: nightly-2026-08-18
+          components: rustc-dev, rust-src, llvm-tools
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+      - name: Install command runner
+        run: cargo binstall --no-confirm just@1.58.0
+      - name: Extractor gate
+        run: just extractor-ci-fast
+      - name: Extractor protocol silence
+        run: |
+          stdout="$(mktemp)"
+          ./scripts/run_rustc_extractor.sh --identity 1>"$stdout"
+          test ! -s "$stdout"
+      - name: sccache telemetry
+        if: always()
+        run: sccache --show-stats
+
+  sidecar:
+    name: Stable Pyrefly sidecar
+    needs: changes
+    if: needs.changes.outputs.sidecar == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+      - name: Install sidecar gate tools
+        run: |
+          cargo binstall --no-confirm just@1.58.0
+          cargo binstall --no-confirm cargo-deny@0.20.2
+          cargo binstall --no-confirm cargo-audit@0.22.2
+      - name: Sidecar gate and policy
+        run: |
+          just sidecar-ci-fast
+          just sidecar-policy
+      - name: Sidecar protocol silence
+        run: |
+          stdout="$(mktemp)"
+          cargo run --quiet --locked --manifest-path pyrefly-sidecar/Cargo.toml -- --identity 1>"$stdout"
+          test ! -s "$stdout"
+      - name: sccache telemetry
+        if: always()
+        run: sccache --show-stats

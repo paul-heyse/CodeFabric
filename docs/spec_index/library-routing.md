@@ -32,9 +32,14 @@ See [`README.md §2`](./README.md#2-citation-convention) for spec tags.
 | `pydantic` | `pydantic_python_advanced_reference_2.13.4.md` | §0–§51 | `fastmcp-pydantic-ref` |
 | `conc` | `rust_parallel_concurrency_stack_reference_2026-08-19.md` | §0–§51 | **none — unrouted** |
 | `tooling` | `rust_development_environment_tooling_agent_reference_2026-08-19.md` | §0–§68 | **none — unrouted** |
+| `ast-grep` | `ast-grep_0.45.1_advanced_reference.md` | §0–§25 | `ast-grep-ripgrep-ref` |
+| `ripgrep` | `ripgrep_advanced_reference_15.2.0_pcre2_10.47.md` | §0–§49 | `ast-grep-ripgrep-ref` |
 
 The skills already carry dense per-document section indexes with line numbers in their
 `REFERENCE.md`. This file routes *into* them; it does not duplicate them.
+
+The last two rows are agent tooling rather than dependencies: no spec section cites them, so
+they appear in this table and nowhere else in this file.
 
 Two chapter ranges above disagree with the `datafusion-pyarrow-rust-ref` skill description,
 which advertises `datafusion_planning_rust.md` as §41–§60 and `datafusion_calculations_rust.md`

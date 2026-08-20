@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package codefabric.wave0.v1;
+
+// WaveZeroProbe proves the Wave 0 generator and local gRPC transport contract.
+service WaveZeroProbe {
+  rpc RoundTrip(ProbeEnvelope) returns (ProbeEnvelope);
+}
+
+message ProbeEnvelope {
+  bytes payload = 1;
+  uint32 response_bytes = 2;
+}

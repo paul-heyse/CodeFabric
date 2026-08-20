@@ -1,24 +1,20 @@
-# Spec section 54. Note what is deliberately NOT ignored: Cargo.lock, uv.lock,
+# Spec section 54. Note what is deliberately NOT ignored: Cargo.lock,
 # .config/nextest.toml, bacon.toml, deny.toml, _typos.toml, clippy.toml, justfile,
-# py.typed, _native.pyi, and any reviewed snapshots. Those are the repository contract.
+# generated contracts, and any reviewed snapshots. Those are the repository contract.
 
 # Rust
 /target/
+/fuzz/target/
+/fuzz/artifacts/
 
-# Python
+# Python adapter build domain
 /.venv/
+/codefabric-cpg-mcp/.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 *.egg-info
-
-# Maturin / package output
-/dist/
-# `maturin develop` places the built extension in the mixed Python source tree.
-/python/**/*.so
-/python/**/*.pyd
-/python/**/*.dylib
 
 # Local diagnostics
 .bacon-locations

@@ -302,8 +302,8 @@ just lib-outline  <ref>.md   --match '^Appendix M' --view expanded
 
 Three things they will not do for you:
 
-- **`spec-outline` does not emit `# Part` or `# Appendix` headings.** All 110 of them are in
-  §3.1 above. On `LIFE` that is 22 headings invisible to the navigator.
+- **`spec-outline` does not emit `# Part` or `# Appendix` headings.** All 116 of them are in
+  §3.1 above — 90 Parts and 26 Appendices across the eight artifacts. On `LIFE` that is 22 headings invisible to the navigator.
 - **`spec-outline` does surface `## AC-G-NN` sections** — they appear as items alongside the
   numbered sections. Do not grep for them separately.
 - **Word-boundary your greps.** `rg -i arrow` over `ONT`/`QRY` is roughly 80% false positives
@@ -402,7 +402,7 @@ what changed and why.
 | `deltalake-rust-ref` cited eight nonexistent `docs/library_ref/` documents; `datafusion-pyarrow-rust-ref` cited one (`datafusion_54vs53.md`) | Every remaining mention states plainly that the file is absent. `deltalake_rust_1.0.0_9f922319_advanced_reference_2026-08-20.md` is declared the only Delta reference here |
 | `datafusion-pyarrow-rust-ref` and `deltalake-rust-ref` pointed at a `datafusion-pyarrow-ref` sibling skill that does not exist | Replaced with the fact that `docs/library_ref/datafusion.md` and `pyarrow.md` exist but are unrouted — and that `SRV §18` and `SRV §6` invariant 3 give the Python side no Arrow/DataFusion demand |
 | `datafusion-pyarrow-rust-ref` advertised chapter ranges its targets do not have | Counted from the files: `datafusion_planning_rust.md` ends at **§56** (not §60), `datafusion_calculations_rust.md` at **C13** (not C26). See [`library-routing.md §1`](./library-routing.md#1-reference-shorthands) |
-| `attrs-cattrs-ref` and `typer-rich-ref` silently routed reference documents that do not exist | Both now self-declare. They differ: `attrs`/`cattrs` **are** declared dependencies in `pyproject.toml`, so that skill stays active with a missing-documents banner; `typer`/`rich` are neither declared nor mentioned in the design suite, so that skill is marked **inactive** in its own description |
+| `attrs-cattrs-ref` and `typer-rich-ref` silently routed reference documents that do not exist | Both now self-declare. None of these libraries is a direct CodeFabric dependency after the Wave 0 packaging cutover; transitive adapter-lock presence is not adoption. The skills remain available only for a future direct seam. |
 
 Two things remain genuinely absent rather than merely misattributed: `docs/library_ref/attrs.md` +
 `cattrs.md` (for libraries the project does depend on), and the library gaps in
@@ -411,7 +411,7 @@ Two things remain genuinely absent rather than merely misattributed: `docs/libra
 ## 8. Verification
 
 Every citation in this directory was checked mechanically during authoring against a ground-truth
-section table built from `spec-outline --json=compact`, a fence-aware extraction of the 110
+section table built from `spec-outline --json=compact`, a fence-aware extraction of the 116
 `# Part`/`# Appendix` h1 headings the outliner does not emit, and `## AC-G-` anchors. The checks
 asserted both that each section exists and that the title recorded here still matches its
 heading.

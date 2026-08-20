@@ -1,0 +1,20 @@
+id: gix-boundary-only
+language: Rust
+severity: error
+message: gix types and functions belong only in the git_state boundary.
+note: Convert gix values to application-owned DTOs before returning across the boundary.
+files:
+  - src/**/*.rs
+ignores:
+  - src/git_state.rs
+rule:
+  any:
+    - all:
+        - kind: scoped_identifier
+        - regex: "^gix::"
+    - all:
+        - kind: scoped_type_identifier
+        - regex: "^gix::"
+    - all:
+        - kind: use_declaration
+        - regex: "(^|\\s)gix::"

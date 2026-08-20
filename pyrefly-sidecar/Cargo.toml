@@ -1,0 +1,19 @@
+[package]
+name = "codefabric-pyrefly-sidecar"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+pyrefly = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094", default-features = false }
+pyrefly_util = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094" }
+
+[build-dependencies]
+blake3 = "=1.8.2"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

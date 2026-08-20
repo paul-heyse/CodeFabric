@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "sidecar": "codefabric-pyrefly-sidecar 0.1.0",
+  "pyrefly_version": "1.2.0",
+  "pyrefly_git_commit": "1933169ad8ee9e4d4114112eb56ef0811fb0a094",
+  "pyrefly_locked_source_blake3": "1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e"
+}

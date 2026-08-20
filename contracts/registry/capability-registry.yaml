@@ -1,0 +1,8 @@
+artifact_id: codefabric.registry.capability-registry
+artifact_kind: registry
+version: "1.0"
+compatible_suite_major: 1
+status: draft
+canonical_digest: "b3:0000000000000000000000000000000000000000000000000000000000000000"
+records: []
+

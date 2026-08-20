@@ -1,0 +1,5 @@
+# The rustc_private extractor uses a dated nightly and compiler-internal libraries.
+# Keep its artifacts distinct from stable root/sidecar builds while still inheriting
+# the repository's sccache wrapper from the parent configuration.
+[build]
+target-dir = "../target/extractor"

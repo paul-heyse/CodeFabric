@@ -1,0 +1,11 @@
+id: deltalake-boundary-only
+valid:
+  - |
+      fn transaction() -> ApplicationTransaction {
+          ApplicationTransaction { version: 1 }
+      }
+invalid:
+  - |
+      fn transaction() {
+          let _value = deltalake::kernel::Transaction::new("app".to_owned(), 1);
+      }

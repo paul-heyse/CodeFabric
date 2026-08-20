@@ -1,0 +1,25 @@
+{
+  "generated_sha256": "180d27858203f6383c8a5ccbf8356ce4e25460984cc9fe078dde39fda3523bdd",
+  "python": {
+    "grpcio-tools": "1.83.0",
+    "protobuf": "7.36.0",
+    "protoc": "libprotoc 35.1",
+    "runtime": "3.14.7"
+  },
+  "rust": {
+    "packages": {
+      "prost": "0.14.4",
+      "prost-build": "0.14.4",
+      "protoc-bin-vendored": "3.2.0",
+      "tonic": "0.14.6",
+      "tonic-build": "0.14.6",
+      "tonic-prost": "0.14.6",
+      "tonic-prost-build": "0.14.6"
+    },
+    "protoc": "libprotoc 31.1",
+    "toolchain_policy": "stable root; declared MSRV 1.94.1"
+  },
+  "schema": 1,
+  "source": "codefabric_cpg_mcp/daemon/generated/wave0_probe.proto",
+  "source_sha256": "b8eeb2a402f703124442ba9d67687c65e33027348b88d895ab56c39e817985cc"
+}

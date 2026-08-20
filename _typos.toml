@@ -11,6 +11,11 @@ extend-exclude = [
   ".venv/",
   "fuzz/corpus/",
   "fuzz/artifacts/",
+  "contracts/generated/",
+  "src/generated/",
+  "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/",
+  "rustc-extractor/src/generated/",
+  "pyrefly-sidecar/src/generated/",
   # ~9 MB of third-party-derived library reference prose. Not our vocabulary to correct,
   # and large enough to bury real findings. docs/upfront_design/ is ours and stays in.
   "docs/library_ref/",
@@ -27,3 +32,12 @@ extend-exclude = [
 # (fact-ontology spec, "class member status"). Rewriting it to "writable" would be an
 # identifier change to the fact contract, not a spelling fix.
 writeable = "writeable"
+
+# The design corpus quotes abbreviated git SHAs (delta-rs revisions, upstream commit
+# ranges). `typos` reads the hex as words: `3b1734ba` -> "ba" -> "by"/"be". These are
+# identities, not prose, and correcting one would falsify a citation.
+ba = "ba"
+
+# "mis-attribution", "mis-cited". A standard English prefix that `typos` splits on the
+# hyphen and then reports as a misspelling of "miss"/"mist".
+mis = "mis"

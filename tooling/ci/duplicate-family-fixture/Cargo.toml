@@ -1,0 +1,9 @@
+[package]
+name = "codefabric-duplicate-family-negative-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+arrow-array = "=58.4.0"
+arrow-array-legacy = { package = "arrow-array", version = "=57.1.0" }

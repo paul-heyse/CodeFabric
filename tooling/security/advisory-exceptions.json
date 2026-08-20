@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "policy": "Exact temporary exceptions forced by the FAB 2.1 dependency baseline",
+  "accepted_by": "user",
+  "accepted_at": "2026-08-20T16:44:36Z",
+  "review_owner_packet": "WP19",
+  "review_trigger": "before_wp19_completion",
+  "exceptions": [
+    {
+      "advisory_id": "RUSTSEC-2024-0436",
+      "package": "paste",
+      "version": "1.0.15",
+      "classification": "unmaintained",
+      "affected_surface": "Parquet macro dependency in the exact Arrow/Parquet 58.4.0 family",
+      "rationale": "No known vulnerability; replacement is owned by the pinned upstream Parquet family.",
+      "owner_packet": "WP19",
+      "review_trigger": "before_wp19_completion"
+    },
+    {
+      "advisory_id": "RUSTSEC-2026-0173",
+      "package": "proc-macro-error2",
+      "version": "2.0.1",
+      "classification": "unmaintained",
+      "affected_surface": "validator derive path selected by the exact delta-rs revision",
+      "rationale": "No known vulnerability; replacement requires an upstream delta-rs or validator dependency refresh.",
+      "owner_packet": "WP19",
+      "review_trigger": "before_wp19_completion"
+    },
+    {
+      "advisory_id": "RUSTSEC-2026-0194",
+      "package": "quick-xml",
+      "version": "0.39.4",
+      "classification": "vulnerability",
+      "affected_surface": "Cloud XML response parsing compiled through kernel-forced object_store cloud features",
+      "rationale": "Waves 0-3 authorize only the local filesystem provider; object_store 0.13.2 cannot resolve the fixed quick-xml 0.41 line.",
+      "owner_packet": "WP19",
+      "review_trigger": "before_wp19_completion"
+    },
+    {
+      "advisory_id": "RUSTSEC-2026-0195",
+      "package": "quick-xml",
+      "version": "0.39.4",
+      "classification": "vulnerability",
+      "affected_surface": "Cloud XML namespace parsing compiled through kernel-forced object_store cloud features",
+      "rationale": "Waves 0-3 authorize only the local filesystem provider; object_store 0.13.2 cannot resolve the fixed quick-xml 0.41 line.",
+      "owner_packet": "WP19",
+      "review_trigger": "before_wp19_completion"
+    }
+  ]
+}

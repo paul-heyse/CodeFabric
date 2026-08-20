@@ -1,0 +1,11 @@
+// artifact_id: codefabric.rpc.pyrefly-sidecar
+// artifact_kind: protobuf-schema
+// version: 1.0
+// compatible_suite_major: 1
+// status: draft
+// canonical_digest: b3:0000000000000000000000000000000000000000000000000000000000000000
+// Wave 1 reserves this authority path; WP10 authors the released protocol.
+syntax = "proto3";
+
+package codefabric.contracts.draft.v1;
+

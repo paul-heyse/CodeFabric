@@ -4,7 +4,13 @@
 # Section 13.1 caveat, accepted deliberately: this makes sccache a hard build
 # prerequisite. scripts/bootstrap.sh checks for it and reports its hit rate.
 #
+# Stable root and Pyrefly-sidecar builds intentionally share the repository target
+# directory. Cargo fingerprints package, compiler, target, profile, features, and flags;
+# incompatible nightly and sanitizer domains select separate target roots in their own
+# config or recipes.
+#
 # Nothing host-specific belongs here -- no `-C target-cpu=native`, no absolute paths, no
 # one machine's linker. Those go in target-specific tables, the environment, or CI.
 [build]
 rustc-wrapper = "sccache"
+target-dir = "target"

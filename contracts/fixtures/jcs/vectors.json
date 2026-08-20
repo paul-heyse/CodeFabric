@@ -1,0 +1,183 @@
+{
+  "profile": "codefabric-jcs-v1",
+  "checksum": "blake3-256",
+  "positive": [
+    {
+      "id": "member-order",
+      "input_json": "{\"b\":1,\"a\":2}",
+      "canonical_utf8": "{\"a\":2,\"b\":1}",
+      "checksum": "b3:aec0c27dfce8daa9a0e36db913d1688ec539ca7f764997c4de8b9f3101f6418b"
+    },
+    {
+      "id": "member-order-permutation",
+      "input_json": "{\"a\":2,\"b\":1}",
+      "canonical_utf8": "{\"a\":2,\"b\":1}",
+      "checksum": "b3:aec0c27dfce8daa9a0e36db913d1688ec539ca7f764997c4de8b9f3101f6418b"
+    },
+    {
+      "id": "empty-values",
+      "input_json": "{\"z\":[],\"a\":{},\"m\":null,\"f\":false,\"t\":true}",
+      "canonical_utf8": "{\"a\":{},\"f\":false,\"m\":null,\"t\":true,\"z\":[]}",
+      "checksum": "b3:a8f9ce171060d249e18898182405bbeb4636bd1f2d84ca40ba0c8898cce77e8b"
+    },
+    {
+      "id": "unicode-and-controls",
+      "input_json": "{\"é\":\"café\",\"😀\":\"😀\",\"ctrl\":\"\\b\\n\"}",
+      "canonical_utf8": "{\"ctrl\":\"\\b\\n\",\"é\":\"café\",\"😀\":\"😀\"}",
+      "checksum": "b3:cf626e504b7481df9ed8f9fd9bbcab083c493fbe2e15d7a689bcc1a06be082c1"
+    },
+    {
+      "id": "utf16-member-order",
+      "input_json": "{\"�\":\"replacement\",\"😀\":\"grin\"}",
+      "canonical_utf8": "{\"😀\":\"grin\",\"�\":\"replacement\"}",
+      "checksum": "b3:c4cc34abd5c6b48c4cf44ba3e83e5dcc7f4aa0e92e274c9625351d7f55f99156"
+    },
+    {
+      "id": "json-escaping",
+      "input_json": "{\"solidus\":\"/\",\"quote\":\"\\\"\",\"backslash\":\"\\\\\"}",
+      "canonical_utf8": "{\"backslash\":\"\\\\\",\"quote\":\"\\\"\",\"solidus\":\"/\"}",
+      "checksum": "b3:7d2610bf67c31b17179dfb104a2fcd97690c59735906361f46da094d1411534b"
+    },
+    {
+      "id": "number-boundaries",
+      "input_json": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"small\":1e-7,\"threshold\":1e-6,\"zero\":-0.0}",
+      "canonical_utf8": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"small\":1e-7,\"threshold\":0.000001,\"zero\":0}",
+      "checksum": "b3:2d0a72a11813180e76733e2a29359c37e7ad406018cc4fe47911e8655e19f18f"
+    },
+    {
+      "id": "no-unicode-normalization",
+      "input_json": "{\"é\":\"decomposed\",\"é\":\"composed\"}",
+      "canonical_utf8": "{\"é\":\"decomposed\",\"é\":\"composed\"}",
+      "checksum": "b3:4ecf0e94e92b3e40b2d5acfb8aa16f57c4f3e7f302fe8c4b193af6c340c5b6f0"
+    },
+    {
+      "id": "nested-order",
+      "input_json": "{\"outer\":{\"z\":0,\"a\":1},\"array\":[{\"b\":2,\"a\":1}]}",
+      "canonical_utf8": "{\"array\":[{\"a\":1,\"b\":2}],\"outer\":{\"a\":1,\"z\":0}}",
+      "checksum": "b3:6dc2602a6b902c0b9c4e0392b2c143b5bcd965cafd40cba6c28839dc0ca807d8"
+    }
+  ],
+  "negative": [
+    {
+      "id": "duplicate-key",
+      "input_json": "{\"a\":1,\"a\":2}",
+      "error": "duplicate-key"
+    },
+    {
+      "id": "nested-duplicate-key",
+      "input_json": "{\"outer\":{\"a\":1,\"a\":2}}",
+      "error": "duplicate-key"
+    },
+    {
+      "id": "nan-token",
+      "input_json": "{\"value\":NaN}",
+      "error": "invalid-json-number"
+    },
+    {
+      "id": "infinity-token",
+      "input_json": "{\"value\":Infinity}",
+      "error": "invalid-json-number"
+    },
+    {
+      "id": "positive-unsafe-integer",
+      "input_json": "9007199254740992",
+      "error": "integer-range"
+    },
+    {
+      "id": "negative-unsafe-integer",
+      "input_json": "-9007199254740992",
+      "error": "integer-range"
+    },
+    {
+      "id": "overflowing-float",
+      "input_json": "1e400",
+      "error": "finite-number"
+    },
+    {
+      "id": "fractional-to-unsafe-integer",
+      "input_json": "909009254740799291.99",
+      "error": "integer-range"
+    }
+  ],
+  "formats": {
+    "int64": {
+      "positive": [
+        "0",
+        "-1",
+        "9223372036854775807",
+        "-9223372036854775808"
+      ],
+      "negative": [
+        "-0",
+        "+1",
+        "01",
+        "9223372036854775808",
+        " 1"
+      ]
+    },
+    "uint64": {
+      "positive": [
+        "0",
+        "1",
+        "18446744073709551615"
+      ],
+      "negative": [
+        "-1",
+        "+1",
+        "01",
+        "18446744073709551616",
+        " 1"
+      ]
+    },
+    "bytes": {
+      "positive": [
+        "",
+        "AA",
+        "Y29kZWZhYnJpYw",
+        "_w"
+      ],
+      "negative": [
+        "AA==",
+        "Y29kZWZhYnJpYw==",
+        "/w",
+        "A"
+      ]
+    },
+    "lowercase_public": {
+      "positive": [
+        "workspace:0123abcdef",
+        "entity:abc-123"
+      ],
+      "negative": [
+        "Workspace:0123",
+        "entity:CAFÉ"
+      ]
+    },
+    "checksum": {
+      "positive": [
+        "b3:0000000000000000000000000000000000000000000000000000000000000000",
+        "b3:c4cc34abd5c6b48c4cf44ba3e83e5dcc7f4aa0e92e274c9625351d7f55f99156"
+      ],
+      "negative": [
+        "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+        "b3:A000000000000000000000000000000000000000000000000000000000000000",
+        "b3:000000000000000000000000000000000000000000000000000000000000000",
+        "b3:00000000000000000000000000000000000000000000000000000000000000000",
+        "b3:"
+      ]
+    }
+  },
+  "non_string_map": {
+    "entries": [
+      {
+        "key": 2,
+        "value": "two"
+      },
+      {
+        "key": 1,
+        "value": "one"
+      }
+    ],
+    "canonical_utf8": "[{\"key\":1,\"value\":\"one\"},{\"key\":2,\"value\":\"two\"}]"
+  }
+}

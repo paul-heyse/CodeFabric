@@ -9,6 +9,7 @@
 **Release date:** 2026-08-20
 **Supersedes:** CodeFabric synchronized specification suite 1.2 plus the standalone architecture-completion override
 **Audit integration (2026-08-20):** Plan-audit F-001; clarified executable phrase mappings and owner approval of initial machine-contract allocations.
+**Implementation clarification (2026-08-20):** WP06; fixed the registry-YAML to canonical-JSON projection policy so YAML-only constructs cannot acquire implicit machine semantics.
 
 ---
 
@@ -312,6 +313,17 @@ contracts/
 Generated Rust and Python types SHALL be emitted under `generated/` and SHALL contain a header naming the source artifact digest. Hand-edited generated files are prohibited.
 
 The semantic request/response JSON Schemas SHALL be complete, closed at public boundaries, and capable of validating every normative fixture. The `.proto` files SHALL be compiled in both Rust and Python CI. Registry YAML is the human-reviewable source; canonical JSON derived from it is the fingerprinted machine form.
+
+Registry canonicalization SHALL parse exactly one YAML 1.1 document with the
+suite-pinned parser, reject duplicate mapping keys, reject tagged values and
+merge keys unless a future registry schema explicitly assigns them semantics,
+and project the resolved semantic model into the AC-G-53 JSON domain before
+fingerprinting. Aliases may express repeated source values, but anchor and alias
+spelling never contributes to identity. String-keyed mappings become JSON
+objects; any logical non-string-keyed mapping becomes the AC-G-53 sorted
+key/value-record array. Numeric values remain subject to the AC-G-53 finite and
+interoperable-range rules. Generic serialization of a dynamic YAML value is not
+a permitted projection because it does not define these boundary decisions.
 
 ## AC-G-06 — Canonical enum and flag registry
 ### Decision

@@ -1,0 +1,10 @@
+{
+  "artifact_id": "codefabric.bundles.model-pack-bundle",
+  "artifact_kind": "bundle-manifest",
+  "version": "1.0",
+  "compatible_suite_major": 1,
+  "status": "draft",
+  "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+  "members": []
+}
+

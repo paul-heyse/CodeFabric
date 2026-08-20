@@ -1,0 +1,5 @@
+contracts/generated/** linguist-generated=true
+src/generated/** linguist-generated=true
+codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/** linguist-generated=true
+rustc-extractor/src/generated/** linguist-generated=true
+pyrefly-sidecar/src/generated/** linguist-generated=true

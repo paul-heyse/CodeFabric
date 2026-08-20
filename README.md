@@ -1,133 +1,124 @@
 # CodeFabric
 
-A present-state code property graph: a fact substrate over a codebase that answers
-semantic questions about what the code *is* right now.
+CodeFabric is a present-state code property graph: a fact substrate over a codebase that
+answers semantic questions about what the code is right now.
 
-CodeFabric emits facts and mechanically derived facts. It does not emit judgments — no
-risk scores, no complexity verdicts, no "safe to refactor". Where a provider cannot
-answer, the result is an explicit unknown or capability gap, never an empty result
-implying "none".
+It emits facts and mechanically derived facts, never judgments such as risk scores or
+“safe to refactor.” When a provider cannot answer, the result is an explicit unknown or
+capability gap rather than an empty result implying “none.”
 
-**Status: pre-implementation.** The repository and tooling architecture described below
-is in place and verified end to end. The system itself is not built yet; the design specs
-in `docs/upfront_design/` are still in flux.
+## Implementation status
+
+Production implementation is in progress under the versioned plan in `docs/plans/`.
+Wave 0 has established all four isolated build domains, their exact dependency/toolchain
+identities, the locked Protobuf generator, and cross-domain gates. Contract and runtime
+behavior land in Waves 1–3.
 
 ## Architecture
 
-Rust is the implementation core; Python is the interface layer. The dependency direction
-is one-way and enforced architecturally:
+Four independently built domains meet across process or generated-contract boundaries:
 
-```
-Python caller
-  → python/codefabric/          public Python package, the supported contract
-    → codefabric._native        private PyO3 extension
-      → src/                    Rust core, Python-agnostic
-```
-
-The Rust core builds and tests as an ordinary Rust library with no Python runtime
-present. All PyO3 conversion sits behind the optional `python` Cargo feature, which gives
-two deliberate compile surfaces:
-
-```
-cargo check                      pure Rust core
-cargo check --features python    core plus the PyO3 adapter
+```text
+agent
+  → codefabric-cpg-mcp/       Python FastMCP adapter; presentation only
+    → private Protobuf/gRPC over a Unix-domain socket
+      → root Cargo package   stable Rust daemon and Arrow/Delta/DataFusion data plane
+           ├─ rustc-extractor/   dated-nightly rustc/MIR subprocess
+           └─ pyrefly-sidecar/   pinned Pyrefly semantic subprocess
 ```
 
-`codefabric._native` is private. Import from `codefabric`; the extension's symbol layout
-may change as bindings evolve.
+The root package is one rlib crate, edition 2024 with Rust 1.94.1 as its verified
+compatibility floor. It has no native-extension build surface or root Python package. Its default
+`local-workstation` accepts only local filesystem storage and excludes the Delta S3
+implementation and AWS SDK; `s3-storage` enables them explicitly. The pinned Delta
+kernel still compiles latent `object_store` cloud features, which the graph and advisory
+policy checks report rather than concealing. Narrow `canonical-json`,
+`contracts-tooling`, `proto-tooling`, `rpc`, `repository-state`, and `data-fabric`
+features keep focused tools from compiling unrelated production subsystems.
 
-This is **one Cargo package with one library crate**. There is no `crates/` directory and
-no workspace. A second crate requires a package or build justification — independent
-reuse, dependency isolation, distinct platform requirements, an independent release
-lifecycle, or *measured* compilation benefit. "The code grew another area" is not one.
+The additional Cargo roots are not a Cargo workspace. Their separate toolchains and
+dependency isolation are build-domain requirements, not semantic source organization.
 
-How the Rust core and the Python façade are divided into files internally is deliberately
-not fixed by the repository contract.
+## Supported baseline
 
-## Supported platforms
-
-| | |
+| Surface | Baseline |
 |---|---|
-| Operating systems | Linux and macOS |
-| Python | 3.14 and later (`requires-python = ">=3.14"`) |
-| Rust | current stable, pinned by `rust-toolchain.toml` |
-| Wheels | CPython-specific; no `abi3` |
-
-The Python floor is declared in five places that must move together: `pyproject.toml`,
-`.python-version`, Ruff's `target-version`, Pyrefly's `python-version`, and CI.
-
-**Nightly Rust is not required for normal development.** It is a targeted analysis
-toolchain, used only by `just miri` and `just udeps`. The repository deliberately does not
-declare `rustc-dev`.
+| Stable daemon/data plane | Linux and macOS; Rust 1.94.1 or newer |
+| rustc extractor | `nightly-2026-08-18`; exact compiler identity recorded |
+| Pyrefly sidecar | Pyrefly 1.2.0 at an immutable source revision |
+| FastMCP adapter | Python 3.14.7 development pin; package floor 3.12 |
 
 ## Bootstrap
 
 ```bash
-uv python install     # if 3.14 is not present
-uv sync               # Python environment; also builds the native extension
-just doctor           # verify toolchains, required tools, and direnv state
+just doctor      # toolchains, domain presence, required tools, and direnv state
+just --list      # the operational API
+just ci-fast     # current routine gate
 ```
 
-Required beyond a Rust toolchain and uv: `just`, `sccache` (committed as a
-`rustc-wrapper` in `.cargo/config.toml`, so builds fail without it), `cargo-nextest`,
-`cargo-deny`, `cargo-audit`, `cargo-shear`, `cargo-machete`, and `typos`. Install them
-with `cargo binstall`; `just doctor` reports what is missing.
+The repository requires `just`, `sccache`, `cargo-nextest`, `typos`, `rg`, `ast-grep`,
+`jq`, and `uv`. Dependency gates additionally use `cargo-deny`, `cargo-audit`,
+`cargo-shear`, and `cargo-machete`. `sccache` is a committed `rustc-wrapper`, so Cargo
+fails rather than silently running without it.
 
-`direnv` is optional and applies only to interactive shells. Non-interactive callers
-should use `uv run <cmd>`, `direnv exec . <cmd>`, or source `scripts/bootstrap.sh`.
+Stable root and Pyrefly-sidecar builds share the repository `target/` and the host-global
+sccache. Dated-nightly extractor, nightly assurance, and sanitizer/fuzz artifacts use
+separate target subdirectories. CI disables Cargo incremental compilation for better
+sccache reuse; local incremental compilation remains enabled.
+
+`direnv` is optional and only affects interactive shells. It syncs the adapter's locked
+environment and never creates a root Python project. Non-interactive callers should use
+`direnv exec . <cmd>` or source `scripts/bootstrap.sh` within the command.
 
 ## Common commands
 
-`just --list` is the full contract. The everyday ones:
+`just --list` is authoritative. The everyday commands are:
 
 ```bash
-just ci-fast      # the routine gate: format, check, clippy, lint, types, tests, typos, deps
-just test         # Rust tests, doctests, and Python interface tests
-just check        # both compile surfaces
-just wheel-test   # build a wheel and prove it installs in a clean environment
-just doctor       # environment report
+just root-check           # default local and featureless stable-root builds
+just root-clippy          # warnings denied on both root surfaces
+just root-test            # nextest plus doctests
+just adapter-ci-fast      # Ruff, Pyrefly, pytest, and STDIO discipline
+just extractor-ci-fast    # dated-nightly extractor gate
+just sidecar-ci-fast      # stable pinned-source sidecar gate
+just proto-check          # generated stubs and exact generator identity
+just contracts-verify     # AC-G-05 tree, JCS, generated bytes, negative fixtures
+just stable-graph-check   # exact pins/families and local-vs-S3 activation boundary
+just governance           # structural rules, graph negative fixture, generated drift
+just ci-fast              # routine four-domain aggregate gate
 ```
 
-Recipes in the `[mutating]` group change source, manifests, or the environment. They are
-never dependencies of a gate and must be invoked deliberately.
+Recipes in the `mutating` group change source, manifests, or the environment and are
+never dependencies of a gate. Note that `cargo nextest` does not execute doctests;
+`just root-test` covers both layers.
 
-Note that `just test-rust` does **not** cover doctests — `cargo nextest` cannot run them.
-`just test` includes both.
-
-## Building a wheel
-
-```bash
-just wheel        # release wheel into dist/
-just wheel-test   # build, then install into a throwaway venv and run python_tests
-```
-
-`uv run maturin develop` is the fast local iteration path and is **not** packaging
-evidence. Only a clean-environment install of the built artifact validates the wheel;
-`scripts/wheel_test.sh` asserts the import resolves inside the temporary environment so a
-stale editable install cannot produce a false pass.
-
-Publishing is a separate, explicit action. It is never implied by building or testing.
-
-## Where things go
+## Repository map
 
 | Path | Contents |
 |---|---|
-| `src/` | Rust crate source |
-| `python/codefabric/` | public Python package |
-| `tests/` | Rust integration tests — one target, cases in `tests/integration/` |
-| `python_tests/` | Python interface tests |
-| `scripts/` | operational scripts too complex for a `just` recipe |
-| `docs/upfront_design/` | system design specs (in flux) |
+| `src/` | stable daemon/data-plane library source |
+| `tests/` | one Rust integration target; cases under `tests/integration/` |
+| `rustc-extractor/` | dated-nightly extractor domain |
+| `pyrefly-sidecar/` | pinned Pyrefly sidecar domain |
+| `codefabric-cpg-mcp/` | Python FastMCP adapter project and its own `uv.lock` |
+| `contracts/` | AC-G-05 authority, generated registries, and cross-language fixtures |
+| `fuzz/` | native-target JCS parser/canonicalizer fuzz harness |
+| `tooling/proto/` | hermetic Protobuf generation and version identity |
+| `scripts/` | operational scripts too substantial for a `just` recipe |
+| `rules/`, `sgconfig.yml` | structural governance rules and scan configuration |
+| `docs/upfront_design/` | authoritative system design suite |
 | `docs/library_ref/` | version-pinned dependency references |
-| `target/` | all build output and reports — generated, ignored |
-| `dist/` | built wheels — generated, ignored |
+| `docs/spec_index/` | derived navigation and traceability; never normative |
+| `docs/plans/`, `docs/reviews/` | implementation plans, execution state, and audits |
+| `tooling/ast-grep/` | document-navigation extractors for `spec-outline`/`lib-outline` |
+| `.claude/`, `.codex/`, `.agents/` | shared agent configuration and skills |
+| `target/` | generated build output and reports; ignored |
 
-`target/` disk usage says nothing about wheel or binary size; measure the artifact
-directly with `just bloat` or `just sections`.
+## Governing documents
 
-## Governing specification
-
-`docs/rust_core_python_interface_repository_specification_2026-08-20.md` defines this
-repository's package and tooling architecture, the assurance tiers, and the agent
-operating rules. Section 60's change-risk table is the guide for which tools a given
-change actually warrants.
+The authoritative system design is the v1.3 suite under `docs/upfront_design/`; the
+roadmap composes its implementation waves. `AGENTS.md` documents the repository’s
+tooling, assurance model, design map, and operating rules. The older
+`docs/rust_core_python_interface_repository_specification_2026-08-20.md` remains the
+infrastructure source for compatible decisions, but accepted v4 plan decisions and the
+v1.3 design corrections govern where they deliberately replace the seed-era extension shape.

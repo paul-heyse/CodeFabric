@@ -8,9 +8,9 @@ nothing about how production code should be organized — see *Scope boundary* b
 
 | File | Answers |
 |---|---|
-| **AGENTS.md** (this file) | infrastructure decisions, capabilities, evidence model |
-| `README.md` | what CodeFabric is, how to bootstrap, the handful of commands you need |
-| `CLAUDE.md` | the system being built: the design specs, cross-cutting doctrine, research tooling |
+| **AGENTS.md** (this file) | **the canonical agent instructions.** Infrastructure decisions, the design corpus, doctrine, evidence model, tooling. Codex loads it directly; Claude Code loads it through a `@AGENTS.md` import in `CLAUDE.md`, so both agents read exactly this. |
+| `README.md` | human onboarding: what CodeFabric is, how to install it, supported platforms |
+| `CLAUDE.md` | a thin shim — the import above, plus Claude-specific harness notes |
 | `docs/upfront_design/` | the design corpus: governance manifest, six domain specs, implementation roadmap — see *Design corpus map* below |
 | `docs/spec_index/` | navigation and traceability over that corpus; derived, never normative |
 | `docs/rust_core_python_interface_repository_specification_2026-08-20.md` | **the governing spec.** Authoritative for everything here |
@@ -23,10 +23,10 @@ the convention `docs/spec_index/README.md` fixes. This file's own sections are r
 files in this repository also carry their own rationale comments; this file is the
 cross-cutting view.
 
-> **Status: pre-implementation.** The infrastructure described here is in place and
-> verified end to end. What is in `src/` and `python/codefabric/` is a deliberately
-> minimal seed whose only job was to prove the toolchain — a `version()` accessor and a
-> `normalize_workspace_id()` that can fail. It is not a design. Replace it.
+> **Status: implementation in progress.** The four Wave 0 build domains, dependency
+> boundaries, adapter shell, Protobuf/UDS compatibility harness, and aggregate gates are
+> present. The versioned execution state under `docs/plans/state/` is authoritative for
+> packet and milestone progress.
 
 ---
 
@@ -35,8 +35,7 @@ cross-cutting view.
 The system itself is specified in two sibling directories. They are **design inputs, not
 infrastructure**: deliberately not an input to any package/repository/tooling decision here
 (see *Scope boundary*), revised in place while in flux, and navigated with
-`just spec-outline` rather than read whole. `CLAUDE.md` carries the composition story and
-the cross-cutting doctrine; this section is only the finding aid.
+`just spec-outline` rather than read whole.
 
 `docs/upfront_design/` — the authoritative suite: a governance manifest, six domain
 specifications, and the implementation roadmap.
@@ -64,82 +63,145 @@ normative**: cite the section it points at, not the index.
 | `contract-census.md` | all 84 `AC-G` contracts with owner, consumers, and wave |
 | `invariants-and-doctrine.md` | the invariants every wave must preserve, traced to their normative homes |
 
+### 0.1 How the suite composes
+
+Read the six domain specs as a stack: each layer consumes the one above, the ontology is the
+root vocabulary, and the governance manifest sits across all of them. The end-to-end data
+path (`GEN §6` + `LIFE §93` + `FAB §1`):
+
+```text
+source change → dirty registry → update wave → source images → invalidation plan
+  → fast syntax lane (Tree-sitter)           → immutable syntax-current snapshot
+  → semantic lane (Ruff+Pyrefly / rustc+MIR) → normalization → reconciliation
+  → derived lane (petgraph, fixed-point)     → interprocedural summaries
+  → validated immutable hot snapshot         → async Delta publication → DataFusion serving
+```
+
+Runtime topology: one central **Rust daemon per workspace** owns source state, snapshots,
+provider orchestration, query execution and capability status; one **FastMCP STDIO process
+per agent** is presentation only and must never hold independent mutable CPG state
+(`LIFE §122`).
+
+Consult `docs/spec_index/`'s gap register before concluding a search failed: several cited
+authorities — requirement IDs, the flag registry, property names — are build outputs under
+`contracts/`, not prose that exists anywhere yet.
+
+### 0.2 Cross-cutting doctrine
+
+Violating any of these contradicts every spec at once.
+
+- **Fact substrate, not judgment.** The system emits facts and mechanically derived facts. It
+  never encodes `SAFE_TO_REFACTOR`, `TEST_IMPACTED`, `HIGH_RISK`, `SHOULD_CHANGE`, complexity
+  verdicts, or test-impact conclusions. The query service *rejects* evaluative requests; the
+  fact-equivalent form is the allowed rewrite. Excluded domains: git history, runtime
+  observation/coverage, environment inventory.
+- **Absence is never proof of absence.** Missing provider output must materialize as an
+  *explicit unknown* or *capability gap*, never an empty result implying "none". Compile
+  failure yields capability gaps, not stale-current compiler facts.
+- **Raw and normalized coexist.** Every syntax/MIR fact keeps both the provider-native kind
+  and the normalized kind; normalization must not block representing a new grammar or
+  compiler variant.
+- **Syntax occurrence ≠ semantic entity.** Call syntax is not a callable; type syntax is not
+  a type. Call sites are first-class entities, not just caller→callee edges.
+- **Canonical identity is application-owned.** Raw `DefId`, MIR local/block indices,
+  Tree-sitter node IDs, Ruff node indices and Pyrefly internal keys are never canonical
+  identity (`GEN §13`). Rust prefers `StableCrateId + DefPathHash`.
+- **Provider isolation.** Every provider sits behind an application-owned adapter emitting
+  application-owned DTOs; no long-lived borrowed provider type (e.g. `Node<'tree>`) escapes
+  an adapter.
+- **Authority, never silent overwrite.** Conflicting provider facts resolve by the
+  per-fact-family authority tables (`GEN §5`); conflicting evidence is retained in
+  provenance/diagnostics, and unresolvable conflict emits an unknown or multi-candidate fact.
+- **Atomic present state.** Owner-scoped replacement plus manifest-pinned multi-table MVCC: a
+  publication maps to an exact Delta version per table, and intermediate versions are
+  invisible through `cpg_serving` until the pointer advances. Every query pins exactly one
+  immutable snapshot and never mixes source generations.
+
+`LIFE §§157–159` lists the mandatory consistency, performance and failure invariants — check
+any incremental-update design against them.
+
+### 0.3 Library references (`docs/library_ref/`)
+
+Deep, **version-pinned** references for the exact dependency baseline the specs assume:
+Arrow/Parquet, DataFusion, delta-rs, `object_store`, tree-sitter, Ruff, Pyrefly, petgraph,
+`notify-debouncer-full`, gix, FastMCP, Pydantic, FastAPI, `rustc_public`.
+
+**Consult the matching file before writing code against any of them** — several APIs are
+pre-release or nightly-sensitive. Do not quote a version from here or from a skill: the
+session context prints the pins extracted live from `FAB §2.1`, which is the only
+authoritative source. `docs/spec_index/library-routing.md` maps a spec section to the
+reference chapter that covers it.
+
 ---
 
 ## 1. Scope boundary — what was *not* decided
 
-The governing specification governs package/repository/tooling architecture **only**. It
-explicitly declines to decide (repo-spec §2, §45 scope note):
+The infrastructure specification still does not decide semantic source decomposition:
 
 - which production concepts deserve their own Rust source file;
 - whether a concept is a file, an inline module, a nested module, or a folder;
 - how domain functionality is grouped or named;
-- whether the Python façade is one file or several;
+- whether the FastMCP adapter is one Python module or several;
 - naming conventions for semantic production directories.
 
-**Do not infer a preferred decomposition from the current seed.** `src/lib.rs` and
-`src/python.rs` are a free choice and say so in their own doc comments. The only
-structural constraints are the ones in *Repository shape* and *The architectural
-invariant* below.
+Do not infer a preferred domain decomposition from temporary compatibility modules.
 
-Equally: do not create a new crate to organize production code. That needs a
-package/build justification from repo-spec §0.3 — independent reuse, dependency
-isolation, distinct platform requirements, an independent release lifecycle, a separately
-built artifact, or *measured* compilation benefit. "Another conceptual area" and "the file
-got long" are explicitly insufficient (repo-spec §61.2).
+Do not create another Cargo root or package merely to organize code. The two additional
+Cargo roots accepted by the design have explicit build justifications: the extractor uses
+a distinct dated-nightly compiler-private toolchain, and the sidecar isolates a pinned
+unstable Pyrefly integration. “Another conceptual area” and “the file got long” remain
+insufficient.
 
 ---
 
 ## 2. Repository shape
 
-One Cargo package, one library crate. No `[workspace]` table, no `crates/` directory
-(repo-spec §0.3, §1.1, §77).
+Four independent build domains, no root `[workspace]` and no `crates/` directory:
 
 ```
 CodeFabric/
-├── Cargo.toml  Cargo.lock  rust-toolchain.toml     Rust package + pins
-├── pyproject.toml  uv.lock  .python-version        Python package + pins
-├── justfile                                        the operational API
-├── src/                     Rust crate      lib.rs · python.rs   (layout: free choice)
-├── python/codefabric/       public Python package
-│   ├── __init__.py          the supported contract
-│   ├── py.typed             PEP 561 marker
-│   └── _native.pyi          hand-written stub for the private extension
-├── tests/                   ONE integration target: integration.rs + integration/
-├── python_tests/            interface tests: test_api.py · test_packaging.py
-├── scripts/                 bootstrap · wheel_test · tooling_inventory · doc outliners
-├── tooling/ast-grep/        doc-navigation extractors (see CLAUDE.md)
-├── .cargo/config.toml       sccache wrapper
+├── Cargo.toml  Cargo.lock  rust-toolchain.toml  stable daemon/data-plane rlib
+├── src/  tests/                               stable-root code and one test target
+├── rustc-extractor/                           dated-nightly Cargo root
+├── pyrefly-sidecar/                           pinned-source Cargo root
+├── codefabric-cpg-mcp/                        Python adapter + local uv.lock
+├── contracts/                                 AC-G-05 authority + shared fixtures
+├── fuzz/                                      JCS parser/canonicalizer harness
+├── tooling/proto/                             hermetic Protobuf generator
+├── justfile                                   repository operational API
+├── scripts/                                   bootstrap, validators, doc outliners
+├── sgconfig.yml  rules/                       structural governance harness
+├── tooling/ast-grep/        doc-navigation extractors (§10.1)
+├── docs/                    the governing spec, upfront_design/, library_ref/,
+│                            spec_index/, plans/, reviews/
+├── .claude/                 settings.json (permissions + SessionStart hook) · skills/
+├── .codex/                  config.toml · hooks/ · skills -> ../.claude/skills
+├── .agents/skills           -> ../.claude/skills  (the path Codex documents)
+├── .cargo/config.toml       sccache wrapper + shared stable target
 ├── .config/nextest.toml     test profiles
-├── .github/workflows/ci.yml Tier A only
+├── .github/workflows/ci.yml four-domain + contracts/governance CI
 ├── bacon.toml  deny.toml  _typos.toml  clippy.toml  .envrc
-└── target/  dist/           generated, ignored
+└── target/                   generated and ignored, including agent context caches
 ```
 
 **Absent on purpose** — each has a named trigger that would justify creating it:
 
 | Not here | Add it when |
 |---|---|
-| `crates/`, `[workspace]` | a second package clears repo-spec §0.3, measured first (§79) |
-| `fuzz/` | a parser, decoder, protocol, or untrusted-input surface exists (§23) |
+| `crates/`, root `[workspace]` | a new package clears repo-spec §0.3 independently |
 | `benches/` | a stable performance workload exists worth defending (§1) |
 | `supply-chain/` (cargo-vet) | dependency trust becomes an engineering goal (§32) |
 | `tests/fixtures/` | a test needs reusable non-code data (§4.4) |
-| `deep-assurance.yml`, `wheels.yml` | the surfaces they cover exist; a permanently-red deep workflow is worse than none (§52) |
-| `scripts/coverage_python.sh` | cross-language Rust-through-Python coverage becomes worth the wiring (§21.2) |
+| `deep-assurance.yml` | the surfaces it covers exist; a permanently-red workflow is worse than none (§52) |
 | `src/main.rs`, `src/bin/` | a CLI is needed — same package, reusing the lib target (§3) |
 
-### 2.1 Why Python has its own source root
+### 2.1 Why the domains are separate
 
-`python/codefabric/` is a **packaging/language-boundary** choice required by Maturin's
-mixed layout, not a semantic decomposition rule (repo-spec §1.2). It keeps Python sources
-out of Cargo's conventional `src/`.
-
-One consequence is easy to miss: because Python sources are not at the repository root,
-Ruff's default `src = ["."]` cannot distinguish first-party from third-party imports, so it
-sorts every import block wrongly. `pyproject.toml` therefore sets
-`src = ["python", "python_tests"]`. The spec's example manifest assumes a default layout
-and omits this.
+The stable root owns source state, Arrow/Delta/DataFusion processing, snapshots, and query
+execution. `rustc-extractor/` owns compiler-private Rust facts; `pyrefly-sidecar/` owns the
+pinned Pyrefly query integration; `codefabric-cpg-mcp/` owns presentation only. The three
+process boundaries use generated Protobuf contracts. Python never becomes an Arrow or
+DataFusion processing layer, and no native-extension build surface exists.
 
 ### 2.2 Rust test topology
 
@@ -150,62 +212,53 @@ set, process environment, harness, external service, platform restriction, or re
 group (§4.3) — not just another subsystem.
 
 The inline `mod integration { … }` wrapper inside `tests/integration.rs` is load-bearing:
-a test crate root resolves submodules against `tests/`, so without it `mod errors;` would
-look for `tests/errors.rs` and every case would need its own top-level file — precisely
-the crate explosion §4.2 exists to prevent.
+a test crate root resolves submodules against `tests/`, so without it case modules resolve
+at the wrong level and encourage top-level test-target proliferation.
 
 Most tests are colocated `#[cfg(test)]` modules beside the implementation, so private
 invariants are testable without widening visibility (§4.1).
 
 ---
 
-## 3. The architectural invariant: two compile surfaces
-
-Rust is the implementation core; Python is the interface layer. The dependency direction
-is one-way and is the one thing here that is genuinely load-bearing.
+## 3. The architectural invariant: isolated build domains
 
 ```
-Python caller → python/codefabric/ → codefabric._native → src/  (Python-agnostic)
+agent → FastMCP adapter → private UDS gRPC → stable Rust daemon
+                                             ├─ rustc extractor subprocess
+                                             └─ Pyrefly sidecar subprocess
 ```
 
-PyO3 lives behind an optional Cargo feature (repo-spec §6.1, §26.2):
+The root keeps one default production aggregate and exposes narrow build capabilities for
+tools and assurance:
 
 ```toml
 [features]
-default = []
-python = ["dep:pyo3"]
+default = ["local-workstation"]
+canonical-json = ["dep:base64", "dep:blake3", "dep:serde", "dep:serde_json", "..."]
+contracts-tooling = ["canonical-json", "dep:serde_yaml_ng", "dep:tempfile"]
+data-fabric = ["dep:arrow", "...", "dep:datafusion", "dep:deltalake", "..."]
+rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
+repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
+compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
+local-workstation = ["contracts-tooling", "compatibility-probes"]
+s3-storage = ["data-fabric", "deltalake/s3"]
 ```
-
-which produces two surfaces that `just check` and `just clippy` both exercise:
 
 | Surface | Command | Dependency graph |
 |---|---|---|
-| pure Rust core | `cargo check --all-targets` | **zero dependencies** |
-| core + PyO3 adapter | `cargo check --all-targets --features python` | 13 packages, rooted at `pyo3` |
+| local workstation | `cargo check --all-targets` | local provider authority; no `deltalake-aws` or AWS SDK |
+| featureless substrate | `cargo check --all-targets --no-default-features` | dependency-free root substrate |
+| canonical JSON | `cargo check --no-default-features --features canonical-json` | strict JSON/JCS only; no data fabric, repository, or RPC |
+| contract tooling | `cargo check --no-default-features --features contracts-tooling` | canonical JSON plus artifact generation/verification |
+| Protobuf tooling | `cargo check --no-default-features --features proto-tooling --bin codefabric-proto-gen` | generator-only graph |
+| S3 deployment | `cargo check --all-targets --features s3-storage` | explicit delta-rs S3 graph |
 
-That zero is the invariant made measurable: the core builds and tests with no Python
-runtime present, exactly as a non-Python Rust consumer would see it. **A Python-only
-dependency must never leak into the featureless core.** Verify with `cargo tree
---no-default-features`.
-
-Three related decisions:
-
-- **No `pyo3/extension-module` feature** (repo-spec §6.2, anti-pattern §81.5). Maturin
-  sets the extension-build environment for the build that needs it; enabling that feature
-  globally interferes with ordinary Rust test linking. `Cargo.toml` carries
-  `pyo3 = { version = "0.29.2", optional = true }` and nothing more.
-- **`crate-type = ["rlib", "cdylib"]`** — one target serving both ordinary Rust consumers
-  and the Maturin extension.
-- **`#[pymodule(name = "_native")]`** must match the last component of Maturin's
-  `module-name = "codefabric._native"` (repo-spec §6.3). Those two strings are coupled.
-
-Error translation is a boundary responsibility (§6.5). `src/python.rs` centralizes
-`crate::Error → PyErr`; centralizing is a choice, the *predictability* is the requirement,
-and `python_tests/test_api.py` covers the mapping from the Python side.
-
-`codefabric._native` is **private** (§5.1, §61.5). Import from `codefabric`. Only
-narrowly-scoped binding-contract tests may touch `_native` (§19.2) — in this repo, exactly
-one test in `test_packaging.py`.
+`scripts/stable_graph_check.sh` verifies the actual resolved version and feature graph,
+including a single Arrow/Parquet/DataFusion/object-store/kernel universe, exact delta-rs
+and gix identities, the kernel-forced latent `object_store` features, and the
+local-vs-S3 activation boundary. It also proves narrow feature graphs omit unrelated
+heavy package families and that stable root/sidecar target sharing does not cross the
+dated-nightly extractor boundary. Compiled capability is not provider authority.
 
 ---
 
@@ -215,10 +268,10 @@ one test in `test_packaging.py`.
 
 | Decision | Value | Why |
 |---|---|---|
-| toolchain channel | `stable` | nightly is a *targeted analysis toolchain* for `just miri`/`just udeps` only, never the default (repo-spec §10) |
+| root toolchain | `stable` | stable daemon/data-plane boundary |
 | components | `rustfmt`, `clippy`, `rust-analyzer`, `rust-src`, `llvm-tools-preview` | `llvm-tools-preview` is the substrate for coverage, binutils and fuzz-coverage (tooling-ref §8); `rust-src` gives semantic tools stdlib source (§7) |
-| `rustc-dev` | **deliberately absent** | declaring it couples the repo to compiler-private APIs and forces an exact date-pinned nightly (repo-spec §76). If MIR extraction is ever built, that is a separate architecture decision, not an edit to this file |
-| `rust-version` | **not declared** | do not advertise an MSRV that is not verified (§27). `just msrv` exists and is inert until this appears |
+| extractor toolchain | `nightly-2026-08-18` in its own root | owns `rustc-dev`; it never contaminates the stable root |
+| `rust-version` | `1.94.1` | floor imposed by pinned delta-rs and verified with `cargo msrv verify` |
 | `license` | **not declared** | no license chosen yet; `publish = false` stops Cargo warning. `deny.toml` sets `licenses.private.ignore = true` so our own crate is not reported "Unlicensed" |
 | lints | `unsafe_code = "deny"`, clippy `all` + `pedantic` = warn | there is no first-party `unsafe`; preserving that is a useful default (§33) |
 | `clippy.toml` | five `doc-valid-idents` words + the `..` defaults marker | `pedantic` enables `doc_markdown`, which wants backticks around proper nouns in prose. The list names known-good words — it does **not** disable the lint (§9.1) |
@@ -226,21 +279,24 @@ one test in `test_packaging.py`.
 | extra profiles | `debugging` (full debug), `profiling` (release + symbols, `strip = "none"`) | profiling needs release codegen with symbols preserved (§40.2) |
 | release tuning | **none** | `lto`, `codegen-units = 1`, `panic = "abort"`, `strip` are not added by folklore; measure first (§9.3) |
 
-### Python
+### Dependency baseline
 
 | Decision | Value | Why |
 |---|---|---|
-| build backend | Maturin `>=1.14,<2` | mixed Rust/Python project layout (§11) |
-| floor | `>=3.14` | declared in **five places that must move together**: `pyproject.toml`, `.python-version`, Ruff `target-version`, Pyrefly `python-version`, and CI (§11.1). CI currently runs a single interpreter, not a matrix |
-| dev tooling | `[dependency-groups] dev` | lint/test tools are not runtime dependencies of the package (§11.2) |
-| Ruff | formatter *and* linter; `select = ["E","F","I","UP","B","SIM"]` | one Python tool surface, not three (§42) |
-| Pyrefly | explicitly configured `project-includes` | an unconfigured checker enables only a narrow high-confidence set; configuring it makes the intended type surface a decision (§43) |
-| typing | `py.typed` + hand-written `_native.pyi` | native runtime signatures are not the public typing contract; a private stub plus a typed façade lets the Python API stay richer and more stable than the raw FFI surface (§8) |
+| Arrow/Parquet | `58.4.0` | one public type universe |
+| DataFusion | `54.1.0` | query, catalog, execution |
+| object_store | `0.13.2` | canonical storage abstraction |
+| delta-rs | git rev `9f922319…` | pinned pre-release; compile-probed |
+| gix | `0.86.0`, narrow read profile + SHA-256 probe | present-state accelerator, never byte authority |
+| SQLite | `rusqlite 0.40.2`, `bundled` + `backup` | operational state and online backup |
+| safe filesystem | `rustix 1.1.4`, `fs` | descriptor-relative authoritative reads |
+| Rust gRPC/Protobuf | tonic/tonic-prost `0.14.6`, prost `0.14.4` | UDS transport, generated service boundary |
+| Rust generator | tonic-prost-build `0.14.6`, protoc-bin-vendored `3.2.0` | ambient `protoc` is never correctness input |
 
-Both lockfiles are committed. `Cargo.lock`, `uv.lock`, `.config/nextest.toml`,
-`bacon.toml`, `deny.toml`, `_typos.toml`, `clippy.toml`, `justfile`, `py.typed` and
-`_native.pyi` are the repository contract and are deliberately **not** gitignored
-(repo-spec §54).
+The root and both auxiliary Cargo locks are committed. Python has one domain-local lock,
+`codefabric-cpg-mcp/uv.lock`; there is no root uv project. Generator identities, including
+Rust libprotoc 31.1 and Python grpcio-tools libprotoc 35.1, are recorded under
+`tooling/proto/` and interoperability is proved against shared wire bytes.
 
 ---
 
@@ -248,16 +304,17 @@ Both lockfiles are committed. `Cargo.lock`, `uv.lock`, `.config/nextest.toml`,
 
 `just --list` is the first thing to read (repo-spec §14, §59, §92). Recipes express
 **intent**, not tool flags, so implementations can change without invalidating what
-callers know. Ten groups:
+callers know. Current groups:
 
-`environment` · `static` · `test` · `gate` · `quality` · `compat` · `supply-chain` ·
-`package` · `perf` · `mutating`
+`environment` · `static` · `test` · `extractor` · `sidecar` · `adapter` · `contracts` ·
+`gate` · `quality` · `compat` · `supply-chain` · `perf` · `mutating`
 
 Two rules govern all of it:
 
-1. **Mutating recipes are never dependencies of a gate** (§14.1). The four that
-   change state — `fmt-write`, `typos-write`, `snapshots-accept`, `deps-fix` — must be
-   invoked deliberately and their diff inspected; three carry `[confirm(...)]` prompts.
+1. **Mutating recipes are never dependencies of a gate** (§14.1). The five that
+   change state — `root-fmt-write`, `proto-gen`, `typos-write`, `snapshots-accept`,
+   `deps-fix` — must be invoked deliberately and their diff inspected; four carry
+   `[confirm(...)]` prompts.
    (`tool-updates-check` sits in the group for visibility but only lists available
    updates.)
 2. **Availability is not a mandate to run** (§73.1). Pick the smallest tool set that
@@ -286,7 +343,18 @@ no one machine's linker.
 
 `cargo clean` is not routine hygiene (§13.3). Reserve it for suspected stale artifacts,
 controlled clean-build measurement, reclaiming disk, or isolating a profile/feature
-interaction. A large `target/` is not evidence that the wheel is large.
+interaction. A large `target/` is not evidence that a release artifact is large.
+
+The cache and artifact topology is deliberate:
+
+- sccache remains host-global; the repository does not set `SCCACHE_DIR`;
+- stable root and stable Pyrefly-sidecar builds share the repository `target/`;
+- the dated-nightly extractor uses `target/extractor/`;
+- Miri/udeps use `target/nightly-assurance/`;
+- cargo-fuzz uses `target/fuzz/<nightly-host>/` and explicitly selects the native host.
+
+CI sets `CARGO_INCREMENTAL=0` so its sccache backend receives cacheable compiler outputs.
+Local builds retain Cargo incremental compilation.
 
 ### One continuous checker
 
@@ -299,65 +367,56 @@ Watchexec      →  non-Rust tasks and process restarts only
 ```
 
 Do not configure editor check-on-save, Bacon, and Watchexec to run the same
-`cargo check`. `bacon.toml` defines `check`, `check-python-feature`, `clippy` and
-`nextest` jobs, and exports `.bacon-locations` for editor/agent consumption — an agent
+`cargo check`. `bacon.toml` defines stable-root `check`, `clippy`, and `nextest` jobs,
+and exports `.bacon-locations` for editor/agent consumption — an agent
 must confirm that file matches the current source generation before reading an empty list
 as success (§15.2).
 
 ### Shell environment — the trap that matters for agents
 
 `direnv` applies `.envrc` in **interactive shells only**. Agent harnesses typically run
-each command in a fresh non-interactive shell that inherits nothing. So invoke tools one
-of three ways rather than assuming an activated environment:
+each command in a fresh non-interactive shell that inherits nothing. Invoke tools without
+assuming an activated environment:
 
 ```bash
-uv run <cmd>                     # Python
 direnv exec . <cmd>              # full .envrc environment, non-interactively
 . scripts/bootstrap.sh && <cmd>  # within one compound command
 ```
 
-`scripts/bootstrap.sh` is the shared mechanism: sourcing it applies the environment,
-running it checks one. `--quiet` is silent when healthy; `--context` emits a compact block
-for agent context injection.
-
-**One coupling worth knowing:** the build backend is Maturin, so `uv sync` compiles the
-Rust extension — including the `uv sync` inside `.envrc`. A broken Rust build therefore
-degrades the Python environment, not just the Rust one. `.envrc` treats sync failure as
-non-fatal, so the symptom is a stale `.venv` rather than an unenterable directory.
+`scripts/bootstrap.sh` is the shared mechanism: sourcing it applies the adapter's
+domain-local virtual environment and repository paths; running it checks all four domains.
+`--quiet` is silent when healthy; `--context` emits a compact block for agent context
+injection. Python commands are always domain-explicit; there is no root uv environment.
 
 ---
 
 ## 7. Test architecture and what each layer proves
 
-Evidence is **orthogonal**, not redundant (repo-spec §25). Current state: 9 nextest tests,
-2 doctests, 12 pytest tests — all green.
+Evidence is **orthogonal**, not redundant (repo-spec §25). WP01 starts with executable
+compatibility tests; each later packet adds behavioral proof at the boundary it owns.
 
 | Question | Instrument | Recipe |
 |---|---|---|
-| Do ordinary Rust tests pass? | cargo-nextest | `just test-rust` |
-| Do documented examples still work? | `cargo test --doc` | `just doctest` |
-| Does the Python interface behave? | pytest against a dev install | `just test-python` |
+| Do ordinary stable-root Rust tests pass? | cargo-nextest | `just root-test-rust` |
+| Do documented examples still work? | `cargo test --doc` | `just root-doctest` |
+| Does the exact stable graph match the design? | resolved metadata/tree validator | `just stable-graph-check` |
+| Do structural boundaries hold? | tested ast-grep rules | `just governance-scan` |
+| Are generated Protobuf outputs reproducible? | dual isolated generation | `just proto-repro-check` |
+| Do all four domains pass their routine gates? | aggregate command | `just ci-fast` |
 | Which Rust regions executed? | cargo-llvm-cov | `just coverage` |
 | Do assertions detect plausible faults? | cargo-mutants | `just mutants-file <path>` |
-| What inputs find new behavior? | cargo-fuzz | `just fuzz <target>` *(no targets yet)* |
+| What inputs find new behavior? | cargo-fuzz | `just fuzz jcs_decode_canonicalize` |
 | Did structured output change? | cargo-insta | `just snapshots-review` |
 | Do unsafe/concurrent executions violate Rust's rules? | Miri | `just miri`, `just miri-seeds` |
-| Does the built wheel install and import? | clean-env wheel test | `just wheel-test` |
+| Does the adapter protocol behave? | adapter-local pytest/FastMCP client | added in WP04 |
 
-### Four traps the tooling will not catch for you
+### Three traps the tooling will not catch for you
 
 1. **`cargo nextest` does not run doctests.** Never report "all Rust tests passed" from
-   nextest alone. `just test` covers both; `just test-rust` does not (§18.2, §62.2).
-2. **`maturin develop` is not packaging evidence.** Only `just wheel-test` — a clean-env
-   install of the built artifact — validates the wheel (§44.2, §62.3). A stale editable
-   install produces convincing false passes, which is why `scripts/wheel_test.sh` asserts
-   the *import origin* resolves inside the temporary venv. It also refuses to run when
-   `dist/` holds more than one wheel, so a stale artifact cannot become the thing under
-   test, and it prints the wheel name, sha256, and interpreter version as the record
-   (§45 item 6).
-3. **`--all-features` is not a feature matrix.** It validates only the maximal additive
+   nextest alone. `just root-test` covers both; `just root-test-rust` does not (§18.2, §62.2).
+2. **`--all-features` is not a feature matrix.** It validates only the maximal additive
    union and hides accidental coupling. Use `just features-each` (§26.1, §62.6).
-4. **Coverage is not test strength.** A covered line may assert nothing. Triangulate:
+3. **Coverage is not test strength.** A covered line may assert nothing. Triangulate:
    uncovered + surviving mutant → establish reachability first; covered + surviving mutant
    → strengthen the assertion (§21, §22.1, §62.4).
 
@@ -370,12 +429,11 @@ build (§18.1). When tests come to share a database, port, or other scarce resou
 constrain them with a nextest test group rather than serializing the whole suite (§18.3) —
 the file carries a commented example.
 
-### Python test posture
+### Adapter test posture
 
-Python tests exercise the **public package**, not the private extension (§19.2), and
-deliberately do not replay the Rust suite. Rust owns domain validation; what Python must
-prove is that the interface accepts expected values, converts correctly in both
-directions, maps errors as documented, and that packaging/import works (§19.1).
+From WP04 onward, Python tests exercise the FastMCP adapter through its public protocol
+surface and real gRPC stubs; they do not replay Rust domain logic or import a native
+extension. Rust owns domain validation, Arrow processing, and query execution.
 
 ---
 
@@ -383,30 +441,28 @@ directions, maps errors as documented, and that packaging/import works (§19.1).
 
 Not every installed tool belongs on the critical path of every commit (repo-spec §49).
 
-**Tier A — every meaningful change.** Wired into both `just ci-fast` and
-`.github/workflows/ci.yml`:
+**Tier A — every meaningful change.** Wired into `just ci-fast` and CI:
 
 ```
-fmt · check (both surfaces) · clippy (both surfaces) · ruff lint · pyrefly
-· nextest · doctests · pytest · typos · machete · shear        [+ deny · audit in CI]
+root fmt/check/clippy/nextest/doctests · adapter lint/type/test/STDIO
+· extractor + sidecar domain gates at milestones · typos · machete · shear
+· stable graph · tested ast-grep rules · duplicate-family negative fixture · proto drift
+          [+ advisory registry · deny advisories/bans/sources · audit in CI/ci-pr]
 ```
 
-`just ci-pr` adds `policy` (deny + audit), the `ci` nextest profile with the `python`
-feature, feature-flagged doctests, and `cargo insta pending-snapshots`.
+`just ci-pr` adds root and sidecar policy, two-root Protobuf reproduction, the `ci`
+nextest profile, and pending-snapshot review state.
 
 **Tier B — conditional.** Available as recipes, not wired into CI: `coverage`,
-`features-each`, `features-no-default`, `wheel-test`, `semver`, `msrv`.
+`features-each`, `features-no-default`, `semver`, `msrv`.
 
 **Tier C — risk-triggered or scheduled.** Available as recipes: `miri`, `miri-seeds`,
 `mutants-file`, `fuzz`, `udeps`, `unsafe-surface`, plus the whole `perf` group.
 
-**CI deliberately implements Tier A only.** There is no unsafe code, no fuzz surface and
-no benchmark baseline yet, and §52 is explicit that a permanently-red deep-assurance
-workflow is worse than a smaller meaningful suite. Every CI step mirrors a justfile
-recipe — keep them in sync; the justfile is the API and CI exists for per-step
-granularity. Actions are pinned to commit SHAs and Rust CLIs to explicit versions, so a
-tool release cannot silently change a merge gate (§50.1). CI runs `uv sync --frozen` so a
-lock mismatch fails rather than being silently rewritten (§50.2).
+**CI implements Tier A plus the path/pin-triggered extractor and sidecar gates.** Those
+two run on relevant changes, pushes, scheduled runs, and manual milestone dispatch; root,
+adapter, contracts, and governance run on every PR. Every CI step mirrors a justfile
+recipe. Actions are pinned to commit SHAs and CLIs to explicit versions (§50.1).
 
 ### Choose evidence by change risk
 
@@ -414,17 +470,16 @@ Classify before validating (repo-spec §60). The rows most likely to apply here:
 
 | Change | Minimum additional evidence |
 |---|---|
-| comment/docs only | Ruff / Typos as relevant |
+| comment/docs only | formatting / Typos as relevant |
 | local safe Rust logic | check + Clippy + targeted nextest |
-| public Python façade | pytest + Pyrefly + Ruff; wheel test if packaging-significant |
-| PyO3 conversion/binding | Rust tests + pytest + Maturin build |
-| error mapping | Rust error tests **and** Python exception tests |
-| Cargo feature | `features-each` + featureless and `python` builds |
+| FastMCP adapter | adapter pytest + Pyrefly + Ruff + protocol tests |
+| gRPC boundary | Rust and Python interop + size/identity/error tests |
+| Cargo feature | `features-each` + default and featureless builds |
 | dependency | `deps-fast` + `policy` + tests + feature matrix |
 | unsafe/pointer/concurrency | Geiger + Miri + native tests |
 | parser/protocol | coverage + fuzz + snapshots + mutation testing |
 | performance claim | Hyperfine before/after + profiler |
-| Python packaging | fresh wheel install + pytest |
+| Python packaging | locked adapter sync + subprocess/import proof |
 
 **Do not run Tier C tools to appear thorough.** Run them when they produce evidence
 relevant to the risk (§73.1).
@@ -449,24 +504,26 @@ next tool when macro-generated use is suspected.
 `deny.toml` was generated with `cargo deny init` and then edited deliberately. Its
 non-obvious decisions:
 
-- **`all-features = true`.** The wheel ships with the `python` feature enabled, so the
-  featureless graph is not the graph that gets distributed. Auditing the wrong dependency
-  graph is a named failure mode (tooling-ref §72.16); without this, `pyo3` and its whole
-  subtree are invisible to every check.
-- **Permissive licenses only.** CodeFabric distributes a wheel containing statically
-  linked Rust dependencies, so a copyleft or source-disclosure obligation would attach to
-  the distributed artifact. The allow-list is *policy*, not a mirror of today's graph —
-  `unused-allowed-license = "allow"` keeps unused entries from being findings (§30.1).
+- **`all-features = true`.** Policy checks include the optional S3 deployment graph;
+  default-profile isolation is proven separately by `stable-graph-check`.
+- **License checks are currently inactive by user direction.** The dormant allow-list is
+  retained only as a future decision aid; neither `just policy` nor CI evaluates it, and
+  it is not assurance evidence.
 - **`licenses.private.ignore = true`** because this package declares no `license` field
   (see *Manifests, pins, and the decisions inside them*). Revisit when a license is chosen.
-- **`multiple-versions = "warn"`, not deny.** Duplicates deserve attention, not automatic
-  failure — they are often forced by transitive constraints. Pair with `cargo tree -d`
-  before attempting a resolution (§30.2).
-- **crates.io only**, `unknown-git = "deny"`. A Git dependency pinned to a branch is
-  materially less reproducible than one pinned to an immutable revision.
+- **`multiple-versions = "deny"` with exact transitive skips.** Type-bearing
+  Arrow/Parquet/DataFusion/object_store/buoyant-kernel families are never skipped. A
+  committed second-Arrow graph must fail on every governance run; the script also checks
+  the deny-config shape before accepting that expected failure.
+- **crates.io plus one approved Git source**, `unknown-git = "deny"`. The only exception
+  is delta-rs; the resolved-graph validator enforces its immutable revision.
+- **Exact advisory exceptions only.** `tooling/security/advisory-exceptions.json` records
+  package/version, rationale, owner, and the mandatory WP19 review trigger. The checker
+  requires exact equality with `deny.toml`, `Cargo.lock`, and the current RustSec result.
 
-`cargo audit` green means the resolved graph matches no known RustSec advisory under the
-current database — **not** that dependencies have been security-audited (§31).
+The policy audit is green only after applying the exact registered exceptions; it means
+there are no *unregistered* current findings, **not** that dependencies have been
+security-audited or that registered findings are safe (§31).
 
 **cargo-vet is deliberately not adopted** (§32). Maintaining human audit attestations is
 real work and `supply-chain/` should not exist merely to have one. An agent may identify
@@ -499,10 +556,12 @@ non-secret record to `target/tooling-inventory.txt` (repo-spec §57).
 | Command contract | `just` | **required** | `just --list` |
 | Compilation cache | `sccache` | **required** — committed wrapper | `just cache-stats` |
 | Environment report | `scripts/bootstrap.sh` | **required** | `just doctor` |
-| Test runner | cargo-nextest | Tier A | `just test-rust` |
-| Python build/wheel | Maturin | Tier A | `just python-develop`, `just wheel` |
-| Python lint + format | Ruff | Tier A | `just python-lint`, `just fmt` |
-| Python types | Pyrefly | Tier A | `just python-type` |
+| Test runner | cargo-nextest | Tier A | `just root-test-rust` |
+| Stable graph validation | Cargo metadata/tree + jq | Tier A | `just stable-graph-check` |
+| Structural boundaries | ast-grep | Tier A | `just governance-scan` |
+| Adapter lint/types/tests | Ruff, Pyrefly, pytest | Tier A | `just adapter-ci-fast` |
+| Protobuf generation | prost/tonic + grpcio-tools | Tier A | `just proto-check` |
+| Duplicate-family policy | cargo-deny + negative fixture | Tier A | `just duplicate-family-check` |
 | Spelling | Typos | Tier A | `just typos` |
 | Unused deps (fast) | cargo-machete, cargo-shear | Tier A | `just deps-fast` |
 | Dependency policy | cargo-deny, cargo-audit | Tier A (CI / `ci-pr`) | `just policy` |
@@ -511,13 +570,12 @@ non-secret record to `target/tooling-inventory.txt` (repo-spec §57).
 | File discovery | `fd` | agent discovery | — |
 | Coverage | cargo-llvm-cov | Tier B | `just coverage` |
 | Feature matrix | cargo-hack | Tier B | `just features-each` |
-| Wheel validation | `scripts/wheel_test.sh` | Tier B | `just wheel-test` |
 | Rust API compatibility | cargo-semver-checks | Tier B — only if the Rust API becomes externally supported (§28) | `just semver <rev>` |
-| MSRV | cargo-msrv | Tier B — inert until `rust-version` is declared | `just msrv` |
+| MSRV | cargo-msrv | WP01 packet gate / Tier B later | `just msrv` |
 | Snapshots | cargo-insta | when snapshot-worthy output exists (§20) | `just snapshots-review` |
 | UB / aliasing / races | Miri | Tier C, risk-triggered | `just miri`, `just miri-seeds` |
 | Assertion strength | cargo-mutants | Tier C | `just mutants-file <path>` |
-| Adversarial inputs | cargo-fuzz | Tier C — no `fuzz/` yet | `just fuzz <target>` |
+| Adversarial inputs | cargo-fuzz | Tier C — JCS target present | `just fuzz jcs_decode_canonicalize` |
 | Unused deps (compiler) | cargo-udeps | Tier C, disputed findings | `just udeps` |
 | Unsafe inventory | cargo-geiger | Tier C | `just unsafe-surface` |
 | Audit attestations | cargo-vet | **not adopted** (§32) | — |
@@ -542,11 +600,74 @@ mechanism → ONE controlled change → correctness suite → the exact benchmar
 ```
 
 A narrower flame frame or nicer assembly is not itself an improvement. And `target/` disk
-usage is not artifact size — measure the wheel or binary (§39, §82.2).
+usage is not artifact size — measure the final executable or package (§39, §82.2).
+
+---
+
+### 10.1 Navigating the documentation corpus
+
+The corpora are too large to read. `.claude/skills/_shared/code-intelligence.md` is the full
+reference — a three-tier instrument ladder for *proof*, and `outline` first for *navigation*.
+
+| Tier | Instrument | Proves | Reach |
+|---|---|---|---|
+| 1 | `cargo check`, `uv run ruff` | caller coverage **by construction** — rename the symbol, rebuild clean | Rust strong, Python partial |
+| 2 | `ast-grep` | structure: call sites, impls, signatures, member access | any tree-sitter language |
+| 3 | `rg` | literal residue: strings, config, comments, cross-language, generated | everything, including what has no AST |
+
+Escalate down for breadth, up for proof. A tier-3 zero-hit is not caller completeness; a
+tier-1 clean rebuild is. Label every claim with the highest tier that confirmed it, and with
+the tool version — the session context prints both.
+
+Three navigators, none interchangeable:
+
+- `just spec-outline` — `docs/upfront_design/` by section. h2-rooted (`## N.` items,
+  `### N.N` members).
+- `just lib-outline` — `docs/library_ref/` by chapter. h1-rooted, because those files are
+  rooted a level higher; `spec-outline`'s mapping would find no chapters and silently
+  flatten the rest. Each script refuses the other's tree rather than emit a misleading
+  outline. Extractors live in `tooling/ast-grep/outline/`, with shape tests beside them.
+- `ast-grep outline <dir>` — code. `--items exports` maps a subtree's public surface;
+  `--view expanded --match '^Name$'` inspects one type's members. Syntax only: no reference
+  resolution, no types, no call graph.
+
+`--match` filters items, not members — zoom to the chapter, then `--view expanded`. Prefer
+either outline over `rg` for headings in those files: both parse markdown, so a `# Cargo.toml`
+inside a fenced block cannot masquerade as a heading.
+
+The search traps that silently shrink results are printed in the session context rather than
+restated here.
+
+### 10.2 Project skills (`.claude/skills/`)
+
+Twenty-one skills plus `_shared/`, discoverable by both agents: `.codex/skills` and
+`.agents/skills` symlink to `.claude/skills`, so a skill is edited once and both read it.
+
+- **Ten workflow skills**, intended as a flow: `design-development` →
+  `library-capability-research` → `impl-plan` → `plan-audit` → `integrate-plan-audit` →
+  `impl-plan-exec` → `impl-status` → `implementation-review`, with `lib-leverage` and
+  `skill-eval` standalone. Each opens by reading shared policy from `_shared/`.
+- **Eleven library-reference navigators** routing `docs/library_ref/`: `ast-grep-ripgrep-ref`,
+  `canonicalization-lib-ref`, `code-facts-lib-ref`, `datafusion-pyarrow-rust-ref`,
+  `deltalake-rust-ref`, `fastmcp-pydantic-ref`, `grpcio-orjson-protobuf-ref`, `gix-notify-ref`,
+  `petgraph-ref`, and the two inert ones — `attrs-cattrs-ref` and `typer-rich-ref`, whose target
+  documents have not been written. Both self-declare. `ast-grep-ripgrep-ref` is the one that is
+  also project-anchored: it maps search use cases onto ast-grep, ripgrep and PCRE2 capabilities,
+  and covers this repository's own `rules/` and outline extractors.
+
+`_shared/` holds the policy every workflow skill loads: `code-intelligence.md` (research),
+`evidence-policy.md` (claim → required evidence), `validation-policy.md` (gates),
+`doctrine-policy.md`, `subagent-orchestration.md`, `artifact-schemas.md` (artifact paths,
+frontmatter, ID prefixes, status vocabularies).
 
 ---
 
 ## 11. Invariants for agents working here
+
+Items 1, 2, 5 and 6 are also asserted in the session context that `scripts/bootstrap.sh
+--context` injects at session start, so an agent should already hold them. They are kept
+here in full because the context block carries the rule and this section carries the reason.
+
 
 1. **Read `just --list` first.** Prefer a recipe over reconstructing tool flags
    (repo-spec §59, §92).
@@ -557,18 +678,17 @@ usage is not artifact size — measure the wheel or binary (§39, §82.2).
 4. **rust-analyzer is not the final authority** — confirm with the repository's Cargo
    commands (§62.1).
 5. **Never report "all Rust tests passed" from nextest alone.** Doctests are separate.
-6. **Never treat `maturin develop` as packaging evidence.**
-7. **Preserve the dependency direction.** Before adding a PyO3 or Python-object dependency
-   to code the core uses, confirm it genuinely belongs to the binding boundary (§61.1).
-8. **Keep Python as an interface layer.** If you find yourself writing a second
-   implementation of core behavior in Python, reassess the boundary (§61.4).
-9. **Do not create a crate to organize code, or a second top-level test file** (§61.2,
+6. **Preserve domain isolation.** No compiler-private or Pyrefly dependency enters the
+   stable root, and Python never becomes an Arrow/DataFusion processing layer.
+7. **Keep Python as presentation only.** If adapter code begins implementing domain or
+   query behavior, move that behavior behind the daemon contract.
+8. **Do not create a crate to organize code, or a second top-level test file** (§61.2,
    §61.3).
-10. **Mutating recipes need a reason and a diff review.** `fmt-write`, `typos-write`,
-    `snapshots-accept`, `deps-fix`, `cargo update`, `maturin publish` — none is ever an
+9. **Mutating recipes need a reason and a diff review.** `root-fmt-write`, `proto-gen`,
+    `typos-write`, `snapshots-accept`, `deps-fix`, and `cargo update` — none is ever an
     automatic fix (§14.1, §63).
-11. **Miri never proves soundness.** Record toolchain, seed range, target and exclusions
+10. **Miri never proves soundness.** Record toolchain, seed range, target and exclusions
     with any finding (§24.2, §62.5).
-12. **Record the evidence, not the verdict** (§65): tool and version, toolchain and
+11. **Record the evidence, not the verdict** (§65): tool and version, toolchain and
     target, feature selection, profile, exact command, exit status, and whether the
     command mutated source, lockfiles, manifests or the environment.

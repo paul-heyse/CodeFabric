@@ -3,14 +3,12 @@
 #
 # `clippy::pedantic` enables `doc_markdown`, which asks for backticks around anything
 # that looks like an identifier. Applied to prose, it wants "the `CodeFabric` core" and
-# "a `PyO3` extension", which is wrong -- these are proper nouns, not code. This list is
+# "a `PyArrow` extension", which is wrong -- these are proper nouns, not code. This list is
 # the lint's own designed escape hatch and is deliberately narrow: it names known-good
 # words, it does not disable the lint. The leading ".." preserves Clippy's defaults.
 doc-valid-idents = [
   "..",
   "CodeFabric",
-  "PyO3",
-  "Maturin",
   "DataFusion",
   "FastMCP",
 ]

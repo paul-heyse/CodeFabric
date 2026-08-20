@@ -127,15 +127,16 @@ approval_policy = "on-request"
 
 [permissions.codefabric.filesystem]
 ":workspace_roots"."Cargo.lock"   = "deny"   # matches Claude's Edit() denies
-":workspace_roots"."uv.lock"      = "deny"
+":workspace_roots"."codefabric-cpg-mcp"."uv.lock" = "deny"
 ":workspace_roots"."\.envrc\.local" = "deny" # holds CODEFABRIC_CPG_CAPABILITY_TOKEN
 ```
 
 **No model or reasoning settings.** Those are your preference, not repository
 policy, and already live in `~/.codex/config.toml`.
 
-**No MCP servers.** CodeFabric's own FastMCP server is specified but not built
-— it arrives in roadmap Wave 18.
+**No external MCP server registration.** The repository now contains the standalone
+`codefabric-cpg-mcp/` adapter shell, but host registration and the production serving
+surface remain owned by the later serving waves.
 
 **No `project_doc_fallback_filenames` override.** Codex reads `AGENTS.md` by
 default, and `AGENTS.md` already routes to `CLAUDE.md` for the system-being-built

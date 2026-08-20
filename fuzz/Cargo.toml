@@ -1,0 +1,21 @@
+[package]
+name = "codefabric-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.94.1"
+resolver = "3"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+codefabric = { path = "..", default-features = false, features = ["canonical-json"] }
+
+[[bin]]
+name = "jcs_decode_canonicalize"
+path = "fuzz_targets/jcs_decode_canonicalize.rs"
+test = false
+doc = false
+bench = false

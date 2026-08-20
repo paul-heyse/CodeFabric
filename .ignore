@@ -1,0 +1,15 @@
+# Generated artifacts are compiled and byte-checked by their owning gates; heuristic
+# source scanners must not treat generated references as handwritten dependency use.
+contracts/generated/
+src/generated/
+codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/
+rustc-extractor/src/generated/
+pyrefly-sidecar/src/generated/
+
+# This deliberately-invalid Cargo graph belongs only to duplicate-family governance.
+tooling/ci/duplicate-family-fixture/
+
+# Transient environments and test caches are execution products, not repository
+# authority. They may contain third-party metadata or stale test node IDs.
+**/.venv/
+**/.pytest_cache/

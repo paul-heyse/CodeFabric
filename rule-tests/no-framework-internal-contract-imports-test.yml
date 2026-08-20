@@ -1,0 +1,10 @@
+id: no-framework-internal-contract-imports
+valid:
+  - |
+      from pydantic import BaseModel
+
+      class PublicContract(BaseModel):
+          value: str
+invalid:
+  - |
+      from fastmcp.server.server import FastMCP

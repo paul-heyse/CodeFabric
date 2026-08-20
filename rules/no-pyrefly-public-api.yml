@@ -1,0 +1,54 @@
+id: no-pyrefly-public-api
+language: Rust
+severity: error
+message: Keep Pyrefly-owned types behind the private sidecar boundary.
+note: Expose application-owned DTOs only; Pyrefly 1.2.0's Query surface is explicitly unstable.
+rule:
+  any:
+    - all:
+        - kind: scoped_type_identifier
+        - regex: "^pyrefly(::|_)"
+        - any:
+            - all:
+                - inside:
+                    kind: function_item
+                    field: return_type
+                    stopBy: end
+                - inside:
+                    all:
+                      - kind: function_item
+                      - has:
+                          kind: visibility_modifier
+                    stopBy: end
+            - all:
+                - inside:
+                    kind: parameters
+                    stopBy: end
+                - inside:
+                    all:
+                      - kind: function_item
+                      - has:
+                          kind: visibility_modifier
+                    stopBy: end
+            - inside:
+                all:
+                  - any:
+                      - kind: struct_item
+                      - kind: enum_item
+                      - kind: union_item
+                      - kind: type_item
+                      - kind: const_item
+                      - kind: static_item
+                      - kind: trait_item
+                  - has:
+                      kind: visibility_modifier
+                stopBy: end
+    - all:
+        - kind: scoped_identifier
+        - regex: "^pyrefly(::|_)"
+        - inside:
+            all:
+              - kind: use_declaration
+              - has:
+                  kind: visibility_modifier
+            stopBy: end

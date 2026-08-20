@@ -6,11 +6,17 @@ code contains, who calls what, or what has reached zero.
 Two tools do this work: `ast-grep` for syntax-aware structure and `rg` (ripgrep)
 for text. Both are installed. Their capabilities are documented in depth at:
 
-- `docs/library_ref/ast-grep_0.45.1_advanced_reference.md`
-- `docs/library_ref/ripgrep.md`
+- `docs/library_ref/ast-grep_0.45.1_advanced_reference.md` (§0-§25)
+- `docs/library_ref/ripgrep_advanced_reference_15.2.0_pcre2_10.47.md` (§0-§49)
 
 Consult those for syntax and flag semantics rather than guessing. Section
-citations below (`ast-grep §G2`, `ripgrep §L5`) point into them.
+citations below (`ast-grep §6.0`, `ripgrep §13.1`) point into them. Both
+documents number chapters `# N)` and subsections `## N.M`, and nine chapter
+numbers collide between them, so the alias is never optional.
+
+The `ast-grep-ripgrep-ref` skill navigates both: which capability answers a given
+search job, and where it is specified. Reach for it when the search needs more
+than a literal.
 
 Invoke it as `ast-grep`, never `sg`. The `sg` shim is deprecated in the 0.45
 line, prints a warning banner that corrupts `--json` and piped output, and
@@ -236,7 +242,7 @@ Both are live today and both silently shrink results:
   Compare `rg --files | grep -c '^\.claude/'` (zero) against
   `rg --files --hidden -g '!.git/**' | grep -c '^\.claude/'`. Use
   `--hidden -g '!.git/**'` whenever skills, settings, or any dotfile are in
-  scope (`ripgrep §J1.2`).
+  scope (`ripgrep §16.0`).
 - **`docs/library_ref/` is ~9 MB of prose**, several files over 1 MB, and it
   mentions most identifiers you will ever search for. Exclude it with
   `-g '!docs/library_ref/**'` unless the question is *about* the references.
@@ -262,16 +268,18 @@ external merely because it is structured (`§22.6`).
   capture unnamed operator/punctuation nodes; a multi-metavariable cannot be
   the root pattern; repeated `$A` silently enforces syntactic equality.
 - **rg**: the default engine has no lookaround or backreferences — use
-  `-P`/`--engine` (`§F1`, `§F4`); `-g dir` does not mean `dir/` — write
-  `-g 'dir/**'` (`§K1.2`, `§L3.2`); later globs win (`§L3.1`); type filters
-  apply late and cannot override ignores (`§L3.4`); hidden and binary files are
-  skipped by default (`§J1`).
+  `-P`/`--engine` (`ripgrep §5.1`, `§5.0`); `-g dir` does not mean `dir/` —
+  write `-g 'dir/**'` (`ripgrep §15.1`); later matching globs win
+  (`ripgrep §15.0`); manual `-g` overrides sit *above* the ignore stack while
+  `-t` type filters are a separate layer the reference does not place in it
+  (`ripgrep §13.1`, `§15.3`); hidden and binary files are skipped by default
+  (`ripgrep §13.0`, `§16.1`).
 - **Both**: dynamic dispatch, `getattr`, macro-generated code, trait objects,
   re-exports, and string-keyed registries are invisible to structure. Name this
   residue in the claim instead of implying it was covered.
 - **Version is part of the claim.** A structural result is only valid for the
   ast-grep and grammar version that produced it — a parser upgrade can change
-  node kinds, field names, and named/unnamed boundaries (`§22.15`). Record the
+  node kinds, field names, and named/unnamed boundaries (`ast-grep §22.15`). Record the
   tool version alongside any structural claim you expect to survive.
 
 ### Navigating the design specs

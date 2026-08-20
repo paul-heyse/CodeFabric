@@ -45,4 +45,7 @@ type = "command"
 command = ".codex/hooks/session-start.sh"
 statusMessage = "Loading CodeFabric environment"
 timeout = 20
-additionalContextLimit = 2500
+# The payload is ~3.4 KB / ~860 tokens. This ceiling is a spill threshold, not a hard
+# cap -- exceeding it saves the context to disk and shows the model a preview -- but
+# the headroom keeps the whole report inline as the corpus grows.
+additionalContextLimit = 5200

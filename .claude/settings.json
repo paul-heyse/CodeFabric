@@ -91,15 +91,14 @@
       "Bash(rustup toolchain list*)",
       "Bash(rustc -vV)",
       "Bash(cargo -V)",
-      "Bash(uv run maturin develop*)",
-      "Bash(uv run maturin build*)",
-      "Bash(uv run pyrefly*)",
+      "Bash(uv run --frozen --project codefabric-cpg-mcp *)",
+      "Bash(uv run --frozen --project pyrefly-sidecar *)",
       "Bash(uv version*)",
       "Bash(./scripts/tooling_inventory.sh*)",
       "Bash(./scripts/wheel_test.sh*)"
     ],
     "deny": [
-      "Edit(./uv.lock)",
+      "Edit(./codefabric-cpg-mcp/uv.lock)",
       "Edit(./Cargo.lock)"
     ]
   },

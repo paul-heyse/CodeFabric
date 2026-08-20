@@ -32,6 +32,11 @@ default:
 doctor:
     ./scripts/bootstrap.sh
 
+[doc("Run the routine gate once and cache its verdict under target/")]
+[group('environment')]
+baseline:
+    ./scripts/bootstrap.sh --baseline
+
 [doc("Capture a non-secret tooling inventory to target/tooling-inventory.txt")]
 [group('environment')]
 inventory:
@@ -68,37 +73,24 @@ lib-outline *args:
 
 # --------------------------------------------------- formatting / static feedback
 
-[doc("Check formatting of Rust and Python sources")]
+[doc("Check formatting of stable-domain Rust sources")]
 [group('static')]
-fmt:
+root-fmt:
     cargo fmt --all -- --check
-    uv run ruff format --check python python_tests
 
-# Both compile surfaces (spec section 26.2): the featureless core must build without a
-# Python runtime, and the PyO3 adapter must build with it. A Python-only dependency must
-# never leak into the featureless core.
+# The default local profile and the featureless substrate are both load-bearing.
 
-[doc("Type-check both compile surfaces: featureless core and python feature")]
+[doc("Type-check default local and featureless stable-domain surfaces")]
 [group('static')]
-check:
+root-check:
     cargo check --all-targets
-    cargo check --all-targets --features python
+    cargo check --all-targets --no-default-features
 
-[doc("Clippy on both compile surfaces, warnings denied")]
+[doc("Clippy on default local and featureless stable-domain surfaces")]
 [group('static')]
-clippy:
+root-clippy:
     cargo clippy --all-targets -- -D warnings
-    cargo clippy --all-targets --features python -- -D warnings
-
-[doc("Ruff lint over the Python facade and its tests")]
-[group('static')]
-python-lint:
-    uv run ruff check python python_tests
-
-[doc("Pyrefly type check")]
-[group('static')]
-python-type:
-    uv run pyrefly check
+    cargo clippy --all-targets --no-default-features -- -D warnings
 
 [doc("Spelling and identifier hygiene")]
 [group('static')]
@@ -109,7 +101,7 @@ typos:
 
 [doc("Rust tests via nextest (does NOT include doctests)")]
 [group('test')]
-test-rust:
+root-test-rust:
     cargo nextest run
 
 # nextest does not run doctests. This is a separate, mandatory step -- never report "all
@@ -117,25 +109,12 @@ test-rust:
 
 [doc("Rust doctests -- nextest does not cover these")]
 [group('test')]
-doctest:
+root-doctest:
     cargo test --doc
 
-# Fast local iteration path only. A development install is never packaging evidence
-# (spec sections 44 and 62.3); that is what wheel-test is for.
-
-[doc("Build and install the native extension into the local environment")]
+[doc("Everything in the stable root: Rust tests and doctests")]
 [group('test')]
-python-develop:
-    uv run maturin develop
-
-[doc("Python interface tests against a development install")]
-[group('test')]
-test-python: python-develop
-    uv run pytest
-
-[doc("Everything: Rust tests, doctests, and Python interface tests")]
-[group('test')]
-test: test-rust doctest test-python
+root-test: root-test-rust root-doctest
 
 # ----------------------------------------------------------------- fast / PR gates
 
@@ -148,21 +127,177 @@ deps-fast:
 [doc("Dependency policy and known-advisory scan")]
 [group('gate')]
 policy:
-    cargo deny check
-    cargo audit
+    ./scripts/advisory_policy_check.sh --audit
+    cargo deny check --hide-inclusion-graph advisories bans sources
+
+[doc("Validate exact advisory exceptions against lockfile, deny, and RustSec")]
+[group('gate')]
+advisory-policy-check:
+    ./scripts/advisory_policy_check.sh
 
 # The routine baseline. Run it before editing and record pre-existing failures separately
 # from anything the edit causes (spec section 59.1).
 
-[doc("The routine gate: format, check, lint, types, tests, typos, dep hygiene")]
+[doc("Validate the exact resolved stable dependency and feature graph")]
 [group('gate')]
-ci-fast: fmt check clippy python-lint python-type test typos deps-fast
+stable-graph-check:
+    ./scripts/stable_graph_check.sh
+
+[doc("Run repository structural governance rules")]
+[group('gate')]
+governance-scan:
+    ast-grep test --skip-snapshot-tests
+    ast-grep scan \
+      --globs '!contracts/generated/**' \
+      --globs '!src/generated/**' \
+      --globs '!codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/**' \
+      --globs '!rustc-extractor/src/generated/**' \
+      --globs '!pyrefly-sidecar/src/generated/**'
+
+[doc("The routine stable-root gate")]
+[group('gate')]
+root-ci-fast: root-fmt root-check root-clippy root-test typos deps-fast stable-graph-check
+
+# --------------------------------------------------------- independent build domains
+
+[doc("Format-check the dated-nightly rustc extractor")]
+[group('extractor')]
+extractor-fmt:
+    cd rustc-extractor && cargo fmt --all -- --check
+
+[doc("Compile and lint the dated-nightly rustc extractor")]
+[group('extractor')]
+extractor-check:
+    cd rustc-extractor && cargo check --all-targets --locked
+    cd rustc-extractor && cargo clippy --all-targets --locked -- -D warnings
+
+[doc("Test the dated-nightly rustc extractor")]
+[group('extractor')]
+extractor-test:
+    cd rustc-extractor && cargo test --locked
+
+[doc("Launch the built extractor directly and verify exact stderr-only identity")]
+[group('extractor')]
+extractor-identity:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    (cd rustc-extractor && cargo build --locked)
+    temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/codefabric-extractor-identity.XXXXXX")"
+    trap 'rm -rf "$temporary_root"' EXIT
+    ./scripts/run_rustc_extractor.sh --identity >"$temporary_root/stdout" 2>"$temporary_root/stderr"
+    test ! -s "$temporary_root/stdout"
+    cmp rustc-extractor/toolchain-identity.json "$temporary_root/stderr"
+
+[doc("Run the complete extractor gate")]
+[group('extractor')]
+extractor-ci-fast: extractor-fmt extractor-check extractor-test extractor-identity
+
+[doc("Format-check the stable Pyrefly sidecar")]
+[group('sidecar')]
+sidecar-fmt:
+    cd pyrefly-sidecar && cargo fmt --all -- --check
+
+[doc("Compile and lint the stable Pyrefly sidecar")]
+[group('sidecar')]
+sidecar-check:
+    cd pyrefly-sidecar && cargo check --all-targets --locked
+    cd pyrefly-sidecar && cargo clippy --all-targets --locked -- -D warnings
+
+[doc("Test the stable Pyrefly sidecar")]
+[group('sidecar')]
+sidecar-test:
+    cd pyrefly-sidecar && cargo test --locked
+
+[doc("Check sidecar advisories, bans, and sources (licenses excluded)")]
+[group('sidecar')]
+sidecar-policy:
+    cd pyrefly-sidecar && cargo deny check --hide-inclusion-graph advisories bans sources
+    cd pyrefly-sidecar && cargo audit
+
+[doc("Run the complete sidecar routine gate")]
+[group('sidecar')]
+sidecar-ci-fast: sidecar-fmt sidecar-check sidecar-test
+
+[doc("Check adapter Ruff formatting and lint")]
+[group('adapter')]
+adapter-lint:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check codefabric-cpg-mcp
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check codefabric-cpg-mcp
+
+[doc("Type-check the configured adapter source and test trees")]
+[group('adapter')]
+adapter-type:
+    cd codefabric-cpg-mcp && env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen pyrefly check
+
+[doc("Test the locked FastMCP adapter")]
+[group('adapter')]
+adapter-test:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests
+
+[doc("Test locked-command STDIO startup, shutdown, and protocol silence")]
+[group('adapter')]
+adapter-stdio-test:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_stdio.py
+
+[doc("Run the complete adapter gate")]
+[group('adapter')]
+adapter-ci-fast: adapter-lint adapter-type adapter-test adapter-stdio-test
+
+# -------------------------------------------------------- contracts / governance
+
+[doc("Verify committed Protobuf outputs and generator identity")]
+[group('contracts')]
+proto-check:
+    cargo check --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen
+    cargo clippy --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen -- -D warnings
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/proto/generate.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/proto/generate.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py check
+
+[doc("Generate twice in isolated roots and compare byte digests")]
+[group('contracts')]
+proto-repro-check: proto-check
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py repro-check
+
+[doc("Verify the AC-G-05 tree, JCS corpus, generated bytes, and negative fixtures")]
+[group('contracts')]
+contracts-verify:
+    cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- verify --profile full
+    ./scripts/contracts_negative_check.sh
+
+[doc("Require every contract artifact to be released with zero warnings")]
+[group('contracts')]
+contracts-verify-released:
+    cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- verify --profile released
+
+[doc("Generate contracts twice in isolated roots and compare exact bytes")]
+[group('contracts')]
+contracts-repro-check:
+    ./scripts/contracts_repro_check.sh
+
+[doc("Prove family duplicate policy and its expected-failure fixture")]
+[group('gate')]
+duplicate-family-check:
+    ./scripts/duplicate_family_check.sh
+
+[doc("Prove retired native-extension seed and root packaging surfaces stay absent")]
+[group('gate')]
+seed-zero-state-check:
+    ./scripts/seed_zero_state_check.sh
+
+[doc("Run structural, graph-policy, and generated-artifact governance")]
+[group('gate')]
+governance: governance-scan duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check
+
+[doc("Run the routine gate across all four build domains")]
+[group('gate')]
+ci-fast: root-ci-fast extractor-ci-fast sidecar-ci-fast adapter-ci-fast governance
 
 [doc("ci-fast plus policy, the ci nextest profile, and snapshot review state")]
 [group('gate')]
-ci-pr: ci-fast policy
-    cargo nextest run --features python -P ci
-    cargo test --doc --features python
+ci-pr: ci-fast policy sidecar-policy proto-repro-check
+    cargo nextest run -P ci
+    cargo test --doc
     cargo insta pending-snapshots
 
 # ------------------------------------------------------- coverage / test quality
@@ -176,7 +311,7 @@ ci-pr: ci-fast policy
 coverage:
     mkdir -p target/coverage
     cargo llvm-cov nextest \
-      --all-features \
+      --features local-workstation \
       --lcov \
       --output-path target/coverage/lcov.info
 
@@ -194,38 +329,48 @@ snapshots-review:
 mutants-file path:
     cargo mutants -f {{path}}
 
-# Nightly is a targeted analysis toolchain, not the repository default (spec section 10).
+# Nightly is the extractor's production toolchain and remains isolated from this root.
 # Miri explores executions; it never proves soundness (spec section 24.2). Record
 # toolchain, seed range, and exclusions with any finding.
 
 [doc("Miri UB check on the default toolchain's nightly")]
 [group('quality')]
 miri:
-    cargo +nightly miri test
+    CARGO_TARGET_DIR=target/nightly-assurance cargo +nightly miri test
 
 [doc("Miri across a range of randomized seeds")]
 [group('quality')]
 miri-seeds seeds="16":
-    MIRIFLAGS="-Zmiri-many-seeds=0..{{seeds}}" cargo +nightly miri test
+    CARGO_TARGET_DIR=target/nightly-assurance MIRIFLAGS="-Zmiri-many-seeds=0..{{seeds}}" cargo +nightly miri test
 
 [doc("Compiler-oriented unused-dependency adjudication")]
 [group('quality')]
 udeps:
-    cargo +nightly udeps --all-targets --all-features
+    CARGO_TARGET_DIR=target/nightly-assurance cargo +nightly udeps --all-targets --all-features
 
 # Bounded runs only; long campaigns belong in scheduled infrastructure (spec section 23).
-# There is no fuzz/ directory yet -- add one when a parser or untrusted-input surface
-# actually exists, not because cargo-fuzz is installed.
+# WP06's canonical JSON decoder is the first production-path untrusted-input surface;
+# its fuzz harness exercises the same parser and serializer used by the verifier.
 
 [doc("Bounded fuzz run against one target")]
 [group('quality')]
 fuzz target seconds="60":
-    cargo fuzz run {{target}} -- -max_total_time={{seconds}}
+    rust_host="$(rustc +nightly -vV | sed -n 's/^host: //p')"; \
+      runtime_corpus="target/fuzz-corpus/$rust_host/{{target}}"; \
+      mkdir -p "$runtime_corpus"; \
+      cp -R "fuzz/corpus/{{target}}/." "$runtime_corpus/"; \
+      cargo +nightly fuzz run --target "$rust_host" --target-dir "target/fuzz/$rust_host" \
+      {{target}} "$runtime_corpus" -- -max_total_time={{seconds}}
 
 [doc("Coverage of a fuzz corpus")]
 [group('quality')]
 fuzz-coverage target:
-    cargo fuzz coverage {{target}}
+    rust_host="$(rustc +nightly -vV | sed -n 's/^host: //p')"; \
+      runtime_corpus="target/fuzz-corpus/$rust_host/{{target}}"; \
+      mkdir -p "$runtime_corpus"; \
+      cp -R "fuzz/corpus/{{target}}/." "$runtime_corpus/"; \
+      cargo +nightly fuzz coverage --target "$rust_host" \
+      --target-dir "target/fuzz/$rust_host" {{target}} "$runtime_corpus"
 
 # --------------------------------------------------------- feature / compatibility
 
@@ -266,22 +411,6 @@ semver baseline:
 unsafe-surface:
     cargo geiger
 
-# ---------------------------------------------------------------- package validation
-
-[doc("Build a release wheel into dist/")]
-[group('package')]
-wheel:
-    rm -rf dist
-    uv run maturin build --release --out dist
-
-# Separate from test-python by design: a development install proves nothing about
-# packaging (spec sections 44.2, 45, and 62.3).
-
-[doc("Build a wheel and prove it installs and imports in a clean environment")]
-[group('package')]
-wheel-test: wheel
-    ./scripts/wheel_test.sh
-
 # ------------------------------------------------ artifact / performance investigation
 
 # `target/` disk usage is not artifact size (spec sections 39 and 82.2). Measure the
@@ -320,11 +449,22 @@ profile-build:
 # impact, rerun the relevant validation, and disclose what the tool changed
 # (spec section 63).
 
-[doc("MUTATES: rewrite Rust and Python formatting in place")]
+[doc("MUTATES: rewrite Rust formatting in place")]
 [group('mutating')]
-fmt-write:
+root-fmt-write:
     cargo fmt --all
-    uv run ruff format python python_tests
+
+[confirm("Regenerate committed Rust and Python Protobuf outputs. Continue?")]
+[doc("MUTATES: regenerate committed Protobuf stubs and identity")]
+[group('mutating')]
+proto-gen:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py write
+
+[confirm("Regenerate committed contract derivatives from authority sources. Continue?")]
+[doc("MUTATES: regenerate contract indexes, canonical registries, and typed identities")]
+[group('mutating')]
+contracts-gen:
+    cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- generate
 
 [confirm("typos -w rewrites source in place; identifier fixes can be API changes. Continue?")]
 [doc("MUTATES: apply spelling corrections to source")]

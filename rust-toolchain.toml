@@ -1,13 +1,11 @@
 # Repository toolchain pin (spec section 10, section 86 "rust-toolchain.toml stable-first").
 #
-# Stable is the default for all ordinary development. Nightly is a *targeted analysis
-# toolchain* only -- `cargo +nightly miri test`, `cargo +nightly udeps` -- and is
-# deliberately not pinned here.
+# Stable is the daemon/data-plane and Pyrefly-sidecar toolchain. The production MIR
+# extractor owns an exact dated nightly in rustc-extractor/rust-toolchain.toml; targeted
+# assurance commands may still use a separately installed nightly.
 #
-# `rustc-dev` is intentionally absent (spec section 76): declaring it would couple this
-# repository to compiler-private APIs and force an exact date-pinned nightly. If the
-# project ever consumes those APIs, that becomes a separate, deliberate architecture
-# change, not an edit to this file.
+# `rustc-dev` is intentionally absent from this root. Compiler-private APIs and their
+# required component live only in the isolated extractor domain.
 
 [toolchain]
 channel = "stable"

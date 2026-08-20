@@ -1,0 +1,11 @@
+id: no-pyrefly-public-api
+valid:
+  - |
+      fn private_query() -> pyrefly::query::Query {
+          todo!()
+      }
+invalid:
+  - |
+      pub fn leaked_query() -> pyrefly::query::Query {
+          todo!()
+      }

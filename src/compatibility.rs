@@ -1,0 +1,177 @@
+//! Compile- and behavior-level probes for load-bearing production dependencies.
+//!
+//! This is deliberately narrow: it proves that the exact pinned versions expose the
+//! APIs assumed by the accepted design. Production modules replace these probes as the
+//! corresponding capabilities land.
+
+use std::sync::Arc;
+
+use arrow_array::{ArrayRef, Int32Array, RecordBatch};
+use arrow_buffer::Buffer;
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use datafusion::datasource::MemTable;
+use datafusion::prelude::SessionContext;
+use serde::{Deserialize, Serialize};
+
+/// Small serializable record used to prove the stable utility stack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatibilityRecord {
+    /// Stable identifier used by the smoke checks.
+    pub id: u32,
+}
+
+/// Constructs an Arrow schema through the exact `58.4.0` public type universe.
+#[must_use]
+pub fn schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)]))
+}
+
+/// Builds a batch and registers it as a DataFusion table provider.
+///
+/// # Errors
+///
+/// Returns a DataFusion error if batch construction or provider registration fails.
+pub fn session_with_provider() -> datafusion::error::Result<SessionContext> {
+    let schema = schema();
+    let values: ArrayRef = Arc::new(Int32Array::from(vec![1_i32, 2_i32]));
+    let batch = RecordBatch::try_new(Arc::clone(&schema), vec![values])?;
+    let provider = MemTable::try_new(schema, vec![vec![batch]])?;
+    let context = SessionContext::new();
+    context.register_table("compatibility", Arc::new(provider))?;
+    Ok(context)
+}
+
+/// Exercises direct Arrow-family crates that carry types across the data plane.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a fixed compatibility kernel rejects its input.
+pub fn arrow_family_probe() -> Result<(), arrow_schema::ArrowError> {
+    let values = Int32Array::from(vec![3_i32, 1_i32, 2_i32]);
+    let _buffer = Buffer::from_vec(vec![1_u8, 2_u8, 3_u8]);
+    let sorted = arrow_ord::sort::sort(&values, None)?;
+    let _cast = arrow_cast::cast(sorted.as_ref(), &DataType::Int64)?;
+    let _concat = arrow_select::concat::concat(&[&values, &values])?;
+    let _rows = arrow_row::RowConverter::new(vec![arrow_row::SortField::new(DataType::Int32)])?;
+    let _length =
+        arrow_string::length::length(&arrow_array::StringArray::from(vec!["codefabric"]))?;
+    Ok(())
+}
+
+/// Exercises non-Arrow utilities in the stable dependency contract.
+///
+/// # Errors
+///
+/// Returns an error if the fixed compatibility values cannot be encoded or parsed.
+pub fn utility_probe() -> Result<(), Box<dyn std::error::Error>> {
+    let record = CompatibilityRecord { id: 7 };
+    let encoded = serde_json::to_vec(&record)?;
+    let decoded: CompatibilityRecord = serde_json::from_slice(&encoded)?;
+    if record != decoded {
+        return Err(std::io::Error::other("serde round-trip changed the record").into());
+    }
+
+    let digest = blake3::hash(&encoded);
+    if digest.as_bytes() == &[0_u8; 32] {
+        return Err(std::io::Error::other("BLAKE3 returned the reserved zero digest").into());
+    }
+    let parsed = url::Url::parse("file:///tmp/codefabric")?;
+    if parsed.scheme() != "file" {
+        return Err(std::io::Error::other("URL parser changed the file scheme").into());
+    }
+    let _ready = futures::future::ready(record);
+    let _runtime = tokio::runtime::Handle::try_current()?;
+    tracing::trace!(target: "codefabric::compatibility", "stable utility graph ready");
+    let _store = object_store::local::LocalFileSystem::new();
+    let _writer_properties = parquet::file::properties::WriterProperties::builder().build();
+    let _arrow_reexport = arrow::array::Int32Array::from(vec![1_i32]);
+    Ok(())
+}
+
+/// Returns the number of object-hash algorithms compiled into the read-only Git profile.
+#[must_use]
+pub const fn git_hash_algorithm_count() -> usize {
+    crate::git_state::supported_hash_algorithms().len()
+}
+
+/// Returns a Delta application-transaction version without exposing Delta-owned types.
+#[must_use]
+pub fn delta_application_transaction_version() -> i64 {
+    crate::fabric::application_transaction().version
+}
+
+/// Copies an open `rusqlite` database through the online backup API.
+///
+/// # Errors
+///
+/// Returns a `rusqlite` error if opening, writing, or backing up the databases
+/// fails.
+pub fn sqlite_backup_probe() -> rusqlite::Result<i64> {
+    use rusqlite::backup::Backup;
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
+        .as_nanos();
+    let directory =
+        std::env::temp_dir().join(format!("codefabric-sqlite-{}-{nonce}", std::process::id()));
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    let source_path = directory.join("source.sqlite3");
+    let destination_path = directory.join("destination.sqlite3");
+
+    let source = rusqlite::Connection::open(&source_path)?;
+    let journal_mode: String = source.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
+    if journal_mode != "wal" {
+        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+            std::io::Error::other(format!(
+                "requested WAL journal mode but SQLite selected {journal_mode}"
+            )),
+        )));
+    }
+    source.execute_batch("CREATE TABLE probe(value INTEGER);")?;
+    source.execute("INSERT INTO probe(value) VALUES (42)", [])?;
+    let mut destination = rusqlite::Connection::open(&destination_path)?;
+    let backup = Backup::new(&source, &mut destination)?;
+    backup.run_to_completion(5, std::time::Duration::from_millis(1), None)?;
+    drop(backup);
+    let value = destination.query_row("SELECT value FROM probe", [], |row| row.get(0))?;
+    drop(destination);
+    drop(source);
+
+    for path in [
+        source_path.clone(),
+        source_path.with_extension("sqlite3-wal"),
+        source_path.with_extension("sqlite3-shm"),
+        destination_path,
+    ] {
+        if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+        }
+    }
+    std::fs::remove_dir(directory)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    Ok(value)
+}
+
+/// Opens a file relative to a trusted directory descriptor without following a final
+/// symlink.
+///
+/// # Errors
+///
+/// Returns the operating-system error from the descriptor-relative open.
+pub fn descriptor_relative_open(
+    directory: &std::fs::File,
+    relative: &std::path::Path,
+) -> std::io::Result<std::fs::File> {
+    use rustix::fs::{Mode, OFlags, openat};
+
+    let descriptor = openat(
+        directory,
+        relative,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )?;
+    Ok(std::fs::File::from(descriptor))
+}

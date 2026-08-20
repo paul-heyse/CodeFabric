@@ -1,0 +1,15 @@
+id: no-framework-internal-contract-imports
+language: Python
+severity: error
+message: Public adapter contracts may not import FastMCP or Pydantic internals.
+note: Public models use stable Pydantic APIs; framework objects stay in the server boundary.
+files:
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/**/*.py
+rule:
+  any:
+    - all:
+        - kind: import_from_statement
+        - regex: "^from (fastmcp([.]|\\s)|pydantic[.]_internal)"
+    - all:
+        - kind: import_statement
+        - regex: "^import (fastmcp([.]|\\s)|pydantic[.]_internal)"

@@ -1,0 +1,52 @@
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[project]
+name = "codefabric-cpg-mcp"
+version = "0.1.0"
+description = "STDIO FastMCP adapter for the CodeFabric present-state CPG daemon."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "blake3==1.0.9",
+  "fastmcp==3.4.7",
+  "grpcio",
+  "orjson",
+  "protobuf",
+  "pydantic==2.13.4",
+  "pydantic-settings==2.15.0",
+  "rfc8785==0.1.4",
+]
+
+[dependency-groups]
+dev = [
+  "grpcio-tools",
+  "pyrefly>=1.2.0",
+  "pytest>=9.1.1",
+  "ruff>=0.16.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["src/codefabric_cpg_mcp/daemon/generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.pyrefly]
+project-includes = [
+  "src/**/*.py",
+  "tests/**/*.py",
+]
+python-version = "3.14"
