@@ -1,6 +1,6 @@
 ---
 name: attrs-cattrs-ref
-description: "Reference for attrs (declarative class definition, field metadata, validators, converters, frozen/mutable policy, introspection, extending) and cattrs (structured/unstructured boundary conversion, converter instances, hook registration, generated hooks, union handling, validation errors, preconfigured serializer integrations). Use when code involves attrs or cattrs imports, class definition with @define/@frozen, field() declarations, cattrs.structure/unstructure, Converter configuration, or boundary serialization design."
+description: "TARGET DOCUMENTS ABSENT — `docs/library_ref/attrs.md` and `cattrs.md` are not written yet, so section citations do not resolve; the libraries themselves are declared dependencies in `pyproject.toml`, so use upstream docs meanwhile. Reference for attrs (declarative class definition, field metadata, validators, converters, frozen/mutable policy, introspection, extending) and cattrs (structured/unstructured boundary conversion, converter instances, hook registration, generated hooks, union handling, validation errors, preconfigured serializer integrations). Use when code involves attrs or cattrs imports, class definition with @define/@frozen, field() declarations, cattrs.structure/unstructure, Converter configuration, or boundary serialization design."
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
@@ -10,7 +10,16 @@ allowed-tools: Read, Grep, Glob, Bash
 
 **Version anchor:** attrs 26.1.0, cattrs 26.1.0. All guidance assumes these versions.
 
-Two deep-dive reference documents back this skill:
+Two deep-dive reference documents back this skill.
+
+> **Both are currently absent from this repository.** `docs/library_ref/attrs.md` and
+> `docs/library_ref/cattrs.md` have not been written, so every `§N` citation below — the section
+> indexes, the task tables, the decision trees — resolves to nothing. Unlike `typer-rich-ref`,
+> this skill is **not** inapplicable: `attrs>=26.1.0` and `cattrs>=26.1.0` are declared
+> dependencies in `pyproject.toml`. Treat the section numbers as a specification of what those
+> two documents should contain, and fall back to the upstream docs (<https://www.attrs.org>,
+> <https://catt.rs>) until they exist. The design suite in `docs/upfront_design/` never mentions
+> either library, so nothing here is spec-anchored.
 
 | Library | Path | Lines | Sections | Scope |
 |---------|------|-------|----------|-------|

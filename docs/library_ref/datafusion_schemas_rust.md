@@ -809,7 +809,7 @@ external data / declared SQL / in-memory Arrow
 
 The attached document already covers the main ingredients: Arrow `Schema` / `Field` / `DataType`, `RecordBatch`, `DFSchema`, schema qualifiers, catalog/provider hierarchy, and provider output requirements. This chapter’s added value is the **end-to-end invariant system**: where schemas originate, who owns them, where they are validated, how they are normalized, when metadata is preserved or discarded, and where drift must be rejected.  
 
-DataFusion’s released docs.rs surface currently renders `datafusion 54.0.0`, uses Apache Arrow as the in-memory format, exposes SQL/DataFrame APIs, and allows customization across data sources, functions, operators, query languages, and planning/execution layers. ([Docs.rs][1])
+DataFusion’s released docs.rs surface currently renders `datafusion 54.1.0`, uses Apache Arrow as the in-memory format, exposes SQL/DataFrame APIs, and allows customization across data sources, functions, operators, query languages, and planning/execution layers. ([Docs.rs][1])
 
 ---
 
@@ -8717,7 +8717,7 @@ Behavioral consequences that change results, output schemas, and error surfaces:
 ```text
 SELECT 5 > '100'
   53.x: could compare as strings → '5' > '100' is true
-  54.0: '100' is cast to the numeric type → numeric comparison → false
+  54.x: '100' is cast to the numeric type → numeric comparison → false
 
 Invalid numeric strings in comparison contexts:
   int_col > 'abc' → runtime cast error instead of a silent string comparison
@@ -9804,10 +9804,10 @@ Two function-level output-schema changes in DataFusion 54 break schema snapshots
 ```text
 arrays_zip
   53.x: List<Struct<c0: ..., c1: ...>>   — zero-based field names c0, c1, …
-  54.0: List<Struct<"1": ..., "2": ...>> — one-based field names "1", "2", …
+  54.x: List<Struct<"1": ..., "2": ...>> — one-based field names "1", "2", …
 
 approx_percentile_cont / approx_median
-  54.0: numeric (including integer) inputs are coerced to Float64 through the
+  54.x: numeric (including integer) inputs are coerced to Float64 through the
         aggregate's coercible signature, so integer inputs now produce Float64
         output where 53.x could preserve the input's numeric type.
 ```
@@ -11855,7 +11855,7 @@ STORED AS PARQUET
 OPTIONS (
   'writer_version' '1.0',
   'skip_arrow_metadata' 'false',
-  'created_by' 'my-service datafusion 54.0.0',
+  'created_by' 'my-service datafusion 54.1.0',
   'metadata::pipeline' 'daily-facts-v2',
   'metadata::owner' 'analytics-platform',
   'metadata::schema_contract' 'refinery.streams@1.2.0'
@@ -13134,7 +13134,7 @@ datafusion_common::types::DFExtensionTypeRef            = Arc<dyn DFExtensionTyp
 ### S7.20.2 Trait surface
 
 ```rust
-// datafusion_expr::registry (DataFusion 54.0.0)
+// datafusion_expr::registry (DataFusion 54.1.0)
 pub trait ExtensionTypeRegistry: Debug + Send + Sync {
     /// Lookup by extension type name; error if not registered.
     fn extension_type_registration(
@@ -13244,7 +13244,7 @@ Registry population rules:
 
 ```text
 Default registry = MemoryExtensionTypeRegistry::new_empty()
-  SessionStateDefaults::default_extension_types() is empty in 54.0.0 —
+  SessionStateDefaults::default_extension_types() is empty in 54.1.0 —
   even the canonical Arrow extension types are NOT pre-registered.
 
 MemoryExtensionTypeRegistry::new_with_canonical_extension_types()
@@ -13254,11 +13254,11 @@ MemoryExtensionTypeRegistry::new_with_types(iter)
   bulk construction from ExtensionTypeRegistrationRef values.
 ```
 
-The Arrow side of the contract is `arrow-schema` 58.3.0's canonical extension types (`arrow_schema::extension`, one module per type in `src/extension/canonical/`): `Bool8`, `FixedShapeTensor`, `VariableShapeTensor`, `Json`, `Opaque`, `TimestampWithOffset`, `Uuid`, unified by the `CanonicalExtensionType` enum. DataFusion mirrors each with a storage-resolved wrapper in `datafusion_common::types` (`DFBool8`, `DFFixedShapeTensor`, `DFVariableShapeTensor`, `DFJson`, `DFOpaque`, `DFTimestampWithOffset`, `DFUuid`), and those wrappers are what `new_with_canonical_extension_types()` registers.
+The Arrow side of the contract is `arrow-schema` 58.4.0's canonical extension types (`arrow_schema::extension`, one module per type in `src/extension/canonical/`): `Bool8`, `FixedShapeTensor`, `VariableShapeTensor`, `Json`, `Opaque`, `TimestampWithOffset`, `Uuid`, unified by the `CanonicalExtensionType` enum. DataFusion mirrors each with a storage-resolved wrapper in `datafusion_common::types` (`DFBool8`, `DFFixedShapeTensor`, `DFVariableShapeTensor`, `DFJson`, `DFOpaque`, `DFTimestampWithOffset`, `DFUuid`), and those wrappers are what `new_with_canonical_extension_types()` registers.
 
 ### S7.20.4 Scope discipline
 
-The registry does not turn metadata into automatic optimizer or execution semantics. In 54.0.0 the customization surface is intentionally narrow — extension-type-aware value formatting (`DFExtensionType::create_array_formatter`) plus programmatic resolution for your own providers, planner extensions, and UDFs. Governance rules for this doc's semantic-annotation model:
+The registry does not turn metadata into automatic optimizer or execution semantics. In 54.1.0 the customization surface is intentionally narrow — extension-type-aware value formatting (`DFExtensionType::create_array_formatter`) plus programmatic resolution for your own providers, planner extensions, and UDFs. Governance rules for this doc's semantic-annotation model:
 
 ```text
 Use plain field metadata (semantic.*, governance.*, S7.2.2) when annotations
@@ -13412,7 +13412,7 @@ TableContract
   └─ enforcement boundary
 ```
 
-The attached documentation already mentions provider schema stability, constraints, statistics, filter pushdown, and provider test requirements, but it treats them primarily as provider implementation details rather than a unified contract model.  DataFusion’s `TableProvider` surface in 54.0.0 includes required `schema`, `table_type`, and `scan` methods, plus provided methods such as `constraints`, `get_column_default`, `statistics`, `supports_filters_pushdown`, and `insert_into`, which makes the provider the natural boundary for contract metadata. ([Docs.rs][1]) Note that in 54.0.0 the trait carries an `Any` supertrait (`TableProvider: Any + Debug + Sync + Send`) and no longer declares an `as_any` method; concrete-provider access goes through `downcast_ref::<T>()` via trait upcasting.
+The attached documentation already mentions provider schema stability, constraints, statistics, filter pushdown, and provider test requirements, but it treats them primarily as provider implementation details rather than a unified contract model.  DataFusion’s `TableProvider` surface in 54.1.0 includes required `schema`, `table_type`, and `scan` methods, plus provided methods such as `constraints`, `get_column_default`, `statistics`, `supports_filters_pushdown`, and `insert_into`, which makes the provider the natural boundary for contract metadata. ([Docs.rs][1]) Note that in 54.1.0 the trait carries an `Any` supertrait (`TableProvider: Any + Debug + Sync + Send`) and no longer declares an `as_any` method; concrete-provider access goes through `downcast_ref::<T>()` via trait upcasting.
 
 ---
 
@@ -13533,7 +13533,7 @@ If provider.schema() marks a field non-nullable, provider execution must never e
 
 ### S8.2.3 Constraints
 
-DataFusion `Constraint` in 54.0.0 has `PrimaryKey(Vec<usize>)` and `Unique(Vec<usize>)` variants (unchanged from 53.x), where indices refer to schema fields; primary-key columns are jointly unique and not nullable, while unique-key columns are jointly unique. ([Docs.rs][3]) `Constraints` encapsulates a list of functional constraints; `Constraints::project` projects constraints through a projection and returns `None` if constraint columns are not included in the projection. ([Docs.rs][4])
+DataFusion `Constraint` in 54.1.0 has `PrimaryKey(Vec<usize>)` and `Unique(Vec<usize>)` variants (unchanged from 53.x), where indices refer to schema fields; primary-key columns are jointly unique and not nullable, while unique-key columns are jointly unique. ([Docs.rs][3]) `Constraints` encapsulates a list of functional constraints; `Constraints::project` projects constraints through a projection and returns `None` if constraint columns are not included in the projection. ([Docs.rs][4])
 
 ```rust id="qgay3f"
 use datafusion::common::{Constraint, Constraints};
@@ -14127,7 +14127,7 @@ pub fn constraints_from_contract(
                 out.push(Constraint::Unique(indices));
             }
             _ => {
-                // DataFusion 54.0.0 datafusion_common::Constraint only models
+                // DataFusion 54.1.0 datafusion_common::Constraint only models
                 // PrimaryKey and Unique; keep FK/check in app/provider contract.
             }
         }
@@ -23768,7 +23768,7 @@ pub struct SchemaDiffFinding {
 ```json
 {
   "object_ref": "semantic.streams_v1",
-  "datafusion_version": "54.0.0",
+  "datafusion_version": "54.1.0",
   "schema_fingerprint": "sha256:...",
   "fields": [
     {"ordinal": 0, "name": "stream_id", "data_type": "Utf8", "nullable": false},
@@ -24152,7 +24152,7 @@ Core operating rule: **every schema-sensitive feature needs both positive schema
 [7]: https://datafusion.apache.org/user-guide/sql/information_schema.html?utm_source=chatgpt.com "Information Schema — Apache DataFusion documentation"
 [8]: https://datafusion.apache.org/user-guide/sql/data_types.html?utm_source=chatgpt.com "Data Types — Apache DataFusion documentation"
 [9]: https://docs.rs/datafusion/latest/datafusion/?utm_source=chatgpt.com "datafusion - Rust"
-[10]: https://docs.rs/crate/datafusion-common/latest/source/src/error.rs?utm_source=chatgpt.com "datafusion-common 54.0.0"
+[10]: https://docs.rs/crate/datafusion-common/latest/source/src/error.rs?utm_source=chatgpt.com "datafusion-common 54.1.0"
 
 
 # DataFusion Advanced — S15) Schema security, governance, and tenant isolation

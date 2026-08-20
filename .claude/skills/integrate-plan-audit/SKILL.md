@@ -4,7 +4,6 @@ description: Integrate a plan audit into versioned design and implementation-pla
 when_to_use: Use after plan-audit and before execution. Use a new artifact version by default. Do not use when the audit verdict is needs-redesign unless creating a new design and plan revision is explicitly within scope.
 argument-hint: "[plan-path] [audit-path] [--design path] [--mode new-version|in-place]"
 allowed-tools: Read, Glob, Grep, Bash, Write, Edit, WebSearch, WebFetch
-disable-model-invocation: true
 user-invocable: true
 ---
 

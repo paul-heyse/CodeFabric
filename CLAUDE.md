@@ -17,8 +17,10 @@ Two documents govern, at different layers:
   rules. It is authoritative for everything in this file. Its section 60 change-risk table
   decides which tools a given change actually warrants — consult it before reaching for an
   expensive one.
-- **`docs/upfront_design/`** (six specs) defines what the system *does*. These are **in
-  flux** and are deliberately not an input to repository/tooling decisions.
+- **`docs/upfront_design/`** (a governance manifest, six domain specs, and the implementation
+  roadmap) defines what the system *does* and in what order it gets built. These are **in flux**
+  and are deliberately not an input to repository/tooling decisions. `docs/spec_index/` indexes
+  them — see *The design corpus* below.
 
 ### Shape
 
@@ -86,18 +88,25 @@ not just the Rust one. `.envrc` treats sync failure as non-fatal, so the symptom
 stale `.venv` rather than an unenterable directory.
 
 
-## The six specifications and how they compose
+## The design corpus (`docs/upfront_design/`)
 
-Read them as a stack; each layer consumes the one above and the ontology is the root vocabulary.
+Eight files: the governance manifest, six domain specifications, and the implementation
+roadmap. Read the six domain specs as a stack — each layer consumes the one above and the
+ontology is the root vocabulary; the governance manifest sits across all of them. Cite
+suite-wide as `TAG §N` with the section title alongside (the convention
+`docs/spec_index/README.md` §2 fixes), never by line number — revisions move lines but
+usually keep titles.
 
-| File | Layer |
-|---|---|
-| `docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.2.md` | **What facts exist.** Language-neutral core ontology + Python and Rust profiles (~50 fact domains: syntax, semantics, types, CFG, dataflow, alias, effects, MIR, ownership, unknowns). |
-| `docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.2.md` | **How facts are produced.** Provider stack (Tree-sitter, Ruff crates, Pyrefly, `rustc_public`/MIR, petgraph), normalization, reconciliation, derived analyses. |
-| `docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.2.md` | **How facts are stored and served.** Arrow schemas, Delta Lake tables, DataFusion catalog (`cpg_control`/`cpg_base`/`cpg_python`/`cpg_rust`/`cpg_derived`/`cpg_serving`). |
-| `docs/upfront_design/code_property_graph_semantic_query_specification_v1.2.md` | **How agents ask.** Semantic-first JSON request/response envelope with eight request forms; the agent never sees tables, edge labels, or traversal syntax. |
-| `docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.2.md` | **How it stays current.** Watcher → dirty registry → update waves → invalidation → two-speed lanes → hot snapshot → durable publication. Also defines the runtime topology and recommended crate split (§155). |
-| `docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.2.md` | **How agents connect.** FastMCP 3.4.7 STDIO server, one process per agent, Pydantic contracts and `pydantic-settings` configuration over the semantic query contract. |
+| Tag | File (in `docs/upfront_design/`) | Layer |
+|---|---|---|
+| `SUITE` | `codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md` | **Who owns what.** Cross-cutting authority: artifact ownership and precedence, the compatibility matrix, requirement IDs, the `contracts/` machine-artifact tree, the ten global invariants, and Readiness Gates A–G. Owns `AC-G-01`–`AC-G-08` and `AC-G-78`–`AC-G-84`; its Part II is the authoritative owner table for all 84 contracts. |
+| `ONT` | `code_property_graph_present_state_fact_ontology_specification_v1.3.md` | **What facts exist.** Language-neutral core ontology + Python and Rust profiles (~50 fact domains: syntax, semantics, types, CFG, dataflow, alias, effects, MIR, ownership, unknowns). |
+| `GEN` | `present_state_cpg_fact_generation_specification_python_rust_v1.3.md` | **How facts are produced.** Provider stack (Tree-sitter, Ruff crates, Pyrefly, `rustc_public`/MIR, petgraph), normalization, reconciliation, derived analyses. |
+| `FAB` | `present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md` | **How facts are stored and served.** Arrow schemas, Delta Lake tables, DataFusion catalog (`cpg_control`/`cpg_base`/`cpg_python`/`cpg_rust`/`cpg_derived`/`cpg_serving`). `FAB §2.1` is the canonical Cargo dependency baseline. |
+| `QRY` | `code_property_graph_semantic_query_specification_v1.3.md` | **How agents ask.** Semantic-first JSON request/response envelope with eight request forms; the agent never sees tables, edge labels, or traversal syntax. |
+| `LIFE` | `codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md` | **How it stays current.** Watcher → dirty registry → update waves → invalidation → two-speed lanes → hot snapshot → durable publication. Also defines the runtime topology and recommended crate split (§155). |
+| `SRV` | `present_state_cpg_fastmcp_serving_specification_v1.3.md` | **How agents connect.** FastMCP 3.4.7 STDIO server, one process per agent, Pydantic contracts and `pydantic-settings` configuration over the semantic query contract. |
+| `RM` | `codefabric_1.3_implementation_roadmap_v1.0.md` | **In what order.** Twenty waves, W0 (repository foundation) through W19 (production acceptance). Explicitly subordinate: where it disagrees with the specs or manifest, they prevail (`RM §0`); its §29 traceability table is corrected by `docs/spec_index/wave-traceability.md`. |
 
 End-to-end data path (fact generation §6 + lifecycle §93 + fabric §1):
 
@@ -110,6 +119,25 @@ source change → dirty registry → update wave → source images → invalidat
 ```
 
 Runtime topology: one central **Rust daemon per workspace** owning source state, snapshots, provider orchestration, query execution, and capability status; one **FastMCP STDIO process per agent** as presentation only — it must never hold independent mutable CPG state (lifecycle §122).
+
+### The index layer (`docs/spec_index/`)
+
+A derived navigation and traceability layer over the suite — **never normative**: cite the
+section it points at, not the index. Where two specs appear to disagree, `SUITE AC-G-01` is
+the precedence rule.
+
+| File | Answers |
+|---|---|
+| `README.md` | how to cite (`TAG §N`), the suite census, the 110 `# Part`/`# Appendix` headings `spec-outline` cannot see, and the gap register: absent referents, registries that exist only as generated `contracts/` artifacts, known inter-spec conflicts |
+| `fact-domain-map.md` | one fact domain traced across all six domain specs, plus the table and serving registries |
+| `library-routing.md` | which `docs/library_ref/` chapter covers a given spec section; the version-pin ledger |
+| `wave-traceability.md` | which spec sections and contracts each roadmap wave implements (corrects `RM §29`) |
+| `contract-census.md` | all 84 `AC-G` contracts with owner, consumers, and wave |
+| `invariants-and-doctrine.md` | the invariants every wave must preserve, traced to their normative homes |
+
+Consult the gap register before concluding a search failed: several cited authorities
+(requirement IDs, the flag registry, property names) are build outputs under `contracts/`,
+not prose that exists anywhere yet.
 
 ## Cross-cutting doctrine (violating these contradicts every spec at once)
 
@@ -126,7 +154,7 @@ The lifecycle spec §§157–159 lists the mandatory consistency, performance, a
 
 ## Library references (`docs/library_ref/`)
 
-Deep, **version-pinned** references for the exact dependency baseline the specs assume (Arrow/Parquet 58.3.0, DataFusion 54.0.0, delta-rs 1.0.0 @ rev `35cfed45…`, `object_store` 0.13.2, tree-sitter 0.26.12, Ruff 0.16.1, Pyrefly 1.2.0, petgraph 0.8.3, `notify-debouncer-full` 0.7.0, FastMCP 3.4.7, Pydantic 2.13.4, FastAPI 0.141.1, `rustc_public` 1.100.0-nightly). Consult the matching file before writing code against any of these — the specs pin exact versions and several APIs are pre-release or nightly-sensitive. The canonical Cargo workspace baseline lives in the data-fabric spec §2.1.
+Deep, **version-pinned** references for the exact dependency baseline the specs assume (Arrow/Parquet 58.4.0, DataFusion 54.1.0, delta-rs 1.0.0 @ rev `9f922319…`, `object_store` 0.13.2, tree-sitter 0.26.12, Ruff 0.16.1, Pyrefly 1.2.0, petgraph 0.8.3, `notify-debouncer-full` 0.7.0, FastMCP 3.4.7, Pydantic 2.13.4, FastAPI 0.141.1, `rustc_public` 1.100.0-nightly). Consult the matching file before writing code against any of these — the specs pin exact versions and several APIs are pre-release or nightly-sensitive. The canonical Cargo workspace baseline lives in the data-fabric spec §2.1.
 
 ## Environment
 
@@ -189,12 +217,17 @@ is worth reading before making any claim about what the code contains or what ha
 | 2 | `ast-grep` 0.45.1 | Structure: call sites, impls, subclasses, signatures |
 | 3 | `rg` 15.2.0 | Literal residue: strings, config, comments, cross-language |
 
-The six design specs in `docs/upfront_design/` are navigable by section: `spec-outline` maps all
+The design artifacts in `docs/upfront_design/` are navigable by section: `spec-outline` maps all
 of them to 28 KB (23x smaller than reading them), one line per section with a line number, and
 `spec-outline <spec>.md --match '^93\.' --view expanded` zooms to one section's subsections. It
 wraps `ast-grep outline` with the project extractor at `tooling/ast-grep/outline/specs.yml`;
 `tooling/ast-grep/outline/specs.test.sh` pins its output shape against grammar drift. Section
 numbers move when a spec is revised — confirm a citation with `--match` before trusting it.
+
+One thing `spec-outline` does **not** emit is the `# Part` and `# Appendix` headings — all 110 of
+them are invisible to it. They are tabulated in `docs/spec_index/README.md` §3.1; that
+directory's per-file map is in *The design corpus* above. It is navigation only — never cite it
+as authority, cite the section it points at.
 
 The library references in `docs/library_ref/` have their own navigator, `lib-outline`, because they
 are rooted a level higher: chapters are `#`, subsections are `##`, so `spec-outline`'s h2/h3 mapping

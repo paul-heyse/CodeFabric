@@ -1,10 +1,16 @@
 ---
 name: typer-rich-ref
-description: "Reference navigator for the Typer + Rich CLI stack. Routes questions across two deep-dive documents at docs/library_ref/: typer.md (Typer ↔ Click decomposition, commands/callbacks/context, Annotated metadata, prompts, validation, subcommand trees, help/markup, completion, file/path types, testing, advanced UX) and rich.md (Console API, styles/themes, markup, Text, highlighters, pretty, logging integration, tracebacks, prompts, tables, panels, Markdown, syntax, progress, status, tree, layout, export/record, Jupyter). SKILL.md carries the section index across both. Use whenever code touches `import typer`, `from typer`, `import rich`, or `from rich`; whenever modifying `src/smartref/interfaces/cli/`; whenever authoring command groups, callbacks, options, tables, panels, layouts, progress, or tracebacks; whenever debugging help output, completion, or exit-code semantics."
+description: "INACTIVE in this repository — both target documents are missing. Routes `docs/library_ref/typer.md` and `docs/library_ref/rich.md`, neither of which exists here; Typer and Rich are not declared dependencies of CodeFabric and appear zero times in the design suite. Invoke only to read the notice explaining that, or if those two references are later written. CodeFabric's administrative CLI (`RM W2` work package 8) is a Rust daemon-side surface with no library chosen; the Python FastMCP adapter is STDIO-only and `SRV §6` invariant 11 keeps STDOUT protocol-only, which precludes a Rich Console there. For references that do exist, see `docs/spec_index/library-routing.md`."
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
 # Typer + Rich Reference Navigator
+
+> **Not usable in this repository — both target documents are absent.** This skill routes
+> `docs/library_ref/typer.md` and `docs/library_ref/rich.md`; neither exists here, so every
+> section reference below resolves to nothing. It was authored for a different project and has
+> not been re-grounded on CodeFabric. See *Project context* at the end before relying on any of
+> it.
 
 ## Version anchor
 
@@ -322,18 +328,28 @@ Library code raising an unhandled exception?
 
 ---
 
-## Project context: smartref CLI
+## Project context: CodeFabric — this skill does not apply
 
-The smartref CLI lives at `src/smartref/interfaces/cli/`:
+**CodeFabric has no Typer or Rich CLI, and neither library appears anywhere in the design
+suite.** Three independent facts:
 
-- `app_factory.py` — root `Typer()` construction
-- `console.py`, `common.py` — shared `Console` instances (narrative + stderr)
-- `callback_chain.py` — `@app.callback()` chain for global options + ctx.obj
-- `command_graph_compiler.py` — Typer ↔ Click command-graph orchestration
-- `session_context.py` — per-invocation context state
-- `groups/` — subcommand groups via `app.add_typer(...)`
-- `projection_rendering/` — Rich-based projection emitters (`Panel`, `Table`, `Layout`)
-- `failure_rendering/` — Rich `Panel` + `traceback` policy for command failures
-- `live_observation/` — Rich `Live` + `Layout` for streaming run feedback
+* **The reference documents do not exist.** `docs/library_ref/typer.md` and
+  `docs/library_ref/rich.md` are absent. Every `typer §N` / `rich §N` citation in this file
+  points at nothing.
+* **Neither library is a declared dependency.** They appear in `uv.lock` only as transitive
+  resolutions (`rich` 15.0.0, `typer` 0.27.1 — note the lockfile's Typer differs from the
+  0.25.0 version anchor above), and `pyproject.toml` declares neither.
+* **The design suite never mentions them.** `typer` and `rich` occur zero times across the
+  seven artifacts in `docs/upfront_design/`.
 
-When changing CLI behavior, consult typer §28 (large-app architecture) and rich §25 (CLI integration patterns) alongside the local module these files belong to. The project's contract substrate (attrs/cattrs) handles boundary conversion *before* it reaches any CLI rendering — never put domain validation logic inside Typer callbacks.
+The nearest real requirement is `RM W2` work package 8, *"Internal administration and
+diagnostics"* — a non-MCP administrative CLI or test client for bootstrap testing. That is a
+**Rust** daemon-side surface, not a Python one, and the specification does not choose a CLI
+library for it. `SRV §7 Non-goals` and `SRV §31` further constrain the Python side: the FastMCP
+adapter is STDIO-only, and `SRV §6` invariant 11 requires STDOUT to carry protocol frames only —
+which rules out a Rich `Console` writing to STDOUT anywhere in that process.
+
+**If a Python CLI is ever introduced**, this skill needs its two reference documents written
+before it becomes usable, and this section rewritten against the actual module layout. Until
+then, prefer the specification: `docs/spec_index/library-routing.md` maps spec sections to the
+references that *do* exist.

@@ -437,7 +437,7 @@ Rules 1-12 are doctrine and library semantics. **Rules 13-18 are navigation meta
 
 17. **gix is 52.87% blank lines.** Double-spaced throughout, including markdown table rows, against notify's 28%. A `Read(offset, limit)` window holds about half the content it appears to, and `grep -A5` captures roughly two content lines. Budget roughly double the `limit`.
 
-18. **The lifecycle spec has no Part IV.** Part III (line 1435) jumps to Part V (1994), so §26-§36 — every watcher section — are orphaned under Part III. Cite lifecycle material by **section number, never by Part**, and by section rather than line: the file carries `_v1.2` and its lines drift while section numbers have held. Both library docs are h1-rooted, so use `lib-outline`, not `spec-outline`, on them.
+18. **The lifecycle spec has no Part IV.** Part III "State Model" runs §18-§36 and Part V "Git-Aware Repository and Worktree State" picks up at §37, so every watcher section (§27-§36) sits under a Part titled for state, not for watching. Cite lifecycle material by **section number, never by Part**, and by section rather than line: the filename carries a version suffix that moves between releases and its lines drift, while section numbers have held. Note also that `spec-outline` does not emit `# Part` headings at all — `docs/spec_index/README.md` §3.1 tabulates all 110 of them. Both library docs are h1-rooted, so use `lib-outline`, not `spec-outline`, on them.
 
 ---
 
@@ -486,4 +486,4 @@ The spec names two crates: **`codefabric-watch`** (notify-debouncer wrapper, sou
 
 The doctrine these two docs serve is the same one that governs the fact providers: **fact substrate, not judgment**, and **present state, not history**. Git is the most tempting place in the system to violate the second — the library makes `log`, `blame`, and revision walks trivially available, and they are exactly what the ontology excludes. Operational Git state (HEAD, index, worktree topology, acceleration status) enters as *lifecycle metadata*, never as CPG facts (§37.2: *"The CPG fact ontology remains history-free"*).
 
-**Rule of thumb:** deciding *whether a file matters, or what changed* → this skill. Deciding *what a file means* → **`code-facts-lib-ref`**. Storing or serving the result → **`deltalake-rust-ref`** / **`datafusion-pyarrow-rust-ref`**. Scheduling and backpressure mechanics → `docs/library_ref/rust_parallel_concurrency_stack_reference_2026-08-19.md`, currently unrouted.
+**Rule of thumb:** deciding *whether a file matters, or what changed* → this skill. Deciding *what a file means* → **`code-facts-lib-ref`**. Storing or serving the result → **`deltalake-rust-ref`** / **`datafusion-pyarrow-rust-ref`**. Scheduling and backpressure mechanics → `docs/library_ref/rust_parallel_concurrency_stack_reference_2026-08-19.md`, which no skill routes; `docs/spec_index/library-routing.md` maps its chapters to the lifecycle sections that need them (§70-§71, §109-§116, §151-§153).

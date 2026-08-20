@@ -1,6 +1,6 @@
 # DataFusion + Arrow Rust — Detailed Reference
 
-This document is the deep-dive companion to `SKILL.md` in the same directory. SKILL.md carries the core map (version anchors, the five-document topic table, reading strategy, where-to-look routing, and the seven key invariants); this file carries the full **per-document section indexes** (every §/S/C section with its line number), the **cross-document overlap matrix** (who is authoritative per topic), the **decision trees**, the **full 22 operating rules**, and the **smartref project context**.
+This document is the deep-dive companion to `SKILL.md` in the same directory. SKILL.md carries the core map (version anchors, the five-document topic table, reading strategy, where-to-look routing, and the seven key invariants); this file carries the full **per-document section indexes** (every §/S/C section with its line number), the **cross-document overlap matrix** (who is authoritative per topic), the **decision trees**, the **full 22 operating rules**, and the **CodeFabric project context**.
 
 Cross-references back into the core map are written `SKILL §...`. Read SKILL.md first; reach here once you know which document you need and want its section map, when a routing choice gets hard, or when you need the authoritative-source table for an overlapping topic.
 
@@ -17,7 +17,7 @@ Every doc follows a **catalog-first, then deep-dives** layout, but with differen
 - **§2 — Cross-document overlap matrix** (authoritative source per topic)
 - **§3 — Decision trees** (crate · planning surface · UDF kind · column type · read path · write path · plan layer · cross-runtime · slow-query · schema governance · Cargo project)
 - **§4 — Operating rules** (full set of 22)
-- **§5 — Project context: smartref**
+- **§5 — Project context: CodeFabric** (pre-implementation; spec-section → chapter map; the three boundaries)
 
 ---
 
@@ -376,7 +376,7 @@ Legend: ✅ authoritative, 🔁 cross-cut/summary, — not covered.
 | Aggregate lowering (`LoweredAggregateBuilder`) | §30 🔁 | §49.31 🔁 | — | **C13.22** ✅ | — | **df-calcs C13.22** |
 | Proto decode contexts (`from_bytes_with_ctx`, `PhysicalPlanDecodeContext`) | **§36.26** ✅ | §56.32 🔁 | — | — | — | **df-rust §36.26** |
 | Comparison-coercion semantics (numeric-preferring, `type_union_coercion`) | §7.21 ✅ | — | **S5.3.9** ✅ | C2.12 🔁 | — | **df-schemas S5.3.9** governance; **df-rust §7.21** SQL surface |
-| Full 53→54 migration review spec (all breaking changes + upgrade workflow) | — | — | — | — | — | **`docs/library_ref/datafusion_54vs53.md`** (sibling doc, not part of the five-doc set) |
+| Full 53→54 migration review spec (all breaking changes + upgrade workflow) | — | — | — | — | — | **Absent** — `datafusion_54vs53.md` is cited by this skill's ancestry but does not exist here (§5) |
 
 ---
 
@@ -542,7 +542,7 @@ Plan serialization / cache / fingerprint?              -> df-rust §36; df-plann
 ```
 Producer in Rust, consumer in Python?
   -> Expose Rust side as `__arrow_c_stream__` producer via pyo3-arrow (pa-rust §21)
-  -> Python `datafusion.SessionContext.from_arrow(producer)` consumes directly (datafusion-pyarrow-ref §20)
+  -> Python `datafusion.SessionContext.from_arrow(producer)` consumes directly (`docs/library_ref/datafusion.md`, unrouted -- and note SRV §18 and SRV §6 invariant 3 forbid this path in CodeFabric; see §5)
 Producer in Python (PyArrow), consumer in Rust?
   -> Use arrow_pyarrow::PyArrowType to ingest pa.Table/pa.RecordBatch (pa-rust §21)
   -> Or accept any `__arrow_c_stream__`-implementing object via PyCapsule
@@ -650,31 +650,83 @@ Match Arrow version across all crates that depend on Arrow types directly.
 
 ---
 
-## §5 — Project context: smartref
+## §5 — Project context: CodeFabric
 
-**Rust DataFusion + Arrow is now smartref's core compiled substrate, and the project is pivoting hard onto it** (this reverses the earlier "Python-binding-only" posture). The Rust side is a **23-crate Cargo workspace** under `crates/`; nearly every member depends on `datafusion` and `arrow`, and the workspace default-member `crates/smartref_pyo3` builds the **`smartref_core_native`** PyO3 extension that Python imports across `src/smartref/adapters/datafusion/` (`native_runtime`, `session_context_factory`, `substrait_export`, `native_runtime_dataset_reader`, `native_build_guard`), `shared/graph/` (`query_runtime`, `relation_access`, `projection_specs`, `native_kernel_port`), `shared/solver_math/native_kernel_delegate`, `shared/arrow/schema/` (`schema_fingerprint`, `rust_schema_parity`, `rust_substrate_bridge`), and `kernel/source_ingress/workbook/` (extraction pipeline + passes). The Python `datafusion`/`pyarrow` packages (`pyproject.toml`) still ship, but on the *other* side of the PyCapsule boundary — the substrate itself is Rust.
+**Pre-implementation.** There is no DataFusion or Arrow code in this repository yet. The shape
+is one Cargo package and one library crate, with a seed whose only job was to prove the
+toolchain; `RM W0` plans the four build domains (stable Rust daemon/data plane, nightly rustc
+extractor, Pyrefly sidecar, Python FastMCP adapter) and `RM W3` is the first wave that puts real
+Arrow, Delta, and DataFusion code on disk.
 
-### Build + version pins
+Consequence for using these five documents: read them **against the specifications**, not against
+existing code. The mapping that matters is spec section → chapter, not crate → chapter.
 
-* **Native module.** `smartref-core-native` = `{ path = "crates/smartref_pyo3", editable = true }` (`[tool.uv.sources]`); the `[lib]` name is `smartref_core_native`. Built as an **editable maturin build on the dev profile** — never pass `--release` on the editable refresh (it overrides the pyproject `profile=dev` and triggers a multi-minute fat-LTO relink). `uv sync` will not rebuild the extension on source-only changes (version pinned `0.1.0`); use `maturin develop` and copy `target/debug/*.so` into site-packages when you hit a `does not expose <fn>` `TypeError`.
-* **Versions** (`Cargo.toml`, all centralized in `[workspace.dependencies]` so every member crate stays unified — Operating Rules 6 & 18): `datafusion = "=54.0.0"` (exact pin; `datafusion-proto = "=54.0.0"`, `datafusion-substrait` / `-catalog` / `-common` / `-expr` / `-optimizer` / `-functions-aggregate` / `-functions-window` at `54.0.0`) — matching these docs' 54.0.0 anchor. The **`arrow` ecosystem is pinned at `58.3.0`** (`arrow` with `csv`/`json`/`ipc`/`ffi`/`pyarrow`/`canonical_extension_types`, plus `arrow-flight` w/ `flight-sql`, `arrow-pyarrow`, `arrow-row`, `parquet` w/ `arrow`/`async`/`object_store`, and every `arrow-*` subcrate). `adbc_datafusion` and `object_store` round out the IO surface. For what changed crossing 53→54, see `docs/library_ref/datafusion_54vs53.md`.
+### Version pins come from the spec, not a lockfile
 
-### Crate → reference-document map
+`FAB §2.1 Canonical workspace baseline` is the normative source:
 
-| Crate(s) | Role | Read |
+* `datafusion = "=54.1.0"`;
+* `arrow`, `arrow-array`, `-buffer`, `-schema`, `-cast`, `-select`, `-ord`, `-string`, `-row` and
+  `parquet` all at `=58.4.0` (`parquet` with features `arrow`, `async`, `object_store`);
+* `object_store = "=0.13.2"`;
+* `deltalake` at git rev `9f9223197469897ef05ae4369eb4fd1390174e65`, `default-features = false`,
+  features `rustls`, `datafusion` — **a pinned pre-release revision**, so `FAB §2` requires
+  compile-testing generated code against that exact rev before adoption. Object-store backends are
+  feature-gated (`s3-storage`), not default;
+* `edition = "2024"`, `rust-version = "1.94.1"`, `resolver = "3"`;
+* utility crates `tokio`, `futures`, `url`, `tracing`, `serde`, `serde_json`, `blake3`.
+
+`FAB §2.2` states the alignment invariant: one Arrow major/minor family, one matching Parquet
+family, one DataFusion family, one `object_store` family, one pinned delta-rs revision — and CI
+SHALL reject duplicate versions that cross public type boundaries. `RM W0` work package 1 is
+where that CI check is built.
+
+These pins move. They were `58.3.0` / `54.0.0` until recently. Read `FAB §2.1` rather than
+trusting a number quoted here or in the skill description.
+
+**No `datafusion_54vs53.md` exists in this repository.** Earlier revisions of this skill cited it
+as the DF 53→54 migration catalog; per-topic DF-54 behaviour is covered inside the five documents
+themselves — see §2 "DataFusion 54 additions" above.
+
+### Spec section → reference-document map
+
+Full table in `docs/spec_index/library-routing.md` §3. The load-bearing rows:
+
+| Spec section | Role | Read |
 |---|---|---|
-| `smartref_arrow_schema` | **Foundational** — Arrow schema specs, fingerprinting (`schema_fingerprint.py`), Rust↔Py schema parity; every other crate depends on it | **df-schemas** S1-S15 · **pa-rust** §3 (data model) / §26 (extension types) · Rule 10 (schema as contract) |
-| `smartref_catalog`, `smartref_workbook`, `smartref_substrate_context`, `smartref_action_log` | Sessions, `TableProvider` / listing tables / Parquet datasource, `object_store` IO, CompiledSubstrateContext, action log | **df-rust** §3 (sessions) / §14 (sources) / §17 (catalogs) / §18 (`TableProvider`) · **df-schemas** S10 · **df-planning** §51 · **pa-rust** §13 (dataset) / §14 (`object_store`) |
-| `smartref_plan_spec`, `smartref_plan_lint`, `smartref_plan_contracts`, `smartref_cache`, `smartref_substrait`, `smartref_substrate_compiler` | Programmatic `LogicalPlan`/`Expr` construction (PlanSpec), optimizer-based plan lints, plan contracts/artifacts, `datafusion-proto` plan cache, Substrait export | **df-planning** §41-§56 (esp. §43 PlanSpec, §46 lint, §55-§56 artifacts/cache) · **df-rust** §10/§11/§19/§22/§36 · **pa-rust** §25 (Substrait) |
-| `smartref_udf`, `smartref_udf_contracts`, `smartref_solver_kernels`, `smartref_graph_kernels`, `smartref_symbolic_kernels` | UDF/UDAF subsystem + contracts; solver lane (COO matrix, dispatch), graph substrate (CSR), symbolic kernels | **df-calcs** C1-C13 (placement, signature, vectorized bodies, UDAF state) · **df-rust** §24 · **pa-rust** §5 (arrays/builders) / §7 (compute kernels) / §17 (`arrow-row` sort) |
-| `smartref_bus`, `smartref_pg_adbc`, `smartref_pyo3` (+ `smartref_pyo3_tests`), `smartref_substrate_probe` | Arrow Flight bus; Postgres-as-source via ADBC; the `smartref_core_native` PyCapsule boundary; full-surface probe crate | **pa-rust** §19 (Flight RPC/SQL) / §20 (ADBC) / §21 (PyO3 / pyo3-arrow / PyCapsule) |
-
-`smartref_pyrefly_query_core` and `smartref_pyrefly_queryd` are the **pyrefly type-intelligence** crates (no Arrow/DataFusion) — they power the code-intel surface, not this substrate, and are out of scope here.
+| `FAB §7` canonical physical types and identity · `FAB §10`-`§11` schema metadata conventions and schema registry | The `TableSpec` contract every other table depends on | **df-schemas** S1-S15 · **pa-rust** §3 (data model) / §26 (extension types) · Rule 10 (schema as contract) |
+| `FAB §13` control-plane schemas · `FAB §91` snapshot-pinned overlay-aware catalog provider · `FAB §92`-`§93` stable serving views and table functions | Catalog, `TableProvider`, the 23 `cpg_serving.*` views, four table functions | **df-rust** §3 (sessions) / §17 (catalogs) / §18 (`TableProvider`) / §24 (UDTF) · **df-planning** §51 |
+| `FAB §63`-`§66` provider-observation to Arrow, batch size, builder policy, batch validation | The ingestion boundary — provider DTOs become `RecordBatch` here | **pa-rust** §5 (arrays/builders) / §6 (`RecordBatch`) / §10 (IPC) · **df-rust** §4 |
+| `FAB §77` Arrow kernel catalog · `FAB §78`-`§79` scalar and aggregate UDFs · `FAB §79A` derivation registry and single-authority matrix | Which engine owns which derived fact | **pa-rust** §7/§8 (kernels) · **df-rust** §24 · **df-calcs** C1-C3, esp. C1.7 multi-axis placement matrix and C1.12 calculation manifest |
+| `FAB §80`-`§82` relationally expressible derived facts, custom logical operators, custom physical graph representation | `CpgGraphTraverse`, `CpgStrongComponents`, `CpgDominators`, … | **df-rust** §19 (logical plans) / §26 (custom operators) · **pa-rust** §4 (buffers) — the physical graph is **Arrow CSR**, not petgraph |
+| `FAB §83`-`§90` reachability, SCC, dominators, control dependence, reaching definitions, points-to, summary fixed point, execution requirements | Memory, spill, cancellation, streaming, `PlanProperties` obligations | **df-rust** §20 (physical plans) / §21 (streaming) / §28 (memory and spilling) · **df-planning** §41-§56 |
+| `FAB §94`-`§98` query-planning policy, partitioning, Z-order, Parquet writer policy, runtime policy | Layout and runtime tuning | **df-rust** §22 (optimizer) / §27 (configuration) / §28 · **pa-rust** §11-§12 (Parquet) |
+| `QRY AC-G-46` typed internal `PlanSpec` · `AC-G-52` cost model and hard limits · `AC-G-57` plan cache contract | The query compiler's lowering target | **df-rust** §19/§22/§28 · **df-planning** |
 
 ### Boundary discipline
 
-The contract substrate (attrs/cattrs) handles Python-side boundary conversion *into* domain models; when a Rust-side calculation crosses back to Python, conversion happens at the `pyo3-arrow` / `arrow_pyarrow` boundary (pa-rust §21), and the resulting `pa.Table`/`pa.RecordBatch` is structured into smartref contracts via cattrs as usual. **Never round-trip data via pickle / JSON when a PyCapsule path exists** (Operating Rule 9).
+Three boundaries the specifications draw, all of which constrain this stack:
 
-The **solver path still drives external SCIP/Ipopt via Pyomo** (see `CLAUDE.md` — no in-process SCIP, no PySCIPOpt plugin layer); `smartref_solver_kernels` is the Arrow-native **assembly + projection** lane *around* that solver contract (df-calcs C11 route matrix; C12 async I/O UDFs; C13 stateful aggregation), not an in-process MILP replacement. Reframing the solver contract itself is a larger architectural decision than this skill alone supports.
+**Petgraph does not cross into the fabric.** `FAB §82` is explicit that the custom physical graph
+representation is CSR over Arrow buffers; petgraph belongs to fact generation (`GEN §52 Petgraph
+role`, routed by the `petgraph-ref` sibling). A `petgraph::graph::DiGraph` must not appear in a
+`TableProvider`, an `ExecutionPlan`, or any type on the fabric's public surface.
 
-When in doubt about whether to read this skill versus the Python sibling: **if the source you are editing is a `.rs` file, a `Cargo.toml`, or a `pyo3-arrow`-bridged surface, use this skill; if the source is a `.py` file calling `import datafusion` / `import pyarrow`, use `datafusion-pyarrow-ref` instead.**
+**The adapter process holds no Arrow.** `SRV §18 Framework and package posture` states the Python
+FastMCP adapter requires neither Arrow nor DataFusion — it is Pydantic, pydantic-settings, a gRPC
+client, and orjson. `SRV §6` invariant 3 makes it a hard system invariant: *"Python never becomes
+an Arrow/DataFusion processing layer."* There is therefore **no PyCapsule / `pyo3-arrow` data path
+in this architecture**; the Rust↔Python boundary is Protobuf over a Unix domain socket
+(`SRV §8`-`§9`), not zero-copy Arrow. Chapters **pa-rust §21** (PyO3 interop), **§19**-**§20**
+(Flight, ADBC) and **§25** (Substrait) have no consumer in the design suite — read them only if a
+future decision creates one.
+
+**No provider writes a canonical row.** Reconciliation is `FAB AC-G-37`, fed by `GEN` Part VII
+(§80-§85). Arrow batches arriving from a provider are *observations*; turning them into canonical
+`entity`/`relation`/`property_fact` rows is the reconciliation engine's job, not the ingestion
+path's.
+
+**Rule of thumb:** editing a `.rs` file, a `Cargo.toml`, or anything on the fabric's Arrow /
+DataFusion surface → this skill. Delta tables, `_delta_log`, publication and vacuum →
+`deltalake-rust-ref`. Graph algorithms during fact generation → `petgraph-ref`. Watching the
+filesystem or reading Git state → `gix-notify-ref`.

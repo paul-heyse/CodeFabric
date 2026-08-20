@@ -3907,9 +3907,9 @@ Versioning:
 [2]: https://datafusion.apache.org/user-guide/sql/select.html "SELECT syntax — Apache DataFusion  documentation"
 [3]: https://docs.rs/sqlparser/latest/sqlparser/ast/enum.Statement.html "Statement in sqlparser::ast - Rust"
 [4]: https://docs.rs/datafusion/latest/datafusion/execution/session_state/struct.SessionState.html "SessionState in datafusion::execution::session_state - Rust"
-[5]: https://docs.rs/crate/datafusion-sql/latest/source/examples/sql.rs "datafusion-sql 54.0.0 - Docs.rs"
+[5]: https://docs.rs/crate/datafusion-sql/latest/source/examples/sql.rs "datafusion-sql 54.1.0 - Docs.rs"
 [6]: https://docs.rs/datafusion/latest/datafusion/sql/planner/trait.ContextProvider.html "ContextProvider in datafusion::sql::planner - Rust"
-[7]: https://docs.rs/crate/datafusion-sql/latest/source/src/planner.rs?utm_source=chatgpt.com "datafusion-sql 54.0.0"
+[7]: https://docs.rs/crate/datafusion-sql/latest/source/src/planner.rs?utm_source=chatgpt.com "datafusion-sql 54.1.0"
 [8]: https://datafusion.apache.org/_sources/library-user-guide/building-logical-plans.md.txt "datafusion.apache.org"
 [9]: https://datafusion.apache.org/library-user-guide/extending-sql.html "Extending SQL Syntax — Apache DataFusion  documentation"
 [10]: https://docs.rs/datafusion/latest/datafusion/logical_expr/planner/trait.ExprPlanner.html "ExprPlanner in datafusion::logical_expr::planner - Rust"
@@ -10029,7 +10029,7 @@ pub fn lint_table_scans(
 
 ## 46.13 Detecting cross joins
 
-DataFusion represents cross join semantics through join planning rather than a `LogicalPlan::CrossJoin` variant: the 54.0.0 `LogicalPlan` enum (`datafusion-expr/src/logical_plan/plan.rs`) has a single `Join` variant and no `CrossJoin` variant, while the SQL docs still support `CROSS JOIN`. ([Docs.rs][1])
+DataFusion represents cross join semantics through join planning rather than a `LogicalPlan::CrossJoin` variant: the 54.1.0 `LogicalPlan` enum (`datafusion-expr/src/logical_plan/plan.rs`) has a single `Join` variant and no `CrossJoin` variant, while the SQL docs still support `CROSS JOIN`. ([Docs.rs][1])
 
 ```rust id="kv9b4k"
 pub fn lint_joins(
@@ -22472,7 +22472,7 @@ The executor calls `create_sibling_state()` once per execution and passes the sa
 
 ### 54.25.3 Gating — no config key
 
-There is **no** SQL/config key for this in 54.0.0 (`execution.enable_file_stream_work_stealing` does not exist). Gating is structural, on `FileScanConfig`:
+There is **no** SQL/config key for this in 54.1.0 (`execution.enable_file_stream_work_stealing` does not exist). Gating is structural, on `FileScanConfig`:
 
 ```text id="wsteal54b"
 sharing DISABLED (create_sibling_state returns None) when:
@@ -23486,8 +23486,8 @@ Use JSON as canonical machine-readable artifact.
     "redaction_profile": "InternalNoSecrets"
   },
   "engine": {
-    "datafusion_version": "54.0.0",
-    "arrow_version": "58.3.0",
+    "datafusion_version": "54.1.0",
+    "arrow_version": "58.4.0",
     "feature_flags": ["parquet", "sql"]
   },
   "logical": {
@@ -23522,7 +23522,7 @@ Use Markdown for human/agent reading.
 
 ## Summary
 - status: success
-- datafusion: 54.0.0
+- datafusion: 54.1.0
 - output rows: 10,000
 - warning count: 2
 
@@ -23598,7 +23598,7 @@ Use for CI golden diffs:
 
 ```text id="if8w5d"
 query_id=q_example
-datafusion=54.0.0
+datafusion=54.1.0
 config_hash=...
 schema_hash=...
 

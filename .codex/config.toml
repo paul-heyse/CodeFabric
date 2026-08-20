@@ -1,0 +1,48 @@
+# CodeFabric — project-scoped Codex configuration.
+#
+# This layer is deliberately minimal. It configures what belongs to the
+# repository (skills, the environment hook) and leaves model choice, sandbox
+# mode, and approval policy to your ~/.codex/config.toml.
+#
+# Project config is only read for TRUSTED projects. If nothing here appears to
+# take effect, check that ~/.codex/config.toml contains:
+#
+#   [projects."/Users/paulheyse/CodeFabric"]
+#   trust_level = "trusted"
+#
+# Verified against codex-cli 0.148.0. See .codex/README.md for what was tested
+# and how to re-test after a Codex upgrade.
+
+# ---------------------------------------------------------------------------
+# Skills
+# ---------------------------------------------------------------------------
+# The 18 project skills are NOT listed here — they are auto-discovered from
+# .codex/skills and .agents/skills, both of which symlink to .claude/skills so
+# Claude Code and Codex read one copy. Verified: `codex debug prompt-input`
+# lists all 18, from either symlink alone, with no duplication when both exist.
+#
+# To disable one without deleting it, register it explicitly:
+#
+#   [[skills.config]]
+#   path = ".codex/skills/typer-rich-ref"
+#   enabled = false
+
+# ---------------------------------------------------------------------------
+# Hooks
+# ---------------------------------------------------------------------------
+# Mirrors the Claude Code SessionStart hook: inject the bootstrap environment
+# report so a session opens knowing toolchain state instead of probing for it.
+#
+# Matcher values for SessionStart are startup | resume | clear | compact.
+# "clear" and "compact" are included because the environment report is just as
+# useful after a context reset as at first start.
+
+[[hooks.SessionStart]]
+matcher = "^startup$|^resume$|^clear$|^compact$"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = ".codex/hooks/session-start.sh"
+statusMessage = "Loading CodeFabric environment"
+timeout = 20
+additionalContextLimit = 2500

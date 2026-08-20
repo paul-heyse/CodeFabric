@@ -714,7 +714,7 @@ Rules 1-14 are semantic. **Rules 15-18 are meta-rules about navigating these fou
 
 ### Spec anchors
 
-`present_state_cpg_fact_generation_specification_python_rust_v1.2.md` is the governing spec and names exactly these four as its source basis (§2):
+`present_state_cpg_fact_generation_specification_python_rust_v1.3.md` is the governing spec. Its §2 source basis names five library references — these four plus `petgraph.md`, routed by the `petgraph-ref` sibling — alongside the ontology specification as a companion artifact:
 
 | Spec section | What it fixes | Mirrored here |
 |---|---|---|
@@ -728,7 +728,7 @@ Rules 1-14 are semantic. **Rules 15-18 are meta-rules about navigating these fou
 | §12 | Raw and normalized facts coexist | Operating Rule 6 |
 | §13 | Canonical semantic identity is application-owned | Operating Rule 4 |
 
-**Cite specs by section number, not line number.** The spec files carry `_v1.2` filenames and their line numbers shift between revisions; section numbers have held. Confirm a citation with `spec-outline <spec>.md --match '^5\.'` before trusting it. For the four references, the matching tool is `lib-outline` (Rule 18).
+**Cite specs by section number, not line number.** The spec filenames carry a version suffix that moves between releases and their line numbers shift with every revision; section numbers have held. Confirm a citation with `spec-outline <spec>.md --match '^5\.'` before trusting it. For the four references, the matching tool is `lib-outline` (Rule 18). `docs/spec_index/` carries a verified cross-reference layer over the whole design suite, including a spec-section-to-library-chapter map.
 
 ### Boundary discipline
 

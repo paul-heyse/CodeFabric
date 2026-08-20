@@ -18,6 +18,7 @@
 **Primary concurrency stack:** Tokio, Rayon, Crossbeam, DashMap, optional `tokio-rayon`
 **Primary durable data plane:** Arrow, DataFusion, Delta Lake / delta-rs
 **Git state baseline:** `gix = 0.86.0` minimum; read-only application policy; no repository mutation, checkout, network, credentials, hooks, or external filters in the lifecycle daemon
+**Audit integration (2026-08-20):** Plan-audit F-008; fixed safe descriptor API and strict local trust-profile mechanics.
 **Companion specifications:**
 
 - `code_property_graph_present_state_fact_ontology_specification_v1.3.md`
@@ -3128,7 +3129,8 @@ gix lock/tempfile facilities SHOULD be considered for CodeFabric-owned local ope
 
 ## 75. Singleton daemon lease
 
-For one daemon per authorized workspace/user domain:
+For one daemon state root (the AC-G-62 repository/worktree group), regardless
+of how many authorized workspaces it contains:
 
 ```text
 acquire CodeFabric-owned lock
@@ -3167,7 +3169,15 @@ repository mutation     disabled
 checkout                disabled
 trusted path roots       explicit
 resource limits          enabled
+allowed config sources   CodeFabric-owned + repository-local only
+environment overrides    rejected
+global/system Git config not consulted
 ```
+
+Repository-local attributes and excludes may influence inventory
+classification but never authorization. Their external filter/command content
+is not executed. These defaults are part of `local-workstation-v1`; weakening
+one requires a separately fingerprinted trust profile.
 
 ---
 
@@ -5609,6 +5619,15 @@ Every workspace-relative path accepted from a watcher, Git adapter, query bounda
 8. root directory identity still matches the authorized record.
 
 Linux SHALL use `openat2` with `RESOLVE_BENEATH`, `RESOLVE_NO_MAGICLINKS`, and `RESOLVE_NO_SYMLINKS` where available. The fallback is a component-by-component `openat`/`fstatat` walk using `O_NOFOLLOW`. macOS SHALL use directory-relative opens and `fstat` checks with equivalent no-follow behavior.
+
+The conforming Rust implementation uses the safe descriptor APIs in
+`rustix = "=1.1.4"` with feature `fs` (or a separately approved equivalent)
+so first-party code retains `unsafe_code = "deny"`. Linux additionally uses
+`ResolveFlags::NO_XDEV` for the default no-nested-mount profile. The fallback
+and macOS paths compare device and file identity after each descriptor-relative
+open. Authoritative source bytes are read only from the resulting owned file
+descriptor; gix path reads remain advisory acceleration evidence and are
+revalidated before influencing source state.
 
 Directory symlinks are never followed in 1.x. File symlink targets are not parsed in the default profile. A symlink entry may expose its link text as source metadata only if source disclosure authorization allows it.
 

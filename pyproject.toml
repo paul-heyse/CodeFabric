@@ -23,6 +23,8 @@ authors = [
 # Relaxed from ">=3.14.7"; a patch-level floor excludes 3.14.0-3.14.6 for no reason.
 requires-python = ">=3.14"
 dependencies = [
+    "attrs>=26.1.0",
+    "cattrs>=26.1.0",
     "fastmcp[anthropic,apps,azure,code-mode,gemini,openai,tasks]>=3.4.7",
     "pydantic>=2.13.4",
 ]

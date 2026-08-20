@@ -13,6 +13,7 @@
 **Primary purpose:** Present-state code-intelligence fact substrate for LLM programming agents
 **Artifact type:** Language-neutral core ontology with Python- and Rust-specific extensions
 **Scope boundary:** Facts and mechanically derived facts only; no task-specific or evaluative analysis
+**Audit integration (2026-08-20):** Plan-audit F-001; fixed initial CBEF, path-platform, registry-code, and family allocations.
 
 ---
 
@@ -3051,6 +3052,13 @@ GitAccelerationStatus:
 
 The numeric registry is a generated machine-readable suite artifact. Codes are append-only; names are never reassigned. Every Arrow enum dimension, Delta code column, RPC/Pydantic enum, semantic JSON Schema, and lifecycle state mapper SHALL be generated from or conformance-tested against the same registry. Operational-only states remain infrastructure metadata and are not semantic program facts merely because their codes are defined here.
 
+For the initial 1.3 allocation, an enum block that lists canonical names but no
+explicit numeric values assigns codes in declaration order starting at `10`
+and incrementing by ten within that registry domain, matching Suite Manifest
+AC-G-06. The generated registry materializes those numbers
+and freezes them append-only. Later prose reordering does not renumber an
+accepted registry.
+
 Public phrases such as “exact,” “statically resolved,” “sound possible,” and “possible but not proven” SHALL map to these exact registries.
 
 ---
@@ -3742,6 +3750,18 @@ Core type codes:
 | 11 | map | key/value pairs sorted by encoded key |
 | 12 | tagged union | variant code followed by variant payload |
 
+Container encodings use unsigned 32-bit big-endian element counts and unsigned
+32-bit big-endian per-element, key, value, or variant-payload lengths. The
+outer field `payload_length` is computed after semantic-string normalization
+and covers the exact emitted payload bytes. Decoders SHALL reject duplicate or
+non-ascending field tags, non-minimal/truncated containers, and trailing bytes.
+
+The initial `record_domain` allocation follows the canonical-domain list below
+in declaration order starting at `0x0001`. Within each domain recipe, field
+tags follow the owner-approved recipe order starting at `0x0001`. A recipe
+change after acceptance is a versioned contract change; tags are never reused
+or inferred from Rust/Python field layout.
+
 Every UTF-8 field recipe SHALL declare one normalization rule: `NONE`, `NFC`, `NFKC`, `ASCII_LOWER`, or an explicitly named language/ecosystem canonicalizer. The default is `NONE`. Raw source text and path bytes are never Unicode-normalized. Python semantic identifier keys use Python's NFKC identifier semantics while preserving raw spelling separately; Rust semantic identifiers use the exact compiler/application canonical form selected by the Rust identity recipe; registry slugs use `ASCII_LOWER`. Package, module, crate, and qualified-name fields use their ecosystem-specific declared canonicalizer rather than a universal Unicode rule.
 
 ID derivation uses unkeyed BLAKE3-256 over the complete CBEF record; the internal ID is the first 16 bytes. The full 32-byte digest and a compact canonical-preimage diagnostic record SHALL be retained in collision-diagnostic storage.
@@ -3944,9 +3964,12 @@ Canonical component encoding uses `/` as an internal separator and percent-escap
 
 Platform rules:
 
-- **Linux/Unix:** raw `OsStr` bytes are authoritative. Default comparison is byte-exact.
-- **macOS:** raw filesystem bytes are authoritative. Registration probes the volume for case sensitivity. The comparison key uses Unicode NFD plus full case folding only when the volume is case-insensitive; non-UTF-8 components fall back to byte-exact comparison and trigger a diagnostic.
-- **Windows:** no conforming runtime in 1.x; the registry reserves a WTF-8 path encoding for future use.
+- **Linux/Unix (`platform_code = 0x01`):** raw `OsStr` bytes are authoritative. Default comparison is byte-exact.
+- **macOS (`platform_code = 0x02`):** raw filesystem bytes are authoritative. Registration probes the volume for case sensitivity. The comparison key uses Unicode NFD plus full case folding only when the volume is case-insensitive; non-UTF-8 components fall back to byte-exact comparison and trigger a diagnostic.
+- **Windows/WTF-8 (`platform_code = 0x03`):** no conforming runtime in 1.x; the registry reserves a WTF-8 path encoding for future use.
+
+All other platform-code values are reserved and rejected by released-profile
+decoders.
 
 Two distinct raw paths producing the same comparison key are a blocking collision on case-insensitive workspaces.
 
@@ -3968,6 +3991,12 @@ Deterministic ordering is by `(comparison_key_bytes, raw_relative_path_bytes)`. 
 ### Decision
 
 The prose ontology is instantiated by versioned machine registries for entity kinds, relation kinds, property kinds, fact kinds, unknowns, and representation/projection roles. The machine registries are the code-generation authority; prose supplies definitions and rationale.
+
+Initial registry allocations are design-contract artifacts, not implementation
+defaults. They SHALL be accepted by the ontology owner before generated code
+consumes them. When a record has a primary ontology layer, `family_code` is the
+layer number plus one (`L0 = 1` through `L14 = 15`); a kind spanning layers
+names one primary layer and records other projection memberships separately.
 
 ### Contract
 

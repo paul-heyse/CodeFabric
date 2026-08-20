@@ -3043,7 +3043,7 @@ The signature contract decomposes into five obligations:
 
 ## C1.20.3 Complete implementation skeleton
 
-Verified against the commented reference implementation `datafusion-functions-nested-54.0.0/src/array_transform.rs`:
+Verified against the commented reference implementation `datafusion-functions-nested-54.1.0/src/array_transform.rs`:
 
 ```rust id="hof-impl-skeleton"
 use std::sync::Arc;
@@ -3938,9 +3938,9 @@ version:
   function_version: 1.2.0
   methodology_version: normalize_api_v1
   introduced_in: calc_pkg_0.4.0
-  datafusion_min: 54.0.0
-  datafusion_max_tested: 54.0.0
-  arrow_min: 58.3.0
+  datafusion_min: 54.1.0
+  datafusion_max_tested: 54.1.0
+  arrow_min: 58.4.0
   breaking_change: false
 ```
 
@@ -5665,9 +5665,9 @@ versioning:
   api_stability: stable
   introduced_in_package: refinery_calc_0.1.0
   introduced_in_product: smartref_engine_0.3.0
-  datafusion_min: 54.0.0
-  datafusion_max_tested: 54.0.0
-  arrow_min: 58.3.0
+  datafusion_min: 54.1.0
+  datafusion_max_tested: 54.1.0
+  arrow_min: 58.4.0
   signature_hash: sha256:...
   semantics_hash: sha256:...
   docs_hash: sha256:...
@@ -6721,9 +6721,9 @@ package:
     - engineering_quality
     - refinery_aggregate_metrics
   compatibility:
-    datafusion_min: 54.0.0
-    datafusion_max_tested: 54.0.0
-    arrow_min: 58.3.0
+    datafusion_min: 54.1.0
+    datafusion_max_tested: 54.1.0
+    arrow_min: 58.4.0
 ```
 
 ## C3.22.2 Package trait
@@ -7348,7 +7348,7 @@ members = [
 ]
 
 [workspace.dependencies]
-datafusion = { version = "=54.0.0" }
+datafusion = { version = "=54.1.0" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 async-trait = "0.1"
@@ -8382,7 +8382,7 @@ function:
 deployment:
   environment: production
   engine_version: 2026.05.24
-  datafusion_version: 54.0.0
+  datafusion_version: 54.1.0
 
 packages:
   enabled:
@@ -9064,8 +9064,8 @@ benchmark:
   package_id: refinery.engineering
   function: weighted_sulfur
   version: 0.4.0
-  datafusion_version: 54.0.0
-  arrow_version: 58.3.0
+  datafusion_version: 54.1.0
+  arrow_version: 58.4.0
   batch_size: 8192
   rows: 1000000
   null_fraction: 0.05
@@ -9151,7 +9151,7 @@ runtime:
 {
   "event": "function_package_registration_complete",
   "tenant": "internal_refinery_modeling",
-  "datafusion_version": "54.0.0",
+  "datafusion_version": "54.1.0",
   "packages": [
     {
       "package_id": "core.math",
@@ -12084,7 +12084,7 @@ datafusion_expr::registry        ExtensionTypeRegistry trait + ExtensionTypeRegi
                                   preloads the Arrow canonical set)
 datafusion_common::types         DFExtensionType / DFExtensionTypeRef
                                  (typed logical-type object resolved from field metadata)
-arrow-schema 58.3 canonical set  bool8, json, uuid, opaque, fixed_shape_tensor,
+arrow-schema 58.4 canonical set  bool8, json, uuid, opaque, fixed_shape_tensor,
                                  variable_shape_tensor, timestamp_with_offset
 ```
 
@@ -13652,7 +13652,7 @@ reason:
 
 [1]: https://datafusion.apache.org/library-user-guide/functions/adding-udfs.html?utm_source=chatgpt.com "Adding User Defined Functions: Scalar/Window/Aggregate ..."
 [2]: https://datafusion.apache.org/user-guide/expressions.html?utm_source=chatgpt.com "Expression API — Apache DataFusion documentation"
-[3]: https://docs.rs/crate/datafusion-common/latest/source/src/error.rs?utm_source=chatgpt.com "datafusion-common 54.0.0"
+[3]: https://docs.rs/crate/datafusion-common/latest/source/src/error.rs?utm_source=chatgpt.com "datafusion-common 54.1.0"
 [4]: https://docs.rs/datafusion-python/latest/datafusion_python/datafusion_common/error/index.html?utm_source=chatgpt.com "datafusion_python::datafusion_common::error - Rust"
 [5]: https://datafusion.apache.org/user-guide/sql/scalar_functions.html?utm_source=chatgpt.com "Scalar Functions — Apache DataFusion documentation"
 

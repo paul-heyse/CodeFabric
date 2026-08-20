@@ -15,6 +15,7 @@
 **Primary provider stack:** Tree-sitter, Ruff Python crates, Pyrefly, `rustc_public`/MIR, narrowly scoped `rustc_private`, and petgraph
 **Scope:** Generation of present-state facts and mechanically derived facts only
 **Out of scope:** History, runtime observation, environment inventory, test-impact analysis, refactor analysis, risk scoring, recommendations, and other evaluative conclusions
+**Audit integration (2026-08-20):** Plan-audit F-001; fixed provider wire packages, event mappings, registry shape, and shared credit authority.
 
 ---
 
@@ -3721,6 +3722,24 @@ pub enum ProviderEvent {
 }
 ```
 
+The 1.3 wire packages and services are fixed:
+
+| Contract source | Protobuf package | Service |
+|---|---|---|
+| `provider_control.proto` | `codefabric.provider.v1` | `ProviderControl` |
+| `pyrefly_sidecar.proto` | `codefabric.pyrefly.v1` | `PyreflySidecar` |
+| `rustc_extractor.proto` | `codefabric.rustc.v1` | `RustcExtractor` |
+
+Wire events map to the application-owned interface rather than creating a
+second event taxonomy. `RunAccepted`/`CompilationAccepted` construct
+`ProviderAccepted`; progress and begin/end markers map to `Progress` with a
+typed phase; observation chunks map to `ObservationChunk` or `ArrowIpcChunk`
+according to payload kind; diagnostics map to `Diagnostic`; successful terminal
+records map to `Completed`; failed, cancelled, stale, or protocol-invalid
+terminal records map to `Failed` with the canonical failure code. The complete
+mapping table is a required part of `feature-registry.yaml` and is verifier
+checked against these variants.
+
 Requirements:
 
 - `ProviderAccepted` is available before long-running work;
@@ -4136,6 +4155,9 @@ CloseContext
 Shutdown
 ```
 
+The corresponding Protobuf package is `codefabric.pyrefly.v1` and the service
+name is `PyreflySidecar`; aliases or adapter-local package names are prohibited.
+
 The protocol starts with `Hello`/`HelloAck` containing:
 
 ```text
@@ -4210,6 +4232,9 @@ One sidecar process MAY host multiple read-only contexts if its negotiated memor
 ### Decision
 
 The Rust extractor communicates over a dedicated inherited file descriptor or private Unix socket. It never writes extraction data to rustc stdout or stderr. The protocol is compilation-unit and owner-manifest based.
+
+The corresponding Protobuf package is `codefabric.rustc.v1` and the service
+name is `RustcExtractor`; aliases or wrapper-local package names are prohibited.
 
 ### Contract
 
@@ -4488,6 +4513,28 @@ applicability predicate
 completeness proof rule
 supported precision profiles
 ```
+
+The provider registry record is fixed as:
+
+```text
+provider_id
+provider_slug
+placement: IN_PROCESS | SIDECAR | COMPILER_GROUP
+protocol_package: optional
+protocol_service: optional
+toolchain_or_bundle_digest_fields: ordered
+capability_codes: ordered unique
+event_mapping_version
+introduced/deprecated/replacement versions
+```
+
+`protocol_package` and `protocol_service` are required for sidecar/compiler
+placements and absent for in-process providers. The registry references the
+single provider-event mapping in `feature-registry.yaml`; provider-specific
+event enums are prohibited at the application boundary. Credit-control values
+are defined once in `provider_control.proto` as four outstanding chunks and
+16 MiB of unacknowledged payload and are imported or conformance-tested by the
+two provider protocols.
 
 Mandatory initial scope kinds:
 

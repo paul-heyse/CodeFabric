@@ -12,6 +12,7 @@
 **Primary consumers:** LLM programming agents and code-intelligence services
 **Supported ontology profiles:** Language-neutral core, Python, and Rust
 **Companion ontology:** `code_property_graph_present_state_fact_ontology_specification_v1.3.md`
+**Audit integration (2026-08-20):** Plan-audit F-001; made phrase-to-PlanSpec mappings and PlanSpec serialization executable contract data.
 **Companion schemas:**
 
 - `cpg_semantic_query_request.schema.json`
@@ -5924,9 +5925,19 @@ allowed request forms
 allowed subject/object roles
 required modifiers
 incompatible modifiers
+planspec_mapping:
+  node_kind
+  typed_slot_bindings
+  constant_fields
+  output_role
 introduced/deprecated versions
 examples and negative fixtures
 ```
+
+`planspec_mapping` is executable declarative contract data: after typed slots
+are filled, it deterministically constructs one schema-valid `PlanSpec` node
+template. Every released phrase has such a mapping even before the runtime
+compiler is implemented. A prose placeholder or deferred owner is invalid.
 
 Canonical interpretation is the phrase ID plus filled typed slots, not the original text. Equivalent aliases compile to the same AST and checksum.
 
@@ -5970,6 +5981,12 @@ The resolver is a pure service with no filesystem reads, provider calls, network
 ### Decision
 
 Every canonical semantic request compiles to a typed, storage-independent `PlanSpec`. SQL strings are not an intermediate representation.
+
+The machine serialization contract is JSON Schema 2020-12. The query bundle
+contains schemas for both unbound `PlanSpec` templates and snapshot-bound
+`PlanSpec` values. Canonical bytes and `canonical_digest` use the AC-G-53 JCS
+contract; generated Rust and Python types are conformance-tested against the
+same schemas.
 
 ### Contract
 

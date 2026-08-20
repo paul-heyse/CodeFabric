@@ -8,6 +8,7 @@
 **Primary deployment profile:** `local-workstation-v1`  
 **Primary implementation:** Native Rust daemon and data plane, date-pinned nightly Rust extractor, Rust Pyrefly sidecar, and Python FastMCP adapter  
 **Purpose:** Sequence realization of the finalized 1.3 target design into dependency-correct implementation waves that are each suitable for a separate detailed implementation plan
+**Audit integration (2026-08-20):** Plan-audit F-002/F-003/F-005/F-014; clarified Wave-0 pinning, pre-snapshot readiness, provider-before-activation order, and integrated-foundation execution discipline.
 
 ---
 
@@ -208,7 +209,7 @@ Create a reproducible implementation environment for the four distinct compatibi
    - configure caching without allowing cache contents to become correctness authority.
 
 6. **Process-boundary build prerequisites**
-   - install and verify Protobuf generation for Rust and Python;
+   - pin and verify one exact Protobuf compiler/generator identity for Rust and Python rather than accepting an ambient system `protoc`;
    - establish canonical artifact output locations for generated contracts and fixtures.
 
 ### Exit evidence
@@ -350,6 +351,9 @@ Implement the secure present-state source-instance control plane on which all fa
 - Concurrent file mutation during capture never yields a falsely stable source image.
 - Restart restores registration and inventory state without claiming an active fact snapshot.
 - Adversarial path and permission fixtures pass for Linux and macOS profiles.
+- Wave-2 source-control-plane health is reported independently; the mandatory
+  `WorkspaceLifecycle` remains `BOOTSTRAPPING` until Wave 3 activates the first
+  valid `ServingSnapshot`, which is the sole transition to `READY`.
 
 ### Explicitly deferred
 
@@ -396,7 +400,7 @@ Create the canonical fact-state substrate before introducing real providers.
 
 6. **Publication and active pointer protocols**
    - staged durable publication, table-version recording, validation, completion, and current pointer;
-   - `ServingSnapshot` construction and atomic activation.
+   - candidate `ServingSnapshot` construction, including exact-version Delta providers, private catalog, overlay wrappers, integrity checks, and frozen provider set, before atomic activation.
 
 7. **Snapshot leases and retention**
    - immutable snapshot lease API;
@@ -404,8 +408,8 @@ Create the canonical fact-state substrate before introducing real providers.
    - interaction with result retention and future vacuum.
 
 8. **Overlay-aware DataFusion catalog**
-   - durable-base providers merged with the pinned overlay;
-   - synthetic serving views sufficient for integration tests.
+   - serving views and query-time-derived surfaces over the snapshot-owned durable-base providers and pinned overlay;
+   - synthetic views sufficient for integration tests without rebuilding or rebinding providers after activation.
 
 ### Exit evidence
 
@@ -414,6 +418,7 @@ Create the canonical fact-state substrate before introducing real providers.
 - Crash/restart tests at publication and pointer boundaries recover to one coherent current state.
 - Overlay merge equals the corresponding durable effective state under canonical comparison.
 - Schema round-trip and integrity queries pass for the foundational tables.
+- Every lease on one snapshot reuses that snapshot's pointer-identical provider set, and no active snapshot exists before that set is frozen.
 
 ### Explicitly deferred
 
@@ -1492,6 +1497,15 @@ The next planning pass for any wave should produce a separate document with this
 14. **Completion checklist** — machine-verifiable evidence required to close the wave.
 
 A detailed plan SHALL not introduce a new high-level design decision. A discovered ambiguity is returned to the owning 1.3 specification as a design issue rather than resolved ad hoc inside implementation code.
+
+An integrated program plan MAY cover Waves 0-3 because they form the initial
+contract/build/source/storage foundation, but execution remains wave-segmented:
+only the current wave and its accepted predecessor interfaces are loaded as
+active context, each milestone restamps design and plan digests, and parallel
+packets have disjoint write sets. Shared generator, bootstrap, CI, or generated
+output files require an explicit serialized integration edge. This exception
+does not relax the normal four-to-eight-packet sizing target for the
+executable slice of any one wave.
 
 ---
 

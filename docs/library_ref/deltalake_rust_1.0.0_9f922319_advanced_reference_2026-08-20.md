@@ -5,18 +5,18 @@ Primary objective: **prevent syntax drift, dependency skew, feature-gate omissio
 
 ---
 
-## 0.1 Canonical baseline: `1.0.0` @ git rev `35cfed45…` (pre-release pin)
+## 0.1 Canonical baseline: `1.0.0` @ git rev `9f922319…` (pre-release pin)
 
-Use **`deltalake`/`deltalake-core` `1.0.0`, pinned to git rev `35cfed4545f41c2f483706d29670f7cc2fe7e217`**, as the documentation target. This is a **pre-release pin**: the delta-rs workspace at this rev already declares crate version `1.0.0`, but there is no tagged `rust-v1.0.0` release and no formal 1.0.0 release notes yet — the repository `CHANGELOG.md` at the rev (whose newest entry is `rust-v0.32.3`, 2026-05-19) is the authoritative change record for this baseline. Expect the eventual tagged 1.0.0 release to add changes beyond this rev.
+Use **`deltalake`/`deltalake-core` `1.0.0`, pinned to git rev `9f9223197469897ef05ae4369eb4fd1390174e65`**, as the documentation target. This SHA is the tip of protected `main` verified on **2026-08-20** (commit timestamp 2026-08-19T19:29:14Z). It remains a **pre-release pin**: the delta-rs workspace declares crate version `1.0.0`, but there is still no tagged `rust-v1.0.0` release and the repository `CHANGELOG.md` still begins with `rust-v0.32.3` (2026-05-19). For post-0.32.3 / pre-1.0 behavior, the exact pinned source and the commit range from the prior pin are the authoritative records. Expect the eventual tagged 1.0.0 release to add changes beyond this SHA.
 
-Pin-refresh procedure when moving the baseline forward: (1) choose the new delta-rs rev; (2) update `rev = "…"` in the `deltalake` and `deltalake-core` git pins — and the matching `buoyant_kernel` rev if the kernel moved with it; (3) run `cargo update -p deltalake -p deltalake-core`; (4) re-run the duplicate-dependency gates in §0.8; (5) re-verify every doc-referenced API surface against the new checkout before restamping this document.
+Pin-refresh procedure when moving the baseline forward: (1) choose the new delta-rs rev; (2) update `rev = "…"` in the `deltalake` / `deltalake-core` git pins; (3) re-resolve the released `buoyant_kernel` and `buoyant_kernel_engine` 0.25.x dependencies selected by that delta-rs revision rather than carrying a separate kernel git SHA; (4) run `cargo update -p deltalake -p deltalake-core`; (5) re-run the duplicate-dependency gates in §0.8; (6) re-verify every doc-referenced API surface against the new checkout before restamping this document.
 
 The pinned-rev workspace baseline is:
 
 ```toml
-# deltalake 1.0.0 @ rev 35cfed45 workspace-level compatibility anchor
+# deltalake 1.0.0 @ rev 9f922319 workspace-level compatibility anchor
 
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 edition = "2024"
 
 arrow = "58"        # resolves to 58.3.0 alongside DataFusion 54
@@ -29,11 +29,12 @@ datafusion-proto = "54.0.0"
 object_store = "0.13.2"
 tokio = "1"
 
-# Delta kernel: packaged as buoyant_kernel (0.24.0 line), pinned by git rev
-delta_kernel = { package = "buoyant_kernel", git = "https://github.com/buoyant-data/delta-kernel-rs", rev = "393fbf662f56c4bb04445e1d36805a33e32b8fbc", features = ["arrow-58", "internal-api"] }
+# Delta kernel: released 0.25.x crates; default engine is now a separate package.
+delta_kernel = { package = "buoyant_kernel", version = "0.25.0,<0.25.100", features = ["arrow-58", "internal-api"] }
+delta_kernel_default_engine = { package = "buoyant_kernel_engine", version = "0.25.0,<0.25.100", features = ["arrow-58", "rustls"], default-features = false }
 ```
 
-This is not optional metadata: the rev’s root `Cargo.toml` sets `rust-version = "1.91.1"`, `edition = "2024"`, Arrow-family crates at `58`, `parquet = "58"`, `object_store = "0.13.2"`, and DataFusion-family crates at `54.0.0`; the Delta kernel dependency is the `buoyant_kernel` package (0.24.0 line) pinned by git rev with features `arrow-58` + `internal-api`; the repository’s `rust-toolchain.toml` also pins toolchain channel `1.91.1` with `rustfmt` and `clippy`. ([GitHub][2])
+This is not optional metadata: the rev’s root `Cargo.toml` sets `rust-version = "1.94.1"`, `edition = "2024"`, Arrow-family crates at `58`, `parquet = "58"`, `object_store = "0.13.2"`, and DataFusion-family crates at `54.0.0`. The Delta kernel is now the released `buoyant_kernel` 0.25.x line with `arrow-58` + `internal-api`, while its default engine is split into released `buoyant_kernel_engine` 0.25.x; the repository’s `rust-toolchain.toml` pins channel `1.94.1` with `rustfmt` and `clippy`. The Rust floor was raised from 1.91.1 after upstream AWS crates increased their MSRV. ([GitHub][2])
 
 **Agent rule:** do not generate examples using older DataFusion APIs, older Arrow constructors, or older `object_store` registration patterns without explicitly marking them as legacy.
 
@@ -47,7 +48,7 @@ Use when loading tables, inspecting schema/history/files, and writing Arrow batc
 
 ```toml
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217" }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 url = "2"
 tracing = "0.1"
@@ -61,7 +62,7 @@ Use for a codebase where Delta tables are registered as DataFusion table provide
 
 ```toml
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion"] }
 
 # Align with the delta-rs 1.0.0 pinned-rev workspace.
 datafusion = "=54.0.0"
@@ -82,7 +83,7 @@ The `datafusion` feature in `deltalake-core` gates optional dependencies on `dat
 
 ```toml
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -105,7 +106,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dependencies]
 deltalake = {
   git = "https://github.com/delta-io/delta-rs.git",
-  rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217",
+  rev = "9f9223197469897ef05ae4369eb4fd1390174e65",
   features = [
     "datafusion",
     "s3",
@@ -140,7 +141,7 @@ The public docs repeatedly describe the `deltalake` crate as a **meta-package sh
 
 ### Dependency shape
 
-At the pinned rev (`35cfed45…`), the wrapper crate is named `deltalake`, version `1.0.0`, and depends on `deltalake-core` plus optional backend/catalog crates including `deltalake-aws`, `deltalake-azure`, `deltalake-gcp`, `deltalake-hdfs`, `deltalake-lakefs`, `deltalake-opendal`, `deltalake-catalog-glue`, and `deltalake-catalog-unity`. ([GitHub][5])
+At the pinned rev (`9f922319…`), the wrapper crate is named `deltalake`, version `1.0.0`, and depends on `deltalake-core` plus optional backend/catalog crates including `deltalake-aws`, `deltalake-azure`, `deltalake-gcp`, `deltalake-hdfs`, `deltalake-lakefs`, `deltalake-opendal`, `deltalake-catalog-glue`, and `deltalake-catalog-unity`. ([GitHub][5])
 
 Application import posture:
 
@@ -172,7 +173,7 @@ When documenting syntax, write against `deltalake` public exports first. Only me
 
 ```toml
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion", "s3"] }
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
 parquet = "=58.3.0"
@@ -185,7 +186,7 @@ Use exact pins for documentation examples, CI golden tests, and generated code t
 
 ```toml
 [workspace.dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
 arrow-array = "=58.3.0"
@@ -235,14 +236,14 @@ Action:
 
 ## 0.5 Rust edition and MSRV contract
 
-The repository root at the pinned rev declares `edition = "2024"` and `rust-version = "1.91.1"`; `rust-toolchain.toml` pins `channel = "1.91.1"` and includes `rustfmt` and `clippy` — both unchanged from the `rust-v0.32.3` tag. ([GitHub][2])
+The repository root at the pinned rev declares `edition = "2024"` and `rust-version = "1.94.1"`; `rust-toolchain.toml` pins `channel = "1.94.1"` and includes `rustfmt` and `clippy`. This is a post-baseline MSRV increase: commit `e8072a63…` raised the workspace/toolchain from 1.91.1 to 1.94.1 because the AWS dependency line raised its MSRV. ([GitHub][2])
 
 ### Required repository files
 
 ```toml
 # rust-toolchain.toml
 [toolchain]
-channel = "1.91.1"
+channel = "1.94.1"
 components = ["rustfmt", "clippy"]
 ```
 
@@ -250,16 +251,16 @@ components = ["rustfmt", "clippy"]
 # Cargo.toml
 [package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 ```
 
 ### CI baseline
 
 ```bash
 rustup show
-cargo +1.91.1 fmt --all -- --check
-cargo +1.91.1 clippy --workspace --all-targets --all-features -- -D warnings
-cargo +1.91.1 test --workspace --all-features
+cargo +1.94.1 fmt --all -- --check
+cargo +1.94.1 clippy --workspace --all-targets --all-features -- -D warnings
+cargo +1.94.1 test --workspace --all-features
 ```
 
 ### Agent rule
@@ -297,7 +298,7 @@ The wrapper’s Cargo file documents that many wrapper features are reflected in
 
 ### Core crate feature map
 
-`deltalake-core` 1.0.0 at the pinned rev exposes the same core feature set as 0.32.x: `datafusion`, `datafusion-ext`, `json`, `python`, `native-tls`, `rustls`, `cloud`, `delta-cache`, `nanosecond-timestamps`, and `integration_test`; the `datafusion` feature pulls optional DataFusion crates, `json` maps to `parquet/json`, `python` maps to `arrow/pyarrow`, TLS maps to delta-kernel default engines, and `delta-cache` enables `foyer`, `tempfile`, and `url/serde`. ([GitHub][4])
+`deltalake-core` 1.0.0 at the pinned rev retains the same public core feature names as the earlier 0.32.x line: `datafusion`, `datafusion-ext`, `json`, `python`, `native-tls`, `rustls`, `cloud`, `delta-cache`, `nanosecond-timestamps`, and `integration_test`. The plumbing changed with kernel 0.25: `native-tls` / `rustls` now forward to the separate `delta_kernel_default_engine` package rather than feature names embedded in `delta_kernel`; `datafusion` still pulls the optional DataFusion crates, `json` maps to `parquet/json`, `python` maps to `arrow/pyarrow`, and `delta-cache` enables `foyer`, `tempfile`, and `url/serde`. ([GitHub][4])
 
 ---
 
@@ -306,7 +307,7 @@ The wrapper’s Cargo file documents that many wrapper features are reflected in
 ### 0.7.1 Minimal local Delta table tooling
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217" }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65" }
 ```
 
 Use for:
@@ -334,7 +335,7 @@ cloud object-store access
 ### 0.7.2 DataFusion-native service
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion"] }
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
 parquet = "=58.3.0"
@@ -358,7 +359,7 @@ Delta Lake’s DataFusion integration docs state that Delta Lake works with the 
 ### 0.7.3 S3 + DataFusion
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion", "s3"] }
 ```
 
 Use for:
@@ -374,7 +375,7 @@ transaction-log/object-store integration
 ### 0.7.4 Native TLS S3
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["datafusion", "s3-native-tls"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["datafusion", "s3-native-tls"] }
 ```
 
 Use for:
@@ -388,7 +389,7 @@ native OS certificate store requirements
 ### 0.7.5 Azure
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion", "azure"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion", "azure"] }
 ```
 
 Use for:
@@ -404,7 +405,7 @@ The project feature/support table lists Azure Blob, ADLS Gen2, and Microsoft One
 ### 0.7.6 GCS
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion", "gcs"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion", "gcs"] }
 ```
 
 Use for:
@@ -420,7 +421,7 @@ The project support table lists Google Cloud Storage as a Rust-supported storage
 ### 0.7.7 Glue catalog
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion", "s3", "glue"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion", "s3", "glue"] }
 ```
 
 Use for:
@@ -434,7 +435,7 @@ S3 table storage + Glue metadata
 ### 0.7.8 Unity Catalog experimental
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion", "unity-experimental"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion", "unity-experimental"] }
 ```
 
 Use for:
@@ -553,7 +554,7 @@ Do not:
 
 ### 0.9.4 Nanosecond timestamps
 
-`nanosecond-timestamps` is explicitly feature-gated and described in the core Cargo file as experimental support for a nanosecond timestamp primitive type (PR #4370). At the pinned rev the wrapper feature forwards `deltalake-core/nanosecond-timestamps`, which forwards `delta_kernel/nanosecond-timestamps`; when enabled, the write path adds a `check_can_write_timestamp_nanos` protocol gate and `TableFeature::TimestampNanos` joins the supported reader/writer feature sets. ([GitHub][4])
+`nanosecond-timestamps` is explicitly feature-gated and remains experimental. At the pinned rev the wrapper feature forwards `deltalake-core/nanosecond-timestamps`, which forwards `delta_kernel/nanosecond-timestamps`; when enabled, the write path gates on `TableFeature::TimestampNanos`. The current 0.25-kernel line additionally carries both nanosecond logical variants: timezone-aware `TimestampNanos` and timezone-less **`TimestampNanosNtz`**, which maps to Arrow `Timestamp(Nanosecond, None)` and uses the same `timestampNanos` Delta table feature. ([GitHub][4])
 
 Documentation posture:
 
@@ -589,11 +590,12 @@ Treat variant as new/high-risk:
 
 | Layer               |                        Target version | Reason                                         |
 | ------------------- | -------------------------------------: | ---------------------------------------------- |
-| `deltalake`         | `1.0.0` @ git rev `35cfed45…` (pre-release pin) | public app crate                       |
+| `deltalake`         | `1.0.0` @ git rev `9f922319…` (pre-release pin) | public app crate                       |
 | `deltalake-core`    |                     `1.0.0` (same rev) | implementation crate behind wrapper            |
-| `delta_kernel`      | `buoyant_kernel` `0.24.0` @ rev `393fbf6…` (`arrow-58` + `internal-api`) | Delta kernel implementation |
+| `delta_kernel`      | `buoyant_kernel` `0.25.x` (`>=0.25.0,<0.25.100`; `arrow-58` + `internal-api`) | Delta kernel implementation |
+| kernel default engine | `buoyant_kernel_engine` `0.25.x` (`>=0.25.0,<0.25.100`; `arrow-58`) | filesystem/JSON/Parquet/default-engine implementation |
 | Rust edition        |                                 `2024` | workspace edition                              |
-| Rust toolchain/MSRV |                               `1.91.1` | workspace/toolchain pin                        |
+| Rust toolchain/MSRV |                               `1.94.1` | workspace/toolchain pin                        |
 | Arrow               |            `58` (resolves to `58.3.0`) | Delta kernel + DataFusion shared memory format |
 | Parquet             |            `58` (resolves to `58.3.0`) | Delta data-file writer/reader compatibility    |
 | DataFusion          |                               `54.0.0` | query/planning/expression engine               |
@@ -617,7 +619,7 @@ deltalake = "1.0"   # floating crates.io range cannot express the pre-release pi
 Prefer:
 
 ```toml
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", features = ["datafusion"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", features = ["datafusion"] }
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
 parquet = "=58.3.0"
@@ -657,7 +659,7 @@ delta-rs-doc-tests/
 
 ```toml
 [toolchain]
-channel = "1.91.1"
+channel = "1.94.1"
 components = ["rustfmt", "clippy"]
 ```
 
@@ -675,10 +677,10 @@ members = [
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 
 [workspace.dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion"] }
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
 arrow-array = "=58.3.0"
@@ -715,10 +717,10 @@ fn assert_type_surface() {
 ### CI
 
 ```bash
-cargo +1.91.1 fmt --all -- --check
-cargo +1.91.1 clippy --workspace --all-targets --all-features -- -D warnings
-cargo +1.91.1 test --workspace --all-features
-cargo +1.91.1 tree -d
+cargo +1.94.1 fmt --all -- --check
+cargo +1.94.1 clippy --workspace --all-targets --all-features -- -D warnings
+cargo +1.94.1 test --workspace --all-features
+cargo +1.94.1 tree -d
 ```
 
 ---
@@ -729,10 +731,10 @@ Every subsequent deep dive should start with:
 
 ```text
 Version target:
-  deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+  deltalake: 1.0.0 (git rev 9f922319, pre-release)
   deltalake-core: 1.0.0 (same git rev)
   Rust edition: 2024
-  Rust toolchain/MSRV: 1.91.1
+  Rust toolchain/MSRV: 1.94.1
   Arrow: 58
   Parquet: 58
   DataFusion: 54.0.0
@@ -747,9 +749,9 @@ For your codebase, default banner:
 
 ```text
 Version target:
-  deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+  deltalake: 1.0.0 (git rev 9f922319, pre-release)
   Rust edition: 2024
-  Rust toolchain/MSRV: 1.91.1
+  Rust toolchain/MSRV: 1.94.1
   Arrow: 58
   Parquet: 58
   DataFusion: 54.0.0
@@ -849,34 +851,43 @@ Removed / deprecated at the pinned rev:
 
 ```toml
 [workspace.dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = [
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = [
     "rustls",
     "datafusion",
     "s3",
     "gcs",
     "azure",
 ] }
-deltalake-core = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false }
-delta_kernel = { package = "buoyant_kernel", git = "https://github.com/buoyant-data/delta-kernel-rs", rev = "393fbf662f56c4bb04445e1d36805a33e32b8fbc", default-features = false, features = [
+deltalake-core = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false }
+
+# Only add direct kernel dependencies if application code intentionally consumes
+# kernel APIs. delta-rs itself already selects these released 0.25.x crates.
+delta_kernel = { package = "buoyant_kernel", version = "0.25.0,<0.25.100", default-features = false, features = [
     "arrow-58",
     "internal-api",
+] }
+delta_kernel_default_engine = { package = "buoyant_kernel_engine", version = "0.25.0,<0.25.100", default-features = false, features = [
+    "arrow-58",
+    "rustls",
 ] }
 ```
 
 There are no formal 1.0.0 release notes; the `CHANGELOG.md` at the rev is the change record (§0.1), and the eventual tagged release may add changes beyond this rev — re-verify on pin refresh.
 
-### Kernel identity: `buoyant_kernel` 0.24.0
+### Kernel identity: released `buoyant_kernel` / `buoyant_kernel_engine` 0.25.x
 
-The Delta kernel underneath `deltalake-core` is the `delta_kernel` crate **packaged as `buoyant_kernel`** (version `0.24.0`), consumed from the `buoyant-data/delta-kernel-rs` repository at rev `393fbf662f56c4bb04445e1d36805a33e32b8fbc` with features `arrow-58` + `internal-api`. The delta-rs CHANGELOG records the adoption path (PRs #4416, #4445, #4453 — “adopt the released buoyant_kernel version”). Practical consequences:
+The Delta kernel underneath `deltalake-core` is the `delta_kernel` crate **packaged as `buoyant_kernel` 0.25.x**, now consumed from a released crate constraint (`>=0.25.0,<0.25.100`) rather than a git SHA. Kernel 0.25 also split the default engine into the separate **`buoyant_kernel_engine` 0.25.x** package. `deltalake-core` depends on both: the kernel carries `arrow-58` + `internal-api`, while the default engine supplies the filesystem, JSON, Parquet, and Tokio execution implementations and the selected TLS feature. Practical consequences:
 
 ```text
-- Cargo.lock shows `buoyant_kernel 0.24.0`, not `delta_kernel` — this is expected.
+- Cargo.lock shows `buoyant_kernel` and `buoyant_kernel_engine`; this is expected.
+- A pure deltalake application normally should NOT add either crate directly;
+  let the exact delta-rs git pin and Cargo.lock select the compatible 0.25.x pair.
 - The kernel owns snapshot construction, log replay, checkpoint writing (§8.25),
   and per-operation table-feature validation (§11.27).
-- The `arrow-58` kernel feature is what ties the whole stack to Arrow 58.x;
-  do not enable a different kernel arrow feature.
-- `internal-api` is required by deltalake-core; it exposes kernel internals and
-  carries no cross-rev stability promise — pin kernel and delta-rs revs together.
+- The `arrow-58` kernel/default-engine features tie the stack to Arrow 58.x;
+  do not select a different kernel Arrow feature.
+- `internal-api` remains an implementation-facing surface without a cross-rev
+  stability promise; isolate any direct use behind application-owned adapters.
 ```
 
 ### Cross-version behavior notes carried by this baseline
@@ -889,14 +900,51 @@ The Delta kernel underneath `deltalake-core` is the `delta_kernel` crate **packa
 - DeltaScan stats loading is selective/lazy at the pinned rev (§12.33).
 ```
 
+
+
+## 0.16 Delta from the prior documentation pin (`35cfed45…`) to `9f922319…`
+
+The current target is **20 commits ahead** of the previous reference baseline. The dependency family deliberately stays on DataFusion 54 / Arrow 58 / Parquet 58 / `object_store` 0.13.2, so this is a stabilization refresh rather than an ecosystem-major migration. The material Rust-side changes are:
+
+| Area | Latest-pin change | Practical significance |
+|---|---|---|
+| Snapshot replay | explicit lazy/eager materialization modes; capability-aware active-add replay | lower activation memory and safer on-demand file/stat replay |
+| Snapshot cache identity | cache keyed/validated against table root, version, checkpoint, protocol, metadata | stale or cross-snapshot materialized file state is rejected |
+| Snapshot serde | pre-identity cache compatibility + identityless-cache rejection | safer restart/serialization boundaries |
+| Delta kernel | `buoyant_kernel` upgraded to released 0.25.x and default engine split to `buoyant_kernel_engine` | removes the second unpublished kernel git pin and clarifies engine ownership |
+| DataFusion scan | nested physical nullability adapter | fixes Spark-written nested-schema `OPTIMIZE`/scan failures |
+| Partition mapping | nested fields no longer compared to top-level partition columns | fixes latest compaction/schema-mapping edge case |
+| Protocol features | `V2Checkpoint` accepted as reader/writer feature | broader protocol compatibility |
+| CDF | prefers `inCommitTimestamp` when present | more correct timestamp-range behavior |
+| Nanosecond types | adds timezone-less `TimestampNanosNtz` under the feature gate | complete ns timestamp/NTZ pairing |
+| Delta action paths | URI-encode spaces while preserving path/Hive delimiters | correct log-path serialization and Spark round trips |
+| Toolchain | workspace/MSRV 1.91.1 -> **1.94.1** | repository and CI toolchain update required |
+| Python packaging | explicit source distribution release workflow | no effect on pure-Rust API/design |
+
+### Update recommendation embedded in this reference
+
+Use the exact SHA, commit `Cargo.lock`, and compile the complete workspace on Rust 1.94.1. Do not float on `main`. Continue to exact-pin DataFusion/Arrow/Parquet/ObjectStore at the application workspace boundary to prevent type-universe skew.
+
+### Known compatibility boundary that did **not** move
+
+This revision still uses Arrow/Parquet 58 because DataFusion 54 is the compatibility anchor. Do not independently move Parquet to 59 in an application workspace merely to pick up newer Parquet internals; that would break the intentionally unified DataFusion/Arrow/Delta dependency universe. Track such upgrades as a future coordinated stack migration.
+
+Primary upstream evidence:
+
+- latest protected `main`: https://github.com/delta-io/delta-rs/commit/9f9223197469897ef05ae4369eb4fd1390174e65
+- prior-to-current comparison: https://github.com/delta-io/delta-rs/compare/35cfed4545f41c2f483706d29670f7cc2fe7e217...9f9223197469897ef05ae4369eb4fd1390174e65
+- root dependency baseline: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/Cargo.toml
+- snapshot implementation: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/src/kernel/snapshot/mod.rs
+- protocol feature checker: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/src/kernel/transaction/protocol.rs
+
 [1]: https://github.com/delta-io/delta-rs/releases "Releases · delta-io/delta-rs · GitHub"
-[2]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/Cargo.toml "delta-rs/Cargo.toml at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[2]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/Cargo.toml "delta-rs/Cargo.toml at rev 9f922319 · delta-io/delta-rs · GitHub"
 [3]: https://docs.rs/crate/deltalake/latest/features "deltalake - Docs.rs (crates.io latest; the 1.0.0 pre-release rev is not yet published to docs.rs)"
-[4]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/core/Cargo.toml "delta-rs/crates/core/Cargo.toml at rev 35cfed45 · delta-io/delta-rs · GitHub"
-[5]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/deltalake/Cargo.toml "delta-rs/crates/deltalake/Cargo.toml at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[4]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/Cargo.toml "delta-rs/crates/core/Cargo.toml at rev 9f922319 · delta-io/delta-rs · GitHub"
+[5]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/deltalake/Cargo.toml "delta-rs/crates/deltalake/Cargo.toml at rev 9f922319 · delta-io/delta-rs · GitHub"
 [6]: https://docs.rs/deltalake/latest/deltalake/ "deltalake - Rust"
 [7]: https://delta-io.github.io/delta-rs/integrations/delta-lake-datafusion/ "DataFusion - Delta Lake Documentation"
-[8]: https://github.com/delta-io/delta-rs/tree/35cfed4545f41c2f483706d29670f7cc2fe7e217 "GitHub - delta-io/delta-rs at rev 35cfed45 · GitHub"
+[8]: https://github.com/delta-io/delta-rs/tree/9f9223197469897ef05ae4369eb4fd1390174e65 "GitHub - delta-io/delta-rs at rev 9f922319 · GitHub"
 [9]: https://docs.rs/crate/deltalake/latest "deltalake - Docs.rs (crates.io latest; the 1.0.0 pre-release rev is not yet published to docs.rs)"
 
 
@@ -905,9 +953,9 @@ The Delta kernel underneath `deltalake-core` is the `delta_kernel` crate **packa
 Version target for this section:
 
 ```text id="57mg81"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -917,7 +965,7 @@ Default TLS: rustls
 Primary service profile: DataFusion + Arrow + S3-compatible object storage
 ```
 
-The pinned 1.0.0 rev (`35cfed45…`) pins Rust `1.91.1`, edition `2024`, Arrow `58` (resolved `58.3.0`), Parquet `58`, DataFusion `54.0.0`, `object_store 0.13.2`, and Tokio `1`; production documentation and generated code should align to that dependency universe to avoid Arrow/DataFusion type-identity skew. ([GitHub][1])
+The pinned 1.0.0 rev (`9f922319…`) pins Rust `1.94.1`, edition `2024`, Arrow `58` (resolved `58.3.0`), Parquet `58`, DataFusion `54.0.0`, `object_store 0.13.2`, and Tokio `1`; production documentation and generated code should align to that dependency universe to avoid Arrow/DataFusion type-identity skew. ([GitHub][1])
 
 ---
 
@@ -946,10 +994,10 @@ The `object_store` crate is the storage substrate underneath much of this stack:
 ```toml id="66mev3"
 [package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217" }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 url = "2"
 anyhow = "1"
@@ -972,10 +1020,10 @@ basic non-cloud development fixtures
 ```toml id="a3mxn5"
 [package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -998,10 +1046,10 @@ Use this for local/object-store-independent service code that registers Delta ta
 ```toml id="ospw9j"
 [package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -1023,22 +1071,22 @@ The `s3` feature enables `deltalake-aws/rustls` plus `rustls`; `s3-native-tls` e
 
 ```toml id="8tw4xl"
 # AWS S3
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 # AWS S3 with native TLS
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["native-tls", "datafusion", "s3-native-tls"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["native-tls", "datafusion", "s3-native-tls"] }
 
 # Azure ADLS / Blob / OneLake-style endpoints
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "azure"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "azure"] }
 
 # Google Cloud Storage
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "gcs"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "gcs"] }
 
 # AWS Glue catalog + S3 data
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3", "glue"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3", "glue"] }
 
 # Experimental Unity Catalog
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "unity-experimental"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "unity-experimental"] }
 ```
 
 Published feature flags include `azure`, `datafusion`, `datafusion-ext`, `gcs`, `glue`, `hdfs`, `json`, `lakefs`, `nanosecond-timestamps`, `native-tls`, `python`, `s3`, `s3-native-tls`, and `unity-experimental`; default is `rustls`. ([Docs.rs][4])
@@ -1218,7 +1266,7 @@ Storage options should be treated as configuration, not business logic. Never sc
 ### 2.6.1 S3 feature gate
 
 ```toml id="njic4z"
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 ```
 
 Delta-rs has native S3 backend support, but credentials must be configured correctly; the docs explicitly warn Python users not to assume boto3 credential behavior. Supported credential paths include storage options, environment variables, EC2 metadata, AWS profiles, and web identity. ([Delta IO][7])
@@ -1367,7 +1415,7 @@ The locking docs expose DynamoDB override keys such as `AWS_ENDPOINT_URL_DYNAMOD
 ### 2.8.1 Azure feature gate
 
 ```toml id="3k4855"
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "azure"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "azure"] }
 ```
 
 Delta-rs documents native support for Microsoft Azure Data Lake Storage as an object-storage backend; explicit storage options are forwarded to the object-store library. ([Delta IO][10])
@@ -1434,7 +1482,7 @@ avoid:
 ### 2.9.1 GCS feature gate
 
 ```toml id="bs6qk1"
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "gcs"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "gcs"] }
 ```
 
 With the `gcs` feature enabled through the `deltalake` meta-crate, GCS support is automatically registered; manual `deltalake_gcp::register_handlers` is described as the legacy/deprecated path for application users of the meta-crate. ([Delta IO][11])
@@ -1486,7 +1534,7 @@ Required GCS permissions listed by the docs include `storage.objects.create`, `s
 ### 2.10.1 Default: `rustls`
 
 ```toml id="zqf4lb"
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 ```
 
 Use `rustls` for:
@@ -1502,7 +1550,7 @@ S3/GCS/Azure services without enterprise TLS interception
 ### 2.10.2 Native TLS
 
 ```toml id="q53wxh"
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["native-tls", "datafusion", "s3-native-tls"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["native-tls", "datafusion", "s3-native-tls"] }
 ```
 
 Use `native-tls` for:
@@ -1602,7 +1650,7 @@ avoid:
 ### 2.12.1 Rustls-based image
 
 ```dockerfile id="3iy1br"
-ARG RUST_VERSION=1.91.1
+ARG RUST_VERSION=1.94.1
 
 FROM rust:${RUST_VERSION}-bookworm AS builder
 WORKDIR /app
@@ -1879,10 +1927,10 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 
 [workspace.dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
 arrow-array = "=58.3.0"
@@ -1901,10 +1949,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ```bash id="i7ph9j"
 set -euo pipefail
 
-cargo +1.91.1 check --workspace --all-targets --locked
-cargo +1.91.1 test --workspace --all-features --locked
-cargo +1.91.1 clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo +1.91.1 tree -d | tee /tmp/cargo-tree-duplicates.txt
+cargo +1.94.1 check --workspace --all-targets --locked
+cargo +1.94.1 test --workspace --all-features --locked
+cargo +1.94.1 clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo +1.94.1 tree -d | tee /tmp/cargo-tree-duplicates.txt
 
 if grep -E 'arrow|arrow-array|arrow-schema|parquet|datafusion|object_store|deltalake' /tmp/cargo-tree-duplicates.txt; then
   echo "Duplicate lakehouse dependency detected"
@@ -1917,11 +1965,11 @@ fi
 ```toml id="xqlcfd"
 # rust-toolchain.toml
 [toolchain]
-channel = "1.91.1"
+channel = "1.94.1"
 components = ["rustfmt", "clippy"]
 ```
 
-The upstream `rust-toolchain.toml` pins channel `1.91.1` with `rustfmt` and `clippy`. ([GitHub][15])
+The upstream `rust-toolchain.toml` pins channel `1.94.1` with `rustfmt` and `clippy`. ([GitHub][15])
 
 ---
 
@@ -2219,11 +2267,11 @@ Swift, WebHDFS, WebDAV, SFTP) or for test backends. Do not enable opendal-s3
 expecting it to replace the native S3 backend — it registers opendal+s3:// only.
 ```
 
-[1]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/Cargo.toml "delta-rs/Cargo.toml at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[1]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/Cargo.toml "delta-rs/Cargo.toml at rev 9f922319 · delta-io/delta-rs · GitHub"
 [2]: https://docs.rs/deltalake/latest/deltalake/logstore/index.html "deltalake::logstore - Rust"
 [3]: https://docs.rs/object_store/0.13.2/object_store/ "object_store - Rust"
 [4]: https://docs.rs/crate/deltalake/latest/features "deltalake - Docs.rs (crates.io latest; the 1.0.0 pre-release rev is not yet published to docs.rs)"
-[5]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/deltalake/Cargo.toml "delta-rs/crates/deltalake/Cargo.toml at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[5]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/deltalake/Cargo.toml "delta-rs/crates/deltalake/Cargo.toml at rev 9f922319 · delta-io/delta-rs · GitHub"
 [6]: https://docs.rs/deltalake/latest/deltalake/fn.open_table.html "open_table in deltalake - Rust"
 [7]: https://delta-io.github.io/delta-rs/integrations/object-storage/s3/ "AWS S3 Storage Backend - Delta Lake Documentation"
 [8]: https://delta-io.github.io/delta-rs/usage/writing/writing-to-s3-with-locking-provider/ "Writing to S3 with a locking provider - Delta Lake Documentation"
@@ -2233,7 +2281,7 @@ expecting it to replace the native S3 backend — it registers opendal+s3:// onl
 [12]: https://docs.rs/deltalake/latest/deltalake/delta_datafusion/struct.TableProviderBuilder.html "TableProviderBuilder in deltalake::delta_datafusion - Rust"
 [13]: https://docs.rs/deltalake/latest/deltalake/table/struct.DeltaTable.html "DeltaTable in deltalake::table - Rust"
 [14]: https://delta-io.github.io/delta-rs/integrations/object-storage/special_configuration/ "Advanced object storage configuration - Delta Lake Documentation"
-[15]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/rust-toolchain.toml "delta-rs/rust-toolchain.toml at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[15]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/rust-toolchain.toml "delta-rs/rust-toolchain.toml at rev 9f922319 · delta-io/delta-rs · GitHub"
 
 
 # 3. Table loading, snapshots, state, and time travel — Rust `deltalake`
@@ -2241,9 +2289,9 @@ expecting it to replace the native S3 backend — it registers opendal+s3:// onl
 Version target:
 
 ```text id="g8t7vn"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -2306,7 +2354,7 @@ Loaded datetime T => state describes latest version committed at or before T.
 
 ```toml id="rww7g0"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -2459,7 +2507,7 @@ pub async fn load_metadata_or_protocol_fast(uri: &str) -> anyhow::Result<deltala
 }
 ```
 
-Use `without_files()` only for metadata/protocol/schema-oriented operations where active file enumeration is not needed; it sets `require_files=false` on the builder. ([Docs.rs][3])
+`without_files()` sets `require_files=false` and is now best understood as a **metadata-first / lazy snapshot posture**, not an absolute prohibition on later file-backed reads. At this pin, active-file rows can be replayed on demand by the snapshot/provider path. Use it when avoiding eager file materialization is valuable; account for the fact that the first operation needing active files/statistics may pay that replay cost. ([Docs.rs][3])
 
 ---
 
@@ -3727,6 +3775,42 @@ Design constraints to respect:
 - Commits bypass CommitBuilder and use the kernel Transaction API directly.
 ```
 
+
+
+## 3.28 Lazy snapshot replay, cache identity, and same-version checkpoint refresh (latest pin)
+
+The post-`9f922319` baseline makes the kernel-backed snapshot model more explicit and more defensive. The current source distinguishes two internal materialization modes:
+
+```text
+Snapshot (lazy / require_files=false):
+  protocol + metadata are resident
+  active-file rows are replayed on demand
+  replay can request no stats, raw JSON stats, or parsed stats
+  replayed batches can remain operation-local instead of becoming a resident cache
+
+EagerSnapshot / require_files=true:
+  maintains a materialized active-file cache
+  cache policy records whether raw statistics were preserved
+```
+
+Every materialized file cache now carries a `SnapshotIdentity` covering the table root, Delta version, checkpoint version, protocol, and metadata. A cache is reused only when that identity and the requested stats capability match the live snapshot. Identity-less or mismatched cached state is rejected/ignored and the table state is replayed instead. The serialization compatibility path explicitly distinguishes pre-identity caches so stale state cannot silently become authoritative.
+
+A further subtlety matters for reproducibility: a checkpoint may be written **after** a process has already loaded the same logical Delta version. The current snapshot update path can rebuild that same-version snapshot to adopt the newly available checkpoint. This is a storage/replay optimization only: **the logical Delta version has not changed**. Application snapshot identities should therefore pin the Delta table version, not a particular checkpoint file, unless the application is specifically testing checkpoint encoding.
+
+Operational guidance:
+
+```text
+- Treat delta-rs materialized-file caches as ephemeral implementation state.
+- Do not persist them as an application source of truth across releases.
+- For deterministic reads, pin the table version; checkpoint selection may vary.
+- `without_files()` is now a stronger basis for metadata-first / lazy workflows,
+  but query-serving handles should still follow the public `skip_stats` guidance.
+- Benchmark table-open memory and first-query latency separately: lazy loading can
+  shift work from activation time to the first operation that needs file state.
+```
+
+Primary source: `crates/core/src/kernel/snapshot/mod.rs` at the pinned revision and commits `53d4475a…`, `0b83064c…`, `439583af…`, `95ad71d1…`, and `84fad0b1…`.
+
 [1]: https://docs.rs/deltalake/latest/deltalake/table/struct.DeltaTable.html "DeltaTable in deltalake::table - Rust"
 [2]: https://docs.rs/deltalake/latest/deltalake/fn.open_table.html "open_table in deltalake - Rust"
 [3]: https://docs.rs/deltalake/latest/deltalake/struct.DeltaTableBuilder.html "DeltaTableBuilder in deltalake - Rust"
@@ -3739,9 +3823,9 @@ Design constraints to respect:
 Version target:
 
 ```text id="6ydet6"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -3808,7 +3892,7 @@ Parquet schema is the physical file contract.
 
 ```toml id="yuubak"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -5115,6 +5199,23 @@ Production invariant:
 Every table should have a versioned schema contract: Delta StructType, Arrow Schema fixture, partition columns, field metadata policy, table properties, compatibility matrix, and golden round-trip tests.
 ```
 
+
+
+## 4.37 Nested-schema physical/nullability interoperability hardening (latest pin)
+
+The latest pin adds Delta-aware DataFusion schema adaptation for a real Spark interoperability edge case: Spark may write nested Parquet fields as physically nullable even when the Delta logical schema declares the nested field non-nullable. The Delta scan path now relaxes **nested** physical-read nullability for structs, list variants, maps, dictionaries, and fixed-size lists, delegates expression adaptation to DataFusion, and then restores/validates the strict logical Delta result schema above the Parquet scan. Top-level required-column behavior remains strict, and map entries/keys retain Arrow's non-nullability invariants.
+
+A second fix at the current tip prevents a nested field whose **name happens to equal a top-level partition column** from being treated as a partition-field candidate while mapping physical types. This fixes an `OPTIMIZE`/compaction failure mode where a nested string could otherwise be dictionary-encoded as though it were a partition column.
+
+For schema-governed systems, add two golden tests:
+
+```text
+1. Delta nested field non-nullable; physical Parquet nested field optional -> read/OPTIMIZE succeeds, logical schema stays strict.
+2. Top-level partition column `date` plus nested `properties.date` -> read/OPTIMIZE preserves the nested field's ordinary data type and values.
+```
+
+These are compatibility fixes, not permission to weaken the declared Delta schema. Keep the Delta logical nullability contract authoritative.
+
 [1]: https://docs.rs/delta_kernel/latest/delta_kernel/schema/struct.StructType.html "StructType in delta_kernel::schema - Rust"
 [2]: https://docs.rs/deltalake/latest/deltalake/table/state/struct.DeltaTableState.html "DeltaTableState in deltalake::table::state - Rust"
 [3]: https://docs.rs/deltalake/latest/deltalake/enum.DataType.html "DataType in deltalake - Rust"
@@ -5142,9 +5243,9 @@ Proceeding with **topic 5**. I am treating the newer write-path request as super
 Version target:
 
 ```text id="rz2vp8"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -5207,10 +5308,10 @@ Avoid:
 ```toml id="de6vv1"
 [package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -6540,11 +6641,28 @@ Current API invariant:
 In deltalake 1.0.0 (pinned rev), write builders produce a new DeltaTable, not a (DeltaTable, metrics) tuple; DeltaOps is compatibility/deprecated style, and DeltaTable::write is the canonical service API.
 ```
 
+
+
+## 5.29 Delta action-path URI encoding hardening (latest pin)
+
+Delta `Add`, `Remove`, and CDF action paths are URI paths in the transaction log. The current pin fixes serialization so a literal space is percent-encoded as `%20`, while path hierarchy `/` and Hive-style `=` delimiters remain literal. Existing logs containing legacy unencoded spaces remain readable, and already percent-encoded Spark-written paths round-trip without double-encoding.
+
+Application rule:
+
+```text
+- Never hand-assemble Delta action path strings for transaction-log writes.
+- Treat action paths as Delta/object-store URI identifiers and let delta-rs serialize them.
+- Do not decode/re-encode Add/Remove paths merely for display and then reuse the display value as identity.
+- Test filenames/partition values containing spaces and percent escapes in any custom maintenance tooling.
+```
+
+This change is especially relevant to custom log/maintenance tooling; normal `DeltaTable::write` users receive the fix automatically.
+
 [1]: https://docs.rs/deltalake/latest/deltalake/struct.DeltaOps.html "DeltaOps in deltalake - Rust"
 [2]: https://docs.rs/deltalake/latest/deltalake/operations/write/struct.WriteBuilder.html "WriteBuilder in deltalake::operations::write - Rust"
 [3]: https://docs.rs/deltalake/latest/deltalake/ "deltalake - Rust"
 [4]: https://docs.rs/deltalake/latest/deltalake/table/struct.DeltaTable.html "DeltaTable in deltalake::table - Rust"
-[5]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/core/src/protocol/mod.rs "delta-rs/crates/core/src/protocol/mod.rs at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[5]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/src/protocol/mod.rs "delta-rs/crates/core/src/protocol/mod.rs at rev 9f922319 · delta-io/delta-rs · GitHub"
 [6]: https://delta-io.github.io/delta-rs/usage/appending-overwriting-delta-lake-table/ "Append/overwrite tables - Delta Lake Documentation"
 [7]: https://docs.rs/deltalake/0.32.3/deltalake/operations/write/enum.SchemaMode.html "SchemaMode in deltalake::operations::write - Rust (0.32.3 docs.rs page; surface unchanged at the 1.0.0 pinned rev)"
 [8]: https://delta-io.github.io/delta-rs/usage/writing/ "Writing Delta Tables - Delta Lake Documentation"
@@ -6556,9 +6674,9 @@ In deltalake 1.0.0 (pinned rev), write builders produce a new DeltaTable, not a 
 Version target:
 
 ```text id="2eld8j"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -6600,7 +6718,7 @@ SessionContext:
 
 ```toml id="bdzgd9"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -7762,6 +7880,16 @@ Semantics verified in source at the pinned rev:
 
 Use cases: partition-scoped maintenance reads, file-level backfills/repairs, targeted quality scans over known-bad files, and deterministic re-reads of an exact file set under `MissingSelectedFilePolicy::Error`.
 
+
+
+## 6.36 Delta-aware physical-expression/schema adaptation at the latest pin
+
+The current kernel-backed provider wraps DataFusion's default `PhysicalExprAdapterFactory` with a Delta-specific adapter for nested nullability. This is a correctness/interoperability change rather than a new public query method: predicates and projections can now be planned against Spark-written files whose nested Parquet nullability is looser than the logical Delta contract, while the strict logical result schema is restored after file adaptation.
+
+The latest commit also excludes nested fields from top-level partition-column mapping. Partition columns are top-level Delta columns; a nested field sharing the same name is not a partition candidate.
+
+Agent rule: do not reproduce this adaptation in application code. Register the Delta `TableProvider` and allow delta-rs to own the logical-to-physical schema bridge. Custom raw-Parquet providers over a Delta table path would bypass these fixes.
+
 [1]: https://docs.rs/deltalake/latest/deltalake/delta_datafusion/index.html "deltalake::delta_datafusion - Rust"
 [2]: https://docs.rs/datafusion/latest/src/datafusion/lib.rs.html?utm_source=chatgpt.com "datafusion/ lib.rs"
 [3]: https://docs.rs/deltalake/latest/deltalake/table/struct.DeltaTable.html "DeltaTable in deltalake::table - Rust"
@@ -7778,9 +7906,9 @@ Use cases: partition-scoped maintenance reads, file-level backfills/repairs, tar
 Version target:
 
 ```text id="f9q4q4"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -9342,9 +9470,9 @@ A query is only correct when its provider snapshot, session runtime, object-stor
 Version target:
 
 ```text id="2upcmu"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -10568,6 +10696,8 @@ Consequence for the Parquet checkpoint schema (verified in kernel source): the c
 
 Cross-version compatibility posture:
 
+At the latest pin, `TableFeature::V2Checkpoint` is included in delta-rs's supported **reader and writer feature sets**. A table declaring the feature therefore no longer fails the generic protocol checker solely because `v2Checkpoint` is present. This is a compatibility-gate improvement; it should not be read as a promise that every V2 checkpoint authoring/maintenance control is exposed through a new high-level Rust builder.
+
 ```text
 - Modern readers (Spark, delta-rs >= 0.26-era, kernel-based engines) read these
   checkpoints fine: the Delta protocol marks those add fields as required.
@@ -10599,9 +10729,9 @@ Operational guidance: treat checkpoint creation as a protocol-compatibility even
 Version target:
 
 ```text id="q71l1j"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -10636,7 +10766,7 @@ Delta DML is **file-rewrite-based mutable table behavior**, not in-place row mut
 
 ```toml id="43dq1l"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -11967,11 +12097,11 @@ Every DML call must declare predicate, source uniqueness, clause order, session 
 [1]: https://docs.rs/deltalake/latest/deltalake/ "deltalake - Rust"
 [2]: https://docs.rs/deltalake/latest/deltalake/operations/delete/index.html "deltalake::operations::delete - Rust"
 [3]: https://docs.rs/deltalake/latest/deltalake/operations/delete/struct.DeleteBuilder.html "DeleteBuilder in deltalake::operations::delete - Rust"
-[4]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/core/src/operations/delete.rs "delta-rs/crates/core/src/operations/delete.rs at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[4]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/src/operations/delete.rs "delta-rs/crates/core/src/operations/delete.rs at rev 9f922319 · delta-io/delta-rs · GitHub"
 [5]: https://docs.rs/deltalake/0.32.3/deltalake/operations/update/struct.UpdateBuilder.html "UpdateBuilder in deltalake::operations::update - Rust (0.32.3 docs.rs page; surface unchanged at the 1.0.0 pinned rev)"
-[6]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/core/src/operations/update.rs "delta-rs/crates/core/src/operations/update.rs at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[6]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/src/operations/update.rs "delta-rs/crates/core/src/operations/update.rs at rev 9f922319 · delta-io/delta-rs · GitHub"
 [7]: https://docs.rs/deltalake/latest/deltalake/operations/merge/index.html "deltalake::operations::merge - Rust"
-[8]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/core/src/operations/merge/mod.rs "delta-rs/crates/core/src/operations/merge/mod.rs at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[8]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/src/operations/merge/mod.rs "delta-rs/crates/core/src/operations/merge/mod.rs at rev 9f922319 · delta-io/delta-rs · GitHub"
 [9]: https://docs.delta.io/concurrency-control/?utm_source=chatgpt.com "Concurrency control"
 
 
@@ -11980,9 +12110,9 @@ Every DML call must declare predicate, source uniqueness, clause order, session 
 Version target:
 
 ```text id="iu7g8u"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -12029,7 +12159,7 @@ CDF is not “listen to object-store events.” It is a **bounded replay over co
 
 ```toml id="vigink"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -12294,7 +12424,8 @@ _commit_version: Long
   Delta log/table version containing the change
 
 _commit_timestamp: Timestamp
-  commit creation timestamp
+  commit timestamp used by the CDF reader; at this pin, `inCommitTimestamp`
+  is preferred when present, with ordinary `commitInfo.timestamp` as fallback
 ```
 
 `update_preimage` is the value before an update; `update_postimage` is the value after an update. Delta documentation states that CDF reads use the latest table version’s schema by default, with column-mapping caveats. ([Delta Lake][1])
@@ -12310,7 +12441,7 @@ event identity:
   optional row hash
 ```
 
-Do not assume `_commit_timestamp` is unique or monotonic enough for exactly-once ordering by itself. `_commit_version` is the authoritative ordering key.
+Do not assume `_commit_timestamp` is unique or monotonic enough for exactly-once ordering by itself. `_commit_version` is the authoritative ordering key. The current reader understands Delta **in-commit timestamps** for timestamp-range filtering and `_commit_timestamp` projection when they are present; delta-rs still does not rely on that as the consumer checkpoint identity.
 
 ---
 
@@ -12733,7 +12864,7 @@ Rename/drop/change type/nullability:
 
 Column mapping:
   treat as CDF high-risk
-  test against the pinned 1.0.0 rev (35cfed45) specifically
+  test against the pinned 1.0.0 rev (9f922319) specifically
 ```
 
 As of the current open Rust issue, `delta-rs` maintainers note that column mapping is not supported in CDF scans and that an early error was expected but not yet enforced in the reported path. Treat column-mapping + CDF in Rust as unsupported/high-risk until your pinned version proves otherwise in CI. ([GitHub][6])
@@ -13051,13 +13182,31 @@ Production invariant:
 Enable CDF before the changes you need, consume bounded version windows, commit downstream effects before checkpoint advancement, and keep consumer lag inside retention.
 ```
 
+
+
+## 10.29 In-commit timestamp support in CDF reads (latest pin)
+
+The latest pin adds read-side support for Delta **in-commit timestamps (ICT)**. When a `CommitInfo` contains `inCommitTimestamp`, CDF timestamp-range filtering and the emitted `_commit_timestamp` prefer that value; otherwise the reader falls back to the ordinary `CommitInfo.timestamp`. Version filtering remains the stronger reproducibility boundary, and production checkpoints should continue to persist `_commit_version`.
+
+```text
+CDF timestamp precedence:
+  CommitInfo.inCommitTimestamp, when present
+  -> CommitInfo.timestamp
+  -> 0 only for malformed/absent timestamp fallback paths internal to the reader
+
+Consumer checkpoint:
+  continue to use Delta version, not timestamp
+```
+
+The change improves interoperability with tables written by engines that use the ICT protocol behavior. It does not turn timestamp into a unique transaction identity.
+
 [1]: https://docs.delta.io/delta-change-data-feed/ "Change data feed | Delta Lake"
 [2]: https://docs.rs/deltalake/latest/deltalake/table/struct.DeltaTable.html "DeltaTable in deltalake::table - Rust"
 [3]: https://docs.rs/deltalake/latest/deltalake/operations/write/struct.WriteBuilder.html?utm_source=chatgpt.com "WriteBuilder in deltalake::operations::write - Rust"
 [4]: https://docs.rs/deltalake/latest/deltalake/operations/load_cdf/struct.CdfLoadBuilder.html "CdfLoadBuilder in deltalake::operations::load_cdf - Rust"
 [5]: https://delta-io.github.io/delta-rs/usage/read-cdf/ "Reading Change Data - Delta Lake Documentation"
 [6]: https://github.com/delta-io/delta-rs/issues/4474?utm_source=chatgpt.com "[Bug]: cdf scan doesn't raise if column mapping is enabled ..."
-[7]: https://github.com/delta-io/delta-rs/blob/35cfed4545f41c2f483706d29670f7cc2fe7e217/crates/core/src/operations/load_cdf.rs "delta-rs/crates/core/src/operations/load_cdf.rs at rev 35cfed45 · delta-io/delta-rs · GitHub"
+[7]: https://github.com/delta-io/delta-rs/blob/9f9223197469897ef05ae4369eb4fd1390174e65/crates/core/src/operations/load_cdf.rs "delta-rs/crates/core/src/operations/load_cdf.rs at rev 9f922319 · delta-io/delta-rs · GitHub"
 
 
 # 11. Constraints, properties, and governance — Rust `deltalake`
@@ -13065,9 +13214,9 @@ Enable CDF before the changes you need, consume bounded version windows, commit 
 Version target:
 
 ```text id="19aeyr"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -13141,7 +13290,7 @@ Delta constraints make tables reject non-conforming data; the delta-rs constrain
 
 ```toml id="n9ecv0"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -14191,17 +14340,18 @@ Supported sets compiled into the pinned rev (default `datafusion` build):
 
 ```text
 Reader: timestampNtz, deletionVectors, variantType, variantType-preview,
-        columnMapping; (+ timestampNanos with the nanosecond-timestamps feature)
+        v2Checkpoint, columnMapping;
+        (+ timestampNanos with the nanosecond-timestamps feature)
 Writer: appendOnly, timestampNtz, variantType, variantType-preview,
-        changeDataFeed, invariants, checkConstraints, generatedColumns,
-        columnMapping, deletionVectors;
+        v2Checkpoint, changeDataFeed, invariants, checkConstraints,
+        generatedColumns, columnMapping, deletionVectors;
         (+ timestampNanos with the nanosecond-timestamps feature)
 NOT supported for writes (examples): rowTracking, identityColumns,
-        icebergCompat* — a table declaring any of these in writerFeatures
+        typeWidening, icebergCompat* — a table declaring any of these in writerFeatures
         fails can_write_to() even for writes that never touch them.
 ```
 
-Change vs 0.32.x: the checker logic is carried over essentially unchanged; the single delta is that `columnMapping` joined the supported **writer** set at the pinned rev (it was commented out in 0.32.x — see §4.25 for what column-mapped writes still reject). Deletion vectors are supported on both sides — a DV-bearing table does not fail validation.
+Change vs 0.32.x: `columnMapping` is in the supported **writer** set (subject to operation-specific restrictions in §4.25), and the current post-baseline pin additionally recognizes **`V2Checkpoint`** in both reader and writer feature sets. Deletion vectors remain supported on both sides. Recognition of `V2Checkpoint` means the protocol checker no longer rejects a table solely because it declares that feature; it does not by itself imply that every V2-checkpoint creation/maintenance workflow is exposed as a new public Rust API.
 
 Operational posture:
 
@@ -14233,9 +14383,9 @@ Operational posture:
 Version target:
 
 ```text id="3bqgt5"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -14293,7 +14443,7 @@ Partitioning and file skipping are complementary. Partition pruning skips direct
 
 ```toml id="ti73wy"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -15646,10 +15796,18 @@ Practical consequences:
 - Partition columns are excluded from the add-stats schema (PR #4408) — do not
   expect partition columns to appear in stats_parsed; pruning on partition
   values uses partitionValues_parsed, not file stats.
-- None of this changes the DeltaTableConfig::skip_stats contract in §12.12: a
-  table opened with skip_stats=true still has no stats for predicate skipping.
-- Nothing to migrate: no public API changed; re-baseline any performance
-  fixtures that assumed eager full-stats parsing.
+- The public `DeltaTableConfig::skip_stats` contract in §12.12 remains: a
+  normal predicated query using a table instance opened with `skip_stats=true`
+  cannot rely on its file cache for data-skipping statistics and may scan every
+  file. Partition pruning is unaffected.
+- **New at the latest pin:** internal consumers can request a stronger stats
+  capability than the resident cache provides. A lazy snapshot or a
+  stats-free materialized cache can replay active adds with raw/parsed stats
+  for conflict checking or other explicit internal operations without mutating
+  the snapshot's resident cache. Thus `skip_stats` is now a cache/load policy,
+  not a blanket claim that no internal operation can ever replay stats.
+- Nothing in the public query API needs migration; re-baseline performance
+  fixtures that assumed one eager/full-stats materialization model.
 ```
 
 [1]: https://docs.rs/deltalake/latest/deltalake/ "deltalake - Rust"
@@ -15674,9 +15832,9 @@ Practical consequences:
 Version target:
 
 ```text id="yys1h5"
-deltalake: 1.0.0 (git rev 35cfed45, pre-release)
+deltalake: 1.0.0 (git rev 9f922319, pre-release)
 Rust edition: 2024
-Rust toolchain/MSRV: 1.91.1
+Rust toolchain/MSRV: 1.94.1
 Arrow: 58
 Parquet: 58
 DataFusion: 54.0.0
@@ -15731,7 +15889,7 @@ Optimize is a logical Delta transaction that compacts files and increments the t
 
 ```toml id="h1zhgm"
 [dependencies]
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217", default-features = false, features = ["rustls", "datafusion", "s3"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion", "s3"] }
 
 datafusion = "=54.0.0"
 arrow = "=58.3.0"
@@ -17005,6 +17163,17 @@ All SMARTREF Delta mutations enter through `DeltaOperationCommand` and return
 commands and project receipts; runtime-owned execution methods invoke the Delta
 adapter. Direct write, CDF, maintenance, and migration helpers are adapter
 internals or test fixtures, not public mutation authority.
+
+
+
+## 13.29 Latest-pin `OPTIMIZE` interoperability fixes for nested schemas
+
+Two post-baseline fixes materially improve compaction reliability:
+
+1. **Spark-written nested nullability.** `OPTIMIZE` previously could fail during DataFusion planning when a Delta nested field was logically non-nullable but the Spark-written Parquet field was physically optional. The scan now uses a Delta-aware physical-expression adapter that relaxes nested read nullability and restores the strict logical schema after adaptation; actual illegal null values still fail validation.
+2. **Nested field name equals partition column.** The current tip prevents nested struct/list fields from being compared against the table's top-level partition-column list. This avoids accidental partition-style dictionary mapping and the resulting `Expected string, got Dictionary(...)` compaction failure.
+
+Add these cases to maintenance conformance tests even if current production schemas are mostly flat, because CodeFabric-like metadata tables often contain `List`, `Map`, or `Struct` payloads.
 
 [1]: https://docs.rs/deltalake/latest/deltalake/struct.DeltaOps.html "DeltaOps in deltalake - Rust"
 [2]: https://docs.rs/deltalake/latest/deltalake/operations/optimize/index.html "deltalake::operations::optimize - Rust"

@@ -4,7 +4,7 @@ Modeled after the uploaded Cyclopts advanced-doc reference style: an exhaustive 
 
 ## Version / source anchors
 
-This document is pinned to `datafusion` **54.0.0** (released; the workspace anchor); the official DataFusion site describes the core project as an extensible Rust query engine using Apache Arrow, with SQL and DataFrame APIs, CSV/Parquet/JSON/Avro support, a full query planner, and a columnar streaming multi-threaded vectorized execution engine. ([Docs.rs][1])
+This document is pinned to `datafusion` **54.1.0** (released; the workspace anchor); the official DataFusion site describes the core project as an extensible Rust query engine using Apache Arrow, with SQL and DataFrame APIs, CSV/Parquet/JSON/Avro support, a full query planner, and a columnar streaming multi-threaded vectorized execution engine. ([Docs.rs][1])
 
 ---
 
@@ -879,13 +879,13 @@ Style target follows your uploaded advanced-reference pattern.
 
 ## 0.0 Version anchors and documentation stance
 
-Use **version-pinned docs** when writing deployable code. This document is anchored to `datafusion` **54.0.0**, which is released on crates.io and is the version this workspace pins; the official site's upgrade guide for 54.0.0 describes the 53→54 migration surface (trait `Any` supertraits replacing `as_any`, proto decode contexts, coercion changes, and more). Treat official-site prose as useful but potentially ahead of the crates.io/docs.rs release; treat docs.rs for the pinned crate as the highest-confidence call-signature source. ([Docs.rs][1])
+Use **version-pinned docs** when writing deployable code. This document is anchored to `datafusion` **54.1.0**, which is released on crates.io and is the version this workspace pins; the official site's upgrade guide for 54.1.0 describes the 53→54 migration surface (trait `Any` supertraits replacing `as_any`, proto decode contexts, coercion changes, and more). Treat official-site prose as useful but potentially ahead of the crates.io/docs.rs release; treat docs.rs for the pinned crate as the highest-confidence call-signature source. ([Docs.rs][1])
 
 For release hygiene: most Rust users consume DataFusion through `Cargo.toml` / crates.io, but Apache states that official releases are source artifacts, with signatures/checksums available from ASF release infrastructure. Pin exact crate versions in production, verify source releases when supply-chain controls matter, and record the Arrow/DataFusion pair used for schema/batch compatibility. ([Apache DataFusion][2])
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"        # pin; do not use "*" in production
+datafusion = "54.1.0"        # pin; do not use "*" in production
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 ```
@@ -1215,7 +1215,7 @@ async fn main() -> datafusion::error::Result<()> {
 }
 ```
 
-Do not snapshot physical plan formatting as a stable semantic contract unless your test intentionally targets the exact deployed version. DataFusion’s 54.0.0 upgrade guide, for example, notes physical `EXPLAIN` formatting changes and warns that exact physical-plan diagnostic strings may need updates. ([Apache DataFusion][12])
+Do not snapshot physical plan formatting as a stable semantic contract unless your test intentionally targets the exact deployed version. DataFusion’s 54.1.0 upgrade guide, for example, notes physical `EXPLAIN` formatting changes and warns that exact physical-plan diagnostic strings may need updates. ([Apache DataFusion][12])
 
 ---
 
@@ -1357,7 +1357,7 @@ Main-branch docs may discuss unreleased changes. Pin a crate version, cite the m
 [9]: https://docs.rs/datafusion/latest/datafusion/dataframe/struct.DataFrame.html "DataFrame in datafusion::dataframe - Rust"
 [10]: https://datafusion.apache.org/user-guide/dataframe.html "DataFrame API — Apache DataFusion  documentation"
 [11]: https://datafusion.apache.org/_sources/library-user-guide/using-the-dataframe-api.md.txt "datafusion.apache.org"
-[12]: https://datafusion.apache.org/library-user-guide/upgrading/54.0.0.html "Upgrade Guides — Apache DataFusion  documentation"
+[12]: https://datafusion.apache.org/library-user-guide/upgrading/54.1.0.html "Upgrade Guides — Apache DataFusion  documentation"
 
 # DataFusion Advanced — 1) Installation, crate selection, and Rust project layout
 
@@ -1365,7 +1365,7 @@ Style target follows your uploaded advanced technical-doc template.
 
 ## 1.0 Source-of-truth stance
 
-Use **docs.rs for exact released Rust API/dependency facts** and the official DataFusion site for user-guide patterns. This document is anchored to `datafusion` **54.0.0**; the crate describes DataFusion as an extensible Rust query engine using Arrow, with SQL/DataFrame APIs, CSV/Parquet/JSON/Avro support, a full planner, columnar streaming multi-threaded vectorized execution, and extensive customization points. ([Docs.rs][1])
+Use **docs.rs for exact released Rust API/dependency facts** and the official DataFusion site for user-guide patterns. This document is anchored to `datafusion` **54.1.0**; the crate describes DataFusion as an extensible Rust query engine using Arrow, with SQL/DataFrame APIs, CSV/Parquet/JSON/Avro support, a full planner, columnar streaming multi-threaded vectorized execution, and extensive customization points. ([Docs.rs][1])
 
 ---
 
@@ -1375,7 +1375,7 @@ Official example dependency shape:
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -1412,13 +1412,13 @@ Recommended production posture:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 ```
 
-Use exact `=54.0.0` when reproducibility matters, especially if exposing DataFusion through service APIs, query snapshots, plan snapshots, SQL compatibility tests, or extension traits. DataFusion public APIs evolve over time and the project deprecates before removing where possible, but upgrade guides and compile/test gates remain mandatory. DataFusion itself also commits `Cargo.lock` and updates dependencies regularly through automated PRs. ([Docs.rs][1])
+Use exact `=54.1.0` when reproducibility matters, especially if exposing DataFusion through service APIs, query snapshots, plan snapshots, SQL compatibility tests, or extension traits. DataFusion public APIs evolve over time and the project deprecates before removing where possible, but upgrade guides and compile/test gates remain mandatory. DataFusion itself also commits `Cargo.lock` and updates dependencies regularly through automated PRs. ([Docs.rs][1])
 
-Cargo interprets manifest versions through semver compatibility rules, so `datafusion = "54.0.0"` permits compatible patch/minor resolution according to Cargo’s resolver; exact pins avoid unplanned dependency graph drift. ([Rust Documentation][3])
+Cargo interprets manifest versions through semver compatibility rules, so `datafusion = "54.1.0"` permits compatible patch/minor resolution according to Cargo’s resolver; exact pins avoid unplanned dependency graph drift. ([Rust Documentation][3])
 
 ---
 
@@ -1426,12 +1426,12 @@ Cargo interprets manifest versions through semver compatibility rules, so `dataf
 
 **Hard invariant:** if your crate imports Arrow or Parquet types directly, their versions must match DataFusion’s versions. DataFusion’s guide warns that mismatched Arrow versions can produce compile-time type errors such as “expected `Schema`, found `arrow_schema::Schema`” and runtime surprises such as `downcast_ref` returning `None`; it recommends using the Arrow types re-exported by DataFusion. ([Apache DataFusion][2])
 
-For `datafusion 54.0.0`, the crate manifest declares:
+For `datafusion 54.1.0`, the crate manifest declares:
 
 ```text
-arrow        58.3.0
-arrow-schema 58.3.0
-parquet      58.3.0   # optional, enabled through parquet feature
+arrow        58.4.0
+arrow-schema 58.4.0
+parquet      58.4.0   # optional, enabled through parquet feature
 tokio        ^1.48
 object_store 0.13.2
 ```
@@ -1461,7 +1461,7 @@ Bad pattern:
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 arrow = "59"       # wrong: creates a second Arrow type universe
 parquet = "59"     # wrong when crossing types with DataFusion
 ```
@@ -1508,14 +1508,14 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-datafusion = { version = "=54.0.0" }
+datafusion = { version = "=54.1.0" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 tracing = "0.1"
 
 # Only add direct Arrow/Parquet when unavoidable.
-arrow = "58.3.0"
-parquet = "58.3.0"
+arrow = "58.4.0"
+parquet = "58.4.0"
 ```
 
 ```toml
@@ -1560,13 +1560,13 @@ Agent rule: downstream crates import `query_core::df_prelude::*`, not `arrow::*`
 
 ## 1.7 Feature flag selection
 
-Default `datafusion` features are broad. In 54.0.0, the crate manifest defines 20 `[features]` entries (19 named features plus `default`), and 11 features are enabled by default: `nested_expressions`, `crypto_expressions`, `datetime_expressions`, `encoding_expressions`, `regex_expressions`, `string_expressions`, `unicode_expressions`, `compression`, `parquet`, `recursive_protection`, and `sql`. Optional features include Avro, backtrace, Parquet encryption, math/array expression aliases, and serde support. ([Docs.rs][6])
+Default `datafusion` features are broad. In 54.1.0, the crate manifest defines 20 `[features]` entries (19 named features plus `default`), and 11 features are enabled by default: `nested_expressions`, `crypto_expressions`, `datetime_expressions`, `encoding_expressions`, `regex_expressions`, `string_expressions`, `unicode_expressions`, `compression`, `parquet`, `recursive_protection`, and `sql`. Optional features include Avro, backtrace, Parquet encryption, math/array expression aliases, and serde support. ([Docs.rs][6])
 
 ### Full default engine
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 ```
 
 Use when building general SQL/DataFrame tools, ad hoc analytics, internal platforms, or applications where compile time/binary size is secondary.
@@ -1575,7 +1575,7 @@ Use when building general SQL/DataFrame tools, ad hoc analytics, internal platfo
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", features = ["backtrace"] }
+datafusion = { version = "=54.1.0", features = ["backtrace"] }
 ```
 
 ```bash
@@ -1588,7 +1588,7 @@ DataFusion’s crate configuration guide says the `backtrace` feature adds more 
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", features = ["avro"] }
+datafusion = { version = "=54.1.0", features = ["avro"] }
 ```
 
 Use when reading Avro sources. Avro is optional, while CSV/JSON core datasource crates and Parquet are part of the normal/default dependency surface. ([Docs.rs][1])
@@ -1597,7 +1597,7 @@ Use when reading Avro sources. Avro is optional, while CSV/JSON core datasource 
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", features = ["parquet_encryption"] }
+datafusion = { version = "=54.1.0", features = ["parquet_encryption"] }
 ```
 
 Use only when actually reading/writing encrypted Parquet; it activates DataFusion and Parquet encryption-related feature paths. ([Docs.rs][6])
@@ -1606,7 +1606,7 @@ Use only when actually reading/writing encrypted Parquet; it activates DataFusio
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", features = ["serde"] }
+datafusion = { version = "=54.1.0", features = ["serde"] }
 ```
 
 Use when serializing Arrow schema-related types through the enabled `arrow-schema/serde` path. ([Docs.rs][6])
@@ -1615,7 +1615,7 @@ Use when serializing Arrow schema-related types through the enabled `arrow-schem
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", default-features = false, features = [
+datafusion = { version = "=54.1.0", default-features = false, features = [
   "parquet",
   "sql",
   "string_expressions",
@@ -1761,7 +1761,7 @@ Default answer: **depend on `datafusion`**, not internal subcrates.
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 ```
 
 DataFusion’s docs state that most users interact through the top-level `datafusion` crate, which re-exports functionality needed to build and execute queries. ([Docs.rs][5])
@@ -1787,27 +1787,27 @@ Examples:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
-datafusion-proto = "=54.0.0"      # only for plan protobuf serialization
-datafusion-substrait = "=54.0.0"  # only for Substrait interoperability
+datafusion = "=54.1.0"
+datafusion-proto = "=54.1.0"      # only for plan protobuf serialization
+datafusion-substrait = "=54.1.0"  # only for Substrait interoperability
 ```
 
 ```toml
 [dev-dependencies]
-datafusion-sqllogictest = "=54.0.0"
+datafusion-sqllogictest = "=54.1.0"
 ```
 
 Extension crate pattern:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
-datafusion-expr = "=54.0.0"
-datafusion-physical-plan = "=54.0.0"
-datafusion-common = "=54.0.0"
+datafusion = "=54.1.0"
+datafusion-expr = "=54.1.0"
+datafusion-physical-plan = "=54.1.0"
+datafusion-common = "=54.1.0"
 ```
 
-Rule: if importing direct subcrates, pin every DataFusion subcrate to the same exact version. The 54.0.0 top-level crate depends on matching `datafusion-* 54.0.0` subcrates, so mixing `datafusion-expr 53.x` with `datafusion 54.x` is a self-inflicted ABI/API mismatch risk. ([Docs.rs][4])
+Rule: if importing direct subcrates, pin every DataFusion subcrate to the same exact version. The 54.1.0 top-level crate depends on matching `datafusion-* 54.1.0` subcrates, so mixing `datafusion-expr 53.x` with `datafusion 54.x` is a self-inflicted ABI/API mismatch risk. ([Docs.rs][4])
 
 ---
 
@@ -1815,8 +1815,8 @@ Rule: if importing direct subcrates, pin every DataFusion subcrate to the same e
 
 | Application type                  | `Cargo.toml` stance                                                    | Notes                                                      |
 | --------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Toy example / tutorial            | `datafusion = "54.0.0"`                                                | fastest setup                                              |
-| Internal CLI                      | `datafusion = "=54.0.0"` + `tokio` macros/runtime                      | commit lockfile; release build                             |
+| Toy example / tutorial            | `datafusion = "54.1.0"`                                                | fastest setup                                              |
+| Internal CLI                      | `datafusion = "=54.1.0"` + `tokio` macros/runtime                      | commit lockfile; release build                             |
 | HTTP SQL service                  | exact `datafusion`, explicit `tokio`, `tracing`, memory/runtime config | avoid uncontrolled `ctx.sql`; enforce SQL options/policies |
 | Parquet analytics engine          | defaults or explicit `parquet`, CPU-native release, LTO/PGO benchmarks | tune file/object-store/runtime later                       |
 | Avro reader                       | `features = ["avro"]`                                                  | Avro is optional                                           |
@@ -1898,7 +1898,7 @@ lto = "thin"
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", features = ["backtrace"] }
+datafusion = { version = "=54.1.0", features = ["backtrace"] }
 ```
 
 Use for staging systems where optimized behavior and useful stack traces both matter. DataFusion documents `backtrace` as an opt-in feature for verbose error details. ([Apache DataFusion][7])
@@ -1925,7 +1925,7 @@ DataFusion explicitly recommends its Arrow re-export to avoid version mismatch. 
 
 ```toml
 [workspace.dependencies]
-datafusion = { version = "=54.0.0" }
+datafusion = { version = "=54.1.0" }
 ```
 
 3. **Use top-level `datafusion` first.**
@@ -1940,9 +1940,9 @@ datafusion = { version = "=54.0.0" }
 6. **Pin extension crates exactly.**
 
 ```toml
-datafusion = "=54.0.0"
-datafusion-expr = "=54.0.0"
-datafusion-physical-plan = "=54.0.0"
+datafusion = "=54.1.0"
+datafusion-expr = "=54.1.0"
+datafusion-physical-plan = "=54.1.0"
 ```
 
 7. **Use runtime-builder mode for services.**
@@ -1981,12 +1981,12 @@ datafusion-physical-plan = "=54.0.0"
 [ ] For services, move runtime/session construction out of request handlers.
 ```
 
-[1]: https://docs.rs/crate/datafusion/latest "datafusion 54.0.0 - Docs.rs"
+[1]: https://docs.rs/crate/datafusion/latest "datafusion 54.1.0 - Docs.rs"
 [2]: https://datafusion.apache.org/user-guide/example-usage.html "Example Usage — Apache DataFusion  documentation"
 [3]: https://doc.rust-lang.org/cargo/reference/manifest.html "The Manifest Format - The Cargo Book"
 [4]: https://docs.rs/datafusion/latest/src/datafusion/lib.rs.html "lib.rs - source"
 [5]: https://docs.rs/datafusion/latest/datafusion/ "datafusion - Rust"
-[6]: https://docs.rs/crate/datafusion/latest/features "datafusion 54.0.0 - Docs.rs"
+[6]: https://docs.rs/crate/datafusion/latest/features "datafusion 54.1.0 - Docs.rs"
 [7]: https://datafusion.apache.org/user-guide/crate-configuration.html "Crate Configuration — Apache DataFusion  documentation"
 [8]: https://docs.rs/tokio/latest/tokio/attr.main.html "main in tokio - Rust"
 
@@ -2017,14 +2017,14 @@ SessionContext
 [package]
 name = "df-first-app"
 version = "0.1.0"
-edition = "2024"   # DataFusion 54.0.0 itself is edition 2024, MSRV Rust 1.88
+edition = "2024"   # DataFusion 54.1.0 itself is edition 2024, MSRV Rust 1.88
 
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-The official example uses `datafusion` plus `tokio` with the multi-threaded runtime feature; `macros` is required for `#[tokio::main]`. This document is anchored to `datafusion 54.0.0`; website examples may show an older version, so pin the crate version actually used by your project. ([Apache DataFusion][2])
+The official example uses `datafusion` plus `tokio` with the multi-threaded runtime feature; `macros` is required for `#[tokio::main]`. This document is anchored to `datafusion 54.1.0`; website examples may show an older version, so pin the crate version actually used by your project. ([Apache DataFusion][2])
 
 ---
 
@@ -3339,7 +3339,7 @@ Use for workload classes: interactive vs batch, premium vs basic tenants, memory
 
 ## 3.15 Extension-type registry (new in DataFusion 54)
 
-DataFusion 54 introduced a session-level **extension-type registry** so logical types beyond the physical Arrow `DataType` set (UUID, JSON, tensors, and custom domain types) can participate in planning. The `FunctionRegistry` trait in `datafusion_expr::registry` gained extension-type-registry methods alongside the new higher-order-function methods; the registration vocabulary is the `ExtensionTypeRegistry` trait plus `ExtensionTypeRegistration` (datafusion-expr `registry.rs`), with `DFExtensionType` / `DFExtensionTypeRef` in `datafusion_common::types`, and Arrow's canonical extension types (bool8, fixed-shape tensor, JSON, opaque, UUID, variable-shape tensor, timestamp-with-offset) shipping in `arrow-schema 58.3.0` under `extension::canonical`. Metadata-aware expressions (`with_metadata`, `cast_to_type` / `try_cast_to_type`, field-aware casts) build on this substrate — see §12.27 for the function entries. The full treatment of extension types, metadata governance, and field-aware casting lives in `docs/library_ref/datafusion_schemas_rust.md` (S7).
+DataFusion 54 introduced a session-level **extension-type registry** so logical types beyond the physical Arrow `DataType` set (UUID, JSON, tensors, and custom domain types) can participate in planning. The `FunctionRegistry` trait in `datafusion_expr::registry` gained extension-type-registry methods alongside the new higher-order-function methods; the registration vocabulary is the `ExtensionTypeRegistry` trait plus `ExtensionTypeRegistration` (datafusion-expr `registry.rs`), with `DFExtensionType` / `DFExtensionTypeRef` in `datafusion_common::types`, and Arrow's canonical extension types (bool8, fixed-shape tensor, JSON, opaque, UUID, variable-shape tensor, timestamp-with-offset) shipping in `arrow-schema 58.4.0` under `extension::canonical`. Metadata-aware expressions (`with_metadata`, `cast_to_type` / `try_cast_to_type`, field-aware casts) build on this substrate — see §12.27 for the function entries. The full treatment of extension types, metadata governance, and field-aware casting lives in `docs/library_ref/datafusion_schemas_rust.md` (S7).
 
 # DataFusion Advanced — 4) Data model: Arrow, schemas, arrays, and batches
 
@@ -4800,7 +4800,7 @@ Generated SQL identifiers:
 
 ```toml
 [dependencies]
-datafusion = { version = "54.0.0", default-features = false, features = ["sql", "parquet"] }
+datafusion = { version = "54.1.0", default-features = false, features = ["sql", "parquet"] }
 ```
 
 ---
@@ -10697,7 +10697,7 @@ The `datafusion-functions` crate is implemented as function packages using DataF
 
 ## 12.2 Function availability and feature flags
 
-Function availability is not merely “SQL parser accepts name.” It depends on the crate build features and registered packages. The top-level `datafusion` crate depends on function crates such as `datafusion-functions`, `datafusion-functions-aggregate`, `datafusion-functions-table`, and `datafusion-functions-window`; nested functions are behind an optional `datafusion-functions-nested` dependency in the current 54.0.0 dependency graph. ([Docs.rs][3])
+Function availability is not merely “SQL parser accepts name.” It depends on the crate build features and registered packages. The top-level `datafusion` crate depends on function crates such as `datafusion-functions`, `datafusion-functions-aggregate`, `datafusion-functions-table`, and `datafusion-functions-window`; nested functions are behind an optional `datafusion-functions-nested` dependency in the current 54.1.0 dependency graph. ([Docs.rs][3])
 
 Agent rules:
 
@@ -10917,7 +10917,7 @@ let df = df.select(vec![
 ])?;
 ```
 
-`datafusion::functions::string` in the 54.0.0 docs has an `expr_fn` submodule and is available under the `string_expressions` feature. Note that in 54.0.0 the internal string-builder helpers of `datafusion_functions::strings` became crate-private; treat only the documented `expr_fn` surface as public API. ([Docs.rs][3])
+`datafusion::functions::string` in the 54.1.0 docs has an `expr_fn` submodule and is available under the `string_expressions` feature. Note that in 54.1.0 the internal string-builder helpers of `datafusion_functions::strings` became crate-private; treat only the documented `expr_fn` surface as public API. ([Docs.rs][3])
 
 Agent rules:
 
@@ -11632,7 +11632,7 @@ DataFusion’s Spark-compatibility page points users to the `datafusion-spark` c
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 datafusion-spark = "<pin-compatible-version>"
 ```
 
@@ -13479,7 +13479,7 @@ let df = ctx
 
 ```toml id="txiigl"
 [dependencies]
-datafusion = { version = "54.0.0", features = ["avro"] }
+datafusion = { version = "54.1.0", features = ["avro"] }
 ```
 
 `read_avro` and `register_avro` are only available with the `avro` crate feature; use Avro where the upstream ecosystem already provides Avro schemas/files and verify feature availability in the pinned build. ([Docs.rs][3])
@@ -13968,7 +13968,7 @@ DataFusion’s Parquet pruning documentation describes a multi-step pruning pipe
 
 ```toml
 [dependencies]
-datafusion = { version = "54.0.0", features = ["parquet"] }
+datafusion = { version = "54.1.0", features = ["parquet"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -14581,7 +14581,7 @@ STORED AS PARQUET
 OPTIONS (
   'writer_version' '2.0',
   'skip_arrow_metadata' 'false',
-  'created_by' 'my-service datafusion 54.0.0',
+  'created_by' 'my-service datafusion 54.1.0',
   'metadata::pipeline' 'daily-facts-v2',
   'metadata::owner' 'analytics-platform'
 );
@@ -15264,7 +15264,7 @@ This mapping is documented in the DataFusion CLI data-source guide. ([Apache Dat
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13", features = ["aws"] }
 url = "2"
 ```
@@ -21861,7 +21861,7 @@ The moving parts (in `datafusion-datasource`):
 * **`SharedWorkSource`** — the engine-internal shared queue of unopened files that sibling `FileStream`s drain cooperatively (crate-private in `datafusion_datasource::file_stream`; you interact with it only through the surfaces above).
 * **`FileScanConfig.partitioned_by_file_group: bool`** (builder: `with_partitioned_by_file_group(true)`) — **disables** sharing for that scan: `create_sibling_state` returns `None` when this flag is set (or when `preserve_order` requires stable per-partition file order), and each partition then reads exactly its assigned file group.
 
-Configuration reality check: **there is no `enable_file_stream_work_stealing` configuration key in DataFusion 54.0.0.** Work stealing is gated structurally — by whether the data source creates sibling state and whether `partitioned_by_file_group`/`preserve_order` suppress it — not by a SQL-settable option. Do not write `SET datafusion.execution.enable_file_stream_work_stealing = ...`; the key does not exist.
+Configuration reality check: **there is no `enable_file_stream_work_stealing` configuration key in DataFusion 54.1.0.** Work stealing is gated structurally — by whether the data source creates sibling state and whether `partitioned_by_file_group`/`preserve_order` suppress it — not by a SQL-settable option. Do not write `SET datafusion.execution.enable_file_stream_work_stealing = ...`; the key does not exist.
 
 Distributed-execution warning: work stealing assumes all sibling partitions of a `DataSourceExec` run in the same process and can share the queue. Engines that ship individual partitions to isolated tasks (Ballista-style scheduling, or any executor that runs `execute(partition, ..)` in separate processes) **must set `partitioned_by_file_group = true`** on their scans — otherwise each isolated task constructs its own queue containing *all* files and every file is read once per task.
 
@@ -21878,7 +21878,7 @@ Agent rules:
 Custom DataSource impls: implement open_with_args + create_sibling_state to opt into stealing.
 Set partitioned_by_file_group=true whenever partition-to-file-group mapping is a correctness contract.
 Set partitioned_by_file_group=true for distributed/isolated per-partition execution.
-Do not reference an enable_file_stream_work_stealing config key; it does not exist in 54.0.0.
+Do not reference an enable_file_stream_work_stealing config key; it does not exist in 54.1.0.
 Expect scan output row interleaving to change vs 53; do not depend on file order without preserve_order.
 ```
 
@@ -21981,7 +21981,7 @@ impl AnalyzerRule for MyAnalyzerRule {
 }
 ```
 
-The released 54.0.0 `AnalyzerRule` trait requires `analyze(plan, config) -> Result<LogicalPlan>` and `name() -> &str`; use `SessionState::add_analyzer_rule` to register additional analyzer rules. ([Docs.rs][4])
+The released 54.1.0 `AnalyzerRule` trait requires `analyze(plan, config) -> Result<LogicalPlan>` and `name() -> &str`; use `SessionState::add_analyzer_rule` to register additional analyzer rules. ([Docs.rs][4])
 
 ### Analyzer use cases
 
@@ -24354,7 +24354,7 @@ use datafusion::physical_plan::Accumulator;
 use datafusion::prelude::*;
 ```
 
-Use `datafusion::arrow` re-exports for Arrow arrays and datatypes in DataFusion UDF code to avoid Arrow version mismatches. The `datafusion 54.0.0` crate manifest declares Arrow `58.3.0` and DataFusion subcrates pinned at `54.0.0`, so direct subcrate use should be version-aligned. ([Docs.rs][2])
+Use `datafusion::arrow` re-exports for Arrow arrays and datatypes in DataFusion UDF code to avoid Arrow version mismatches. The `datafusion 54.1.0` crate manifest declares a caret Arrow requirement of `58.3.0` — satisfied by this baseline's `58.4.0` — and DataFusion subcrates pinned at `54.1.0`, so direct subcrate use should be version-aligned. ([Docs.rs][2])
 
 ---
 
@@ -28540,7 +28540,7 @@ This pattern separates session/planning settings from runtime resource settings.
 
 ## 27.28 New configuration options in DataFusion 54
 
-Crate-verified list of configuration keys that are **new in 54.0.0** (all keys take the `datafusion.` prefix in SQL `SET` statements):
+Crate-verified list of configuration keys that are **new in the 54 line** (all keys take the `datafusion.` prefix in SQL `SET` statements):
 
 | Key | Default | Purpose |
 |---|---|---|
@@ -28564,7 +28564,7 @@ Crate-verified list of configuration keys that are **new in 54.0.0** (all keys t
 | CSV `format.ignore_trailing_whitespace` (CsvOptions) | `NULL` | CSV reader: strip trailing whitespace in fields |
 | `runtime.file_statistics_cache_limit` | `20M` | memory limit for the CacheManager-owned file-statistics cache (§27.18) |
 
-Explicitly **not** new in 54 — these pre-date it and must not be treated as part of the 53→54 delta: the four `*_dynamic_filter_pushdown` keys, `execution.split_file_groups_by_statistics`, and `execution.spill_compression`. Also note there is **no** `execution.enable_file_stream_work_stealing` key in 54.0.0 (§21.25).
+Explicitly **not** new in 54 — these pre-date it and must not be treated as part of the 53→54 delta: the four `*_dynamic_filter_pushdown` keys, `execution.split_file_groups_by_statistics`, and `execution.spill_compression`. Also note there is **no** `execution.enable_file_stream_work_stealing` key in 54.1.0 (§21.25).
 
 ```sql
 -- representative usage
@@ -33231,7 +33231,7 @@ DataFusion’s own testing guide describes a layered test pyramid: Rust unit tes
 
 ```toml
 [dev-dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -33239,7 +33239,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml
 [dev-dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 sqllogictest = "0.28"
 ```
 
@@ -33247,7 +33247,7 @@ sqllogictest = "0.28"
 
 ```toml
 [dev-dependencies]
-datafusion-sqllogictest = "=54.0.0"
+datafusion-sqllogictest = "=54.1.0"
 ```
 
 `datafusion_sqllogictest` is the DataFusion SQLLogicTest driver crate; its public docs list structures such as `DataFusion`, `TestContext`, `Filter`, and utility functions such as `convert_batches`, `convert_schema_to_types`, `df_value_validator`, and scratch-directory setup helpers. ([Docs.rs][2])
@@ -34847,7 +34847,7 @@ Use `datafusion::error::Result<T>` for examples, CLI tools, tests, UDFs, table p
 
 ## 33.2 Error category map
 
-Current DataFusion error variants include Arrow, Parquet, object-store, I/O, SQL parser, not-implemented, internal, plan, configuration, schema, execution, join-task, resource-exhaustion, external, context, diagnostic, collection, shared, Substrait, and FFI categories. The enum docs describe `Plan` as query-planning failures, `Execution` as runtime failures, `SQL` as syntactically incorrect SQL, `SchemaError` as schema-related failures, `ObjectStore` as object-store read/write failures, and `ResourcesExhausted` as memory/scratch-disk/resource failures. DataFusion 54 **removed** `DataFusionError::AvroError`: the Avro read path was rebuilt on `arrow-avro` (58.3.0), Avro decode failures now surface as `ArrowError`, and the umbrella crate re-export changed from `datafusion::apache_avro` to `datafusion::arrow_avro`; Avro `timestamp-*` logical types now map to UTC-aware Arrow timestamps. ([Docs.rs][2])
+Current DataFusion error variants include Arrow, Parquet, object-store, I/O, SQL parser, not-implemented, internal, plan, configuration, schema, execution, join-task, resource-exhaustion, external, context, diagnostic, collection, shared, Substrait, and FFI categories. The enum docs describe `Plan` as query-planning failures, `Execution` as runtime failures, `SQL` as syntactically incorrect SQL, `SchemaError` as schema-related failures, `ObjectStore` as object-store read/write failures, and `ResourcesExhausted` as memory/scratch-disk/resource failures. DataFusion 54 **removed** `DataFusionError::AvroError`: the Avro read path was rebuilt on `arrow-avro` (58.4.0), Avro decode failures now surface as `ArrowError`, and the umbrella crate re-export changed from `datafusion::apache_avro` to `datafusion::arrow_avro`; Avro `timestamp-*` logical types now map to UTC-aware Arrow timestamps. ([Docs.rs][2])
 
 | Variant class        | Typical origin                 | User-facing meaning                                                 |
 | -------------------- | ------------------------------ | ------------------------------------------------------------------- |
@@ -35468,7 +35468,7 @@ DataFusion supports optional backtraces through a cargo feature and standard Rus
 
 ```toml
 [dependencies]
-datafusion = { version = "54.0.0", features = ["backtrace"] }
+datafusion = { version = "54.1.0", features = ["backtrace"] }
 ```
 
 ```bash
@@ -36074,7 +36074,7 @@ Use for:
   extension API changes
 ```
 
-The official documentation includes version-specific upgrade guides; the index lists guides for versions including DataFusion 54.0.0, 53.0.0, 52.0.0, 51.0.0, 50.0.0, 49.0.0, 48.x, 47.0.0, and 46.0.0. DataFusion 54.0.0 is released and is the version this document anchors to; its upgrade guide covers the 53→54 breaking surface (`Any` supertraits replacing `as_any`, proto decode contexts, coercion changes, physical `EXPLAIN` format changes, and more). ([datafusion.apache.org][2])
+The official documentation includes version-specific upgrade guides; the index lists guides for versions including DataFusion 54.0.0, 53.0.0, 52.0.0, 51.0.0, 50.0.0, 49.0.0, 48.x, 47.0.0, and 46.0.0. DataFusion 54.1.0 is released and is the version this document anchors to; the 54 upgrade guide covers the 53→54 breaking surface (`Any` supertraits replacing `as_any`, proto decode contexts, coercion changes, physical `EXPLAIN` format changes, and more). ([datafusion.apache.org][2])
 
 Upgrade workflow:
 
@@ -36123,18 +36123,18 @@ Recommended pinning:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 ```
 
 Extension-heavy exact-family pinning:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
-datafusion-common = "=54.0.0"
-datafusion-expr = "=54.0.0"
-datafusion-physical-plan = "=54.0.0"
-datafusion-sql = "=54.0.0"
+datafusion = "=54.1.0"
+datafusion-common = "=54.1.0"
+datafusion-expr = "=54.1.0"
+datafusion-physical-plan = "=54.1.0"
+datafusion-sql = "=54.1.0"
 ```
 
 ---
@@ -36145,7 +36145,7 @@ datafusion-sql = "=54.0.0"
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 ```
 
 Most application projects should depend on the top-level `datafusion` crate and import through its re-exports. The top-level crate re-exports dependencies that are part of its public API, including `arrow`, `object_store`, and feature-gated `parquet`, and it re-exports many `datafusion-*` subcrates under modules such as `datafusion::common`, `datafusion::catalog`, `datafusion::logical_expr`, `datafusion::physical_plan`, `datafusion::optimizer`, `datafusion::sql`, and function packages. ([Docs.rs][3])
@@ -36176,7 +36176,7 @@ Use subcrates directly only when:
   avoiding top-level feature surface intentionally
 ```
 
-DataFusion subcrates exist for modularity and compilation control, but the top-level crate is designed to present a unified public API surface. The `datafusion 54.0.0` crate depends on matching `datafusion-* 54.0.0` subcrates and Arrow/Parquet 58.3-era crates, illustrating why cross-version mixing is risky. ([Docs.rs][4])
+DataFusion subcrates exist for modularity and compilation control, but the top-level crate is designed to present a unified public API surface. The `datafusion 54.1.0` crate depends on matching `datafusion-* 54.1.0` subcrates and Arrow/Parquet 58.4-era crates, illustrating why cross-version mixing is risky. ([Docs.rs][4])
 
 ---
 
@@ -36200,17 +36200,17 @@ use datafusion::parquet;
 use arrow::record_batch::RecordBatch;
 ```
 
-DataFusion re-exports Arrow and object_store because they are part of its public API, and the `datafusion 54.0.0` dependency graph declares `arrow = "58.3.0"`, `parquet = "58.3.0"`, and `object_store = "0.13.2"`. If an application directly depends on a different Arrow version, Rust type identity mismatches can occur even when names look identical. ([Docs.rs][3])
+DataFusion re-exports Arrow and object_store because they are part of its public API, and the `datafusion 54.1.0` dependency graph declares caret requirements `arrow = "58.3.0"`, `parquet = "58.3.0"`, and `object_store = "0.13.2"`, which the `58.4.0` Arrow/Parquet baseline satisfies. If an application directly depends on a different Arrow version, Rust type identity mismatches can occur even when names look identical. ([Docs.rs][3])
 
 Recommended direct-dependency policy:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 
 # Only add direct Arrow when necessary, and match DataFusion's version.
-arrow = "=58.3.0"
-parquet = "=58.3.0"
+arrow = "=58.4.0"
+parquet = "=58.4.0"
 object_store = "=0.13.2"
 ```
 
@@ -36233,14 +36233,14 @@ Feature flags can change the API surface, binary size, compile time, and runtime
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 ```
 
 ### Minimized style
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", default-features = false, features = [
+datafusion = { version = "=54.1.0", default-features = false, features = [
   "sql",
   "parquet",
 ] }
@@ -36339,13 +36339,13 @@ The lower you integrate into DataFusion internals, the more you should:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 ```
 
 Upgrade:
 
 ```bash
-cargo update -p datafusion --precise 54.0.0
+cargo update -p datafusion --precise 54.1.0
 cargo tree -i datafusion
 cargo tree -d
 cargo check --all-targets
@@ -36355,11 +36355,11 @@ cargo check --all-targets
 
 ```toml
 [workspace.dependencies]
-datafusion = "=54.0.0"
-datafusion-common = "=54.0.0"
-datafusion-expr = "=54.0.0"
-datafusion-physical-plan = "=54.0.0"
-datafusion-sql = "=54.0.0"
+datafusion = "=54.1.0"
+datafusion-common = "=54.1.0"
+datafusion-expr = "=54.1.0"
+datafusion-physical-plan = "=54.1.0"
+datafusion-sql = "=54.1.0"
 ```
 
 Member crate:
@@ -36672,9 +36672,9 @@ Maintain a machine-readable manifest in extension-heavy repositories.
 
 ```toml
 [datafusion]
-version = "54.0.0"
-arrow = "58.3.0"
-parquet = "58.3.0"
+version = "54.1.0"
+arrow = "58.4.0"
+parquet = "58.4.0"
 object_store = "0.13.2"
 sqlparser = "0.62.0"
 
@@ -36688,10 +36688,10 @@ sql = true
 [baselines]
 explain = "tests/golden/explain/"
 sqllogictest = "tests/sql/"
-performance = "benchmarks/baselines/54.0.0/"
+performance = "benchmarks/baselines/54.1.0/"
 ```
 
-The crate manifest for `datafusion 54.0.0` declares its Arrow, Parquet, object_store, sqlparser, and DataFusion subcrate dependency families; a local manifest prevents accidental drift and makes upgrade reviews explicit. ([Docs.rs][4])
+The crate manifest for `datafusion 54.1.0` declares its Arrow, Parquet, object_store, sqlparser, and DataFusion subcrate dependency families; a local manifest prevents accidental drift and makes upgrade reviews explicit. ([Docs.rs][4])
 
 ---
 
@@ -36701,7 +36701,7 @@ The crate manifest for `datafusion 54.0.0` declares its Arrow, Parquet, object_s
 git checkout -b upgrade/datafusion-54-0
 
 # 1. Edit Cargo.toml / workspace deps.
-cargo update -p datafusion --precise 54.0.0
+cargo update -p datafusion --precise 54.1.0
 
 # 2. Inspect graph.
 cargo tree -i datafusion
@@ -36936,7 +36936,7 @@ Migration report shape:
 ```text
 DataFusion upgrade report
   from: 53.1.0
-  to:   54.0.0
+  to:   54.1.0
 
 Cargo changes:
   datafusion: ...
@@ -37067,7 +37067,7 @@ Rust crate names use underscores even when Cargo package names use hyphens. The 
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -37075,7 +37075,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", default-features = false, features = [
+datafusion = { version = "=54.1.0", default-features = false, features = [
   "sql",
   "parquet",
 ] }
@@ -37086,11 +37086,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
-datafusion-common = "=54.0.0"
-datafusion-expr = "=54.0.0"
-datafusion-physical-plan = "=54.0.0"
-datafusion-sql = "=54.0.0"
+datafusion = "=54.1.0"
+datafusion-common = "=54.1.0"
+datafusion-expr = "=54.1.0"
+datafusion-physical-plan = "=54.1.0"
+datafusion-sql = "=54.1.0"
 ```
 
 Direct subcrate dependencies are appropriate for extension crates, compile-time minimization, or narrowly scoped internal libraries. For ordinary applications, prefer the top-level `datafusion` crate because it re-exports the public API and avoids dependency-family drift. ([Docs.rs][1])
@@ -38037,7 +38037,7 @@ This matches the current crate organization list in the DataFusion crate docs, w
 
 ```toml
 [dependencies]
-datafusion = { version = "=54.0.0", default-features = false, features = [
+datafusion = { version = "=54.1.0", default-features = false, features = [
   "sql",
   "parquet",
 ] }
@@ -38209,8 +38209,8 @@ Durable storage / long-lived cache:
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
-datafusion-proto = "=54.0.0"
+datafusion = "=54.1.0"
+datafusion-proto = "=54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -38218,13 +38218,13 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
-datafusion-substrait = "=54.0.0"
+datafusion = "=54.1.0"
+datafusion-substrait = "=54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 prost = "0.14"
 ```
 
-`datafusion-proto 54.0.0` depends on the matching `datafusion-* 54.0.0` crate family, Arrow `58.3.0`, `prost 0.14`, and `object_store 0.13.2`; `datafusion-substrait 54.0.0` depends on the matching `datafusion 54.0.0`, the `substrait` protobuf crate, and `prost`. Keep these crate families aligned during upgrades. ([Docs.rs][1])
+`datafusion-proto 54.1.0` depends on the matching `datafusion-* 54.1.0` crate family, Arrow `58.4.0`, `prost 0.14`, and `object_store 0.13.2`; `datafusion-substrait 54.1.0` depends on the matching `datafusion 54.1.0`, the `substrait` protobuf crate, and `prost`. Keep these crate families aligned during upgrades. ([Docs.rs][1])
 
 ---
 
@@ -42417,11 +42417,11 @@ use arrow::record_batch::RecordBatch;
 
 ```toml
 [dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 
 # Only add if necessary and match DataFusion's Arrow family.
-arrow = "=58.3.0"
-parquet = "=58.3.0"
+arrow = "=58.4.0"
+parquet = "=58.4.0"
 ```
 
 ### Agent checklist

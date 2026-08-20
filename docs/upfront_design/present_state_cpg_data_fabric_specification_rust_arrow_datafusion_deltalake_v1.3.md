@@ -14,6 +14,7 @@
 **Core data-plane technologies:** Apache Arrow Rust, Apache DataFusion Rust, and `deltalake` / delta-rs
 **Logical scope:** Present-state Python and Rust code-property-graph facts and mechanically derived facts
 **Excluded semantic scope:** Git/history analytics, runtime observation, test-impact assessment, refactor assessment, risk scoring, recommendations, and other evaluative conclusions
+**Audit integration (2026-08-20):** Plan-audit F-006/F-007; separated table policy axes and adopted pinned delta-rs application transactions.
 
 ---
 
@@ -274,46 +275,53 @@ This specification is grounded in the attached references and uses their termino
 
 | Technology | Version anchor used by this specification | Primary role |
 |---|---:|---|
-| Arrow Rust | `58.3.0` family | Canonical in-memory schemas, arrays, buffers, builders, `RecordBatch`, vectorized kernels, Parquet interchange |
-| DataFusion Rust | `54.0.0` | Catalog, SQL/DataFrame/Expr planning, streaming execution, joins, aggregations, custom functions, custom logical/physical operators |
-| `deltalake` / delta-rs | `1.0.0` at git rev `35cfed4545f41c2f483706d29670f7cc2fe7e217` | Transactional Delta tables, table schemas, DataFusion providers, writes, DML, constraints, optimize, vacuum |
-| Parquet Rust | `58.3.0` | Physical data-file format beneath Delta Lake |
+| Arrow Rust | `58.4.0` family | Canonical in-memory schemas, arrays, buffers, builders, `RecordBatch`, vectorized kernels, Parquet interchange |
+| DataFusion Rust | `54.1.0` | Catalog, SQL/DataFrame/Expr planning, streaming execution, joins, aggregations, custom functions, custom logical/physical operators |
+| `deltalake` / delta-rs | `1.0.0` at git rev `9f9223197469897ef05ae4369eb4fd1390174e65` | Transactional Delta tables, table schemas, DataFusion providers, writes, DML, constraints, optimize, vacuum |
+| Parquet Rust | `58.4.0` | Physical data-file format beneath Delta Lake |
 | `object_store` | `0.13.2` | Local and object-store I/O used by DataFusion and delta-rs |
-| Rust toolchain | `1.91.1` for the pinned delta-rs baseline | Workspace compatibility floor |
+| Rust toolchain | `1.94.1` for the pinned delta-rs baseline | Workspace compatibility floor |
+| Delta kernel | `buoyant_kernel` and `buoyant_kernel_engine` on the released `0.25.x` line | Selected **transitively** by the pinned delta-rs revision; not independently pinned by CodeFabric |
 
-The delta-rs `1.0.0` target is a pinned pre-release revision rather than a tagged stable release. All code generated from this specification SHALL be compile-tested against that exact revision before adoption.
+The delta-rs `1.0.0` target is a pinned pre-release revision rather than a tagged stable release: the upstream workspace declares crate version `1.0.0`, but no `rust-v1.0.0` tag exists and the upstream changelog still begins at `rust-v0.32.3`. All code generated from this specification SHALL be compile-tested against that exact revision before adoption.
+
+The Rust floor of `1.94.1` is set by the pinned revision itself, which raised its MSRV from `1.91.1` after upstream AWS crates increased theirs. It is a build-tooling obligation, not a CodeFabric language-feature requirement.
+
+The storage-substrate contracts in sections 2, 12.5–12.9, 67.3, 98.1–98.3, 100.1, 101.1, 103.4, 111.1 and 112.6 were integrated from `docs/codefabric_delta_rs_9f922319_design_change_recommendations_2026-08-20.md`, which assessed the move from delta-rs `35cfed45…` to `9f922319…`. That assessment found no required change to the ontology, semantic query model, hot-overlay model, multi-table publication model, or `ServingSnapshot` consistency semantics; the changes are confined to the implementation baseline, the provider lifecycle, and the conformance suite.
+
+The pinned revision declares looser upstream requirements than CodeFabric's exact pins — `arrow = "58"`, `parquet = "58"`, `datafusion = "54.0.0"` — all of which are caret requirements satisfied by CodeFabric's `=58.4.0` and `=54.1.0`. CodeFabric pins exactly where delta-rs pins loosely; the exact pins remain authoritative for this specification.
 
 ### 2.1 Canonical workspace baseline
 
 ```toml
 [workspace]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 
 [workspace.dependencies]
-datafusion = "=54.0.0"
+datafusion = "=54.1.0"
 
-arrow = "=58.3.0"
-arrow-array = "=58.3.0"
-arrow-buffer = "=58.3.0"
-arrow-schema = "=58.3.0"
-arrow-cast = "=58.3.0"
-arrow-select = "=58.3.0"
-arrow-ord = "=58.3.0"
-arrow-string = "=58.3.0"
-arrow-row = "=58.3.0"
+arrow = "=58.4.0"
+arrow-array = "=58.4.0"
+arrow-buffer = "=58.4.0"
+arrow-schema = "=58.4.0"
+arrow-cast = "=58.4.0"
+arrow-select = "=58.4.0"
+arrow-ord = "=58.4.0"
+arrow-string = "=58.4.0"
+arrow-row = "=58.4.0"
 
-parquet = { version = "=58.3.0", features = ["arrow", "async", "object_store"] }
+parquet = { version = "=58.4.0", features = ["arrow", "async", "object_store"] }
 object_store = "=0.13.2"
 
 deltalake = {
   git = "https://github.com/delta-io/delta-rs.git",
-  rev = "35cfed4545f41c2f483706d29670f7cc2fe7e217",
+  rev = "9f9223197469897ef05ae4369eb4fd1390174e65",
   default-features = false,
-  features = ["rustls", "datafusion", "s3"]
+  features = ["rustls", "datafusion"]
 }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
@@ -327,6 +335,19 @@ blake3 = "1"
 
 Utility crates such as `blake3`, `serde`, `tokio`, and `futures` MAY be used inside the Rust implementation. The storage, batch, query, and relational-computation engines SHALL remain Arrow, DataFusion, and Delta Lake.
 
+Resolver `3` is required: the pinned delta-rs workspace uses it, and it is the resolver that participates in Rust-version-aware dependency resolution — which matters once a `rust-version` floor is declared.
+
+Object-store backends are **not** in the default feature set. The mandatory `local-workstation-v1` profile writes to a local filesystem Delta namespace, so the baseline compiles neither the AWS SDK nor any other cloud dependency:
+
+```toml
+[features]
+default = ["local-workstation"]
+local-workstation = []
+s3-storage = ["deltalake/s3"]
+```
+
+A deployment profile that requires object-store durability SHALL enable the corresponding storage feature explicitly. Removing `s3` from the default set is dependency hygiene, not a correctness requirement; it does not change any durable-state contract in this specification.
+
 ### 2.2 Version-alignment invariant
 
 ```text
@@ -335,9 +356,25 @@ one Parquet family matching Arrow
 one DataFusion family
 one object_store family
 one pinned delta-rs revision
+one transitively selected Delta kernel line (buoyant_kernel + buoyant_kernel_engine)
 ```
 
 CI SHALL reject duplicate Arrow, Parquet, DataFusion, or `object_store` versions that cross public type boundaries.
+
+The Delta kernel line is part of the alignment universe even though CodeFabric does not pin it directly. `buoyant_kernel` and `buoyant_kernel_engine` are compiled against a specific Arrow feature (`arrow-58`), so a kernel pair drawn from a different line can introduce a second Arrow type universe underneath `deltalake` without appearing anywhere in CodeFabric's own manifests. The duplicate-version gate SHALL therefore inspect the resolved graph, not only the declared dependencies, and SHALL fail when the kernel pair is split across minor lines or bound to a different Arrow feature than the workspace Arrow family.
+
+CodeFabric does not pin the kernel. The pinned delta-rs revision consumes **released** `buoyant_kernel` and `buoyant_kernel_engine` crates on the `0.25.x` line — the engine is a separate package from the kernel — rather than a separately git-pinned kernel revision.
+
+CodeFabric SHALL NOT declare those crates directly merely because delta-rs depends on them. The `deltalake` git pin plus the committed `Cargo.lock` selects the matching pair transitively, and doing so keeps the number of unpublished upstream revisions CodeFabric must coordinate at one.
+
+Should a CodeFabric crate ever need kernel APIs directly, it SHALL:
+
+- declare both `buoyant_kernel` and `buoyant_kernel_engine` where engine facilities are required;
+- isolate every kernel type behind one application-owned adapter module;
+- expose no kernel type across a CodeFabric public crate boundary;
+- carry a compile test against the exact pinned delta-rs revision.
+
+This is the same provider-isolation discipline the fact-generation specification applies to Tree-sitter, Ruff, Pyrefly and `rustc_public`.
 
 ---
 
@@ -622,7 +659,9 @@ com.codefabric.cpg.schema_version
 com.codefabric.cpg.ontology_version
 com.codefabric.cpg.primary_key
 com.codefabric.cpg.partition_columns
-com.codefabric.cpg.owner_replacement_policy
+com.codefabric.cpg.durable_mutation_class
+com.codefabric.cpg.overlay_mutation_policy
+com.codefabric.cpg.materialization_role
 com.codefabric.cpg.compatibility_mode
 ```
 
@@ -653,11 +692,35 @@ pub struct TableSpec {
     pub primary_key: &'static [&'static str],
     pub partition_columns: &'static [&'static str],
     pub zorder_columns: &'static [&'static str],
-    pub owner_policy: OwnerReplacementPolicy,
+    pub durable_mutation: DurableMutationClass,
+    pub overlay_mutation: OverlayMutationPolicy,
+    pub materialization_role: MaterializationRole,
     pub dependencies: &'static [i16],
     pub required_for_publication: bool,
 }
 ```
+
+These are orthogonal contract axes:
+
+```text
+DurableMutationClass:
+  STATIC_DIMENSION | CURRENT_SINGLETON | OWNER_REPLACED_FACT |
+  PUBLICATION_APPEND | DERIVED_OWNER_REPLACED | GLOBAL_DERIVED_REPLACEMENT
+
+OverlayMutationPolicy:
+  OWNER_REPLACE | PRIMARY_KEY_UPSERT | FULL_TABLE_REPLACE |
+  BASE_IMMUTABLE | NOT_APPLICABLE
+
+MaterializationRole:
+  DURABLE_EFFECTIVE | BUNDLE_DIMENSION | QUERY_TIME_DERIVED |
+  OPERATIONAL_PROJECTION
+```
+
+Durable mutation governs Delta writes, overlay mutation governs how an
+existing effective table participates in a hot snapshot, and materialization
+role governs whether the surface is durable fact state, bundle-backed,
+computed from a leased snapshot, or an operational projection. No axis may be
+derived implicitly from another.
 
 The registry SHALL generate or validate:
 
@@ -741,6 +804,125 @@ A common repository may have many rows in both maps, one per workspace/worktree.
 ### 12.4 No semantic-history guarantee
 
 Older publications and retired snapshots exist only for reader leases, recovery, retries, and safe vacuum. They are not exposed as code-history facts.
+
+### 12.5 Delta engine snapshots are not CodeFabric serving snapshots
+
+Both layers use the word *snapshot*, and they mean different things. The distinction is normative.
+
+```text
+ServingSnapshot                          delta-rs Snapshot / EagerSnapshot
+  = durable publication                    = storage-engine view of ONE Delta
+  + exact multi-table version map            table at ONE version
+  + consolidated hot overlay               + log-replay, materialization and
+  + source generation                        cache state
+  + analysis contexts
+  + capabilities / diagnostics
+  + exact interpretation bundle digests
+
+  the only query pin                       an implementation object for
+                                           reading one durable table
+```
+
+A delta-rs `Snapshot`, `EagerSnapshot`, checkpoint selection, materialized-file cache, or DataFusion `TableProvider` SHALL NOT independently define CodeFabric current-state identity. Current-state identity is defined only by the leased `ServingSnapshot` together with its exact durable Delta table-version map and overlay identity. Delta engine objects are reconstructible accelerators and SHALL NOT independently define fact freshness, completeness, publication identity, or semantic snapshot identity.
+
+This rule exists to foreclose an attractive but incorrect simplification. The storage engine's own snapshot model is single-table and version-scoped; CodeFabric's consistency object is multi-table, overlay-bearing, and carries interpretation metadata. The former cannot substitute for the latter, however similar the vocabulary.
+
+### 12.6 Snapshot-scoped durable provider set
+
+For each active `ServingSnapshot`, the daemon SHOULD build one immutable set of exact-version Delta `TableProvider`s for the durable base and reuse those providers for every lease on that snapshot:
+
+```text
+ServingSnapshot
+  ├─ durable publication metadata
+  ├─ DeltaBaseCatalog
+  │    ├─ table_code → exact delta_version
+  │    ├─ table_code → Arc<dyn TableProvider>
+  │    └─ table_code → table-root / schema identity diagnostics
+  ├─ consolidated hot overlay
+  ├─ capability index
+  └─ diagnostics index
+```
+
+Activation order:
+
+```text
+1. read the immutable durable publication manifest
+2. resolve the exact Delta version for each required table from publication_table
+3. construct an exact-version delta-rs table/snapshot/provider
+4. register the provider in the candidate snapshot's private DataFusion catalog
+5. wrap it with the CodeFabric overlay-aware provider (section 91)
+6. run activation integrity checks
+7. freeze the catalog and provider set
+8. atomically activate the new ServingSnapshot
+9. every lease reuses those exact provider objects
+```
+
+Providers SHALL be discarded when their owning `ServingSnapshot` becomes unreferenced. A provider built for one publication/version SHALL NOT be rebound to another publication by mutating its underlying table state.
+
+The abstraction stores the DataFusion provider and CodeFabric identity metadata. It SHALL NOT expose or serialize delta-rs internal snapshot or cache types.
+
+This makes provider lifetime exactly equal to snapshot lease lifetime, makes intra-query drift between the table-version map and the provider set impossible by construction, and avoids replaying the Delta log independently for every semantic query.
+
+### 12.7 Delta materialization caches are ephemeral
+
+The pinned delta-rs revision maintains an internal snapshot identity over table root, Delta version, checkpoint version, protocol, and metadata, and reuses materialized file state only when it matches that identity and the requested statistics capability.
+
+CodeFabric SHALL NOT duplicate that state. Materialized-file and statistics caches internal to delta-rs SHALL remain process-local, non-authoritative, and rebuildable. They MAY be retained by provider objects for the lifetime of a leased `ServingSnapshot`, but SHALL be reconstructible solely from the table root, pinned Delta version, and storage configuration. They SHALL NOT be serialized into the operational store, Delta control tables, or `ServingSnapshot` wire metadata, and SHALL NOT participate in semantic digests, publication equality, or query completeness proofs.
+
+Durable recovery requires only the publication manifest, the exact table-version map, table roots and storage configuration, the schema bundle, and normal operational recovery state.
+
+Where CodeFabric maintains its own provider or cache map, the key SHALL be:
+
+```text
+workspace_id
+publication_id
+table_code
+delta_table_root_identity
+delta_version
+schema_bundle_digest
+```
+
+Keying by table name alone, or by any notion of "latest", is prohibited.
+
+### 12.8 Checkpoint arrival is identity-neutral
+
+A Delta checkpoint may be created, replaced, or first discovered for a table version that a publication already pins. The pinned delta-rs revision can rebuild a snapshot at the **same** Delta version once a newer checkpoint becomes available:
+
+```text
+before            entity table version 421, replay = JSON commits after checkpoint 400
+maintenance       checkpoint 421 is written
+after refresh     entity table version 421, replay = checkpoint 421
+semantic identity unchanged
+```
+
+The addition, replacement, or later discovery of a checkpoint for an already pinned table version does not change the logical content identity of that version. Checkpoint choice is a replay optimization and SHALL NOT by itself advance publication generation, source generation, fact generation, or freshness.
+
+A new `ServingSnapshot` MAY still be constructed for operational reasons, but its logical durable-base content digest SHALL compare equal when no Delta table version and no overlay content changed. Without this rule, background checkpoint maintenance would spuriously advance freshness generations, invalidate query caches, and produce publication churn and false state-changed notifications.
+
+### 12.9 Publication validation is not provider construction
+
+The pinned revision can defer active-file and statistics materialization. That is desirable for query latency and memory, and it creates one architectural hazard worth naming:
+
+```text
+cheap provider construction != durable publication validation
+```
+
+Publication validation SHALL still establish, by doing the work:
+
+```text
+the exact requested Delta table version exists
+the schema digest matches the schema registry
+protocol and table features are compatible
+table metadata and the partition contract are correct
+publication table checksums and counts pass
+owner and relation integrity queries pass
+every required table is present in the publication manifest
+cross-table publication invariants pass
+```
+
+Where an integrity obligation requires enumerating active files or reading fact rows, the validator SHALL perform that enumeration or read. Successful construction of a delta-rs provider object SHALL NOT be treated as evidence of any of the above.
+
+Once durable publication validation has succeeded, the provider set MAY defer file and statistics replay until a query needs it. Correctness is established eagerly; materialization stays lazy.
 
 ## 13. Control-plane schemas and operational-state store
 
@@ -2196,11 +2378,30 @@ Column mapping SHALL not be enabled unless all reader, writer, DML, CDF, optimiz
 
 Delta type widening SHALL be disabled by default. Schema migrations SHALL be explicit and tested across Arrow, DataFusion, and Delta.
 
+### 67.3 Table-feature compatibility and `V2Checkpoint`
+
+The pinned delta-rs protocol checker recognizes `V2Checkpoint` as both a reader and a writer feature. The table-feature compatibility registry SHALL be updated accordingly, so that a table declaring `V2Checkpoint` is not rejected merely because the selected delta-rs build was assumed not to understand it.
+
+Recognition is not adoption. The policy is:
+
+```text
+V2Checkpoint read compatibility                 ALLOWED
+V2Checkpoint existing-table write compatibility ALLOWED_BY_LIBRARY
+CodeFabric create/enable by default             NO
+CodeFabric maintenance rollout                  BENCHMARK_AND_CONFORMANCE_REQUIRED
+```
+
+CodeFabric-owned tables SHALL continue to use the existing checkpoint policy. Protocol-checker recognition is not a designed checkpoint maintenance policy; the current baseline does not need V2 checkpoints for correctness; and durable publication identity is table-version based and independent of checkpoint format (section 12.8).
+
+Features that remain unsupported — including identity columns and type widening — SHALL continue to fail closed.
+
 ---
 
 ## 68. Table mutation classes
 
-Each table SHALL be assigned one mutation class.
+Each physical durable table SHALL be assigned one `DurableMutationClass`.
+This class governs durable writes only; it does not determine overlay or
+catalog behavior.
 
 | Class | Tables | Default operation |
 |---|---|---|
@@ -2261,12 +2462,33 @@ input checksum
 
 in Delta commit metadata where supported.
 
+At the pinned delta-rs revision, CodeFabric SHALL attach that metadata with
+`CommitProperties::with_metadata` and SHALL use a Delta application transaction
+for every retryable table commit. The application transaction identity is:
+
+```text
+app_id = "codefabric/<workspace_id>/<table_code>/<mutation_phase>"
+version = coordinator-persisted monotonically increasing signed 64-bit sequence
+```
+
+`mutation_phase` distinguishes independently retryable commits such as
+`owner-delete`, `owner-append`, `singleton-upsert`, `publication-append`, and
+maintenance. The operational write record binds `operation_id` to
+`(app_id, version, input checksum, expected output checksum)` before the Delta
+commit. The commit uses
+`CommitProperties::with_application_transaction(Transaction::new(app_id,
+version))`. This is the primary per-table duplicate/conflict marker; it does not
+replace CodeFabric's multi-table publication and pointer protocols.
+
 Retry logic SHALL:
 
 1. reload latest table state;
-2. inspect whether the operation was already committed;
-3. validate expected rows/checksum;
-4. retry only when the prior outcome is known not to have committed.
+2. read the latest Delta application-transaction version for the operation's
+   `app_id`;
+3. reconcile that version with the persisted operation record and commit
+   metadata;
+4. validate expected rows/checksum when the version is equal or has advanced;
+5. retry only when the prior outcome is known not to have committed.
 
 Blind append retry is prohibited.
 
@@ -2796,6 +3018,8 @@ Every custom `ExecutionPlan` SHALL:
 
 Every query catalog SHALL be created from one leased immutable `ServingSnapshot`, never from mutable global pointers and never from a publication alone.
 
+The durable half of that catalog is the snapshot-scoped `DeltaBaseCatalog` specified in section 12.6: one immutable set of exact-version Delta `TableProvider`s, built during candidate-snapshot construction and reused by every lease. This section specifies how the overlay is layered over those providers; section 12.6 specifies their construction and lifetime, and section 12.7 why their internal caches are never durable state.
+
 For each table, the provider binds:
 
 ```text
@@ -2818,7 +3042,12 @@ current rows =
       ANTI JOIN overlay tombstones
 ```
 
-Non-owner/global tables SHALL have an explicit overlay policy in `TableSpec`: immutable/base-only, whole-table replacement, keyed replacement, or query-time derived. Unspecified overlay behavior is a schema error.
+Every physical table SHALL have an explicit `overlay_mutation` in `TableSpec`.
+Query-time-derived surfaces are expressed by
+`materialization_role = QUERY_TIME_DERIVED` and
+`overlay_mutation = NOT_APPLICABLE`; they consume the already-composed leased
+snapshot and are not themselves overlay tables. Unspecified axis values or an
+invalid cross-axis combination are schema errors.
 
 The catalog exposes the same `snapshot_id`, workspace, context set, base publication, overlay generation/checksum, capability index, and source-trust metadata used by the query response. A long-running query never observes an active-pointer change.
 
@@ -3030,6 +3259,36 @@ repartition joins/aggregates    enabled where beneficial
 
 Custom graph operators SHALL use the same `RuntimeEnv`, memory pool, disk manager, and object-store registry as normal DataFusion execution.
 
+### 98.1 Delta provider access profiles
+
+Delta handles are opened for several purposes with different materialization needs. Every Delta handle SHALL be opened under exactly one declared access profile:
+
+| Access profile | Materialization posture | `skip_stats` | Purpose |
+|---|---|---:|---|
+| `QUERY_SERVING` | exact-version provider; lazy replay permitted | **false** | normal semantic and DataFusion queries |
+| `PUBLICATION_METADATA` | metadata-first / lazy | may be `true` only when no pruning or data scan is performed | schema, protocol and table-version validation |
+| `APPEND_ONLY_WRITER` | metadata-first where safe | may be `true` | writes that do not inspect existing files |
+| `VACUUM_FILESYSTEM_CHECK` | operation-specific | `true` may be appropriate | maintenance without query pruning |
+| `OPTIMIZE_DML` | active files and statistics as the operation requires | `false`/default unless the upstream operation owns stronger replay | rewrite maintenance |
+
+### 98.2 Query-serving statistics profile
+
+A query-visible Delta provider SHALL NOT be created with a statistics-skipping configuration unless the query planner can prove that no data-skipping predicate will be required and the resulting performance regression is explicitly accepted.
+
+The pinned delta-rs revision can replay active adds with stronger statistics capabilities when an internal operation demands them, even where the resident materialized cache was built without statistics. That is useful hardening. It is **not** a reason to disable statistics on the primary query path: the public `skip_stats` contract still permits a predicated query on a stats-less instance to scan every file, and partition pruning is a separate mechanism that does not compensate. This restates, for Delta handles specifically, the `metadata/file/statistics cache enabled` and `Parquet pruning enabled` requirements above.
+
+### 98.3 Provider warm-up is a performance policy
+
+Because replay is lazy, work can move from snapshot activation to the first operation that needs active files or statistics. For tables proven hot by measurement, the daemon MAY warm selected exact-version providers during `ServingSnapshot` activation with a bounded query that forces the required state through the provider's normal execution path.
+
+Warm-up SHALL NOT be globally required, and SHALL NOT be part of snapshot correctness. Recommended default posture:
+
+```text
+cold or seldom-queried extension tables      leave lazy
+entity / relation / high-frequency detail    benchmark optional warm-up
+control tables                               eager cost is usually negligible
+```
+
 ---
 
 ## 99. Update locality
@@ -3065,6 +3324,30 @@ Default maintenance:
 - use the service DataFusion session state;
 - require session fallback policy rather than silently using internal defaults.
 
+### 100.1 Nested-schema optimize obligations
+
+Optimize runs generically across the Delta namespace, and the schema registry already admits bounded `List`, `Map` and `Struct` payloads. Two nested cases are certified once for the maintenance subsystem rather than encoded as per-table exceptions.
+
+**Physically nullable nested fields under a stricter logical schema.** Parquet written by other engines may mark a nested field optional where the Delta logical schema declares it `NOT NULL`:
+
+```text
+logical    meta: STRUCT<int_id: STRING NOT NULL> NULLABLE
+physical   meta.int_id optional
+```
+
+The pinned delta-rs revision relaxes nested nullability for physical read and adaptation, then restores the strict logical Delta schema after the scan. Data that actually violates the logical contract still fails validation. CodeFabric SHALL rely on that adaptation layer and SHALL NOT weaken canonical schema nullability to accommodate physical encodings (see section 103.4).
+
+**Nested field name equal to a top-level partition column.** Where a nested field shares its name with a partition column:
+
+```text
+date                             top-level partition column
+properties STRUCT<date: STRING>  ordinary nested field
+```
+
+only the top-level column is a partition-field candidate. The nested field SHALL retain its ordinary representation through scan and optimize, with no partition or dictionary coercion.
+
+Both cases are mandatory regression fixtures in section 112.3.
+
 ---
 
 ## 101. Vacuum policy
@@ -3088,6 +3371,24 @@ Vacuum workflow:
 5. reopen current publication
 6. run table and cross-table smoke queries
 ```
+
+Vacuum reachability is computed over **table versions**, never over checkpoint files. Checkpoints do not define publication identity (section 12.8), so their creation or removal SHALL NOT by itself make a version reachable or unreachable. A checkpoint written at a version that a lease still pins is a replay artifact of a version that must be preserved for other reasons; it neither extends nor shortens that version's retention.
+
+### 101.1 Delta action paths are opaque URI identities
+
+Where maintenance code inspects Delta file actions directly, `Add.path`, `Remove.path` and change-data-feed action paths SHALL be created, encoded, decoded, and compared through delta-rs and `object_store` path facilities.
+
+The pinned revision corrects percent-encoding of spaces in action paths — `part 0.parquet` serializes as `part%200.parquet` — while preserving `/` as the path hierarchy separator and `=` as the Hive partition delimiter, and while remaining compatible with already-encoded and legacy unencoded paths. Hand-rolled encoding is therefore both unnecessary and unsafe.
+
+Specifically, maintenance code SHALL NOT:
+
+```text
+construct transaction-log action paths by string concatenation
+decode an action path for display and reuse the display string as identity
+compare CodeFabric source-path byte identity to Delta Parquet action paths
+```
+
+CodeFabric's byte-safe source-path contract governs **source files inside analyzed workspaces**. Delta's own Parquet and log object paths are a separate storage-identity domain. The two SHALL NOT be conflated, and no ontology change follows from this rule.
 
 ---
 
@@ -3173,6 +3474,18 @@ Partition changes SHALL create a new Delta table root, backfill through DataFusi
 ### 103.3 Schema merge
 
 `SchemaMode::Merge` SHALL not be the default ingestion mode. Schema evolution is an explicit migration operation.
+
+### 103.4 Physical nested-schema adaptation
+
+The Delta logical schema remains the authoritative durable table contract even where the Parquet physical encoding is looser — most commonly, a nested field written as optional beneath a logical `NOT NULL` declaration.
+
+```text
+Delta logical schema        authoritative CodeFabric durable table contract
+Arrow batches               SHALL conform to the logical contract
+Parquet physical nullability storage encoding detail, handled by the delta-rs adapter
+```
+
+CodeFabric SHALL rely on the pinned delta-rs and DataFusion schema-adaptation layer for that reconciliation. It SHALL NOT weaken canonical schema nullability to improve interoperability, and SHALL NOT read Delta-owned Parquet files through an independent raw-Parquet provider that bypasses the adaptation layer. The upstream fix resolves the mismatch at the correct layer and removes the need for an application workaround; the corresponding regression fixtures are in section 112.3.
 
 ---
 
@@ -3309,6 +3622,25 @@ integrity query failures
 
 These metrics SHALL not be inserted into the semantic CPG metric table unless they describe objective code structure rather than fabric operation.
 
+### 111.1 Delta activation and replay metrics
+
+Because replay is lazy, work moves between opening a table and the first operation that needs active files or statistics. A single end-to-end query-latency metric hides that shift, so the durable-provider lifecycle SHALL be instrumented separately from query execution:
+
+```text
+delta_snapshot_open_ms
+delta_provider_build_ms
+delta_provider_activation_count
+delta_first_scan_ms
+delta_first_predicated_scan_ms
+delta_table_version
+delta_checkpoint_version_if_available    diagnostic only; never semantic identity
+delta_active_file_count_when_materialized
+delta_materialization_reason             QUERY | VALIDATION | DML | OPTIMIZE | CONFLICT_CHECK
+delta_stats_policy_class                 CodeFabric-owned abstraction
+```
+
+Telemetry contracts SHALL NOT depend on private upstream enum or type names. Upstream states SHALL be mapped into CodeFabric-owned diagnostic categories, so that an upstream refactor cannot break a published metric contract. `delta_checkpoint_version_if_available` is explicitly diagnostic: it never contributes to publication or snapshot identity (section 12.8).
+
 ---
 
 ## 112. Testing strategy
@@ -3338,7 +3670,15 @@ These metrics SHALL not be inserted into the semantic CPG metric table unless th
 - concurrent publication conflict;
 - delete+append recovery;
 - optimize and vacuum safety;
-- local and object-store backends.
+- local and object-store backends;
+- optimize Spark-style physically nullable nested fields under a stricter Delta logical schema;
+- optimize a table whose nested field name equals a top-level partition column;
+- assert pre/post-optimize logical schema digest equality;
+- assert pre/post-optimize row and content digest equality;
+- assert no nested dictionary or partition coercion leakage;
+- data-file path containing a space serializes and reopens correctly;
+- Hive partition delimiters survive action-path round trip;
+- an already percent-encoded path round-trips without double encoding.
 
 ### 112.4 DataFusion tests
 
@@ -3360,6 +3700,77 @@ These metrics SHALL not be inserted into the semantic CPG metric table unless th
 - unknown materialization;
 - table row counts/checksums;
 - cross-publication isolation.
+
+### 112.6 delta-rs upgrade gate
+
+Every change to the pinned delta-rs revision SHALL pass this gate before the pin is accepted. It exists because the storage engine's snapshot, cache and replay behavior can change without any change to CodeFabric's own contracts.
+
+**Snapshot and cache behavior**
+
+```text
+[ ] an exact Delta version yields identical logical content with and without a
+    checkpoint at that same version
+[ ] a provider rebuilt after same-version checkpoint creation returns identical
+    rows and checksums
+[ ] a provider or snapshot cache from version N is never reused as version N+1 state
+[ ] a table-root mismatch cannot reuse a cached provider or snapshot
+[ ] daemon restart reconstructs providers solely from the publication manifest and
+    Delta versions, with no persisted engine cache
+```
+
+**Lazy and eager equivalence**
+
+```text
+[ ] a lazy exact-version provider and a fully materialized read return identical rows
+[ ] metadata-first load and normal load return identical protocol, schema and
+    table metadata
+[ ] the first predicated scan after lazy activation matches the steady-state scan
+```
+
+**Statistics policy**
+
+```text
+[ ] a QUERY_SERVING provider retains pruning capability
+[ ] a deliberately stats-skipped test demonstrates the expected loss of file pruning
+    and is never used as a production default
+[ ] partition pruning remains correct independently of file statistics
+```
+
+**Optimize**
+
+```text
+[ ] Spark-style nested nullability fixture passes
+[ ] nested field name matching a top-level partition column passes
+[ ] logical schema digest is identical before and after optimize
+[ ] a publication-pinned old version remains queryable until normal retention and
+    vacuum policy permits removal
+```
+
+**Protocol features**
+
+```text
+[ ] a V2Checkpoint-declaring fixture passes generic feature compatibility
+[ ] unsupported features such as identity columns and type widening still fail closed
+[ ] CodeFabric-owned table creation does not enable V2Checkpoint implicitly
+```
+
+**Equivalence and performance**
+
+```text
+[ ] clean-build CPG logical digests match the golden corpus
+[ ] canonical query responses are unchanged for unchanged source
+[ ] publication, overlay and freshness semantics are unchanged
+[ ] durable-base activation latency and peak RSS show no material regression
+[ ] first filtered query latency is bounded
+[ ] steady-state filtered query p50/p95 show no material regression
+[ ] unfiltered full scan shows no material regression
+[ ] owner-replacement conflict-check latency is bounded
+[ ] optimize on a nested table is correct and within timing budget
+[ ] reopening a table after checkpoint creation yields the same logical version
+    and result
+```
+
+Acceptance SHALL be judged on representative CodeFabric table shapes across small, medium and large tables, not on upstream synthetic benchmarks.
 
 ---
 
@@ -3677,7 +4088,9 @@ Overlay construction has a hard memory reservation. It SHALL fail before activat
 ## AC-G-21 — Overlay semantics for owner-scoped, cross-owner, and global tables
 ### Decision
 
-Every table declares exactly one overlay mutation policy in the schema registry.
+Every physical table declares exactly one overlay mutation policy in the
+schema registry. Operational projections and query-time-derived surfaces use
+`NOT_APPLICABLE`; their distinct meaning is carried by `MaterializationRole`.
 
 ### Contract
 
@@ -3686,7 +4099,7 @@ OWNER_REPLACE
 PRIMARY_KEY_UPSERT
 FULL_TABLE_REPLACE
 BASE_IMMUTABLE
-OPERATIONAL_ONLY
+NOT_APPLICABLE
 ```
 
 Policy semantics:
@@ -3697,7 +4110,7 @@ Policy semantics:
 | `PRIMARY_KEY_UPSERT` | Remove exact touched keys, then union replacements | cross-owner index rows whose owner cannot safely capture mutation scope |
 | `FULL_TABLE_REPLACE` | A table tombstone hides the entire base table; overlay rows are the complete effective table | workspace-global SCC/component maps or global registries produced per snapshot |
 | `BASE_IMMUTABLE` | No overlay writes permitted | enum dimensions, bundle registries, schema registry |
-| `OPERATIONAL_ONLY` | Not part of `ServingSnapshot` effective fact tables | provider runs, progress, queue metrics |
+| `NOT_APPLICABLE` | No overlay object exists for this surface; materialization role supplies the reason | provider runs, progress, queue metrics, query-time-derived views |
 
 Every canonical relation still has an `owner_id`. For direct inter-owner relations, the owner is the source/emitting semantic owner unless the derivation registry explicitly assigns a global derivation owner. This keeps most relation tables under `OWNER_REPLACE`.
 
@@ -3706,6 +4119,13 @@ Property facts inherit the subject entity's replacement owner unless the propert
 Workspace-global derivations SHALL use `FULL_TABLE_REPLACE`; partial replacement of a global fixed-point result is prohibited unless a later derivation profile formally proves a smaller stable replacement partition.
 
 Base-immutable tables are loaded from the pinned bundles and are not duplicated in each overlay.
+
+The valid role combinations are generated and verifier-enforced. In
+particular, `OPERATIONAL_PROJECTION` is never a `ServingSnapshot` effective
+fact table; `QUERY_TIME_DERIVED` reads only one leased snapshot;
+`BUNDLE_DIMENSION` is `BASE_IMMUTABLE`; and a `DURABLE_EFFECTIVE` table must
+declare a durable mutation class plus either a real overlay policy or
+`BASE_IMMUTABLE`.
 ## AC-G-22 — Deterministic overlay consolidation, merge, and durable rebase
 ### Decision
 

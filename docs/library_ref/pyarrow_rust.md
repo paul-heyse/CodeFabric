@@ -456,7 +456,7 @@ Start with **0–6** to lock the Arrow memory model and Rust syntax. Then cover 
 
 [1]: https://arrow.apache.org/docs/python/index.html "Python — Apache Arrow v24.0.0"
 [2]: https://arrow.apache.org/rust/arrow/index.html "arrow - Rust"
-[3]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.3.0 - Docs.rs"
+[3]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.4.0 - Docs.rs"
 [4]: https://arrow.apache.org/rust/arrow_pyarrow/index.html "arrow_pyarrow - Rust"
 [5]: https://datafusion.apache.org/user-guide/introduction.html "Introduction — Apache DataFusion  documentation"
 [6]: https://arrow.apache.org/rust/parquet/index.html "parquet - Rust"
@@ -481,15 +481,15 @@ As of **2026-07-14**, use these as the initial compatibility anchors:
 
 | Capability layer             |                                                                                                         Rust crate / package |             Current anchor | Role                                                                                                                   |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------: | -------------------------: | ---------------------------------------------------------------------------------------------------------------------- |
-| Arrow core                   |                                                                                                                      `arrow` |                   `58.3.0` | Top-level Arrow Rust crate; re-exports subcrates; arrays, schemas, compute, IPC/CSV/JSON features. ([Apache Arrow][1]) |
-| Arrow subcrates              | `arrow-array`, `arrow-schema`, `arrow-buffer`, `arrow-data`, `arrow-cast`, `arrow-select`, `arrow-ord`, `arrow-string`, etc. |                   `58.3.0` | Narrow dependency surface for libraries that do not need full `arrow`. ([Apache Arrow][1])                             |
-| Parquet                      |                                                                                                                    `parquet` |                   `58.3.0` | Official native Rust Parquet implementation; Arrow `RecordBatch` read/write bridge. ([Docs.rs][2])                     |
-| Flight                       |                                                                                                               `arrow-flight` |                   `58.3.0` | Arrow Flight gRPC, `FlightData`, `FlightInfo`, `Ticket`, tonic client/server, optional Flight SQL. ([Docs.rs][3])      |
+| Arrow core                   |                                                                                                                      `arrow` |                   `58.4.0` | Top-level Arrow Rust crate; re-exports subcrates; arrays, schemas, compute, IPC/CSV/JSON features. ([Apache Arrow][1]) |
+| Arrow subcrates              | `arrow-array`, `arrow-schema`, `arrow-buffer`, `arrow-data`, `arrow-cast`, `arrow-select`, `arrow-ord`, `arrow-string`, etc. |                   `58.4.0` | Narrow dependency surface for libraries that do not need full `arrow`. ([Apache Arrow][1])                             |
+| Parquet                      |                                                                                                                    `parquet` |                   `58.4.0` | Official native Rust Parquet implementation; Arrow `RecordBatch` read/write bridge. ([Docs.rs][2])                     |
+| Flight                       |                                                                                                               `arrow-flight` |                   `58.4.0` | Arrow Flight gRPC, `FlightData`, `FlightInfo`, `Ticket`, tonic client/server, optional Flight SQL. ([Docs.rs][3])      |
 | Object storage               |                                                                                                               `object_store` |                   `0.13.2` | Uniform async object-store/local-file abstraction; S3/GCS/Azure/HTTP features. ([Docs.rs][4])                          |
-| Query engine                 |                                                                                                                 `datafusion` |                   `54.0.0` | Arrow-native SQL/DataFrame/query execution engine. ([Docs.rs][5])                                                      |
-| Substrait                    |                                                                                                       `datafusion-substrait` |                   `54.0.0` | DataFusion plan producer/consumer for Substrait plans. ([Docs.rs][6])                                                  |
+| Query engine                 |                                                                                                                 `datafusion` |                   `54.1.0` | Arrow-native SQL/DataFrame/query execution engine. ([Docs.rs][5])                                                      |
+| Substrait                    |                                                                                                       `datafusion-substrait` |                   `54.1.0` | DataFusion plan producer/consumer for Substrait plans. ([Docs.rs][6])                                                  |
 | Python interop               |                                                                                                                 `pyo3-arrow` |                   `0.17.0` | Zero-copy PyO3 integration via Arrow PyCapsule / Arrow C Data Interface. ([Docs.rs][7])                                |
-| PyArrow-specific interop     |                                                                                            `arrow-pyarrow` / `arrow_pyarrow` | `58.3.0` via Arrow feature | PyArrow object import/export through Arrow C Data Interface + PyO3. ([Apache Arrow][8])                                |
+| PyArrow-specific interop     |                                                                                            `arrow-pyarrow` / `arrow_pyarrow` | `58.4.0` via Arrow feature | PyArrow object import/export through Arrow C Data Interface + PyO3. ([Apache Arrow][8])                                |
 | Avro optional                |                                                                                                                 `arrow-avro` |              `58.x` family | Arrow ↔ Avro read/write layer. ([Docs.rs][9])                                                                          |
 | ADBC optional                |                                                                                                                  `adbc_core` |     current docs.rs latest | Arrow-native database connectivity traits and APIs. ([Docs.rs][10])                                                    |
 | DataFrame ergonomic optional |                                                                                                                     `polars` |                   `0.53.0` | Rust DataFrame/query engine based on Arrow memory model; not a PyArrow clone. ([Docs.rs][11])                          |
@@ -581,10 +581,10 @@ Use for libraries that construct/inspect arrays, schemas, batches, or buffers; a
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-data = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-data = "58.4.0"
 ```
 
 Value case: smallest dependency surface, faster compile, fewer feature interactions, better library hygiene. The top-level `arrow` docs explicitly allow depending only on subcrates instead of the re-exporting `arrow` crate. ([Apache Arrow][1])
@@ -595,7 +595,7 @@ Use for binaries, notebooks, prototypes, tests, examples, and tools where compil
 
 ```toml
 [dependencies]
-arrow = { version = "58.3.0", features = ["csv", "json", "ipc", "prettyprint"] }
+arrow = { version = "58.4.0", features = ["csv", "json", "ipc", "prettyprint"] }
 ```
 
 Value case: one import namespace, `arrow::array::*`, `arrow::datatypes::*`, `arrow::record_batch::*`, `arrow::compute::*`, optional CSV/JSON/IPC/pretty printing. The `arrow` crate provides typed arrays, trait-object erasure, compute kernels, `RecordBatch`, JSON/CSV/IPC readers/writers, and pretty-printing behind features. ([Apache Arrow][1])
@@ -604,15 +604,15 @@ Value case: one import namespace, `arrow::array::*`, `arrow::datatypes::*`, `arr
 
 ```toml
 [dependencies]
-arrow = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow"] }
+arrow = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow"] }
 ```
 
 Add async/cloud:
 
 ```toml
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow", "async", "object_store"] }
+parquet = { version = "58.4.0", features = ["arrow", "async", "object_store"] }
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -626,9 +626,9 @@ Value case: Rust-native Parquet read/write, metadata access, Arrow `RecordBatch`
 crate-type = ["cdylib"]
 
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
 pyo3 = { version = "0.27", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
 ```
@@ -637,7 +637,7 @@ Alternative PyArrow-specific route:
 
 ```toml
 [dependencies]
-arrow = { version = "58.3.0", features = ["pyarrow"] }
+arrow = { version = "58.4.0", features = ["pyarrow"] }
 pyo3 = { version = "0.27", features = ["extension-module"] }
 ```
 
@@ -647,7 +647,7 @@ Value case: accept and return Python Arrow-compatible objects without pandas/Num
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -655,7 +655,7 @@ With cloud object stores:
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -666,9 +666,9 @@ Value case: PyArrow Dataset / Acero-like work should generally target DataFusion
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-flight = { version = "58.3.0", features = ["flight-sql"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-flight = { version = "58.4.0", features = ["flight-sql"] }
 tonic = "0.14"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -684,11 +684,11 @@ Value case: Arrow-native gRPC transport for cross-process streaming. `arrow-flig
 Prefer:
 
 ```toml
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-parquet = "58.3.0"
-arrow-flight = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+parquet = "58.4.0"
+arrow-flight = "58.4.0"
 ```
 
 Avoid:
@@ -700,17 +700,17 @@ parquet = "56"
 arrow-flight = "58"
 ```
 
-Reason: the top-level `arrow` crate depends on matching `58.3.0` Arrow subcrates, and `arrow-flight 58.3.0` also depends on Arrow `58.3.0` subcrates. ([Docs.rs][16])
+Reason: the top-level `arrow` crate depends on matching `58.4.0` Arrow subcrates, and `arrow-flight 58.4.0` also depends on Arrow `58.4.0` subcrates. ([Docs.rs][16])
 
 ### DataFusion alignment
 
-`datafusion 54.0.0` declares arrow `58.3.0`; that means agent-generated manifests should not force older Arrow versions alongside current DataFusion. ([Docs.rs][5])
+`datafusion 54.1.0` declares a caret arrow requirement of `58.3.0`, resolved to `58.4.0` in this baseline; that means agent-generated manifests should not force older Arrow versions alongside current DataFusion. ([Docs.rs][5])
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
-arrow = "58.3.0"       # compatible anchor
-parquet = "58.3.0"     # compatible anchor
+datafusion = "54.1.0"
+arrow = "58.4.0"       # compatible anchor
+parquet = "58.4.0"     # compatible anchor
 ```
 
 ### Object store independence
@@ -721,7 +721,7 @@ parquet = "58.3.0"     # compatible anchor
 object_store = { version = "0.13.2", features = ["aws"] }
 ```
 
-The `object_store` crate is its own package at `0.13.2`, while Arrow/Parquet/Flight are `58.3.0` in the current anchor set. ([Docs.rs][4])
+The `object_store` crate is its own package at `0.13.2`, while Arrow/Parquet/Flight are `58.4.0` in the current anchor set. ([Docs.rs][4])
 
 ### PyO3 interop alignment
 
@@ -855,7 +855,7 @@ The Arrow Rust docs define `ArrayRef` as `Arc<dyn Array>`, document downcasting 
 Use top-level `arrow` + feature flags for ergonomics:
 
 ```toml
-arrow = { version = "58.3.0", features = ["csv", "json", "ipc", "prettyprint"] }
+arrow = { version = "58.4.0", features = ["csv", "json", "ipc", "prettyprint"] }
 ```
 
 Best for CLIs, internal tools, ETL jobs, one binary deployment unit.
@@ -865,8 +865,8 @@ Best for CLIs, internal tools, ETL jobs, one binary deployment unit.
 Use narrow subcrates:
 
 ```toml
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 Best for public crates, plugin APIs, extensions, and compile-time-sensitive builds.
@@ -882,8 +882,8 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.27", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 ### Data lake services
@@ -891,9 +891,9 @@ arrow-schema = "58.3.0"
 Use `datafusion` + `object_store` + `parquet`; register stores once, expose query/dataset layer instead of hand-rolled file loops.
 
 ```toml
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure"] }
-parquet = { version = "58.3.0", features = ["arrow", "async", "object_store"] }
+parquet = { version = "58.4.0", features = ["arrow", "async", "object_store"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -902,8 +902,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 Use `arrow-flight`; add DataFusion only if the service executes SQL/plans.
 
 ```toml
-arrow-flight = { version = "58.3.0", features = ["flight-sql"] }
-datafusion = "54.0.0"
+arrow-flight = { version = "58.4.0", features = ["flight-sql"] }
+datafusion = "54.1.0"
 tonic = "0.14"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -997,12 +997,12 @@ Rust toolchain:
   - pinned MSRV if project defines one
 
 Arrow family:
-  - exact pinned: 58.3.0
+  - exact pinned: 58.4.0
   - allowed-compatible: ^58, checked by cargo update dry run
 
 DataFusion:
-  - exact pinned: 54.0.0
-  - verify Arrow dependency remains 58.3.0-aligned
+  - exact pinned: 54.1.0
+  - verify Arrow dependency remains 58.4.0-aligned
 
 Object store:
   - exact pinned: 0.13.2
@@ -1026,11 +1026,11 @@ Golden tests:
 `arrow` currently documents that it is tested with the latest stable Rust and follows Cargo SemVer; DataFusion official docs note crates.io distribution is a convenience and official Apache releases are source artifacts with signature/checksum verification guidance. ([Docs.rs][20])
 
 [1]: https://arrow.apache.org/rust/arrow/index.html "arrow - Rust"
-[2]: https://docs.rs/crate/parquet/latest?utm_source=chatgpt.com "parquet 58.3.0"
+[2]: https://docs.rs/crate/parquet/latest?utm_source=chatgpt.com "parquet 58.4.0"
 [3]: https://docs.rs/arrow-flight/latest/arrow_flight/ "arrow_flight - Rust"
 [4]: https://docs.rs/object_store/latest/src/object_store/lib.rs.html "lib.rs - source"
-[5]: https://docs.rs/crate/datafusion/latest "datafusion 54.0.0 - Docs.rs"
-[6]: https://docs.rs/crate/datafusion-substrait/latest?utm_source=chatgpt.com "datafusion-substrait 54.0.0"
+[5]: https://docs.rs/crate/datafusion/latest "datafusion 54.1.0 - Docs.rs"
+[6]: https://docs.rs/crate/datafusion-substrait/latest?utm_source=chatgpt.com "datafusion-substrait 54.1.0"
 [7]: https://docs.rs/pyo3-arrow "pyo3_arrow - Rust"
 [8]: https://arrow.apache.org/rust/src/arrow_pyarrow/lib.rs.html "lib.rs - source"
 [9]: https://docs.rs/arrow-avro?utm_source=chatgpt.com "arrow_avro - Rust"
@@ -1043,7 +1043,7 @@ Golden tests:
 [16]: https://docs.rs/arrow/latest/arrow/ "arrow - Rust"
 [17]: https://docs.rs/crate/pyo3-arrow/latest "pyo3-arrow 0.17.0 - Docs.rs"
 [18]: https://arrow.apache.org/docs/format/CDataInterface.html?utm_source=chatgpt.com "The Arrow C data interface — Apache Arrow v24.0.0"
-[19]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.3.0 - Docs.rs"
+[19]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.4.0 - Docs.rs"
 [20]: https://docs.rs/crate/arrow/latest/source/README.md?utm_source=chatgpt.com "arrow 58.1.0"
 
 
@@ -1090,7 +1090,7 @@ independent / companion
 
 ```toml
 [dependencies]
-arrow = { version = "58.3.0", features = ["csv", "json", "ipc", "prettyprint"] }
+arrow = { version = "58.4.0", features = ["csv", "json", "ipc", "prettyprint"] }
 ```
 
 Best fit:
@@ -1137,9 +1137,9 @@ use arrow::record_batch::RecordBatch;
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 Best fit:
@@ -1208,14 +1208,14 @@ The facade crate’s rustdoc also shows re-exports such as `arrow::csv`, `arrow:
 
 ```toml
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow"] }
+parquet = { version = "58.4.0", features = ["arrow"] }
 ```
 
 Feature knobs:
 
 ```toml
 parquet = {
-  version = "58.3.0",
+  version = "58.4.0",
   features = [
     "arrow",          # Arrow RecordBatch read/write bridge
     "async",          # async Parquet read APIs
@@ -1246,7 +1246,7 @@ Rust:
 
 ```toml
 [dependencies]
-arrow-flight = { version = "58.3.0", features = ["flight-sql"] }
+arrow-flight = { version = "58.4.0", features = ["flight-sql"] }
 tonic = "0.14"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -1273,7 +1273,7 @@ Rust:
 
 ```toml
 [dependencies]
-arrow-avro = "58.3.0"
+arrow-avro = "58.4.0"
 ```
 
 Use for:
@@ -1289,7 +1289,7 @@ Rust:
   arrow_avro::writer::AvroStreamWriter
 ```
 
-`arrow-avro 58.3.0` converts data to/from Arrow and Avro; it decodes Avro Object Container Files, Avro Single-Object Encoding, and Confluent Schema Registry wire format into Arrow `RecordBatch`es, and encodes Arrow `RecordBatch`es into Avro OCF or SOE. ([Docs.rs][5])
+`arrow-avro 58.4.0` converts data to/from Arrow and Avro; it decodes Avro Object Container Files, Avro Single-Object Encoding, and Confluent Schema Registry wire format into Arrow `RecordBatch`es, and encodes Arrow `RecordBatch`es into Avro OCF or SOE. ([Docs.rs][5])
 
 ### `object_store`
 
@@ -1323,7 +1323,7 @@ Rust:
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -1342,7 +1342,7 @@ Rust:
   Expr / LogicalPlan / ExecutionPlan
 ```
 
-`datafusion 54.0.0` is an in-memory query engine using Apache Arrow as its memory model; it declares arrow `58.3.0`, optional parquet `58.3.0`, and object_store `0.13.2`. It offers SQL/DataFrame APIs, CSV/Parquet/JSON/Avro support, query planning, vectorized streaming execution, partitioned data sources, and extensive customization points. ([Docs.rs][7])
+`datafusion 54.1.0` is an in-memory query engine using Apache Arrow as its memory model; it declares caret requirements on arrow `58.3.0`, optional parquet `58.3.0`, and object_store `0.13.2`, which this baseline resolves to Arrow/Parquet `58.4.0`. It offers SQL/DataFrame APIs, CSV/Parquet/JSON/Avro support, query planning, vectorized streaming execution, partitioned data sources, and extensive customization points. ([Docs.rs][7])
 
 ### `pyo3-arrow`
 
@@ -1350,9 +1350,9 @@ Rust:
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
 ```
 
 Use for:
@@ -1406,21 +1406,21 @@ Hard alignment rule:
 
 ```toml
 [workspace.dependencies]
-arrow = "58.3.0"
-arrow-array = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-data = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-string = "58.3.0"
-arrow-csv = "58.3.0"
-arrow-json = "58.3.0"
-arrow-ipc = "58.3.0"
-arrow-flight = "58.3.0"
-parquet = "58.3.0"
-arrow-avro = "58.3.0"
+arrow = "58.4.0"
+arrow-array = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-data = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-string = "58.4.0"
+arrow-csv = "58.4.0"
+arrow-json = "58.4.0"
+arrow-ipc = "58.4.0"
+arrow-flight = "58.4.0"
+parquet = "58.4.0"
+arrow-avro = "58.4.0"
 ```
 
 Rationale: Arrow Rust releases approximately monthly and follows SemVer; Arrow crates, `arrow-flight`, `parquet`, and `parquet_derive` are released on the same schedule with the same versions. The release policy describes minor releases as non-breaking and major releases as potentially breaking. ([GitHub][9])
@@ -1429,13 +1429,13 @@ Rationale: Arrow Rust releases approximately monthly and follows SemVer; Arrow c
 
 ```toml
 [workspace.dependencies]
-datafusion = "54.0.0"
-arrow = "58.3.0"
-parquet = "58.3.0"
+datafusion = "54.1.0"
+arrow = "58.4.0"
+parquet = "58.4.0"
 object_store = "0.13.2"
 ```
 
-`datafusion 54.0.0` declares `arrow 58.3.0`, `arrow-schema 58.3.0`, optional `parquet 58.3.0`, and `object_store 0.13.2`; therefore, pairing it with Arrow/Parquet `58.3.0` and object_store `0.13.2` is version-coherent. ([Docs.rs][7])
+`datafusion 54.1.0` declares caret requirements on `arrow 58.3.0`, `arrow-schema 58.3.0`, optional `parquet 58.3.0`, and `object_store 0.13.2`; therefore, pairing it with Arrow/Parquet `58.4.0` and object_store `0.13.2` is version-coherent. ([Docs.rs][7])
 
 ### PyO3 compatibility
 
@@ -1443,8 +1443,8 @@ object_store = "0.13.2"
 [workspace.dependencies]
 pyo3 = "0.28"
 pyo3-arrow = "0.17.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 `pyo3-arrow 0.17.x` maps to PyO3 `0.28` and Arrow Rust `58`; do not blindly pair it with arbitrary Arrow major versions. ([Docs.rs][8])
@@ -1473,7 +1473,7 @@ cargo update -p arrow     # controlled update, not global drift
 ### Default application profile
 
 ```toml
-arrow = { version = "58.3.0", features = ["csv", "json", "ipc", "prettyprint"] }
+arrow = { version = "58.4.0", features = ["csv", "json", "ipc", "prettyprint"] }
 ```
 
 Use when:
@@ -1490,8 +1490,8 @@ not dependency-sensitive
 ### Minimal library profile
 
 ```toml
-arrow-array = { version = "58.3.0", default-features = false }
-arrow-schema = { version = "58.3.0", default-features = false }
+arrow-array = { version = "58.4.0", default-features = false }
+arrow-schema = { version = "58.4.0", default-features = false }
 ```
 
 Use when:
@@ -1507,12 +1507,12 @@ no pretty output
 ### Compute-kernel library profile
 
 ```toml
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-string = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-string = "58.4.0"
 ```
 
 Use when:
@@ -1528,7 +1528,7 @@ no object storage
 ### IPC/FFI profile
 
 ```toml
-arrow = { version = "58.3.0", default-features = false, features = ["ffi", "ipc"] }
+arrow = { version = "58.4.0", default-features = false, features = ["ffi", "ipc"] }
 ```
 
 Use when:
@@ -1545,7 +1545,7 @@ The `ffi` feature enables Arrow C Data Interface bindings; `ipc` enables the Arr
 ### Validation-heavy test profile
 
 ```toml
-arrow = { version = "58.3.0", features = ["force_validate"] }
+arrow = { version = "58.4.0", features = ["force_validate"] }
 ```
 
 Use when:
@@ -1582,18 +1582,18 @@ anyhow = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
-arrow-array = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-string = "58.3.0"
+arrow-array = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-string = "58.4.0"
 
-arrow = "58.3.0"
-parquet = "58.3.0"
+arrow = "58.4.0"
+parquet = "58.4.0"
 object_store = "0.13.2"
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 ```
 
 ```toml
@@ -1685,9 +1685,9 @@ edition = "2024"
 rust-version = "1.88"
 
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
 thiserror = "2"
 ```
 
@@ -1731,9 +1731,9 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
 ```
 
 ```rust
@@ -1792,7 +1792,7 @@ name = "my_query_service"
 edition = "2024"
 
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = "2"
@@ -1844,10 +1844,10 @@ DataFusion’s default features include Parquet and SQL support, plus multiple e
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-flight = { version = "58.3.0", features = ["flight-sql"] }
-datafusion = "54.0.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-flight = { version = "58.4.0", features = ["flight-sql"] }
+datafusion = "54.1.0"
 tonic = "0.14"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -2088,12 +2088,12 @@ Escalate upward only when the requested capability crosses a layer boundary:
 ```
 
 [1]: https://arrow.apache.org/rust/arrow/index.html "arrow - Rust"
-[2]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.3.0 - Docs.rs"
-[3]: https://docs.rs/crate/parquet/latest "parquet 58.3.0 - Docs.rs"
+[2]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.4.0 - Docs.rs"
+[3]: https://docs.rs/crate/parquet/latest "parquet 58.4.0 - Docs.rs"
 [4]: https://docs.rs/arrow-flight/latest/arrow_flight/ "arrow_flight - Rust"
 [5]: https://docs.rs/arrow-avro "arrow_avro - Rust"
 [6]: https://docs.rs/object_store "object_store - Rust"
-[7]: https://docs.rs/crate/datafusion/latest "datafusion 54.0.0 - Docs.rs"
+[7]: https://docs.rs/crate/datafusion/latest "datafusion 54.1.0 - Docs.rs"
 [8]: https://docs.rs/crate/pyo3-arrow/latest "pyo3-arrow 0.17.0 - Docs.rs"
 [9]: https://github.com/apache/arrow-rs "GitHub - apache/arrow-rs: Official Rust implementation of Apache Arrow · GitHub"
 
@@ -2108,28 +2108,28 @@ As of **2026-07-14**:
 
 ```toml id="arrow-stack-versions"
 [workspace.dependencies]
-arrow = "58.3.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-data = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-string = "58.3.0"
+arrow = "58.4.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-data = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-string = "58.4.0"
 
-parquet = "58.3.0"
-arrow-flight = "58.3.0"
-arrow-avro = "58.3.0"
+parquet = "58.4.0"
+arrow-flight = "58.4.0"
+arrow-avro = "58.4.0"
 
 object_store = "0.13.2"
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 
 pyo3 = "0.28"
 pyo3-arrow = "0.17.0"
 ```
 
-`arrow 58.3.0` declares Rust edition `2024`, Rust version `1.85`, and feature flags including `csv`, `json`, `ipc`, `ipc_compression`, `ffi`, `pyarrow`, `prettyprint`, `canonical_extension_types`, `async`, `force_validate`, `pool`, and `chrono-tz`. Its default features include `csv`, `ipc`, and `json`. `datafusion 54.0.0` declares edition `2024` and Rust version `1.88.0`, so workspaces that include DataFusion should set `rust-version = "1.88"` (or later) as their floor. ([Docs.rs][1])
+`arrow 58.4.0` declares Rust edition `2024`, Rust version `1.85`, and feature flags including `csv`, `json`, `ipc`, `ipc_compression`, `ffi`, `pyarrow`, `prettyprint`, `canonical_extension_types`, `async`, `force_validate`, `pool`, and `chrono-tz`. Its default features include `csv`, `ipc`, and `json`. `datafusion 54.1.0` declares edition `2024` and Rust version `1.88.0`, so workspaces that include DataFusion should set `rust-version = "1.88"` (or later) as their floor. ([Docs.rs][1])
 
 ---
 
@@ -2164,7 +2164,7 @@ pyo3-arrow = "0.17.0"
 | `datafusion`   | default                     | SQL, Parquet, expression groups, compression, recursive protection | normal query engine use                                 |
 | `pyo3-arrow`   | default `buffer_protocol`   | Python buffer protocol support                                     | Python Arrow extension modules                          |
 
-`parquet 58.3.0` documents `arrow` as the default Arrow array bridge, `async` for async Parquet APIs, `object_store` as enabling `async`, and default compression features including Snappy, Brotli, gzip/zlib, LZ4, ZSTD, base64, and SIMD UTF-8 validation. ([Docs.rs][2])
+`parquet 58.4.0` documents `arrow` as the default Arrow array bridge, `async` for async Parquet APIs, `object_store` as enabling `async`, and default compression features including Snappy, Brotli, gzip/zlib, LZ4, ZSTD, base64, and SIMD UTF-8 validation. ([Docs.rs][2])
 
 ---
 
@@ -2194,23 +2194,23 @@ bytes = "1"
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
-arrow = "58.3.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-data = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-string = "58.3.0"
-arrow-csv = "58.3.0"
-arrow-json = "58.3.0"
-arrow-ipc = "58.3.0"
+arrow = "58.4.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-data = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-string = "58.4.0"
+arrow-csv = "58.4.0"
+arrow-json = "58.4.0"
+arrow-ipc = "58.4.0"
 
-parquet = "58.3.0"
-arrow-flight = "58.3.0"
+parquet = "58.4.0"
+arrow-flight = "58.4.0"
 object_store = "0.13.2"
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 
 pyo3 = "0.28"
 pyo3-arrow = "0.17.0"
@@ -2794,7 +2794,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ```
 
-`arrow-flight 58.3.0` has no default features; `flight-sql` enables additional Arrow kernel dependencies, and TLS feature flags are exposed for tonic TLS backends. ([Docs.rs][9])
+`arrow-flight 58.4.0` has no default features; `flight-sql` enables additional Arrow kernel dependencies, and TLS feature flags are exposed for tonic TLS backends. ([Docs.rs][9])
 
 ### Service layering
 
@@ -2892,7 +2892,7 @@ DON'T:
 ### Pitfall A — assuming `arrow` default is minimal
 
 ```toml id="pitfall-arrow-default"
-arrow = "58.3.0"
+arrow = "58.4.0"
 ```
 
 Actual effect: enables default `csv`, `ipc`, `json`. ([Docs.rs][1])
@@ -2900,20 +2900,20 @@ Actual effect: enables default `csv`, `ipc`, `json`. ([Docs.rs][1])
 Strict minimal:
 
 ```toml id="strict-minimal-arrow"
-arrow = { version = "58.3.0", default-features = false }
+arrow = { version = "58.4.0", default-features = false }
 ```
 
 Better library pattern:
 
 ```toml id="strict-minimal-subcrates"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 ### Pitfall B — enabling `parquet/object_store` without understanding async
 
 ```toml id="parquet-object-store-feature"
-parquet = { version = "58.3.0", features = ["object_store"] }
+parquet = { version = "58.4.0", features = ["object_store"] }
 ```
 
 Effect: `object_store` feature includes `async`, which pulls `futures` and `tokio`. ([Docs.rs][10])
@@ -2921,7 +2921,7 @@ Effect: `object_store` feature includes `async`, which pulls `futures` and `toki
 ### Pitfall C — enabling experimental Parquet APIs in stable product APIs
 
 ```toml id="parquet-experimental"
-parquet = { version = "58.3.0", features = ["experimental"] }
+parquet = { version = "58.4.0", features = ["experimental"] }
 ```
 
 Risk: Parquet docs explicitly state experimental components have no stability guarantees. ([Docs.rs][4])
@@ -2945,7 +2945,7 @@ experimental feature forbidden:
 ### Pitfall D — `arrow-flight` TLS assumptions
 
 ```toml id="flight-no-defaults"
-arrow-flight = "58.3.0"
+arrow-flight = "58.4.0"
 ```
 
 `arrow-flight` has `default = []`; TLS, CLI, and Flight SQL are explicit feature choices. ([Docs.rs][9])
@@ -2953,7 +2953,7 @@ arrow-flight = "58.3.0"
 Correct explicit Flight SQL + TLS:
 
 ```toml id="flight-tls"
-arrow-flight = { version = "58.3.0", features = ["flight-sql", "tls-ring"] }
+arrow-flight = { version = "58.4.0", features = ["flight-sql", "tls-ring"] }
 ```
 
 ### Pitfall E — Python extension feature mismatch
@@ -2971,8 +2971,8 @@ Good:
 ```toml id="good-python-match"
 pyo3 = "0.28"
 pyo3-arrow = "0.17.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 `pyo3-arrow 0.17.0` depends on Arrow `58` crates and PyO3 `0.28`, so generated projects should keep those families aligned. ([Docs.rs][11])
@@ -2982,7 +2982,7 @@ arrow-schema = "58.3.0"
 Bad:
 
 ```toml id="bad-datafusion-mismatch"
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 arrow = "57"
 parquet = "57"
 ```
@@ -2990,12 +2990,12 @@ parquet = "57"
 Good:
 
 ```toml id="good-datafusion-match"
-datafusion = "54.0.0"
-arrow = "58.3.0"
-parquet = "58.3.0"
+datafusion = "54.1.0"
+arrow = "58.4.0"
+parquet = "58.4.0"
 ```
 
-DataFusion `54.0.0` declares arrow `58.3.0` and optional parquet `58.3.0`; forcing older Arrow-family crates can produce duplicate major versions or incompatible public types. ([Docs.rs][12])
+DataFusion `54.1.0` declares caret requirements on arrow `58.3.0` and optional parquet `58.3.0`, satisfied by the `58.4.0` baseline; forcing older Arrow-family crates can produce duplicate major versions or incompatible public types. ([Docs.rs][12])
 
 ### Pitfall G — `prettyprint` in libraries
 
@@ -3017,9 +3017,9 @@ prettyprint:
 
 ```toml id="application-pinning"
 [dependencies]
-arrow = "=58.3.0"
-parquet = "=58.3.0"
-datafusion = "=54.0.0"
+arrow = "=58.4.0"
+parquet = "=58.4.0"
+datafusion = "=54.1.0"
 object_store = "=0.13.2"
 ```
 
@@ -3051,10 +3051,10 @@ Use compatible major pins when:
 
 ```toml id="workspace-pinning"
 [workspace.dependencies]
-arrow-array = "=58.3.0"
-arrow-schema = "=58.3.0"
-parquet = "=58.3.0"
-datafusion = "=54.0.0"
+arrow-array = "=58.4.0"
+arrow-schema = "=58.4.0"
+parquet = "=58.4.0"
+datafusion = "=54.1.0"
 ```
 
 ### CI duplicate guard
@@ -3067,10 +3067,10 @@ cargo tree -e features | rg 'arrow|parquet|datafusion|object_store|pyo3'
 ### Update workflow
 
 ```bash id="update-workflow"
-cargo update -p arrow --precise 58.3.0
-cargo update -p arrow-array --precise 58.3.0
-cargo update -p parquet --precise 58.3.0
-cargo update -p datafusion --precise 54.0.0
+cargo update -p arrow --precise 58.4.0
+cargo update -p arrow-array --precise 58.4.0
+cargo update -p parquet --precise 58.4.0
+cargo update -p datafusion --precise 54.1.0
 
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
@@ -3086,8 +3086,8 @@ cargo tree -d
 ```toml id="profile-local-cli"
 [dependencies]
 anyhow = "1"
-arrow = { version = "58.3.0", features = ["csv", "json", "ipc", "prettyprint"] }
-parquet = { version = "58.3.0", features = ["arrow"] }
+arrow = { version = "58.4.0", features = ["csv", "json", "ipc", "prettyprint"] }
+parquet = { version = "58.4.0", features = ["arrow"] }
 ```
 
 ```text id="profile-local-cli-value"
@@ -3101,13 +3101,13 @@ Value:
 
 ```toml id="profile-kernel"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-string = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-string = "58.4.0"
 thiserror = "2"
 ```
 
@@ -3124,9 +3124,9 @@ Value:
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow", "async", "object_store"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow", "async", "object_store"] }
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 ```
 
@@ -3142,7 +3142,7 @@ Value:
 ```toml id="profile-datafusion"
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 ```
 
@@ -3165,9 +3165,9 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
 ```
 
 ```text id="profile-pyo3-arrow-value"
@@ -3186,7 +3186,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module"] }
-arrow = { version = "58.3.0", features = ["pyarrow"] }
+arrow = { version = "58.4.0", features = ["pyarrow"] }
 ```
 
 ```text id="profile-arrow-pyarrow-value"
@@ -3202,9 +3202,9 @@ Value:
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tonic = { version = "0.14", features = ["transport"] }
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-flight = { version = "58.3.0", features = ["tls-ring"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-flight = { version = "58.4.0", features = ["tls-ring"] }
 ```
 
 ```text id="profile-flight-value"
@@ -3220,10 +3220,10 @@ Value:
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tonic = { version = "0.14", features = ["transport"] }
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-flight = { version = "58.3.0", features = ["flight-sql", "tls-ring"] }
-datafusion = "54.0.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-flight = { version = "58.4.0", features = ["flight-sql", "tls-ring"] }
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure"] }
 ```
 
@@ -3285,7 +3285,7 @@ Library:
 strict-validation = ["arrow/force_validate"]
 
 [dependencies]
-arrow = { version = "58.3.0", default-features = false, optional = true }
+arrow = { version = "58.4.0", default-features = false, optional = true }
 ```
 
 Use:
@@ -3423,18 +3423,18 @@ Pin versions at the workspace.
 Audit features with cargo tree before shipping.
 ```
 
-[1]: https://docs.rs/crate/arrow/latest/source/Cargo.toml "arrow 58.3.0 - Docs.rs"
-[2]: https://docs.rs/parquet "parquet 58.3.0 - Docs.rs"
-[3]: https://docs.rs/crate/datafusion/latest/features "datafusion 54.0.0 - Docs.rs"
+[1]: https://docs.rs/crate/arrow/latest/source/Cargo.toml "arrow 58.4.0 - Docs.rs"
+[2]: https://docs.rs/parquet "parquet 58.4.0 - Docs.rs"
+[3]: https://docs.rs/crate/datafusion/latest/features "datafusion 54.1.0 - Docs.rs"
 [4]: https://docs.rs/parquet/latest/src/parquet/lib.rs.html "lib.rs - source"
 [5]: https://docs.rs/object_store "object_store - Rust"
 [6]: https://docs.rs/pyo3-arrow "pyo3_arrow - Rust"
 [7]: https://www.maturin.rs/ "Introduction - Maturin User Guide"
 [8]: https://arrow.apache.org/rust/arrow_pyarrow/index.html "arrow_pyarrow - Rust"
-[9]: https://docs.rs/crate/arrow-flight/latest/source/Cargo.toml "arrow-flight 58.3.0 - Docs.rs"
-[10]: https://docs.rs/crate/parquet/latest/source/Cargo.toml "parquet 58.3.0 - Docs.rs"
+[9]: https://docs.rs/crate/arrow-flight/latest/source/Cargo.toml "arrow-flight 58.4.0 - Docs.rs"
+[10]: https://docs.rs/crate/parquet/latest/source/Cargo.toml "parquet 58.4.0 - Docs.rs"
 [11]: https://docs.rs/crate/pyo3-arrow/latest/source/Cargo.toml.orig "pyo3-arrow 0.17.0 - Docs.rs"
-[12]: https://docs.rs/crate/datafusion/latest?utm_source=chatgpt.com "datafusion 54.0.0"
+[12]: https://docs.rs/crate/datafusion/latest?utm_source=chatgpt.com "datafusion 54.1.0"
 
 
 # 3) Arrow data model: types, fields, schemas, metadata
@@ -3463,7 +3463,7 @@ RecordBatch = SchemaRef + equal-length ArrayRef columns
 
 ```toml id="schema-only-cargo"
 [dependencies]
-arrow-schema = "58.3.0"
+arrow-schema = "58.4.0"
 ```
 
 ```rust id="schema-only-imports"
@@ -3480,7 +3480,7 @@ use arrow_schema::{
 
 ```toml id="schema-arrow-facade-cargo"
 [dependencies]
-arrow = { version = "58.3.0", features = ["canonical_extension_types"] }
+arrow = { version = "58.4.0", features = ["canonical_extension_types"] }
 ```
 
 ```rust id="schema-arrow-facade-imports"
@@ -3494,7 +3494,7 @@ use arrow::datatypes::{
 
 ```toml id="canonical-extension-cargo"
 [dependencies]
-arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
+arrow-schema = { version = "58.4.0", features = ["canonical_extension_types"] }
 ```
 
 `Field::try_canonical_extension_type` and canonical extension structs such as `Uuid` are gated by the `canonical_extension_types` crate feature. ([Docs.rs][2])
@@ -4219,7 +4219,7 @@ let ext = field.try_extension_type::<EmailAddress>()?;
 
 ```toml id="canonical-extension-cargo-repeat"
 [dependencies]
-arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
+arrow-schema = { version = "58.4.0", features = ["canonical_extension_types"] }
 ```
 
 ### UUID canonical extension
@@ -4787,24 +4787,24 @@ OffsetBuffer<O> = monotonically increasing offsets for variable-length arrays
 
 ```toml id="cargo-minimal-memory"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-data = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-data = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 ### App/facade profile
 
 ```toml id="cargo-facade-memory"
 [dependencies]
-arrow = "58.3.0"
+arrow = "58.4.0"
 ```
 
 ### Memory accounting profile
 
 ```toml id="cargo-memory-pool"
 [dependencies]
-arrow = { version = "58.3.0", features = ["pool"] }
+arrow = { version = "58.4.0", features = ["pool"] }
 ```
 
 `arrow_buffer` exposes memory-pool traits and a `TrackingMemoryPool`; `Array::claim` is available behind the `pool` feature and recursively claims data buffers, child arrays, and null bitmaps while avoiding double-counting shared/sliced buffers. ([Apache Arrow][1])
@@ -5941,21 +5941,21 @@ Arrow Rust’s `arrow_array` crate provides concrete array implementations plus 
 
 ```toml id="array-cargo-minimal"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
 ```
 
 ### Builders + DataFusion scalars
 
 ```toml id="array-cargo-datafusion"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-datafusion-common = "54.0.0"
-datafusion-expr = "54.0.0"
-datafusion-physical-plan = "54.0.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+datafusion-common = "54.1.0"
+datafusion-expr = "54.1.0"
+datafusion-physical-plan = "54.1.0"
 futures = "0.3"
 ```
 
@@ -5963,8 +5963,8 @@ futures = "0.3"
 
 ```toml id="array-cargo-facade"
 [dependencies]
-arrow = "58.3.0"
-datafusion = "54.0.0"
+arrow = "58.4.0"
+datafusion = "54.1.0"
 ```
 
 Agent rule:
@@ -7331,32 +7331,32 @@ A Rust `RecordBatch` is a two-dimensional batch of column-oriented arrays; all a
 
 ```toml id="recordbatch-cargo-minimal"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
 ```
 
 ### App / examples / pretty printing
 
 ```toml id="recordbatch-cargo-app"
 [dependencies]
-arrow = { version = "58.3.0", features = ["prettyprint"] }
+arrow = { version = "58.4.0", features = ["prettyprint"] }
 ```
 
 ### Sync IPC/CSV/JSON readers
 
 ```toml id="recordbatch-cargo-sync-readers"
 [dependencies]
-arrow = { version = "58.3.0", features = ["csv", "json", "ipc"] }
+arrow = { version = "58.4.0", features = ["csv", "json", "ipc"] }
 ```
 
 ### Async query streams
 
 ```toml id="recordbatch-cargo-async-streams"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-datafusion = "54.0.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+datafusion = "54.1.0"
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -7365,7 +7365,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml id="recordbatch-cargo-pyarrow"
 [dependencies]
-arrow = { version = "58.3.0", features = ["pyarrow"] }
+arrow = { version = "58.4.0", features = ["pyarrow"] }
 pyo3 = { version = "0.28", features = ["extension-module"] }
 ```
 
@@ -8581,7 +8581,7 @@ The top-level `arrow::compute` module re-exports Arrow compute functionality and
 
 ```toml id="compute-cargo-facade"
 [dependencies]
-arrow = "58.3.0"
+arrow = "58.4.0"
 ```
 
 ```rust id="compute-import-facade"
@@ -8592,14 +8592,14 @@ use arrow::compute;
 
 ```toml id="compute-cargo-narrow"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-arith = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-string = "58.3.0"
+arrow-array = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-arith = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-string = "58.4.0"
 ```
 
 ```rust id="compute-import-narrow"
@@ -9734,7 +9734,7 @@ Use Arrow kernels for local batch operations; use DataFusion when the operation 
 
 ```toml id="df-query-cargo"
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -9742,19 +9742,19 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml id="df-plugin-cargo"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-datafusion-common = "54.0.0"
-datafusion-expr = "54.0.0"
-datafusion-physical-expr = "54.0.0"
-datafusion-physical-plan = "54.0.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+datafusion-common = "54.1.0"
+datafusion-expr = "54.1.0"
+datafusion-physical-expr = "54.1.0"
+datafusion-physical-plan = "54.1.0"
 ```
 
 ### Lake/query service profile
 
 ```toml id="df-lake-cargo"
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
@@ -10902,10 +10902,10 @@ JSON:
 
 ```toml id="csv-json-cargo-narrow"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-csv = "58.3.0"
-arrow-json = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-csv = "58.4.0"
+arrow-json = "58.4.0"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -10915,7 +10915,7 @@ serde_json = "1"
 
 ```toml id="csv-json-cargo-facade"
 [dependencies]
-arrow = { version = "58.3.0", features = ["csv", "json", "prettyprint"] }
+arrow = { version = "58.4.0", features = ["csv", "json", "prettyprint"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -10925,10 +10925,10 @@ serde_json = "1"
 
 ```toml id="csv-json-cargo-async"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-csv = "58.3.0"
-arrow-json = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-csv = "58.4.0"
+arrow-json = "58.4.0"
 bytes = "1"
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "fs"] }
@@ -10938,8 +10938,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "fs
 
 ```toml id="csv-json-cargo-compressed"
 [dependencies]
-arrow-csv = "58.3.0"
-arrow-json = "58.3.0"
+arrow-csv = "58.4.0"
+arrow-json = "58.4.0"
 flate2 = "1"
 zstd = "0.13"
 ```
@@ -12121,14 +12121,14 @@ The `arrow-ipc` crate defines two IPC variants: streaming format with `StreamRea
 
 ```toml id="ipc-cargo-facade"
 [dependencies]
-arrow = { version = "58.3.0", features = ["ipc"] }
+arrow = { version = "58.4.0", features = ["ipc"] }
 ```
 
 ### IPC with compression through facade
 
 ```toml id="ipc-cargo-facade-compression"
 [dependencies]
-arrow = { version = "58.3.0", features = ["ipc", "ipc_compression"] }
+arrow = { version = "58.4.0", features = ["ipc", "ipc_compression"] }
 ```
 
 The `arrow` crate enables `csv`, `ipc`, and `json` by default; its `ipc_compression` feature enables `arrow-ipc/lz4`, `arrow-ipc/zstd`, and the `ipc` feature. ([Docs.rs][2])
@@ -12137,23 +12137,23 @@ The `arrow` crate enables `csv`, `ipc`, and `json` by default; its `ipc_compress
 
 ```toml id="ipc-cargo-narrow"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-ipc = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-ipc = "58.4.0"
 ```
 
 ### Narrow IPC + compression
 
 ```toml id="ipc-cargo-narrow-compression"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-ipc = { version = "58.3.0", features = ["lz4", "zstd"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-ipc = { version = "58.4.0", features = ["lz4", "zstd"] }
 ```
 
-`arrow-ipc 58.3.0` exposes no enabled default compression features; optional `lz4` enables `lz4_flex`, and optional `zstd` enables `zstd`. ([Docs.rs][3])
+`arrow-ipc 58.4.0` exposes no enabled default compression features; optional `lz4` enables `lz4_flex`, and optional `zstd` enables `zstd`. ([Docs.rs][3])
 
 ---
 
@@ -12364,14 +12364,14 @@ Arrow’s Python IPC docs define streaming format as an arbitrary-length sequenc
 
 ```toml id="ipc-compression-cargo"
 [dependencies]
-arrow-ipc = { version = "58.3.0", features = ["lz4", "zstd"] }
+arrow-ipc = { version = "58.4.0", features = ["lz4", "zstd"] }
 ```
 
 or:
 
 ```toml id="ipc-compression-arrow-cargo"
 [dependencies]
-arrow = { version = "58.3.0", features = ["ipc_compression"] }
+arrow = { version = "58.4.0", features = ["ipc_compression"] }
 ```
 
 ### Write compressed IPC
@@ -12770,9 +12770,9 @@ Stream format:
 
 ```toml id="ipc-profile-local"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = "58.4.0"
 ```
 
 ```text id="ipc-profile-local-use"
@@ -12786,9 +12786,9 @@ Use:
 
 ```toml id="ipc-profile-pipe"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = "58.4.0"
 ```
 
 ```text id="ipc-profile-pipe-use"
@@ -12802,9 +12802,9 @@ Use:
 
 ```toml id="ipc-profile-feather-compressed"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = { version = "58.3.0", features = ["lz4", "zstd"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = { version = "58.4.0", features = ["lz4", "zstd"] }
 ```
 
 ```text id="ipc-profile-feather-compressed-use"
@@ -12817,10 +12817,10 @@ Use:
 
 ```toml id="ipc-profile-object-stream"
 [dependencies]
-arrow-buffer = "58.3.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = "58.3.0"
+arrow-buffer = "58.4.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = "58.4.0"
 bytes = "1"
 futures = "0.3"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
@@ -12837,8 +12837,8 @@ Use:
 
 ```toml id="ipc-profile-flight"
 [dependencies]
-arrow-flight = { version = "58.3.0", features = ["flight-sql", "tls-ring"] }
-datafusion = "54.0.0"
+arrow-flight = { version = "58.4.0", features = ["flight-sql", "tls-ring"] }
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tonic = "0.14"
 ```
@@ -13105,8 +13105,8 @@ Never skip validation on untrusted IPC.
 ```
 
 [1]: https://docs.rs/arrow-ipc "arrow_ipc - Rust"
-[2]: https://docs.rs/crate/arrow/latest/features "arrow 58.3.0 - Docs.rs"
-[3]: https://docs.rs/crate/arrow-ipc/latest/features "arrow-ipc 58.3.0 - Docs.rs"
+[2]: https://docs.rs/crate/arrow/latest/features "arrow 58.4.0 - Docs.rs"
+[3]: https://docs.rs/crate/arrow-ipc/latest/features "arrow-ipc 58.4.0 - Docs.rs"
 [4]: https://docs.rs/arrow-ipc/latest/arrow_ipc/writer/struct.StreamWriter.html "StreamWriter in arrow_ipc::writer - Rust"
 [5]: https://docs.rs/arrow-ipc/latest/arrow_ipc/reader/struct.StreamReader.html "StreamReader in arrow_ipc::reader - Rust"
 [6]: https://docs.rs/arrow-ipc/latest/arrow_ipc/writer/struct.FileWriter.html "FileWriter in arrow_ipc::writer - Rust"
@@ -13154,9 +13154,9 @@ The `parquet` crate is the official native Rust implementation of Apache Parquet
 
 ```toml id="parquet-cargo-sync"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow"] }
 ```
 
 ### Controlled compression footprint
@@ -13164,31 +13164,31 @@ parquet = { version = "58.3.0", features = ["arrow"] }
 ```toml id="parquet-cargo-controlled"
 [dependencies]
 parquet = {
-  version = "58.3.0",
+  version = "58.4.0",
   default-features = false,
   features = ["arrow", "snap", "zstd"]
 }
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 ### Full default sync profile
 
 ```toml id="parquet-cargo-default"
 [dependencies]
-parquet = "58.3.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+parquet = "58.4.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 ### Async / object-store profile
 
 ```toml id="parquet-cargo-async-object-store"
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow", "async", "object_store"] }
+parquet = { version = "58.4.0", features = ["arrow", "async", "object_store"] }
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -13197,7 +13197,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml id="parquet-cargo-crc"
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow", "crc"] }
+parquet = { version = "58.4.0", features = ["arrow", "crc"] }
 ```
 
 The `parquet` default feature set includes Arrow support plus common compression support such as Brotli, gzip/flate2, LZ4, ZSTD, Snappy, and SIMD UTF-8 validation; `crc` enables page checksum verification when present, and `experimental`/`variant_experimental`/`geospatial` are explicitly unstable feature surfaces. ([Docs.rs][2])
@@ -14255,7 +14255,7 @@ Use DataFusion for dataset-level predicate pushdown and relational scans.
 ```
 
 [1]: https://docs.rs/parquet?utm_source=chatgpt.com "parquet - Rust"
-[2]: https://docs.rs/parquet "parquet 58.3.0 - Docs.rs"
+[2]: https://docs.rs/parquet "parquet 58.4.0 - Docs.rs"
 [3]: https://docs.rs/parquet/latest/parquet/arrow/arrow_writer/struct.ArrowWriter.html "ArrowWriter in parquet::arrow::arrow_writer - Rust"
 [4]: https://docs.rs/parquet/latest/parquet/file/properties/struct.WriterProperties.html "WriterProperties in parquet::file::properties - Rust"
 [5]: https://arrow.apache.org/rust/src/parquet/file/properties.rs.html "properties.rs - source"
@@ -14303,12 +14303,12 @@ Rust Parquet’s advanced APIs are deliberately low-level: the crate exposes the
 
 ```toml id="advanced-parquet-cargo-object-store"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
 
-parquet = { version = "58.3.0", features = ["arrow", "async", "object_store"] }
+parquet = { version = "58.4.0", features = ["arrow", "async", "object_store"] }
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 
 futures = "0.3"
@@ -14320,9 +14320,9 @@ bytes = "1"
 
 ```toml id="advanced-parquet-cargo-async-local"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow", "async"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow", "async"] }
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 ```
@@ -14331,9 +14331,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 
 ```toml id="advanced-parquet-cargo-cdc"
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow"] }
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+parquet = { version = "58.4.0", features = ["arrow"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 CDC is exposed through `WriterProperties::set_content_defined_chunking(Some(CdcOptions::default()))`; the crate docs mark content-defined chunking as **experimental**, and it is only supported through the Arrow writer interface. ([Docs.rs][2])
@@ -14342,7 +14342,7 @@ CDC is exposed through `WriterProperties::set_content_defined_chunking(Some(CdcO
 
 ```toml id="advanced-parquet-cargo-variant"
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow", "variant_experimental"] }
+parquet = { version = "58.4.0", features = ["arrow", "variant_experimental"] }
 ```
 
 The Rust Parquet crate documents the `variant_experimental` feature for reading and writing the Parquet Variant Binary Encoding logical type, intended for efficient semi-structured data such as JSON. ([Docs.rs][2])
@@ -14351,7 +14351,7 @@ The Rust Parquet crate documents the `variant_experimental` feature for reading 
 
 ```toml id="advanced-parquet-cargo-encryption"
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow", "encryption"] }
+parquet = { version = "58.4.0", features = ["arrow", "encryption"] }
 ```
 
 Rust Parquet exposes an `encryption` feature and the Arrow module includes an example for reading encrypted Parquet files with `FileDecryptionProperties`; the docs note that this requires the experimental `encryption` feature at compile time. ([Docs.rs][3])
@@ -15053,7 +15053,7 @@ PyArrow’s CDC docs explicitly warn that changing write options such as compres
 
 ```toml id="variant-cargo"
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow", "variant_experimental"] }
+parquet = { version = "58.4.0", features = ["arrow", "variant_experimental"] }
 ```
 
 ```text id="variant-model"
@@ -15093,7 +15093,7 @@ PyArrow documents Parquet modular/columnar encryption support, including envelop
 
 ```toml id="encryption-cargo"
 [dependencies]
-parquet = { version = "58.3.0", features = ["arrow", "encryption"] }
+parquet = { version = "58.4.0", features = ["arrow", "encryption"] }
 ```
 
 ```rust id="encryption-read-sketch"
@@ -15494,7 +15494,7 @@ PyArrow’s dataset module is a unified interface for tabular, potentially large
 
 ```toml id="dataset-cargo-datafusion"
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
@@ -15504,15 +15504,15 @@ futures = "0.3"
 
 ```toml id="dataset-cargo-narrow"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 
-datafusion-common = "54.0.0"
-datafusion-expr = "54.0.0"
-datafusion-catalog = "54.0.0"
-datafusion-datasource = "54.0.0"
-datafusion-datasource-parquet = "54.0.0"
-datafusion-physical-plan = "54.0.0"
+datafusion-common = "54.1.0"
+datafusion-expr = "54.1.0"
+datafusion-catalog = "54.1.0"
+datafusion-datasource = "54.1.0"
+datafusion-datasource-parquet = "54.1.0"
+datafusion-physical-plan = "54.1.0"
 
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -15522,9 +15522,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml id="dataset-cargo-partitioned-writer"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow", "async", "object_store"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow", "async", "object_store"] }
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
@@ -17895,7 +17895,7 @@ RecordBatch output =
 
 ```toml id="df-cargo-normal"
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 ```
@@ -17904,7 +17904,7 @@ futures = "0.3"
 
 ```toml id="df-cargo-avro"
 [dependencies]
-datafusion = { version = "54.0.0", features = ["avro"] }
+datafusion = { version = "54.1.0", features = ["avro"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -17914,7 +17914,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml id="df-cargo-object-store"
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
@@ -17925,7 +17925,7 @@ url = "2"
 
 ```toml id="df-cargo-pretty"
 [dependencies]
-datafusion = { version = "54.0.0", features = ["prettyprint"] }
+datafusion = { version = "54.1.0", features = ["prettyprint"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -18990,7 +18990,7 @@ Use Arrow kernels only inside local transforms or UDF implementations, not for r
 
 [1]: https://docs.rs/datafusion/latest/datafusion/execution/context/struct.SessionContext.html "SessionContext in datafusion::execution::context - Rust"
 [2]: https://docs.rs/datafusion/latest/datafusion/common/arrow/util/pretty/fn.pretty_format_batches.html?utm_source=chatgpt.com "pretty_format_batches in datafusion - arrow::util::pretty"
-[3]: https://docs.rs/crate/datafusion/latest/source/src/prelude.rs?utm_source=chatgpt.com "datafusion 54.0.0"
+[3]: https://docs.rs/crate/datafusion/latest/source/src/prelude.rs?utm_source=chatgpt.com "datafusion 54.1.0"
 [4]: https://docs.rs/datafusion/latest/datafusion/ "datafusion - Rust"
 [5]: https://docs.rs/datafusion/latest/datafusion/dataframe/struct.DataFrame.html "DataFrame in datafusion::dataframe - Rust"
 
@@ -19027,7 +19027,7 @@ DataFusion parses SQL strings with `sqlparser`, converts AST nodes to `LogicalPl
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
@@ -19037,16 +19037,16 @@ object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] 
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 
-datafusion = "54.0.0"
-datafusion-common = "54.0.0"
-datafusion-expr = "54.0.0"
-datafusion-optimizer = "54.0.0"
-datafusion-physical-plan = "54.0.0"
-datafusion-physical-expr = "54.0.0"
-datafusion-physical-optimizer = "54.0.0"
+datafusion = "54.1.0"
+datafusion-common = "54.1.0"
+datafusion-expr = "54.1.0"
+datafusion-optimizer = "54.1.0"
+datafusion-physical-plan = "54.1.0"
+datafusion-physical-expr = "54.1.0"
+datafusion-physical-optimizer = "54.1.0"
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
@@ -20258,7 +20258,7 @@ DataFusion 54 uses `foldhash` for its internal hash tables and hash repartitioni
 
 ### Morsel-driven file scans with work stealing
 
-File scans are morsel-driven: partitions share a `SharedWorkSource`, and idle partition streams steal sibling work (new `DataSource::open_with_args(OpenArgs)` surface with sibling state). There is **no** config key for this in 54.0.0; a scan opts out structurally by setting `FileScanConfig.partitioned_by_file_group = true` (datafusion-datasource `file_scan_config`). Distributed engines that assume a fixed file→partition assignment should opt out.
+File scans are morsel-driven: partitions share a `SharedWorkSource`, and idle partition streams steal sibling work (new `DataSource::open_with_args(OpenArgs)` surface with sibling state). There is **no** config key for this in 54.1.0; a scan opts out structurally by setting `FileScanConfig.partitioned_by_file_group = true` (datafusion-datasource `file_scan_config`). Distributed engines that assume a fixed file→partition assignment should opt out.
 
 ---
 
@@ -20294,7 +20294,7 @@ Use DataFusion for joins, grouped aggregations, SQL windows, distinct, sort, lim
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 ```
@@ -20303,14 +20303,14 @@ For lower-level planning or extension crates:
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 
-datafusion = "54.0.0"
-datafusion-common = "54.0.0"
-datafusion-expr = "54.0.0"
-datafusion-physical-plan = "54.0.0"
-datafusion-physical-optimizer = "54.0.0"
+datafusion = "54.1.0"
+datafusion-common = "54.1.0"
+datafusion-expr = "54.1.0"
+datafusion-physical-plan = "54.1.0"
+datafusion-physical-optimizer = "54.1.0"
 ```
 
 ---
@@ -21526,9 +21526,9 @@ DataFusion’s UDF family includes scalar, window, aggregate, table, and async s
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+datafusion = "54.1.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 ```
@@ -21537,20 +21537,20 @@ futures = "0.3"
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-ord = "58.3.0"
+arrow-array = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-ord = "58.4.0"
 
-datafusion = "54.0.0"
-datafusion-common = "54.0.0"
-datafusion-expr = "54.0.0"
-datafusion-catalog = "54.0.0"
-datafusion-optimizer = "54.0.0"
-datafusion-physical-plan = "54.0.0"
-datafusion-physical-optimizer = "54.0.0"
+datafusion = "54.1.0"
+datafusion-common = "54.1.0"
+datafusion-expr = "54.1.0"
+datafusion-catalog = "54.1.0"
+datafusion-optimizer = "54.1.0"
+datafusion-physical-plan = "54.1.0"
+datafusion-physical-optimizer = "54.1.0"
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
@@ -23047,10 +23047,10 @@ The Rust `arrow-flight` crate contains prost-generated Flight protobuf structs s
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = "58.3.0"
-arrow-flight = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = "58.4.0"
+arrow-flight = "58.4.0"
 
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -23063,12 +23063,12 @@ bytes = "1"
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = "58.3.0"
-arrow-flight = { version = "58.3.0", features = ["flight-sql"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = "58.4.0"
+arrow-flight = { version = "58.4.0", features = ["flight-sql"] }
 
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -23080,12 +23080,12 @@ bytes = "1"
 
 ```toml
 [dependencies]
-arrow-flight = { version = "58.3.0", features = ["flight-sql", "tls-ring", "tls-webpki-roots"] }
+arrow-flight = { version = "58.4.0", features = ["flight-sql", "tls-ring", "tls-webpki-roots"] }
 tonic = { version = "0.14", features = ["transport", "tls-ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-`arrow-flight 58.3.0` has no enabled default features; feature flags include `flight-sql`, `flight-sql-experimental`, `cli`, and tonic TLS integrations such as `tls-ring`, `tls-native-roots`, `tls-webpki-roots`, and `tls-aws-lc`. ([Docs.rs][2])
+`arrow-flight 58.4.0` has no enabled default features; feature flags include `flight-sql`, `flight-sql-experimental`, `cli`, and tonic TLS integrations such as `tls-ring`, `tls-native-roots`, `tls-webpki-roots`, and `tls-aws-lc`. ([Docs.rs][2])
 
 ---
 
@@ -24262,7 +24262,7 @@ Treat prepared statements, tickets, and transactions as server resources with TT
 ```
 
 [1]: https://docs.rs/datafusion/latest/datafusion/dataframe/struct.DataFrame.html "DataFrame in datafusion::dataframe - Rust"
-[2]: https://docs.rs/crate/arrow-flight/latest/features "arrow-flight 58.3.0 - Docs.rs"
+[2]: https://docs.rs/crate/arrow-flight/latest/features "arrow-flight 58.4.0 - Docs.rs"
 [3]: https://arrow.apache.org/docs/format/Flight.html "Arrow Flight RPC — Apache Arrow v24.0.0"
 [4]: https://docs.rs/arrow-flight/latest/src/arrow_flight/client.rs.html "client.rs - source"
 [5]: https://arrow.apache.org/rust/arrow_flight/encode/struct.FlightDataEncoderBuilder.html "FlightDataEncoderBuilder in arrow_flight::encode - Rust"
@@ -24325,10 +24325,10 @@ Driver status is not uniform: current ADBC status docs mark the Rust DataFusion 
 adbc_core = "0.23.0"
 adbc_datafusion = "0.23.0"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -24341,8 +24341,8 @@ Use when Rust code wants an ADBC-compliant interface over an in-process DataFusi
 adbc_core = "0.23.0"
 adbc_driver_manager = "0.23.0"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 Use when loading C-compatible ADBC shared libraries at runtime: SQLite, PostgreSQL, Flight SQL, DuckDB, or vendor drivers.
@@ -24355,10 +24355,10 @@ adbc_core = "0.23.0"
 adbc_datafusion = "0.23.0"
 adbc_driver_manager = "0.23.0"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
-datafusion = "54.0.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
+datafusion = "54.1.0"
 ```
 
 ### Version-drift warning
@@ -25462,10 +25462,10 @@ pyo3 = { version = "0.28", features = ["extension-module"] }
 
 pyo3-arrow = "0.17.0"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
-arrow-cast = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
+arrow-cast = "58.4.0"
 ```
 
 `pyo3-arrow 0.17.0` is documented as a lightweight PyO3 integration layer for zero-copy FFI conversions between Python Arrow objects and Rust `arrow` objects through the Arrow PyCapsule Interface; it currently depends on PyO3 `0.28` and Arrow Rust `58` crates. ([Docs.rs][2])
@@ -25478,7 +25478,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module"] }
-arrow = { version = "58.3.0", features = ["pyarrow"] }
+arrow = { version = "58.4.0", features = ["pyarrow"] }
 ```
 
 `arrow_pyarrow` is the Arrow Rust crate for passing objects to and from PyArrow using Arrow’s C Data Interface and PyO3; it maps PyArrow `DataType`, `Field`, `Schema`, `Array`, `RecordBatch`, `RecordBatchReader`, and `Table` to corresponding Arrow Rust types or wrappers. ([Apache Arrow][3])
@@ -25991,9 +25991,9 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.28", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
 ```
 
 ### `pyproject.toml`
@@ -26731,20 +26731,20 @@ Polars is a Rust DataFrame library based on Apache Arrow’s memory model, with 
 
 ```toml id="h5r0h7"
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
-arrow-select = "58.3.0"
-arrow-cast = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-arith = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
+arrow-select = "58.4.0"
+arrow-cast = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-arith = "58.4.0"
 ```
 
 ### DataFusion query-engine profile
 
 ```toml id="xai8pb"
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
@@ -26778,8 +26778,8 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.28", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 Use `pyo3-arrow` at the Python boundary and choose raw Arrow, Polars, or DataFusion internally based on workload shape.
@@ -27681,17 +27681,17 @@ Treat **Avro** as a first-class Arrow Rust path via `arrow-avro`. Treat **ORC** 
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-avro = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-avro = "58.4.0"
 ```
 
 ### ORC: direct Rust reader/writer experiments
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 orc-rust = "0.8.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 ```
@@ -27700,7 +27700,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 datafusion-orc = "0.7.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
@@ -28092,13 +28092,13 @@ For SOE and Confluent/Apicurio frames, `arrow-avro` uses a `SchemaStore` to reso
 | compression                   |                      OCF writer supports compression | configure explicitly                 |
 | nested types                  |           supported through Arrow/Avro codec mapping | test corpus required                 |
 | row-by-row message bytes      |                            supported through encoder | Kafka/Pulsar use case                |
-| DataFusion native Avro source |   built on `arrow-avro 58.3.0` as of DataFusion 54 | same decode substrate as `arrow-avro` path |
+| DataFusion native Avro source |   built on `arrow-avro 58.4.0` as of DataFusion 54 | same decode substrate as `arrow-avro` path |
 
 The Arrow blog introducing `arrow-avro` says the crate supports OCF, SOE, Confluent and Apicurio wire formats, projection/evolution, tunable batch sizing, optional `StringViewArray`, vectorized read/write paths, `AvroWriter`, `AvroStreamWriter`, and schema-store-driven decoding. ([Apache Arrow][11])
 
 ### DataFusion 54 Avro datasource changes
 
-DataFusion 54 rebuilt its Avro datasource on `arrow-avro` (58.3.0) instead of the `apache-avro` crate. Consequences for consumers:
+DataFusion 54 rebuilt its Avro datasource on `arrow-avro` (58.4.0) instead of the `apache-avro` crate. Consequences for consumers:
 
 ```text
 Re-export rename:
@@ -28854,9 +28854,9 @@ dlpack = []
 arrow-device = []
 
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-buffer = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-buffer = "58.4.0"
 
 # Optional; choose and audit.
 # cudarc = { version = "...", optional = true }
@@ -29440,7 +29440,7 @@ Do not claim PyArrow CUDA parity in Rust unless every API in the parity table ha
 [1]: https://arrow.apache.org/docs/5.0/python/api/cuda.html "CUDA Integration — Apache Arrow v5.0.0"
 [2]: https://arrow.apache.org/docs/python/dlpack.html "The DLPack Protocol — Apache Arrow v24.0.0"
 [3]: https://arrow.apache.org/docs/format/CDeviceDataInterface.html "The Arrow C Device data interface — Apache Arrow v24.0.0"
-[4]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.3.0 - Docs.rs"
+[4]: https://docs.rs/crate/arrow/latest/source/README.md "arrow 58.4.0 - Docs.rs"
 [5]: https://arrow.apache.org/docs/python/generated/pyarrow.cuda.Context.html "pyarrow.cuda.Context — Apache Arrow v24.0.0"
 [6]: https://arrow.apache.org/blog/2024/10/07/nanoarrow-0.6.0-release/ "Apache Arrow nanoarrow 0.6.0 Release | Apache Arrow"
 [7]: https://arrow.apache.org/blog/2020/05/03/introducing-arrow-c-data-interface/?utm_source=chatgpt.com "Introducing the Apache Arrow C Data Interface"
@@ -29489,8 +29489,8 @@ Substrait is a cross-language format for describing compute operations on struct
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
-datafusion-substrait = "54.0.0"
+datafusion = "54.1.0"
+datafusion-substrait = "54.1.0"
 
 prost = "0.14"
 serde_json = "1"
@@ -29502,8 +29502,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 ```toml
 [dependencies]
-datafusion = "54.0.0"
-datafusion-substrait = { version = "54.0.0", features = ["physical"] }
+datafusion = "54.1.0"
+datafusion-substrait = { version = "54.1.0", features = ["physical"] }
 
 prost = "0.14"
 serde_json = "1"
@@ -29511,7 +29511,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-The `datafusion-substrait` crate is released in lockstep with DataFusion (`54.0.0`) and depends on the DataFusion crates, `prost`, and the `substrait` proto crate; its physical-plan module is feature-gated behind the `physical` feature. ([Docs.rs][2])
+The `datafusion-substrait` crate is released in lockstep with DataFusion (`54.1.0`) and depends on the DataFusion crates, `prost`, and the `substrait` proto crate; its physical-plan module is feature-gated behind the `physical` feature. ([Docs.rs][2])
 
 ---
 
@@ -29912,7 +29912,7 @@ Custom producer needed for:
 
 ```toml
 [dependencies]
-datafusion-substrait = { version = "54.0.0", features = ["physical"] }
+datafusion-substrait = { version = "54.1.0", features = ["physical"] }
 ```
 
 ```text
@@ -30536,15 +30536,15 @@ Arrow extension types attach custom logical semantics to a normal Arrow storage 
 
 ```toml
 [dependencies]
-arrow-schema = "58.3.0"
+arrow-schema = "58.4.0"
 ```
 
 ### Canonical extension types
 
 ```toml
 [dependencies]
-arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
-arrow-array = "58.3.0"
+arrow-schema = { version = "58.4.0", features = ["canonical_extension_types"] }
+arrow-array = "58.4.0"
 ```
 
 Canonical extension support in `arrow-schema` is gated behind the `canonical_extension_types` feature. ([Apache Arrow][1])
@@ -30553,10 +30553,10 @@ Canonical extension support in `arrow-schema` is gated behind the `canonical_ext
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
-arrow-ipc = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow"] }
+arrow-array = "58.4.0"
+arrow-schema = { version = "58.4.0", features = ["canonical_extension_types"] }
+arrow-ipc = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow"] }
 ```
 
 ### Python interop profile
@@ -30569,8 +30569,8 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.28", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
 
-arrow-array = "58.3.0"
-arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
+arrow-array = "58.4.0"
+arrow-schema = { version = "58.4.0", features = ["canonical_extension_types"] }
 ```
 
 ---
@@ -30776,7 +30776,7 @@ let ext = field.try_extension_type::<EmailAddress>()?;
 
 ```toml
 [dependencies]
-arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
+arrow-schema = { version = "58.4.0", features = ["canonical_extension_types"] }
 ```
 
 Canonical extension types are standardized extension definitions intended to improve interoperability across Arrow implementations; canonical extension names must start with `arrow.`, and standardized canonical types are expected to be stable with backward-compatibility guarantees. ([Apache Arrow][5])
@@ -31723,16 +31723,16 @@ Criterion uses `criterion_group!` and `criterion_main!` to create benchmark grou
 
 ```toml
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-select = "58.3.0"
-arrow-ord = "58.3.0"
-arrow-cast = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-select = "58.4.0"
+arrow-ord = "58.4.0"
+arrow-cast = "58.4.0"
 
-parquet = { version = "58.3.0", features = ["arrow", "async", "object_store"] }
+parquet = { version = "58.4.0", features = ["arrow", "async", "object_store"] }
 object_store = { version = "0.13.2", features = ["aws", "gcp", "azure", "http"] }
 
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 ```
@@ -32838,12 +32838,12 @@ ProductError:
 thiserror = "2"
 anyhow = "1"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow"] }
 object_store = "0.13.2"
-datafusion = "54.0.0"
+datafusion = "54.1.0"
 
 [dev-dependencies]
 tempfile = "3"
@@ -32862,8 +32862,8 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.28", features = ["extension-module"] }
 pyo3-arrow = "0.17.0"
 
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
 ```
 
 ### Fuzz target profile
@@ -32873,11 +32873,11 @@ arrow-schema = "58.3.0"
 cargo-fuzz = true
 
 [dependencies]
-arrow-array = "58.3.0"
-arrow-schema = "58.3.0"
-arrow-ipc = "58.3.0"
-parquet = { version = "58.3.0", features = ["arrow"] }
-arrow-json = "58.3.0"
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+arrow-ipc = "58.4.0"
+parquet = { version = "58.4.0", features = ["arrow"] }
+arrow-json = "58.4.0"
 ```
 
 ---
@@ -33691,16 +33691,16 @@ As of **2026-07-14**, use this matrix as an explicit test target, not as an impl
 
 | Component    |        Anchor | Test role                              |
 | ------------ | ------------: | -------------------------------------- |
-| Arrow Rust   |      `58.3.0` | arrays, schema, IPC, compute, FFI      |
-| Parquet Rust |      `58.3.0` | Parquet read/write/interoperability    |
-| DataFusion   |      `54.0.0` | SQL/DataFrame/query tests              |
+| Arrow Rust   |      `58.4.0` | arrays, schema, IPC, compute, FFI      |
+| Parquet Rust |      `58.4.0` | Parquet read/write/interoperability    |
+| DataFusion   |      `54.1.0` | SQL/DataFrame/query tests              |
 | object_store |      `0.13.2` | local/S3/GCS/Azure/HTTP storage tests  |
 | pyo3-arrow   |      `0.17.0` | Python Arrow PyCapsule interop         |
 | Polars Rust  |      `0.53.0` | optional DataFrame interop tests       |
 | PyArrow      |      `24.0.0` | Python IPC/Parquet/PyCapsule reference |
 | Python       | `3.10`–`3.14` | wheel/import/interoperability matrix   |
 
-The current docs.rs pages identify Arrow Rust `58.3.0`, DataFusion `54.0.0`, object_store `0.13.2`, pyo3-arrow `0.17.0`, and Polars `0.53.0`; PyArrow’s PyPI page shows `24.0.0`, and official PyArrow installation docs list Python 3.10–3.14 compatibility. ([Docs.rs][9])
+The current docs.rs pages identify Arrow Rust `58.4.0`, DataFusion `54.1.0`, object_store `0.13.2`, pyo3-arrow `0.17.0`, and Polars `0.53.0`; PyArrow’s PyPI page shows `24.0.0`, and official PyArrow installation docs list Python 3.10–3.14 compatibility. ([Docs.rs][9])
 
 ---
 
@@ -34023,9 +34023,9 @@ proptest! {
 # compat.toml
 
 [versions]
-arrow = "58.3.0"
-parquet = "58.3.0"
-datafusion = "54.0.0"
+arrow = "58.4.0"
+parquet = "58.4.0"
+datafusion = "54.1.0"
 object_store = "0.13.2"
 pyo3_arrow = "0.17.0"
 polars = "0.53.0"
@@ -34237,7 +34237,7 @@ Never claim compatibility without an automated test that proves it.
 [6]: https://datafusion.apache.org/contributor-guide/testing.html "Testing — Apache DataFusion  documentation"
 [7]: https://arrow.apache.org/docs/format/Security.html?utm_source=chatgpt.com "Security Considerations — Apache Arrow v24.0.0"
 [8]: https://arrow.apache.org/docs/developers/cpp/fuzzing.html?utm_source=chatgpt.com "Fuzzing Arrow C++ — Apache Arrow v24.0.0"
-[9]: https://docs.rs/crate/arrow/latest?utm_source=chatgpt.com "arrow 58.3.0"
+[9]: https://docs.rs/crate/arrow/latest?utm_source=chatgpt.com "arrow 58.4.0"
 [10]: https://pyo3.rs/v0.28.3/building-and-distribution?utm_source=chatgpt.com "Building and distribution"
 ### SMARTREF Arrow Boundary
 
