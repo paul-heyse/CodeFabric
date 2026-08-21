@@ -7,9 +7,9 @@
   "design_version": "v1",
   "design_digest": "f48caf54239752324a979eb26a9c435888d6cf3b1974d32b762da5e783eede72",
   "baseline_commit": "a689f1ddf712c0f8fe5cf93d9a50a559f84e4b91",
-  "accepted_execution_baseline_commit": "790cc8c45abfb69ec07ca116d1abba6cd35228a6",
+  "accepted_execution_baseline_commit": "da18263804de09a2b24de7745b95388fb4df7050",
   "accepted_execution_tree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "current_head": "790cc8c45abfb69ec07ca116d1abba6cd35228a6",
+  "current_head": "da18263804de09a2b24de7745b95388fb4df7050",
   "status": "executing",
   "current_packet": "WP09",
   "acceptance": {
