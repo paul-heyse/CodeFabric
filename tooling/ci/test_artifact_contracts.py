@@ -92,7 +92,9 @@ def test_packet_trust_requires_ancestor_commit(tmp_path: Path) -> None:
 def test_wp00_behavioral_acceptance() -> None:
     state = validate_state(ROOT, STATE)
     assert state["schema_version"] == 2
-    assert state["current_packet"] in state["packets"]
+    assert (
+        state["current_packet"] is None or state["current_packet"] in state["packets"]
+    )
     assert state["packets"]["WP00"]["status"] in {"in_progress", "complete"}
     assert commit_trust(ROOT, state["baseline_commit"])["ancestor"]
 
@@ -105,12 +107,15 @@ def test_wp00_structural_acceptance() -> None:
 
 def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
     state = load_state(STATE)
-    paths = _accepted_input_evolution_paths(ROOT, state)
+    incomplete = deepcopy(state)
+    incomplete["packets"]["WP06a"]["status"] = "in_progress"
+    incomplete["packets"]["WP06a"]["proving_commit"] = None
+    paths = _accepted_input_evolution_paths(ROOT, incomplete)
     assert not paths
 
     completed = deepcopy(state)
     completed["packets"]["WP06a"]["status"] = "complete"
-    completed["packets"]["WP06a"]["proving_commit"] = state["packets"]["WP00"][
+    completed["packets"]["WP06a"]["proving_commit"] = state["packets"]["WP06a"][
         "proving_commit"
     ]
     paths = _accepted_input_evolution_paths(ROOT, completed)

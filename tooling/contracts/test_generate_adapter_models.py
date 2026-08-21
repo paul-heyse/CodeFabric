@@ -9,8 +9,8 @@ from jsonschema import Draft202012Validator
 
 from tooling.contracts.generate_adapter_models import (
     AdapterModelIr,
-    _catalog_records,
     _load_candidate,
+    _resolved_input_and_outputs,
     render_outputs,
     render_source,
 )
@@ -50,8 +50,8 @@ def test_contract_ir_rejects_unknown_fields_and_references() -> None:
 def test_one_ir_field_mutation_changes_source_both_schema_modes_and_fingerprints() -> (
     None
 ):
-    descriptor, identity = _catalog_records(ROOT)
-    source = json.loads((ROOT / str(descriptor["authority_path"])).read_text())
+    identity, _ = _resolved_input_and_outputs(ROOT)
+    source = json.loads((ROOT / str(identity["authority_path"])).read_text())
     original_ir = AdapterModelIr.model_validate(source, strict=False)
     source["models"][1]["fields"][0]["description"] = (
         "Mutated fact count documentation."

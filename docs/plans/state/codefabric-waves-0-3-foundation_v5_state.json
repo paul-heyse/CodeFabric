@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP06a",
+  "current_packet": null,
   "packets": {
     "WP00": {
       "status": "complete",
@@ -288,10 +288,14 @@
       "blockers": []
     },
     "WP06a": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ca68ff86e139454016f325fa4396d0db0399fbb7",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first registry-set migration selected all registry-kind artifacts although two are native governance registries with no canonical-registry output; the unit now selects exactly its thirteen producing inputs.",
+        "The first Proto unit modeled only the Wave-0 probe, but the existing single descriptor source set and compatibility baseline already contained all five current Proto artifacts; all five are now typed source inputs and primary provenance for the shared FDS.",
+        "The first isolated adapter reproduction used full catalog source existence checks and therefore required unrelated authorities; load_for_derivation now preserves complete graph validation while requiring only the resolved unit inputs."
+      ],
       "blockers": []
     },
     "WP07": {
