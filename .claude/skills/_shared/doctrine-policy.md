@@ -23,12 +23,15 @@ project rules unless architecture may be affected.
 
 ## Required artifact behavior
 
-- Cite relevant principles by number/name in design decisions and packet
-  invariants.
-- State `Advances`, `Maintains`, or `Risk — mitigated`.
+- Cite relevant principles by number/name in design decisions; packet
+  invariants inherit the citation through their design references.
+- State `Advances`, `Maintains`, or `Risk — mitigated` for the principles a
+  decision actually implicates.
 - Record any temporary violation as an explicit bounded transition with an
   owner, exit invariant, and decommission packet.
-- Check the anti-principles directly.
+- Check the anti-principles directly. A recurring anti-principle becomes a
+  `rules/` governance rule with `rule-tests/` fixtures, not a per-artifact
+  assertion; cite the rule id thereafter (`evidence-policy.md` §0).
 - Treat silent doctrine regressions as defects.
 - Mark unrelated principles `N/A`; do not produce a ceremonial 31-row table
   when most principles do not apply.

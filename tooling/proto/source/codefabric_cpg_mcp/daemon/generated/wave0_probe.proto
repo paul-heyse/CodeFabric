@@ -1,6 +1,17 @@
+// artifact_id: codefabric.tooling.wave0-probe
+// artifact_kind: protobuf-schema
+// version: 1.0
+// compatible_suite_major: 1
+// status: released
+// canonical_digest: b3:cca2248b68f3e4235af95a7b369837fb581ce8813e4aab80930acb5f8b319204
+// digest_projection: proto-descriptor-v1
 syntax = "proto3";
 
 package codefabric.wave0.v1;
+
+import "google/protobuf/empty.proto";
+
+option java_package = "dev.codefabric.wave0.v1";
 
 // WaveZeroProbe proves the Wave 0 generator and local gRPC transport contract.
 service WaveZeroProbe {
@@ -10,4 +21,27 @@ service WaveZeroProbe {
 message ProbeEnvelope {
   bytes payload = 1;
   uint32 response_bytes = 2;
+  uint32 delay_millis = 3;
+
+  oneof selector {
+    string trace_id = 4;
+    uint64 generation = 5;
+  }
+
+  ProbeMode mode = 6;
+  reserved 7 to 9;
+  reserved "legacy_payload";
+  optional string note = 10;
+}
+
+enum ProbeMode {
+  PROBE_MODE_UNSPECIFIED = 0;
+  PROBE_MODE_ECHO = 1;
+  reserved 2;
+  reserved "PROBE_MODE_LEGACY";
+}
+
+// ProbeMarker ensures imported well-known descriptors traverse the shared IR.
+message ProbeMarker {
+  google.protobuf.Empty value = 1;
 }

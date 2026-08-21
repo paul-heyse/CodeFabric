@@ -46,8 +46,9 @@ Goal: detect interaction defects before the final ceremony.
 
 ### Final
 
-Derive the gate matrix from repository manifests, CI configuration, and the
-plan's declared obligations. It normally includes:
+The gate matrix is a list of `just` recipes — the justfile is the gate
+registry per the AGENTS.md command contract, and the plan's declared
+obligations select from it. It normally includes:
 
 - repository or policy-defined formatting/linting;
 - relevant static/type checks;
@@ -92,13 +93,12 @@ states it plainly.
 
 ## 4. Gate selection
 
-Discover commands from the repository:
-
-- `pyproject.toml`, lockfiles, task runners, and test configuration;
-- Cargo manifests, workspace metadata, and nextest configuration;
-- package scripts and build tools;
-- CI workflows;
-- project instructions and existing developer documentation.
+Discover gates from `just --list` first, and prefer a recipe over
+reconstructed tool flags — recipes express intent, so implementations can
+change without invalidating what callers know. Re-derive commands from raw
+manifests or CI configuration only when auditing the justfile itself, or
+when a needed gate has no recipe — in which case propose adding one rather
+than embedding flags in an artifact.
 
 Do not hard-code Python-only gates for a mixed-language plan.
 
@@ -107,26 +107,17 @@ Do not hard-code Python-only gates for a mixed-language plan.
 Delegated implementers own edit-local and packet-local proof. The lead executor
 owns merge, cross-packet milestone, and final proof.
 
-The lead must not accept a subagent's statement that checks passed without the
-command, outcome, and affected scope. Re-run integration-sensitive checks after
-merging parallel work.
+The lead must not accept a subagent's statement that checks passed: a
+subagent's proof is the recipe or command name plus its exit status and the
+affected scope. Re-run integration-sensitive checks after merging parallel
+work.
 
 ## 6. Evidence record
 
-Record each required gate as:
-
-```json
-{
-  "level": "packet",
-  "packet_id": "WP03",
-  "command": "uv run pytest tests/unit/example -q",
-  "status": "passed",
-  "started_at": "...",
-  "finished_at": "...",
-  "summary": "42 passed",
-  "artifact": null
-}
-```
-
-Store compact results, not entire logs, unless a failure artifact is necessary
-for diagnosis.
+Record each required gate as its recipe or command name plus exit status —
+`just root-test — exit 0` — nothing more. Check outcomes are derivable by
+re-running the named check (`evidence-policy.md` §0), so they are never
+hand-written into state; the execution-state schema has no field to hold
+them. Prefer machine capture where it already exists (the nextest `ci`
+profile emits JUnit under `target/`). Keep a failure log only while it is
+needed for diagnosis.

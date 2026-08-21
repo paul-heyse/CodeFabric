@@ -3,7 +3,7 @@
 // version: 1.0
 // compatible_suite_major: 1
 // status: draft
-// canonical_digest: b3:0000000000000000000000000000000000000000000000000000000000000000
+// canonical_digest: b3:69b7abee0fcf580e76582178a07811a628af6ddf59ff227fa3543356652fec5c
 // Wave 1 reserves this authority path; WP10 authors the released protocol.
 syntax = "proto3";
 

@@ -1,0 +1,295 @@
+{
+  "baseline": {
+    "compiler": "grpcio-tools==1.83.0 (libprotoc 35.1)",
+    "descriptor_sha256": "a515bb2b875a8555ca43d1c2b35a58b465185c71b10de2cb6107388aebdba3b7",
+    "status": "reviewed initial pre-release wire baseline covering Wave-0 probe and four governed draft RPC authorities"
+  },
+  "files": [
+    {
+      "dependencies": [
+        "google/protobuf/empty.proto"
+      ],
+      "edition": null,
+      "enums": [
+        {
+          "full_name": "codefabric.wave0.v1.ProbeMode",
+          "options": {},
+          "reserved_names": [
+            "PROBE_MODE_LEGACY"
+          ],
+          "reserved_ranges": [
+            {
+              "end_inclusive": 2,
+              "start": 2
+            }
+          ],
+          "values": [
+            {
+              "name": "PROBE_MODE_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "PROBE_MODE_ECHO",
+              "number": 1,
+              "options": {}
+            }
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "payload",
+              "label": "LABEL_OPTIONAL",
+              "name": "payload",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "responseBytes",
+              "label": "LABEL_OPTIONAL",
+              "name": "response_bytes",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "delayMillis",
+              "label": "LABEL_OPTIONAL",
+              "name": "delay_millis",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "traceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "trace_id",
+              "number": 4,
+              "oneof": "selector",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "generation",
+              "label": "LABEL_OPTIONAL",
+              "name": "generation",
+              "number": 5,
+              "oneof": "selector",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "mode",
+              "label": "LABEL_OPTIONAL",
+              "name": "mode",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.wave0.v1.ProbeMode"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "note",
+              "label": "LABEL_OPTIONAL",
+              "name": "note",
+              "number": 10,
+              "oneof": "_note",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.wave0.v1.ProbeEnvelope",
+          "oneofs": [
+            {
+              "name": "selector",
+              "options": {}
+            },
+            {
+              "name": "_note",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [
+            "legacy_payload"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 10,
+              "start": 7
+            }
+          ]
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "value",
+              "label": "LABEL_OPTIONAL",
+              "name": "value",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".google.protobuf.Empty"
+            }
+          ],
+          "full_name": "codefabric.wave0.v1.ProbeMarker",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        }
+      ],
+      "name": "codefabric_cpg_mcp/daemon/generated/wave0_probe.proto",
+      "options": {
+        "$wire_hex": "0a176465762e636f64656661627269632e77617665302e7631",
+        "java_package": "dev.codefabric.wave0.v1"
+      },
+      "package": "codefabric.wave0.v1",
+      "public_dependencies": [],
+      "services": [
+        {
+          "full_name": "codefabric.wave0.v1.WaveZeroProbe",
+          "methods": [
+            {
+              "client_streaming": false,
+              "input_type": ".codefabric.wave0.v1.ProbeEnvelope",
+              "name": "RoundTrip",
+              "options": {},
+              "output_type": ".codefabric.wave0.v1.ProbeEnvelope",
+              "server_streaming": false
+            }
+          ],
+          "options": {}
+        }
+      ],
+      "syntax": "proto3",
+      "weak_dependencies": []
+    },
+    {
+      "dependencies": [],
+      "edition": null,
+      "enums": [],
+      "messages": [],
+      "name": "contracts/rpc/cpg_query_service.proto",
+      "options": {},
+      "package": "codefabric.contracts.draft.v1",
+      "public_dependencies": [],
+      "services": [],
+      "syntax": "proto3",
+      "weak_dependencies": []
+    },
+    {
+      "dependencies": [],
+      "edition": null,
+      "enums": [],
+      "messages": [],
+      "name": "contracts/rpc/provider_control.proto",
+      "options": {},
+      "package": "codefabric.contracts.draft.v1",
+      "public_dependencies": [],
+      "services": [],
+      "syntax": "proto3",
+      "weak_dependencies": []
+    },
+    {
+      "dependencies": [],
+      "edition": null,
+      "enums": [],
+      "messages": [],
+      "name": "contracts/rpc/pyrefly_sidecar.proto",
+      "options": {},
+      "package": "codefabric.contracts.draft.v1",
+      "public_dependencies": [],
+      "services": [],
+      "syntax": "proto3",
+      "weak_dependencies": []
+    },
+    {
+      "dependencies": [],
+      "edition": null,
+      "enums": [],
+      "messages": [],
+      "name": "contracts/rpc/rustc_extractor.proto",
+      "options": {},
+      "package": "codefabric.contracts.draft.v1",
+      "public_dependencies": [],
+      "services": [],
+      "syntax": "proto3",
+      "weak_dependencies": []
+    },
+    {
+      "dependencies": [],
+      "edition": null,
+      "enums": [],
+      "messages": [
+        {
+          "extension_ranges": [],
+          "fields": [],
+          "full_name": "google.protobuf.Empty",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        }
+      ],
+      "name": "google/protobuf/empty.proto",
+      "options": {
+        "$wire_hex": "0a13636f6d2e676f6f676c652e70726f746f627566420a456d70747950726f746f50015a2e676f6f676c652e676f6c616e672e6f72672f70726f746f6275662f74797065732f6b6e6f776e2f656d7074797062f80101a20203475042aa021e476f6f676c652e50726f746f6275662e57656c6c4b6e6f776e5479706573",
+        "cc_enable_arenas": true,
+        "csharp_namespace": "Google.Protobuf.WellKnownTypes",
+        "go_package": "google.golang.org/protobuf/types/known/emptypb",
+        "java_multiple_files": true,
+        "java_outer_classname": "EmptyProto",
+        "java_package": "com.google.protobuf",
+        "objc_class_prefix": "GPB"
+      },
+      "package": "google.protobuf",
+      "public_dependencies": [],
+      "services": [],
+      "syntax": "proto3",
+      "weak_dependencies": []
+    }
+  ],
+  "schema": 1
+}
+

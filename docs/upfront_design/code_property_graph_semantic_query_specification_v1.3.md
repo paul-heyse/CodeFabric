@@ -4,7 +4,7 @@
 **Artifact kind:** Normative document
 **Compatible suite major:** 1
 **Release date:** 2026-08-20
-**Canonical digest:** External; recorded in `codefabric_v1.3_manifest.json`
+**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`
 
 **Status:** Released normative specification
 **Synchronized suite version:** 1.3
@@ -37,7 +37,7 @@ status: released
 canonical_digest: external
 ```
 
-The canonical digest is recorded in `codefabric_v1.3_manifest.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
+The canonical digest and exact source digest are recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
 
 ### 0.2 Permanent ownership and precedence
 
@@ -6386,7 +6386,10 @@ It is BLAKE3-256 over canonical UTF-8 bytes. Checksums exist for request, resolv
 
 The canonicalization profile is versioned as `codefabric-jcs-v1`. Rust and Python implementations SHALL pass the same fixture corpus, including Unicode, escaping, number boundaries, empty values, and insertion-order permutations.
 
-`orjson`, Serde JSON, or other libraries may implement the encoder but are not themselves the contract.
+The adopted RFC 8785 implementations may implement the encoder, but no ordinary
+sorted-key JSON serializer is itself the contract. Protobuf deterministic serialization,
+ProtoJSON, pretty schema JSON, cache encodings, and MCP structured values are distinct
+formats and SHALL NOT be substituted for `codefabric-jcs-v1` canonical bytes.
 ## AC-G-54 — Canonical human-readable fact statements
 ### Decision
 

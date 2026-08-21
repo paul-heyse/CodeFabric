@@ -1,25 +1,33 @@
 {
-  "generated_sha256": "180d27858203f6383c8a5ccbf8356ce4e25460984cc9fe078dde39fda3523bdd",
+  "authority": "single grpc_tools.protoc invocation -> descriptor + Python; Rust compile_fds",
+  "descriptor_sha256": "a515bb2b875a8555ca43d1c2b35a58b465185c71b10de2cb6107388aebdba3b7",
+  "generated_sha256": "74498693ba3e9f4b0bc3831552f09efb7e12ec9c4fa29069cf6bb505ac2717ef",
   "python": {
+    "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
     "protobuf": "7.36.0",
     "protoc": "libprotoc 35.1",
     "runtime": "3.14.7"
   },
   "rust": {
+    "descriptor_api": "tonic_prost_build::Builder::compile_fds",
     "packages": {
       "prost": "0.14.4",
       "prost-build": "0.14.4",
-      "protoc-bin-vendored": "3.2.0",
+      "prost-types": "0.14.4",
       "tonic": "0.14.6",
       "tonic-build": "0.14.6",
       "tonic-prost": "0.14.6",
       "tonic-prost-build": "0.14.6"
     },
-    "protoc": "libprotoc 31.1",
     "toolchain_policy": "stable root; declared MSRV 1.94.1"
   },
-  "schema": 1,
-  "source": "codefabric_cpg_mcp/daemon/generated/wave0_probe.proto",
-  "source_sha256": "b8eeb2a402f703124442ba9d67687c65e33027348b88d895ab56c39e817985cc"
+  "schema": 3,
+  "sources": {
+    "codefabric_cpg_mcp/daemon/generated/wave0_probe.proto": "6c674c03ebb4efca527b1bb90b7411b48b90eb27c02abf0c28c2f2e3d3fd3ea3",
+    "contracts/rpc/cpg_query_service.proto": "558b0126319d6076c9f6140c902d7bda64d8c9b98239ba19abed8a814550da97",
+    "contracts/rpc/provider_control.proto": "ac079b01b726d59a5a0377d0f2c23a69a89d90b304768c30590ad8894d1edadf",
+    "contracts/rpc/pyrefly_sidecar.proto": "1874dc9f10c9070ba25bf7242eedd1c3c1f3527171c51b702207f6793f8d8239",
+    "contracts/rpc/rustc_extractor.proto": "acd854b95d728e5c748ffccd905557e8d52ee83a17570400f5ab37a9c4ecc2c4"
+  }
 }

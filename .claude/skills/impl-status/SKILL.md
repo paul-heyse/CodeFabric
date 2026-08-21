@@ -13,8 +13,11 @@ agent: general-purpose
 
 # Implementation Status and Resume Audit
 
-Determine what is truly complete, stale, blocked, or ready. This is not a code
-quality review and does not modify the immutable design or plan.
+Determine what is truly complete, stale, blocked, or ready. This skill is the
+judgment layer over the derivation in `artifact-schemas.md` §8: derive input
+freshness, drift, and packet trust first, then judge only what derivation
+cannot see. It is not a code quality review and does not modify the immutable
+design or plan.
 
 The repository is read-only except for:
 
@@ -51,11 +54,12 @@ Milestones and decommission batches use the same model where applicable.
 
 A prior `complete` status is not permanent. It remains trusted only when:
 
-- the proving commit is in current history;
+- the §8 derivation shows the proving commit in current history — a
+  `complete` packet with a null `proving_commit` cannot be trusted;
 - the relevant code has not changed since proof;
-- governing design/plan digests have not invalidated it;
+- the plan's declared inputs are fresh;
 - its dependencies remain valid;
-- the recorded checks remain applicable;
+- its named acceptance checks remain applicable;
 - later packets did not reintroduce the legacy path or violate the invariant.
 
 ## Procedure
@@ -64,23 +68,22 @@ A prior `complete` status is not permanent. It remains trusted only when:
 
 Read the design, plan, and existing state. Extract:
 
-- artifact versions/digests and baseline;
+- artifact versions and baseline;
 - packet dependencies and outcomes;
 - milestones and decommission batches;
-- acceptance evidence and checks;
+- named acceptance checks;
 - prior deviations, failed approaches, blockers, and discovered obligations;
-- current and proving commits.
+- proving commits.
 
 If state is absent, initialize an in-memory model from the plan; do not write it
 until evidence has been gathered.
 
 ### Phase 2 — Detect specification and repository drift
 
-Compare:
+Derive input freshness, proving-commit ancestry, and drift over the declared
+scope per `artifact-schemas.md` §8 — do not compare digests or commits by
+hand. Then hand-verify only what derivation does not cover:
 
-- stored plan/design digests to current files;
-- baseline and proving commits to current history;
-- current HEAD and working tree;
 - relevant files/symbols/contracts since packet proof;
 - library/toolchain versions and feature flags;
 - tests/gates whose command or scope changed.
@@ -97,17 +100,16 @@ For each packet:
 1. Verify target contracts/behavior exist.
 2. Verify immediate consumers and integrations use the target.
 3. Verify attached legacy/decommission targets remain absent.
-4. Verify recorded checks actually correspond to current code and current
-   commands.
+4. Verify the packet's named checks still exist and are runnable at their
+   recorded names.
 5. Re-run focused proof only when:
-   - code changed;
-   - prior evidence is missing/ambiguous;
+   - the derivation shows drift after the proving commit;
+   - the packet was never proven (`proving_commit` null or not in history);
    - a dependency changed;
-   - a later change could reintroduce the defect;
-   - the packet was never independently proved.
+   - a later change could reintroduce the defect.
 
 Do not require every predicted file to change. Judge the packet's outcome and
-acceptance evidence.
+its named acceptance checks.
 
 ### Phase 4 — Verify milestones and cross-packet effects
 
@@ -142,7 +144,8 @@ both hold.
 
 Assign each packet:
 
-- `complete` — all current acceptance evidence holds;
+- `complete` — the proving commit is in history and all named acceptance
+  checks pass;
 - `stale` — previously complete but proof is no longer trustworthy;
 - `invalidated` — target design/contract/library decision no longer holds;
 - `blocked` — an external or upstream condition prevents completion;
@@ -164,12 +167,12 @@ Select the next action by dependency and risk:
 
 ### Phase 7 — Reconcile the state file
 
-Update:
+Writes conform to the schema-version-2 shape; migrate a schema-version-1
+file to version 2 on first write (`artifact-schemas.md` §3). Update:
 
-- current HEAD and overall status;
+- overall status;
 - packet/milestone/batch statuses;
-- current evidence and checks;
-- stale/invalidated reasons;
+- stale/invalidated reasons (as deviations or blockers);
 - discovered obligations;
 - blockers and failed approaches;
 - exact `next_action`;
@@ -181,24 +184,25 @@ correction.
 
 ### Phase 8 — Write the report
 
-Use:
+Frontmatter per `artifact-schemas.md` §7 (`artifact: implementation-status`,
+`plan_path`, `state_path`, `version`, `date`, `status`). Use:
 
 ```markdown
 # Implementation Status: <plan>
 
-## Provenance and Current Repository State
-## Executive Summary
-## Specification and Repository Drift
-## Packet Status Matrix
-## Milestone Status
-## Decommission Status
-## Baseline and Gate Status
-## Discovered Obligations and Deviations
+## Provenance
+## Derived Status Snapshot
+## Reconciliation Decisions
 ## Blockers and Invalidated Assumptions
 ## Recommended Resume Order
 ## Exact Next Action
 ## State Reconciliation Summary
 ```
+
+The Derived Status Snapshot is the §8 derivation output (freshness, drift,
+packet trust), reproduced verbatim, not re-tallied. Reconciliation Decisions
+records each packet where judgment overrode or refined derivation, with the
+reason.
 
 For each non-complete packet, state:
 
@@ -211,6 +215,7 @@ For each non-complete packet, state:
 ## Quality requirements
 
 - Do not edit the plan or design.
+- Do not hand-recompute anything the §8 derivation covers.
 - Do not trust `complete` solely because an earlier status said so.
 - Do not rerun the entire repository suite when a focused proof settles status.
 - Do not carry forward stale file paths or APIs.

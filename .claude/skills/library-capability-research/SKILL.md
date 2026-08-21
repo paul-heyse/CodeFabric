@@ -19,8 +19,8 @@ Read:
 
 - `../_shared/evidence-policy.md`
 - `../_shared/code-intelligence.md`
-- the library-decision and evidence-ledger portions of
-  `../_shared/artifact-schemas.md`
+- the LD block in `../_shared/artifact-schemas.md` §1 and the
+  evidence-recording rules in `../_shared/evidence-policy.md` §6
 
 When a design path is supplied, read only the relevant requirements,
 constraints, invariants, and open library decisions.
@@ -32,6 +32,10 @@ Write a versioned report:
 ```text
 docs/reviews/library_capability_<topic>_<YYYY-MM-DD>_vN.md
 ```
+
+Frontmatter per `artifact-schemas.md` §7
+(`artifact: library-capability-research`, `topic`, `version`, `date`,
+`status`).
 
 If the invoking design workflow requests inline output, return the same
 structured findings to the parent rather than duplicating a report.
@@ -136,16 +140,9 @@ For each required capability, record one decision:
 adopt | wrap | upgrade | build | reject | retain-current
 ```
 
-Each `LD-*` decision must include:
-
-- selected candidate and exact version/feature basis;
-- evidence;
-- target design role and stable boundary;
-- custom code displaced or retained;
-- integration and migration consequences;
-- key risk and mitigation;
-- confidence;
-- validation required during planning or implementation.
+Record each decision per the LD block in `artifact-schemas.md` §1 — the
+single definition of the `LD-*` record. Add the target design role and
+integration consequences when the block's fields do not already carry them.
 
 A wrapper is justified only when it protects a stable project contract,
 normalizes vendor behavior, adds material policy/observability, or makes
@@ -178,7 +175,7 @@ Use this structure:
 ## Upgrade and Migration Implications
 ## Risks and Open Validation
 ## Recommended Design Integration
-## Evidence Ledger
+## Evidence and Reproduction Commands
 ```
 
 The candidate matrix should include capability fit, version basis, effort,

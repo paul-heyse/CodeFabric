@@ -3,6 +3,6 @@ artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
 status: draft
-canonical_digest: "b3:0000000000000000000000000000000000000000000000000000000000000000"
+canonical_digest: "b3:29fd88a10110f7f2604d7da8aab6b59da951a312e789854609cfec67e03cb01b"
 rules: []
 

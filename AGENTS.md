@@ -194,6 +194,7 @@ CodeFabric/
 | `tests/fixtures/` | a test needs reusable non-code data (§4.4) |
 | `deep-assurance.yml` | the surfaces it covers exist; a permanently-red workflow is worse than none (§52) |
 | `src/main.rs`, `src/bin/` | a CLI is needed — same package, reusing the lib target (§3) |
+| `scripts/artifact_check.sh`, `scripts/plan_status.sh` + recipes | phase 2 of the process-policy redesign lands them (`.claude/skills/_shared/artifact-schemas.md` §8) |
 
 ### 2.1 Why the domains are separate
 
@@ -291,12 +292,13 @@ dated-nightly extractor boundary. Compiled capability is not provider authority.
 | SQLite | `rusqlite 0.40.2`, `bundled` + `backup` | operational state and online backup |
 | safe filesystem | `rustix 1.1.4`, `fs` | descriptor-relative authoritative reads |
 | Rust gRPC/Protobuf | tonic/tonic-prost `0.14.6`, prost `0.14.4` | UDS transport, generated service boundary |
-| Rust generator | tonic-prost-build `0.14.6`, protoc-bin-vendored `3.2.0` | ambient `protoc` is never correctness input |
+| Descriptor/Rust generator | grpcio-tools `1.83.0` + tonic-prost-build `0.14.6` `compile_fds` | one pinned compiler emits Python and the descriptor IR; Rust consumes that exact IR |
 
 The root and both auxiliary Cargo locks are committed. Python has one domain-local lock,
-`codefabric-cpg-mcp/uv.lock`; there is no root uv project. Generator identities, including
-Rust libprotoc 31.1 and Python grpcio-tools libprotoc 35.1, are recorded under
-`tooling/proto/` and interoperability is proved against shared wire bytes.
+`codefabric-cpg-mcp/uv.lock`; there is no root uv project. The single grpcio-tools
+libprotoc 35.1 identity, committed descriptor digest, and Rust `compile_fds` API are
+recorded under `tooling/proto/`; descriptor equivalence and shared-wire interoperability
+are both proved.
 
 ---
 
@@ -656,9 +658,10 @@ Twenty-one skills plus `_shared/`, discoverable by both agents: `.codex/skills` 
   and covers this repository's own `rules/` and outline extractors.
 
 `_shared/` holds the policy every workflow skill loads: `code-intelligence.md` (research),
-`evidence-policy.md` (claim → required evidence), `validation-policy.md` (gates),
-`doctrine-policy.md`, `subagent-orchestration.md`, `artifact-schemas.md` (artifact paths,
-frontmatter, ID prefixes, status vocabularies).
+`evidence-policy.md` (the governing principle — executable beats derived beats recorded —
+plus claim → required evidence), `validation-policy.md` (gates), `doctrine-policy.md`,
+`subagent-orchestration.md`, `artifact-schemas.md` (artifact paths, frontmatter, the ID
+minting rule, status vocabularies, and the §8 validation/derivation contract).
 
 ---
 

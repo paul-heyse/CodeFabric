@@ -322,8 +322,10 @@ real sections. `--match` filters items, not members.
 
 ## Durable rules
 
-When an invariant must hold repeatedly, make it executable rather than
-re-deriving it each session. `sgconfig.yml` at the repository root:
+This is the default destination for any invariant asserted more than once:
+per `evidence-policy.md` §0, promote it to an executable rule and cite the
+rule id thereafter, rather than re-deriving it each session or re-asserting
+it per artifact. `sgconfig.yml` at the repository root:
 
 ```yaml
 ruleDirs: [rules]
@@ -376,8 +378,9 @@ Use both directions of proof:
   reached zero *within a stated coverage envelope*, confirmed at tier 1 where
   the language permits.
 
-Prefer `--json` on both tools when the result becomes evidence-ledger material,
-so the entry cites a reproducible command rather than a pasted screenful.
+Prefer `--json` on both tools when the result backs a recorded claim
+(`evidence-policy.md` §6), so the record cites a reproducible command rather
+than a pasted screenful.
 
 Do not use a tool to certify its own modification. When changing analysis or
 search tooling — including CodeFabric's own analyzers, once they exist — verify

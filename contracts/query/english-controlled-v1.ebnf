@@ -3,7 +3,7 @@
 (* version: 1.0 *)
 (* compatible_suite_major: 1 *)
 (* status: draft *)
-(* canonical_digest: b3:0000000000000000000000000000000000000000000000000000000000000000 *)
+(* canonical_digest: b3:e5ab851c5b1032123bf1de8efe0a7c5b6940e5e6ddcbde09bd7b319d4055186c *)
 (* WP08 authors the released controlled-English grammar. *)
 document = "";
 

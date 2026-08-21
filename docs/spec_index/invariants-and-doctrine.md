@@ -131,6 +131,7 @@ to violate.
 | Waves | Most-at-risk list |
 |---|---|
 | W0–W1 | `SUITE §0.2` 10 (versioning and fingerprinting) · `SUITE AC-G-02`/`AC-G-03` |
+| W1 contract identity | `SUITE AC-G-02` separates semantic `canonical_digest`, exact-byte `source_digest`, and AC-G-07 `bundle_digest`; projection IDs are versioned contract data |
 | W2–W3 | `FAB` App. C 1–5, 12 · `LIFE §157` 1–3, 9, 10, 20 · `LIFE §159` 1–3 |
 | W4–W5 | `GEN §96` in full · `ONT §4` in full |
 | W6–W7 | `LIFE §157` in full — especially 32, convergence · `LIFE §158` · `LIFE §159` |

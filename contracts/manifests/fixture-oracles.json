@@ -1,0 +1,26 @@
+{
+  "artifact_id": "codefabric.manifests.fixture-oracles",
+  "artifact_kind": "manifest",
+  "version": "1.0",
+  "compatible_suite_major": 1,
+  "status": "draft",
+  "canonical_digest": "b3:4677e50ed9bcc4dd5777c46e6bae9cc4a84e8d74d518e092b316c191e8098de2",
+  "records": [
+    {"path":"contracts/fixtures/jcs/differential-cases.json","oracle_class":"differential","origin":"Cross-language equivalence inputs with no stored output oracle","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"contracts/fixtures/jcs/vectors.json","oracle_class":"normative-kat","origin":"RFC 8785 edge cases plus owner-reviewed Query AC-G-53 profile answers","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"contracts/fixtures/negative/drifted-digest.json","oracle_class":"negative-class","origin":"Owner-reviewed digest-mismatch failure class","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"contracts/fixtures/negative/perturbed-artifact.json","oracle_class":"negative-class","origin":"Owner-reviewed perturbed-source failure class","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"contracts/fixtures/projections/vectors.json","oracle_class":"normative-kat","origin":"Exact SUITE AC-G-02 worked vectors independently recomputed during M01 review","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"contracts/fixtures/proto/wave0_probe.json","oracle_class":"normative-kat","origin":"Owner-reviewed Protocol Buffers binary wire-format known answer","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"fuzz/corpus/contract_ingress/ebnf-seed","oracle_class":"property","origin":"Minimal valid shared EBNF ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"fuzz/corpus/contract_ingress/json-seed","oracle_class":"property","origin":"Minimal valid strict-JSON ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"fuzz/corpus/contract_ingress/jsonl-seed","oracle_class":"property","origin":"Minimal valid JSON Lines ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"fuzz/corpus/contract_ingress/prose-seed","oracle_class":"property","origin":"Minimal valid UTF-8 prose ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"fuzz/corpus/contract_ingress/proto-header-seed","oracle_class":"property","origin":"Minimal valid governed Proto header ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"fuzz/corpus/contract_ingress/yaml-seed","oracle_class":"property","origin":"Minimal valid bounded YAML-subset ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"tooling/proto/compatibility-baseline.json","oracle_class":"normative-kat","origin":"Owner-reviewed first-release descriptor compatibility baseline","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"tooling/proto/descriptor-census.json","oracle_class":"generated-example","origin":"Generated normalized view of the single committed descriptor IR","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"tooling/proto/toolchain-identity.json","oracle_class":"generated-example","origin":"Generated compiler/runtime/source identity record","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"tooling/proto/wave0-probe-descriptor.pb","oracle_class":"generated-example","origin":"Generated single-compiler FileDescriptorSet authority","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"}
+  ]
+}

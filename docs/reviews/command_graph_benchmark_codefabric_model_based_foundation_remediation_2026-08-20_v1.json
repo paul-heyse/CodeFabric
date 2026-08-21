@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "profile": "codefabric-command-graph-benchmark-v1",
+  "observed_at": "2026-08-20",
+  "environment": {
+    "platform": "Darwin 25.5.0 arm64",
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "python": "3.14.7",
+    "just": "1.58.0",
+    "hyperfine": "1.20.0",
+    "sccache": "0.17.0",
+    "uv": "0.12.5"
+  },
+  "accepted_candidate": {
+    "id": "adapter-stdio-dedup-v1",
+    "affected_boundary": "just adapter-ci-fast",
+    "before": {
+      "command": "just adapter-ci-fast",
+      "warmup_runs": 1,
+      "measured_runs": 5,
+      "samples_seconds": [
+        6.38964424622,
+        6.58413857922,
+        6.20796203722,
+        6.31528853722,
+        6.47815374522
+      ],
+      "mean_seconds": 6.39503742902,
+      "standard_deviation_seconds": 0.14496011641722995,
+      "minimum_seconds": 6.20796203722,
+      "maximum_seconds": 6.58413857922,
+      "sccache_compile_requests": 0
+    },
+    "after": {
+      "command": "just adapter-ci-fast",
+      "warmup_runs": 1,
+      "measured_runs": 5,
+      "samples_seconds": [
+        4.50689227084,
+        4.50561010484,
+        4.75847993784,
+        5.09586052084,
+        4.71692035384
+      ],
+      "mean_seconds": 4.71675263764,
+      "standard_deviation_seconds": 0.24191244569353962,
+      "minimum_seconds": 4.50561010484,
+      "maximum_seconds": 5.09586052084,
+      "sccache_compile_requests": 0
+    },
+    "mean_reduction_seconds": 1.67828479138,
+    "mean_reduction_percent": 26.2435491584,
+    "proof_equivalence": {
+      "manifest": "tooling/ci/proof-coverage.json",
+      "live_report": "target/proof-coverage-current.json",
+      "tier_a_proof_atoms": 51,
+      "full_pytest_node_ids": 68,
+      "targeted_stdio_node_ids": 2,
+      "targeted_selection_is_subset": true,
+      "before_and_after_proof_sets_equal": true,
+      "standalone_recipe_retained": "just adapter-stdio-test",
+      "ci_targeted_step_retained": true
+    },
+    "decision": "accepted"
+  },
+  "post_remediation_warm_baseline": {
+    "governance": {
+      "command": "just governance",
+      "warmup_runs": 1,
+      "measured_runs": 3,
+      "samples_seconds": [12.90540320344, 12.90156849644, 12.71414303744],
+      "mean_seconds": 12.840371579106668,
+      "standard_deviation_seconds": 0.10933393705942344
+    },
+    "ci_fast": {
+      "command": "just ci-fast",
+      "warmup_runs": 1,
+      "measured_runs": 3,
+      "samples_seconds": [30.07298653744, 30.13912312144, 30.02697995444],
+      "mean_seconds": 30.079696537773334,
+      "standard_deviation_seconds": 0.05637189507682375
+    },
+    "sccache": {
+      "compile_requests": 221,
+      "requests_executed": 0,
+      "cache_hits": 0,
+      "cache_misses": 0,
+      "explanation": "Warm Cargo invocations found current target artifacts, so sccache observed compiler probes but no executable compile requests."
+    }
+  },
+  "other_decisions": [
+    {
+      "candidate": "shared contract-tooling Ruff dependency",
+      "decision": "accepted",
+      "basis": "Just dependency deduplication executes one shared contracts-tooling-lint prerequisite for schema, fixture, adapter-model, and proof checks."
+    },
+    {
+      "candidate": "remove root check or Clippy because later builds compile",
+      "decision": "rejected",
+      "basis": "The commands have distinct Tier-A target and lint proof obligations; successful compilation is not proof-equivalent."
+    },
+    {
+      "candidate": "Pydantic defer_build",
+      "decision": "rejected",
+      "basis": "The WP07 microbenchmark supports eager module-scope construction and avoids a first-use latency/state transition."
+    },
+    {
+      "candidate": "ci-affected",
+      "decision": "not_adopted",
+      "basis": "Catalog, governance, generated-output, and tooling changes dominate current work; no measured benefit justifies a second path and its fallback maintenance yet."
+    }
+  ],
+  "cold_target_disposition": {
+    "status": "excluded_from_decision",
+    "reason": "The accepted candidate is Python test-process deduplication and produces zero Rust compile requests. A full fresh Cargo target measures unrelated root and sidecar dependency rebuilds, not the affected boundary.",
+    "observations": [
+      "The first fresh-target run exposed seven new contract-compiler Clippy violations and therefore served as correctness evidence, not timing evidence.",
+      "The second fresh-target run exposed an overbroad legacy root-wheel recipe search and therefore served as structural-gate evidence, not timing evidence.",
+      "A third full cold attempt was stopped after the user accepted the narrower affected-boundary evidence strategy."
+    ],
+    "shared_target_or_cache_deleted": false,
+    "performance_claim_from_cold_attempt": false
+  }
+}

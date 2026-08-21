@@ -5,7 +5,7 @@
 **Status:** Released normative specification
 **Version:** 1.3
 **Compatible suite major:** 1
-**Canonical digest:** External; recorded in `codefabric_v1.3_manifest.json`
+**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`
 **Release date:** 2026-08-20
 **Supersedes:** CodeFabric synchronized specification suite 1.2 plus the standalone architecture-completion override
 **Audit integration (2026-08-20):** Plan-audit F-001; clarified executable phrase mappings and owner approval of initial machine-contract allocations.
@@ -107,34 +107,126 @@ A downstream layer SHALL consume the owned artifact or API. It SHALL NOT recreat
 
 ### Conformance
 
-The generated master manifest SHALL contain the ownership table and SHALL fail CI if two machine artifacts declare the same concern as authoritative.
+The typed suite catalog SHALL contain the ownership table, the generated artifact index
+SHALL expose its compiled view, and CI SHALL fail if two machine artifacts declare the
+same concern as authoritative.
 
 ## AC-G-02 — Normative version for every artifact
 ### Decision
 
-Every normative prose document and every machine bundle uses a two-component public version `major.minor`; generated artifacts additionally carry a content digest and generator revision. Patch-only editorial changes do not change semantic versions but always change the digest.
+Every normative prose document and every machine bundle uses a two-component public
+version `major.minor`. Every governed source has two deliberately distinct identities:
+
+- `canonical_digest` identifies its compiled semantic contract under a named,
+  versioned projection profile;
+- `source_digest` identifies its exact checked-in bytes.
+
+Generated artifacts additionally carry their source identities and generator revision.
+Patch-only editorial changes do not change semantic versions and do not necessarily
+change `canonical_digest`, but they always change `source_digest`.
 
 ### Contract
 
-Every artifact SHALL have this metadata in its own header or in the authoritative suite artifact manifest:
+Every artifact SHALL have this metadata in its own header or in the generated artifact
+index:
 
 ```yaml
 artifact_id: stable ASCII identifier
-artifact_kind: document | registry | schema | proto | bundle | model_pack | deployment_profile
+artifact_kind: normative-document | manifest | json-schema | json-lines | registry | yaml-contract | ebnf-grammar | protobuf-schema | bundle-manifest
 version: "<major>.<minor>"
 compatible_suite_major: 1
 status: draft | released | deprecated
+digest_projection: prose-utf8-v1 | json-jcs-v1 | yaml-ac-g-53-v1 | jsonl-jcs-v1 | proto-descriptor-v1 | ebnf-source-v1 | bundle-ac-g-07-v1
 canonical_digest: "b3:<64 lowercase hex>"
+source_digest: "b3:<64 lowercase hex>"
 generator_revision: optional source-control digest
 ```
 
-Machine artifacts SHALL embed all applicable fields directly. A prose document SHALL embed every field except its own content digest; its `canonical_digest` field SHALL state that the value is external, and the suite artifact manifest SHALL carry the actual digest over the complete UTF-8 document bytes. This avoids a self-referential hash while retaining exact artifact verification.
+For machine artifacts, `canonical_digest` is BLAKE3-256 over the artifact's canonical
+semantic projection with only that artifact's root/header `canonical_digest` and
+`source_digest` identity fields omitted when present. Nested member, evidence, requirement, and
+referenced-artifact digests remain semantic data. `prose-utf8-v1` is the explicit
+exception: prose contains external sentinels rather than computed identity fields, so
+the complete document bytes are hashed. `source_digest` is BLAKE3-256 over the complete
+checked-in byte sequence and therefore SHALL live outside those bytes in the generated
+artifact index or another detached provenance envelope. Machine sources may embed
+`canonical_digest` because their named semantic projection structurally omits that
+field; prose headers use the `external` sentinel because prose hashes complete bytes.
+Generated outputs SHALL embed the applicable source artifact IDs, source
+digests, canonical digests, projection IDs, and generator revision when doing so does
+not create a self-reference. This preserves both semantic comparison and exact-byte
+verification.
+
+Every source descriptor selects exactly one closed projection profile:
+
+| Projection ID | Canonical semantic projection |
+|---|---|
+| `prose-utf8-v1` | Complete checked-in UTF-8 document bytes with no BOM. Prose has no separate executable semantic parser in suite 1.x, so its canonical and source digest values are equal; they remain separately named metadata fields. |
+| `json-jcs-v1` | Strict typed JSON root with only its own identity fields omitted, serialized as RFC 8785 bytes. |
+| `yaml-ac-g-53-v1` | The pinned AC-G-05 YAML semantic projection with only its own root identity fields omitted, serialized as RFC 8785 bytes. |
+| `jsonl-jcs-v1` | Strict typed metadata and records with only the metadata record's own identity fields omitted; each record is RFC 8785 JSON followed by one LF byte, preserving declared record order and all evidence digests. |
+| `proto-descriptor-v1` | A normalized typed descriptor model derived from the suite's single compiled `FileDescriptorSet`; source comments and source locations are excluded. |
+| `ebnf-source-v1` | The metadata header is parsed and validated, then omitted from the projection; canonical bytes are the exact grammar payload with line endings normalized to LF. No other whitespace or text rewriting occurs. |
+| `bundle-ac-g-07-v1` | A bundle artifact profile with two projections: artifact canonical bytes omit only root `canonical_digest`/`source_digest`; bundle identity bytes additionally omit `bundle_digest` and `signature`. Both use the same typed, artifact-sorted RFC 8785 model. |
+
+The projection ID is part of the artifact contract. Changing a profile or its emitted
+bytes is a versioned contract change, never an incidental generator refactor. RFC 8785
+encoding and BLAKE3 are owned by the suite-pinned libraries; repository code owns strict
+ingress, typed projection, field omission, record framing, and resource bounds.
 
 Version change rules:
 
 - **major**: any change that can alter existing identity, fact meaning, required field meaning, protocol interpretation, negative-proof semantics, or previously valid request behavior;
 - **minor**: additive kinds, fields, aliases, capabilities, profiles, protocol methods, or optional behavior that preserves all prior meanings;
-- **digest only**: formatting, examples, comments, spelling, non-normative explanation, or generated ordering with no contract change.
+- **digest only**: a change retained by one or both selected digest projections that
+  does not change the public contract version, such as formatting, examples, comments,
+  spelling, non-normative explanation, or generated ordering.
+
+The last rule always changes `source_digest`; it changes `canonical_digest` exactly when
+the selected profile retains the edited bytes. Thus prose editorial changes affect both
+digests, while JSON/YAML source formatting outside the semantic projection affects only
+`source_digest`. A semantic change changes both artifact identities. `bundle_digest` is
+a third identity defined only by AC-G-07 and SHALL NOT be substituted for either
+artifact identity.
+
+Worked cases are normative:
+
+| Source kind/change | Canonical projection consequence | Required identity change |
+|---|---|---|
+| Normative prose wording, formatting, or examples change | `prose-utf8-v1` retains exact document bytes | both artifact digests; no semantic-version change is required for an editorial-only change |
+| JSON object members are reordered or insignificant whitespace changes | `json-jcs-v1` emits the same RFC 8785 bytes | `source_digest` only |
+| A JSON field value changes | the strict typed model and RFC 8785 bytes change | both artifact digests |
+| YAML indentation, comments, mapping order, or an equivalent accepted scalar spelling changes | `yaml-ac-g-53-v1` resolves to the same semantic JSON value | `source_digest` only |
+| A YAML scalar or sequence order with declared semantic order changes | the semantic JSON projection changes | both artifact digests |
+| JSONL record whitespace changes without changing a typed record | that record's JCS bytes and LF framing remain identical | `source_digest` only |
+| JSONL record order changes | ordered framed record bytes change | both artifact digests |
+| Protobuf comments or source locations change | normalized `proto-descriptor-v1` remains identical | `source_digest` only |
+| A Protobuf field number, type, label, package, service, or method changes | normalized descriptor semantics change | both artifact digests |
+| EBNF CRLF becomes LF | `ebnf-source-v1` normalizes to the same grammar payload | `source_digest` only |
+| EBNF grammar-payload whitespace, comments, or production text changes | exact LF-normalized payload changes; payload presentation is contract data in `ebnf-source-v1` | both artifact digests |
+| A bundle signature changes | artifact canonical bytes include it; the AC-G-07 bundle projection omits it | `canonical_digest` and `source_digest` change; `bundle_digest` does not |
+| A required bundle artifact digest changes | both typed projections retain member digests | `canonical_digest`, `source_digest`, and `bundle_digest` change |
+
+The following minimal profile vectors are normative. `<LF>` denotes byte `0a`; displayed
+JSON projection bytes have no trailing LF unless one is shown. The `b3:` values are
+BLAKE3-256 over exactly the displayed decoded bytes.
+
+| Profile | Exact source bytes | Exact canonical projection bytes | Expected identities |
+|---|---|---|---|
+| `prose-utf8-v1` | `# Example<LF>` | `# Example<LF>` | `canonical_digest = source_digest = b3:a0f5e8f16750f4638b7d8ed55e400ea266f7d938bd19c42a8c626fb9025d97ec` |
+| `json-jcs-v1` A | `{"b":2, "a":1}<LF>` | `{"a":1,"b":2}` | `source_digest = b3:b0ab3e1f1fdd9ae807e31fe856be07c7c7a704c35fc2a48d88525b4d8245900b`; `canonical_digest = b3:8e80439b77ac62d4194499edd46684c479da3aa1ac80dd5511468efae049166e` |
+| `json-jcs-v1` B | `{<LF>  "a": 1,<LF>  "b": 2<LF>}<LF>` | `{"a":1,"b":2}` | `source_digest = b3:80a64d48801b5d77caef68c66e807fd2b34126bef0cdfcb6ff99a924fd2ccac0`; same canonical digest as A |
+| `yaml-ac-g-53-v1` A | `a: 1<LF>b: 2<LF>` | `{"a":1,"b":2}` | `source_digest = b3:82d1b8f4ff3274aaa304cfa9c704fad602f51eb0a1928cf9659b5b31130686ab`; canonical digest equals the JSON A/B value |
+| `yaml-ac-g-53-v1` B | `# editorial<LF>b: 2<LF>a: 1<LF>` | `{"a":1,"b":2}` | `source_digest = b3:dec00b1309f573aa2ce543d0223eea79d7614f8dcc4c6e44ba12e9197da8aee9`; same canonical digest as YAML A |
+| `jsonl-jcs-v1` | `{"record_kind":"metadata","canonical_digest":"b3:1111111111111111111111111111111111111111111111111111111111111111","status":"draft"}<LF>{"z":2,"a":1}<LF>` | `{"record_kind":"metadata","status":"draft"}<LF>{"a":1,"z":2}<LF>` | `source_digest = b3:903036f189b73b62ed3326caf917f2fa9d8aa53b8f603449258f0ee6897880a3`; `canonical_digest = b3:0dd1ac3334522bae92947a15c7949f85b4c0874d6d05f0f631355b582bb99765` |
+| `proto-descriptor-v1` | `// canonical_digest: b3:1111111111111111111111111111111111111111111111111111111111111111<LF>syntax = "proto3";<LF>package codefabric.example.v1;<LF>` | `{"files":[{"name":"example.proto","package":"codefabric.example.v1","syntax":"proto3"}]}` | `source_digest = b3:9742a6b59a39e895fae46965179e4c3325408684df6643cbdd35f1d56bbfd5a6`; `canonical_digest = b3:47e3dbed48619fab3f445c0c297847682a8df0471535b0648b5c2e91aacb2abc` |
+| `ebnf-source-v1` | `(* artifact_id: codefabric.query.example *)<LF>(* canonical_digest: b3:1111111111111111111111111111111111111111111111111111111111111111 *)<LF>document = "";<LF>` | `document = "";<LF>` | `source_digest = b3:0ffbb2b15bd9a2b5aa0121a94256069c5f43ed58deb242e710b11403763f8574`; `canonical_digest = b3:b8f869e4a1e4509bf2a85fada5cdc3d72fe7108f173ef5eeaa4d5622079e1a78` |
+| `bundle-ac-g-07-v1` | `{"artifacts":[{"artifact_id":"a","canonical_digest":"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required":true}],"bundle_digest":"b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","bundle_kind":"schema","bundle_version":"1.0","canonical_digest":"b3:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","signature":"sig"}` | Artifact: `{"artifacts":[{"artifact_id":"a","canonical_digest":"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required":true}],"bundle_digest":"b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","bundle_kind":"schema","bundle_version":"1.0","signature":"sig"}`; bundle: `{"artifacts":[{"artifact_id":"a","canonical_digest":"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required":true}],"bundle_kind":"schema","bundle_version":"1.0"}` | `source_digest = b3:eabf79fdfa14d0c8692c7bb7b5e20425946e2c15dc9e4d5375403a894024c5ab`; `canonical_digest = b3:0697267a6199027a9c53bb702b9a156c499a54be714ca74312ace151e09e8583`; `bundle_digest = b3:1155e940f9114f59d0b003b1f6aedd325ff1d19defb896486f7378768d6776e5` |
+
+For catalog-order normalization, input descriptor arrays with IDs `["b", "a"]` and
+`["a", "b"]` both compile to
+`[{"artifact_id":"a"},{"artifact_id":"b"}]` with digest
+`b3:41c2c452f3762017987d6f8702c7bcd7dabfb3515e381cf4f4d534f74eaa5c08`.
 
 The synchronized prose suite and this manifest are version `1.3` and compatible with suite major `1`. Independent registries and deployment profiles introduced by the architecture-completion pass begin at version `1.0` where stated and are pinned by exact digest in this 1.3 suite manifest.
 
@@ -237,7 +329,12 @@ reference is not an executable mapping and SHALL fail the released profile.
 ## AC-G-05 — Required machine artifacts and repository layout
 ### Decision
 
-The machine artifacts are first-class sources of truth and SHALL live in a dedicated `contracts/` tree generated or validated from the normative specifications.
+The machine artifacts are first-class sources of truth and SHALL live in a dedicated
+`contracts/` tree generated or validated from the normative specifications.
+`contracts/manifests/suite-manifest.json` is the sole compiler bootstrap and typed
+catalog authority for artifact ownership and derivation edges. It describes native
+sources; it does not replace JSON Schema, Protobuf, YAML-registry, JSONL, or EBNF
+semantics.
 
 ### Contract
 
@@ -247,6 +344,7 @@ The required layout is:
 contracts/
   manifests/
     suite-manifest.json
+    fixture-oracles.json
     deployment-profile.schema.json
     requirements.jsonl
     traceability.jsonl
@@ -288,9 +386,7 @@ contracts/
     rustc_extractor.proto
     feature-registry.yaml
   adapter/
-    fastmcp-input.schema.json
-    fastmcp-output.schema.json
-    fastmcp-public-meta.schema.json
+    adapter-model-ir.json
   bundles/
     ontology-bundle.json
     schema-bundle.json
@@ -312,18 +408,62 @@ contracts/
 
 Generated Rust and Python types SHALL be emitted under `generated/` and SHALL contain a header naming the source artifact digest. Hand-edited generated files are prohibited.
 
+The suite manifest SHALL use a closed typed catalog model. Each artifact descriptor
+declares its stable ID, native source path and kind, compatibility family, projection
+profile, generated outputs, consumer domains, provenance obligations, and resource
+budget profile. The compiler SHALL derive source and output censuses, generator
+dispatch, packaging inputs, warning/release counts, traceability joins, and artifact
+index records from that graph. It SHALL reject unknown fields and kinds, duplicate IDs
+or authority/output paths, missing sources, conflicting or cyclic derivation edges,
+path escape, and outputs with multiple authorities. Catalog record order has no
+semantic effect; diagnostics and output order are deterministic.
+
+The suite manifest's first logical descriptor SHALL describe the suite manifest itself,
+including authority path, projection, owner, compatibility family, budget profile, and
+derived artifact-index output. This is ordinary typed self-description, not a computed
+census or embedded digest. During typed projection, artifact descriptors are sorted by
+`artifact_id`; generated outputs by path; consumer/provenance sets by their stable code;
+and derivation edges by `(authority_artifact_id, output_path, consumer_code)`. Duplicate
+sort keys fail validation before projection. RFC 8785 then canonicalizes object members;
+it is not expected to reorder arrays.
+
+Computed observations do not become a second self-referential catalog. A generated
+artifact index SHALL record, for every governed source, its projection ID,
+`canonical_digest`, `source_digest`, authority, provenance, generator revision, outputs,
+and consumer views. Generated outputs identify their authority source and that source's
+digests; the index does not attempt to contain its own exact-byte digest. Rust and Python
+consumers SHALL read the same canonical index resource; language source generation is
+reserved for statically useful types and behavior.
+
 The semantic request/response JSON Schemas SHALL be complete, closed at public boundaries, and capable of validating every normative fixture. The `.proto` files SHALL be compiled in both Rust and Python CI. Registry YAML is the human-reviewable source; canonical JSON derived from it is the fingerprinted machine form.
 
 Registry canonicalization SHALL parse exactly one YAML 1.1 document with the
 suite-pinned parser, reject duplicate mapping keys, reject tagged values and
 merge keys unless a future registry schema explicitly assigns them semantics,
 and project the resolved semantic model into the AC-G-53 JSON domain before
-fingerprinting. Aliases may express repeated source values, but anchor and alias
-spelling never contributes to identity. String-keyed mappings become JSON
+fingerprinting. Anchors and aliases are rejected by a bounded pre-parse YAML-subset
+scanner because the suite-pinned parser cannot enforce an alias-expansion bound before
+materialization. A future policy that accepts aliases requires a parser with a proven
+pre-expansion limit and a versioned design correction. String-keyed mappings become JSON
 objects; any logical non-string-keyed mapping becomes the AC-G-53 sorted
 key/value-record array. Numeric values remain subject to the AC-G-53 finite and
 interoperable-range rules. Generic serialization of a dynamic YAML value is not
 a permitted projection because it does not define these boundary decisions.
+
+All compiler ingress is staged and bounded: raw-byte and token/alias checks precede
+full allocation where applicable; typed closed records precede cross-record validation;
+emitters consume the typed Contract IR rather than rediscovering metadata lexically.
+Every catalog descriptor names explicit byte, depth, collection, token/alias, graph,
+and diagnostic budgets appropriate to its source kind. JSON Schema inputs SHALL pass
+Draft 2020-12 metaschema validation with the suite-pinned validator before release.
+
+The four `.proto` authorities SHALL be compiled by one exact `grpcio-tools` invocation
+into Python bindings and one committed `FileDescriptorSet` with imports included and
+source information excluded. Rust generation SHALL decode that same descriptor set and
+use the pinned Prost/Tonic descriptor APIs; it SHALL NOT invoke a second `protoc`.
+Normative known-answer vectors remain independently reviewed oracles. Generator-derived,
+property, and differential corpora provide broad coverage but SHALL NOT approve or
+overwrite their own expected bytes or digests.
 
 ## AC-G-06 — Canonical enum and flag registry
 ### Decision
@@ -402,7 +542,12 @@ bundle_digest: "b3:..."
 signature: optional
 ```
 
-Artifacts are sorted by `artifact_id`. The bundle digest is BLAKE3-256 over RFC-8785 canonical JSON with the `bundle_digest` and `signature` fields omitted.
+Artifacts are sorted by `artifact_id`. The bundle digest is BLAKE3-256 over RFC-8785
+canonical JSON with the bundle's root `canonical_digest`, `source_digest`,
+`bundle_digest`, and `signature` fields omitted. Member and referenced-artifact digests
+are retained. The bundle artifact's separate `canonical_digest` omits only its root
+`canonical_digest` and `source_digest`, so it includes the computed `bundle_digest` and
+any signature.
 
 Built-in bundles are trusted by exact digest shipped with the binary. External model-pack bundles require an Ed25519 signature by a configured trust root. No other bundle accepts executable extensions.
 
@@ -1832,6 +1977,7 @@ The design is not implementation-closed until these artifacts exist and pass the
 
 ```text
 contracts/manifests/suite-manifest.json
+contracts/manifests/fixture-oracles.json
 contracts/manifests/deployment-profile.schema.json
 contracts/manifests/requirements.jsonl
 contracts/manifests/traceability.jsonl
@@ -1867,9 +2013,7 @@ contracts/rpc/provider_control.proto
 contracts/rpc/pyrefly_sidecar.proto
 contracts/rpc/rustc_extractor.proto
 contracts/rpc/feature-registry.yaml
-contracts/adapter/fastmcp-input.schema.json
-contracts/adapter/fastmcp-output.schema.json
-contracts/adapter/fastmcp-public-meta.schema.json
+contracts/adapter/adapter-model-ir.json
 contracts/bundles/*.json
 contracts/deployment/local-workstation-v1.yaml
 contracts/faults/fault-point-registry.yaml
@@ -1878,6 +2022,10 @@ contracts/security/security-corpus-manifest.yaml
 ```
 
 Generated code is a build output of these sources; it is not an independent authority.
+The adapter model compiler emits its statically typed Pydantic source plus canonical
+validation/serialization schema and fingerprint manifests under
+`codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/`; these are catalog-owned package
+outputs of `contracts/adapter/adapter-model-ir.json`, never sibling schema authorities.
 
 ---
 

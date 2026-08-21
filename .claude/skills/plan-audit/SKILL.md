@@ -37,6 +37,9 @@ Write:
 docs/reviews/plan_audit_<plan-slug>_<YYYY-MM-DD>_vN.md
 ```
 
+Frontmatter per `artifact-schemas.md` §7 (`artifact: plan-audit`,
+`plan_path`, `verdict`, `version`, `date`, `status`).
+
 Never overwrite, rename, or edit a prior audit. Reference earlier audits and
 state what the new audit re-evaluates.
 
@@ -66,20 +69,22 @@ ready | ready-with-corrections | needs-revision | needs-redesign
 
 Read the full plan and source design once. Extract:
 
-- baseline and artifact digests;
+- baseline and declared inputs (freshness derived per
+  `artifact-schemas.md` §8);
 - outcomes, non-goals, design decisions, invariants, and library decisions;
 - work packets, dependencies, milestones, and decommission batches;
-- change-surface claims and preflight discovery obligations;
+- preflight queries and known-touch claims;
 - local, packet, milestone, and final gates;
 - risks, assumptions, replan triggers, and rollback;
 - prior audit and integration provenance.
 
-Validate the artifact structure and stable identifiers.
+Run the §8 validation on the plan, design, and state, and convert failures
+into findings. Do not hand-validate structure it already checks.
 
 ### Phase 2 — Establish current truth and staleness
 
-Compare the current tree to the recorded baseline over the relevant scope.
-Verify load-bearing:
+Derive drift from the recorded baseline over the relevant scope per
+`artifact-schemas.md` §8. Then verify load-bearing:
 
 - files, symbols, contracts, import/export paths, and configuration;
 - callers, implementations, subclasses, constructors, serialization, and
@@ -139,22 +144,24 @@ Fabricated or version-incompatible APIs are blockers.
 
 ### Phase 5 — Audit work-packet executability
 
-For each packet:
+Structural conformance is already covered by the §8 validation; judge each
+packet on five dimensions:
 
-- outcome is observable;
-- dependencies are complete and acyclic;
-- packet is dependency-closed or has an explicit milestone boundary;
-- design/invariant/library references are correct;
-- must-touch files are evidenced;
-- likely-touch and preflight discovery are sufficient;
-- immediate consumers and cross-language boundaries are covered;
-- required changes avoid speculative implementation detail;
-- acceptance evidence proves behavior, structure, negative state, and
-  operations as applicable;
-- edit-local and packet-local gates are executable and proportional;
-- replan triggers distinguish adaptation, plan revision, and design reopening;
-- rollback/recovery is adequate;
-- packet size is neither a one-file microtask nor an untestable omnibus.
+1. **Outcome and closure** — the outcome is observable, dependencies are
+   complete and acyclic, and the packet is dependency-closed or has an
+   explicit milestone boundary.
+2. **Proof strength** — the named acceptance checks are executable and
+   actually *prove* the outcome across behavior, structure, negative state,
+   and operations as applicable. A check that merely runs code without
+   distinguishing pass from fail is a finding.
+3. **Discovery sufficiency** — the preflight query would discover the real
+   change surface; design/invariant/library references are correct.
+4. **Consumer coverage** — immediate consumers and cross-language boundaries
+   are covered by the packet or an explicit milestone.
+5. **Proportionality** — required changes avoid speculative implementation
+   detail; gates are proportional; replan triggers distinguish adaptation,
+   plan revision, and design reopening; rollback is adequate; packet size is
+   neither a one-file microtask nor an untestable omnibus.
 
 Flag plans that spend context predicting helper bodies while omitting contracts,
 proof, or impact discovery.
@@ -225,12 +232,14 @@ Use this finding format:
 **Category:** factuality | design | library | impact | legacy | proof |
 sequence | doctrine | operations | context-efficiency
 **Scope:** <design IDs and/or packet IDs>
-**Claim:** <one falsifiable statement>
-**Evidence:** <specific code, command, artifact section, or official API>
-**Impact:** <what fails or degrades>
+**Finding:** <one falsifiable claim and its evidence — specific code,
+command, artifact section, or official API>
 **Required resolution:** <exact artifact change or re-design>
-**Revalidation:** <how the integrator/re-auditor proves closure>
+**Revalidation:** <an executable command whose success closes the finding>
 ```
+
+**`Revalidation:` must be an executable command** — a test, recipe,
+`ast-grep`/`rg` query, or probe — never prose. Integration runs it verbatim.
 
 Do not create multiple findings for symptoms of one root defect. Do not bury
 execution blockers in prose.
@@ -282,7 +291,7 @@ Verdict:
 
 ## Quality requirements
 
-- Every finding has evidence and a closure test.
+- Every finding has evidence and an executable closure test.
 - Every global/negative claim accounts for coverage.
 - Every library finding is version-grounded.
 - Recommendations modify a named design/plan section or add a bounded packet.

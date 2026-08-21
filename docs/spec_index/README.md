@@ -318,8 +318,9 @@ Worth knowing before you go looking:
   cross-references in 30,600 lines of spec (`FAB §8`'s citation of `ONT §§62.1–62.10` being the
   substantive one). Specs point at each other by filename or by shared vocabulary token. Every
   section-to-section link in this directory was derived, not copied.
-- **No concrete digest or fingerprint value appears anywhere.** Every `canonical_digest` is
-  `external`.
+- **No concrete digest or fingerprint value appears in prose headers.** Every
+  `canonical_digest` is `external`; the generated artifact index owns computed semantic
+  and exact-source identities.
 
 ## 7. Gap register
 
@@ -330,15 +331,20 @@ specs. Consult this before concluding that you have failed to find something.
 
 The suite governance and release manifest — cited by every spec's `§0` and previously missing —
 **is present**. `SUITE` Part II resolves all 84 `G-NN` owners, and `SUITE` Part V defines
-Readiness Gates A–G. What remains unresolvable locally is one generated artifact:
+Readiness Gates A–G. The generated
+`codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json` is present and is
+the single packaged value authority cited by every spec's `§0.1` and `SUITE AC-G-02`; its
+released profile must carry each governed artifact's semantic `canonical_digest` and
+exact-byte `source_digest`. Rust embeds these bytes directly and Python loads the same package
+resource through `importlib.resources`.
 
-| Missing | Cited by | What it holds |
-|---|---|---|
-| `codefabric_v1.3_manifest.json` | every spec's `§0.1` (`canonical_digest: external`) | the canonical digest of each released artifact |
-| `codefabric_architecture_completion_and_missing_design_specifications_v1.0.md` | `§0` preamble | nothing needed — `SUITE §0` states it is "historical source material only; no implementation needs it to interpret the 1.3 release" |
+The absent `codefabric_architecture_completion_and_missing_design_specifications_v1.0.md`
+is historical source material only; `SUITE §0` states that no implementation needs it
+to interpret the 1.3 release.
 
-No concrete digest or fingerprint value appears anywhere in the design corpus. Every
-`canonical_digest` is `external`.
+No concrete digest or fingerprint value appears in the prose corpus. Every
+`canonical_digest` is `external`; `SUITE AC-G-02` assigns computed values to the
+generated artifact index to avoid self-reference.
 
 ### 7.2 Specified as generated artifacts, absent as prose
 
@@ -374,10 +380,12 @@ Libraries the specs depend on that have **no deep reference** in `docs/library_r
 
 | Library | Where the specs need it | Status |
 |---|---|---|
-| **gRPC / Protobuf** service authoring (`tonic`/`prost` on the Rust side, `grpcio`/`protobuf` on the Python side) | `SRV §8`, `§9`, `AC-G-58`, `AC-G-61`; `GEN AC-G-30`, `AC-G-31` | No doc. `prost` appears only incidentally in the DataFusion/Arrow references, in Substrait and Flight context. The specs never name a Rust crate. |
 | **Embedded SQLite** (WAL operational store) | `FAB §13`, `AC-G-23`, `AC-G-26`; `LIFE §130`, `§131`, `AC-G-27`, `AC-G-41`, `AC-G-62`; `SRV AC-G-60`, `AC-G-63` | No doc, **and no crate is ever named** — not `rusqlite`, not `sqlx`. `LIFE AC-G-27` only says what it must *not* be ("No RocksDB, redb, or independent append journal"). |
-| **`blake3`** | Canonical ID and digest authority in all six specs — `ONT AC-G-13`, `LIFE AC-G-09`, `QRY AC-G-53`, source-image capture at `LIFE §33` | No doc. Two incidental mentions across the whole reference corpus. |
-| **`orjson`** | `SRV §18`, `§58`, `§60`; `QRY AC-G-53` canonical JSON | No doc; not routed by `fastmcp-pydantic-ref`. |
+
+The canonicalization/BLAKE3 references are routed by `canonicalization-lib-ref`; Python
+gRPC, Protobuf, and orjson references are routed by `grpcio-orjson-protobuf-ref`.
+Rust Prost/Tonic descriptor generation is covered by the pinned source/API evidence
+recorded by the Wave-1 plan until a dedicated Rust reference is added.
 
 References that exist but that **no skill routes**:
 
@@ -405,7 +413,7 @@ what changed and why.
 | `attrs-cattrs-ref` and `typer-rich-ref` silently routed reference documents that do not exist | Both now self-declare. None of these libraries is a direct CodeFabric dependency after the Wave 0 packaging cutover; transitive adapter-lock presence is not adoption. The skills remain available only for a future direct seam. |
 
 Two things remain genuinely absent rather than merely misattributed: `docs/library_ref/attrs.md` +
-`cattrs.md` (for libraries the project does depend on), and the library gaps in
+`cattrs.md` (neither is a current direct dependency), and the SQLite gap in
 [§7.4](#74-library-coverage-gaps).
 
 ## 8. Verification

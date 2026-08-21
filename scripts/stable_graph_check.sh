@@ -46,6 +46,7 @@ require_one_version tower 0.5.3
 require_one_version base64 0.22.1
 require_one_version serde_json 1.0.151
 require_one_version serde_json_canonicalizer 0.3.2
+require_one_version serde_path_to_error 0.1.20
 require_one_version serde_yaml_ng 0.10.0
 require_one_version tempfile 3.27.0
 require_one_version thiserror 2.0.20
@@ -103,6 +104,7 @@ printf '%s' "$root_shape" | jq -e '
     ],
     "contracts-tooling": [
       "canonical-json",
+      "dep:serde_path_to_error",
       "dep:serde_yaml_ng",
       "dep:tempfile"
     ],
@@ -125,7 +127,7 @@ printf '%s' "$root_shape" | jq -e '
     ],
     "default": ["local-workstation"],
     "local-workstation": ["contracts-tooling", "compatibility-probes"],
-    "proto-tooling": ["dep:prost-build", "dep:protoc-bin-vendored", "dep:tonic-prost-build"],
+    "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
     "repository-state": ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"],
     "rpc": ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"],
     "s3-storage": ["data-fabric", "deltalake/s3"]
@@ -226,6 +228,8 @@ printf '%s\n' "$canonical_tree" | rg -q '^serde_json_canonicalizer ' || \
   fail 'canonical-json does not activate the approved JCS serializer'
 printf '%s\n' "$contracts_tree" | rg -q '^serde_yaml_ng ' || \
   fail 'contracts-tooling does not activate YAML contract parsing'
+printf '%s\n' "$contracts_tree" | rg -q '^serde_path_to_error ' || \
+  fail 'contracts-tooling does not activate path-aware typed diagnostics'
 printf '%s\n' "$proto_tree" | rg -q '^tonic-prost-build ' || \
   fail 'proto-tooling does not activate the Rust Protobuf generator'
 
@@ -239,9 +243,14 @@ extractor_target="$(cd rustc-extractor && cargo metadata --locked --format-versi
   fail 'dated-nightly extractor shares the stable target directory'
 
 legacy_backend='ma''turin'
-operational_surface="$({ ./scripts/bootstrap.sh --context; just --list; } 2>&1)"
-if printf '%s\n' "$operational_surface" | rg -qi \
-  "${legacy_backend}|wheel|python-develop|test-python"; then
+bootstrap_surface="$(./scripts/bootstrap.sh --context 2>&1)"
+if printf '%s\n' "$bootstrap_surface" | rg -qi "${legacy_backend}"; then
+  fail 'the operational command surface still advertises a removed root packaging command'
+fi
+just_dump="$(just --dump --dump-format json)"
+if printf '%s' "$just_dump" | jq -e '
+  .recipes | has("wheel") or has("python-develop") or has("test-python")
+' >/dev/null; then
   fail 'the operational command surface still advertises a removed root packaging command'
 fi
 

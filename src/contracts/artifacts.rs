@@ -2,101 +2,27 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
-use std::fmt::Write as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use serde_json::{Map, Number, Value, json};
-use serde_yaml_ng::Value as YamlValue;
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
+use super::catalog::{CatalogError, CompiledCatalog, ContractCatalog, GeneratedOutputKind};
+use super::compiler::{ContractCompileError, compile_artifact, compile_artifact_for_generation};
+use super::index::{
+    ArtifactIndex, ArtifactIndexGeneration, ArtifactIndexOutput, ArtifactIndexRecord,
+};
 use super::jcs::{
-    CanonicalJsonError, PROFILE, canonicalize_slice, canonicalize_value, checksum,
+    CanonicalJsonError, PROFILE, canonicalize_slice, canonicalize_value, checksum, decode_strict,
     non_string_map_records, validate_bytes, validate_checksum, validate_int64,
     validate_lowercase_public, validate_uint64,
 };
-
-/// Exact AC-G-05 machine-source files introduced across Wave 1.
-pub const REQUIRED_SOURCE_ARTIFACTS: &[&str] = &[
-    "manifests/suite-manifest.json",
-    "manifests/deployment-profile.schema.json",
-    "manifests/requirements.jsonl",
-    "manifests/traceability.jsonl",
-    "registry/enum-registry.yaml",
-    "registry/flag-registry.yaml",
-    "registry/ontology-entity-registry.yaml",
-    "registry/ontology-relation-registry.yaml",
-    "registry/ontology-property-registry.yaml",
-    "registry/unknown-registry.yaml",
-    "registry/projection-registry.yaml",
-    "registry/summary-registry.yaml",
-    "registry/capability-registry.yaml",
-    "registry/error-registry.yaml",
-    "registry/provider-registry.yaml",
-    "registry/derivation-registry.yaml",
-    "registry/phrase-registry.yaml",
-    "registry/model-pack.schema.json",
-    "identity/cbef-v1.yaml",
-    "identity/type-algebra-v1.yaml",
-    "identity/path-canonicalization-v1.yaml",
-    "schema/analysis-context.schema.json",
-    "schema/serving-snapshot.schema.json",
-    "schema/public-snapshot-metadata.schema.json",
-    "schema/source-context.schema.json",
-    "schema/cpg-semantic-query-request.schema.json",
-    "schema/cpg-semantic-query-response.schema.json",
-    "schema/public-status.schema.json",
-    "query/english-controlled-v1.ebnf",
-    "query/planspec.schema.json",
-    "rpc/cpg_query_service.proto",
-    "rpc/provider_control.proto",
-    "rpc/pyrefly_sidecar.proto",
-    "rpc/rustc_extractor.proto",
-    "rpc/feature-registry.yaml",
-    "adapter/fastmcp-input.schema.json",
-    "adapter/fastmcp-output.schema.json",
-    "adapter/fastmcp-public-meta.schema.json",
-    "bundles/ontology-bundle.json",
-    "bundles/schema-bundle.json",
-    "bundles/provider-bundle.json",
-    "bundles/derivation-bundle.json",
-    "bundles/query-language-bundle.json",
-    "bundles/tool-contract-bundle.json",
-    "bundles/toolchain-bundle.json",
-    "bundles/model-pack-bundle.json",
-    "deployment/local-workstation-v1.yaml",
-    "faults/fault-point-registry.yaml",
-    "comparison/comparison-ignore-registry.yaml",
-    "security/security-corpus-manifest.yaml",
-];
-
-const REGISTRY_SOURCES: &[&str] = &[
-    "enum-registry.yaml",
-    "flag-registry.yaml",
-    "ontology-entity-registry.yaml",
-    "ontology-relation-registry.yaml",
-    "ontology-property-registry.yaml",
-    "unknown-registry.yaml",
-    "projection-registry.yaml",
-    "summary-registry.yaml",
-    "capability-registry.yaml",
-    "error-registry.yaml",
-    "provider-registry.yaml",
-    "derivation-registry.yaml",
-    "phrase-registry.yaml",
-];
-
-const GENERATED_INDEX: &str = "contracts/generated/artifact-index.json";
-const GENERATED_RUST: &str = "src/generated/contracts.rs";
-const GENERATED_PYTHON: &str =
-    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/_contract_index.py";
-const GENERATED_PYTHON_STUB: &str =
-    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/_contract_index.pyi";
-const GENERATED_PYTHON_INIT: &str =
-    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/__init__.py";
+use super::models::{RequirementRecord, TraceabilityRecord};
 
 /// Verifier strictness profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,6 +60,12 @@ pub struct VerificationReport {
 /// Contract generation or verification failure.
 #[derive(Debug, Error)]
 pub enum ContractArtifactError {
+    /// The typed catalog could not be loaded or compiled.
+    #[error(transparent)]
+    Catalog(#[from] CatalogError),
+    /// Native bounded compilation failed.
+    #[error(transparent)]
+    Compile(#[from] ContractCompileError),
     /// A required path is absent.
     #[error("required contract path is absent: {0}")]
     Missing(PathBuf),
@@ -160,14 +92,6 @@ pub enum ContractArtifactError {
         /// Underlying error.
         #[source]
         source: CanonicalJsonError,
-    },
-    /// YAML source could not be converted into the JSON value domain.
-    #[error("registry YAML failure for {path}: {message}")]
-    Yaml {
-        /// Affected path.
-        path: PathBuf,
-        /// Parser or conversion message.
-        message: String,
     },
     /// A fixture document has the wrong shape.
     #[error("invalid verification fixture {path}: {message}")]
@@ -200,13 +124,6 @@ fn read(path: &Path) -> Result<Vec<u8>, ContractArtifactError> {
     })
 }
 
-fn yaml_failure(path: &Path, message: impl Into<String>) -> ContractArtifactError {
-    ContractArtifactError::Yaml {
-        path: path.to_owned(),
-        message: message.into(),
-    }
-}
-
 fn fixture_failure(path: &Path, message: impl Into<String>) -> ContractArtifactError {
     ContractArtifactError::Fixture {
         path: path.to_owned(),
@@ -214,331 +131,141 @@ fn fixture_failure(path: &Path, message: impl Into<String>) -> ContractArtifactE
     }
 }
 
-fn yaml_number_to_json(
-    path: &Path,
-    logical_path: &str,
-    number: &serde_yaml_ng::Number,
-) -> Result<Value, ContractArtifactError> {
-    if let Some(value) = number.as_i64() {
-        return Ok(Value::Number(value.into()));
-    }
-    if let Some(value) = number.as_u64() {
-        return Ok(Value::Number(value.into()));
-    }
-    let value = number.as_f64().ok_or_else(|| {
-        yaml_failure(
-            path,
-            format!("unsupported numeric value at {logical_path}: {number:?}"),
-        )
-    })?;
-    Number::from_f64(value).map(Value::Number).ok_or_else(|| {
-        yaml_failure(
-            path,
-            format!("non-finite numeric value at {logical_path}: {number:?}"),
-        )
-    })
-}
-
-fn yaml_to_json(
-    path: &Path,
-    logical_path: &str,
-    value: YamlValue,
-) -> Result<Value, ContractArtifactError> {
-    match value {
-        YamlValue::Null => Ok(Value::Null),
-        YamlValue::Bool(value) => Ok(Value::Bool(value)),
-        YamlValue::Number(number) => yaml_number_to_json(path, logical_path, &number),
-        YamlValue::String(value) => Ok(Value::String(value)),
-        YamlValue::Sequence(values) => values
-            .into_iter()
-            .enumerate()
-            .map(|(index, value)| yaml_to_json(path, &format!("{logical_path}[{index}]"), value))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-        YamlValue::Mapping(mapping) => {
-            let mut projected = Vec::with_capacity(mapping.len());
-            let mut all_string_keys = true;
-            for (index, (key, value)) in mapping.into_iter().enumerate() {
-                if matches!(&key, YamlValue::String(key) if key == "<<") {
-                    return Err(yaml_failure(
-                        path,
-                        format!("YAML merge keys are not supported at {logical_path}"),
-                    ));
-                }
-                all_string_keys &= matches!(&key, YamlValue::String(_));
-                let projected_key =
-                    yaml_to_json(path, &format!("{logical_path}.key[{index}]"), key)?;
-                let projected_value =
-                    yaml_to_json(path, &format!("{logical_path}.value[{index}]"), value)?;
-                projected.push((projected_key, projected_value));
-            }
-
-            if all_string_keys {
-                let mut object = Map::with_capacity(projected.len());
-                for (key, value) in projected {
-                    let Value::String(key) = key else {
-                        unreachable!("all YAML mapping keys were checked as strings");
-                    };
-                    object.insert(key, value);
-                }
-                Ok(Value::Object(object))
-            } else {
-                non_string_map_records(projected).map_err(|source| {
-                    ContractArtifactError::Canonical {
-                        path: path.to_owned(),
-                        source,
-                    }
-                })
-            }
-        }
-        YamlValue::Tagged(tagged) => Err(yaml_failure(
-            path,
-            format!("YAML tag {} is not supported at {logical_path}", tagged.tag),
-        )),
-    }
-}
-
-fn yaml_json_value(path: &Path, bytes: &[u8]) -> Result<Value, ContractArtifactError> {
-    // `from_slice` on the pinned parser rejects duplicate mapping keys, excess
-    // nesting, and streams containing more than one document. Aliases are
-    // resolved into this semantic model; tags and merge keys remain explicit
-    // and are rejected by `yaml_to_json`.
-    let yaml: YamlValue =
-        serde_yaml_ng::from_slice(bytes).map_err(|error| yaml_failure(path, error.to_string()))?;
-    yaml_to_json(path, "$", yaml)
-}
-
-fn canonical_source_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<u8>, ContractArtifactError> {
-    match path.extension().and_then(OsStr::to_str) {
-        Some("json") => {
-            canonicalize_slice(bytes).map_err(|source| ContractArtifactError::Canonical {
-                path: path.to_owned(),
-                source,
-            })
-        }
-        Some("jsonl") => {
-            let mut canonical = Vec::new();
-            for line in bytes
-                .split(|byte| *byte == b'\n')
-                .filter(|line| !line.is_empty())
-            {
-                canonical.extend(canonicalize_slice(line).map_err(|source| {
-                    ContractArtifactError::Canonical {
-                        path: path.to_owned(),
-                        source,
-                    }
-                })?);
-                canonical.push(b'\n');
-            }
-            Ok(canonical)
-        }
-        Some("yaml" | "yml") => {
-            let value = yaml_json_value(path, bytes)?;
-            canonicalize_value(&value).map_err(|source| ContractArtifactError::Canonical {
-                path: path.to_owned(),
-                source,
-            })
-        }
-        _ => Ok(bytes.to_vec()),
-    }
-}
-
-fn generated_registry_value(source: &str, source_bytes: &[u8], value: &Value) -> Value {
+fn generated_registry_value(
+    artifact: &super::catalog::ArtifactDescriptor,
+    compiled: &super::compiler::CompiledArtifact,
+    value: &Value,
+) -> Value {
     json!({
         "_generated": {
             "generator_revision": "codefabric-contracts-wp06-v1",
             "profile": PROFILE,
-            "source": source,
-            "source_digest": checksum(source_bytes),
+            "source_artifact_id": artifact.artifact_id,
+            "source": artifact.authority_path,
+            "source_digest": compiled.source_digest,
+            "canonical_digest": compiled.canonical_digest,
+            "digest_projection": compiled.digest_projection,
         },
         "value": value,
     })
 }
 
 fn collect_artifact_records(
-    contracts_root: &Path,
-) -> Result<Vec<(String, String)>, ContractArtifactError> {
-    let mut records = Vec::with_capacity(REQUIRED_SOURCE_ARTIFACTS.len());
-    for relative in REQUIRED_SOURCE_ARTIFACTS {
-        let path = contracts_root.join(relative);
-        let bytes = read(&path)?;
-        let canonical = canonical_source_bytes(&path, &bytes)?;
-        records.push(((*relative).to_owned(), checksum(&canonical)));
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<Vec<ArtifactIndexRecord>, ContractArtifactError> {
+    let mut records = Vec::new();
+    for artifact in catalog.artifacts() {
+        let compiled = compile_artifact(repository_root, catalog, artifact)?;
+        records.push(ArtifactIndexRecord {
+            artifact_id: artifact.artifact_id.clone(),
+            authority_path: artifact.authority_path.clone(),
+            artifact_kind: artifact.artifact_kind,
+            owner: artifact.owner,
+            version: artifact.version.clone(),
+            compatible_suite_major: artifact.compatible_suite_major,
+            status: artifact.status,
+            digest_projection: artifact.digest_projection,
+            canonical_digest: compiled.canonical_digest,
+            source_digest: compiled.source_digest,
+            bundle_digest: compiled.bundle_digest,
+            compatibility_family: artifact.compatibility_family,
+            provenance_requirements: artifact.provenance_requirements.iter().copied().collect(),
+            consumers: artifact.consumers.iter().copied().collect(),
+            generated_outputs: artifact
+                .generated_outputs
+                .iter()
+                .map(|output| ArtifactIndexOutput {
+                    path: output.path.clone(),
+                    output_kind: output.output_kind,
+                    producer: output.producer,
+                    consumers: output.consumers.iter().copied().collect(),
+                })
+                .collect(),
+        });
     }
     Ok(records)
 }
 
 fn render_registry_outputs(
-    contracts_root: &Path,
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
     outputs: &mut BTreeMap<PathBuf, Vec<u8>>,
 ) -> Result<(), ContractArtifactError> {
-    for source_name in REGISTRY_SOURCES {
-        let relative = format!("registry/{source_name}");
-        let path = contracts_root.join(&relative);
-        let bytes = read(&path)?;
-        let value = yaml_json_value(&path, &bytes)?;
-        let canonical_source = canonical_source_bytes(&path, &bytes)?;
-        let generated = generated_registry_value(&relative, &canonical_source, &value);
+    for (output_path, owner, output) in catalog.outputs() {
+        if output.output_kind != GeneratedOutputKind::CanonicalRegistry {
+            continue;
+        }
+        let artifact = catalog
+            .artifact(owner)
+            .expect("compiled output owner must be a catalog artifact");
+        let path = repository_root.join(&artifact.authority_path);
+        let compiled = compile_artifact(repository_root, catalog, artifact)?;
+        let value = decode_strict(&compiled.canonical_bytes).map_err(|source| {
+            ContractArtifactError::Canonical {
+                path: path.clone(),
+                source,
+            }
+        })?;
+        let generated = generated_registry_value(artifact, &compiled, &value);
         let encoded =
             canonicalize_value(&generated).map_err(|source| ContractArtifactError::Canonical {
                 path: path.clone(),
                 source,
             })?;
-        outputs.insert(
-            PathBuf::from(format!(
-                "contracts/generated/registry/{}.json",
-                source_name.trim_end_matches(".yaml")
-            )),
-            encoded,
-        );
+        outputs.insert(output_path.to_owned(), encoded);
     }
     Ok(())
 }
 
 fn render_index(
     repository_root: &Path,
-    artifact_records: &[(String, String)],
-) -> Result<(Vec<u8>, String), ContractArtifactError> {
-    let index_records = artifact_records
-        .iter()
-        .map(|(path, canonical_digest)| {
-            json!({
-                "canonical_digest": canonical_digest,
-                "path": path,
-            })
-        })
-        .collect::<Vec<_>>();
-    let index = json!({
-        "_generated": {
-            "generator_revision": "codefabric-contracts-wp06-v1",
-            "profile": PROFILE,
+    index_path: &Path,
+    artifact_records: &[ArtifactIndexRecord],
+) -> Result<Vec<u8>, ContractArtifactError> {
+    let index = ArtifactIndex {
+        generated: ArtifactIndexGeneration {
+            catalog_artifact_id: "codefabric.manifests.suite-manifest".to_owned(),
+            artifact_count: artifact_records.len(),
+            generator_revision: "codefabric-contracts-model-v1".to_owned(),
+            profile: PROFILE.to_owned(),
         },
-        "artifacts": index_records,
-    });
-    let bytes = canonicalize_value(&index).map_err(|source| ContractArtifactError::Canonical {
-        path: repository_root.join(GENERATED_INDEX),
+        artifacts: artifact_records.to_vec(),
+    };
+    canonicalize_value(
+        &serde_json::to_value(index).expect("typed artifact index serialization is infallible"),
+    )
+    .map_err(|source| ContractArtifactError::Canonical {
+        path: repository_root.join(index_path),
         source,
-    })?;
-    let digest = checksum(&bytes);
-    Ok((bytes, digest))
-}
-
-fn render_rust_index(artifact_records: &[(String, String)], index_digest: &str) -> Vec<u8> {
-    let mut rust = format!(
-        concat!(
-            "// @generated from {generated_index} {index_digest}; do not edit.\n",
-            "/// One source artifact and its canonical BLAKE3 digest.\n",
-            "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n",
-            "pub struct GeneratedContractArtifact {{\n",
-            "    /// Repository-relative authority path.\n",
-            "    pub path: &'static str,\n",
-            "    /// BLAKE3-256 over the artifact's canonical bytes.\n",
-            "    pub canonical_digest: &'static str,\n",
-            "}}\n\n",
-            "/// BLAKE3 digest of the generated Wave 1 artifact index.\n",
-            "pub const CONTRACT_ARTIFACT_INDEX_DIGEST: &str = \"{index_digest}\";\n\n",
-            "/// Exact AC-G-05 source-artifact index.\n",
-            "pub const CONTRACT_ARTIFACTS: &[GeneratedContractArtifact] = &[\n",
-        ),
-        generated_index = GENERATED_INDEX,
-        index_digest = index_digest
-    );
-    for (path, canonical_digest) in artifact_records {
-        writeln!(
-            rust,
-            "    GeneratedContractArtifact {{ path: {path:?}, canonical_digest: {canonical_digest:?} }},"
-        )
-        .expect("writing to a String cannot fail");
-    }
-    rust.push_str("];\n");
-    rust.into_bytes()
-}
-
-fn render_python_index(artifact_records: &[(String, String)], index_digest: &str) -> Vec<u8> {
-    let mut python = format!(
-        concat!(
-            "# @generated from {generated_index} {index_digest}; do not edit.\n",
-            "from typing import Final, NamedTuple\n\n\n",
-            "class GeneratedContractArtifact(NamedTuple):\n",
-            "    path: str\n",
-            "    canonical_digest: str\n\n\n",
-            "CONTRACT_ARTIFACT_INDEX_DIGEST: Final[str] = (\n",
-            "    \"{index_digest}\"\n",
-            ")\n",
-            "CONTRACT_ARTIFACTS: Final[tuple[GeneratedContractArtifact, ...]] = (\n",
-        ),
-        generated_index = GENERATED_INDEX,
-        index_digest = index_digest
-    );
-    for (path, canonical_digest) in artifact_records {
-        writeln!(
-            python,
-            "    GeneratedContractArtifact(\n        path={path:?},\n        canonical_digest={canonical_digest:?},\n    ),"
-        )
-        .expect("writing to a String cannot fail");
-    }
-    python.push_str(")\n");
-    python.into_bytes()
+    })
 }
 
 fn render_outputs(
     repository_root: &Path,
 ) -> Result<BTreeMap<PathBuf, Vec<u8>>, ContractArtifactError> {
-    let contracts_root = repository_root.join("contracts");
+    let catalog = ContractCatalog::load(repository_root)?;
     let mut outputs = BTreeMap::new();
-    let artifact_records = collect_artifact_records(&contracts_root)?;
-    render_registry_outputs(&contracts_root, &mut outputs)?;
-    let (index_bytes, index_digest) = render_index(repository_root, &artifact_records)?;
-    outputs.insert(PathBuf::from(GENERATED_INDEX), index_bytes);
-    outputs.insert(
-        PathBuf::from(GENERATED_RUST),
-        render_rust_index(&artifact_records, &index_digest),
-    );
-    outputs.insert(
-        PathBuf::from(GENERATED_PYTHON),
-        render_python_index(&artifact_records, &index_digest),
-    );
-
-    let python_stub = format!(
-        concat!(
-            "# @generated from {generated_index} {index_digest}; do not edit.\n",
-            "from typing import Final, NamedTuple\n\n",
-            "class GeneratedContractArtifact(NamedTuple):\n",
-            "    path: str\n",
-            "    canonical_digest: str\n\n",
-            "CONTRACT_ARTIFACT_INDEX_DIGEST: Final[str]\n",
-            "CONTRACT_ARTIFACTS: Final[tuple[GeneratedContractArtifact, ...]]\n",
-        ),
-        generated_index = GENERATED_INDEX,
-        index_digest = index_digest
-    );
-    outputs.insert(
-        PathBuf::from(GENERATED_PYTHON_STUB),
-        python_stub.into_bytes(),
-    );
-    let python_init = format!(
-        concat!(
-            "# @generated from {generated_index} {index_digest}; do not edit.\n",
-            "\"\"\"Typed contract-artifact identities generated from AC-G-05 sources.\"\"\"\n\n",
-            "from ._contract_index import (\n",
-            "    CONTRACT_ARTIFACT_INDEX_DIGEST,\n",
-            "    CONTRACT_ARTIFACTS,\n",
-            "    GeneratedContractArtifact,\n",
-            ")\n\n",
-            "__all__ = [\n",
-            "    \"CONTRACT_ARTIFACT_INDEX_DIGEST\",\n",
-            "    \"CONTRACT_ARTIFACTS\",\n",
-            "    \"GeneratedContractArtifact\",\n",
-            "]\n",
-        ),
-        generated_index = GENERATED_INDEX,
-        index_digest = index_digest
-    );
-    outputs.insert(
-        PathBuf::from(GENERATED_PYTHON_INIT),
-        python_init.into_bytes(),
-    );
+    let artifact_records = collect_artifact_records(repository_root, &catalog)?;
+    render_registry_outputs(repository_root, &catalog, &mut outputs)?;
+    let generated_index = required_output(&catalog, GeneratedOutputKind::ArtifactIndex)?;
+    let index_bytes = render_index(repository_root, &generated_index, &artifact_records)?;
+    outputs.insert(generated_index, index_bytes);
     Ok(outputs)
+}
+
+fn required_output(
+    catalog: &CompiledCatalog,
+    output_kind: GeneratedOutputKind,
+) -> Result<PathBuf, ContractArtifactError> {
+    catalog
+        .output_of_kind(output_kind)
+        .map(Path::to_path_buf)
+        .ok_or_else(|| {
+            ContractArtifactError::Missing(PathBuf::from(format!(
+                "catalog output kind {output_kind:?}"
+            )))
+        })
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ContractArtifactError> {
@@ -569,12 +296,102 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ContractArtifactError> 
     Ok(())
 }
 
-/// Generate every committed WP06 derivative using atomic same-directory replacement.
+fn replace_unique_digest(
+    path: &Path,
+    bytes: &[u8],
+    claimed: &str,
+    computed: &str,
+) -> Result<Option<Vec<u8>>, ContractArtifactError> {
+    if claimed == computed {
+        return Ok(None);
+    }
+    let matches = bytes
+        .windows(claimed.len())
+        .enumerate()
+        .filter(|(_, window)| *window == claimed.as_bytes())
+        .map(|(offset, _)| offset)
+        .collect::<Vec<_>>();
+    let [offset] = matches.as_slice() else {
+        return Err(ContractArtifactError::Metadata(path.to_owned()));
+    };
+    let mut updated = bytes.to_vec();
+    updated.splice(
+        *offset..(*offset + claimed.len()),
+        computed.as_bytes().iter().copied(),
+    );
+    Ok(Some(updated))
+}
+
+fn embed_bundle_digests(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<(), ContractArtifactError> {
+    for artifact in catalog.artifacts().filter(|artifact| {
+        artifact.digest_projection == super::catalog::DigestProjection::BundleAcG07V1
+    }) {
+        let path = repository_root.join(&artifact.authority_path);
+        let compiled = compile_artifact_for_generation(repository_root, catalog, artifact)?;
+        let computed = compiled
+            .bundle_digest
+            .expect("the bundle projection always computes a bundle identity");
+        let bytes = read(&path)?;
+        let mut value =
+            decode_strict(&bytes).map_err(|source| ContractArtifactError::Canonical {
+                path: path.clone(),
+                source,
+            })?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?;
+        if object.get("bundle_digest").and_then(Value::as_str) == Some(&computed) {
+            continue;
+        }
+        object.insert("bundle_digest".to_owned(), Value::String(computed));
+        let mut updated = serde_json::to_vec_pretty(&value).map_err(|source| {
+            ContractArtifactError::Canonical {
+                path: path.clone(),
+                source: CanonicalJsonError::Serialization(source),
+            }
+        })?;
+        updated.push(b'\n');
+        write_atomic(&path, &updated)?;
+    }
+    Ok(())
+}
+
+fn embed_semantic_digests(repository_root: &Path) -> Result<(), ContractArtifactError> {
+    let catalog = ContractCatalog::load(repository_root)?;
+    embed_bundle_digests(repository_root, &catalog)?;
+
+    let catalog = ContractCatalog::load(repository_root)?;
+    for artifact in catalog.artifacts() {
+        let compiled = compile_artifact_for_generation(repository_root, &catalog, artifact)?;
+        let Some(claimed) = compiled.embedded_canonical_digest else {
+            continue;
+        };
+        let path = repository_root.join(&artifact.authority_path);
+        let bytes = read(&path)?;
+        if let Some(updated) =
+            replace_unique_digest(&path, &bytes, &claimed, &compiled.canonical_digest)?
+        {
+            write_atomic(&path, &updated)?;
+        }
+    }
+
+    let catalog = ContractCatalog::load(repository_root)?;
+    for artifact in catalog.artifacts() {
+        compile_artifact(repository_root, &catalog, artifact)?;
+    }
+    Ok(())
+}
+
+/// Generate every committed model-derived contract output using atomic replacement.
 ///
 /// # Errors
 ///
 /// Returns an error for missing/invalid sources, canonicalization, or filesystem failure.
 pub fn generate(repository_root: &Path) -> Result<usize, ContractArtifactError> {
+    embed_semantic_digests(repository_root)?;
     let outputs = render_outputs(repository_root)?;
     for (relative, bytes) in &outputs {
         write_atomic(&repository_root.join(relative), bytes)?;
@@ -585,11 +402,6 @@ pub fn generate(repository_root: &Path) -> Result<usize, ContractArtifactError> 
 fn verify_generated(repository_root: &Path) -> Result<(), ContractArtifactError> {
     let outputs = render_outputs(repository_root)?;
     verify_generated_census(repository_root, &outputs, Path::new("contracts/generated"))?;
-    verify_generated_census(
-        repository_root,
-        &outputs,
-        Path::new("codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated"),
-    )?;
     for (relative, expected) in outputs {
         let path = repository_root.join(&relative);
         let actual = read(&path)?;
@@ -667,36 +479,21 @@ fn collect_generated_files(
     Ok(())
 }
 
-fn has_metadata(bytes: &[u8]) -> bool {
-    [
-        b"artifact_id".as_slice(),
-        b"artifact_kind".as_slice(),
-        b"version".as_slice(),
-        b"compatible_suite_major".as_slice(),
-        b"status".as_slice(),
-        b"canonical_digest".as_slice(),
-    ]
-    .iter()
-    .all(|marker| bytes.windows(marker.len()).any(|window| window == *marker))
-}
-
-fn is_draft(bytes: &[u8]) -> bool {
-    [
-        b"status: draft".as_slice(),
-        b"\"status\":\"draft\"".as_slice(),
-        b"\"status\": \"draft\"".as_slice(),
-    ]
-    .iter()
-    .any(|marker| bytes.windows(marker.len()).any(|window| window == *marker))
-}
-
-fn jsonl_records(path: &Path) -> Result<Vec<Value>, ContractArtifactError> {
-    let bytes = read(path)?;
-    bytes
+fn typed_jsonl_records<T: DeserializeOwned>(
+    path: &Path,
+    canonical_bytes: &[u8],
+) -> Result<Vec<T>, ContractArtifactError> {
+    canonical_bytes
         .split(|byte| *byte == b'\n')
         .filter(|line| !line.is_empty())
+        .skip(1)
         .map(|line| {
-            serde_json::from_slice(line).map_err(|error| ContractArtifactError::Traceability {
+            let value =
+                decode_strict(line).map_err(|error| ContractArtifactError::Traceability {
+                    path: path.to_owned(),
+                    message: error.to_string(),
+                })?;
+            serde_json::from_value(value).map_err(|error| ContractArtifactError::Traceability {
                 path: path.to_owned(),
                 message: error.to_string(),
             })
@@ -722,47 +519,44 @@ fn valid_requirement_id(identifier: &str) -> bool {
         && parts.next().is_none()
 }
 
-fn non_empty_string_array(record: &Value, field: &str) -> bool {
-    record[field].as_array().is_some_and(|values| {
-        !values.is_empty()
-            && values
-                .iter()
-                .all(|value| value.as_str().is_some_and(|text| !text.is_empty()))
-    })
+fn non_empty_strings(values: &[String]) -> bool {
+    !values.is_empty() && values.iter().all(|value| !value.is_empty())
 }
 
-fn verify_traceability(contracts_root: &Path) -> Result<(), ContractArtifactError> {
-    let requirements_path = contracts_root.join("manifests/requirements.jsonl");
-    let traceability_path = contracts_root.join("manifests/traceability.jsonl");
+fn verify_traceability(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<(), ContractArtifactError> {
+    let requirements = catalog
+        .artifact("codefabric.manifests.requirements")
+        .expect("the compiled catalog owns the requirements manifest");
+    let traceability = catalog
+        .artifact("codefabric.manifests.traceability")
+        .expect("the compiled catalog owns the traceability manifest");
+    let requirements_path = repository_root.join(&requirements.authority_path);
+    let traceability_path = repository_root.join(&traceability.authority_path);
+    let compiled_requirements = compile_artifact(repository_root, catalog, requirements)?;
+    let compiled_traceability = compile_artifact(repository_root, catalog, traceability)?;
     let mut requirement_ids = BTreeSet::new();
-    for record in jsonl_records(&requirements_path)? {
-        if record["record_kind"] == "metadata" {
-            continue;
-        }
-        let Some(identifier) = record["requirement_id"].as_str() else {
+    for record in typed_jsonl_records::<RequirementRecord>(
+        &requirements_path,
+        &compiled_requirements.canonical_bytes,
+    )? {
+        let identifier = record.requirement_id;
+        if !valid_requirement_id(&identifier) || !requirement_ids.insert(identifier.clone()) {
             return Err(ContractArtifactError::Traceability {
-                path: requirements_path,
-                message: "requirement_id is absent".to_owned(),
-            });
-        };
-        if !valid_requirement_id(identifier) || !requirement_ids.insert(identifier.to_owned()) {
-            return Err(ContractArtifactError::Traceability {
-                path: requirements_path,
+                path: requirements_path.clone(),
                 message: format!("invalid or duplicate requirement ID: {identifier}"),
             });
         }
-        let normative_text = record["normative_text"].as_str().unwrap_or_default();
-        if record["normative_text_digest"].as_str()
-            != Some(checksum(normative_text.as_bytes()).as_str())
-            || !non_empty_string_array(&record, "implements")
-            || !non_empty_string_array(&record, "verified_by")
-            || record["owner_acceptance"]["approver"].as_str().is_none()
-            || record["owner_acceptance"]["source_digest"]
-                .as_str()
-                .is_none()
+        if record.normative_text_digest != checksum(record.normative_text.as_bytes())
+            || !non_empty_strings(&record.implements)
+            || !non_empty_strings(&record.verified_by)
+            || record.owner_acceptance.approver.is_empty()
+            || record.owner_acceptance.source_digest.is_empty()
         {
             return Err(ContractArtifactError::Traceability {
-                path: requirements_path,
+                path: requirements_path.clone(),
                 message: format!(
                     "requirement {identifier} is incomplete or has a stale text digest"
                 ),
@@ -771,29 +565,24 @@ fn verify_traceability(contracts_root: &Path) -> Result<(), ContractArtifactErro
     }
     if requirement_ids.is_empty() {
         return Err(ContractArtifactError::Traceability {
-            path: requirements_path,
+            path: requirements_path.clone(),
             message: "no CF-* requirement records exist".to_owned(),
         });
     }
 
     let mut traced_ids = BTreeSet::new();
-    for record in jsonl_records(&traceability_path)? {
-        if record["record_kind"] == "metadata" {
-            continue;
-        }
-        let Some(identifier) = record["requirement_id"].as_str() else {
-            return Err(ContractArtifactError::Traceability {
-                path: traceability_path,
-                message: "trace requirement_id is absent".to_owned(),
-            });
-        };
-        if !requirement_ids.contains(identifier)
-            || !traced_ids.insert(identifier.to_owned())
-            || !non_empty_string_array(&record, "implements")
-            || !non_empty_string_array(&record, "verified_by")
+    for record in typed_jsonl_records::<TraceabilityRecord>(
+        &traceability_path,
+        &compiled_traceability.canonical_bytes,
+    )? {
+        let identifier = record.requirement_id;
+        if !requirement_ids.contains(&identifier)
+            || !traced_ids.insert(identifier.clone())
+            || !non_empty_strings(&record.implements)
+            || !non_empty_strings(&record.verified_by)
         {
             return Err(ContractArtifactError::Traceability {
-                path: traceability_path,
+                path: traceability_path.clone(),
                 message: format!("trace for {identifier} is unknown, duplicate, or orphaned"),
             });
         }
@@ -823,25 +612,21 @@ pub fn verify(
         return Err(ContractArtifactError::Missing(arrow_delta));
     }
 
-    let mut warning_count = 0;
-    for relative in REQUIRED_SOURCE_ARTIFACTS {
-        let path = contracts_root.join(relative);
-        let bytes = read(&path)?;
-        if !has_metadata(&bytes) {
-            return Err(ContractArtifactError::Metadata(path));
-        }
-        warning_count += usize::from(is_draft(&bytes));
-        canonical_source_bytes(&path, &bytes)?;
+    let catalog = ContractCatalog::load(repository_root)?;
+    let warning_count = catalog.draft_count();
+    for artifact in catalog.artifacts() {
+        compile_artifact(repository_root, &catalog, artifact)?;
     }
-    verify_traceability(&contracts_root)?;
+    verify_traceability(repository_root, &catalog)?;
     verify_generated(repository_root)?;
     verify_jcs_corpus(&contracts_root.join("fixtures/jcs/vectors.json"))?;
+    verify_jcs_differential(&contracts_root.join("fixtures/jcs/differential-cases.json"))?;
 
     if profile == VerificationProfile::Released && warning_count != 0 {
         return Err(ContractArtifactError::ReleasedWarnings(warning_count));
     }
     Ok(VerificationReport {
-        artifact_count: REQUIRED_SOURCE_ARTIFACTS.len(),
+        artifact_count: catalog.artifact_count(),
         warning_count,
     })
 }
@@ -955,6 +740,53 @@ pub fn verify_jcs_corpus(path: &Path) -> Result<(), ContractArtifactError> {
     verify_non_string_map_vector(&corpus, path)
 }
 
+fn verify_jcs_differential(path: &Path) -> Result<(), ContractArtifactError> {
+    let corpus =
+        decode_strict(&read(path)?).map_err(|source| ContractArtifactError::Canonical {
+            path: path.to_owned(),
+            source,
+        })?;
+    let cases = corpus["cases"]
+        .as_array()
+        .ok_or_else(|| fixture_failure(path, "cases must be an array"))?;
+    for case in cases {
+        let identifier = case["id"].as_str().unwrap_or("differential");
+        let inputs = case["inputs"].as_array().ok_or_else(|| {
+            fixture_failure(path, format!("{identifier}: inputs must be an array"))
+        })?;
+        let mut outputs = inputs.iter().map(|input| {
+            let input = input.as_str().ok_or_else(|| {
+                fixture_failure(path, format!("{identifier}: input must be a string"))
+            })?;
+            let output = canonicalize_slice(input.as_bytes())
+                .map_err(|error| fixture_failure(path, format!("{identifier}: {error}")))?;
+            if canonicalize_slice(&output)
+                .map_err(|error| fixture_failure(path, format!("{identifier}: {error}")))?
+                != output
+            {
+                return Err(fixture_failure(
+                    path,
+                    format!("{identifier}: canonicalization is not idempotent"),
+                ));
+            }
+            Ok(output)
+        });
+        let first = outputs
+            .next()
+            .transpose()?
+            .ok_or_else(|| fixture_failure(path, format!("{identifier}: inputs are empty")))?;
+        for output in outputs {
+            if output? != first {
+                return Err(fixture_failure(
+                    path,
+                    format!("{identifier}: equivalent inputs diverged"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn verify_format_vectors(
     corpus: &Value,
     path: &Path,
@@ -1050,45 +882,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn required_layout_has_the_exact_census() {
-        assert_eq!(REQUIRED_SOURCE_ARTIFACTS.len(), 50);
-        assert_eq!(REGISTRY_SOURCES.len(), 13);
-    }
-
-    #[test]
     fn verifier_profiles_parse_strictly() {
         assert_eq!(
             VerificationProfile::parse("full").unwrap(),
             VerificationProfile::Full
         );
         assert!(VerificationProfile::parse("Full").is_err());
-    }
-
-    #[test]
-    fn yaml_projection_resolves_aliases_and_encodes_non_string_maps_as_records() {
-        let path = Path::new("fixture.yaml");
-        let aliased =
-            canonical_source_bytes(path, b"base: &shared [1, 2]\ncopy: *shared\n").unwrap();
-        let inline = canonical_source_bytes(path, b"base: [1, 2]\ncopy: [1, 2]\n").unwrap();
-        assert_eq!(aliased, inline);
-
-        let non_string = canonical_source_bytes(path, b"2: two\n1: one\n").unwrap();
-        assert_eq!(
-            non_string,
-            br#"[{"key":1,"value":"one"},{"key":2,"value":"two"}]"#
-        );
-    }
-
-    #[test]
-    fn yaml_projection_rejects_ambiguous_constructs() {
-        let path = Path::new("fixture.yaml");
-        for source in [
-            b"value: !application data\n".as_slice(),
-            b"defaults: &defaults\n  a: 1\nvalue:\n  <<: *defaults\n".as_slice(),
-            b"outer:\n  same: 1\n  same: 2\n".as_slice(),
-            b"---\na: 1\n---\nb: 2\n".as_slice(),
-        ] {
-            assert!(canonical_source_bytes(path, source).is_err());
-        }
     }
 }

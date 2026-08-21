@@ -69,16 +69,15 @@ Dependencies already landed:
 Read first:
 - <specific files or symbols>
 
-Expected change surface:
-- Must touch: ...
-- Likely touch: ...
-- Preflight query: ...
+Change surface:
+- Preflight query: <commands to run before editing>
+- Known-touch (verified): <optional; only files verified this session>
 
 Required changes and legacy disposition:
 - ...
 
-Acceptance evidence:
-- Behavioral: ...
+Acceptance checks (named, executable):
+- Behavioral: <test / recipe / probe>
 - Structural: ...
 - Negative: ...
 - Operational: ...
@@ -95,8 +94,7 @@ Constraints:
 Return:
 - Files changed/created/deleted.
 - What was implemented.
-- Acceptance evidence.
-- Commands run and outcomes.
+- Acceptance checks run: name + exit status for each.
 - Decommission proof.
 - Deviations, failed approaches, blockers, and remaining risks.
 ```

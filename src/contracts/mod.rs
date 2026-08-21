@@ -2,13 +2,12 @@
 
 #[cfg(feature = "contracts-tooling")]
 pub mod artifacts;
-pub mod jcs;
-
-/// Deterministically generated contract-index types and values.
 #[cfg(feature = "contracts-tooling")]
-pub mod generated {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/generated/contracts.rs"
-    ));
-}
+pub mod catalog;
+#[cfg(feature = "contracts-tooling")]
+pub mod compiler;
+#[cfg(feature = "contracts-tooling")]
+pub mod index;
+pub mod jcs;
+#[cfg(feature = "contracts-tooling")]
+pub mod models;

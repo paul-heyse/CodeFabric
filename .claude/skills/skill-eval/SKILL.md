@@ -13,6 +13,11 @@ user-invocable: true
 Treat skill design as an empirical engineering problem. Compare realistic fresh
 runs, not the apparent quality of the prose.
 
+Read:
+
+- `../_shared/evidence-policy.md`
+- `../_shared/artifact-schemas.md`
+
 ## Output
 
 Write a versioned report:
@@ -26,6 +31,9 @@ Place reusable evaluation cases under:
 ```text
 docs/agent_evals/<suite-or-skill>/cases/
 ```
+
+(The directory is created on first use; it is absent until an evaluation has
+produced cases.)
 
 Do not modify production code merely to make an evaluation pass. Use a fixture,
 temporary branch, or isolated worktree for implementation trials.
@@ -132,21 +140,26 @@ Repeat high-variance cases enough to distinguish a pattern from a single run.
 
 ## Objective checks
 
-Automate where possible:
+Run the checks that already exist before inventing any:
 
-- artifact frontmatter/schema validation;
-- stable and complete IDs;
-- plan/design/state path consistency;
-- dependency-cycle detection;
-- checklist coverage;
-- invented/nonexistent file or symbol references;
+- artifact schema, frontmatter, ID, and path validation per
+  `artifact-schemas.md` §8;
+- declared gates: run the `just` recipes the artifact names, recording
+  recipe name + exit status;
+- plan freshness and packet trust, where a state file was produced: the
+  derivations in `artifact-schemas.md` §8;
+- compilation/tests via the repository's gate recipes.
+
+Bespoke checks with no automation yet (run by hand, scripted per evaluation
+when worth it):
+
+- invented/nonexistent file or symbol references (`rg`/`ast-grep` over the
+  artifact's citations);
+- dependency-cycle detection across packet dependencies;
 - pinned library API probes;
 - missing consumer/implementation sites;
-- missing local/final gates;
 - global claims made on partial evidence;
 - legacy zero-state;
-- compilation/tests;
-- implementation-review findings;
 - diff size and unrelated churn;
 - artifact word/line count.
 

@@ -68,43 +68,42 @@ policy conservatively.
 Read the design and plan once. Confirm:
 
 - accepted/audited status;
-- design path/version/digest;
+- design path/version;
 - baseline commit;
 - stable IDs and dependencies;
 - state path;
 - no unresolved blocker finding in the latest integrated audit.
 
-Compute current plan and design digests.
-
-If state exists, verify its digests. A mismatch makes affected packets `stale`
-until reconciled. Do not silently keep old completion state against a changed
-specification.
+Validate the artifacts and derive input freshness and packet trust per
+`artifact-schemas.md` §8. A stale declared input or an unproven `complete`
+packet marks the affected packets `stale` until reconciled. Do not silently
+keep old completion state against a changed specification.
 
 ### 2. Establish repository state
 
-Record:
-
-- current HEAD and working-tree status;
-- unrelated pre-existing modifications;
-- plan-baseline drift over the declared change surface;
-- relevant toolchain versions and manifests;
-- current CI/build/test commands;
-- baseline failures for required checks.
+Derive working-tree status and plan-baseline drift over the declared scope
+per `artifact-schemas.md` §8; confirm relevant toolchain versions and
+current gate recipes by inspection. Record in state only what is judgment:
+baseline failures for required checks, and any unrelated pre-existing
+modification that overlaps a packet — as that packet's blocker or deviation.
 
 Do not overwrite or revert unrelated user work. If it overlaps a packet, mark
 the overlap and integrate carefully or block that packet.
 
 ### 3. Initialize or reconcile state
 
-Create/reconcile the state file using the shared schema.
+Create/reconcile the state file using the shared schema (version 2). A
+schema-version-1 file is migrated to version 2 on first write
+(`artifact-schemas.md` §3).
 
 Set packet readiness from dependencies. A prior `complete` packet remains
 trusted only when:
 
-- its proving commit is in current history;
+- the §8 derivation shows it proven — its proving commit is in current
+  history;
 - relevant files/contracts have not changed since proof;
-- the plan/design digest is compatible;
-- its checks still apply.
+- the plan's declared inputs are fresh;
+- its named acceptance checks still apply.
 
 Otherwise mark it `stale` and revalidate or re-open it.
 
@@ -114,7 +113,7 @@ Set `next_action` before implementation begins.
 
 For each soon-ready packet, verify load-bearing current facts:
 
-- must-touch symbols/files still exist;
+- the symbols/files the packet names still exist;
 - planned library API/version remains valid;
 - contract consumers and implementations have not materially drifted;
 - legacy targets and match sets still exist as expected;
@@ -137,8 +136,8 @@ A task description should contain:
 - dependencies already proved;
 - design/library references;
 - current verified facts and staleness corrections;
-- must-touch, likely, and preflight discovery;
-- acceptance evidence;
+- preflight discovery queries and any session-verified known-touch files;
+- named acceptance checks;
 - local gates;
 - decommission and negative proof;
 - replan triggers.
@@ -240,8 +239,8 @@ Before completion, run every packet-local obligation:
 - operational or failure proof;
 - package/crate/module checks.
 
-A packet is not complete because files exist. Every declared acceptance
-criterion needs recorded evidence.
+A packet is not complete because files exist. Every named acceptance check
+must be run and green.
 
 If a check fails, diagnose and iterate. Add a failed approach to state when the
 failure teaches a future executor not to repeat a path.
@@ -258,19 +257,21 @@ If zero-state evidence is partial, do not mark decommission complete.
 
 ### Step 8 — Complete and persist
 
-Update state with:
+**A proving commit is mandatory.** Commit the packet's coherent work — the
+commit message carries the implementation summary — and record the commit as
+`proving_commit` before setting `complete`. Without one the packet stays
+`in_progress` with a blocker naming the gap. There is no working-tree-digest
+fallback.
 
-- files changed/created/deleted;
-- concise implementation summary;
-- acceptance evidence;
-- commands and outcomes;
-- decommission proof;
-- deviations and failed approaches;
-- remaining risks;
-- completion time and proving commit when available.
+Update state (schema version 2 — judgment fields only) with:
 
-A commit is not required unless repository/user policy requires one. If there
-is no proving commit, record a working-tree digest or current diff identity.
+- deviations worth a future executor's attention;
+- failed approaches that teach what not to repeat;
+- remaining risks and blockers.
+
+Changed files, check outcomes, acceptance evidence, and decommission proof
+are never stored: they are re-derived from the proving commit and by
+re-running the packet's named checks (`artifact-schemas.md` §8).
 
 Set packet `complete`, release dependent packets to `ready`, and update
 `next_action`.
@@ -292,9 +293,9 @@ constraints belong in the subagent definition.
 
 ### Validation ownership
 
-Subagents must run edit-local and packet-local checks. Their return must include
-commands and outcomes. Do not instruct them to "implement only" or disregard
-their tests.
+Subagents must run edit-local and packet-local checks. Their return must
+include the checks run — name plus exit status for each. Do not instruct
+them to "implement only" or disregard their tests.
 
 After merge, the lead:
 
@@ -320,17 +321,17 @@ Do not defer a high-value milestone until all unrelated packets are complete.
 
 ## Phase 5 — Completeness audit
 
-After all non-invalidated packets and milestones:
+After all non-invalidated packets and milestones, run the §8 validation and
+derivation first — artifact conformance, packet trust, input freshness —
+then judge only what derivation cannot see:
 
-- re-read the plan once;
-- verify every outcome, invariant, packet, milestone, `DB*`, and checklist item;
-- compare actual changed files and deviations to the plan;
-- verify every design `L-*` disposition is satisfied;
-- search for unplanned duplicate authority, compatibility shims, TODOs,
-  placeholder errors, and old patterns;
-- confirm all discovered obligations are closed or explicitly blocked;
-- confirm the implementation still matches the accepted design, not merely the
-  packet text.
+- every outcome and invariant is satisfied per the accepted design, not
+  merely the packet text;
+- every design `L-*` disposition is satisfied;
+- no unplanned duplicate authority, compatibility shims, TODOs, placeholder
+  errors, or old patterns remain (structural search with a stated coverage
+  envelope);
+- all discovered obligations are closed or explicitly blocked.
 
 Fix gaps before final gates when possible.
 
@@ -369,9 +370,10 @@ Set overall state:
 Write a completion summary containing:
 
 - design/plan/state versions and final HEAD;
-- files created/changed/deleted;
+- the derived change summary per `artifact-schemas.md` §8 (proving commits
+  and their diffs — not a hand-built file list);
 - packets/milestones/batches complete;
-- final gate outcomes and baseline residuals;
+- final gate outcomes (recipe name + exit status) and baseline residuals;
 - plan deviations;
 - legacy removed and any explicitly deferred residue;
 - open risks and next action.

@@ -38,6 +38,9 @@ Write:
 docs/reviews/implementation_review_<plan-slug>_<YYYY-MM-DD>_vN.md
 ```
 
+Frontmatter per `artifact-schemas.md` §7 (`artifact: implementation-review`,
+`plan_path`, `verdict`, `version`, `date`, `status`).
+
 Never overwrite an earlier review. Reference prior reviews and identify the
 findings being re-reviewed.
 
@@ -69,12 +72,16 @@ Do not modify code. Findings go to the implementation author for remediation.
 Read the accepted design, plan, state, latest audit/integration log, and
 relevant prior implementation reviews.
 
+Derive packet trust, per-packet changed files, and drift per
+`artifact-schemas.md` §8 before judgment. A `complete` packet with no
+proving commit in history is itself a finding, not a fact to work around.
+
 Determine:
 
 - baseline and final/current refs;
 - actual diff and unrelated changes;
 - completed packets, deviations, failed approaches, and blockers;
-- declared gate evidence and residual baseline failures;
+- residual baseline failures;
 - design decisions, invariants, library decisions, and legacy dispositions.
 
 If the state claims completion but required packets/gates are missing, record a
@@ -102,10 +109,15 @@ cross-language residue, and state the coverage envelope for any negative claim.
 For each design outcome and target invariant:
 
 - identify the code and behavior that implement it;
-- identify the test or oracle that proves it;
+- name the executable oracle that proves it — a test id, `rules/` rule id,
+  `just` recipe, or probe command;
 - verify failure and edge behavior;
 - verify no contradictory path remains;
 - record unexplained deviations.
+
+These rows become the report's Outcome and Invariant Matrix. **A row with no
+executable oracle is itself an `IR-` finding (dimension: tests) — a test
+gap — never a prose attestation that the invariant holds.**
 
 The implementation is defective when the plan's mechanics landed but the
 design outcome did not.
@@ -201,6 +213,8 @@ Ask:
 - Are flaky timing assumptions or weak assertions present?
 - Do structural rules have positive and negative fixtures?
 - Do final gates cover all affected languages and boundaries?
+- Does every design invariant have a named oracle? A missing oracle is a
+  test-gap finding.
 
 Run focused checks to verify disputed behavior. Reuse existing gate evidence
 when it is current and sufficient; do not rerun expensive suites merely for
@@ -246,7 +260,7 @@ tests | security | performance | operations | diff-hygiene
 **Evidence:** <code, command, behavior>
 **Failure mode:** <what goes wrong>
 **Remediation:** <concrete change, not a full patch>
-**Focused re-test:** <how closure is proved>
+**Focused re-test:** <an executable command whose success proves closure>
 ```
 
 Severity:

@@ -1,0 +1,1 @@
+"""CodeFabric adapter test package."""

@@ -3,6 +3,6 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: draft
-canonical_digest: "b3:0000000000000000000000000000000000000000000000000000000000000000"
+canonical_digest: "b3:691169af33119c3b661599820a0c08a93bff661afdaa6ca790bc5032b7579032"
 records: []
 

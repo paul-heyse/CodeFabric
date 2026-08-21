@@ -4,7 +4,2047 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "draft",
-  "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
-  "prose_documents": []
+  "canonical_digest": "b3:ddfee6e85496948bf56297adcda308c0a2d5670f7c84f55c7d25ed49658293e0",
+  "digest_projection": "json-jcs-v1",
+  "catalog_schema_version": 1,
+  "resource_budget_profiles": [
+    {
+      "profile_id": "ebnf-standard",
+      "max_bytes": 262144,
+      "max_depth": 32,
+      "max_nodes": 32768,
+      "max_collection_items": 4096,
+      "max_string_bytes": 16384,
+      "max_records_or_edges": 32768,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    },
+    {
+      "profile_id": "json-bundle",
+      "max_bytes": 262144,
+      "max_depth": 32,
+      "max_nodes": 32768,
+      "max_collection_items": 4096,
+      "max_string_bytes": 16384,
+      "max_records_or_edges": 32768,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    },
+    {
+      "profile_id": "json-catalog",
+      "max_bytes": 262144,
+      "max_depth": 32,
+      "max_nodes": 8192,
+      "max_collection_items": 256,
+      "max_string_bytes": 1024,
+      "max_records_or_edges": 2048,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    },
+    {
+      "profile_id": "json-schema",
+      "max_bytes": 1048576,
+      "max_depth": 64,
+      "max_nodes": 131072,
+      "max_collection_items": 16384,
+      "max_string_bytes": 65536,
+      "max_records_or_edges": 131072,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    },
+    {
+      "profile_id": "jsonl-manifest",
+      "max_bytes": 4194304,
+      "max_depth": 64,
+      "max_nodes": 262144,
+      "max_collection_items": 16384,
+      "max_string_bytes": 1048576,
+      "max_records_or_edges": 16384,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    },
+    {
+      "profile_id": "prose-standard",
+      "max_bytes": 1048576,
+      "max_depth": 1,
+      "max_nodes": 1,
+      "max_collection_items": 1,
+      "max_string_bytes": 1048576,
+      "max_records_or_edges": 1,
+      "max_aliases": 0,
+      "max_diagnostics": 8
+    },
+    {
+      "profile_id": "proto-descriptor-census",
+      "max_bytes": 8388608,
+      "max_depth": 128,
+      "max_nodes": 1000000,
+      "max_collection_items": 250000,
+      "max_string_bytes": 1048576,
+      "max_records_or_edges": 500000,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    },
+    {
+      "profile_id": "proto-standard",
+      "max_bytes": 1048576,
+      "max_depth": 64,
+      "max_nodes": 250000,
+      "max_collection_items": 65536,
+      "max_string_bytes": 1048576,
+      "max_records_or_edges": 250000,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    },
+    {
+      "profile_id": "yaml-standard",
+      "max_bytes": 4194304,
+      "max_depth": 64,
+      "max_nodes": 500000,
+      "max_collection_items": 100000,
+      "max_string_bytes": 1048576,
+      "max_records_or_edges": 100000,
+      "max_aliases": 0,
+      "max_diagnostics": 16
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact_id": "codefabric.adapter.model-ir",
+      "authority_path": "contracts/adapter/adapter-model-ir.json",
+      "artifact_kind": "manifest",
+      "native_format": "json",
+      "owner": "serving",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "adapter",
+      "resource_budget_profile": "json-catalog",
+      "parser_schema_authority": "codefabric-adapter-model-ir-v1",
+      "generated_outputs": [
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/wire_models.py",
+          "output_kind": "python-adapter-models",
+          "producer": "adapter-model-compiler",
+          "consumers": ["contract-tooling", "packaging", "python-adapter"]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-schemas.json",
+          "output_kind": "adapter-schema-manifest",
+          "producer": "adapter-model-compiler",
+          "resource_budget_profile": "json-catalog",
+          "consumers": ["contract-tooling", "governance", "packaging", "python-adapter"]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
+          "output_kind": "adapter-fingerprint-manifest",
+          "producer": "adapter-model-compiler",
+          "resource_budget_profile": "json-catalog",
+          "consumers": ["contract-tooling", "governance", "packaging", "python-adapter"]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "packaging",
+        "python-adapter"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.derivation-bundle",
+      "authority_path": "contracts/bundles/derivation-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.model-pack-bundle",
+      "authority_path": "contracts/bundles/model-pack-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.ontology-bundle",
+      "authority_path": "contracts/bundles/ontology-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.provider-bundle",
+      "authority_path": "contracts/bundles/provider-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.query-language-bundle",
+      "authority_path": "contracts/bundles/query-language-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.schema-bundle",
+      "authority_path": "contracts/bundles/schema-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.tool-contract-bundle",
+      "authority_path": "contracts/bundles/tool-contract-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.bundles.toolchain-bundle",
+      "authority_path": "contracts/bundles/toolchain-bundle.json",
+      "artifact_kind": "bundle-manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "bundle-ac-g-07-v1",
+      "compatibility_family": "bundle",
+      "resource_budget_profile": "json-bundle",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.comparison.comparison-ignore-registry",
+      "authority_path": "contracts/comparison/comparison-ignore-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "conformance",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.deployment.local-workstation-v1",
+      "authority_path": "contracts/deployment/local-workstation-v1.yaml",
+      "artifact_kind": "yaml-contract",
+      "native_format": "yaml",
+      "owner": "lifecycle",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "deployment",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-data-fabric",
+      "authority_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "data-fabric",
+      "version": "1.3",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-fact-generation",
+      "authority_path": "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "fact-generation",
+      "version": "1.3",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-ontology",
+      "authority_path": "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "ontology",
+      "version": "1.3",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-continuous-cpg-lifecycle",
+      "authority_path": "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "lifecycle",
+      "version": "1.3",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-implementation-roadmap",
+      "authority_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "roadmap",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-composable-semantic-cpg-query",
+      "authority_path": "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "semantic-query",
+      "version": "1.3",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-fastmcp-serving",
+      "authority_path": "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "serving",
+      "version": "1.3",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-suite-manifest",
+      "authority_path": "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+      "artifact_kind": "normative-document",
+      "native_format": "markdown",
+      "owner": "suite",
+      "version": "1.3",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "prose-utf8-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "prose-standard",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "owner-acceptance",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.faults.fault-point-registry",
+      "authority_path": "contracts/faults/fault-point-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "lifecycle",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "conformance",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.identity.cbef-v1",
+      "authority_path": "contracts/identity/cbef-v1.yaml",
+      "artifact_kind": "yaml-contract",
+      "native_format": "yaml",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "identity",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.identity.path-canonicalization-v1",
+      "authority_path": "contracts/identity/path-canonicalization-v1.yaml",
+      "artifact_kind": "yaml-contract",
+      "native_format": "yaml",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "identity",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.identity.type-algebra-v1",
+      "authority_path": "contracts/identity/type-algebra-v1.yaml",
+      "artifact_kind": "yaml-contract",
+      "native_format": "yaml",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "identity",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.manifests.deployment-profile.schema",
+      "authority_path": "contracts/manifests/deployment-profile.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.manifests.requirements",
+      "authority_path": "contracts/manifests/requirements.jsonl",
+      "artifact_kind": "json-lines",
+      "native_format": "jsonl",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "jsonl-jcs-v1",
+      "compatibility_family": "traceability",
+      "resource_budget_profile": "jsonl-manifest",
+      "parser_schema_authority": "codefabric.typed-jsonl-v1",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.manifests.fixture-oracles",
+      "authority_path": "contracts/manifests/fixture-oracles.json",
+      "artifact_kind": "manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "conformance",
+      "resource_budget_profile": "json-catalog",
+      "parser_schema_authority": null,
+      "generated_outputs": [],
+      "consumers": ["contract-tooling", "governance"],
+      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "depends_on": ["codefabric.manifests.suite-manifest"]
+    },
+    {
+      "artifact_id": "codefabric.manifests.suite-manifest",
+      "authority_path": "contracts/manifests/suite-manifest.json",
+      "artifact_kind": "manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "suite",
+      "resource_budget_profile": "json-catalog",
+      "parser_schema_authority": null,
+      "generated_outputs": [
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json",
+          "output_kind": "artifact-index",
+          "resource_budget_profile": "json-catalog",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        },
+        {
+          "path": "tooling/proto/wave0-probe-descriptor.pb",
+          "output_kind": "proto-descriptor-set",
+          "producer": "proto-compiler",
+          "consumers": [
+            "contract-tooling",
+            "python-adapter",
+            "rust-core"
+          ]
+        },
+        {
+          "path": "tooling/proto/descriptor-census.json",
+          "output_kind": "proto-descriptor-census",
+          "producer": "proto-compiler",
+          "resource_budget_profile": "proto-descriptor-census",
+          "consumers": [
+            "contract-tooling",
+            "governance"
+          ]
+        },
+        {
+          "path": "tooling/proto/toolchain-identity.json",
+          "output_kind": "proto-toolchain-identity",
+          "producer": "proto-compiler",
+          "consumers": [
+            "governance"
+          ]
+        },
+        {
+          "path": "src/generated/codefabric.wave0.v1.rs",
+          "output_kind": "rust-proto-bindings",
+          "producer": "proto-compiler",
+          "consumers": [
+            "rust-core"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2.py",
+          "output_kind": "python-proto-bindings",
+          "producer": "proto-compiler",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2.pyi",
+          "output_kind": "python-proto-stub",
+          "producer": "proto-compiler",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2_grpc.py",
+          "output_kind": "python-grpc-bindings",
+          "producer": "proto-compiler",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": []
+    },
+    {
+      "artifact_id": "codefabric.manifests.traceability",
+      "authority_path": "contracts/manifests/traceability.jsonl",
+      "artifact_kind": "json-lines",
+      "native_format": "jsonl",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "jsonl-jcs-v1",
+      "compatibility_family": "traceability",
+      "resource_budget_profile": "jsonl-manifest",
+      "parser_schema_authority": "codefabric.typed-jsonl-v1",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.query.english-controlled-v1",
+      "authority_path": "contracts/query/english-controlled-v1.ebnf",
+      "artifact_kind": "ebnf-grammar",
+      "native_format": "ebnf",
+      "owner": "semantic-query",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "ebnf-source-v1",
+      "compatibility_family": "query",
+      "resource_budget_profile": "ebnf-standard",
+      "parser_schema_authority": "codefabric.ebnf-source-v1",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.query.planspec.schema",
+      "authority_path": "contracts/query/planspec.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "semantic-query",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "query",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.capability-registry",
+      "authority_path": "contracts/registry/capability-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/capability-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.derivation-registry",
+      "authority_path": "contracts/registry/derivation-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/derivation-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.enum-registry",
+      "authority_path": "contracts/registry/enum-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/enum-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.error-registry",
+      "authority_path": "contracts/registry/error-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/error-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.flag-registry",
+      "authority_path": "contracts/registry/flag-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/flag-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.model-pack.schema",
+      "authority_path": "contracts/registry/model-pack.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "model-pack",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-entity-registry",
+      "authority_path": "contracts/registry/ontology-entity-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/ontology-entity-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-property-registry",
+      "authority_path": "contracts/registry/ontology-property-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/ontology-property-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-relation-registry",
+      "authority_path": "contracts/registry/ontology-relation-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/ontology-relation-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.phrase-registry",
+      "authority_path": "contracts/registry/phrase-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "semantic-query",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/phrase-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.projection-registry",
+      "authority_path": "contracts/registry/projection-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/projection-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.provider-registry",
+      "authority_path": "contracts/registry/provider-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/provider-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.summary-registry",
+      "authority_path": "contracts/registry/summary-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/summary-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.registry.unknown-registry",
+      "authority_path": "contracts/registry/unknown-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "ontology",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [
+        {
+          "path": "contracts/generated/registry/unknown-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "packaging",
+            "python-adapter",
+            "rust-core"
+          ]
+        }
+      ],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.rpc.cpg-query-service",
+      "authority_path": "contracts/rpc/cpg_query_service.proto",
+      "artifact_kind": "protobuf-schema",
+      "native_format": "proto",
+      "owner": "semantic-query",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "proto-descriptor-v1",
+      "compatibility_family": "rpc",
+      "resource_budget_profile": "proto-standard",
+      "parser_schema_authority": "protobuf-file-descriptor-set",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.rpc.feature-registry",
+      "authority_path": "contracts/rpc/feature-registry.yaml",
+      "artifact_kind": "yaml-contract",
+      "native_format": "yaml",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "rpc",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.rpc.provider-control",
+      "authority_path": "contracts/rpc/provider_control.proto",
+      "artifact_kind": "protobuf-schema",
+      "native_format": "proto",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "proto-descriptor-v1",
+      "compatibility_family": "rpc",
+      "resource_budget_profile": "proto-standard",
+      "parser_schema_authority": "protobuf-file-descriptor-set",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.rpc.pyrefly-sidecar",
+      "authority_path": "contracts/rpc/pyrefly_sidecar.proto",
+      "artifact_kind": "protobuf-schema",
+      "native_format": "proto",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "proto-descriptor-v1",
+      "compatibility_family": "rpc",
+      "resource_budget_profile": "proto-standard",
+      "parser_schema_authority": "protobuf-file-descriptor-set",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "pyrefly-sidecar",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.rpc.rustc-extractor",
+      "authority_path": "contracts/rpc/rustc_extractor.proto",
+      "artifact_kind": "protobuf-schema",
+      "native_format": "proto",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "proto-descriptor-v1",
+      "compatibility_family": "rpc",
+      "resource_budget_profile": "proto-standard",
+      "parser_schema_authority": "protobuf-file-descriptor-set",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core",
+        "rustc-extractor"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.schema.analysis-context.schema",
+      "authority_path": "contracts/schema/analysis-context.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
+      "authority_path": "contracts/schema/cpg-semantic-query-request.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "semantic-query",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
+      "authority_path": "contracts/schema/cpg-semantic-query-response.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "semantic-query",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
+      "authority_path": "contracts/schema/public-snapshot-metadata.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "lifecycle",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.schema.public-status.schema",
+      "authority_path": "contracts/schema/public-status.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "serving",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.schema.serving-snapshot.schema",
+      "authority_path": "contracts/schema/serving-snapshot.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "lifecycle",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.schema.source-context.schema",
+      "authority_path": "contracts/schema/source-context.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "ontology",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.security.security-corpus-manifest",
+      "authority_path": "contracts/security/security-corpus-manifest.yaml",
+      "artifact_kind": "yaml-contract",
+      "native_format": "yaml",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "draft",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "conformance",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    },
+    {
+      "artifact_id": "codefabric.tooling.wave0-probe",
+      "authority_path": "tooling/proto/source/codefabric_cpg_mcp/daemon/generated/wave0_probe.proto",
+      "artifact_kind": "protobuf-schema",
+      "native_format": "proto",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "proto-descriptor-v1",
+      "compatibility_family": "toolchain",
+      "resource_budget_profile": "proto-standard",
+      "parser_schema_authority": "tooling/proto/wave0-probe-descriptor.pb",
+      "generated_outputs": [],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "depends_on": [
+        "codefabric.manifests.suite-manifest"
+      ]
+    }
+  ]
 }
-

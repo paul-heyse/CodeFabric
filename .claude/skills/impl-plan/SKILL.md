@@ -70,7 +70,10 @@ Read the design dossier end-to-end and extract:
 - risks, assumptions, and design-level replan triggers.
 
 Verify that the dossier is accepted. Do not plan around unresolved blockers.
-Record the plan baseline commit and design digest.
+Record the baseline commit and the declared-inputs table — one `path |
+sha256` row per document the plan depends on (`shasum -a 256`), computed
+once now and thereafter recomputed only by tooling per
+`artifact-schemas.md` §8.
 
 If current repository drift may invalidate the design, perform a bounded
 staleness probe before planning and record the result.
@@ -89,13 +92,13 @@ targets. Identify:
 - old paths that must reach zero.
 
 Do not pretend every downstream file is certain before implementation exists.
-Classify the change surface:
+The plan carries the question, not a frozen answer:
 
-- **Must touch — verified:** follows directly from current evidence.
-- **Likely touch — impact candidates:** expected consumers or tests that may
-  need changes.
-- **Discover at packet preflight:** exact current-tree query or rule the
-  executor must run before editing.
+- **Preflight query:** the exact current-tree commands or rules the executor
+  runs before editing to discover the change surface.
+- **Known touch (verified this session):** optionally, the files whose
+  involvement follows directly from evidence gathered in this planning
+  session.
 
 Global and negative claims require complete evidence coverage.
 
@@ -120,12 +123,11 @@ Each packet must contain:
 ### Target Invariants
 ### Design and Library References
 ### Change Surface
-#### Must Touch — Verified
-#### Likely Touch — Impact Candidates
-#### Discover at Packet Preflight
+#### Preflight Query
+#### Known Touch (verified this session)
 ### Required Changes
 ### Legacy Disposition and Decommission
-### Acceptance Evidence
+### Acceptance Checks
 #### Behavioral
 #### Structural
 #### Negative / Zero-State
@@ -139,6 +141,12 @@ Each packet must contain:
 ```
 
 A packet outcome must be observable. "Implement the new module" is not enough.
+
+Every acceptance-check item is a named executable check — a test name, a
+`rules/` rule id, a `just` recipe, or a probe command. A packet is
+**complete** when these checks pass at its proving commit and at HEAD
+(`artifact-schemas.md` §2); prose that cannot be run is not an acceptance
+check.
 
 ### Phase 4 — Carry legacy decisions into execution
 
@@ -168,11 +176,13 @@ List the packets, required evidence, and milestone gates.
 
 ### Phase 6 — Build the layered gate matrix
 
-Discover actual commands from manifests, CI, and project instructions.
+Discover gates from `just --list`; the justfile is the gate registry. When a
+needed gate has no recipe, the plan proposes adding one rather than
+embedding raw flags.
 
 For each packet and milestone, select the smallest relevant checks from
-`../_shared/validation-policy.md`. Then define the final matrix across all
-affected toolchains.
+`../_shared/validation-policy.md`. Then define the final matrix — a list of
+`just` recipes — across all affected toolchains.
 
 Record baseline failures rather than assuming a clean repository. Do not make
 a Python-only final gate for mixed Python/Rust scope.
@@ -213,12 +223,16 @@ The lead synthesizes. Do not paste raw subagent output into the plan.
 
 Write the plan using the shared schema. Include:
 
-- design path/version/digest and baseline;
+- design path/version, baseline, and the declared-inputs table;
 - immutable work-packet specification;
-- state-file path;
-- final completion checklist with packets, milestones, and decommission
+- state-file path (state contract: schema version 2);
+- execution sequence covering all packets, milestones, and decommission
   batches;
 - explicit plan risks and replan policy.
+
+Forbidden in the body: digest tables beyond the declared-inputs table,
+hand-built traceability matrices, and restamp procedures
+(`artifact-schemas.md` §2).
 
 Do not create or update execution state unless the user also asks to begin
 execution.
@@ -230,7 +244,8 @@ execution.
 - Every material legacy surface has an execution disposition.
 - Every cutover has an exit invariant and negative proof.
 - Every packet is coherent enough for local validation.
-- Exact file predictions are tiered by confidence.
+- File predictions are limited to session-verified known-touch entries;
+  everything else is a preflight query.
 - Exemplars are conditional and design-bearing.
 - The sequence is a dependency graph, not a prose wish list.
 - The final gate matrix covers all affected languages and integration

@@ -245,7 +245,12 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 
 2. **Contract compiler and verifier**
    - implement the repository-owned `codefabric-contracts` generator/verifier;
-   - canonicalize and fingerprint artifacts;
+   - load only the closed typed catalog in `contracts/manifests/suite-manifest.json`,
+     compile native sources through staged typed ingress and cross-record validation,
+     and derive every source/output census, consumer edge, and provenance obligation;
+   - canonicalize semantic projections and separately fingerprint exact source bytes;
+   - enforce catalog-selected byte, nesting, collection, token/alias, graph, and
+     diagnostic budgets before and after parse as appropriate;
    - expose a stable repository command equivalent to `codefabric-contracts verify --profile full`.
 
 3. **Ontology and categorical registries**
@@ -266,7 +271,10 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 6. **Protocol generation**
    - daemon query service, provider control, Pyrefly sidecar, and rustc extractor Protobuf packages;
    - negotiated feature registry;
-   - compiled Rust and Python stubs.
+   - one exact Python compiler invocation producing Python stubs and a committed
+     `FileDescriptorSet`, followed by Rust generation from that same descriptor IR;
+   - descriptor-model assertions that distinguish semantic descriptors from generated
+     language source and never treat deterministic Protobuf serialization as canonical bytes.
 
 7. **Bundle and deployment manifests**
    - ontology, schema, provider, derivation, query-language, tool-contract, toolchain, and model-pack bundles;
@@ -274,6 +282,21 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 
 8. **Requirement traceability**
    - stable requirement IDs and end-to-end trace records from ontology through storage, query, serving, and tests.
+
+9. **Generated-data and conformance discipline**
+   - emit language-neutral index and schema data once as canonical resources, while
+     reserving generated Rust/Python source for statically useful types and behavior;
+   - keep owner-reviewed known-answer vectors independent from generator-derived,
+     property, differential, and fuzz corpora; generation may stage candidates but
+     SHALL NOT approve or overwrite normative expected values.
+
+10. **Proof-preserving command feedback**
+   - keep independent intent recipes and the complete milestone gate;
+   - change aggregate command edges only after controlled warm and fresh-target
+     Hyperfine measurements demonstrate material benefit;
+   - compare a machine-readable proof manifest before and after, preserving exact
+     toolchains, targets, features, tests, fixtures, and negative cases;
+   - never use `cargo clean` or shared-cache deletion as routine benchmark setup.
 
 ### Exit evidence
 
@@ -284,6 +307,8 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 - Protobuf packages compile and round-trip in both languages.
 - No mandatory requirement, ontology kind, storage field, query phrase, or public field is orphaned in traceability.
 - Re-running generation from unchanged sources produces byte-identical canonical artifacts.
+- Catalog reordering does not change compiled output bytes, and every accepted input
+  remains within its declared resource budget.
 
 ### Explicitly deferred
 
@@ -1214,6 +1239,12 @@ Expose the complete daemon query capability through the specified accepted-handl
    - handshake, status, validate, start, stream/attach, cancel, read result, and release result;
    - negotiated versions, feature bits, compression, bundles, and limits.
 
+   The generated Python client substrate from Wave 1 becomes a production
+   event-loop-owned `grpc.aio` `DaemonClient` here. One channel and stub live for the
+   adapter lifespan, deadlines are mandatory, metadata/status translation is
+   centralized, and shutdown explicitly closes the channel. Wave 1 does not claim this
+   runtime behavior.
+
 2. **Accepted-handle query state machine**
    - daemon query ID returned before freshness waiting/execution;
    - progress phases, terminal states, acknowledgement, idempotency, and reconnect.
@@ -1280,6 +1311,11 @@ Deliver the final model-facing local STDIO surface while preserving the daemon a
    - long-lived authenticated daemon client;
    - STDIO-safe startup/shutdown;
    - readiness and safe STDERR diagnostics.
+
+   The four production handlers, their real published FastMCP tool manifests, and the
+   equality check between published manifest schemas and generated Pydantic
+   serialization schemas are owned by this wave. Wave 1 supplies only the model,
+   schema, and fingerprint compiler substrate.
 
 3. **Four public tools**
    - `query_code_graph`;

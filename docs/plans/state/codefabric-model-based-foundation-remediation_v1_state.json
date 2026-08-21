@@ -1,0 +1,509 @@
+{
+  "schema_version": 1,
+  "plan_path": "docs/plans/codefabric_model_based_foundation_remediation_implementation_plan_v1_2026-08-20.md",
+  "plan_version": "v1",
+  "plan_digest": "94ef42472e513676f4818908414bd4b4c7d38dac506ccbf6150dda3e968f0adf",
+  "design_path": "docs/reviews/implementation_review_codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20_2026-08-20_v1.md",
+  "design_version": "v1",
+  "design_digest": "f48caf54239752324a979eb26a9c435888d6cf3b1974d32b762da5e783eede72",
+  "baseline_commit": "a689f1ddf712c0f8fe5cf93d9a50a559f84e4b91",
+  "accepted_execution_baseline_commit": "790cc8c45abfb69ec07ca116d1abba6cd35228a6",
+  "accepted_execution_tree_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "current_head": "790cc8c45abfb69ec07ca116d1abba6cd35228a6",
+  "status": "executing",
+  "current_packet": "WP09",
+  "acceptance": {
+    "plan_frontmatter_status": "draft",
+    "accepted_by": "user",
+    "accepted_at": "2026-08-20T21:53:20Z",
+    "evidence": "The user stated that the working-tree implementation was committed and explicitly requested implementation of the entirety of this plan."
+  },
+  "design_inputs": {
+    "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md": "b0054314f9c5e4360476b053f98bdaa43857e2611e23d4fd026c6c5e4c0b6985",
+    "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md": "749a032a21875589ea5e15eb850cb4008269856d6a3aeba9df3ef1ef6ee216fd",
+    "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md": "8ee8ec7dbc06b1a8ac1b03d882abe33fef5d3dbe70e35446e56dbfd399f25524",
+    "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md": "b0754f97a36e19bf9e5224bc861891dbc5915fc27ae8b3b3c2e13361fa066e0f",
+    "docs/designs/codefabric_build_cache_and_feature_isolation_design_v1_2026-08-20.md": "460e2f36a8a61a9972c976adbd20e1a86b82a26cd7bd38840cb1565948475e8f",
+    "docs/plans/codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20.md": "598b4971574c245cfd4f3f560ad52e2838eef884d21ea4c77c9233c70ad3d3db",
+    "docs/plans/state/codefabric-waves-0-3-foundation_v4_state.json": "621bb157dfdae47876ae926c82909ab4e099cf102480e28ea6fb5906eaac2343"
+  },
+  "design_correction_outputs": {
+    "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md": "a90cea42b5f13092000e06326513f40f8365a2e1b44eec091aca47a413ce51f8",
+    "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md": "087408e86b6dfde7ebb66624cafa58793f26860288861addbf9a0124f7647a78",
+    "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md": "26fe78128357aebbca8d25b60bd5e533fd6dc9fbdb26d65a9d34387215b130e0",
+    "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md": "6512e715c118fd7c72dbdc2d4ccce6828fafb6526f7e6db540f5ab587eb33847",
+    "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md": "a8ba008a94c72c55b48b91fd8967eafe6f46419f0fe5f65d1bcb3a874d79adab",
+    "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md": "ba3b33acaab3c4df9d6a47ec0b748ff57ac227bcf3ca0a8a0061d493539597ac",
+    "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md": "3ce756c018196ca677ab2ad4284b008e5da1b097b79c9e8f7006693ec53b4b4e",
+    "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md": "bf622f58354c7a11d5d9427663a9da6bd5d5e77fe1f3ca4e3fe249eb8f0ff151",
+    "docs/spec_index/README.md": "81f0f23627da6cd85a42acaee8cf43a196275fd6f1f9683f8689ba35735abd7c",
+    "docs/spec_index/library-routing.md": "e8797c873d0430bfc2ec57b33477153afa163a0166de1b74c8a86d990c9d7f38",
+    "docs/spec_index/wave-traceability.md": "fb3b6c5da4b531e2a84cb2c14e911edaf99052a270d287ded7d64b7626c1e194",
+    "docs/spec_index/invariants-and-doctrine.md": "4e92d19f633a09c5c984ac53b08dff9fed14c3cb0a09cca8fd177abf9efc68eb",
+    "v4_interlocked_state": "7350dc713c3fcb7629789d549f61ab992e5fbd522dd032405be253a1fad9fbfe",
+    "packet_diff_sha256_excluding_this_state": "619f14f292061494b84fe98bbb06b23b5e0bc6ce3880ea1d219609064b5eaab7"
+  },
+  "baseline_failures": [],
+  "baseline_checks": [
+    {
+      "level": "baseline",
+      "command": "just ci-fast",
+      "status": "passed",
+      "started_at": "2026-08-20T21:52:55Z",
+      "finished_at": "2026-08-20T21:53:20Z",
+      "summary": "All four build domains and governance passed: 21 root tests plus doctests, 3 extractor tests, 2 sidecar tests, 46 adapter tests plus the repeated 2-test STDIO subset, proto generation, full draft contract verification, negative fixtures, and two-root contract generation.",
+      "residual_warnings": [
+        "proc-macro-error2 2.0.1 future-incompatibility warning",
+        "macOS compact-unwind linker warning for the integration test"
+      ]
+    }
+  ],
+  "pre_existing_modifications": [],
+  "packets": {
+    "WP01": {
+      "title": "Correct normative authority and interlock v4 execution",
+      "status": "complete",
+      "dependencies": [],
+      "started_at": "2026-08-20T21:53:20Z",
+      "completed_at": "2026-08-20T22:15:57Z",
+      "proving_commit": null,
+      "changed_files": [
+        "docs/plans/state/codefabric-model-based-foundation-remediation_v1_state.json",
+        "docs/plans/state/codefabric-waves-0-3-foundation_v4_state.json",
+        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+        "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md",
+        "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md",
+        "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
+        "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
+        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+        "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
+        "docs/spec_index/README.md",
+        "docs/spec_index/library-routing.md",
+        "docs/spec_index/wave-traceability.md",
+        "docs/spec_index/invariants-and-doctrine.md"
+      ],
+      "acceptance_evidence": [
+        "SUITE AC-G-02 now defines profile-total dual identities, exact worked vectors, root-only identity omission, and distinct bundle identity.",
+        "SUITE AC-G-05 and roadmap Wave 1 now define one self-describing typed suite catalog, stable graph sorting, bounded staged compilation, one descriptor IR, independent KATs, and proof-preserving aggregate commands.",
+        "Serving removes orjson ownership, exact-pins protocol intent, derives Pydantic views from Contract IR, freezes four schema families and the nine-key FastMCP fingerprint profile, and preserves Wave 17/18 runtime ownership.",
+        "V4 WP07 is durably interlocked on this plan M04 while all completed v4 packet evidence is unchanged.",
+        "Independent reviewer found no remaining blocker or major issue and recommended M01 PASS."
+      ],
+      "checks": [
+        {"command": "just spec-outline <owning design> --match <changed section>", "status": "passed", "summary": "AC-G-01/02/05/07, roadmap 6/22/23, and Serving 18/58/60/70 remain structurally addressable."},
+        {"command": "typos <changed design and derived-index files>", "status": "passed"},
+        {"command": "git diff --check", "status": "passed"},
+        {"command": "jq empty <both execution state files>", "status": "passed"},
+        {"command": "design consistency zero-state rg", "status": "passed", "summary": "No OPT_SORT_KEYS canonical claim, three-family/four-item mismatch, undefined generated master manifest, stale external manifest path, or stale Tonic guidance remains."},
+        {"command": "independent WP01 projection review", "status": "passed", "summary": "All six profile vectors plus catalog reorder digest independently matched; no blocker or major finding remained."}
+      ],
+      "deviations": [
+        {
+          "id": "AD-01",
+          "kind": "bounded_design-clarification",
+          "summary": "WP01 clarified D-01 without changing packet scope or dependencies: machine projections omit only the governed artifact's own root/header canonical_digest and source_digest, retain nested/member/evidence digests, and normative prose uses prose-utf8-v1 because it has no executable semantic parser in suite 1.x.",
+          "authority": "SUITE AC-G-02 as corrected during the plan's design-authority packet",
+          "disposition": "accepted_current_truth"
+        }
+      ],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP02": {
+      "title": "Compile the suite catalog into a typed derivation graph",
+      "status": "complete",
+      "dependencies": ["WP01"],
+      "started_at": "2026-08-20T22:15:57Z",
+      "completed_at": "2026-08-20T22:36:46Z",
+      "proving_commit": null,
+      "changed_files": [
+        "contracts/manifests/suite-manifest.json",
+        "src/contracts/catalog.rs",
+        "src/contracts/artifacts.rs",
+        "src/contracts/mod.rs",
+        "scripts/contracts_repro_check.sh",
+        "contracts/generated/artifact-index.json",
+        "contracts/generated/registry/*.json",
+        "src/generated/contracts.rs",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/*.py*",
+        "tests/integration/contracts.rs",
+        "codefabric-cpg-mcp/tests/test_contract_json.py"
+      ],
+      "acceptance_evidence": [
+        "The sole production bootstrap path now compiles 59 governed source descriptors, including all eight normative prose authorities and the Wave 0 probe schema, into deterministic ID/path/output/budget/dependency/consumer views.",
+        "All 21 generated outputs (14 contract-compiler and seven Proto-compiler outputs), all 13 registry transformations, release warnings, source census, package-data edges, provenance obligations, and compatibility consumers derive from typed catalog records.",
+        "The compiler no longer contains REQUIRED_SOURCE_ARTIFACTS, REGISTRY_SOURCES, generated-output path constants, byte-substring metadata/status discovery, or literal 50/13 assertions.",
+        "Synthetic graph tests prove additive derivation; negative graph tests reject duplicate IDs/paths/outputs, cycles, unknown kinds/profiles/dependencies, missing authorities, unsafe paths, and conflicting representations.",
+        "Two unchanged isolated roots regenerate byte-identically; a third reordered catalog root preserves semantic registry outputs and changes only the catalog source identity recorded in the index."
+      ],
+      "checks": [
+        {"command": "cargo fmt --all -- --check", "status": "passed"},
+        {"command": "cargo check --locked --no-default-features --features contracts-tooling --bin codefabric-contracts", "status": "passed"},
+        {"command": "cargo clippy --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- -D warnings", "status": "passed"},
+        {"command": "cargo nextest run --locked --no-default-features --features contracts-tooling -E 'test(contracts)'", "status": "passed", "summary": "19 targeted unit/integration tests passed."},
+        {"command": "just contracts-verify", "status": "passed", "summary": "58 sources verified, 50 draft warnings, and committed negative checksum fixtures failed as expected."},
+        {"command": "just contracts-repro-check", "status": "passed", "summary": "18 outputs were byte-identical across isolated roots after reversing catalog record order."},
+        {"command": "uv run --project codefabric-cpg-mcp --frozen pytest codefabric-cpg-mcp/tests/test_contract_json.py -q", "status": "passed", "summary": "25 adapter compatibility-index/JCS tests passed."},
+        {"command": "hyperfine --warmup 3 --runs 10 'target/debug/codefabric-contracts verify --profile full'", "status": "passed", "summary": "Representative warm compiler/verification upper bound: mean 48.8 ms, standard deviation 2.5 ms, range 46.2-53.8 ms; peak RSS sample 5,980,160 bytes."},
+        {"command": "catalog authority-size census", "status": "passed", "summary": "Catalog input is 59,658 bytes; largest current governed source is 209,281 bytes."},
+        {"command": "git diff --check and catalog-authority zero-state rg", "status": "passed"}
+      ],
+      "deviations": [],
+      "failed_approaches": [
+        "The first mutation attempt used a nonexistent contracts-generate recipe; just --list identified the confirm-gated contracts-gen command.",
+        "The first typed decode exposed serde rename_all spellings that omitted the required hyphen in AC-G-53/AC-G-07; explicit wire renames now match the normative profile IDs.",
+        "The preexisting two-root script copied only contracts/, so catalog-governed prose authorities were absent; it now copies both authorities and compares outputs solely through catalog edges."
+      ],
+      "blockers": []
+    },
+    "WP03": {
+      "title": "Implement bounded typed ingress and digest profiles",
+      "status": "complete",
+      "dependencies": ["WP02", "WP05"],
+      "started_at": "2026-08-20T22:40:35Z",
+      "completed_at": "2026-08-20T23:24:00Z",
+      "proving_commit": null,
+      "changed_files": ["Cargo.toml", "Cargo.lock", "src/contracts/compiler.rs", "src/contracts/models.rs", "src/contracts/jcs.rs", "contracts/bundles/*.json", "tooling/contracts/json_schema_check.py", "tooling/contracts/test_json_schema_check.py", "contracts/fixtures/projections/vectors.json", "fuzz/Cargo.toml", "fuzz/Cargo.lock", "fuzz/fuzz_targets/contract_ingress.rs", "fuzz/corpus/contract_ingress/*", "codefabric-cpg-mcp/pyproject.toml", "codefabric-cpg-mcp/uv.lock", "codefabric-cpg-mcp/tests/test_contract_json.py", "tests/integration/contracts.rs", "scripts/stable_graph_check.sh", "justfile"],
+      "acceptance_evidence": [
+        "Every catalog source crosses a size-sentinel read and a native typed adapter with named budgets for bytes, depth, nodes, collection/token size, records/edges, aliases, and diagnostics.",
+        "Strict JSON/JCS, bounded YAML subset decoding, typed JSONL, descriptor-selected Proto IR, parsed EBNF, exact prose, and dual bundle profiles share one compiler and nine cross-language projection vectors.",
+        "JSON Schema authorities are selected from the catalog and checked hermetically against Draft 2020-12 through jsonschema 4.26.0.",
+        "A shared contract-ingress fuzz target dispatches across all six machine/prose parser families with committed seed corpora.",
+        "Independent WP09 review found and then verified closure of the last IR-003 gap: all eight AC-G-07 bundles now decode into closed root/member/compatibility/generator models, both identities derive from the sorted typed value, and shared serde_path_to_error decoding reports exact nested data paths without handwritten field walkers."
+      ],
+      "checks": [
+        {"command": "cargo nextest run --locked --no-default-features --features contracts-tooling -E 'test(contracts)'", "status": "passed", "summary": "Compiler, projection, resource-boundary, and catalog-focused tests passed."},
+        {"command": "just schema-check", "status": "passed", "summary": "Nine schema-tooling tests and 13 catalog-selected schema authorities passed."},
+        {"command": "adapter JCS/projection corpus", "status": "passed", "summary": "34 Python cross-language canonicalization and projection tests passed."},
+        {"command": "just fuzz contract_ingress 5", "status": "passed", "summary": "213,444 bounded fuzz executions completed without a crash."},
+        {"command": "cargo check --locked --manifest-path fuzz/Cargo.toml --bins", "status": "passed"},
+        {"command": "bundle-focused contracts-tooling Nextest", "status": "passed", "summary": "Four typed-model, dual-projection, digest-mutation, and full-verifier path-aware bundle tests passed."},
+        {"command": "just contracts-verify && just contracts-repro-check", "status": "passed", "summary": "Fifty-eight sources, 49 expected draft warnings, negative fixtures, and exact isolated regeneration passed after typed bundle migration."},
+        {"command": "just fuzz contract_ingress 5", "status": "passed", "summary": "154,526 bounded executions completed without a crash after the typed-path dependency update."}
+      ],
+      "deviations": ["AD-02", "AD-03", "AD-06"],
+      "failed_approaches": ["serde_yaml_ng exposes no configurable pre-expansion alias cap, so the accepted subset rejects anchors and aliases before materialization.", "The initial split-on-semicolon EBNF check was insufficient; it was replaced by a bounded tokenizer and recursive dialect parser."],
+      "blockers": []
+    },
+    "WP04": {
+      "title": "Migrate all artifacts and consolidate the artifact index",
+      "status": "complete",
+      "dependencies": ["WP02", "WP03", "WP05"],
+      "started_at": "2026-08-20T23:24:00Z",
+      "completed_at": "2026-08-20T23:45:19Z",
+      "proving_commit": null,
+      "changed_files": ["contracts/**/*.json", "contracts/**/*.jsonl", "contracts/**/*.yaml", "contracts/**/*.proto", "contracts/query/english-controlled-v1.ebnf", "tooling/proto/source/codefabric_cpg_mcp/daemon/generated/wave0_probe.proto", "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json", "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/index.py", "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/__init__.py", "src/contracts/index.rs", "src/contracts/artifacts.rs", "src/contracts/compiler.rs", "tests/integration/contracts.rs", "codefabric-cpg-mcp/tests/test_contract_json.py", "scripts/contracts_repro_check.sh", "scripts/adapter_wheel_test.sh", "justfile"],
+      "acceptance_evidence": [
+        "All governed machine sources contain computed semantic digests; all eight bundles contain independently verified AC-G-07 identities; no governed zero sentinel remains.",
+        "One RFC 8785 artifact-index resource contains 59 typed source records and is consumed byte-identically through Rust include_bytes!/OnceLock and Python importlib.resources/module-scope TypeAdapter.",
+        "The obsolete Rust/Python source mirrors and old contracts/generated index authority are deleted; 13 canonical registries plus the packaged index are the 14 contract-compiler outputs.",
+        "Semantic content, embedded canonical digest, and embedded bundle digest mutations fail; source-only JSON whitespace preserves canonical identity and changes exact source identity."
+      ],
+      "checks": [
+        {"command": "just contracts-verify", "status": "passed", "summary": "59 sources, 50 draft warnings, 13 schemas, and committed negative cases passed."},
+        {"command": "just contracts-repro-check", "status": "passed", "summary": "Two roots reproduced exactly; catalog reorder changed only its recorded source identity."},
+        {"command": "targeted Rust contract integration tests", "status": "passed", "summary": "Seven index, verification, mutation, and identity tests passed."},
+        {"command": "just adapter-lint && just adapter-type && targeted adapter tests", "status": "passed", "summary": "Ruff and Pyrefly passed; 34 index/JCS tests passed."},
+        {"command": "just adapter-wheel-test", "status": "passed", "summary": "A clean wheel install loaded and validated the canonical package resource."}
+      ],
+      "deviations": ["AD-04"],
+      "failed_approaches": ["Comparing a reordered catalog's full artifact-index bytes incorrectly ignored the required source_digest change; the reproduction oracle now separates unchanged-root byte reproducibility from reorder semantic invariance."],
+      "blockers": []
+    },
+    "WP05": {
+      "title": "Establish one Protobuf descriptor IR and exact Python dependency intent",
+      "status": "complete",
+      "dependencies": ["WP01"],
+      "started_at": "2026-08-20T22:15:57Z",
+      "completed_at": "2026-08-20T22:40:35Z",
+      "proving_commit": null,
+      "changed_files": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "codefabric-cpg-mcp/pyproject.toml",
+        "codefabric-cpg-mcp/uv.lock",
+        "tooling/proto/generate.py",
+        "tooling/proto/generate.rs",
+        "tooling/proto/README.md",
+        "tooling/proto/source/codefabric_cpg_mcp/daemon/generated/wave0_probe.proto",
+        "tooling/proto/wave0-probe-descriptor.pb",
+        "tooling/proto/descriptor-census.json",
+        "tooling/proto/compatibility-baseline.json",
+        "tooling/proto/toolchain-identity.json",
+        "tooling/proto/test_generate.py",
+        "src/generated/codefabric.wave0.v1.rs",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2.pyi",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2_grpc.py",
+        "codefabric-cpg-mcp/tests/test_proto.py",
+        "tests/integration/rpc.rs",
+        "scripts/proto_dependency_check.sh",
+        "scripts/stable_graph_check.sh",
+        "justfile",
+        "AGENTS.md",
+        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
+      ],
+      "acceptance_evidence": [
+        "One grpc_tools.protoc 1.83.0/libprotoc 35.1 invocation emits Python bindings and the committed FileDescriptorSet; Rust decodes the same bytes and generates tonic/prost bindings through compile_fds.",
+        "The normalized descriptor census and reviewed compatibility baseline cover imports/options, services/cardinality, messages, fields/numbers/types/presence, oneofs, enums, and reserved names/ranges.",
+        "Python generated DESCRIPTOR and DescriptorPool views match the committed descriptor; cross-language binary probes cover unknown-field preservation, deadlines/status, message limits, and runtime versions.",
+        "grpcio==1.83.0, protobuf==7.36.0, and build-only grpcio-tools==1.83.0 are exact intent; orjson, protoc-bin-vendored, the Rust protoc invocation, and unbounded protocol declarations are absent.",
+        "Committed descriptor SHA-256 is a515bb2b875a8555ca43d1c2b35a58b465185c71b10de2cb6107388aebdba3b7; generated output identity is 74498693ba3e9f4b0bc3831552f09efb7e12ec9c4fa29069cf6bb505ac2717ef."
+      ],
+      "checks": [
+        {"command": "just proto-repro-check", "status": "passed", "summary": "16 focused descriptor/protocol tests and byte-identical two-root generation passed."},
+        {"command": "just root-test", "status": "passed", "summary": "26 Nextest tests plus doctests passed."},
+        {"command": "just adapter-ci-fast", "status": "passed", "summary": "Ruff, Pyrefly, 49 adapter tests, and the independent 2-test STDIO selection passed."},
+        {"command": "just stable-graph-check", "status": "passed"},
+        {"command": "just features-each", "status": "passed", "summary": "All 12 feature graphs passed during the packet handoff."},
+        {"command": "just deps-fast && just policy", "status": "passed", "summary": "Dependency hygiene and advisory/bans/source policy passed during the packet handoff."},
+        {"command": "frozen adapter sync and git diff --check", "status": "passed"}
+      ],
+      "deviations": [],
+      "failed_approaches": [
+        "A direct prost-build dependency was retained initially but became redundant once tonic-prost-build compile_fds owned generation; it and the obsolete scanner exception were removed.",
+        "The loopback deadline probe can report either Cancelled or DeadlineExceeded at the local transport race boundary; the assertion now accepts exactly those two defined cancellation outcomes.",
+        "The tooling test import root was not visible under the adapter pytest rootdir until the recipe explicitly set PYTHONPATH=. for tooling/proto tests."
+      ],
+      "blockers": []
+    },
+    "WP06": {
+      "title": "Separate normative KATs from generated and differential corpora",
+      "status": "complete",
+      "dependencies": ["WP03", "WP04"],
+      "started_at": "2026-08-20T23:45:19Z",
+      "completed_at": "2026-08-21T00:00:00Z",
+      "proving_commit": null,
+      "changed_files": [
+        "contracts/manifests/fixture-oracles.json",
+        "contracts/fixtures/README.md",
+        "contracts/fixtures/CHANGELOG.md",
+        "contracts/fixtures/jcs/differential-cases.json",
+        "src/contracts/models.rs",
+        "src/contracts/compiler.rs",
+        "tooling/contracts/fixture_candidates.py",
+        "tooling/contracts/test_fixture_candidates.py",
+        "scripts/fixture_governance_check.sh",
+        "tests/integration/contracts.rs",
+        "codefabric-cpg-mcp/tests/test_contract_json.py",
+        "justfile"
+      ],
+      "acceptance_evidence": [
+        "One catalog-governed typed fixture manifest classifies every normative KAT, differential case, property/fuzz seed, negative failure-class fixture, and generated example with origin, owner, version, and change record.",
+        "Normative KAT paths have no production generator or gate write path; candidate generation is output-free and confined to a new absent or empty review directory.",
+        "Rust and Python differential tests prove cross-implementation equivalence and idempotence; a seeded no-object-sort mutant is killed by the independent JCS KAT."
+      ],
+      "checks": [
+        {"command": "just fixture-check", "status": "passed"},
+        {"command": "targeted Rust contract integration suite", "status": "passed", "summary": "Eight fixture, digest, index, and mutation tests passed at packet completion."},
+        {"command": "targeted Python JCS suite", "status": "passed", "summary": "Thirty-seven differential and KAT tests passed at packet completion."},
+        {"command": "just contracts-verify && just contracts-repro-check", "status": "passed"}
+      ],
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP07": {
+      "title": "Compile adapter Contract IR into Pydantic and FastMCP views",
+      "status": "complete",
+      "dependencies": ["WP02", "WP03", "WP04", "WP05"],
+      "started_at": "2026-08-21T00:00:00Z",
+      "completed_at": "2026-08-21T00:12:00Z",
+      "proving_commit": null,
+      "changed_files": [
+        "contracts/adapter/adapter-model-ir.json",
+        "contracts/manifests/suite-manifest.json",
+        "tooling/contracts/generate_adapter_models.py",
+        "tooling/contracts/test_generate_adapter_models.py",
+        "tooling/contracts/benchmark_adapter_contracts.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/wire_models.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-schemas.json",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/schemas.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/fingerprints.py",
+        "codefabric-cpg-mcp/tests/test_adapter_contracts.py",
+        "scripts/adapter_contract_governance_check.sh",
+        "scripts/adapter_wheel_test.sh",
+        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "justfile"
+      ],
+      "acceptance_evidence": [
+        "One governed adapter Contract IR generates 17 strict frozen Pydantic DTOs, two discriminated delivery/reference unions, module-scope recursive JSON validation, and both validation and serialization schema families.",
+        "Every schema has Draft 2020-12 identity and a distinct RFC 8785+BLAKE3 fingerprint; one IR field mutation changes all intended generated views or fails graph validation.",
+        "The frozen nine-key MCP Tool profile fails unknown protocol fields and matches in-process FastMCP Tool views, CLI inspect output normalized through mcp.types.Tool, and Client(mcp) calls.",
+        "Lifespan/Depends/Context runtime values are absent from public schemas; aliases, coercion, unknown fields, wrong discriminators, and subclass leakage fail.",
+        "A clean wheel install loads and validates the packaged artifact index, generated schemas, fingerprints, and model source."
+      ],
+      "checks": [
+        {"command": "just adapter-contracts-check", "status": "passed", "summary": "Ten generator/model/schema/FastMCP tests and structural governance passed."},
+        {"command": "just adapter-contracts-repro-check", "status": "passed", "summary": "Three generated outputs were byte-identical across isolated roots."},
+        {"command": "just adapter-ci-fast", "status": "passed", "summary": "Ruff, Pyrefly, and 68 adapter tests passed before WP08 deduplication."},
+        {"command": "just adapter-wheel-test", "status": "passed"},
+        {"command": "just contracts-verify && just contracts-repro-check", "status": "passed", "summary": "Fifty-eight governed sources, ten JSON Schemas, negative cases, and isolated generation passed."},
+        {"command": "just adapter-contracts-bench", "status": "passed", "summary": "Eager module-scope construction retained; defer_build was not justified."}
+      ],
+      "deviations": [],
+      "failed_approaches": [
+        "Importing FastMCP's concrete Tool class into the contract fingerprint module violated the framework-boundary structural rule; a protocol-facing structural Protocol now depends only on mcp.types.Tool."
+      ],
+      "blockers": []
+    },
+    "WP08": {
+      "title": "Benchmark and optimize the aggregate command graph",
+      "status": "complete",
+      "dependencies": ["WP02"],
+      "started_at": "2026-08-21T00:12:00Z",
+      "completed_at": "2026-08-21T00:43:49Z",
+      "proving_commit": null,
+      "changed_files": [
+        "justfile",
+        ".github/workflows/ci.yml",
+        "tooling/ci/proof-coverage.json",
+        "tooling/ci/proof_coverage.py",
+        "tooling/ci/test_proof_coverage.py",
+        "docs/reviews/command_graph_benchmark_codefabric_model_based_foundation_remediation_2026-08-20_v1.json",
+        "scripts/stable_graph_check.sh",
+        "src/contracts/catalog.rs",
+        "src/contracts/compiler.rs",
+        "src/contracts/models.rs",
+        "tests/integration/contracts.rs"
+      ],
+      "acceptance_evidence": [
+        "The live Just graph materializes 51 Tier-A proof atoms and exact commands into a machine-readable report; dependency drift, proof loss, cycles, missing declarations, destructive cache steps, and pytest-selection drift fail.",
+        "The full 68-node adapter pytest selector contains both retained STDIO node IDs, so removing only the repeated aggregate edge preserves proof coverage while the independent recipe and targeted CI diagnostic remain.",
+        "Five-run Hyperfine means improved from 6.39503742902 seconds to 4.71675263764 seconds, a 26.2435491584 percent reduction with zero compiler requests in both samples.",
+        "Schema, fixture, adapter-model, and proof checks share one Just-managed contracts-tooling Ruff dependency; root check/Clippy and all independent domain gates remain intact.",
+        "The new post-remediation warm baseline is 12.8403715791 seconds for governance and 30.0796965378 seconds for ci-fast across three runs."
+      ],
+      "checks": [
+        {"command": "just proof-coverage-check", "status": "passed", "summary": "Three comparator negative tests, 51 proof atoms, 68 full adapter tests, and the two-node STDIO subset passed."},
+        {"command": "just governance", "status": "passed"},
+        {"command": "Hyperfine affected-boundary before/after", "status": "passed", "summary": "Five measured warm runs per candidate boundary; 26.24 percent mean reduction."},
+        {"command": "Hyperfine post-remediation governance/ci-fast baseline", "status": "passed", "summary": "Three measured warm runs per aggregate."}
+      ],
+      "deviations": ["AD-05"],
+      "failed_approaches": [
+        "The first fresh-target aggregate exposed seven all-target Clippy defects and was retained as correctness rather than timing evidence; the defects were corrected.",
+        "The second fresh-target aggregate exposed an overbroad root-wheel zero-state search that matched adapter-wheel-test; the rule now queries exact Just recipe keys.",
+        "A third full cold-target run was stopped because it measured unrelated Rust dependency rebuilds rather than the Python-only candidate boundary."
+      ],
+      "blockers": []
+    },
+    "WP09": {
+      "title": "Certify findings, decommission old authority, and release v4 WP07",
+      "status": "in_progress",
+      "dependencies": ["WP01", "WP02", "WP03", "WP04", "WP05", "WP06", "WP07", "WP08"],
+      "started_at": "2026-08-21T00:43:49Z",
+      "completed_at": null,
+      "proving_commit": null,
+      "changed_files": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "fuzz/Cargo.lock",
+        "src/contracts/models.rs",
+        "src/contracts/compiler.rs",
+        "contracts/bundles/*.json",
+        "tests/integration/contracts.rs",
+        "scripts/stable_graph_check.sh",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json",
+        "docs/plans/state/codefabric-model-based-foundation-remediation_v1_state.json"
+      ],
+      "acceptance_evidence": [
+        "Independent implementation re-review now closes IR-001, IR-002, and IR-003 with no blocker or major local finding.",
+        "All eight bundle scaffolds implement the complete AC-G-07 structural envelope while intentionally retaining empty membership for v4 WP11 population.",
+        "Independent RFC 8785 plus BLAKE3 calculations match every embedded canonical_digest, bundle_digest, exact source_digest, and packaged-index record.",
+        "DB01-DB04 remain proven locally; DO-01 and DO-02 remain correctly deferred to Waves 17 and 18.",
+        "The only remaining M04 obligation is the separately required GitHub Actions Ubuntu clean-checkout just ci-fast result."
+      ],
+      "checks": [
+        {"command": "independent IR-001/IR-002/IR-003 re-review", "status": "passed", "summary": "No blocker or major finding remains; the prior typed-bundle IR-003 major is closed."},
+        {"command": "just ci-fast", "status": "passed", "summary": "Thirty-seven root tests plus doctests, three extractor tests, two sidecar tests, 68 adapter tests, all generated-artifact governance, and 51 Tier-A proof atoms passed."},
+        {"command": "just contracts-verify && just contracts-repro-check", "status": "passed", "summary": "Fifty-eight sources with 49 expected draft warnings and 14 derived outputs verified and reproduced exactly."},
+        {"command": "just proto-repro-check", "status": "passed", "summary": "Single descriptor authority, 17 focused protocol tests, and exact generation identity passed."},
+        {"command": "just features-each", "status": "passed", "summary": "All 12 root feature graphs passed with serde_path_to_error confined to contracts-tooling."},
+        {"command": "just policy", "status": "passed", "summary": "Advisory, bans, and source policy passed for the updated locked graph."},
+        {"command": "just adapter-wheel-test", "status": "passed", "summary": "A clean wheel install loaded and validated regenerated contract resources."},
+        {"command": "just fuzz contract_ingress 5", "status": "passed", "summary": "154,526 bounded executions completed without a crash."},
+        {"command": "git diff --check", "status": "passed"}
+      ],
+      "deviations": ["AD-06"],
+      "failed_approaches": [
+        "The first aggregate rerun correctly failed stable-graph-check because the exact contracts-tooling feature manifest did not yet include serde_path_to_error; the pin, feature edge, and graph assertion were added and the full aggregate reran green."
+      ],
+      "blockers": [
+        "External v4 M01 clean Ubuntu checkout evidence remains pending; WP09 and M04 cannot complete without it or an accepted plan revision."
+      ]
+    }
+  },
+  "milestones": {
+    "M01": {"title": "Corrected design authority accepted", "status": "complete", "dependencies": ["WP01"], "checks": ["WP01 design checks passed", "independent projection review passed", "v4 WP07 interlock recorded"]},
+    "M02": {"title": "Model-based contract compiler cutover", "status": "complete", "dependencies": ["WP02", "WP03", "WP04", "WP06"], "checks": ["typed catalog and bounded ingress passed", "artifact index and dual identities reproduced", "fixture-oracle governance and mutation proof passed", "DB02 complete"]},
+    "M03": {"title": "Protocol and adapter compiler substrate", "status": "complete", "dependencies": ["WP05", "WP07"], "checks": ["single descriptor IR and exact protocol intent passed", "Pydantic and FastMCP generated views reproduced", "adapter full, CLI, in-memory Client, and wheel gates passed", "DB03 and DB04 complete"]},
+    "M04": {"title": "Foundation remediation certified; v4 WP07 released", "status": "not_started", "dependencies": ["WP08", "WP09"], "checks": []}
+  },
+  "decommission_batches": {
+    "DB01": {"title": "Preserve completed seed/PyO3/Maturin zero-state", "status": "complete", "dependencies": [], "evidence": "Inherited from v4; must be revalidated at M04."},
+    "DB02": {"title": "Manual contract authority zero-state", "status": "complete", "dependencies": ["WP02", "WP03", "WP04"], "evidence": "Catalog-derived typed compilation owns source/output census, projections, budgets, release status, and package edges; old literal arrays, lexical checks, zero digests, language index mirrors, and the old index path are absent."},
+    "DB03": {"title": "Dual Protobuf compiler and speculative JSON dependency zero-state", "status": "complete", "dependencies": ["WP05"], "evidence": "scripts/proto_dependency_check.sh proves exact pins, runtime/build separation, and absence of orjson, protoc-bin-vendored, a Rust protoc compiler path, and runtime grpcio-tools imports."},
+    "DB04": {"title": "Independent adapter schema authority zero-state", "status": "complete", "dependencies": ["WP07"], "evidence": "The three handwritten adapter schema placeholders are deleted; one governed adapter Contract IR generates typed models plus validation/serialization schemas and fingerprints, and scripts/adapter_contract_governance_check.sh prohibits independent renderers and per-handler construction."}
+  },
+  "downstream_obligations": {
+    "DO-01": {"wave": 17, "status": "planned", "summary": "Production lifespan-owned grpc.aio DaemonClient with deadlines, centralized status/metadata mapping, and explicit close."},
+    "DO-02": {"wave": 18, "status": "planned", "summary": "Four explicit typed FastMCP handlers and real published manifest/fingerprint equivalence."}
+  },
+  "discovered_obligations": [],
+  "plan_deviations": [
+    {
+      "id": "AD-01",
+      "packet": "WP01",
+      "classification": "bounded_local_adaptation",
+      "trigger": "The plan's shorthand digest-profile table omitted normative prose and could be read as omitting nested semantic digests, while WP01 was required to make the owning design total and non-self-referential.",
+      "resolution": "Follow corrected SUITE AC-G-02: omit only own root/header identity fields for machine artifacts, retain nested digests, and add prose-utf8-v1. No outcome, dependency, milestone, or downstream boundary changed.",
+      "plan_revision_required": false
+    },
+    {
+      "id": "AD-02",
+      "packet": "WP03",
+      "classification": "bounded_design_correction",
+      "trigger": "An exact source digest cannot be embedded in the complete source bytes it identifies without self-reference.",
+      "resolution": "SUITE AC-G-02 now makes source_digest detached index provenance while retaining embeddable projection-omitted canonical_digest.",
+      "plan_revision_required": false
+    },
+    {
+      "id": "AD-03",
+      "packet": "WP03",
+      "classification": "library_limit_adaptation",
+      "trigger": "serde_yaml_ng 0.10.0 cannot enforce a configurable alias bound before alias materialization, and the EBNF header is metadata rather than grammar payload.",
+      "resolution": "The governed YAML subset rejects anchors/aliases/tags/merges in a bounded pre-scan, and ebnf-source-v1 validates then omits its header while retaining exact LF-normalized payload bytes.",
+      "plan_revision_required": false
+    },
+    {
+      "id": "AD-04",
+      "packet": "WP04",
+      "classification": "packaging_path_adaptation",
+      "trigger": "uv_build packages small runtime resources from the Python module root rather than an arbitrary repository-external contracts/generated path.",
+      "resolution": "The one canonical artifact index moved under codefabric_cpg_mcp/contracts so importlib.resources and Rust include_bytes consume the exact same file; all design references and catalog output edges were updated.",
+      "plan_revision_required": false
+    },
+    {
+      "id": "AD-05",
+      "packet": "WP08",
+      "classification": "user_accepted_evidence_scope_correction",
+      "trigger": "A full fresh Cargo target rebuild does not measure the accepted Python-only duplicate-test edge and repeatedly surfaced correctness findings rather than decision-relevant timing.",
+      "resolution": "Use five-run Hyperfine timing at the unchanged adapter aggregate boundary plus exact pytest-node and 51-atom proof equivalence. Retain fresh-target attempts only as negative correctness evidence and make no cold-build performance claim.",
+      "plan_revision_required": false
+    },
+    {
+      "id": "AD-06",
+      "packet": "WP03/WP09",
+      "classification": "review_discovered_model_closure",
+      "trigger": "The independent WP09 review found that bundle-ac-g-07-v1 still projected a generic JSON value and accepted incomplete or unknown bundle structure despite WP03's closed-model requirement.",
+      "resolution": "Define closed AC-G-07 bundle, member, compatibility, and generator records; derive both sorted projections from the typed value; migrate all eight scaffolds; and use serde_path_to_error 0.1.20 at the shared typed ingress seam for exact nested diagnostics. Full member population remains v4 WP11 scope.",
+      "plan_revision_required": false
+    }
+  ],
+  "failed_approaches": [],
+  "next_action": "Obtain the GitHub Actions Ubuntu clean-checkout just ci-fast result required by v4 M01, then complete WP09/M04 and release the v4 WP07 interlock if it passes.",
+  "updated_at": "2026-08-21T01:14:00Z"
+}

@@ -1,10 +1,21 @@
 {
   "artifact_id": "codefabric.bundles.provider-bundle",
   "artifact_kind": "bundle-manifest",
-  "version": "1.0",
+  "artifacts": [],
+  "bundle_digest": "b3:fec19dd60938da3e6cd663f71310b55415519ffe28dfee37a418d24a3560fd8e",
+  "bundle_kind": "provider",
+  "bundle_major": 1,
+  "bundle_version": "1.0",
+  "canonical_digest": "b3:84931a7b27cd34c0ee76af3c0ca7cf2f495f43ff461c75d5bfe8cbe10bdc4a85",
+  "compatibility": {
+    "maximum_consumer_minor": 0,
+    "minimum_consumer_minor": 0
+  },
   "compatible_suite_major": 1,
+  "created_by": {
+    "generator_id": "codefabric-contracts",
+    "generator_version": "1.0"
+  },
   "status": "draft",
-  "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
-  "members": []
+  "version": "1.0"
 }
-

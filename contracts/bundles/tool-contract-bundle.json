@@ -1,10 +1,21 @@
 {
   "artifact_id": "codefabric.bundles.tool-contract-bundle",
   "artifact_kind": "bundle-manifest",
-  "version": "1.0",
+  "artifacts": [],
+  "bundle_digest": "b3:cb6d8179d5e5d56defa1e2567fbb196302eda90046e148204abe6787dcf0dff7",
+  "bundle_kind": "tool-contract",
+  "bundle_major": 1,
+  "bundle_version": "1.0",
+  "canonical_digest": "b3:5040991cf65e196a8908357056827940635a6b36c7b2bdae2e7bf69c450dd818",
+  "compatibility": {
+    "maximum_consumer_minor": 0,
+    "minimum_consumer_minor": 0
+  },
   "compatible_suite_major": 1,
+  "created_by": {
+    "generator_id": "codefabric-contracts",
+    "generator_version": "1.0"
+  },
   "status": "draft",
-  "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
-  "members": []
+  "version": "1.0"
 }
-

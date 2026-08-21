@@ -1,0 +1,7 @@
+{
+  "cases": [
+    {"id":"object-order","inputs":["{\"b\":2,\"a\":1}","{\"a\":1,\"b\":2}"]},
+    {"id":"insignificant-whitespace","inputs":["{\"a\":[1,true,null]}","{ \"a\" : [ 1, true, null ] }"]},
+    {"id":"nested-object-order","inputs":["{\"z\":{\"b\":2,\"a\":1},\"a\":0}","{\"a\":0,\"z\":{\"a\":1,\"b\":2}}"]}
+  ]
+}

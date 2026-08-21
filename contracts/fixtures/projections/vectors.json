@@ -1,0 +1,79 @@
+{
+  "checksum": "blake3-256",
+  "vectors": [
+    {
+      "id": "prose-utf8-v1",
+      "profile": "prose-utf8-v1",
+      "source_utf8": "# Example\n",
+      "canonical_utf8": "# Example\n",
+      "source_digest": "b3:a0f5e8f16750f4638b7d8ed55e400ea266f7d938bd19c42a8c626fb9025d97ec",
+      "canonical_digest": "b3:a0f5e8f16750f4638b7d8ed55e400ea266f7d938bd19c42a8c626fb9025d97ec"
+    },
+    {
+      "id": "json-jcs-v1-order-a",
+      "profile": "json-jcs-v1",
+      "source_utf8": "{\"b\":2, \"a\":1}\n",
+      "canonical_utf8": "{\"a\":1,\"b\":2}",
+      "source_digest": "b3:b0ab3e1f1fdd9ae807e31fe856be07c7c7a704c35fc2a48d88525b4d8245900b",
+      "canonical_digest": "b3:8e80439b77ac62d4194499edd46684c479da3aa1ac80dd5511468efae049166e"
+    },
+    {
+      "id": "json-jcs-v1-order-b",
+      "profile": "json-jcs-v1",
+      "source_utf8": "{\n  \"a\": 1,\n  \"b\": 2\n}\n",
+      "canonical_utf8": "{\"a\":1,\"b\":2}",
+      "source_digest": "b3:80a64d48801b5d77caef68c66e807fd2b34126bef0cdfcb6ff99a924fd2ccac0",
+      "canonical_digest": "b3:8e80439b77ac62d4194499edd46684c479da3aa1ac80dd5511468efae049166e"
+    },
+    {
+      "id": "yaml-ac-g-53-v1-a",
+      "profile": "yaml-ac-g-53-v1",
+      "source_utf8": "a: 1\nb: 2\n",
+      "canonical_utf8": "{\"a\":1,\"b\":2}",
+      "source_digest": "b3:82d1b8f4ff3274aaa304cfa9c704fad602f51eb0a1928cf9659b5b31130686ab",
+      "canonical_digest": "b3:8e80439b77ac62d4194499edd46684c479da3aa1ac80dd5511468efae049166e"
+    },
+    {
+      "id": "yaml-ac-g-53-v1-b",
+      "profile": "yaml-ac-g-53-v1",
+      "source_utf8": "# editorial\nb: 2\na: 1\n",
+      "canonical_utf8": "{\"a\":1,\"b\":2}",
+      "source_digest": "b3:dec00b1309f573aa2ce543d0223eea79d7614f8dcc4c6e44ba12e9197da8aee9",
+      "canonical_digest": "b3:8e80439b77ac62d4194499edd46684c479da3aa1ac80dd5511468efae049166e"
+    },
+    {
+      "id": "jsonl-jcs-v1",
+      "profile": "jsonl-jcs-v1",
+      "source_utf8": "{\"record_kind\":\"metadata\",\"canonical_digest\":\"b3:1111111111111111111111111111111111111111111111111111111111111111\",\"status\":\"draft\"}\n{\"z\":2,\"a\":1}\n",
+      "canonical_utf8": "{\"record_kind\":\"metadata\",\"status\":\"draft\"}\n{\"a\":1,\"z\":2}\n",
+      "source_digest": "b3:903036f189b73b62ed3326caf917f2fa9d8aa53b8f603449258f0ee6897880a3",
+      "canonical_digest": "b3:0dd1ac3334522bae92947a15c7949f85b4c0874d6d05f0f631355b582bb99765"
+    },
+    {
+      "id": "proto-descriptor-v1",
+      "profile": "proto-descriptor-v1",
+      "source_utf8": "// canonical_digest: b3:1111111111111111111111111111111111111111111111111111111111111111\nsyntax = \"proto3\";\npackage codefabric.example.v1;\n",
+      "canonical_utf8": "{\"files\":[{\"name\":\"example.proto\",\"package\":\"codefabric.example.v1\",\"syntax\":\"proto3\"}]}",
+      "source_digest": "b3:9742a6b59a39e895fae46965179e4c3325408684df6643cbdd35f1d56bbfd5a6",
+      "canonical_digest": "b3:47e3dbed48619fab3f445c0c297847682a8df0471535b0648b5c2e91aacb2abc"
+    },
+    {
+      "id": "ebnf-source-v1",
+      "profile": "ebnf-source-v1",
+      "source_utf8": "(* artifact_id: codefabric.query.example *)\n(* canonical_digest: b3:1111111111111111111111111111111111111111111111111111111111111111 *)\ndocument = \"\";\n",
+      "canonical_utf8": "document = \"\";\n",
+      "source_digest": "b3:0ffbb2b15bd9a2b5aa0121a94256069c5f43ed58deb242e710b11403763f8574",
+      "canonical_digest": "b3:b8f869e4a1e4509bf2a85fada5cdc3d72fe7108f173ef5eeaa4d5622079e1a78"
+    },
+    {
+      "id": "bundle-ac-g-07-v1",
+      "profile": "bundle-ac-g-07-v1",
+      "source_utf8": "{\"artifacts\":[{\"artifact_id\":\"a\",\"canonical_digest\":\"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"required\":true}],\"bundle_digest\":\"b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"bundle_kind\":\"schema\",\"bundle_version\":\"1.0\",\"canonical_digest\":\"b3:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"signature\":\"sig\"}",
+      "canonical_utf8": "{\"artifacts\":[{\"artifact_id\":\"a\",\"canonical_digest\":\"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"required\":true}],\"bundle_digest\":\"b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"bundle_kind\":\"schema\",\"bundle_version\":\"1.0\",\"signature\":\"sig\"}",
+      "bundle_identity_utf8": "{\"artifacts\":[{\"artifact_id\":\"a\",\"canonical_digest\":\"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"required\":true}],\"bundle_kind\":\"schema\",\"bundle_version\":\"1.0\"}",
+      "source_digest": "b3:eabf79fdfa14d0c8692c7bb7b5e20425946e2c15dc9e4d5375403a894024c5ab",
+      "canonical_digest": "b3:0697267a6199027a9c53bb702b9a156c499a54be714ca74312ace151e09e8583",
+      "bundle_digest": "b3:1155e940f9114f59d0b003b1f6aedd325ff1d19defb896486f7378768d6776e5"
+    }
+  ]
+}

@@ -4,7 +4,7 @@
 **Artifact kind:** Normative document
 **Compatible suite major:** 1
 **Release date:** 2026-08-20
-**Canonical digest:** External; recorded in `codefabric_v1.3_manifest.json`
+**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`
 
 **Status:** Released normative implementation specification
 **Synchronized suite version:** 1.3
@@ -38,7 +38,7 @@ status: released
 canonical_digest: external
 ```
 
-The canonical digest is recorded in `codefabric_v1.3_manifest.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
+The canonical digest and exact source digest are recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
 
 ### 0.2 Permanent ownership and precedence
 
@@ -834,13 +834,17 @@ dependencies = [
   "fastmcp==3.4.7",
   "pydantic==2.13.4",
   "pydantic-settings==2.15.0",
-  "grpcio",
-  "protobuf",
-  "orjson",
+  "grpcio==1.83.0",
+  "protobuf==7.36.0",
 ]
 ```
 
-The exact `grpcio`, `protobuf`, and `orjson` versions SHALL be pinned in the lockfile after compatibility testing.
+`grpcio-tools==1.83.0` is an exact build/development dependency, not a production
+runtime import. It owns the suite's single Protobuf compiler invocation. `orjson` is not
+an adapter dependency: sorted ordinary JSON is not RFC 8785 canonical JSON, ProtoJSON
+is owned by Protobuf, and MCP structured values are owned by Pydantic/FastMCP.
+Re-adoption requires a named non-canonical boundary, fixed options and limits, semantic
+fixtures, and a benchmark.
 
 The project SHALL NOT pin `pydantic-core` independently; Pydantic selects its matching core release. The adapter does not require Arrow, DataFusion, Delta Lake, Ruff, Pyrefly, Tree-sitter, rustc bindings, or an HTTP application framework.
 
@@ -2522,7 +2526,6 @@ class CpgDaemonClient:
 
 ```python
 import asyncio
-import orjson
 import secrets
 from pydantic import ValidationError
 from fastmcp.exceptions import ToolError
@@ -2555,7 +2558,7 @@ async def query_code_graph(
     json_request, semantic_request_id = ensure_effective_semantic_request_id(
         json_request
     )
-    request_json = orjson.dumps(json_request, option=orjson.OPT_SORT_KEYS)
+    request_json = canonical_json_bytes(json_request)
     if len(request_json) > settings.max_request_bytes:
         raise ToolError("The semantic request exceeds the adapter byte limit.")
 
@@ -2606,7 +2609,11 @@ async def query_code_graph(
     )
 ```
 
-`ensure_effective_semantic_request_id` validates a supplied value or injects a newly generated opaque value into the normalized JSON object **before** canonical serialization, request hashing, and RPC submission. It returns the exact value copied into the RPC control field.
+`canonical_json_bytes` is the shared `codefabric-jcs-v1` RFC 8785 encoder and applies
+the AC-G-53 restrictions. `ensure_effective_semantic_request_id` validates a supplied
+value or injects a newly generated opaque value into the normalized JSON object
+**before** canonical serialization, request hashing, and RPC submission. It returns the
+exact value copied into the RPC control field.
 
 ### 58.1 Inline response decoding
 
@@ -2649,17 +2656,14 @@ Dynamic status/reference tool outputs SHALL be validated into their public model
 ### 60.1 Schema export
 
 ```python
+import json
 from pathlib import Path
-import orjson
 
 
 def export_schema(path: Path, schema: dict[str, object]) -> None:
-    path.write_bytes(
-        orjson.dumps(
-            schema,
-            option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
-        )
-        + b"\n"
+    path.write_text(
+        json.dumps(schema, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
     )
 
 export_schema(
@@ -2672,7 +2676,7 @@ export_schema(
 )
 ```
 
-The exported constants SHALL contain `$schema: https://json-schema.org/draft/2020-12/schema` and a stable `$id`. CI SHALL compare both validation and serialization schemas, while FastMCP publishes the serialization-mode schema for outputs.
+The exported constants SHALL contain `$schema: https://json-schema.org/draft/2020-12/schema` and a stable `$id`. CI SHALL compare both validation and serialization schemas, while FastMCP publishes the serialization-mode schema for outputs. Pretty source bytes are review artifacts; schema fingerprints are BLAKE3-256 over RFC 8785 canonical schema JSON and never over the pretty representation.
 
 ### 60.2 Host launch configuration
 
@@ -3066,7 +3070,7 @@ The Pydantic adapter must preserve, not reinterpret, every canonical distinction
 
 ## 70. Contract fingerprinting
 
-CI SHALL compare three independent schema families:
+CI SHALL compare four independent schema families:
 
 ```text
 FastMCP component manifest
@@ -3095,6 +3099,35 @@ semantic schema hashes
 adapter public schema hashes
 server instructions hash
 ```
+
+The protocol-facing FastMCP fingerprint profile is
+`codefabric-fastmcp-tool-manifest-v1`. For each explicit tool it includes exactly these
+serialized MCP keys when present:
+
+```text
+name
+title
+description
+inputSchema
+outputSchema
+icons
+annotations
+_meta
+execution
+```
+
+The value is obtained from
+`tool.to_mcp_tool().model_dump(mode="json", by_alias=True, exclude_none=True)`. An
+unexpected top-level key fails generation rather than being silently excluded.
+Process-local IDs, callable identity, middleware, runtime state, and framework
+bookkeeping never enter the MCP value. Tools are sorted by public name, the resulting
+JSON value is encoded with `codefabric-jcs-v1`, and BLAKE3-256 produces the fingerprint.
+Changing the inclusion list or profile ID is a public contract-version event.
+
+Pydantic validation-mode and serialization-mode schemas are separately generated and
+fingerprinted. FastMCP output publication SHALL equal the generated serialization-mode
+view for the same public contract; equality is structural after strict JSON parsing, not
+an incidental comparison of pretty bytes.
 
 An unchanged public contract version with changed serialization schema SHALL fail CI.
 
@@ -3994,16 +4027,24 @@ Rules:
 
 The MCP delivery/output schemas SHALL NOT be hand-maintained JSON documents.
 
-Normative source:
+Normative source and derivation:
 
 ```text
-Pydantic public model definitions
+typed Contract IR
+    → generated statically typed Pydantic public model source
+    → imported Pydantic models and compiled CoreSchema
     → validation-mode schema
     → serialization-mode schema
-    → canonical sorted JSON
-    → content fingerprint
+    → RFC 8785 canonical JSON
+    → BLAKE3-256 content fingerprint
     → package resource + CI snapshot
 ```
+
+The Contract IR owns adapter field identity, aliases, constraints, unions, and public
+documentation. Pydantic owns validation, CoreSchema compilation, and both JSON Schema
+views. Independently hand-maintained adapter JSON Schemas are prohibited. Models and
+`TypeAdapter` instances are created at module import or lifespan construction and reused;
+handlers SHALL NOT compile them per request.
 
 FastMCP tool `output_schema` SHALL use serialization mode:
 

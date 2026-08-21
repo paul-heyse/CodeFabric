@@ -26,7 +26,12 @@ canonical-json = [
     "dep:serde_json_canonicalizer",
     "dep:thiserror",
 ]
-contracts-tooling = ["canonical-json", "dep:serde_yaml_ng", "dep:tempfile"]
+contracts-tooling = [
+    "canonical-json",
+    "dep:serde_path_to_error",
+    "dep:serde_yaml_ng",
+    "dep:tempfile",
+]
 data-fabric = [
     "dep:arrow",
     "dep:arrow-array",
@@ -48,7 +53,7 @@ rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
 local-workstation = ["contracts-tooling", "compatibility-probes"]
-proto-tooling = ["dep:prost-build", "dep:protoc-bin-vendored", "dep:tonic-prost-build"]
+proto-tooling = ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"]
 s3-storage = ["data-fabric", "deltalake/s3"]
 
 [dependencies]
@@ -72,13 +77,13 @@ gix = { version = "=0.86.0", default-features = false, features = ["sha1", "sha2
 object_store = { version = "=0.13.2", optional = true }
 parquet = { version = "=58.4.0", features = ["arrow", "async", "object_store"], optional = true }
 prost = { version = "=0.14.4", optional = true }
-prost-build = { version = "=0.14.4", optional = true }
-protoc-bin-vendored = { version = "=3.2.0", optional = true }
+prost-types = { version = "=0.14.4", optional = true }
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "backup"], optional = true }
 rustix = { version = "=1.1.4", features = ["fs"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "=1.0.151", features = ["arbitrary_precision"], optional = true }
 serde_json_canonicalizer = { version = "=0.3.2", optional = true }
+serde_path_to_error = { version = "=0.1.20", optional = true }
 serde_yaml_ng = { version = "=0.10.0", optional = true }
 tempfile = { version = "=3.27.0", optional = true }
 thiserror = { version = "=2.0.20", optional = true }
@@ -98,7 +103,7 @@ tower = { version = "=0.5.3", features = ["util"] }
 # These runtime crates are referenced by committed generated code, which D-04 keeps
 # outside heuristic scanner authority. Owner: WP05; next review: WP10 contract RPC
 # generation replaces or adopts the Wave 0 probe.
-ignored = ["prost", "tonic-prost"]
+ignored = ["tonic-prost"]
 
 [[bin]]
 name = "codefabric-proto-gen"

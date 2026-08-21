@@ -252,12 +252,24 @@ fn validate_value(value: &Value) -> Result<(), CanonicalJsonError> {
 /// Returns a typed boundary error for invalid JSON, duplicate keys, unsafe integers,
 /// unrepresentable numbers, or an adopted serializer failure.
 pub fn canonicalize_slice(input: &[u8]) -> Result<Vec<u8>, CanonicalJsonError> {
+    let value = decode_strict(input)?;
+    canonicalize_value(&value)
+}
+
+/// Decode one strict JSON value while preserving duplicate/numeric-token evidence.
+///
+/// # Errors
+///
+/// Returns a typed boundary error for invalid JSON, duplicate keys, non-finite tokens,
+/// unsafe integers, or unrepresentable finite numbers.
+pub fn decode_strict(input: &[u8]) -> Result<Value, CanonicalJsonError> {
     if let Some(token) = invalid_non_finite_token(input) {
         return Err(CanonicalJsonError::InvalidJsonNumber(token));
     }
     reject_duplicate_keys(input)?;
     let value: Value = serde_json::from_slice(input).map_err(CanonicalJsonError::InvalidJson)?;
-    canonicalize_value(&value)
+    validate_value(&value)?;
+    Ok(value)
 }
 
 /// Emit canonical UTF-8 bytes from a validated JSON value.

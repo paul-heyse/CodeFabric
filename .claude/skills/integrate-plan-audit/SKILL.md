@@ -47,8 +47,9 @@ integration.
 
 ## Non-negotiable rules
 
-1. **Copy, then edit.** In new-version mode, first make an exact copy. Confirm
-   the diff is empty. Every later change is a targeted edit.
+1. **Copy, then edit.** In new-version mode, first make an exact copy.
+   Confirm the diff is empty with `git diff --no-index <old> <new>`. Every
+   later change is a targeted edit.
 2. **Stable identifiers are provenance.** Existing `D-*`, `I-*`, `LD-*`,
    `L-*`, `WP*`, `M*`, and `DB*` IDs never change. New items receive the next
    unused ID.
@@ -93,8 +94,10 @@ In `new-version` mode:
 3. update only version/date/status/frontmatter lines;
 4. confirm the remainder is unchanged before substantive edits.
 
-If design changes, create the design version first, then update the new plan to
-reference its exact path, version, and digest.
+If design changes, create the design version first, then update the new plan
+to reference its exact path and version. Update the plan's declared-inputs
+table only when the revision re-baselines it — freshness is derived per
+`artifact-schemas.md` §8, not hand-maintained.
 
 Use `in-place` only when the user explicitly requests it or the original is
 uncommitted scratch. Record that provenance is weaker.
@@ -157,7 +160,7 @@ When needed, update:
 - transition/cutover/decommission;
 - test oracle;
 - assumptions, risks, and replan triggers;
-- evidence ledger and acceptance status.
+- recorded evidence (`evidence-policy.md` §6) and acceptance status.
 
 A changed target decision must propagate to every affected plan packet. Do not
 leave the plan referencing superseded design IDs or versions.
@@ -167,12 +170,12 @@ leave the plan referencing superseded design IDs or versions.
 Update as needed:
 
 - frontmatter/design references;
-- must-touch/likely/preflight change surfaces;
+- preflight queries and known-touch entries;
 - packet outcome, dependencies, and invariants;
 - required changes and legacy disposition;
-- acceptance evidence and local gates;
+- named acceptance checks and local gates;
 - milestones, decommission batches, and final gate matrix;
-- sequence and completion checklist;
+- execution sequence;
 - plan risks and replan policy.
 
 New packets take fresh `WP` IDs and are placed by dependency in the execution
@@ -199,7 +202,7 @@ For every finding record:
 - `F-001` — `applied-plan`
   - Finding: ...
   - Resolution: exact section/ID edited.
-  - Re-verification: evidence used.
+  - Revalidation: the finding's command, run verbatim, with its exit status.
   - Rationale: why this resolves the root defect.
 ```
 
@@ -211,18 +214,18 @@ revision note in the design dossier that identifies affected decisions.
 
 ### Phase 8 — Consistency and revalidation
 
-Re-read revised artifacts end-to-end and verify:
+Three passes, cheapest first:
 
-- all cross-references and digests;
-- stable IDs and no duplicates;
-- dependency order and milestone membership;
-- doctrine rows/notes for new material decisions;
-- every legacy disposition maps to execution;
-- final checklist matches packets, milestones, and batches;
-- every finding has one disposition;
-- no incidental rewrite outside the intended diff.
+1. **Validate** every revised artifact per `artifact-schemas.md` §8 —
+   frontmatter, IDs, cross-references, digests. Do not re-check by hand what
+   it covers.
+2. **Confirm byte-discipline**: `git diff --no-index <old-version> <new>`
+   shows only the intended sections changed.
+3. **Judge** what validation cannot see: dependency order and milestone
+   membership; every legacy disposition maps to execution; every finding has
+   exactly one disposition; doctrine notes exist for new material decisions.
 
-Run the audit's named revalidation queries/probes for all blockers and majors.
+Run the audit's revalidation commands verbatim for all blockers and majors.
 Do not claim closure solely because prose was edited.
 
 ### Phase 9 — Report
@@ -231,6 +234,7 @@ Report:
 
 - output path(s);
 - counts by disposition;
+- the §8 validation outcome on the revised artifacts;
 - whether any blocker/major remains deferred or requires redesign;
 - diff size and changed sections;
 - whether the revised plan is ready for focused re-audit.

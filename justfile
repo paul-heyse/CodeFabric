@@ -239,19 +239,72 @@ adapter-test:
 adapter-stdio-test:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_stdio.py
 
+[doc("Build and import the adapter wheel with its canonical artifact-index resource")]
+[group('adapter')]
+adapter-wheel-test:
+    ./scripts/adapter_wheel_test.sh
+
 [doc("Run the complete adapter gate")]
 [group('adapter')]
-adapter-ci-fast: adapter-lint adapter-type adapter-test adapter-stdio-test
+adapter-ci-fast: adapter-lint adapter-type adapter-test
 
 # -------------------------------------------------------- contracts / governance
+
+[doc("Check formatting and lint for shared contract tooling")]
+[group('contracts')]
+contracts-tooling-lint:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/contracts tooling/ci
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/contracts tooling/ci
+
+[doc("Validate every catalog JSON Schema against the hermetic Draft 2020-12 metaschema")]
+[group('contracts')]
+schema-check: contracts-tooling-lint
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/contracts/test_json_schema_check.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/json_schema_check.py
+
+[doc("Verify fixture oracle classification and immutable normative-KAT boundaries")]
+[group('contracts')]
+fixture-check: contracts-tooling-lint
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/contracts/test_fixture_candidates.py
+    ./scripts/fixture_governance_check.sh
+
+[doc("Verify adapter Contract-IR generation and structural governance")]
+[group('contracts')]
+adapter-contracts-governance: contracts-tooling-lint
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py check
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/contracts/test_generate_adapter_models.py
+    ./scripts/adapter_contract_governance_check.sh
+
+[doc("Verify generated adapter contracts including FastMCP runtime equivalence")]
+[group('contracts')]
+adapter-contracts-check: adapter-contracts-governance
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_adapter_contracts.py
+
+[doc("Generate adapter Contract-IR outputs twice and compare exact bytes")]
+[group('contracts')]
+adapter-contracts-repro-check:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py repro-check
+
+[doc("Benchmark adapter model import, schema build, validation, and serialization")]
+[group('perf')]
+adapter-contracts-bench:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/benchmark_adapter_contracts.py
+
+[doc("Prove Tier-A command coverage and materialize the exact current graph")]
+[group('gate')]
+proof-coverage-check: contracts-tooling-lint
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_proof_coverage.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/proof_coverage.py
 
 [doc("Verify committed Protobuf outputs and generator identity")]
 [group('contracts')]
 proto-check:
+    ./scripts/proto_dependency_check.sh
     cargo check --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen
     cargo clippy --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen -- -D warnings
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/proto/generate.py
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/proto/generate.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/proto/generate.py tooling/proto/test_generate.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/proto/generate.py tooling/proto/test_generate.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/proto/test_generate.py codefabric-cpg-mcp/tests/test_proto.py
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py check
 
 [doc("Generate twice in isolated roots and compare byte digests")]
@@ -261,7 +314,7 @@ proto-repro-check: proto-check
 
 [doc("Verify the AC-G-05 tree, JCS corpus, generated bytes, and negative fixtures")]
 [group('contracts')]
-contracts-verify:
+contracts-verify: schema-check fixture-check
     cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- verify --profile full
     ./scripts/contracts_negative_check.sh
 
@@ -287,7 +340,7 @@ seed-zero-state-check:
 
 [doc("Run structural, graph-policy, and generated-artifact governance")]
 [group('gate')]
-governance: governance-scan duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check
+governance: governance-scan duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
@@ -465,6 +518,17 @@ proto-gen:
 [group('mutating')]
 contracts-gen:
     cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- generate
+
+[confirm("Regenerate committed Pydantic models and schema resources from Contract IR. Continue?")]
+[doc("MUTATES: regenerate adapter models, schemas, and fingerprints")]
+[group('mutating')]
+adapter-contracts-gen:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py write
+
+[doc("MUTATES: emit fixture candidates to an isolated review directory")]
+[group('mutating')]
+fixture-candidates output_dir="target/fixture-candidates":
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/fixture_candidates.py --output-dir "{{output_dir}}"
 
 [confirm("typos -w rewrites source in place; identifier fixes can be API changes. Continue?")]
 [doc("MUTATES: apply spelling corrections to source")]

@@ -86,8 +86,9 @@ Use targeted structural analysis, not exhaustive file dumping, to identify:
   half-migrated architecture;
 - operational constraints and existing proof or observability surfaces.
 
-Capture only facts that affect design. Put them in the evidence ledger with
-coverage limits.
+Capture only facts that affect design. Record each per `evidence-policy.md`
+§6: the reproducible command plus its coverage envelope; promote any
+invariant asserted twice to a `rules/` governance rule.
 
 ### Phase 3 — Derive required capabilities
 
@@ -122,9 +123,8 @@ Research in this order:
    constraints.
 
 Verify the pinned version and load-bearing APIs using official documentation
-and a minimal import/compile/probe when material. Record `LD-*` decisions as
-`adopt`, `wrap`, `upgrade`, `build`, or `reject`, including custom code
-displaced and lifecycle risk.
+and a minimal import/compile/probe when material. Record `LD-*` decisions
+per the LD block in `artifact-schemas.md` §1.
 
 Do not maximize dependency count. Prefer the option with the best combination
 of capability fit, inspectability, operability, testability, ecosystem health,
@@ -170,7 +170,8 @@ Define:
 Prefer diagrams, signatures, schemas, state machines, or short pseudocode only
 when they carry a design decision. Do not write implementation bodies.
 
-Assign stable IDs to design decisions and invariants.
+Mint a stable ID only for items the plan or another artifact will reference
+(`artifact-schemas.md`, intro rule).
 
 ### Phase 7 — Perform the clean-sheet and legacy challenge
 
@@ -179,8 +180,11 @@ Ask explicitly:
 > Would this still be the preferred design if the current implementation did
 > not exist?
 
-Build the Legacy Disposition Matrix. Every material current surface receives
-one disposition:
+Build the Legacy Disposition Matrix over a generated inventory, not
+open-ended re-reading: enumerate the material surfaces with
+`ast-grep outline <scope> --items exports` (plus `rg --files` over non-code
+surfaces in scope) and cite the generating command in the dossier. Every
+surface in that inventory receives one disposition:
 
 ```text
 preserve | reshape | encapsulate-temporarily | replace | delete | defer
@@ -242,7 +246,9 @@ reports into the dossier.
 
 ### Phase 11 — Write and decide
 
-Write the dossier using the shared schema. Its final section must state one:
+Write the dossier using the shared schema — six core sections, with an
+optional section added only when it carries a decision. Its final section
+must state one:
 
 - `accepted for implementation planning`;
 - `accepted with named assumptions to validate in plan preflight`;

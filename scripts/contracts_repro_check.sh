@@ -9,21 +9,66 @@ trap 'rm -rf "$temporary_root"' EXIT
 cargo build --locked --manifest-path "${repository_root}/Cargo.toml" \
   --no-default-features --features contracts-tooling --bin codefabric-contracts
 
-for isolated in "$temporary_root/first" "$temporary_root/second"; do
+for isolated in "$temporary_root/first" "$temporary_root/second" "$temporary_root/reordered"; do
   mkdir -p "$isolated"
-  cp -R "${repository_root}/contracts" "$isolated/contracts"
-  rm -rf "$isolated/contracts/generated"
+  while IFS= read -r authority_path; do
+    mkdir -p "$(dirname "$isolated/$authority_path")"
+    cp "$repository_root/$authority_path" "$isolated/$authority_path"
+  done < <(
+    jq -r '.artifacts[].authority_path' \
+      "$repository_root/contracts/manifests/suite-manifest.json"
+  )
+  while IFS= read -r compiler_input; do
+    mkdir -p "$(dirname "$isolated/$compiler_input")"
+    cp "$repository_root/$compiler_input" "$isolated/$compiler_input"
+  done < <(
+    jq -r '.artifacts[].generated_outputs[]? |
+      select(.output_kind == "proto-descriptor-census") | .path' \
+      "$repository_root/contracts/manifests/suite-manifest.json"
+  )
+  while IFS= read -r fixture_path; do
+    mkdir -p "$(dirname "$isolated/$fixture_path")"
+    cp "$repository_root/$fixture_path" "$isolated/$fixture_path"
+  done < <(
+    jq -r '.records[].path' \
+      "$repository_root/contracts/manifests/fixture-oracles.json"
+  )
+  if [[ "$isolated" == "$temporary_root/reordered" ]]; then
+    reordered_catalog="$(mktemp "$temporary_root/catalog-reordered.XXXXXX")"
+    jq '.artifacts |= reverse | .resource_budget_profiles |= reverse' \
+      "$isolated/contracts/manifests/suite-manifest.json" > "$reordered_catalog"
+    mv "$reordered_catalog" "$isolated/contracts/manifests/suite-manifest.json"
+  fi
   "$binary" generate --root "$isolated"
 done
 
-diff -ru "$temporary_root/first/contracts/generated" "$temporary_root/second/contracts/generated"
-cmp "$temporary_root/first/src/generated/contracts.rs" \
-  "$temporary_root/second/src/generated/contracts.rs"
-cmp \
-  "$temporary_root/first/codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/_contract_index.py" \
-  "$temporary_root/second/codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/_contract_index.py"
-cmp \
-  "$temporary_root/first/codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/_contract_index.pyi" \
-  "$temporary_root/second/codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/generated/_contract_index.pyi"
+while IFS= read -r output_path; do
+  cmp "$temporary_root/first/$output_path" "$temporary_root/second/$output_path"
+done < <(
+  jq -r '.artifacts[].generated_outputs[]? |
+    select((.producer // "contract-compiler") == "contract-compiler") | .path' \
+    "$repository_root/contracts/manifests/suite-manifest.json"
+)
 
-echo "two isolated contract generations are byte-identical"
+while IFS= read -r output_path; do
+  cmp "$temporary_root/first/$output_path" "$temporary_root/reordered/$output_path"
+done < <(
+  jq -r '.artifacts[].generated_outputs[]? |
+    select((.producer // "contract-compiler") == "contract-compiler") |
+    select(.output_kind == "canonical-registry") | .path' \
+    "$repository_root/contracts/manifests/suite-manifest.json"
+)
+
+index_path="$(jq -r '.artifacts[].generated_outputs[]? |
+    select(.output_kind == "artifact-index") | .path' \
+    "$repository_root/contracts/manifests/suite-manifest.json")"
+for isolated in first reordered; do
+  jq -cS '(.artifacts[] |
+    select(.artifact_id == "codefabric.manifests.suite-manifest") |
+    .source_digest) = "source-only-change"' \
+    "$temporary_root/$isolated/$index_path" > "$temporary_root/$isolated-index-normalized.json"
+done
+cmp "$temporary_root/first-index-normalized.json" \
+  "$temporary_root/reordered-index-normalized.json"
+
+echo "two isolated generations are byte-identical; catalog reorder changes only its source identity"

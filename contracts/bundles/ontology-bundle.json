@@ -1,10 +1,21 @@
 {
   "artifact_id": "codefabric.bundles.ontology-bundle",
   "artifact_kind": "bundle-manifest",
-  "version": "1.0",
+  "artifacts": [],
+  "bundle_digest": "b3:40957b23f9753560244f6a0f7dc865adf23f731c1cc1dbf90b46ed6316d3ec7c",
+  "bundle_kind": "ontology",
+  "bundle_major": 1,
+  "bundle_version": "1.0",
+  "canonical_digest": "b3:a55eb3076b47404317f5aeed310affc034908b57a77b6bd23c187014e783fc0e",
+  "compatibility": {
+    "maximum_consumer_minor": 0,
+    "minimum_consumer_minor": 0
+  },
   "compatible_suite_major": 1,
+  "created_by": {
+    "generator_id": "codefabric-contracts",
+    "generator_version": "1.0"
+  },
   "status": "draft",
-  "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
-  "members": []
+  "version": "1.0"
 }
-

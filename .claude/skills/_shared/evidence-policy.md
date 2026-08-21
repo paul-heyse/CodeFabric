@@ -3,6 +3,23 @@
 Read this reference whenever a skill makes repository-wide, API-level,
 architectural, decommission, or completion claims.
 
+## 0. Governing principle
+
+**Executable beats derived beats recorded.**
+
+- A claim that can be a check — a test, a `rules/` governance rule, a `just`
+  gate, an executable probe — must become one, and is thereafter cited by
+  name rather than re-established by hand.
+- A fact that can be recomputed from ground truth — git history, file
+  digests, the justfile, the generated `contracts/` tree — is derived on
+  demand and never hand-transcribed. The derivation contract lives in
+  `artifact-schemas.md` §8.
+- Hand-written artifacts record only what no tool can produce: decisions,
+  rationale, deviations, failed approaches, assumptions, and open blockers.
+
+This section is the single normative home of the principle. Other policies
+and skills cite `evidence-policy.md §0` instead of restating it.
+
 ## 1. Label the epistemic status of important statements
 
 Keep these categories distinct:
@@ -21,6 +38,11 @@ Do not turn an assumption into plan text that reads like a fact.
 
 ## 2. Match evidence strength to the claim
 
+The strongest evidence is proof by construction: promote the claim to an
+executable check and cite that check by name (§0). The table below governs
+what remains — claims that cannot themselves be a check, or that a check has
+not yet been written for.
+
 | Claim | Minimum evidence |
 |---|---|
 | A file or symbol exists | Current-tree file/symbol lookup |
@@ -30,7 +52,7 @@ Do not turn an assumption into plan text that reads like a fact.
 | A library API is available | Pinned-version official docs plus local import/compile probe when material |
 | A behavior is correct | A test or reproducible oracle that distinguishes pass from fail |
 | A performance claim holds | Representative benchmark with recorded environment and baseline |
-| A plan packet is complete | All declared acceptance evidence and local gates are satisfied |
+| A plan packet is complete | Its named acceptance checks pass at the proving commit and at HEAD; commit ancestry is derived per `artifact-schemas.md` §8 |
 | The implementation is complete | All packets, milestones, decommission obligations, and final gates are proved |
 
 Match the instrument to the claim, per the ladder in `code-intelligence.md`.
@@ -68,15 +90,19 @@ set does not become a global zero-state claim.
 
 ## 4. Baseline and staleness
 
-Every design and plan records a baseline commit or an explicit uncommitted
-working-tree identity. Before execution or review:
+Every design and plan records a baseline as a git ref (plus a working-tree
+digest when the tree was dirty). Staleness is derived, never compared by
+hand: input freshness and drift over the declared scope come from the
+commands in `artifact-schemas.md` §8. The plan's declared-inputs table is
+written once at planning time and thereafter only recomputed by tooling —
+if a recorded digest no longer matches, that is a derivation result to act
+on, not a table to silently re-edit.
 
-1. Compare the current tree with the baseline over the design/plan change
-   surface.
-2. Record drift that invalidates file, symbol, dependency, or API assumptions.
-3. Treat the current repository and verified external API as higher authority
+Two rules survive any amount of drift:
+
+1. Treat the current repository and verified external API as higher authority
    than illustrative plan detail.
-4. Preserve the immutable plan; record execution-time corrections in state.
+2. Preserve the immutable plan; record execution-time corrections in state.
 
 ## 5. Library evidence hierarchy
 
@@ -90,22 +116,28 @@ Use this order:
 
 Record when the runtime version differs from the manifest or lockfile.
 
-## 6. Evidence ledger
+## 6. Recording evidence
 
-For design, audit, and review work, maintain a compact ledger:
+Two rules replace any ledger, table, or per-claim registry:
 
-| ID | Claim | Status | Evidence | Coverage/limits | Used by |
-|---|---|---|---|---|---|
-| E-01 | ... | observed/inferred/assumed | path, symbol, command, doc | ... | D-03, WP02 |
+1. **A load-bearing claim is recorded as the reproducible command that
+   regenerates it, plus its coverage envelope** — never pasted output, never
+   a hand-maintained table row with back-references. Anyone re-running the
+   command re-derives the claim.
+2. **An invariant asserted more than once is promoted** to a test, a `rules/`
+   governance rule, or a `just` recipe, and thereafter cited by name — see
+   "Durable rules" in `code-intelligence.md`. Re-deriving the same invariant
+   by hand in a second artifact or session is a defect, not diligence.
 
-Do not paste raw search output into the artifact. Preserve only the smallest
-evidence needed to reconstruct the decision.
+Preserve only the smallest evidence needed to reconstruct the decision.
 
 ## 7. Prohibitions
 
 - Do not invent file paths, symbols, commands, library APIs, or test results.
 - Do not claim a check passed if it was not run.
 - Do not hide a failed check by weakening the gate without a recorded decision.
+- Do not hand-transcribe a fact a command derives — a digest, a changed-file
+  list, a version pin; cite the deriving command instead.
 - Do not claim a decommission is complete while compatibility aliases, imports,
   dual writes, registrations, configuration, or tests still preserve the old
   authority.

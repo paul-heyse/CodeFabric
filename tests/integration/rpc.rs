@@ -5,6 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use codefabric::rpc::generated::ProbeEnvelope;
@@ -38,6 +39,9 @@ impl WaveZeroProbe for ProbeService {
     ) -> Result<Response<ProbeEnvelope>, Status> {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         let message = request.into_inner();
+        if message.delay_millis > 0 {
+            tokio::time::sleep(Duration::from_millis(u64::from(message.delay_millis))).await;
+        }
         let response_size = usize::try_from(message.response_bytes)
             .map_err(|_| Status::invalid_argument("response size is not representable"))?;
         let payload = if response_size == 0 {
@@ -48,6 +52,7 @@ impl WaveZeroProbe for ProbeService {
         Ok(Response::new(ProbeEnvelope {
             payload,
             response_bytes: 0,
+            ..ProbeEnvelope::default()
         }))
     }
 }
@@ -236,12 +241,36 @@ async fn authenticated_uds_round_trip_propagates_peer_identity() {
         .round_trip(ProbeEnvelope {
             payload: b"codefabric".to_vec(),
             response_bytes: 0,
+            ..ProbeEnvelope::default()
         })
         .await
         .expect("same-UID request")
         .into_inner();
     assert_eq!(response.payload, b"codefabric");
     assert_eq!(server.invocations.load(Ordering::SeqCst), 1);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rust_client_deadline_cancels_a_slow_rpc() {
+    let uid = current_uid();
+    let server = start_authenticated_server(uid, true);
+    let mut client = configured_client(channel(&server.socket).await, true);
+    let mut request = Request::new(ProbeEnvelope {
+        delay_millis: 250,
+        ..ProbeEnvelope::default()
+    });
+    request.set_timeout(Duration::from_millis(10));
+
+    let status = client
+        .round_trip(request)
+        .await
+        .expect_err("deadline must cancel the slow request");
+
+    assert!(matches!(
+        status.code(),
+        tonic::Code::Cancelled | tonic::Code::DeadlineExceeded
+    ));
     server.stop().await;
 }
 
@@ -281,6 +310,7 @@ async fn rust_client_and_server_apply_symmetric_four_mib_limits() {
         .round_trip(ProbeEnvelope {
             payload: vec![0; oversized],
             response_bytes: 0,
+            ..ProbeEnvelope::default()
         })
         .await
         .expect_err("server decode limit");
@@ -294,6 +324,7 @@ async fn rust_client_and_server_apply_symmetric_four_mib_limits() {
         .round_trip(ProbeEnvelope {
             payload: vec![0; oversized],
             response_bytes: 0,
+            ..ProbeEnvelope::default()
         })
         .await
         .expect_err("client encode limit");
@@ -307,6 +338,7 @@ async fn rust_client_and_server_apply_symmetric_four_mib_limits() {
         .round_trip(ProbeEnvelope {
             payload: Vec::new(),
             response_bytes: u32::try_from(oversized).expect("response size"),
+            ..ProbeEnvelope::default()
         })
         .await
         .expect_err("server encode limit");
@@ -320,6 +352,7 @@ async fn rust_client_and_server_apply_symmetric_four_mib_limits() {
         .round_trip(ProbeEnvelope {
             payload: Vec::new(),
             response_bytes: u32::try_from(oversized).expect("response size"),
+            ..ProbeEnvelope::default()
         })
         .await
         .expect_err("client decode limit");
@@ -339,6 +372,7 @@ fn rust_protobuf_matches_the_shared_wire_fixture() {
     let encoded = ProbeEnvelope {
         payload: payload.as_bytes().to_vec(),
         response_bytes: 0,
+        ..ProbeEnvelope::default()
     }
     .encode_to_vec();
     assert_eq!(hex(&encoded), expected);

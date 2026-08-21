@@ -16,8 +16,33 @@
       "digest": "460e2f36a8a61a9972c976adbd20e1a86b82a26cd7bd38840cb1565948475e8f",
       "status": "accepted",
       "applied_during_packet": "WP06"
+    },
+    {
+      "path": "docs/plans/codefabric_model_based_foundation_remediation_implementation_plan_v1_2026-08-20.md",
+      "version": "v1",
+      "digest": "94ef42472e513676f4818908414bd4b4c7d38dac506ccbf6150dda3e968f0adf",
+      "status": "accepted_execution_interlock",
+      "applied_during_packet": "WP07"
     }
   ],
+  "remediation_progress": {
+    "plan_path": "docs/plans/codefabric_model_based_foundation_remediation_implementation_plan_v1_2026-08-20.md",
+    "plan_version": "v1",
+    "plan_digest": "94ef42472e513676f4818908414bd4b4c7d38dac506ccbf6150dda3e968f0adf",
+    "state_path": "docs/plans/state/codefabric-model-based-foundation-remediation_v1_state.json",
+    "status": "local_packets_complete_through_wp08_wp09_pending_external_m01",
+    "completed_milestones": ["M01", "M02", "M03"],
+    "pending_milestone": "M04",
+    "pending_evidence": "GitHub Actions Ubuntu clean-checkout just ci-fast for v4 M01",
+    "acceptance_overlays": {
+      "WP07": "CBEF/path vectors consume corrected dual identities and independent normative KAT policy; generated examples are not normative KAT authorities.",
+      "WP09": "Adapter validation and serialization schemas derive from Contract-IR-generated strict Pydantic models and retain distinct RFC 8785+BLAKE3 fingerprints; independent handwritten adapter schemas are prohibited.",
+      "WP10": "Rust and Python generation consume one grpc_tools-produced FileDescriptorSet; Rust uses compile_fds and no second protoc compiler.",
+      "WP11": "Bundle identities use AC-G-07 over sorted member semantic digests and remain distinct from source identities.",
+      "DO-01": "Wave 17 still owns the production lifespan-owned grpc.aio DaemonClient and runtime lifecycle.",
+      "DO-02": "Wave 18 still owns the four real public FastMCP handlers and published production manifest equivalence."
+    }
+  },
   "design_inputs": {
     "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md": "749a032a21875589ea5e15eb850cb4008269856d6a3aeba9df3ef1ef6ee216fd",
     "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md": "6af32718e3fe0bd5203a3754d7f7affecaefd05c73af6032021540db0dbda4af",
@@ -33,8 +58,8 @@
   "baseline_commit": "a689f1ddf712c0f8fe5cf93d9a50a559f84e4b91",
   "baseline_working_tree_digest": "96caca12cf29ecce3781f0255d2650b2ccf8b8a434301af3d9fc609c8ba3a001",
   "accepted_execution_baseline_commit": "a689f1ddf712c0f8fe5cf93d9a50a559f84e4b91",
-  "current_head": "a689f1ddf712c0f8fe5cf93d9a50a559f84e4b91",
-  "status": "executing",
+  "current_head": "790cc8c45abfb69ec07ca116d1abba6cd35228a6",
+  "status": "interlocked",
   "current_wave": "W1",
   "current_packet": "WP07",
   "acceptance": {
@@ -775,7 +800,7 @@
     },
     "WP07": {
       "title": "CBEF-v1 identity, path canonicalization, and KAT vectors",
-      "status": "not_started",
+      "status": "blocked",
       "dependencies": ["WP06"],
       "started_at": null,
       "completed_at": null,
@@ -785,7 +810,12 @@
       "checks": [],
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        {
+          "kind": "pending_external_clean_checkout",
+          "summary": "The remediation plan is locally complete through WP08 and its WP09 local gates are green, but M04 cannot release v4 WP07 until v4 M01 has a GitHub Actions Ubuntu clean-checkout just ci-fast result."
+        }
+      ]
     },
     "WP08": {
       "title": "Ontology and categorical registries plus state machines",
@@ -1276,6 +1306,6 @@
       "summary": "The non-variadic recipe interpreted the path as another recipe. Direct scoped typos validation was then run against the clarified suite manifest and passed."
     }
   ],
-  "next_action": "Run the WP07 current-tree impact and library preflight, then implement CBEF-v1 identity, path canonicalization, and known-answer vectors against the completed WP06 contract substrate.",
-  "updated_at": "2026-08-20T20:52:52Z"
+  "next_action": "Commit the completed remediation changes and obtain the pending GitHub Actions Ubuntu clean-checkout just ci-fast result; then close remediation WP09/M04 and release v4 WP07 under the recorded overlays.",
+  "updated_at": "2026-08-21T00:43:49Z"
 }

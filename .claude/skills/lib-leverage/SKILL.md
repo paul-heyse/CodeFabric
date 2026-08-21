@@ -35,6 +35,9 @@ Write:
 docs/reviews/lib_leverage_<library>_<YYYY-MM-DD>_vN.md
 ```
 
+Frontmatter per `artifact-schemas.md` §7 (`artifact: lib-leverage`,
+`library`, `version`, `date`, `status`).
+
 Never overwrite a prior review.
 
 ## Review stance
@@ -213,7 +216,7 @@ Use:
 ## O01-O18 Outcome Coverage
 ## Recommended Design/Plan Integration
 ## Validation Probes and Open Questions
-## Evidence Ledger
+## Evidence and Reproduction Commands
 ```
 
 Each opportunity:

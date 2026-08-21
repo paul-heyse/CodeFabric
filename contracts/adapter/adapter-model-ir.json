@@ -1,0 +1,147 @@
+{
+  "artifact_id": "codefabric.adapter.model-ir",
+  "artifact_kind": "manifest",
+  "version": "1.0",
+  "compatible_suite_major": 1,
+  "status": "draft",
+  "canonical_digest": "b3:9b10f70490161d9d306f0b521d768a90c97c20672759e78a7c810feb15b0fa46",
+  "schema_version": 1,
+  "models": [
+    {
+      "name": "SnapshotSummary",
+      "fields": [
+        {"name":"snapshot_id","type":{"kind":"string"},"description":"Immutable snapshot identity."},
+        {"name":"workspace_id","type":{"kind":"string"},"description":"Authorized workspace identity."},
+        {"name":"repository_id","type":{"kind":"optional-string"},"description":"Repository identity when available."},
+        {"name":"worktree_id","type":{"kind":"optional-string"},"description":"Worktree identity when available."},
+        {"name":"source_generation","type":{"kind":"nonnegative-integer"},"description":"Monotonic source generation."},
+        {"name":"source_inventory_digest","type":{"kind":"checksum"},"description":"Canonical source inventory identity."},
+        {"name":"durable_base_publication","type":{"kind":"string"},"description":"Durable publication identity."},
+        {"name":"base_table_version_digest","type":{"kind":"checksum"},"description":"Base table version identity."},
+        {"name":"overlay_generation","type":{"kind":"nonnegative-integer"},"description":"Overlay generation."},
+        {"name":"overlay_checksum","type":{"kind":"checksum"},"description":"Overlay identity."},
+        {"name":"analysis_context_set_id","type":{"kind":"string"},"description":"Analysis-context set identity."},
+        {"name":"analysis_context_ids","type":{"kind":"string-list"},"description":"Ordered analysis-context identities."},
+        {"name":"freshness_state","type":{"kind":"literal","values":["CURRENT","POTENTIALLY_STALE","UNAVAILABLE"]},"description":"Snapshot freshness state."},
+        {"name":"source_trust_state","type":{"kind":"string"},"description":"Source trust state."},
+        {"name":"event_stream_health","type":{"kind":"string"},"description":"Lifecycle event-stream health."},
+        {"name":"git_acceleration_status","type":{"kind":"string"},"description":"Git acceleration status."},
+        {"name":"git_operation_summary","type":{"kind":"optional-json-object"},"description":"Safe Git operation summary."},
+        {"name":"pending_update_count","type":{"kind":"nonnegative-integer"},"description":"Pending update count."},
+        {"name":"ontology_version","type":{"kind":"string"},"description":"Ontology contract version."},
+        {"name":"schema_bundle_version","type":{"kind":"string"},"description":"Schema bundle version."},
+        {"name":"provider_bundle_version","type":{"kind":"string"},"description":"Provider bundle version."},
+        {"name":"derivation_bundle_version","type":{"kind":"string"},"description":"Derivation bundle version."},
+        {"name":"query_language_version","type":{"kind":"string"},"description":"Query-language contract version."},
+        {"name":"capability_summaries","type":{"kind":"json-object-list"},"description":"Explicit public capability summaries."},
+        {"name":"diagnostic_references","type":{"kind":"string-list"},"description":"Safe diagnostic reference identities."}
+      ]
+    },
+    {"name":"QueryCounts","fields":[
+      {"name":"fact_count","type":{"kind":"nonnegative-integer"},"description":"Facts returned."},
+      {"name":"result_count","type":{"kind":"nonnegative-integer"},"description":"Logical query results returned."},
+      {"name":"truncated","type":{"kind":"boolean"},"description":"Whether an explicit limit affected delivery."}
+    ]},
+    {"name":"QueryStatus","fields":[
+      {"name":"query_id","type":{"kind":"string"},"description":"Logical query identity."},
+      {"name":"state","type":{"kind":"literal","values":["COMPLETE","FAILED","CANCELLED","DEADLINE_EXCEEDED"]},"description":"Terminal query state."},
+      {"name":"message","type":{"kind":"optional-string"},"description":"Safe status explanation."}
+    ]},
+    {"name":"ResultResource","fields":[
+      {"name":"uri","type":{"kind":"string"},"description":"Immutable result URI."},
+      {"name":"manifest_uri","type":{"kind":"string"},"description":"Result manifest URI."},
+      {"name":"expires_at","type":{"kind":"string"},"description":"RFC 3339 expiry timestamp."},
+      {"name":"subresource_uris","type":{"kind":"string-list"},"description":"Bounded result subresources."}
+    ]},
+    {"name":"InlineDelivery","fields":[
+      {"name":"mode","type":{"kind":"literal-default","values":["inline"],"default":"inline"},"description":"Inline delivery discriminator."},
+      {"name":"canonical_mime_type","type":{"kind":"literal-default","values":["application/json"],"default":"application/json"},"description":"Canonical response media type."},
+      {"name":"result_bytes","type":{"kind":"nonnegative-integer"},"description":"Exact canonical result size."},
+      {"name":"checksum","type":{"kind":"checksum"},"description":"Canonical result checksum."},
+      {"name":"response","type":{"kind":"json-object"},"description":"Daemon-authoritative canonical response object."}
+    ]},
+    {"name":"ResourceDelivery","fields":[
+      {"name":"mode","type":{"kind":"literal-default","values":["resource"],"default":"resource"},"description":"Resource delivery discriminator."},
+      {"name":"canonical_mime_type","type":{"kind":"literal-default","values":["application/json"],"default":"application/json"},"description":"Canonical response media type."},
+      {"name":"result_bytes","type":{"kind":"nonnegative-integer"},"description":"Exact canonical result size."},
+      {"name":"checksum","type":{"kind":"checksum"},"description":"Canonical result checksum."},
+      {"name":"result_resource","type":{"kind":"model","name":"ResultResource"},"description":"Immutable result resource."},
+      {"name":"preview","type":{"kind":"optional-json-object"},"description":"Optional bounded preview."}
+    ]},
+    {"name":"QueryToolOutput","fields":[
+      {"name":"semantic_request_id","type":{"kind":"string"},"description":"Semantic idempotency identity."},
+      {"name":"mcp_call_id","type":{"kind":"string"},"description":"MCP invocation correlation identity."},
+      {"name":"execution_state","type":{"kind":"literal","values":["COMPLETE","FAILED","CANCELLED","DEADLINE_EXCEEDED"]},"description":"Execution state."},
+      {"name":"availability_state","type":{"kind":"literal","values":["AVAILABLE","PARTIAL","UNAVAILABLE"]},"description":"Availability state."},
+      {"name":"completeness_state","type":{"kind":"literal","values":["COMPLETE","PARTIAL","INDETERMINATE","UNAVAILABLE"]},"description":"Completeness state."},
+      {"name":"freshness_state","type":{"kind":"literal","values":["CURRENT","POTENTIALLY_STALE","UNAVAILABLE"]},"description":"Freshness state."},
+      {"name":"limit_state","type":{"kind":"literal","values":["NOT_APPLIED","EXPLICIT_LIMIT_REACHED","HARD_LIMIT_REJECTED"]},"description":"Limit state."},
+      {"name":"snapshot","type":{"kind":"model","name":"SnapshotSummary"},"description":"Pinned public snapshot."},
+      {"name":"delivery","type":{"kind":"union","name":"Delivery"},"description":"Discriminated delivery result."},
+      {"name":"counts","type":{"kind":"model","name":"QueryCounts"},"description":"Query counts."},
+      {"name":"query_statuses","type":{"kind":"model-list","name":"QueryStatus"},"description":"Per-query terminal statuses."},
+      {"name":"notices","type":{"kind":"string-list"},"description":"Safe public notices."}
+    ]},
+    {"name":"PublicToolMeta","fields":[
+      {"name":"contract_version","type":{"kind":"string"},"description":"Adapter public-contract version."},
+      {"name":"semantic_request_id","type":{"kind":"string"},"description":"Semantic request identity."},
+      {"name":"snapshot_id","type":{"kind":"string"},"description":"Pinned snapshot identity."},
+      {"name":"canonical_response_digest","type":{"kind":"checksum"},"description":"Canonical daemon response identity."},
+      {"name":"daemon_rpc_version","type":{"kind":"string"},"description":"Negotiated daemon RPC version."}
+    ]},
+    {"name":"ValidationIssue","fields":[
+      {"name":"code","type":{"kind":"string"},"description":"Stable validation code."},
+      {"name":"path","type":{"kind":"string-list"},"description":"Safe logical path."},
+      {"name":"message","type":{"kind":"string"},"description":"Safe issue explanation."}
+    ]},
+    {"name":"ValidateQueryOutput","fields":[
+      {"name":"valid","type":{"kind":"boolean"},"description":"Whether the semantic request is valid."},
+      {"name":"request_id","type":{"kind":"string"},"description":"Validation request identity."},
+      {"name":"normalized_request","type":{"kind":"optional-json-object"},"description":"Daemon-normalized semantic request."},
+      {"name":"dependency_graph","type":{"kind":"json-object"},"description":"Resolved dependency graph."},
+      {"name":"resolved_semantics","type":{"kind":"json-object"},"description":"Resolved semantic phrases."},
+      {"name":"capability_requirements","type":{"kind":"json-object-list"},"description":"Required capabilities."},
+      {"name":"resource_estimate","type":{"kind":"json-object"},"description":"Bounded resource estimate."},
+      {"name":"errors","type":{"kind":"model-list","name":"ValidationIssue"},"description":"Validation failures."},
+      {"name":"warnings","type":{"kind":"model-list","name":"ValidationIssue"},"description":"Validation warnings."}
+    ]},
+    {"name":"StatusToolOutput","fields":[
+      {"name":"ready","type":{"kind":"boolean"},"description":"Adapter readiness."},
+      {"name":"workspace_id","type":{"kind":"string"},"description":"Authorized workspace identity."},
+      {"name":"agent_instance_id","type":{"kind":"string"},"description":"Agent instance identity."},
+      {"name":"snapshot","type":{"kind":"optional-model","name":"SnapshotSummary"},"description":"Active snapshot when available."},
+      {"name":"versions","type":{"kind":"json-object"},"description":"Explicit public component versions."},
+      {"name":"supported_languages","type":{"kind":"string-list"},"description":"Supported source languages."},
+      {"name":"supported_request_forms","type":{"kind":"string-list"},"description":"Supported semantic request forms."},
+      {"name":"capability_statuses","type":{"kind":"json-object-list"},"description":"Explicit public capability statuses."},
+      {"name":"freshness_state","type":{"kind":"literal","values":["CURRENT","POTENTIALLY_STALE","UNAVAILABLE"]},"description":"Active freshness state."},
+      {"name":"service_limits","type":{"kind":"json-object"},"description":"Safe hard service limits."},
+      {"name":"notices","type":{"kind":"string-list"},"description":"Safe public notices."}
+    ]},
+    {"name":"InlineReference","fields":[
+      {"name":"mode","type":{"kind":"literal-default","values":["inline"],"default":"inline"},"description":"Inline reference discriminator."},
+      {"name":"media_type","type":{"kind":"string"},"description":"Reference media type."},
+      {"name":"text","type":{"kind":"string"},"description":"Packaged reference content."}
+    ]},
+    {"name":"ResourceReference","fields":[
+      {"name":"mode","type":{"kind":"literal-default","values":["resource"],"default":"resource"},"description":"Resource reference discriminator."},
+      {"name":"uri","type":{"kind":"string"},"description":"Constrained MCP resource URI."},
+      {"name":"media_type","type":{"kind":"string"},"description":"Reference media type."}
+    ]},
+    {"name":"QueryToolInput","fields":[
+      {"name":"request","type":{"kind":"json-object"},"description":"Complete daemon-owned semantic request object."},
+      {"name":"delivery","type":{"kind":"literal-default","values":["automatic","inline","resource"],"default":"automatic"},"description":"MCP delivery preference only."}
+    ]},
+    {"name":"ValidateToolInput","fields":[
+      {"name":"request","type":{"kind":"json-object"},"description":"Complete daemon-owned semantic request object."}
+    ]},
+    {"name":"StatusToolInput","fields":[]},
+    {"name":"ReferenceToolInput","fields":[
+      {"name":"reference","type":{"kind":"literal","values":["agent_guide","query_specification","request_schema","response_schema","query_tool_output_schema","validate_tool_output_schema","status_tool_output_schema","reference_tool_output_schema","recipe_index","capabilities"]},"description":"Constrained packaged reference identity."}
+    ]}
+  ],
+  "unions": [
+    {"name":"Delivery","discriminator":"mode","members":["InlineDelivery","ResourceDelivery"]},
+    {"name":"ReferenceToolOutput","discriminator":"mode","members":["InlineReference","ResourceReference"]}
+  ]
+}

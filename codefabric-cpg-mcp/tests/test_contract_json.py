@@ -5,10 +5,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from blake3 import blake3
 
-from codefabric_cpg_mcp.contracts.generated import (
-    CONTRACT_ARTIFACT_INDEX_DIGEST,
-    CONTRACT_ARTIFACTS,
+from codefabric_cpg_mcp.contracts.index import (
+    artifact_index,
+    artifact_index_bytes,
+    artifact_index_digest,
 )
 from codefabric_cpg_mcp.contracts.json import (
     CanonicalJsonError,
@@ -25,13 +27,22 @@ from codefabric_cpg_mcp.contracts.json import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = json.loads((ROOT / "contracts/fixtures/jcs/vectors.json").read_text(encoding="utf-8"))
+PROJECTION_CORPUS = json.loads(
+    (ROOT / "contracts/fixtures/projections/vectors.json").read_text(encoding="utf-8")
+)
+DIFFERENTIAL_CORPUS = json.loads(
+    (ROOT / "contracts/fixtures/jcs/differential-cases.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("vector", CORPUS["positive"], ids=lambda vector: vector["id"])
 def test_shared_positive_vectors(vector: dict[str, str]) -> None:
     canonical = canonicalize_json(vector["input_json"])
+    expected_raw_digest = bytes.fromhex(vector["checksum"].removeprefix("b3:"))
 
     assert canonical == vector["canonical_utf8"].encode()
+    assert blake3(canonical).digest() == expected_raw_digest
+    assert vector["checksum"] == f"b3:{expected_raw_digest.hex()}"
     assert checksum(canonical) == vector["checksum"]
 
 
@@ -71,13 +82,49 @@ def test_non_string_maps_are_sorted_as_records() -> None:
     assert canonicalize_value(non_string_map_records(entries)) == fixture["canonical_utf8"].encode()
 
 
+@pytest.mark.parametrize("case", DIFFERENTIAL_CORPUS["cases"], ids=lambda case: case["id"])
+def test_output_free_differential_inputs_are_equivalent_and_idempotent(
+    case: dict[str, object],
+) -> None:
+    inputs = case["inputs"]
+    assert isinstance(inputs, list)
+    outputs = [canonicalize_json(value) for value in inputs if isinstance(value, str)]
+
+    assert outputs
+    assert all(output == outputs[0] for output in outputs)
+    assert canonicalize_json(outputs[0]) == outputs[0]
+
+
+@pytest.mark.parametrize("vector", PROJECTION_CORPUS["vectors"], ids=lambda vector: vector["id"])
+def test_shared_projection_vector_blake3_identities(vector: dict[str, str]) -> None:
+    source = vector["source_utf8"].encode()
+    canonical = vector["canonical_utf8"].encode()
+
+    assert checksum(source) == vector["source_digest"]
+    assert blake3(source).digest().hex() == vector["source_digest"].removeprefix("b3:")
+    assert checksum(canonical) == vector["canonical_digest"]
+    assert blake3(canonical).digest().hex() == vector["canonical_digest"].removeprefix("b3:")
+    if identity := vector.get("bundle_identity_utf8"):
+        assert checksum(identity.encode()) == vector["bundle_digest"]
+
+
 def test_utf8_bom_is_rejected() -> None:
     with pytest.raises(CanonicalJsonError, match="BOM"):
         canonicalize_json(b"\xef\xbb\xbf{}")
 
 
-def test_generated_python_index_has_the_exact_source_census() -> None:
-    assert len(CONTRACT_ARTIFACTS) == 50
-    validate_checksum(CONTRACT_ARTIFACT_INDEX_DIGEST)
-    for artifact in CONTRACT_ARTIFACTS:
+def test_packaged_index_has_the_exact_source_census_and_bytes() -> None:
+    catalog = json.loads(
+        (ROOT / "contracts/manifests/suite-manifest.json").read_text(encoding="utf-8")
+    )
+    repository_resource = (
+        ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json"
+    ).read_bytes()
+    index = artifact_index()
+
+    assert artifact_index_bytes() == repository_resource
+    assert len(index.artifacts) == len(catalog["artifacts"])
+    assert artifact_index_digest() == checksum(repository_resource)
+    validate_checksum(artifact_index_digest())
+    for artifact in index.artifacts:
         validate_checksum(artifact.canonical_digest)

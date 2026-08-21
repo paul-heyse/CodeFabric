@@ -1,5 +1,14 @@
 """Machine-contract encoding helpers shared with the Rust daemon."""
 
+from .index import (
+    ArtifactIndex,
+    ArtifactIndexGeneration,
+    ArtifactIndexOutput,
+    ArtifactIndexRecord,
+    artifact_index,
+    artifact_index_bytes,
+    artifact_index_digest,
+)
 from .json import (
     PROFILE,
     CanonicalJsonError,
@@ -16,7 +25,14 @@ from .json import (
 
 __all__ = [
     "PROFILE",
+    "ArtifactIndex",
+    "ArtifactIndexGeneration",
+    "ArtifactIndexOutput",
+    "ArtifactIndexRecord",
     "CanonicalJsonError",
+    "artifact_index",
+    "artifact_index_bytes",
+    "artifact_index_digest",
     "canonicalize_json",
     "canonicalize_value",
     "checksum",

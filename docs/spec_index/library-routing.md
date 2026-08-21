@@ -30,6 +30,10 @@ See [`README.md §2`](./README.md#2-citation-convention) for spec tags.
 | `notify` | `notify_debouncer_full_rust_reference.md` | §0–§40 | `gix-notify-ref` |
 | `fastmcp` | `fastmcp_python_advanced_reference_3.4.7.md` | §0–§37 | `fastmcp-pydantic-ref` |
 | `pydantic` | `pydantic_python_advanced_reference_2.13.4.md` | §0–§51 | `fastmcp-pydantic-ref` |
+| `canon` | `README_canonicalization_library_reference_pack.md` and its version-pinned linked references | per-library sections | `canonicalization-lib-ref` |
+| `grpcio` | `grpcio_python_advanced_reference_1.83.0.md` | §0–§40 | `grpcio-orjson-protobuf-ref` |
+| `protobuf` | `protobuf_python_advanced_reference_7.36.0.md` | §0–§44 | `grpcio-orjson-protobuf-ref` |
+| `orjson` | `orjson_python_advanced_reference_3.12.0.md` | §0–§33 | `grpcio-orjson-protobuf-ref` |
 | `conc` | `rust_parallel_concurrency_stack_reference_2026-08-19.md` | §0–§51 | **none — unrouted** |
 | `tooling` | `rust_development_environment_tooling_agent_reference_2026-08-19.md` | §0–§68 | **none — unrouted** |
 | `ast-grep` | `ast-grep_0.45.1_advanced_reference.md` | §0–§25 | `ast-grep-ripgrep-ref` |
@@ -59,7 +63,7 @@ The heaviest dependency surface in the suite: 199 gix mentions and the whole of 
 | §29 | Application event facade | `notify` §3 core type system · §10 event taxonomy |
 | §30 | Bounded ingress and overflow recovery | `notify` §21 backpressure/burst control · §11 rescan and loss recovery |
 | §31 | Dirty registry | `conc` §32–§36 DashMap |
-| §33 | Source image capture | *(blake3 — no reference; see [gap register](./README.md#74-library-coverage-gaps))* |
+| §33 | Source image capture | `canon` BLAKE3 Rust reference |
 | §34 | Source inventory | `gix` §18 directory walking · §20 status |
 | §35 | Rename and identity policy | `notify` §6 rename normalization · §7 file-ID caches · `gix` §21 rename tracking |
 | §36 | Rescan generation fence | `notify` §11 rescan semantics and loss recovery |
@@ -212,7 +216,7 @@ The heaviest dependency surface in the suite: 199 gix mentions and the whole of 
 | §90 | Provider job interfaces | `conc` §8 Tokio tasks · §13 blocking boundary · §20 Rayon scope |
 | §91 | Canonical graph-projection DTO | `pg` §10 weights as domain data · `arrow` §5 arrays and builders |
 | §97 | Capability gaps | `pyrefly` §17 completeness boundaries · `mir` §58 capability gaps · `pg` catalog-only chapters |
-| `AC-G-30` | Pyrefly sidecar wire protocol | `pyrefly` §21 sidecar protocol · App. A pinned-source sidecar skeleton · `arrow` §10 IPC · *(Protobuf — gap)* |
+| `AC-G-30` | Pyrefly sidecar wire protocol | `pyrefly` §21 sidecar protocol · App. A pinned-source sidecar skeleton · `arrow` §10 IPC · `protobuf` descriptors and schema evolution |
 | `AC-G-31` | rustc extractor protocol | `mir` §6 compiler-wrapper integration with Cargo · §39 extraction protocol and transaction boundaries · §55 daemon architecture |
 | `AC-G-32` | Common asynchronous provider execution interface | `conc` §8 tasks · §12 cancellation safety · §40 admission control |
 | `AC-G-33` | Immutable source snapshot transport | `arrow` §10 IPC · `pyrefly` §22 bootstrap/indexing workflow |
@@ -224,7 +228,7 @@ The heaviest dependency surface in the suite: 199 gix mentions and the whole of 
 
 | SRV § | Subject | Library |
 |---|---|---|
-| §8 · §9 | gRPC over Unix domain socket, Protobuf service | *(no reference — see [gap register](./README.md#74-library-coverage-gaps))* |
+| §8 · §9 | gRPC over Unix domain socket, Protobuf service | `grpcio` channels/servers/UDS · `protobuf` generated API/descriptors/evolution |
 | §18 | Framework and package posture | `fastmcp` §1 installation and dependency policy · `pydantic` §1 version pinning |
 | §19 | Pydantic adapter-contract architecture | `pydantic` §4 `BaseModel` · §9 `ConfigDict` · §10 strict mode · §21 `TypeAdapter` |
 | §20 | Server construction | `fastmcp` §4 server construction and lifecycle · §2 first executable server |
@@ -246,8 +250,8 @@ The heaviest dependency surface in the suite: 199 gix mentions and the whole of 
 | §44 · §45 | One logical response, result subresources | `fastmcp` §6 outputs and content blocks · §7 resource templates |
 | §55 | Settings implementation | `pydantic` §38 source priority · §39 nested env, dotenv, secrets, CLI · §31 `SecretStr` |
 | §56 | Public contracts, daemon DTOs, reusable adapters | `pydantic` §21 `TypeAdapter` reuse · §7 fields and `Annotated` |
-| §57 | Daemon client interface | *(gRPC — gap)* |
-| §58 | Primary tool implementation pattern | `fastmcp` §5 tools · §9 Context · *(orjson — gap)* |
+| §57 | Daemon client interface | `grpcio` §10 `grpc.aio` · deadlines/status/metadata/channel lifecycle |
+| §58 | Primary tool implementation pattern | `fastmcp` §5 tools · §9 Context · canonicalization pack for RFC 8785 request bytes |
 | §59 | Result resources, status, and references | `fastmcp` §7 resources |
 | §60 | Schema generation and STDIO launch | `fastmcp` §27 project configuration and `fastmcp.json` · §28 CLI · `pydantic` §34 validation-vs-serialization schemas |
 | §61 | Security model | `fastmcp` §32 security hardening and governance · `pydantic` §49 serialization exposure and trust boundaries |
@@ -257,8 +261,8 @@ The heaviest dependency surface in the suite: 199 gix mentions and the whole of 
 | §70 | Contract fingerprinting | `fastmcp` §30 fingerprinting · `pydantic` §48 schema snapshots and compatibility contracts |
 | §73–§76 | Process ownership, startup, shutdown, multiple agents | `fastmcp` §19 running and deploying servers · §34 production architecture patterns |
 | §77 · §78 | Dependency and daemon upgrade policy | `fastmcp` §35 upgrade discipline · §36 FastMCP 4 prerelease · `pydantic` §46 2.12→2.13.4 delta · §47 2.14 prerelease |
-| `AC-G-58` | Complete Protobuf service and state machine | *(gRPC/Protobuf — gap)* |
-| `AC-G-63` | Immutable result artifact store | *(SQLite metadata + blake3 — gap)* |
+| `AC-G-58` | Complete Protobuf service and state machine | `grpcio` RPC cardinalities/streaming/deadlines/status · `protobuf` generated API/descriptors/evolution |
+| `AC-G-63` | Immutable result artifact store | `canon` BLAKE3 references · *(SQLite metadata gap)* |
 
 ## 6. `RM` — the roadmap
 
@@ -278,12 +282,12 @@ generated artifacts rather than runtime APIs.
 | Spec § | Subject | Library |
 |---|---|---|
 | `ONT §57` · `ONT AC-G-17` | Rust unsafe/FFI ontology, cross-language FFI linking | PyO3 and Maturin appear as **analysis subjects**, not dependencies — `arrow` §21 PyO3 interop and `tooling` §Maturin cover the mechanics if you need to model expansions |
-| `ONT §64` · `AC-G-12` · `AC-G-13` | Identity and public encoding rules | *(blake3 — gap)* |
+| `ONT §64` · `AC-G-12` · `AC-G-13` | Identity and public encoding rules | `canon` BLAKE3 Rust/Python references |
 | `ONT AC-G-70` · `AC-G-71` | Machine ontology registry, property schema | generates Arrow fields, Delta constraints and Pydantic schemas — `arrow` §3 · `delta` §11 · `pydantic` §34 |
 | `QRY AC-G-46` | Typed internal `PlanSpec` | `df` §19 logical plans · `df-plan` planning track |
 | `QRY AC-G-52` | Query cost model, defaults, hard limits | `df` §22 optimizer · §28 memory management and spilling |
-| `QRY AC-G-53` | Canonical JSON and checksum contract | *(blake3, orjson — gaps)* |
-| `QRY AC-G-56` | Streaming, chunk interning, resumability | `df` §21 streaming execution · *(gRPC streaming — gap)* |
+| `QRY AC-G-53` | Canonical JSON and checksum contract | canonicalization pack (`rfc8785`, `serde_json_canonicalizer`, BLAKE3, strict ingress) |
+| `QRY AC-G-56` | Streaming, chunk interning, resumability | `df` §21 streaming execution · `grpcio` streaming/flow control/cancellation |
 | `QRY AC-G-57` | Query plan cache contract | `df` §22 optimizer · `df-plan` plan caching |
 
 ## 8. Version-pin ledger
@@ -314,24 +318,24 @@ too — it is a decision still open.
 | serde / serde_json / futures / tracing / url / blake3 | `"1"` / `"1"` / `"0.3"` / `"0.1"` / `"2"` / `"1"` | `FAB §2.1` |
 | zstd | codec choice, not a direct dependency — Parquet compression and RPC payload compression; covered by `arrow` §11–§12 | `FAB §97` Parquet writer policy · `SRV AC-G-58` |
 | rayon · crossbeam · dashmap · tokio-rayon | named, **unpinned** | `LIFE §109` · `LIFE §155` |
-| gRPC / Protobuf | Python `grpcio` + `protobuf` "pinned in the lockfile after compatibility testing"; **Rust side names no crate** | `SRV §18` |
+| gRPC / Protobuf | Python `grpcio==1.83.0`, `protobuf==7.36.0`; build-only `grpcio-tools==1.83.0`; Rust consumes the same descriptor IR through pinned Prost/Tonic generation APIs | `SRV §18` · `SUITE AC-G-05` |
 | SQLite | embedded, WAL mode; **no crate named** — `LIFE AC-G-27` only excludes RocksDB, redb, and independent append journals | `FAB §13` · `LIFE §130` · `LIFE AC-G-27` |
-| orjson | named, **unpinned** | `SRV §18` |
 
 `FAB §2.2` states the version-alignment invariant these pins serve: one Arrow major/minor
 family, one matching Parquet family, one DataFusion family, one `object_store` family, one
 pinned delta-rs revision — and CI rejects duplicates that cross public type boundaries.
 
-`SUITE AC-G-02` requires a normative version for every artifact and `SUITE AC-G-03` a
-fail-fast compatibility matrix; the two unpinned entries above and the two unnamed crates are
-what those contracts will have to close.
+`SUITE AC-G-02` requires a normative version and separate semantic/source identities for
+every artifact; `SUITE AC-G-03` requires a fail-fast compatibility matrix. Remaining
+unnamed implementation crates must be closed by the owning wave before adoption.
 
 ## 9. Grep hazards in this corpus
 
 - `rg -i arrow` over `ONT`/`QRY` is roughly 80% false positives — `NARROWS_TO`, "narrowing".
   Use `rg -w 'Arrow'`.
 - `rg -i chrono` matches "asynchronous" and "synchronous". `chrono` has **zero** real mentions.
-- `rg -i tonic` matches "monotonic" throughout. There are no `tonic` mentions.
+- `rg -i tonic` is dominated by false-positive "monotonic" matches. Use `rg -w 'Tonic|tonic'`
+  for the intentional Prost/Tonic descriptor-generation references.
 - `docs/library_ref/` is ~9 MB of prose. Scope searches with `-g '!docs/library_ref/**'` unless
   that is what you are searching.
 
@@ -339,8 +343,7 @@ what those contracts will have to close.
 
 Summarized here, detailed in [`README.md §7.4`](./README.md#74-library-coverage-gaps):
 
-- **No reference document**: gRPC/Protobuf service authoring, embedded SQLite, `blake3`,
-  `orjson`.
+- **No reference document**: embedded SQLite.
 - **Reference exists, no skill routes it**: `conc`
   (`rust_parallel_concurrency_stack_reference_2026-08-19.md`) and `tooling`
   (`rust_development_environment_tooling_agent_reference_2026-08-19.md`). Between them they
