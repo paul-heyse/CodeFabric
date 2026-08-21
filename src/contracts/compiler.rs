@@ -1206,7 +1206,7 @@ fn validate_cbef_contract(
         }
     }
 
-    const DOMAIN_NAMES: [&str; 16] = [
+    const DOMAIN_NAMES: [&str; 17] = [
         "WORKSPACE",
         "REPOSITORY",
         "WORKTREE",
@@ -1223,8 +1223,9 @@ fn validate_cbef_contract(
         "RESULT_ARTIFACT",
         "SOURCE_CONTEXT",
         "UNKNOWN_REMAINDER",
+        "ROOT_AUTHORIZATION",
     ];
-    const PREFIXES: [&str; 16] = [
+    const PREFIXES: [&str; 17] = [
         "workspace",
         "repository",
         "worktree",
@@ -1241,6 +1242,7 @@ fn validate_cbef_contract(
         "artifact",
         "source-context",
         "unknown",
+        "root-authorization",
     ];
     validate_canonical_sequence(
         path,

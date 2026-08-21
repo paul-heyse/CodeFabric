@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:6e1676db70ef175bc81ce857f4594c462a6374a512a7ef4d5f2fcdd2a7652a74; codefabric-schema-contracts-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:8f9e1ed9f532a518bfd4e7b7ec398a119845c2f8cdb26da691b6e1227c2b1c30; codefabric-schema-contracts-v1; do not edit.
 
 const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
     GeneratedTableSpec {

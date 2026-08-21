@@ -2,6 +2,56 @@
 
 include!("generated/registries.rs");
 
+/// Closed failure returned when no generated state-machine edge matches an event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StateTransitionViolation {
+    pub prior_state: String,
+    pub event: String,
+    pub guard: String,
+    pub error_code: &'static str,
+}
+
+/// Resolve one transition solely from a generated transition table.
+///
+/// # Errors
+///
+/// Returns `STATE_TRANSITION_VIOLATION` when the state, event, and proven guard do not
+/// identify exactly one generated edge.
+pub fn generated_transition(
+    transitions: &'static [StateTransitionEntry],
+    prior_state: &str,
+    event: &str,
+    guard: &str,
+) -> Result<&'static StateTransitionEntry, StateTransitionViolation> {
+    let mut matches = transitions.iter().filter(|transition| {
+        transition.from == prior_state && transition.event == event && transition.guard == guard
+    });
+    let transition = matches.next().ok_or_else(|| StateTransitionViolation {
+        prior_state: prior_state.to_owned(),
+        event: event.to_owned(),
+        guard: guard.to_owned(),
+        error_code: "STATE_TRANSITION_VIOLATION",
+    })?;
+    if matches.next().is_some() {
+        return Err(StateTransitionViolation {
+            prior_state: prior_state.to_owned(),
+            event: event.to_owned(),
+            guard: guard.to_owned(),
+            error_code: "STATE_TRANSITION_VIOLATION",
+        });
+    }
+    Ok(transition)
+}
+
+/// Resolve a generated registry code to its canonical state name.
+#[must_use]
+pub fn registry_state_name(values: &[RegistryEntry], code: u16) -> Option<&'static str> {
+    values
+        .iter()
+        .find(|entry| entry.code == code)
+        .map(|entry| entry.name)
+}
+
 #[cfg(all(test, feature = "canonical-json"))]
 mod tests {
     use std::any::TypeId;

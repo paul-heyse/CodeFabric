@@ -293,6 +293,7 @@ impl SchemaContractIr {
             "hot_overlay_manifest",
             "nested_root_exclusion",
             "provider_run",
+            "repository_registration",
             "result_artifact_lease",
             "serving_snapshot_manifest",
             "snapshot_lease",
@@ -300,6 +301,7 @@ impl SchemaContractIr {
             "update_wave_item",
             "workspace_generation",
             "workspace_registration",
+            "worktree_registration",
             "worktree_state",
         ]);
         if operational_names != expected_operational_names {

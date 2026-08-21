@@ -4,7 +4,7 @@
   "artifacts": [
     {
       "artifact_id": "codefabric.identity.cbef-v1",
-      "canonical_digest": "b3:50dd3315b6e10cf6d0df710d70e9b2d1d59545d8c2d5c7a4ec426c101a7fc0f3",
+      "canonical_digest": "b3:a749eca0307587c485412a1ce9770947068f8d44f2d8e23381a433a4e9dee252",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -73,11 +73,11 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:c0e999fa851155c70051c9415636c75c5b0cd80bdd64748a9a0846b0e971bf18",
+  "bundle_digest": "b3:d74a8d2a7bf0de2fb8eb0319cb3fbe7cb0329a406426c5ca7a20c7aa77ccf2a0",
   "bundle_kind": "ontology",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:09f8076c7c1111c8233d92c1345f1b99fb6ea4f4e65f2b6102d9732ff2e17856",
+  "canonical_digest": "b3:9a0846c9760b7b530b5a18d54555dd97d22273ca0e163ac17218c440cdb3ace5",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0

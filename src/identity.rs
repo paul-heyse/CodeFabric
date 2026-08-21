@@ -40,6 +40,7 @@ pub enum IdentityDomain {
     ResultArtifact = 14,
     SourceContext = 15,
     UnknownRemainder = 16,
+    RootAuthorization = 17,
 }
 
 impl IdentityDomain {
@@ -62,6 +63,7 @@ impl IdentityDomain {
             14 => Ok(Self::ResultArtifact),
             15 => Ok(Self::SourceContext),
             16 => Ok(Self::UnknownRemainder),
+            17 => Ok(Self::RootAuthorization),
             _ => Err(IdentityError::UnknownDomain(code)),
         }
     }
@@ -83,6 +85,7 @@ impl IdentityDomain {
             Self::ResultArtifact => "artifact",
             Self::SourceContext => "source-context",
             Self::UnknownRemainder => "unknown",
+            Self::RootAuthorization => "root-authorization",
         }
     }
 
@@ -244,6 +247,8 @@ pub enum IdentityError {
     PathCollision,
     #[error("filesystem case-sensitivity probe failed: {0}")]
     CaseProbe(String),
+    #[error("registration nonce generation failed: {0}")]
+    Random(String),
 }
 
 fn normalized(value: &str, rule: StringNormalization) -> Result<String, IdentityError> {
@@ -587,6 +592,191 @@ pub fn derive_identity(record: &CbefRecord) -> Result<DerivedIdentity, IdentityE
         full_digest,
         preimage,
     })
+}
+
+/// Generate one operating-system-random 128-bit registration nonce.
+///
+/// # Errors
+///
+/// Returns an error when the operating-system random source cannot fill the nonce.
+pub fn random_registration_nonce() -> Result<[u8; 16], IdentityError> {
+    let mut nonce = [0_u8; 16];
+    let mut source = std::fs::File::open("/dev/urandom")
+        .map_err(|error| IdentityError::Random(error.to_string()))?;
+    std::io::Read::read_exact(&mut source, &mut nonce)
+        .map_err(|error| IdentityError::Random(error.to_string()))?;
+    Ok(nonce)
+}
+
+/// Derive the AC-G-09 workspace registration identity.
+///
+/// # Errors
+///
+/// Returns an error when the workspace kind is not valid canonical `ASCII` text.
+pub fn workspace_registration_identity(
+    registration_nonce: [u8; 16],
+    workspace_kind: &str,
+) -> Result<DerivedIdentity, IdentityError> {
+    derive_identity(&CbefRecord {
+        domain: IdentityDomain::Workspace,
+        fields: vec![
+            CbefField {
+                tag: 1,
+                value: CbefValue::Bytes(registration_nonce.to_vec()),
+            },
+            CbefField {
+                tag: 2,
+                value: CbefValue::Utf8 {
+                    value: workspace_kind.to_owned(),
+                    normalization: StringNormalization::AsciiLower,
+                },
+            },
+        ],
+    })
+}
+
+/// Derive the AC-G-09 repository registration identity.
+///
+/// # Errors
+///
+/// Returns an error only if the closed CBEF recipe cannot be encoded.
+pub fn repository_registration_identity(
+    registration_nonce: [u8; 16],
+) -> Result<DerivedIdentity, IdentityError> {
+    derive_identity(&CbefRecord {
+        domain: IdentityDomain::Repository,
+        fields: vec![CbefField {
+            tag: 1,
+            value: CbefValue::Bytes(registration_nonce.to_vec()),
+        }],
+    })
+}
+
+/// Derive the AC-G-09 worktree registration identity.
+///
+/// # Errors
+///
+/// Returns an error when the worktree kind is not valid canonical `ASCII` text.
+pub fn worktree_registration_identity(
+    repository_id: [u8; 16],
+    registration_nonce: [u8; 16],
+    worktree_kind: &str,
+) -> Result<DerivedIdentity, IdentityError> {
+    derive_identity(&CbefRecord {
+        domain: IdentityDomain::Worktree,
+        fields: vec![
+            CbefField {
+                tag: 1,
+                value: CbefValue::Id(repository_id),
+            },
+            CbefField {
+                tag: 2,
+                value: CbefValue::Bytes(registration_nonce.to_vec()),
+            },
+            CbefField {
+                tag: 3,
+                value: CbefValue::Utf8 {
+                    value: worktree_kind.to_owned(),
+                    normalization: StringNormalization::AsciiLower,
+                },
+            },
+        ],
+    })
+}
+
+/// Derive the context-set identity for one workspace and its exact context membership.
+///
+/// # Errors
+///
+/// Returns an error only if the closed CBEF recipe cannot be encoded.
+pub fn context_set_identity(
+    workspace_id: [u8; 16],
+    context_ids: &[[u8; 16]],
+) -> Result<DerivedIdentity, IdentityError> {
+    derive_identity(&CbefRecord {
+        domain: IdentityDomain::ContextSet,
+        fields: vec![
+            CbefField {
+                tag: 1,
+                value: CbefValue::Id(workspace_id),
+            },
+            CbefField {
+                tag: 2,
+                value: CbefValue::Set(context_ids.iter().copied().map(CbefValue::Id).collect()),
+            },
+        ],
+    })
+}
+
+/// AC-G-11 root-authorization fields whose CBEF digest is persisted as the fingerprint.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RootAuthorizationInput {
+    pub workspace_id: [u8; 16],
+    pub root_path_bytes: Vec<u8>,
+    pub root_directory_file_identity: Vec<u8>,
+    pub platform_code: u8,
+    pub case_sensitivity_mode: String,
+    pub authorization_revision: u64,
+    pub allowed_source_disclosure_rules: Vec<String>,
+}
+
+/// Derive the full AC-G-11 root-authorization fingerprint from one closed CBEF record.
+///
+/// # Errors
+///
+/// Returns an error when a path, platform, case mode, or disclosure rule is invalid.
+pub fn root_authorization_fingerprint(
+    input: &RootAuthorizationInput,
+) -> Result<[u8; 32], IdentityError> {
+    let identity = derive_identity(&CbefRecord {
+        domain: IdentityDomain::RootAuthorization,
+        fields: vec![
+            CbefField {
+                tag: 1,
+                value: CbefValue::Id(input.workspace_id),
+            },
+            CbefField {
+                tag: 2,
+                value: CbefValue::RawPath {
+                    platform_code: input.platform_code,
+                    bytes: input.root_path_bytes.clone(),
+                },
+            },
+            CbefField {
+                tag: 3,
+                value: CbefValue::Bytes(input.root_directory_file_identity.clone()),
+            },
+            CbefField {
+                tag: 4,
+                value: CbefValue::Unsigned(vec![input.platform_code]),
+            },
+            CbefField {
+                tag: 5,
+                value: CbefValue::Utf8 {
+                    value: input.case_sensitivity_mode.clone(),
+                    normalization: StringNormalization::AsciiLower,
+                },
+            },
+            CbefField {
+                tag: 6,
+                value: CbefValue::Unsigned(input.authorization_revision.to_be_bytes().to_vec()),
+            },
+            CbefField {
+                tag: 7,
+                value: CbefValue::Set(
+                    input
+                        .allowed_source_disclosure_rules
+                        .iter()
+                        .map(|value| CbefValue::Utf8 {
+                            value: value.clone(),
+                            normalization: StringNormalization::AsciiLower,
+                        })
+                        .collect(),
+                ),
+            },
+        ],
+    })?;
+    Ok(identity.full_digest)
 }
 
 /// Collision-diagnostic registry retaining full digests and exact preimages.
@@ -1305,14 +1495,14 @@ mod tests {
             fields: vec![
                 CbefField {
                     tag: 1,
-                    value: CbefValue::Utf8 {
-                        value: "Example".to_owned(),
-                        normalization: StringNormalization::AsciiLower,
-                    },
+                    value: CbefValue::Bytes(vec![0x11; 16]),
                 },
                 CbefField {
                     tag: 2,
-                    value: CbefValue::Digest([0x11; 32]),
+                    value: CbefValue::Utf8 {
+                        value: "Directory".to_owned(),
+                        normalization: StringNormalization::AsciiLower,
+                    },
                 },
             ],
         }
@@ -1497,6 +1687,7 @@ mod tests {
     #[test]
     fn wp07_structural_acceptance() {
         assert_eq!(IdentityDomain::UnknownRemainder as u16, 16);
+        assert_eq!(IdentityDomain::RootAuthorization as u16, 17);
         assert_eq!(TypeConstructor::BoundVariable as u16 + 1, 35);
         let codes = (0_u8..=12)
             .map(CbefTypeCode::from_code)

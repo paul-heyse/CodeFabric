@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:b311fadc860762595be32821eea279651f6920c80eb0b862da8359ae9fd7b7a3"
+canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679"
 records:
   - machine_id: WorkspaceLifecycle
     version: "1.0"
@@ -180,8 +180,10 @@ records:
       - {from: DISABLED, event: remove, guard: no-active-leases, to: REMOVING, actions: [stop-workspace], idempotency_key: registry:remove, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: OPENING, event: root-opened, guard: root-identity-matches, to: BOOTSTRAPPING, actions: [start-inventory], idempotency_key: registry:bootstrap, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: OPENING, event: open-failed, guard: terminal-root-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: registry:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: OPENING, event: disable, guard: operator-authorized, to: DISABLING, actions: [cancel-open, stop-watchers, stop-providers], idempotency_key: registry:disable, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: BOOTSTRAPPING, event: first-snapshot-active, guard: snapshot-valid, to: READY, actions: [publish-readiness], idempotency_key: registry:ready, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: BOOTSTRAPPING, event: bootstrap-failed, guard: terminal-build-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: registry:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: BOOTSTRAPPING, event: disable, guard: operator-authorized, to: DISABLING, actions: [cancel-bootstrap, stop-watchers, stop-providers], idempotency_key: registry:disable, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: READY, event: source-degraded, guard: source-not-current, to: DEGRADED, actions: [preserve-last-snapshot], idempotency_key: registry:degraded, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: READY, event: disable, guard: operator-authorized, to: DISABLING, actions: [stop-watchers, stop-providers], idempotency_key: registry:disable, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: DEGRADED, event: source-current, guard: reconciliation-complete, to: READY, actions: [publish-readiness], idempotency_key: registry:ready, error_on_illegal: STATE_TRANSITION_VIOLATION}

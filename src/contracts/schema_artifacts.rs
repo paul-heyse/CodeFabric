@@ -763,6 +763,8 @@ mod tests {
             "nested_root_exclusion",
             "credential_metadata",
             "audit_event",
+            "repository_registration",
+            "worktree_registration",
             "common_repository_state",
             "worktree_state",
             "git_state_vector",

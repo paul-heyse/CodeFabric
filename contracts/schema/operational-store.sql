@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir b3:6e1676db70ef175bc81ce857f4594c462a6374a512a7ef4d5f2fcdd2a7652a74; codefabric-schema-contracts-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir b3:8f9e1ed9f532a518bfd4e7b7ec398a119845c2f8cdb26da691b6e1227c2b1c30; codefabric-schema-contracts-v1; do not edit.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE workspace_registration (
@@ -8,6 +8,11 @@ CREATE TABLE workspace_registration (
   administrative_key BLOB NOT NULL,
   root_path_bytes BLOB NOT NULL,
   root_path_display TEXT NOT NULL,
+  root_directory_file_identity BLOB NOT NULL,
+  platform_code INTEGER NOT NULL,
+  case_sensitivity_mode TEXT NOT NULL,
+  authorization_revision INTEGER NOT NULL,
+  allowed_source_disclosure_rules BLOB NOT NULL,
   repository_id BLOB,
   worktree_id BLOB,
   authorization_fingerprint BLOB NOT NULL,
@@ -15,8 +20,7 @@ CREATE TABLE workspace_registration (
   status_code INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (workspace_id),
-  UNIQUE (administrative_key)
+  PRIMARY KEY (workspace_id)
 ) STRICT;
 
 CREATE TABLE workspace_generation (
@@ -62,6 +66,24 @@ CREATE TABLE audit_event (
   details_digest BLOB NOT NULL,
   diagnostic_id BLOB,
   PRIMARY KEY (event_id)
+) STRICT;
+
+CREATE TABLE repository_registration (
+  repository_id BLOB NOT NULL,
+  repository_registration_nonce BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (repository_id)
+) STRICT;
+
+CREATE TABLE worktree_registration (
+  worktree_id BLOB NOT NULL,
+  repository_id BLOB NOT NULL,
+  worktree_registration_nonce BLOB NOT NULL,
+  worktree_kind TEXT NOT NULL,
+  administrative_key BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  removed_at TEXT,
+  PRIMARY KEY (worktree_id)
 ) STRICT;
 
 CREATE TABLE common_repository_state (

@@ -285,6 +285,12 @@ fn registry_value(
 }
 
 fn pascal_case(value: &str) -> String {
+    if !value.contains('_')
+        && value.chars().any(char::is_lowercase)
+        && value.chars().next().is_some_and(char::is_uppercase)
+    {
+        return value.to_owned();
+    }
     value
         .split('_')
         .filter(|part| !part.is_empty())

@@ -2453,6 +2453,19 @@ STATE_TRANSITIONS = MappingProxyType(
                 "STATE_TRANSITION_VIOLATION",
             ),
             (
+                "OPENING",
+                "disable",
+                "operator-authorized",
+                "DISABLING",
+                (
+                    "cancel-open",
+                    "stop-watchers",
+                    "stop-providers",
+                ),
+                "registry:disable",
+                "STATE_TRANSITION_VIOLATION",
+            ),
+            (
                 "BOOTSTRAPPING",
                 "first-snapshot-active",
                 "snapshot-valid",
@@ -2468,6 +2481,19 @@ STATE_TRANSITIONS = MappingProxyType(
                 "FAILED",
                 ("publish-diagnostic",),
                 "registry:failed",
+                "STATE_TRANSITION_VIOLATION",
+            ),
+            (
+                "BOOTSTRAPPING",
+                "disable",
+                "operator-authorized",
+                "DISABLING",
+                (
+                    "cancel-bootstrap",
+                    "stop-watchers",
+                    "stop-providers",
+                ),
+                "registry:disable",
                 "STATE_TRANSITION_VIOLATION",
             ),
             (

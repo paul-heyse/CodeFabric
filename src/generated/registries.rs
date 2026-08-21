@@ -749,14 +749,14 @@ pub const RESOURCE_KIND_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
-pub enum Workspacelifecycle {
+pub enum WorkspaceLifecycle {
     Bootstrapping = 10,
     Ready = 20,
     Degraded = 30,
     Disabled = 40,
     Failed = 50,
 }
-impl TryFrom<u16> for Workspacelifecycle {
+impl TryFrom<u16> for WorkspaceLifecycle {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, Self::Error> {
         match code {
@@ -779,7 +779,7 @@ pub const WORKSPACE_LIFECYCLE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
-pub enum Updatewavestate {
+pub enum UpdateWaveState {
     Collecting = 10,
     Snapshotting = 20,
     Running = 30,
@@ -788,7 +788,7 @@ pub enum Updatewavestate {
     Failed = 60,
     Superseded = 70,
 }
-impl TryFrom<u16> for Updatewavestate {
+impl TryFrom<u16> for UpdateWaveState {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, Self::Error> {
         match code {
@@ -815,14 +815,14 @@ pub const UPDATE_WAVE_STATE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
-pub enum Artifactstate {
+pub enum ArtifactState {
     Building = 10,
     Ready = 20,
     Active = 30,
     Expired = 40,
     Failed = 50,
 }
-impl TryFrom<u16> for Artifactstate {
+impl TryFrom<u16> for ArtifactState {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, Self::Error> {
         match code {
@@ -845,7 +845,7 @@ pub const ARTIFACT_STATE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
-pub enum Workspaceregistrylifecycle {
+pub enum WorkspaceRegistryLifecycle {
     Registering = 10,
     Disabled = 20,
     Opening = 30,
@@ -857,7 +857,7 @@ pub enum Workspaceregistrylifecycle {
     Removed = 90,
     Failed = 100,
 }
-impl TryFrom<u16> for Workspaceregistrylifecycle {
+impl TryFrom<u16> for WorkspaceRegistryLifecycle {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, Self::Error> {
         match code {
@@ -1032,8 +1032,10 @@ pub const WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS: &[StateTransitionEntry] = &[
     StateTransitionEntry { from: "DISABLED", event: "remove", guard: "no-active-leases", to: "REMOVING", actions: &["stop-workspace"], idempotency_key: "registry:remove", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "OPENING", event: "root-opened", guard: "root-identity-matches", to: "BOOTSTRAPPING", actions: &["start-inventory"], idempotency_key: "registry:bootstrap", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "OPENING", event: "open-failed", guard: "terminal-root-error", to: "FAILED", actions: &["publish-diagnostic"], idempotency_key: "registry:failed", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "OPENING", event: "disable", guard: "operator-authorized", to: "DISABLING", actions: &["cancel-open", "stop-watchers", "stop-providers"], idempotency_key: "registry:disable", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "BOOTSTRAPPING", event: "first-snapshot-active", guard: "snapshot-valid", to: "READY", actions: &["publish-readiness"], idempotency_key: "registry:ready", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "BOOTSTRAPPING", event: "bootstrap-failed", guard: "terminal-build-error", to: "FAILED", actions: &["publish-diagnostic"], idempotency_key: "registry:failed", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "BOOTSTRAPPING", event: "disable", guard: "operator-authorized", to: "DISABLING", actions: &["cancel-bootstrap", "stop-watchers", "stop-providers"], idempotency_key: "registry:disable", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "READY", event: "source-degraded", guard: "source-not-current", to: "DEGRADED", actions: &["preserve-last-snapshot"], idempotency_key: "registry:degraded", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "READY", event: "disable", guard: "operator-authorized", to: "DISABLING", actions: &["stop-watchers", "stop-providers"], idempotency_key: "registry:disable", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "DEGRADED", event: "source-current", guard: "reconciliation-complete", to: "READY", actions: &["publish-readiness"], idempotency_key: "registry:ready", error_on_illegal: "STATE_TRANSITION_VIOLATION" },

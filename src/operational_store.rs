@@ -1,6 +1,6 @@
 //! Catalog-generated `SQLite` operational state with one logical writer.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
@@ -13,11 +13,12 @@ use thiserror::Error;
 
 use crate::contracts::index::artifact_index;
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str = include_str!("../contracts/schema/operational-store.sql");
 const SCHEMA_IR_ARTIFACT_ID: &str = "codefabric.schema.contract-ir";
 static OPEN_WRITERS: OnceLock<Mutex<BTreeSet<PathBuf>>> = OnceLock::new();
+type GeneratedColumnShapes = BTreeMap<String, Vec<(String, String, bool)>>;
 
 /// Registered deterministic failure seams for migration and transaction recovery tests.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -207,13 +208,27 @@ impl OperationalStore {
     /// # Errors
     ///
     /// Returns an ownership, `SQLite`, caller, or injected-fault error.
-    pub fn write_transaction<T>(
+    pub fn write_transaction<T, E>(
         &mut self,
-        operation: impl FnOnce(&Transaction<'_>) -> Result<T, OperationalStoreError>,
-    ) -> Result<T, OperationalStoreError> {
-        self.write_transaction_with_fault(operation, None)
+        operation: impl FnOnce(&Transaction<'_>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<OperationalStoreError>,
+    {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(OperationalStoreError::from)
+            .map_err(E::from)?;
+        let result = operation(&transaction)?;
+        transaction
+            .commit()
+            .map_err(OperationalStoreError::from)
+            .map_err(E::from)?;
+        Ok(result)
     }
 
+    #[cfg(test)]
     fn write_transaction_with_fault<T>(
         &mut self,
         operation: impl FnOnce(&Transaction<'_>) -> Result<T, OperationalStoreError>,
@@ -300,29 +315,30 @@ impl OperationalStore {
 
     fn migrate_from(
         &mut self,
-        mut version: u32,
+        version: u32,
         fault: Option<StoreFaultPoint>,
     ) -> Result<(), OperationalStoreError> {
-        while version < SCHEMA_VERSION {
-            let target = version + 1;
-            let backup_path = next_migration_backup_path(&self.database_path, target);
-            self.backup_to(&backup_path)?;
-            let transaction = self
-                .connection
-                .transaction_with_behavior(TransactionBehavior::Immediate)?;
-            match target {
-                1 => transaction.execute_batch(OPERATIONAL_DDL)?,
-                _ => unreachable!("migration target is bounded by SCHEMA_VERSION"),
+        let backup_path = next_migration_backup_path(&self.database_path, SCHEMA_VERSION);
+        self.backup_to(&backup_path)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        match version {
+            0 => transaction.execute_batch(OPERATIONAL_DDL)?,
+            1 => migrate_v1_to_v2(&transaction)?,
+            _ => {
+                return Err(OperationalStoreError::DdlLineage(format!(
+                    "no migration is registered from schema {version}"
+                )));
             }
-            if fault == Some(StoreFaultPoint::MigrationBeforeCommit) {
-                return Err(OperationalStoreError::InjectedFault(
-                    StoreFaultPoint::MigrationBeforeCommit,
-                ));
-            }
-            transaction.pragma_update(None, "user_version", target)?;
-            transaction.commit()?;
-            version = target;
         }
+        if fault == Some(StoreFaultPoint::MigrationBeforeCommit) {
+            return Err(OperationalStoreError::InjectedFault(
+                StoreFaultPoint::MigrationBeforeCommit,
+            ));
+        }
+        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -339,8 +355,60 @@ impl OperationalStore {
                 "database table census differs: expected {expected:?}, found {actual:?}"
             )));
         }
+        let expected_columns = generated_column_shapes()?;
+        for (table, expected) in expected_columns {
+            let mut statement = self.connection.prepare(
+                "SELECT name, type, \"notnull\" FROM pragma_table_info(?1) ORDER BY cid",
+            )?;
+            let actual = statement
+                .query_map([&table], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)? != 0,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            if actual != expected {
+                return Err(OperationalStoreError::DdlLineage(format!(
+                    "database column census for {table} differs: expected {expected:?}, found {actual:?}"
+                )));
+            }
+        }
         Ok(())
     }
+}
+
+fn migrate_v1_to_v2(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    transaction
+        .execute_batch("ALTER TABLE workspace_registration RENAME TO workspace_registration_v1;")?;
+    let workspace_v2 = generated_table_ddl("workspace_registration")?.replacen(
+        "CREATE TABLE workspace_registration (",
+        "CREATE TABLE workspace_registration_v2 (",
+        1,
+    );
+    transaction.execute_batch(&workspace_v2)?;
+    transaction.execute_batch(
+        "INSERT INTO workspace_registration_v2 (
+           workspace_id, workspace_registration_nonce, registration_revision,
+           administrative_key, root_path_bytes, root_path_display,
+           root_directory_file_identity, platform_code, case_sensitivity_mode,
+           authorization_revision, allowed_source_disclosure_rules,
+           repository_id, worktree_id, authorization_fingerprint,
+           context_fingerprint, status_code, created_at, updated_at
+         )
+         SELECT workspace_id, workspace_registration_nonce, registration_revision,
+           administrative_key, root_path_bytes, root_path_display,
+           X'', 0, 'unknown', 0, X'5b5d',
+           repository_id, worktree_id, authorization_fingerprint,
+           context_fingerprint, 100, created_at, updated_at
+         FROM workspace_registration_v1;
+         DROP TABLE workspace_registration_v1;
+         ALTER TABLE workspace_registration_v2 RENAME TO workspace_registration;",
+    )?;
+    transaction.execute_batch(&generated_table_ddl("repository_registration")?)?;
+    transaction.execute_batch(&generated_table_ddl("worktree_registration")?)?;
+    Ok(())
 }
 
 impl OperationalReaderFactory {
@@ -508,6 +576,57 @@ fn generated_table_names() -> BTreeSet<String> {
         .collect()
 }
 
+fn generated_table_ddl(table: &str) -> Result<String, OperationalStoreError> {
+    let start = format!("CREATE TABLE {table} (");
+    let mut collecting = false;
+    let mut lines = Vec::new();
+    for line in OPERATIONAL_DDL.lines() {
+        if line == start {
+            collecting = true;
+        }
+        if collecting {
+            lines.push(line);
+            if line == ") STRICT;" {
+                return Ok(format!("{}\n", lines.join("\n")));
+            }
+        }
+    }
+    Err(OperationalStoreError::DdlLineage(format!(
+        "generated DDL has no table {table}"
+    )))
+}
+
+fn generated_column_shapes() -> Result<GeneratedColumnShapes, OperationalStoreError> {
+    let mut result = BTreeMap::new();
+    for table in generated_table_names() {
+        let ddl = generated_table_ddl(&table)?;
+        let columns = ddl
+            .lines()
+            .skip(1)
+            .take_while(|line| *line != ") STRICT;")
+            .filter_map(|line| {
+                let declaration = line.trim().trim_end_matches(',');
+                if declaration.starts_with("PRIMARY KEY") || declaration.starts_with("UNIQUE") {
+                    return None;
+                }
+                let mut parts = declaration.split_whitespace();
+                Some((
+                    parts.next()?.to_owned(),
+                    parts.next()?.to_owned(),
+                    declaration.ends_with("NOT NULL"),
+                ))
+            })
+            .collect::<Vec<_>>();
+        if columns.is_empty() {
+            return Err(OperationalStoreError::DdlLineage(format!(
+                "generated DDL table {table} has no columns"
+            )));
+        }
+        result.insert(table, columns);
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,7 +679,7 @@ mod tests {
                     "INSERT INTO audit_event(event_id, workspace_id, event_code, actor_id, occurred_at, details_digest, diagnostic_id) VALUES (?1, NULL, 1, 'test', '2026-01-01T00:00:00Z', ?2, NULL)",
                     rusqlite::params![vec![3_u8; 16], vec![4_u8; 32]],
                 )?;
-                Ok(())
+                Ok::<(), OperationalStoreError>(())
             })
             .unwrap();
         reader
@@ -621,7 +740,13 @@ mod tests {
         );
         let digest = operational_ddl_digest();
         assert!(digest.starts_with("b3:") && digest.len() == 67);
-        assert_eq!(generated_table_names().len(), 17);
+        assert_eq!(
+            generated_table_names().len(),
+            OPERATIONAL_DDL
+                .lines()
+                .filter(|line| line.starts_with("CREATE TABLE "))
+                .count()
+        );
         assert!(verify_ddl_lineage().is_ok());
     }
 
@@ -666,7 +791,7 @@ mod tests {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v1")
+                    .contains("pre-migration-v2")
             })
             .unwrap()
             .path();
@@ -690,12 +815,12 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v1"))
+                    .contains("pre-migration-v2"))
                 .count(),
             1
         );
         let mut store = OperationalStore::open(&path).unwrap();
-        assert_eq!(user_version(&store.connection).unwrap(), 1);
+        assert_eq!(user_version(&store.connection).unwrap(), SCHEMA_VERSION);
         assert_eq!(
             fs::read_dir(path.parent().unwrap())
                 .unwrap()
@@ -703,7 +828,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v1"))
+                    .contains("pre-migration-v2"))
                 .count(),
             2
         );
@@ -711,8 +836,8 @@ mod tests {
         store
             .write_transaction(|transaction| {
                 transaction.execute(
-                    "INSERT INTO workspace_registration(workspace_id, workspace_registration_nonce, registration_revision, administrative_key, root_path_bytes, root_path_display, repository_id, worktree_id, authorization_fingerprint, context_fingerprint, status_code, created_at, updated_at) VALUES (?1, ?2, 1, ?3, ?4, '/workspace', NULL, NULL, ?5, ?6, 1, '2026-01-01', '2026-01-01')",
-                    rusqlite::params![vec![7_u8; 16], vec![6_u8; 16], vec![5_u8; 16], b"/workspace", vec![4_u8; 32], vec![3_u8; 32]],
+                    "INSERT INTO workspace_registration(workspace_id, workspace_registration_nonce, registration_revision, administrative_key, root_path_bytes, root_path_display, root_directory_file_identity, platform_code, case_sensitivity_mode, authorization_revision, allowed_source_disclosure_rules, repository_id, worktree_id, authorization_fingerprint, context_fingerprint, status_code, created_at, updated_at) VALUES (?1, ?2, 1, ?3, ?4, '/workspace', ?5, 1, 'sensitive', 1, ?6, NULL, NULL, ?7, ?8, 1, '2026-01-01', '2026-01-01')",
+                    rusqlite::params![vec![7_u8; 16], vec![6_u8; 16], vec![5_u8; 16], b"/workspace", vec![9_u8; 16], br#"["metadata"]"#, vec![4_u8; 32], vec![3_u8; 32]],
                 )?;
                 transaction.execute(
                     "INSERT INTO snapshot_lease(lease_id, workspace_id, snapshot_id, owner_id, expires_at) VALUES (?1, ?2, ?3, 'test', '2027-01-01')",
@@ -724,7 +849,7 @@ mod tests {
                         rusqlite::params![vec![id; 16], vec![7_u8; 16], vec![8_u8; 32], terminal_at],
                     )?;
                 }
-                Ok(())
+                Ok::<(), OperationalStoreError>(())
             })
             .unwrap();
         let report = store.cleanup_terminal_before("2026-02-01").unwrap();
@@ -759,5 +884,96 @@ mod tests {
             .unwrap();
         assert_eq!(protected, (1, 1));
         store.checkpoint().unwrap();
+    }
+
+    #[test]
+    fn wp14_operational_schema_v1_migrates_to_v2() {
+        let (_directory, path) = database();
+        let store = OperationalStore::open(&path).unwrap();
+        drop(store);
+
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO workspace_registration (
+                   workspace_id, workspace_registration_nonce, registration_revision,
+                   administrative_key, root_path_bytes, root_path_display,
+                   root_directory_file_identity, platform_code, case_sensitivity_mode,
+                   authorization_revision, allowed_source_disclosure_rules,
+                   repository_id, worktree_id, authorization_fingerprint,
+                   context_fingerprint, status_code, created_at, updated_at
+                 ) VALUES (
+                   zeroblob(16), zeroblob(16), 1, X'aa', X'2f', '/',
+                   X'bb', 2, 'sensitive', 1, X'5b5d', NULL, NULL,
+                   zeroblob(32), zeroblob(32), 20, 'before', 'before'
+                 );
+                 ALTER TABLE workspace_registration RENAME TO workspace_registration_v2;
+                 CREATE TABLE workspace_registration (
+                   workspace_id BLOB NOT NULL,
+                   workspace_registration_nonce BLOB NOT NULL,
+                   registration_revision INTEGER NOT NULL,
+                   administrative_key BLOB NOT NULL,
+                   root_path_bytes BLOB NOT NULL,
+                   root_path_display TEXT NOT NULL,
+                   repository_id BLOB,
+                   worktree_id BLOB,
+                   authorization_fingerprint BLOB NOT NULL,
+                   context_fingerprint BLOB NOT NULL,
+                   status_code INTEGER NOT NULL,
+                   created_at TEXT NOT NULL,
+                   updated_at TEXT NOT NULL,
+                   PRIMARY KEY (workspace_id),
+                   UNIQUE (administrative_key)
+                 ) STRICT;
+                 INSERT INTO workspace_registration
+                 SELECT workspace_id, workspace_registration_nonce,
+                   registration_revision, administrative_key, root_path_bytes,
+                   root_path_display, repository_id, worktree_id,
+                   authorization_fingerprint, context_fingerprint, status_code,
+                   created_at, updated_at
+                 FROM workspace_registration_v2;
+                 DROP TABLE workspace_registration_v2;
+                 DROP TABLE repository_registration;
+                 DROP TABLE worktree_registration;
+                 PRAGMA user_version=1;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let migrated = OperationalStore::open(&path).unwrap();
+        assert_eq!(user_version(&migrated.connection).unwrap(), SCHEMA_VERSION);
+        let migrated_fields = migrated
+            .connection
+            .query_row(
+                "SELECT root_directory_file_identity, platform_code,
+                        case_sensitivity_mode, authorization_revision,
+                        allowed_source_disclosure_rules, status_code
+                 FROM workspace_registration",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Vec<u8>>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            migrated_fields,
+            (Vec::new(), 0, "unknown".to_owned(), 0, b"[]".to_vec(), 100)
+        );
+        let legacy_unique_indexes = migrated
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_index_list('workspace_registration') WHERE origin='u'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_unique_indexes, 0);
     }
 }

@@ -10,25 +10,25 @@
         {
           "tag": 1,
           "value": {
-            "type_code": 2,
-            "type_name": "UTF8",
-            "value": "Example-Org",
-            "normalization": "ASCII_LOWER"
+            "type_code": 1,
+            "type_name": "BYTES",
+            "value": "11111111111111111111111111111111"
           }
         },
         {
           "tag": 2,
           "value": {
-            "type_code": 8,
-            "type_name": "DIGEST",
-            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+            "type_code": 2,
+            "type_name": "UTF8",
+            "value": "Git-Worktree",
+            "normalization": "ASCII_LOWER"
           }
         }
       ],
-      "expected_preimage_hex": "4346494401000100020001020000000b6578616d706c652d6f7267000208000000201111111111111111111111111111111111111111111111111111111111111111",
-      "expected_digest_hex": "78dbae37c45b20d33a13a6770d83c71786be554d7080aa4beb595b0873f482d3",
-      "expected_id_hex": "78dbae37c45b20d33a13a6770d83c717",
-      "expected_public_id": "workspace:78dbae37c45b20d33a13a6770d83c717"
+      "expected_preimage_hex": "43464944010001000200010100000010111111111111111111111111111111110002020000000c6769742d776f726b74726565",
+      "expected_digest_hex": "eb8e716fd6eee24990b72074fd4065ad0380bd6bb3d7c7cfe16650ffbb0d78cc",
+      "expected_id_hex": "eb8e716fd6eee24990b72074fd4065ad",
+      "expected_public_id": "workspace:eb8e716fd6eee24990b72074fd4065ad"
     },
     {
       "id": "repository",
@@ -38,33 +38,16 @@
         {
           "tag": 1,
           "value": {
-            "type_code": 7,
-            "type_name": "ID",
-            "value": "01010101010101010101010101010101"
-          }
-        },
-        {
-          "tag": 2,
-          "value": {
-            "type_code": 2,
-            "type_name": "UTF8",
-            "value": "Git",
-            "normalization": "ASCII_LOWER"
-          }
-        },
-        {
-          "tag": 3,
-          "value": {
-            "type_code": 8,
-            "type_name": "DIGEST",
-            "value": "1212121212121212121212121212121212121212121212121212121212121212"
+            "type_code": 1,
+            "type_name": "BYTES",
+            "value": "12121212121212121212121212121212"
           }
         }
       ],
-      "expected_preimage_hex": "434649440100020003000107000000100101010101010101010101010101010100020200000003676974000308000000201212121212121212121212121212121212121212121212121212121212121212",
-      "expected_digest_hex": "95393380c551081f54fba5d5df911cf79157853d3f45a4c0b986d805a1b41a63",
-      "expected_id_hex": "95393380c551081f54fba5d5df911cf7",
-      "expected_public_id": "repository:95393380c551081f54fba5d5df911cf7"
+      "expected_preimage_hex": "4346494401000200010001010000001012121212121212121212121212121212",
+      "expected_digest_hex": "5f6a7b89c4da3bd068d525728a0f836152a8e65e4e255810d8cacc9b2caf0f3d",
+      "expected_id_hex": "5f6a7b89c4da3bd068d525728a0f8361",
+      "expected_public_id": "repository:5f6a7b89c4da3bd068d525728a0f8361"
     },
     {
       "id": "worktree",
@@ -76,31 +59,31 @@
           "value": {
             "type_code": 7,
             "type_name": "ID",
-            "value": "01010101010101010101010101010101"
+            "value": "5f6a7b89c4da3bd068d525728a0f8361"
           }
         },
         {
           "tag": 2,
           "value": {
-            "type_code": 7,
-            "type_name": "ID",
-            "value": "02020202020202020202020202020202"
+            "type_code": 1,
+            "type_name": "BYTES",
+            "value": "13131313131313131313131313131313"
           }
         },
         {
           "tag": 3,
           "value": {
-            "type_code": 3,
-            "type_name": "RAW_PATH",
-            "value": "7265706f2f776f726b74726565",
-            "platform_code": 1
+            "type_code": 2,
+            "type_name": "UTF8",
+            "value": "Linked",
+            "normalization": "ASCII_LOWER"
           }
         }
       ],
-      "expected_preimage_hex": "434649440100030003000107000000100101010101010101010101010101010100020700000010020202020202020202020202020202020003030000000e017265706f2f776f726b74726565",
-      "expected_digest_hex": "b1a851d6a037558b7d472713e16023c16f882143b2c4217fb6972438b1bcb875",
-      "expected_id_hex": "b1a851d6a037558b7d472713e16023c1",
-      "expected_public_id": "worktree:b1a851d6a037558b7d472713e16023c1"
+      "expected_preimage_hex": "434649440100030003000107000000105f6a7b89c4da3bd068d525728a0f83610002010000001013131313131313131313131313131313000302000000066c696e6b6564",
+      "expected_digest_hex": "3d4b7a790f2d54bbada63e248f09af41f06840935b1f2f21b8dde9a6500004eb",
+      "expected_id_hex": "3d4b7a790f2d54bbada63e248f09af41",
+      "expected_public_id": "worktree:3d4b7a790f2d54bbada63e248f09af41"
     },
     {
       "id": "analysis-context",

@@ -4,8 +4,24 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
+fn run_admin(discovery: &std::path::Path, arguments: &[String]) -> serde_json::Value {
+    let output = Command::new(env!("CARGO_BIN_EXE_codefabric"))
+        .args(arguments)
+        .arg("--discovery")
+        .arg(discovery)
+        .output()
+        .expect("administrative CLI");
+    assert!(
+        output.status.success(),
+        "admin CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("administrative response JSON")
+}
+
 #[test]
-fn wp12_cli_end_to_end() {
+#[allow(clippy::too_many_lines)] // One process test proves the complete ordered admin CLI lifecycle.
+fn wp12_wp14_cli_end_to_end() {
     let root = tempfile::tempdir().expect("temporary daemon root");
     let state = root.path().join("state");
     let runtime = root.path().join("runtime");
@@ -73,6 +89,85 @@ maintenance_schedule = "daily-idle"
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
     assert_eq!(status["daemon_liveness"], "LIVE");
     assert_eq!(status["workspace_readiness"], "NO_WORKSPACES_READY");
+
+    let workspace_root = root.path().join("workspace");
+    let moved_root = root.path().join("moved-workspace");
+    let profile = root.path().join("profile.json");
+    fs::create_dir(&workspace_root).expect("workspace root");
+    fs::create_dir(&moved_root).expect("moved workspace root");
+    fs::write(&profile, br#"{"profile":"default"}"#).expect("profile manifest");
+
+    let added = run_admin(
+        &discovery,
+        &[
+            "workspace".into(),
+            "add".into(),
+            workspace_root.display().to_string(),
+        ],
+    );
+    let workspace_id = added["workspaces"][0]["workspace_id"]
+        .as_str()
+        .expect("public workspace ID")
+        .to_owned();
+    assert!(workspace_id.starts_with("workspace:"));
+    assert_eq!(added["workspaces"][0]["status"], 20);
+
+    let shown = run_admin(
+        &discovery,
+        &["workspace".into(), "show".into(), workspace_id.clone()],
+    );
+    assert_eq!(shown["workspaces"][0]["workspace_id"], workspace_id);
+    let configured = run_admin(
+        &discovery,
+        &[
+            "workspace".into(),
+            "configure".into(),
+            workspace_id.clone(),
+            "--profile".into(),
+            profile.display().to_string(),
+        ],
+    );
+    assert_eq!(configured["workspaces"][0]["registration_revision"], 2);
+    let relinked = run_admin(
+        &discovery,
+        &[
+            "workspace".into(),
+            "relink".into(),
+            workspace_id.clone(),
+            moved_root.display().to_string(),
+            "--acknowledge-non-git".into(),
+            "--inventory-matches".into(),
+        ],
+    );
+    assert_eq!(relinked["workspaces"][0]["registration_revision"], 3);
+    let enabled = run_admin(
+        &discovery,
+        &["workspace".into(), "enable".into(), workspace_id.clone()],
+    );
+    assert_eq!(enabled["workspaces"][0]["status"], 40);
+    let reconciled = run_admin(
+        &discovery,
+        &["workspace".into(), "reconcile".into(), workspace_id.clone()],
+    );
+    assert_eq!(reconciled["workspaces"][0]["status"], 40);
+    let disabled = run_admin(
+        &discovery,
+        &["workspace".into(), "disable".into(), workspace_id.clone()],
+    );
+    assert_eq!(disabled["workspaces"][0]["status"], 20);
+    let removed = run_admin(
+        &discovery,
+        &[
+            "workspace".into(),
+            "remove".into(),
+            workspace_id,
+            "--retain-data".into(),
+        ],
+    );
+    assert_eq!(removed["workspaces"][0]["status"], 90);
+    assert_eq!(removed["workspace_readiness"], "NO_WORKSPACES_READY");
+    let listed = run_admin(&discovery, &["workspace".into(), "list".into()]);
+    assert_eq!(listed["workspaces"], serde_json::json!([]));
 
     assert!(
         Command::new(env!("CARGO_BIN_EXE_codefabric"))

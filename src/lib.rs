@@ -22,6 +22,8 @@ pub mod rpc;
 pub mod schema_registry;
 #[cfg(feature = "canonical-json")]
 pub mod snapshot;
+#[cfg(feature = "daemon")]
+pub mod workspace_registry;
 
 #[cfg(feature = "data-fabric")]
 mod fabric;

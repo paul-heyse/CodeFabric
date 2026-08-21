@@ -3,7 +3,7 @@ artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:50dd3315b6e10cf6d0df710d70e9b2d1d59545d8c2d5c7a4ec426c101a7fc0f3"
+canonical_digest: "b3:a749eca0307587c485412a1ce9770947068f8d44f2d8e23381a433a4e9dee252"
 format_name: CBEF-v1
 format_version: 1
 magic_ascii: CFID
@@ -39,24 +39,22 @@ domains:
     public_prefix: workspace
     kind_slug_required: false
     fields:
-      - {tag: 1, name: organization_slug, type_code: UTF8, normalization: ASCII_LOWER}
-      - {tag: 2, name: workspace_root_digest, type_code: DIGEST}
+      - {tag: 1, name: workspace_registration_nonce, type_code: BYTES}
+      - {tag: 2, name: workspace_kind, type_code: UTF8, normalization: ASCII_LOWER}
   - code: 2
     name: REPOSITORY
     public_prefix: repository
     kind_slug_required: false
     fields:
-      - {tag: 1, name: workspace_id, type_code: ID}
-      - {tag: 2, name: vcs_kind, type_code: UTF8, normalization: ASCII_LOWER}
-      - {tag: 3, name: origin_identity_digest, type_code: DIGEST}
+      - {tag: 1, name: repository_registration_nonce, type_code: BYTES}
   - code: 3
     name: WORKTREE
     public_prefix: worktree
     kind_slug_required: false
     fields:
-      - {tag: 1, name: workspace_id, type_code: ID}
-      - {tag: 2, name: repository_id, type_code: ID}
-      - {tag: 3, name: relative_root, type_code: RAW_PATH}
+      - {tag: 1, name: repository_id, type_code: ID}
+      - {tag: 2, name: worktree_registration_nonce, type_code: BYTES}
+      - {tag: 3, name: worktree_kind, type_code: UTF8, normalization: ASCII_LOWER}
   - code: 4
     name: ANALYSIS_CONTEXT
     public_prefix: context
@@ -174,6 +172,18 @@ domains:
       - {tag: 6, name: reason_code, type_code: UNSIGNED, width_bytes: 2}
       - {tag: 7, name: candidate_set_digest, type_code: TAGGED_UNION, member_type: ABSENT-or-DIGEST}
       - {tag: 8, name: program_point, type_code: TAGGED_UNION, member_type: ABSENT-or-BYTES}
+  - code: 17
+    name: ROOT_AUTHORIZATION
+    public_prefix: root-authorization
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: root_path, type_code: RAW_PATH}
+      - {tag: 3, name: root_directory_file_identity, type_code: BYTES}
+      - {tag: 4, name: platform_code, type_code: UNSIGNED, width_bytes: 1}
+      - {tag: 5, name: case_sensitivity_mode, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 6, name: authorization_revision, type_code: UNSIGNED, width_bytes: 8}
+      - {tag: 7, name: allowed_source_disclosure_rules, type_code: SET, member_type: UTF8-ASCII_LOWER}
 digest_algorithm: BLAKE3-256
 id_derivation: first-16-bytes
 symbolic_source_context: context:source
@@ -182,5 +192,5 @@ collision_error: ID_COLLISION
 owner_acceptance:
   approver: repository-owner
   accepted_at: "2026-08-20"
-  construction_rule: AC-G-13 declaration-order allocation with one-based recipe tags
+  construction_rule: AC-G-09/11/13 declaration-order allocation with nonce-based registration and root-authorization recipes
   source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"

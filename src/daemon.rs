@@ -16,6 +16,10 @@ use crate::contracts::catalog::ArtifactKind;
 use crate::contracts::index::artifact_index;
 use crate::contracts::models::DeploymentProfileDocument;
 use crate::operational_store::{OperationalStore, OperationalStoreError};
+use crate::workspace_registry::{
+    RelinkProof, RemovalPolicy, WorkspaceRecord, WorkspaceRegistry, WorkspaceRegistryError,
+    WorkspaceSourceRegistration,
+};
 
 const CONFIG_MAX_BYTES: u64 = 262_144;
 const ADMIN_MESSAGE_MAX_BYTES: usize = 65_536;
@@ -196,6 +200,50 @@ pub struct AdminRequest {
     pub command: AdminCommand,
 }
 
+/// Closed workspace-administration request family on the private admin socket.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkspaceAdminCommand {
+    Add {
+        root: PathBuf,
+    },
+    List,
+    Show {
+        workspace_id: [u8; 16],
+    },
+    Relink {
+        workspace_id: [u8; 16],
+        new_root: PathBuf,
+        proof: RelinkProof,
+    },
+    Configure {
+        workspace_id: [u8; 16],
+        profile_manifest: PathBuf,
+    },
+    Enable {
+        workspace_id: [u8; 16],
+    },
+    Disable {
+        workspace_id: [u8; 16],
+    },
+    Reconcile {
+        workspace_id: [u8; 16],
+    },
+    Remove {
+        workspace_id: [u8; 16],
+        policy: RemovalPolicy,
+        purge_confirmations: u8,
+    },
+}
+
+/// Scope-tagged administrative request; query protocols have no such variants.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "scope", content = "request", rename_all = "snake_case")]
+pub enum AdminEnvelope {
+    Daemon(AdminRequest),
+    Workspace(WorkspaceAdminCommand),
+}
+
 /// Liveness response kept distinct from workspace readiness.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +252,8 @@ pub struct AdminResponse {
     pub daemon_liveness: String,
     pub workspace_readiness: String,
     pub shutdown_mode: Option<String>,
+    pub workspaces: Vec<WorkspaceRecord>,
+    pub error_code: Option<String>,
 }
 
 /// Ordered evidence returned after a joined daemon shutdown.
@@ -414,7 +464,7 @@ fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
     })
 }
 
-async fn read_request(stream: &mut UnixStream) -> Result<AdminRequest, DaemonError> {
+async fn read_request(stream: &mut UnixStream) -> Result<AdminEnvelope, DaemonError> {
     let mut line = Vec::new();
     let reader = BufReader::new(stream);
     let observed = reader
@@ -442,6 +492,129 @@ async fn write_response(
         .write_all(&bytes)
         .await
         .map_err(|source| DaemonError::Admin(format!("response write: {source}")))
+}
+
+fn workspace_readiness(store: &OperationalStore) -> Result<String, DaemonError> {
+    let reader = store.reader_factory().open()?;
+    let count = reader
+        .with_connection(|connection| {
+            connection.query_row(
+                "SELECT COUNT(*) FROM workspace_registration WHERE status_code != 90",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .map_err(OperationalStoreError::from)?;
+    Ok(if count == 0 {
+        "NO_WORKSPACES_READY"
+    } else {
+        "WORKSPACES_REGISTERED"
+    }
+    .to_owned())
+}
+
+fn execute_workspace_command(
+    store: &mut OperationalStore,
+    command: WorkspaceAdminCommand,
+) -> AdminResponse {
+    let result = execute_workspace_command_inner(store, command);
+    match result {
+        Ok(workspaces) => match workspace_readiness(store) {
+            Ok(workspace_readiness) => AdminResponse {
+                accepted: true,
+                daemon_liveness: "LIVE".to_owned(),
+                workspace_readiness,
+                shutdown_mode: None,
+                workspaces,
+                error_code: None,
+            },
+            Err(_) => internal_admin_response(),
+        },
+        Err(error) => AdminResponse {
+            accepted: false,
+            daemon_liveness: "LIVE".to_owned(),
+            workspace_readiness: "UNCHANGED".to_owned(),
+            shutdown_mode: None,
+            workspaces: Vec::new(),
+            error_code: Some(workspace_error_code(&error).to_owned()),
+        },
+    }
+}
+
+fn internal_admin_response() -> AdminResponse {
+    AdminResponse {
+        accepted: false,
+        daemon_liveness: "LIVE".to_owned(),
+        workspace_readiness: "UNKNOWN".to_owned(),
+        shutdown_mode: None,
+        workspaces: Vec::new(),
+        error_code: Some("INTERNAL".to_owned()),
+    }
+}
+
+fn execute_workspace_command_inner(
+    store: &mut OperationalStore,
+    command: WorkspaceAdminCommand,
+) -> Result<Vec<WorkspaceRecord>, WorkspaceRegistryError> {
+    let mut registry = WorkspaceRegistry::new(store);
+    Ok(match command {
+        WorkspaceAdminCommand::Add { root } => {
+            vec![registry.add(&root, WorkspaceSourceRegistration::Directory)?]
+        }
+        WorkspaceAdminCommand::List => registry.list()?,
+        WorkspaceAdminCommand::Show { workspace_id } => vec![registry.show(workspace_id)?],
+        WorkspaceAdminCommand::Relink {
+            workspace_id,
+            new_root,
+            proof,
+        } => vec![registry.relink(workspace_id, &new_root, &proof)?],
+        WorkspaceAdminCommand::Configure {
+            workspace_id,
+            profile_manifest,
+        } => {
+            let metadata = fs::symlink_metadata(&profile_manifest).map_err(|error| {
+                WorkspaceRegistryError::Root(format!("profile manifest: {error}"))
+            })?;
+            if !metadata.is_file()
+                || metadata.file_type().is_symlink()
+                || metadata.len() > 1_048_576
+            {
+                return Err(WorkspaceRegistryError::Root(
+                    "profile manifest must be a bounded non-symlink file".into(),
+                ));
+            }
+            let bytes = fs::read(&profile_manifest).map_err(|error| {
+                WorkspaceRegistryError::Root(format!("profile manifest: {error}"))
+            })?;
+            vec![registry.configure(workspace_id, *blake3::hash(&bytes).as_bytes())?]
+        }
+        WorkspaceAdminCommand::Enable { workspace_id } => vec![registry.enable(workspace_id)?],
+        WorkspaceAdminCommand::Disable { workspace_id } => vec![registry.disable(workspace_id)?],
+        WorkspaceAdminCommand::Reconcile { workspace_id } => {
+            vec![registry.reconcile(workspace_id)?]
+        }
+        WorkspaceAdminCommand::Remove {
+            workspace_id,
+            policy,
+            purge_confirmations,
+        } => vec![registry.remove(workspace_id, policy, purge_confirmations)?],
+    })
+}
+
+const fn workspace_error_code(error: &WorkspaceRegistryError) -> &'static str {
+    match error {
+        WorkspaceRegistryError::StateTransitionViolation { .. }
+        | WorkspaceRegistryError::DuplicateAdministrativeKey
+        | WorkspaceRegistryError::ActiveLease => "STATE_TRANSITION_VIOLATION",
+        WorkspaceRegistryError::Root(_)
+        | WorkspaceRegistryError::NotFound(_)
+        | WorkspaceRegistryError::RelinkProof => "WORKSPACE_NOT_AUTHORIZED",
+        WorkspaceRegistryError::PurgeConfirmation => "INVALID_REQUEST_SCHEMA",
+        WorkspaceRegistryError::Store(_)
+        | WorkspaceRegistryError::Identity(_)
+        | WorkspaceRegistryError::Sqlite(_)
+        | WorkspaceRegistryError::Persisted(_) => "INTERNAL",
+    }
 }
 
 /// Run the local administrative service until a joined stop or no-work drain completes.
@@ -508,21 +681,31 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
             continue;
         }
         let request = read_request(&mut stream).await?;
-        let shutdown_mode = match request.command {
-            AdminCommand::Status => None,
-            AdminCommand::Stop => Some("stop".to_owned()),
-            AdminCommand::Drain => Some("drain".to_owned()),
+        let (response, shutdown_mode) = match request {
+            AdminEnvelope::Daemon(request) => {
+                let shutdown_mode = match request.command {
+                    AdminCommand::Status => None,
+                    AdminCommand::Stop => Some("stop".to_owned()),
+                    AdminCommand::Drain => Some("drain".to_owned()),
+                };
+                (
+                    AdminResponse {
+                        accepted: true,
+                        daemon_liveness: "LIVE".to_owned(),
+                        workspace_readiness: workspace_readiness(&operational_store)?,
+                        shutdown_mode: shutdown_mode.clone(),
+                        workspaces: Vec::new(),
+                        error_code: None,
+                    },
+                    shutdown_mode,
+                )
+            }
+            AdminEnvelope::Workspace(command) => (
+                execute_workspace_command(&mut operational_store, command),
+                None,
+            ),
         };
-        write_response(
-            &mut stream,
-            &AdminResponse {
-                accepted: true,
-                daemon_liveness: "LIVE".to_owned(),
-                workspace_readiness: "NO_WORKSPACES_READY".to_owned(),
-                shutdown_mode: shutdown_mode.clone(),
-            },
-        )
-        .await?;
+        write_response(&mut stream, &response).await?;
         if let Some(mode) = shutdown_mode {
             break mode == "drain";
         }
@@ -563,6 +746,29 @@ pub async fn administer(
     discovery_path: &Path,
     command: AdminCommand,
 ) -> Result<AdminResponse, DaemonError> {
+    administer_envelope(
+        discovery_path,
+        &AdminEnvelope::Daemon(AdminRequest { command }),
+    )
+    .await
+}
+
+/// Send one closed workspace command through the private admin discovery endpoint.
+///
+/// # Errors
+///
+/// Returns discovery, connection, framing, or response-validation failures.
+pub async fn administer_workspace(
+    discovery_path: &Path,
+    command: WorkspaceAdminCommand,
+) -> Result<AdminResponse, DaemonError> {
+    administer_envelope(discovery_path, &AdminEnvelope::Workspace(command)).await
+}
+
+async fn administer_envelope(
+    discovery_path: &Path,
+    request: &AdminEnvelope,
+) -> Result<AdminResponse, DaemonError> {
     let bytes = fs::read(discovery_path).map_err(|source| DaemonError::Io {
         path: discovery_path.to_owned(),
         source,
@@ -575,7 +781,7 @@ pub async fn administer(
     let mut stream = UnixStream::connect(&discovery.socket_endpoint)
         .await
         .map_err(|source| DaemonError::Admin(format!("connect: {source}")))?;
-    let mut request = serde_json::to_vec(&AdminRequest { command })
+    let mut request = serde_json::to_vec(request)
         .map_err(|error| DaemonError::Admin(format!("request serialization: {error}")))?;
     request.push(b'\n');
     stream
