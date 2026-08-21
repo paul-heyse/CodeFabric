@@ -306,12 +306,12 @@ hand-compared):
 | Packet trust | `git cat-file -e <proving_commit>` and `git merge-base --is-ancestor <proving_commit> HEAD` |
 | Check outcomes | re-run the named check; record recipe name + exit status |
 
-**Absent on purpose — add when phase 2 lands.** Two recipes consolidate this
-section: `just artifacts-check` (the validations) and `just plan-status`
-(the derivations). They are planned, not yet implemented. Until they land,
-run the commands above directly; never hand-transcribe their outputs into an
-artifact. When they land, this paragraph is replaced by their names and the
-skills need no edits.
+The repository consolidates these rules in `just artifacts-check` (schema,
+path, ID, and declared-input validation) and `just plan-status` (freshness,
+ancestry, named-oracle, and recipe-resolution derivation). The independent
+`just tracked-target-zero-state-check` rejects Cargo target outputs in both
+the current index and reachable HEAD history. These commands report derived
+facts; they never write them back into an artifact.
 
 Artifacts predating the 2026-08-20 schema revision are grandfathered: they
 are validated only to the extent their vintage permits (the burn-down list

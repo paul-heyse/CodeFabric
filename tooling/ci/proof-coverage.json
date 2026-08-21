@@ -36,6 +36,9 @@
     "fixture-check": {"dependencies": ["contracts-tooling-lint"], "proofs": ["contracts.fixtures.classification", "contracts.fixtures.normative-kat-immutability"]},
     "adapter-contracts-governance": {"dependencies": ["contracts-tooling-lint"], "proofs": ["adapter.contract-model.generator-current", "adapter.contract-model.generator-tests", "adapter.contract-model.hot-path-zero-state"]},
     "adapter-contracts-repro-check": {"proofs": ["adapter.contract-model.two-root-reproducibility"]},
+    "artifacts-check": {"dependencies": ["contracts-tooling-lint"], "proofs": ["repository.artifacts.schema-conformance", "repository.state.judgment-only", "repository.artifacts.declared-input-freshness"]},
+    "plan-status": {"proofs": ["repository.plan.baseline-ancestry", "repository.plan.proving-commit-trust", "repository.plan.named-oracle-resolution"]},
+    "tracked-target-zero-state-check": {"proofs": ["repository.target-output.ignore-coverage", "repository.target-output.index-zero-state", "repository.target-output.history-zero-state"]},
     "governance-scan": {"proofs": ["repository.ast-grep.rules"]},
     "duplicate-family-check": {"proofs": ["repository.dependencies.duplicate-family-negative"]},
     "seed-zero-state-check": {"proofs": ["repository.seed-packaging.zero-state"]},
@@ -43,7 +46,7 @@
     "contracts-verify": {"dependencies": ["schema-check", "fixture-check"], "proofs": ["contracts.catalog.full-profile", "contracts.negative-checksum-fixtures"]},
     "contracts-repro-check": {"proofs": ["contracts.two-root-reproducibility", "contracts.catalog-reorder-invariance"]},
     "proof-coverage-check": {"dependencies": ["contracts-tooling-lint"], "proofs": ["repository.command-graph.machine-readable", "repository.command-graph.no-destructive-cache-step"]},
-    "governance": {"dependencies": ["governance-scan", "duplicate-family-check", "seed-zero-state-check", "proto-check", "contracts-verify", "contracts-repro-check", "adapter-contracts-governance", "adapter-contracts-repro-check", "proof-coverage-check"], "proofs": []},
+    "governance": {"dependencies": ["governance-scan", "artifacts-check", "plan-status", "tracked-target-zero-state-check", "duplicate-family-check", "seed-zero-state-check", "proto-check", "contracts-verify", "contracts-repro-check", "adapter-contracts-governance", "adapter-contracts-repro-check", "proof-coverage-check"], "proofs": []},
     "ci-fast": {"dependencies": ["root-ci-fast", "extractor-ci-fast", "sidecar-ci-fast", "adapter-ci-fast", "governance"], "proofs": []}
   },
   "optimization_candidates": [

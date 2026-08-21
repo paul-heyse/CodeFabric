@@ -290,6 +290,22 @@ adapter-contracts-repro-check:
 adapter-contracts-bench:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/benchmark_adapter_contracts.py
 
+[doc("Validate active plan, review, and schema-2 execution-state contracts")]
+[group('gate')]
+artifacts-check: contracts-tooling-lint
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_artifact_contracts.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py artifacts-check
+
+[doc("Derive active-plan input freshness and proving-commit trust")]
+[group('gate')]
+plan-status:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py plan-status
+
+[doc("Reject Cargo target outputs in the index or reachable HEAD history")]
+[group('gate')]
+tracked-target-zero-state-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py tracked-target-zero-state-check
+
 [doc("Prove Tier-A command coverage and materialize the exact current graph")]
 [group('gate')]
 proof-coverage-check: contracts-tooling-lint
@@ -338,9 +354,9 @@ duplicate-family-check:
 seed-zero-state-check:
     ./scripts/seed_zero_state_check.sh
 
-[doc("Run structural, graph-policy, and generated-artifact governance")]
+[doc("Run structural, artifact, graph-policy, and generated-output governance")]
 [group('gate')]
-governance: governance-scan duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
+governance: governance-scan artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
