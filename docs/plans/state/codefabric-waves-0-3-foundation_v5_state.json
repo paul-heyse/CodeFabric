@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP21",
+  "current_packet": "WP22",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -562,10 +562,28 @@
       "blockers": []
     },
     "WP21": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "190a44b00c49908cfa19a333832c588f2803bdb9",
+      "deviations": [
+        {
+          "kind": "generated_operation_journal",
+          "summary": "The schema Contract IR, FAB, and LIFE now define table_mutation_operation as the sole coordinator-owned version allocator and recovery journal. Generated SQLite DDL and exact-field reconciliation replace an implementation-local operation record."
+        },
+        {
+          "kind": "pinned_library_no_op_semantics",
+          "summary": "Pinned delta-rs elides a predicate-delete commit when no files change. The coordinator's exact committed record therefore proves an empty delete phase whose Delta version equals its predecessor; every material delete or append still requires matching application-transaction state and exact commit metadata."
+        },
+        {
+          "kind": "user_directed_non_timing_evidence",
+          "summary": "The WP21 operational latency measurement was intentionally omitted under the accepted non-timing evidence policy. Acceptance proves monotonic versions, persisted metadata, exact transaction identity, counts, checksums, and deterministic recovery."
+        }
+      ],
+      "failed_approaches": [
+        "The first replay implementation revalidated the delete phase after a fully completed delete-plus-append operation and rejected the restored owner rows. Phase reconciliation now distinguishes replay from a newly committed delete and verifies the final append result.",
+        "The first concurrency test allowed two operations to reserve the same application predecessor. Coordinator allocation now rejects duplicate application/predecessor claims inside BEGIN IMMEDIATE before either writer reaches Delta.",
+        "The initial migration fixtures rewound generated schema-v5 databases without removing the newly generated table_mutation_operation. The fixtures now model their historical versions exactly, and every v1/v2 migration path is green.",
+        "The first scoped mutation run exposed missing direct assertions for generated policy bypass and mismatched Delta commit metadata. Those negative proofs now catch all 11 targeted high-value mutants across the two bounded in-place runs."
+      ],
       "blockers": []
     },
     "WP22": {
@@ -1003,6 +1021,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP21: enforce generated mutation classes through the sole fabric writer, implement owner replacement and owner deletion, and prove idempotent replay without publication-pointer exposure.",
-  "updated_at": "2026-08-21T13:38:41Z"
+  "next_action": "Execute WP22: implement durable publication, immutable publication rows, complete publication-table version maps, and compare-and-swap activation of the current pointer.",
+  "updated_at": "2026-08-21T14:24:50Z"
 }
