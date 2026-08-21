@@ -13,8 +13,12 @@ from tooling.contracts.json_schema_check import (
     CATALOG_PATH,
     DRAFT_2020_12_URI,
     JSONSCHEMA_VERSION,
+    MODEL_PACK_NEGATIVE_PATH,
+    MODEL_PACK_POSITIVE_PATH,
+    MODEL_PACK_SCHEMA_PATH,
     SchemaCatalogError,
     validate_catalog_schemas,
+    validate_model_pack_examples,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +73,24 @@ def test_current_catalog_schema_suite_is_valid() -> None:
     assert schemas
     assert set(schemas) == discovered
     assert schemas == tuple(sorted(schemas))
+
+
+def test_model_pack_schema_enforces_declarative_non_executable_records() -> None:
+    catalog = json.loads((REPOSITORY_ROOT / CATALOG_PATH).read_text(encoding="utf-8"))
+    profile_by_id = {
+        profile["profile_id"]: profile
+        for profile in catalog["resource_budget_profiles"]
+    }
+    descriptor = next(
+        artifact
+        for artifact in catalog["artifacts"]
+        if artifact["authority_path"] == MODEL_PACK_SCHEMA_PATH.as_posix()
+    )
+    maximum = profile_by_id[descriptor["resource_budget_profile"]]["max_bytes"]
+
+    validate_model_pack_examples(REPOSITORY_ROOT, maximum)
+    assert (REPOSITORY_ROOT / MODEL_PACK_POSITIVE_PATH).is_file()
+    assert (REPOSITORY_ROOT / MODEL_PACK_NEGATIVE_PATH).is_file()
 
 
 @pytest.mark.parametrize(

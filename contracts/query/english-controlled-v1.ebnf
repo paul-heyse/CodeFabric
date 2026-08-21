@@ -2,8 +2,53 @@
 (* artifact_kind: ebnf-grammar *)
 (* version: 1.0 *)
 (* compatible_suite_major: 1 *)
-(* status: draft *)
-(* canonical_digest: b3:e5ab851c5b1032123bf1de8efe0a7c5b6940e5e6ddcbde09bd7b319d4055186c *)
-(* WP08 authors the released controlled-English grammar. *)
-document = "";
+(* status: released *)
+(* canonical_digest: b3:e337ede8c7843ed8058b7e5c1f0871a1707ac2d03df8cc2519c4b8999ffbf0a8 *)
 
+document = phrase;
+phrase = entity_phrase | fact_phrase | relationship_phrase | condition_phrase | projection_phrase | source_boundary_phrase;
+
+entity_phrase = quantity, entity_kind, [ named_selector ], { entity_modifier };
+fact_phrase = quantity, fact_term, [ role_modifier ], { fact_modifier };
+relationship_phrase = quantity, relation_term, [ direction_modifier ], [ endpoint_role ], { relation_modifier };
+condition_phrase = predicate, condition_term, [ condition_value ];
+projection_phrase = representation, projection_term, { projection_modifier };
+source_boundary_phrase = quantity, boundary_term, [ named_selector ], { boundary_modifier };
+
+quantity = "the" | "a" | "an" | "all" | "any" | "each";
+representation = "as" | "with" | "including" | "excluding";
+named_selector = "named", quoted_identifier;
+owner_modifier = "owned by", quoted_identifier;
+location_modifier = "in", quoted_identifier;
+context_modifier = "within", quoted_identifier;
+directness = "direct" | "transitive";
+resolution_set = "exact" | "sound" | "all candidates";
+role_modifier = "as subject" | "as object" | "as owner" | "as result";
+direction_modifier = "outgoing" | "incoming" | "either direction";
+endpoint_role = "from source" | "to target" | "between endpoints";
+
+entity_modifier = owner_modifier | location_modifier | context_modifier | language_modifier;
+fact_modifier = owner_modifier | location_modifier | context_modifier | certainty_modifier | language_modifier;
+relation_modifier = owner_modifier | location_modifier | context_modifier | directness | resolution_set | language_modifier;
+projection_modifier = owner_modifier | location_modifier | context_modifier | directness | resolution_set | language_modifier;
+boundary_modifier = owner_modifier | location_modifier | context_modifier | language_modifier;
+
+entity_kind = registered_phrase;
+fact_term = registered_phrase;
+relation_term = registered_phrase;
+condition_term = registered_phrase;
+projection_term = registered_phrase;
+boundary_term = registered_phrase;
+registered_phrase = word, { " ", word };
+
+predicate = "where" | "whose" | "that has" | "that lacks";
+condition_value = quoted_identifier | word;
+certainty_modifier = "known" | "modelled" | "inferred" | "unknown";
+language_modifier = "Python" | "Rust";
+
+quoted_identifier = backtick, { identifier_character | " " | "." | ":" | "/" | "-" }, backtick;
+backtick = "`";
+word = identifier_character, { identifier_character };
+identifier_character = letter | digit | "_";
+letter = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z";
+digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";

@@ -1,5 +1,11 @@
 # Fixture oracle change record
 
+## 2026-08-21 controlled language and model packs
+
+- Added owner-reviewed positive and executable-field-negative cases for the closed,
+  declarative AC-G-38 model-pack schema.
+- Added an output-free typed phrase-registry seed for bounded parser fuzzing.
+
 ## 2026-08-21 Wave 1 registry KATs
 
 - Added independent code/name/slug examples for every categorical domain and fixed

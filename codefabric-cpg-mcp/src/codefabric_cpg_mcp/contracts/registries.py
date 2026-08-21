@@ -1060,6 +1060,416 @@ ENUM_TRIPLES = MappingProxyType(
     }
 )
 
+PHRASES = MappingProxyType(
+    {
+        "Q50_SOURCE_FILES": MappingProxyType(
+            {
+                "owner_section": 50,
+                "canonical_text": "source files",
+                "accepted_aliases": ("source documents",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q51_SYNTAX_NODES": MappingProxyType(
+            {
+                "owner_section": 51,
+                "canonical_text": "syntax nodes",
+                "accepted_aliases": ("syntax occurrences",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q52_SEMANTIC_SYMBOLS": MappingProxyType(
+            {
+                "owner_section": 52,
+                "canonical_text": "semantic symbols",
+                "accepted_aliases": ("bound symbols",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q53_MODULE_DEPENDENCIES": MappingProxyType(
+            {
+                "owner_section": 53,
+                "canonical_text": "module dependencies",
+                "accepted_aliases": ("module imports",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q54_SEMANTIC_TYPES": MappingProxyType(
+            {
+                "owner_section": 54,
+                "canonical_text": "semantic types",
+                "accepted_aliases": ("computed types",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q55_OBJECT_MEMBERS": MappingProxyType(
+            {
+                "owner_section": 55,
+                "canonical_text": "object members",
+                "accepted_aliases": ("declared members",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q56_CALLABLE_CONTRACTS": MappingProxyType(
+            {
+                "owner_section": 56,
+                "canonical_text": "callable contracts",
+                "accepted_aliases": ("callable signatures",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q57_CALL_TARGETS": MappingProxyType(
+            {
+                "owner_section": 57,
+                "canonical_text": "call targets",
+                "accepted_aliases": ("dispatch targets",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q58_CONTROL_FLOW": MappingProxyType(
+            {
+                "owner_section": 58,
+                "canonical_text": "control flow",
+                "accepted_aliases": ("control paths",),
+                "plan_node_kind": "find-paths",
+                "output_role": "path-set",
+            }
+        ),
+        "Q59_DATA_FLOW": MappingProxyType(
+            {
+                "owner_section": 59,
+                "canonical_text": "data flow",
+                "accepted_aliases": ("definition use flow",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q60_MEMORY_ALIASES": MappingProxyType(
+            {
+                "owner_section": 60,
+                "canonical_text": "memory aliases",
+                "accepted_aliases": ("points to relations",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q61_PROGRAM_POINT_STATE": MappingProxyType(
+            {
+                "owner_section": 61,
+                "canonical_text": "program point state",
+                "accepted_aliases": ("state at program point",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q62_EFFECTS": MappingProxyType(
+            {
+                "owner_section": 62,
+                "canonical_text": "effects",
+                "accepted_aliases": ("observable effects",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q63_EXCEPTIONAL_FLOW": MappingProxyType(
+            {
+                "owner_section": 63,
+                "canonical_text": "exceptional flow",
+                "accepted_aliases": ("exception paths",),
+                "plan_node_kind": "find-paths",
+                "output_role": "path-set",
+            }
+        ),
+        "Q64_RESOURCE_LIFETIMES": MappingProxyType(
+            {
+                "owner_section": 64,
+                "canonical_text": "resource lifetimes",
+                "accepted_aliases": ("resource actions",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q65_CONCURRENCY_EVENTS": MappingProxyType(
+            {
+                "owner_section": 65,
+                "canonical_text": "concurrency events",
+                "accepted_aliases": ("task ordering events",),
+                "plan_node_kind": "find-paths",
+                "output_role": "path-set",
+            }
+        ),
+        "Q66_CLOSURE_CAPTURES": MappingProxyType(
+            {
+                "owner_section": 66,
+                "canonical_text": "closure captures",
+                "accepted_aliases": ("captured symbols",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q67_GENERATED_ORIGINS": MappingProxyType(
+            {
+                "owner_section": 67,
+                "canonical_text": "generated origins",
+                "accepted_aliases": ("lowered origins",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q68_GRAPH_METRICS": MappingProxyType(
+            {
+                "owner_section": 68,
+                "canonical_text": "graph metrics",
+                "accepted_aliases": ("objective graph measures",),
+                "plan_node_kind": "summarize-facts",
+                "output_role": "scalar-summary",
+            }
+        ),
+        "Q69_CALLABLE_SUMMARIES": MappingProxyType(
+            {
+                "owner_section": 69,
+                "canonical_text": "callable summaries",
+                "accepted_aliases": ("interprocedural summaries",),
+                "plan_node_kind": "summarize-facts",
+                "output_role": "group-set",
+            }
+        ),
+        "Q70_EXPLICIT_UNKNOWNS": MappingProxyType(
+            {
+                "owner_section": 70,
+                "canonical_text": "explicit unknowns",
+                "accepted_aliases": ("unresolved facts",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "coverage-proof",
+            }
+        ),
+        "Q71_PYTHON_BINDINGS": MappingProxyType(
+            {
+                "owner_section": 71,
+                "canonical_text": "Python bindings",
+                "accepted_aliases": ("Python scopes",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q72_PYTHON_TYPES": MappingProxyType(
+            {
+                "owner_section": 72,
+                "canonical_text": "Python types",
+                "accepted_aliases": ("Python inferred types",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q73_PYTHON_OBJECT_MEMBERS": MappingProxyType(
+            {
+                "owner_section": 73,
+                "canonical_text": "Python object members",
+                "accepted_aliases": ("Python descriptors",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q74_PYTHON_CALL_TARGETS": MappingProxyType(
+            {
+                "owner_section": 74,
+                "canonical_text": "Python call targets",
+                "accepted_aliases": ("Python dispatch targets",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q75_PYTHON_DYNAMIC_SEMANTICS": MappingProxyType(
+            {
+                "owner_section": 75,
+                "canonical_text": "Python dynamic semantics",
+                "accepted_aliases": ("Python dynamic operations",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q76_PYTHON_DECORATORS": MappingProxyType(
+            {
+                "owner_section": 76,
+                "canonical_text": "Python decorators",
+                "accepted_aliases": ("Python decorated entities",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q77_PYTHON_PATTERN_MATCHING": MappingProxyType(
+            {
+                "owner_section": 77,
+                "canonical_text": "Python pattern matching",
+                "accepted_aliases": ("Python match cases",),
+                "plan_node_kind": "match-pattern",
+                "output_role": "binding-table",
+            }
+        ),
+        "Q78_PYTHON_COMPREHENSIONS": MappingProxyType(
+            {
+                "owner_section": 78,
+                "canonical_text": "Python comprehensions",
+                "accepted_aliases": ("Python comprehension scopes",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q79_PYTHON_CONTEXT_MANAGERS": MappingProxyType(
+            {
+                "owner_section": 79,
+                "canonical_text": "Python context managers",
+                "accepted_aliases": ("Python with statements",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q80_PYTHON_ASYNC_GENERATORS": MappingProxyType(
+            {
+                "owner_section": 80,
+                "canonical_text": "Python async generators",
+                "accepted_aliases": ("Python coroutine generators",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q81_RUST_SEMANTIC_ITEMS": MappingProxyType(
+            {
+                "owner_section": 81,
+                "canonical_text": "Rust semantic items",
+                "accepted_aliases": ("Rust source items",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q82_RUST_GENERICS": MappingProxyType(
+            {
+                "owner_section": 82,
+                "canonical_text": "Rust generics",
+                "accepted_aliases": ("Rust generic parameters",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q83_RUST_TYPE_ADJUSTMENTS": MappingProxyType(
+            {
+                "owner_section": 83,
+                "canonical_text": "Rust type adjustments",
+                "accepted_aliases": ("Rust coercions",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q84_RUST_MIR_STRUCTURE": MappingProxyType(
+            {
+                "owner_section": 84,
+                "canonical_text": "Rust MIR structure",
+                "accepted_aliases": ("Rust MIR bodies",),
+                "plan_node_kind": "find-entities",
+                "output_role": "entity-set",
+            }
+        ),
+        "Q85_RUST_PLACE_PROJECTIONS": MappingProxyType(
+            {
+                "owner_section": 85,
+                "canonical_text": "Rust place projections",
+                "accepted_aliases": ("Rust MIR places",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q86_RUST_MIR_TRANSITIONS": MappingProxyType(
+            {
+                "owner_section": 86,
+                "canonical_text": "Rust MIR transitions",
+                "accepted_aliases": ("Rust MIR state changes",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q87_RUST_OWNERSHIP_LOANS": MappingProxyType(
+            {
+                "owner_section": 87,
+                "canonical_text": "Rust ownership loans",
+                "accepted_aliases": ("Rust borrow loans",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q88_RUST_EXECUTABLE_INSTANCES": MappingProxyType(
+            {
+                "owner_section": 88,
+                "canonical_text": "Rust executable instances",
+                "accepted_aliases": ("Rust monomorphic calls",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q89_RUST_TRAIT_DISPATCH": MappingProxyType(
+            {
+                "owner_section": 89,
+                "canonical_text": "Rust trait dispatch",
+                "accepted_aliases": ("Rust implementation dispatch",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q90_RUST_MACRO_EXPANSIONS": MappingProxyType(
+            {
+                "owner_section": 90,
+                "canonical_text": "Rust macro expansions",
+                "accepted_aliases": ("Rust expanded origins",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q91_RUST_DROP_BEHAVIOR": MappingProxyType(
+            {
+                "owner_section": 91,
+                "canonical_text": "Rust drop behavior",
+                "accepted_aliases": ("Rust destruction effects",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q92_RUST_COROUTINE_LOWERING": MappingProxyType(
+            {
+                "owner_section": 92,
+                "canonical_text": "Rust coroutine lowering",
+                "accepted_aliases": ("Rust async lowering",),
+                "plan_node_kind": "follow-relationships",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q93_RUST_UNSAFE_FFI": MappingProxyType(
+            {
+                "owner_section": 93,
+                "canonical_text": "Rust unsafe FFI",
+                "accepted_aliases": ("Rust foreign operations",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+        "Q94_RUST_COMPILE_TIME_VALUES": MappingProxyType(
+            {
+                "owner_section": 94,
+                "canonical_text": "Rust compile time values",
+                "accepted_aliases": ("Rust constants and statics",),
+                "plan_node_kind": "retrieve-facts",
+                "output_role": "fact-set",
+            }
+        ),
+    }
+)
+
 STATE_TRANSITIONS = MappingProxyType(
     {
         "WorkspaceLifecycle": (
@@ -2340,5 +2750,52 @@ REGISTRY_IDS = MappingProxyType(
             "INTERNAL",
         ),
         "derivations": (),
+        "phrases": (
+            "Q50_SOURCE_FILES",
+            "Q51_SYNTAX_NODES",
+            "Q52_SEMANTIC_SYMBOLS",
+            "Q53_MODULE_DEPENDENCIES",
+            "Q54_SEMANTIC_TYPES",
+            "Q55_OBJECT_MEMBERS",
+            "Q56_CALLABLE_CONTRACTS",
+            "Q57_CALL_TARGETS",
+            "Q58_CONTROL_FLOW",
+            "Q59_DATA_FLOW",
+            "Q60_MEMORY_ALIASES",
+            "Q61_PROGRAM_POINT_STATE",
+            "Q62_EFFECTS",
+            "Q63_EXCEPTIONAL_FLOW",
+            "Q64_RESOURCE_LIFETIMES",
+            "Q65_CONCURRENCY_EVENTS",
+            "Q66_CLOSURE_CAPTURES",
+            "Q67_GENERATED_ORIGINS",
+            "Q68_GRAPH_METRICS",
+            "Q69_CALLABLE_SUMMARIES",
+            "Q70_EXPLICIT_UNKNOWNS",
+            "Q71_PYTHON_BINDINGS",
+            "Q72_PYTHON_TYPES",
+            "Q73_PYTHON_OBJECT_MEMBERS",
+            "Q74_PYTHON_CALL_TARGETS",
+            "Q75_PYTHON_DYNAMIC_SEMANTICS",
+            "Q76_PYTHON_DECORATORS",
+            "Q77_PYTHON_PATTERN_MATCHING",
+            "Q78_PYTHON_COMPREHENSIONS",
+            "Q79_PYTHON_CONTEXT_MANAGERS",
+            "Q80_PYTHON_ASYNC_GENERATORS",
+            "Q81_RUST_SEMANTIC_ITEMS",
+            "Q82_RUST_GENERICS",
+            "Q83_RUST_TYPE_ADJUSTMENTS",
+            "Q84_RUST_MIR_STRUCTURE",
+            "Q85_RUST_PLACE_PROJECTIONS",
+            "Q86_RUST_MIR_TRANSITIONS",
+            "Q87_RUST_OWNERSHIP_LOANS",
+            "Q88_RUST_EXECUTABLE_INSTANCES",
+            "Q89_RUST_TRAIT_DISPATCH",
+            "Q90_RUST_MACRO_EXPANSIONS",
+            "Q91_RUST_DROP_BEHAVIOR",
+            "Q92_RUST_COROUTINE_LOWERING",
+            "Q93_RUST_UNSAFE_FFI",
+            "Q94_RUST_COMPILE_TIME_VALUES",
+        ),
     }
 )

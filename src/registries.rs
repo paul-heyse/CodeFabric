@@ -98,4 +98,30 @@ mod tests {
         assert_eq!(CAPABILITY_IDS.len(), 22);
         assert_eq!(PUBLIC_ERROR_IDS.len(), 60);
     }
+
+    #[test]
+    fn wp08b_behavioral_acceptance() {
+        assert_eq!(PHRASE_ENTRIES.len(), 45);
+        let call_targets = PHRASE_ENTRIES
+            .iter()
+            .find(|entry| entry.phrase_id == "Q57_CALL_TARGETS")
+            .unwrap();
+        assert_eq!(call_targets.owner_section, 57);
+        assert_eq!(call_targets.canonical_text, "call targets");
+        assert_eq!(call_targets.accepted_aliases, &["dispatch targets"]);
+        assert_eq!(call_targets.plan_node_kind, "follow-relationships");
+        assert_eq!(call_targets.output_role, "fact-set");
+    }
+
+    #[test]
+    fn wp08b_operational_acceptance() {
+        assert_eq!(PHRASE_IDS.len(), PHRASE_ENTRIES.len());
+        assert_eq!(PHRASE_IDS.first(), Some(&"Q50_SOURCE_FILES"));
+        assert_eq!(PHRASE_IDS.last(), Some(&"Q94_RUST_COMPILE_TIME_VALUES"));
+        assert!(
+            PHRASE_ENTRIES
+                .windows(2)
+                .all(|entries| { entries[0].owner_section + 1 == entries[1].owner_section })
+        );
+    }
 }

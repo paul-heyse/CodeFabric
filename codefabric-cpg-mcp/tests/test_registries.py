@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 from codefabric_cpg_mcp.contracts import registries
 
@@ -58,3 +59,34 @@ def test_wp08_operational_acceptance() -> None:
     )
     assert len(machine_types) == 12
     assert all(list(machine_type) for machine_type in machine_types)
+
+
+def test_wp08b_behavioral_acceptance() -> None:
+    assert len(registries.PHRASES) == 45
+    call_targets = registries.PHRASES["Q57_CALL_TARGETS"]
+    assert call_targets == {
+        "owner_section": 57,
+        "canonical_text": "call targets",
+        "accepted_aliases": ("dispatch targets",),
+        "plan_node_kind": "follow-relationships",
+        "output_role": "fact-set",
+    }
+
+
+def test_wp08b_structural_acceptance() -> None:
+    assert tuple(record["owner_section"] for record in registries.PHRASES.values()) == tuple(
+        range(50, 95)
+    )
+    assert registries.REGISTRY_IDS["phrases"] == tuple(registries.PHRASES)
+
+
+def test_wp08b_negative_zero_state() -> None:
+    for phrase in registries.PHRASES.values():
+        canonical_text = cast(str, phrase["canonical_text"])
+        assert "placeholder" not in canonical_text.casefold()
+        assert "deferred-mapping" not in canonical_text.casefold()
+
+
+def test_wp08b_operational_acceptance() -> None:
+    assert registries.PHRASES["Q50_SOURCE_FILES"]["plan_node_kind"] == "find-entities"
+    assert registries.PHRASES["Q94_RUST_COMPILE_TIME_VALUES"]["output_role"] == "fact-set"

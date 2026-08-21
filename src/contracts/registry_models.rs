@@ -359,6 +359,238 @@ pub struct StateMachine {
     pub transitions: Vec<StateTransition>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum PhraseAstNodeKind {
+    #[serde(rename = "entity-phrase")]
+    Entity,
+    #[serde(rename = "fact-phrase")]
+    Fact,
+    #[serde(rename = "relationship-phrase")]
+    Relationship,
+    #[serde(rename = "condition-phrase")]
+    Condition,
+    #[serde(rename = "projection-phrase")]
+    Projection,
+    #[serde(rename = "source-boundary-phrase")]
+    SourceBoundary,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhraseSlotType {
+    EntityKind,
+    FactKind,
+    RelationKind,
+    PropertyKind,
+    ProjectionId,
+    EffectKind,
+    ResourceKind,
+    UnknownKind,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhraseReferenceFamily {
+    EntityKind,
+    FactKind,
+    RelationKind,
+    PropertyKind,
+    Projection,
+    EffectKind,
+    ResourceKind,
+    UnknownKind,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhraseContractReference {
+    pub family: PhraseReferenceFamily,
+    pub code: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RequestForm {
+    FindEntities,
+    RetrieveFacts,
+    FollowRelationships,
+    FindPaths,
+    MatchPattern,
+    CombineSets,
+    SummarizeFacts,
+    FetchSourceContext,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhraseRole {
+    Subject,
+    Object,
+    Owner,
+    Endpoint,
+    Source,
+    Target,
+    Result,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlanNodeKind {
+    FindEntities,
+    RetrieveFacts,
+    FollowRelationships,
+    FindPaths,
+    MatchPattern,
+    CombineSets,
+    SummarizeFacts,
+    FetchSourceContext,
+}
+
+impl PlanNodeKind {
+    pub const fn request_form(self) -> RequestForm {
+        match self {
+            Self::FindEntities => RequestForm::FindEntities,
+            Self::RetrieveFacts => RequestForm::RetrieveFacts,
+            Self::FollowRelationships => RequestForm::FollowRelationships,
+            Self::FindPaths => RequestForm::FindPaths,
+            Self::MatchPattern => RequestForm::MatchPattern,
+            Self::CombineSets => RequestForm::CombineSets,
+            Self::SummarizeFacts => RequestForm::SummarizeFacts,
+            Self::FetchSourceContext => RequestForm::FetchSourceContext,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FindEntities => "find-entities",
+            Self::RetrieveFacts => "retrieve-facts",
+            Self::FollowRelationships => "follow-relationships",
+            Self::FindPaths => "find-paths",
+            Self::MatchPattern => "match-pattern",
+            Self::CombineSets => "combine-sets",
+            Self::SummarizeFacts => "summarize-facts",
+            Self::FetchSourceContext => "fetch-source-context",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SlotValueType {
+    QuotedIdentifier,
+    EntitySelector,
+    ResultReference,
+    Literal,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlanField {
+    Selector,
+    SubjectSelector,
+    ObjectSelector,
+    EntityKindIds,
+    FactKindIds,
+    RelationKindIds,
+    PropertyKindIds,
+    ProjectionId,
+    EffectKind,
+    ResourceKind,
+    LanguageProfile,
+    ConditionKind,
+    SourceBoundary,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedSlotBinding {
+    pub slot: String,
+    pub value_type: SlotValueType,
+    pub target_field: PlanField,
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "value_kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum PhraseConstantValue {
+    Text { text: String },
+    TextList { values: Vec<String> },
+    Boolean { value: bool },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstantFieldBinding {
+    pub target_field: PlanField,
+    pub value: PhraseConstantValue,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhraseOutputRole {
+    EntitySet,
+    FactSet,
+    PathSet,
+    BindingTable,
+    GroupSet,
+    SourceContextSet,
+    ScalarSummary,
+    CoverageProof,
+}
+
+impl PhraseOutputRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::EntitySet => "entity-set",
+            Self::FactSet => "fact-set",
+            Self::PathSet => "path-set",
+            Self::BindingTable => "binding-table",
+            Self::GroupSet => "group-set",
+            Self::SourceContextSet => "source-context-set",
+            Self::ScalarSummary => "scalar-summary",
+            Self::CoverageProof => "coverage-proof",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanSpecMapping {
+    pub node_kind: PlanNodeKind,
+    pub typed_slot_bindings: Vec<TypedSlotBinding>,
+    pub constant_fields: Vec<ConstantFieldBinding>,
+    pub output_role: PhraseOutputRole,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhraseRecord {
+    pub phrase_id: String,
+    pub owner_section: u8,
+    pub canonical_text: String,
+    #[serde(default)]
+    pub accepted_aliases: Vec<String>,
+    pub ast_node_kind: PhraseAstNodeKind,
+    pub slot_type: PhraseSlotType,
+    pub contract_reference: PhraseContractReference,
+    pub allowed_request_forms: Vec<RequestForm>,
+    #[serde(default)]
+    pub allowed_subject_roles: Vec<PhraseRole>,
+    #[serde(default)]
+    pub allowed_object_roles: Vec<PhraseRole>,
+    #[serde(default)]
+    pub required_modifiers: Vec<String>,
+    #[serde(default)]
+    pub incompatible_modifiers: Vec<String>,
+    pub planspec_mapping: PlanSpecMapping,
+    #[serde(default)]
+    pub examples: Vec<String>,
+    #[serde(default)]
+    pub negative_fixtures: Vec<String>,
+    #[serde(flatten)]
+    pub lifecycle: VersionLifecycle,
+}
+
 pub trait RegistryRecord {
     fn code(&self) -> Option<u16>;
     fn name(&self) -> &str;
@@ -1194,6 +1426,184 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
     Ok(())
 }
 
+fn output_role_matches(node: PlanNodeKind, output: PhraseOutputRole) -> bool {
+    match node {
+        PlanNodeKind::FindEntities => output == PhraseOutputRole::EntitySet,
+        PlanNodeKind::RetrieveFacts | PlanNodeKind::FollowRelationships => {
+            matches!(
+                output,
+                PhraseOutputRole::FactSet | PhraseOutputRole::CoverageProof
+            )
+        }
+        PlanNodeKind::FindPaths => output == PhraseOutputRole::PathSet,
+        PlanNodeKind::MatchPattern => output == PhraseOutputRole::BindingTable,
+        PlanNodeKind::CombineSets => matches!(
+            output,
+            PhraseOutputRole::EntitySet
+                | PhraseOutputRole::FactSet
+                | PhraseOutputRole::BindingTable
+        ),
+        PlanNodeKind::SummarizeFacts => matches!(
+            output,
+            PhraseOutputRole::GroupSet
+                | PhraseOutputRole::ScalarSummary
+                | PhraseOutputRole::CoverageProof
+        ),
+        PlanNodeKind::FetchSourceContext => output == PhraseOutputRole::SourceContextSet,
+    }
+}
+
+fn forbidden_mapping_text(record: &PhraseRecord) -> bool {
+    let forbidden = |text: &str| {
+        let folded = text.to_ascii_lowercase();
+        folded.contains("deferred-mapping")
+            || folded.contains("placeholder")
+            || folded.contains("todo")
+    };
+    forbidden(&record.phrase_id)
+        || forbidden(&record.canonical_text)
+        || record.accepted_aliases.iter().any(|text| forbidden(text))
+        || forbidden(&record.contract_reference.code)
+        || record.required_modifiers.iter().any(|text| forbidden(text))
+        || record
+            .incompatible_modifiers
+            .iter()
+            .any(|text| forbidden(text))
+        || record.examples.iter().any(|text| forbidden(text))
+        || record.negative_fixtures.iter().any(|text| forbidden(text))
+        || record
+            .planspec_mapping
+            .typed_slot_bindings
+            .iter()
+            .any(|binding| forbidden(&binding.slot))
+        || record
+            .planspec_mapping
+            .constant_fields
+            .iter()
+            .any(|binding| match &binding.value {
+                PhraseConstantValue::Text { text } => forbidden(text),
+                PhraseConstantValue::TextList { values } => {
+                    values.iter().any(|text| forbidden(text))
+                }
+                PhraseConstantValue::Boolean { .. } => false,
+            })
+}
+
+fn validate_phrase_record<'a>(
+    record: &'a PhraseRecord,
+    ids: &mut BTreeSet<&'a String>,
+    canonical_texts: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let normalized = record
+        .canonical_text
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if !upper_snake(&record.phrase_id)
+        || !ids.insert(&record.phrase_id)
+        || record.canonical_text.is_empty()
+        || !record.canonical_text.is_ascii()
+        || !canonical_texts.insert(normalized.clone())
+        || record.contract_reference.code.is_empty()
+        || record.allowed_request_forms.is_empty()
+        || !record
+            .allowed_request_forms
+            .contains(&record.planspec_mapping.node_kind.request_form())
+        || record.planspec_mapping.constant_fields.is_empty()
+        || !output_role_matches(
+            record.planspec_mapping.node_kind,
+            record.planspec_mapping.output_role,
+        )
+        || record.examples.is_empty()
+        || record.negative_fixtures.is_empty()
+        || forbidden_mapping_text(record)
+        || contains_evaluative_kind(
+            &serde_json::to_value(record).expect("typed phrase record serialization is infallible"),
+        )
+    {
+        return Err(format!(
+            "phrase {} is not a complete executable AC-G-44 mapping",
+            record.phrase_id
+        ));
+    }
+    let mut aliases = BTreeSet::new();
+    for alias in &record.accepted_aliases {
+        let alias = alias
+            .split_ascii_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        if alias.is_empty() || !alias.is_ascii() || alias == normalized || !aliases.insert(alias) {
+            return Err(format!(
+                "phrase {} has an invalid or duplicate alias",
+                record.phrase_id
+            ));
+        }
+    }
+    let mut slots = BTreeSet::new();
+    if record
+        .planspec_mapping
+        .typed_slot_bindings
+        .iter()
+        .any(|binding| binding.slot.is_empty() || !slots.insert(&binding.slot))
+    {
+        return Err(format!(
+            "phrase {} has duplicate or empty typed slots",
+            record.phrase_id
+        ));
+    }
+    let mut constants = BTreeSet::new();
+    if record
+        .planspec_mapping
+        .constant_fields
+        .iter()
+        .any(|binding| !constants.insert(binding.target_field))
+    {
+        return Err(format!(
+            "phrase {} assigns a PlanSpec constant field twice",
+            record.phrase_id
+        ));
+    }
+    if record.contract_reference.family == PhraseReferenceFamily::Projection
+        && !record
+            .planspec_mapping
+            .constant_fields
+            .iter()
+            .any(|binding| {
+                binding.target_field == PlanField::ProjectionId
+                    && matches!(
+                        &binding.value,
+                        PhraseConstantValue::Text { text }
+                            if text == &record.contract_reference.code
+                    )
+            })
+    {
+        return Err(format!(
+            "phrase {} does not bind its projection authority into PlanSpec",
+            record.phrase_id
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_phrase_records(records: &[PhraseRecord]) -> Result<(), String> {
+    let expected_sections: BTreeSet<_> = (50_u8..=94).collect();
+    let actual_sections: BTreeSet<_> = records.iter().map(|record| record.owner_section).collect();
+    if records.len() != expected_sections.len() || actual_sections != expected_sections {
+        return Err(
+            "phrase registry must contain exactly one owner record for Query sections 50..=94"
+                .into(),
+        );
+    }
+    let mut ids = BTreeSet::new();
+    let mut canonical_texts = BTreeSet::new();
+    for record in records {
+        validate_phrase_record(record, &mut ids, &mut canonical_texts)?;
+    }
+    Ok(())
+}
+
 pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
     const REQUIRED: [&str; 12] = [
         "WorkspaceLifecycle",
@@ -1305,9 +1715,9 @@ pub fn contains_evaluative_kind(value: &serde_json::Value) -> bool {
     }
 }
 
-/// Replay the three bounded registry ingress families used by the fuzz target.
+/// Replay bounded registry ingress families used by the fuzz target.
 pub fn replay_bounded_registry_ingress(selector: u8, source: &[u8]) {
-    match selector % 3 {
+    match selector % 4 {
         0 => {
             if let Ok(document) = serde_yaml_ng::from_slice::<AcceptedRegistry<EnumDomain>>(source)
             {
@@ -1320,11 +1730,18 @@ pub fn replay_bounded_registry_ingress(selector: u8, source: &[u8]) {
                 let _ = validate_flag_domains(&document.records);
             }
         }
-        _ => {
+        2 => {
             if let Ok(document) =
                 serde_yaml_ng::from_slice::<AcceptedRegistry<StateMachine>>(source)
             {
                 let _ = validate_state_machines(&document.records);
+            }
+        }
+        _ => {
+            if let Ok(document) =
+                serde_yaml_ng::from_slice::<AcceptedRegistry<PhraseRecord>>(source)
+            {
+                let _ = validate_phrase_records(&document.records);
             }
         }
     }
@@ -1351,6 +1768,62 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn phrases() -> AcceptedRegistry<PhraseRecord> {
+        serde_yaml_ng::from_str(include_str!(
+            "../../contracts/registry/phrase-registry.yaml"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn wp08b_structural_acceptance() {
+        let phrases = phrases();
+        validate_phrase_records(&phrases.records).unwrap();
+        assert_eq!(phrases.records.len(), 45);
+        assert_eq!(
+            phrases
+                .records
+                .iter()
+                .map(|record| record.owner_section)
+                .collect::<BTreeSet<_>>(),
+            (50_u8..=94).collect()
+        );
+        assert!(phrases.records.iter().all(|record| {
+            !record.planspec_mapping.constant_fields.is_empty()
+                && record
+                    .allowed_request_forms
+                    .contains(&record.planspec_mapping.node_kind.request_form())
+        }));
+    }
+
+    #[test]
+    fn wp08b_negative_zero_state() {
+        let phrases = phrases();
+
+        let mut out_of_scope = phrases.records.clone();
+        out_of_scope[0].owner_section = 95;
+        assert!(validate_phrase_records(&out_of_scope).is_err());
+
+        let mut deferred = phrases.records.clone();
+        deferred[0].canonical_text = "deferred-mapping".into();
+        assert!(validate_phrase_records(&deferred).is_err());
+
+        let mut evaluative = phrases.records.clone();
+        evaluative[0].canonical_text = "SAFE_TO_REFACTOR".into();
+        assert!(validate_phrase_records(&evaluative).is_err());
+
+        let mut missing_slots = serde_json::to_value(&phrases.records[0]).unwrap();
+        missing_slots["planspec_mapping"]
+            .as_object_mut()
+            .unwrap()
+            .remove("typed_slot_bindings");
+        assert!(serde_json::from_value::<PhraseRecord>(missing_slots).is_err());
+
+        let mut unknown_node = serde_json::to_value(&phrases.records[0]).unwrap();
+        unknown_node["planspec_mapping"]["node_kind"] = serde_json::json!("deferred-node");
+        assert!(serde_json::from_value::<PhraseRecord>(unknown_node).is_err());
+    }
 
     #[test]
     fn wp08_negative_zero_state() {

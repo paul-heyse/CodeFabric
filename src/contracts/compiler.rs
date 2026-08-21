@@ -25,12 +25,13 @@ use super::models::{
 };
 use super::registry_models::{
     AcceptedRegistry, Capability, DerivationDefinition, EntityKind, EnumDomain, FactKind,
-    FlagDomain, Projection, PropertyKind, Provider, PublicError, RelationKind, StateMachine,
-    SummaryProfile, UnknownKind, contains_evaluative_kind, validate_capability_records,
-    validate_entity_records, validate_enum_domains, validate_error_records, validate_fact_records,
-    validate_flag_domains, validate_projection_records, validate_property_records,
-    validate_provider_records, validate_relation_records, validate_state_machines,
-    validate_summary_records, validate_unknown_records,
+    FlagDomain, PhraseRecord, Projection, PropertyKind, Provider, PublicError, RelationKind,
+    StateMachine, SummaryProfile, UnknownKind, contains_evaluative_kind,
+    validate_capability_records, validate_entity_records, validate_enum_domains,
+    validate_error_records, validate_fact_records, validate_flag_domains, validate_phrase_records,
+    validate_projection_records, validate_property_records, validate_provider_records,
+    validate_relation_records, validate_state_machines, validate_summary_records,
+    validate_unknown_records,
 };
 
 const MAX_DIAGNOSTIC_BYTES: usize = 512;
@@ -1341,9 +1342,32 @@ fn canonical_yaml(
     let (header, records) = match descriptor.artifact_kind {
         ArtifactKind::Registry => match descriptor.artifact_id.as_str() {
             "codefabric.registry.phrase-registry" => {
-                let document: RegistryDocument<Value> = typed(path, "$", value.clone())?;
+                let document: AcceptedRegistry<PhraseRecord> = typed(path, "$", value.clone())?;
+                if contains_evaluative_kind(&value) {
+                    return Err(parse_error(
+                        "evaluative-ontology-kind",
+                        path,
+                        "$.records",
+                        "evaluative conclusions are forbidden from factual registries",
+                    ));
+                }
+                validate_phrase_records(&document.records)
+                    .map_err(|error| parse_error("registry-invariant", path, "$.records", error))?;
+                super::jcs::validate_checksum(&document.owner_acceptance.source_digest).map_err(
+                    |error| {
+                        parse_error(
+                            error.failure_class(),
+                            path,
+                            "$.owner_acceptance.source_digest",
+                            error,
+                        )
+                    },
+                )?;
                 let records = document.records.len();
-                (document.header(), records)
+                let header = document.header();
+                value = serde_json::to_value(&document)
+                    .expect("typed phrase registry serialization is infallible");
+                (header, records)
             }
             artifact_id => {
                 macro_rules! accepted {
@@ -2908,6 +2932,25 @@ mod tests {
         assert!(validate_ebnf(Path::new("test.ebnf"), "a = \"x\" | ;\n").is_err());
         assert!(validate_ebnf(Path::new("test.ebnf"), "a = [\"x\";\n").is_err());
         assert!(validate_ebnf(Path::new("test.ebnf"), "a = [b] {\"x\"}; b = \"y\";\n").is_ok());
+    }
+
+    #[test]
+    fn wp08b_operational_acceptance() {
+        let source = include_str!("../../contracts/query/english-controlled-v1.ebnf");
+        let payload = source.lines().skip(6).collect::<Vec<_>>().join("\n");
+        let usage = validate_ebnf(Path::new("english-controlled-v1.ebnf"), &payload).unwrap();
+        assert!(usage.records_or_edges >= 50);
+        assert!(usage.depth >= 2);
+        for production in [
+            "entity_phrase",
+            "fact_phrase",
+            "relationship_phrase",
+            "condition_phrase",
+            "projection_phrase",
+            "source_boundary_phrase",
+        ] {
+            assert!(payload.contains(&format!("{production} =")));
+        }
     }
 
     #[test]

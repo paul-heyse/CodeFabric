@@ -18,6 +18,14 @@ JSONSCHEMA_VERSION = "4.26.0"
 SCHEMA_ID_PREFIX = "https://codefabric.dev/"
 MAX_DIAGNOSTIC_CHARS = 500
 CATALOG_BOOTSTRAP_MAX_BYTES = 262_144
+MODEL_PACK_SCHEMA_PATH = PurePosixPath("contracts/registry/model-pack.schema.json")
+MODEL_PACK_POSITIVE_PATH = PurePosixPath(
+    "contracts/fixtures/model-packs/valid-minimal.json"
+)
+MODEL_PACK_NEGATIVE_PATH = PurePosixPath(
+    "contracts/fixtures/model-packs/invalid-executable-field.json"
+)
+MODEL_PACK_FIXTURE_MAX_BYTES = 262_144
 
 
 class SchemaCatalogError(ValueError):
@@ -200,6 +208,57 @@ def validate_schema(
         ) from error
 
 
+def validate_model_pack_examples(repository_root: Path, maximum_bytes: int) -> None:
+    """Prove the non-executable model-pack schema accepts and rejects its owner cases."""
+
+    schema = _load_json(
+        repository_root / MODEL_PACK_SCHEMA_PATH,
+        MODEL_PACK_SCHEMA_PATH,
+        maximum_bytes,
+    )
+    validator = Draft202012Validator(schema)
+    positive = _load_json(
+        repository_root / MODEL_PACK_POSITIVE_PATH,
+        MODEL_PACK_POSITIVE_PATH,
+        MODEL_PACK_FIXTURE_MAX_BYTES,
+    )
+    positive_errors = sorted(
+        validator.iter_errors(positive), key=lambda error: error.json_path
+    )
+    if positive_errors:
+        error = positive_errors[0]
+        raise SchemaCatalogError(
+            "model_pack_positive_rejected",
+            MODEL_PACK_POSITIVE_PATH,
+            f"{error.json_path}: {error.message}",
+        )
+
+    negative = _load_json(
+        repository_root / MODEL_PACK_NEGATIVE_PATH,
+        MODEL_PACK_NEGATIVE_PATH,
+        MODEL_PACK_FIXTURE_MAX_BYTES,
+    )
+    negative_errors = sorted(
+        validator.iter_errors(negative), key=lambda error: error.json_path
+    )
+    if not negative_errors:
+        raise SchemaCatalogError(
+            "model_pack_negative_accepted",
+            MODEL_PACK_NEGATIVE_PATH,
+            "fixture with executable shell_command unexpectedly validated",
+        )
+    if not any(
+        tuple(error.absolute_path) == ("records", 0, "semantics")
+        and error.validator == "additionalProperties"
+        for error in negative_errors
+    ):
+        raise SchemaCatalogError(
+            "model_pack_wrong_negative_class",
+            MODEL_PACK_NEGATIVE_PATH,
+            "fixture did not fail at records[0].semantics additionalProperties",
+        )
+
+
 def validate_catalog_schemas(repository_root: Path) -> tuple[PurePosixPath, ...]:
     """Validate the complete catalog-derived JSON Schema set."""
 
@@ -220,6 +279,8 @@ def validate_catalog_schemas(repository_root: Path) -> tuple[PurePosixPath, ...]
     schema_inputs = catalog_schema_inputs(repository_root)
     for schema_path, maximum_bytes in schema_inputs:
         validate_schema(repository_root, schema_path, maximum_bytes)
+        if schema_path == MODEL_PACK_SCHEMA_PATH:
+            validate_model_pack_examples(repository_root, maximum_bytes)
     return tuple(path for path, _ in schema_inputs)
 
 
