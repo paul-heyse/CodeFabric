@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP08",
+  "current_packet": "WP08b",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -317,10 +317,22 @@
       "blockers": []
     },
     "WP08": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "1fe6cf5ef8f308e398075b96cd65f689b67e2a35",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "AC-G-05 and the roadmap omitted the required ontology-fact and state-machine registry paths from the authoritative tree even though WP08 and the owner contracts require both; the two paths are now explicit."
+        },
+        {
+          "kind": "accepted_design_correction",
+          "summary": "The lifecycle and serving prose used two stale public-error spellings; they now match the owner-complete AC-G-65 error registry before owner-acceptance provenance is computed."
+        }
+      ],
+      "failed_approaches": [
+        "The first focused mutation campaign caught 4 of 16 whole-validator deletion mutants. A table-driven invalid-record test now independently exercises every registry family, and the rerun caught all 16.",
+        "The first aggregate gate found generated unreadable integer literals, overly broad public registry-model exposure, linear-emitter lint noise, and a hard-coded 58-artifact assertion. Generation now emits bit expressions, exposes only the bounded fuzz seam, scopes linear-dispatch lint rationale, and compares catalog/index identities programmatically."
+      ],
       "blockers": []
     },
     "WP08b": {
@@ -658,6 +670,15 @@
       "summary": "WP06a Required Change 1 intentionally corrects these mutable design authorities after v5 planning. The planning-time hashes remain immutable; the WP06a proving commit and derived acceptance reconcile the expected drift."
     },
     {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP08",
+      "paths": [
+        "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
+        "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md"
+      ],
+      "summary": "WP08 reconciles stale public-error spellings in the two mutable owner authorities. The planning-time hashes remain immutable; the WP08 proving commit and regenerated artifact identities provide the accepted evolution."
+    },
+    {
       "id": "AD-01",
       "kind": "accepted_current_truth",
       "summary": "Machine projections omit only their own root/header identities, retain nested identities, and normative prose uses prose-utf8-v1."
@@ -828,6 +849,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Implement WP06a first-class typed compilation units and revalidate the contract, Proto, adapter, and output-ownership cutover.",
-  "updated_at": "2026-08-21T03:42:09Z"
+  "next_action": "Implement WP08b phrase mappings, the bounded english-controlled-v1 grammar, and the closed model-pack schema from the catalog-driven registry unit.",
+  "updated_at": "2026-08-21T06:13:27Z"
 }

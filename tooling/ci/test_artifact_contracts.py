@@ -107,22 +107,28 @@ def test_wp00_structural_acceptance() -> None:
 
 def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
     state = load_state(STATE)
-    incomplete = deepcopy(state)
-    incomplete["packets"]["WP06a"]["status"] = "in_progress"
-    incomplete["packets"]["WP06a"]["proving_commit"] = None
-    paths = _accepted_input_evolution_paths(ROOT, incomplete)
-    assert not paths
-
-    completed = deepcopy(state)
-    completed["packets"]["WP06a"]["status"] = "complete"
-    completed["packets"]["WP06a"]["proving_commit"] = state["packets"]["WP06a"][
-        "proving_commit"
+    evolutions = [
+        deviation
+        for deviation in state["plan_deviations"]
+        if deviation.get("kind") == "planned_design_input_evolution"
     ]
-    paths = _accepted_input_evolution_paths(ROOT, completed)
-    assert (
-        "docs/upfront_design/"
-        "codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md"
-    ) in paths
+    incomplete = deepcopy(state)
+    for evolution in evolutions:
+        packet = evolution["packet"]
+        incomplete["packets"][packet]["status"] = "in_progress"
+        incomplete["packets"][packet]["proving_commit"] = None
+    assert not _accepted_input_evolution_paths(ROOT, incomplete)
+
+    expected = {
+        path
+        for evolution in evolutions
+        if state["packets"][evolution["packet"]]["status"] == "complete"
+        and commit_trust(ROOT, state["packets"][evolution["packet"]]["proving_commit"])[
+            "ancestor"
+        ]
+        for path in evolution["paths"]
+    }
+    assert _accepted_input_evolution_paths(ROOT, state) == expected
 
 
 def test_wp00_negative_zero_state(tmp_path: Path) -> None:
