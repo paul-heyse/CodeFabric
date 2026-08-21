@@ -3,8 +3,8 @@
   "plan_path": "docs/plans/codefabric_waves_0-3_foundation_implementation_plan_v5_2026-08-20.md",
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
-  "status": "executing",
-  "current_packet": "WP25",
+  "status": "complete",
+  "current_packet": null,
   "packets": {
     "WP00": {
       "status": "complete",
@@ -657,15 +657,18 @@
       "blockers": []
     },
     "WP25": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "d3f5f4f2c37ff8e3dc67c93823dd475e34d59622",
       "deviations": [
         {
           "kind": "accepted_review_remediation",
           "summary": "The user reopened WP25 to close implementation-review findings IR-001 through IR-005. Scope now includes manifest-to-row scope binding, bounded streaming/capture execution, generated serving and control projections, production Delta plan/runtime evidence, and terminal proof before packet and milestone certification."
         }
       ],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "A custom ContractTableProvider metadata facade made DataFusion logical schemas diverge from Delta physical schemas for projection-free aggregate scans. The final path validates generated fields and field metadata exactly, retains native Delta providers, and governs top-level metadata through TableSpec and Delta properties.",
+        "The first terminal mutation census exposed 28 surviving mutants. Focused boundary and builder tests reduced the full replay to two delimiter-policy survivors, and corrected qualified-identifier probes caught those final survivors; the terminal targeted census caught all seven affected mutants with no misses or timeouts."
+      ],
       "blockers": []
     },
     "WP26": {
@@ -727,9 +730,14 @@
       "blockers": []
     },
     "M04": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "d3f5f4f2c37ff8e3dc67c93823dd475e34d59622",
+      "deviations": [
+        {
+          "kind": "user_deferred_external_assurance",
+          "summary": "Ubuntu clean-checkout evidence remains intentionally deferred by user direction. M04 certification is based on the accepted local gate matrix and makes no unsupported cross-platform claim."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     }
@@ -1091,6 +1099,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Remediate WP25 IR-001 through IR-005, then run packet and M04 proof, commit the coherent packet, and record its proving commit.",
-  "updated_at": "2026-08-21T19:47:17Z"
+  "next_action": "Wave 0-3 plan execution is complete. Ubuntu clean-checkout evidence remains a user-deferred assurance item outside the completion blocker set.",
+  "updated_at": "2026-08-21T23:29:27Z"
 }
