@@ -22,8 +22,8 @@ for isolated in "$temporary_root/first" "$temporary_root/second" "$temporary_roo
     mkdir -p "$(dirname "$isolated/$compiler_input")"
     cp "$repository_root/$compiler_input" "$isolated/$compiler_input"
   done < <(
-    jq -r '.artifacts[].generated_outputs[]? |
-      select(.output_kind == "proto-descriptor-census") | .path' \
+    jq -r '[.artifacts[].semantic_projection_source |
+      select(.source_kind == "derivation-output") | .output.path] | unique[]' \
       "$repository_root/contracts/manifests/suite-manifest.json"
   )
   while IFS= read -r fixture_path; do
@@ -35,7 +35,7 @@ for isolated in "$temporary_root/first" "$temporary_root/second" "$temporary_roo
   )
   if [[ "$isolated" == "$temporary_root/reordered" ]]; then
     reordered_catalog="$(mktemp "$temporary_root/catalog-reordered.XXXXXX")"
-    jq '.artifacts |= reverse | .resource_budget_profiles |= reverse' \
+    jq '.artifacts |= reverse | .derivations |= reverse | .resource_budget_profiles |= reverse' \
       "$isolated/contracts/manifests/suite-manifest.json" > "$reordered_catalog"
     mv "$reordered_catalog" "$isolated/contracts/manifests/suite-manifest.json"
   fi
@@ -45,21 +45,21 @@ done
 while IFS= read -r output_path; do
   cmp "$temporary_root/first/$output_path" "$temporary_root/second/$output_path"
 done < <(
-  jq -r '.artifacts[].generated_outputs[]? |
-    select((.producer // "contract-compiler") == "contract-compiler") | .path' \
+  jq -r '.derivations[] |
+    select(.derivation_kind == "artifact-index" or .derivation_kind == "canonical-registry-set") |
+    .outputs[].path' \
     "$repository_root/contracts/manifests/suite-manifest.json"
 )
 
 while IFS= read -r output_path; do
   cmp "$temporary_root/first/$output_path" "$temporary_root/reordered/$output_path"
 done < <(
-  jq -r '.artifacts[].generated_outputs[]? |
-    select((.producer // "contract-compiler") == "contract-compiler") |
+  jq -r '.derivations[].outputs[] |
     select(.output_kind == "canonical-registry") | .path' \
     "$repository_root/contracts/manifests/suite-manifest.json"
 )
 
-index_path="$(jq -r '.artifacts[].generated_outputs[]? |
+index_path="$(jq -r '.derivations[].outputs[] |
     select(.output_kind == "artifact-index") | .path' \
     "$repository_root/contracts/manifests/suite-manifest.json")"
 for isolated in first reordered; do

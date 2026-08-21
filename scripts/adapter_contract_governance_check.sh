@@ -28,8 +28,9 @@ if rg -n 'orjson|SerializeAsAny|model_construct\(|experimental_allow_partial|Pro
   exit 1
 fi
 
-output_count="$(jq '[.artifacts[].generated_outputs[]? |
-  select(.producer == "adapter-model-compiler")] | length' \
+output_count="$(jq '[.derivations[] |
+  select(.derivation_id == "codefabric.derivation.adapter-models") |
+  .outputs[]] | length' \
   "$repository_root/contracts/manifests/suite-manifest.json")"
 if [[ "$output_count" != "3" ]]; then
   echo "adapter model compiler must own exactly three catalog outputs" >&2

@@ -13,6 +13,7 @@ from tooling.ci.artifact_contracts import (
     DEFAULT_PLAN,
     ROOT,
     ArtifactContractError,
+    _accepted_input_evolution_paths,
     check_tracked_target_zero_state,
     commit_trust,
     derive_plan_status,
@@ -100,6 +101,23 @@ def test_wp00_structural_acceptance() -> None:
     report = validate_artifacts(ROOT, DEFAULT_PLAN)
     assert report["packet_count"] == 29
     assert report["declared_input_count"] == 18
+
+
+def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
+    state = load_state(STATE)
+    paths = _accepted_input_evolution_paths(ROOT, state)
+    assert not paths
+
+    completed = deepcopy(state)
+    completed["packets"]["WP06a"]["status"] = "complete"
+    completed["packets"]["WP06a"]["proving_commit"] = state["packets"]["WP00"][
+        "proving_commit"
+    ]
+    paths = _accepted_input_evolution_paths(ROOT, completed)
+    assert (
+        "docs/upfront_design/"
+        "codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md"
+    ) in paths
 
 
 def test_wp00_negative_zero_state(tmp_path: Path) -> None:

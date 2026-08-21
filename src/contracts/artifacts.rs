@@ -8,14 +8,19 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-use super::catalog::{CatalogError, CompiledCatalog, ContractCatalog, GeneratedOutputKind};
+use super::catalog::{
+    ARTIFACT_INDEX_DERIVATION_ID, CatalogError, CompiledCatalog, ContractCatalog, DerivationInput,
+    DerivationOutputKind, REGISTRY_DERIVATION_ID, ResolvedDerivationInvocation,
+    SemanticProjectionSource, generator_identity,
+};
 use super::compiler::{ContractCompileError, compile_artifact, compile_artifact_for_generation};
 use super::index::{
     ArtifactIndex, ArtifactIndexGeneration, ArtifactIndexOutput, ArtifactIndexRecord,
+    DerivationIndexRecord,
 };
 use super::jcs::{
     CanonicalJsonError, PROFILE, canonicalize_slice, canonicalize_value, checksum, decode_strict,
@@ -131,25 +136,6 @@ fn fixture_failure(path: &Path, message: impl Into<String>) -> ContractArtifactE
     }
 }
 
-fn generated_registry_value(
-    artifact: &super::catalog::ArtifactDescriptor,
-    compiled: &super::compiler::CompiledArtifact,
-    value: &Value,
-) -> Value {
-    json!({
-        "_generated": {
-            "generator_revision": "codefabric-contracts-wp06-v1",
-            "profile": PROFILE,
-            "source_artifact_id": artifact.artifact_id,
-            "source": artifact.authority_path,
-            "source_digest": compiled.source_digest,
-            "canonical_digest": compiled.canonical_digest,
-            "digest_projection": compiled.digest_projection,
-        },
-        "value": value,
-    })
-}
-
 fn collect_artifact_records(
     repository_root: &Path,
     catalog: &CompiledCatalog,
@@ -166,25 +152,87 @@ fn collect_artifact_records(
             compatible_suite_major: artifact.compatible_suite_major,
             status: artifact.status,
             digest_projection: artifact.digest_projection,
+            semantic_projection_source: artifact.semantic_projection_source.clone(),
             canonical_digest: compiled.canonical_digest,
             source_digest: compiled.source_digest,
             bundle_digest: compiled.bundle_digest,
             compatibility_family: artifact.compatibility_family,
             provenance_requirements: artifact.provenance_requirements.iter().copied().collect(),
             consumers: artifact.consumers.iter().copied().collect(),
-            generated_outputs: artifact
-                .generated_outputs
-                .iter()
-                .map(|output| ArtifactIndexOutput {
-                    path: output.path.clone(),
-                    output_kind: output.output_kind,
-                    producer: output.producer,
-                    consumers: output.consumers.iter().copied().collect(),
-                })
-                .collect(),
         });
     }
     Ok(records)
+}
+
+fn collect_lineage(
+    catalog: &CompiledCatalog,
+    derivation_id: &str,
+    lineage: &mut BTreeSet<String>,
+    visited: &mut BTreeSet<String>,
+) {
+    if !visited.insert(derivation_id.to_owned()) {
+        return;
+    }
+    let derivation = catalog
+        .derivation(derivation_id)
+        .expect("compiled derivation reference is valid");
+    for input in &derivation.inputs {
+        match input {
+            DerivationInput::Artifact { artifact_id, .. } => {
+                lineage.insert(artifact_id.clone());
+                if let Some(artifact) = catalog.artifact(artifact_id)
+                    && let SemanticProjectionSource::DerivationOutput { output } =
+                        &artifact.semantic_projection_source
+                {
+                    collect_lineage(catalog, &output.derivation_id, lineage, visited);
+                }
+            }
+            DerivationInput::Output { output } => {
+                collect_lineage(catalog, &output.derivation_id, lineage, visited);
+            }
+            DerivationInput::AllCompiledArtifacts => {
+                lineage.extend(
+                    catalog
+                        .artifacts()
+                        .map(|artifact| artifact.artifact_id.clone()),
+                );
+            }
+        }
+    }
+}
+
+fn collect_derivation_records(catalog: &CompiledCatalog) -> Vec<DerivationIndexRecord> {
+    catalog
+        .derivations()
+        .map(|derivation| {
+            let mut lineage = BTreeSet::new();
+            collect_lineage(
+                catalog,
+                &derivation.derivation_id,
+                &mut lineage,
+                &mut BTreeSet::new(),
+            );
+            DerivationIndexRecord {
+                derivation_id: derivation.derivation_id.clone(),
+                derivation_kind: derivation.derivation_kind,
+                inputs: derivation.inputs.clone(),
+                outputs: derivation
+                    .outputs
+                    .iter()
+                    .map(|output| ArtifactIndexOutput {
+                        path: output.path.clone(),
+                        output_kind: output.output_kind,
+                        primary_artifact_ids: output.primary_artifact_ids.iter().cloned().collect(),
+                        consumers: output.consumers.iter().copied().collect(),
+                        resource_budget_profile: output.resource_budget_profile.clone(),
+                    })
+                    .collect(),
+                lineage_artifact_ids: lineage.into_iter().collect(),
+                resource_budget_profile: derivation.resource_budget_profile.clone(),
+                generator: generator_identity(derivation.derivation_kind),
+            }
+        })
+        .collect()
 }
 
 fn render_registry_outputs(
@@ -192,28 +240,23 @@ fn render_registry_outputs(
     catalog: &CompiledCatalog,
     outputs: &mut BTreeMap<PathBuf, Vec<u8>>,
 ) -> Result<(), ContractArtifactError> {
-    for (output_path, owner, output) in catalog.outputs() {
-        if output.output_kind != GeneratedOutputKind::CanonicalRegistry {
-            continue;
+    for (output_path, output) in catalog.outputs_of_kind(
+        REGISTRY_DERIVATION_ID,
+        DerivationOutputKind::CanonicalRegistry,
+    ) {
+        if output.primary_artifact_ids.len() != 1 {
+            return Err(ContractArtifactError::Metadata(output_path.to_owned()));
         }
+        let owner = output
+            .primary_artifact_ids
+            .iter()
+            .next()
+            .expect("length was checked");
         let artifact = catalog
             .artifact(owner)
-            .expect("compiled output owner must be a catalog artifact");
-        let path = repository_root.join(&artifact.authority_path);
+            .expect("compiled primary artifact must exist");
         let compiled = compile_artifact(repository_root, catalog, artifact)?;
-        let value = decode_strict(&compiled.canonical_bytes).map_err(|source| {
-            ContractArtifactError::Canonical {
-                path: path.clone(),
-                source,
-            }
-        })?;
-        let generated = generated_registry_value(artifact, &compiled, &value);
-        let encoded =
-            canonicalize_value(&generated).map_err(|source| ContractArtifactError::Canonical {
-                path: path.clone(),
-                source,
-            })?;
-        outputs.insert(output_path.to_owned(), encoded);
+        outputs.insert(output_path.to_owned(), compiled.canonical_bytes);
     }
     Ok(())
 }
@@ -222,15 +265,18 @@ fn render_index(
     repository_root: &Path,
     index_path: &Path,
     artifact_records: &[ArtifactIndexRecord],
+    derivation_records: &[DerivationIndexRecord],
 ) -> Result<Vec<u8>, ContractArtifactError> {
     let index = ArtifactIndex {
         generated: ArtifactIndexGeneration {
             catalog_artifact_id: "codefabric.manifests.suite-manifest".to_owned(),
             artifact_count: artifact_records.len(),
-            generator_revision: "codefabric-contracts-model-v1".to_owned(),
+            derivation_count: derivation_records.len(),
+            generator_revision: "codefabric-contracts-model-v2".to_owned(),
             profile: PROFILE.to_owned(),
         },
         artifacts: artifact_records.to_vec(),
+        derivations: derivation_records.to_vec(),
     };
     canonicalize_value(
         &serde_json::to_value(index).expect("typed artifact index serialization is infallible"),
@@ -247,25 +293,40 @@ fn render_outputs(
     let catalog = ContractCatalog::load(repository_root)?;
     let mut outputs = BTreeMap::new();
     let artifact_records = collect_artifact_records(repository_root, &catalog)?;
+    let derivation_records = collect_derivation_records(&catalog);
     render_registry_outputs(repository_root, &catalog, &mut outputs)?;
-    let generated_index = required_output(&catalog, GeneratedOutputKind::ArtifactIndex)?;
-    let index_bytes = render_index(repository_root, &generated_index, &artifact_records)?;
+    let generated_index = required_output(
+        &catalog,
+        ARTIFACT_INDEX_DERIVATION_ID,
+        DerivationOutputKind::ArtifactIndex,
+    )?;
+    let index_bytes = render_index(
+        repository_root,
+        &generated_index,
+        &artifact_records,
+        &derivation_records,
+    )?;
     outputs.insert(generated_index, index_bytes);
     Ok(outputs)
 }
 
 fn required_output(
     catalog: &CompiledCatalog,
-    output_kind: GeneratedOutputKind,
+    derivation_id: &str,
+    output_kind: DerivationOutputKind,
 ) -> Result<PathBuf, ContractArtifactError> {
-    catalog
-        .output_of_kind(output_kind)
-        .map(Path::to_path_buf)
-        .ok_or_else(|| {
-            ContractArtifactError::Missing(PathBuf::from(format!(
-                "catalog output kind {output_kind:?}"
-            )))
-        })
+    let mut matches = catalog.outputs_of_kind(derivation_id, output_kind);
+    let Some((path, _)) = matches.next() else {
+        return Err(ContractArtifactError::Missing(PathBuf::from(format!(
+            "catalog derivation {derivation_id} output kind {output_kind:?}"
+        ))));
+    };
+    if matches.next().is_some() {
+        return Err(ContractArtifactError::Metadata(PathBuf::from(format!(
+            "catalog derivation {derivation_id} has non-unique output kind {output_kind:?}"
+        ))));
+    }
+    Ok(path.to_owned())
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ContractArtifactError> {
@@ -851,6 +912,47 @@ pub fn verify_checksum_fixture(path: &Path) -> Result<(), ContractArtifactError>
             ),
         })
     }
+}
+
+/// Resolve one catalog derivation to the paths and exact identities generators consume.
+///
+/// # Errors
+///
+/// Returns a typed catalog, I/O, or semantic-compilation error, or a missing marker for an
+/// unknown derivation ID.
+pub fn resolve_derivation_invocation(
+    repository_root: &Path,
+    derivation_id: &str,
+) -> Result<ResolvedDerivationInvocation, ContractArtifactError> {
+    let catalog = ContractCatalog::load_for_derivation(repository_root)?;
+    let mut invocation = catalog
+        .resolved_invocation(derivation_id)
+        .ok_or_else(|| ContractArtifactError::Missing(PathBuf::from(derivation_id)))?;
+    for input in &mut invocation.artifact_inputs {
+        let artifact = catalog
+            .artifact(&input.artifact_id)
+            .ok_or_else(|| ContractArtifactError::Missing(PathBuf::from(&input.artifact_id)))?;
+        match input.view {
+            super::catalog::ArtifactInputView::SourceBytes => {
+                input.source_digest = Some(checksum(&read(
+                    &repository_root.join(&artifact.authority_path),
+                )?));
+                if artifact.semantic_projection_source
+                    != super::catalog::SemanticProjectionSource::Native
+                {
+                    input.canonical_digest = Some(
+                        compile_artifact(repository_root, &catalog, artifact)?.canonical_digest,
+                    );
+                }
+            }
+            super::catalog::ArtifactInputView::CompiledSemantic => {
+                let compiled = compile_artifact(repository_root, &catalog, artifact)?;
+                input.canonical_digest = Some(compiled.canonical_digest);
+                input.source_digest = Some(compiled.source_digest);
+            }
+        }
+    }
+    Ok(invocation)
 }
 
 /// Deterministic generator identity for the administrative CLI.

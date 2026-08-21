@@ -248,6 +248,13 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
    - load only the closed typed catalog in `contracts/manifests/suite-manifest.json`,
      compile native sources through staged typed ingress and cross-record validation,
      and derive every source/output census, consumer edge, and provenance obligation;
+   - use catalog schema v2: artifact descriptors own native source authority while
+     closed typed derivation units own outputs, complete source sets, producer/tool
+     dispatch, resource budgets, consumers, and transitive lineage;
+   - permit only typed artifact source/semantic views, exact output references, and the
+     artifact-index-only `AllCompiledArtifacts` intrinsic; reject authored commands,
+     globs, platform predicates, scheduling/cache policy, duplicate ownership, and graph
+     cycles;
    - canonicalize semantic projections and separately fingerprint exact source bytes;
    - enforce catalog-selected byte, nesting, collection, token/alias, graph, and
      diagnostic budgets before and after parse as appropriate;
@@ -273,6 +280,9 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
    - negotiated feature registry;
    - one exact Python compiler invocation producing Python stubs and a committed
      `FileDescriptorSet`, followed by Rust generation from that same descriptor IR;
+   - resolve both compiler stages from typed derivation invocations, map descriptor names
+     to the exact governed root-input census, and treat the normalized descriptor census
+     as a generated review projection rather than semantic authority;
    - descriptor-model assertions that distinguish semantic descriptors from generated
      language source and never treat deterministic Protobuf serialization as canonical bytes.
 
@@ -286,6 +296,9 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 9. **Generated-data and conformance discipline**
    - emit language-neutral index and schema data once as canonical resources, while
      reserving generated Rust/Python source for statically useful types and behavior;
+   - emit peer artifact/derivation index records so every generated output has one owner
+     and consumers can inspect its complete resolved lineage without creating a second
+     digest authority;
    - keep owner-reviewed known-answer vectors independent from generator-derived,
      property, differential, and fuzz corpora; generation may stage candidates but
      SHALL NOT approve or overwrite normative expected values.

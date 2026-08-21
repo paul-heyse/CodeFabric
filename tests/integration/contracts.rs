@@ -5,7 +5,7 @@ use codefabric::contracts::artifacts::{
     ContractArtifactError, VerificationProfile, generate, identity, verify,
     verify_checksum_fixture, verify_jcs_corpus,
 };
-use codefabric::contracts::catalog::{ArtifactStatus, ContractCatalog, GeneratedOutputKind};
+use codefabric::contracts::catalog::{ArtifactStatus, ContractCatalog, SemanticProjectionSource};
 use codefabric::contracts::compiler::{ContractCompileError, compile_artifact};
 use codefabric::contracts::index::{ARTIFACT_INDEX_BYTES, artifact_index, artifact_index_digest};
 use codefabric::contracts::jcs::validate_checksum;
@@ -28,10 +28,16 @@ fn isolated_contract_root() -> tempfile::TempDir {
             &isolated.path().join(&artifact.authority_path),
         );
     }
-    let census = catalog
-        .output_of_kind(GeneratedOutputKind::ProtoDescriptorCensus)
-        .expect("catalog-owned descriptor census");
-    copy_file(&source_root.join(census), &isolated.path().join(census));
+    for artifact in catalog.artifacts() {
+        if let SemanticProjectionSource::DerivationOutput { output } =
+            &artifact.semantic_projection_source
+        {
+            copy_file(
+                &source_root.join(&output.path),
+                &isolated.path().join(&output.path),
+            );
+        }
+    }
     let fixture_manifest: serde_json::Value = serde_json::from_slice(
         &std::fs::read(source_root.join("contracts/manifests/fixture-oracles.json"))
             .expect("fixture manifest"),

@@ -1,4 +1,4 @@
-# @generated from catalog proto source set sha256:669c2280548451251fc93c0607e428f02d8fb764525932c5afe1c23c548a9c22; do not edit.
+# @generated from catalog primary semantic identity b3:e277cbb865a7d6b6f43d017e3d0522b9381210add57ef7ab7c67e5ef7936803f,b3:600bc0072c5a938c6ae1e7818d42c837d7141ddbebf3a0c732a2da13f943f47c,b3:5ba59c314ad97b338ebf612a4cd9a4158e6b0e4531c1497a2af8e1c4a35fe1b0,b3:69b7abee0fcf580e76582178a07811a628af6ddf59ff227fa3543356652fec5c,b3:19aafdb1017ec7847d5c7229e0d68794d1083fc5c480b5dab3247eb3f782111b; do not edit.
 from google.protobuf import empty_pb2 as _empty_pb2
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor

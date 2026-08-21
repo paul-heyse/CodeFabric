@@ -176,8 +176,7 @@
       ],
       "name": "codefabric_cpg_mcp/daemon/generated/wave0_probe.proto",
       "options": {
-        "$wire_hex": "0a176465762e636f64656661627269632e77617665302e7631",
-        "java_package": "dev.codefabric.wave0.v1"
+        "$wire_hex": "0a176465762e636f64656661627269632e77617665302e7631"
       },
       "package": "codefabric.wave0.v1",
       "public_dependencies": [],
@@ -269,14 +268,7 @@
       ],
       "name": "google/protobuf/empty.proto",
       "options": {
-        "$wire_hex": "0a13636f6d2e676f6f676c652e70726f746f627566420a456d70747950726f746f50015a2e676f6f676c652e676f6c616e672e6f72672f70726f746f6275662f74797065732f6b6e6f776e2f656d7074797062f80101a20203475042aa021e476f6f676c652e50726f746f6275662e57656c6c4b6e6f776e5479706573",
-        "cc_enable_arenas": true,
-        "csharp_namespace": "Google.Protobuf.WellKnownTypes",
-        "go_package": "google.golang.org/protobuf/types/known/emptypb",
-        "java_multiple_files": true,
-        "java_outer_classname": "EmptyProto",
-        "java_package": "com.google.protobuf",
-        "objc_class_prefix": "GPB"
+        "$wire_hex": "0a13636f6d2e676f6f676c652e70726f746f627566420a456d70747950726f746f50015a2e676f6f676c652e676f6c616e672e6f72672f70726f746f6275662f74797065732f6b6e6f776e2f656d7074797062f80101a20203475042aa021e476f6f676c652e50726f746f6275662e57656c6c4b6e6f776e5479706573"
       },
       "package": "google.protobuf",
       "public_dependencies": [],

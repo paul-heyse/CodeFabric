@@ -8,7 +8,8 @@ use thiserror::Error;
 
 use super::catalog::{
     ArtifactKind, ArtifactStatus, CompatibilityFamily, ConsumerDomain, ContractOwner,
-    DigestProjection, GeneratedOutputKind, GeneratedOutputProducer, ProvenanceRequirement,
+    DerivationInput, DerivationKind, DerivationOutputKind, DigestProjection, GeneratorIdentity,
+    ProvenanceRequirement, SemanticProjectionSource,
 };
 use super::jcs::{canonicalize_slice, checksum, validate_checksum};
 
@@ -29,24 +30,28 @@ pub struct ArtifactIndexGeneration {
     pub catalog_artifact_id: String,
     /// Number of source records encoded below.
     pub artifact_count: usize,
+    /// Number of derivation records encoded below.
+    pub derivation_count: usize,
     /// Generator implementation revision.
     pub generator_revision: String,
     /// Canonical JSON profile used for these exact bytes.
     pub profile: String,
 }
 
-/// One catalog-declared generated derivation edge.
+/// One catalog-declared derivation output edge.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactIndexOutput {
     /// Repository-relative output path.
     pub path: PathBuf,
     /// Closed output representation.
-    pub output_kind: GeneratedOutputKind,
-    /// Closed generator dispatch.
-    pub producer: GeneratedOutputProducer,
+    pub output_kind: DerivationOutputKind,
+    /// Artifacts whose semantic identity drives generated provenance.
+    pub primary_artifact_ids: Vec<String>,
     /// Domains which consume or package the output.
     pub consumers: Vec<ConsumerDomain>,
+    /// Optional output-level resource budget override.
+    pub resource_budget_profile: Option<String>,
 }
 
 /// One fully compiled governed-source identity and consumer view.
@@ -69,6 +74,8 @@ pub struct ArtifactIndexRecord {
     pub status: ArtifactStatus,
     /// Named semantic projection.
     pub digest_projection: DigestProjection,
+    /// Native or derivation-owned source of the semantic projection.
+    pub semantic_projection_source: SemanticProjectionSource,
     /// Compiled semantic identity.
     pub canonical_digest: String,
     /// Exact checked-in source identity.
@@ -81,8 +88,26 @@ pub struct ArtifactIndexRecord {
     pub provenance_requirements: Vec<ProvenanceRequirement>,
     /// Direct source consumers.
     pub consumers: Vec<ConsumerDomain>,
-    /// Catalog-owned generated output edges.
-    pub generated_outputs: Vec<ArtifactIndexOutput>,
+}
+
+/// One peer derivation record with resolved lineage and generator identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DerivationIndexRecord {
+    /// Stable derivation identity.
+    pub derivation_id: String,
+    /// Closed model-level operation.
+    pub derivation_kind: DerivationKind,
+    /// Typed normalized inputs.
+    pub inputs: Vec<DerivationInput>,
+    /// Typed normalized outputs.
+    pub outputs: Vec<ArtifactIndexOutput>,
+    /// Sorted transitive governed-artifact lineage.
+    pub lineage_artifact_ids: Vec<String>,
+    /// Unit-level resource budget.
+    pub resource_budget_profile: String,
+    /// Derived maintained generator identity.
+    pub generator: GeneratorIdentity,
 }
 
 /// Canonical shared artifact-index document.
@@ -94,6 +119,8 @@ pub struct ArtifactIndex {
     pub generated: ArtifactIndexGeneration,
     /// Records sorted by stable artifact identity.
     pub artifacts: Vec<ArtifactIndexRecord>,
+    /// Peer records sorted by stable derivation identity.
+    pub derivations: Vec<DerivationIndexRecord>,
 }
 
 /// Packaged artifact-index validation failure.
@@ -110,6 +137,7 @@ pub enum ArtifactIndexError {
     Invariant(String),
 }
 
+#[allow(clippy::too_many_lines)] // Decode and all closed peer-index invariants form one cache seam.
 fn decode_index() -> Result<ArtifactIndex, ArtifactIndexError> {
     let canonical = canonicalize_slice(ARTIFACT_INDEX_BYTES)
         .map_err(|error| ArtifactIndexError::Canonical(error.to_string()))?;
@@ -123,6 +151,11 @@ fn decode_index() -> Result<ArtifactIndex, ArtifactIndexError> {
     if index.generated.artifact_count != index.artifacts.len() {
         return Err(ArtifactIndexError::Invariant(
             "generated artifact_count disagrees with records".to_owned(),
+        ));
+    }
+    if index.generated.derivation_count != index.derivations.len() {
+        return Err(ArtifactIndexError::Invariant(
+            "generated derivation_count disagrees with records".to_owned(),
         ));
     }
     let mut previous = None;
@@ -141,6 +174,74 @@ fn decode_index() -> Result<ArtifactIndex, ArtifactIndexError> {
                 .map_err(|error| ArtifactIndexError::Invariant(error.to_string()))?;
         }
         previous = Some(record.artifact_id.as_str());
+    }
+    let mut previous_derivation = None;
+    let artifact_ids = index
+        .artifacts
+        .iter()
+        .map(|record| record.artifact_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut output_paths = std::collections::BTreeSet::new();
+    for record in &index.derivations {
+        if previous_derivation.is_some_and(|value: &str| value >= record.derivation_id.as_str()) {
+            return Err(ArtifactIndexError::Invariant(
+                "derivation IDs are not unique and strictly sorted".to_owned(),
+            ));
+        }
+        if record.inputs.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(ArtifactIndexError::Invariant(format!(
+                "derivation {} inputs are not unique and sorted",
+                record.derivation_id
+            )));
+        }
+        if record
+            .outputs
+            .windows(2)
+            .any(|pair| pair[0].path >= pair[1].path)
+        {
+            return Err(ArtifactIndexError::Invariant(format!(
+                "derivation {} outputs are not unique and sorted",
+                record.derivation_id
+            )));
+        }
+        if record
+            .lineage_artifact_ids
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+            || record
+                .lineage_artifact_ids
+                .iter()
+                .any(|artifact_id| !artifact_ids.contains(artifact_id.as_str()))
+        {
+            return Err(ArtifactIndexError::Invariant(format!(
+                "derivation {} lineage is not a closed sorted artifact set",
+                record.derivation_id
+            )));
+        }
+        if record.generator.generator_id.is_empty()
+            || record.generator.generator_revision.is_empty()
+            || record.generator.toolchain.is_empty()
+        {
+            return Err(ArtifactIndexError::Invariant(format!(
+                "derivation {} generator identity is incomplete",
+                record.derivation_id
+            )));
+        }
+        for output in &record.outputs {
+            if !output_paths.insert(&output.path)
+                || output.primary_artifact_ids.is_empty()
+                || output
+                    .primary_artifact_ids
+                    .iter()
+                    .any(|artifact_id| !artifact_ids.contains(artifact_id.as_str()))
+            {
+                return Err(ArtifactIndexError::Invariant(format!(
+                    "derivation {} output provenance is invalid",
+                    record.derivation_id
+                )));
+            }
+        }
+        previous_derivation = Some(record.derivation_id.as_str());
     }
     Ok(index)
 }

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import os
 import shutil
 import subprocess
@@ -15,15 +14,17 @@ from types import ModuleType
 from typing import Literal
 
 from codefabric_cpg_mcp.contracts.json import (
-    canonicalize_json,
     canonicalize_value,
     checksum,
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tooling.contracts.derivation import resolve_derivation
+
 GENERATOR_REVISION = "codefabric-adapter-model-compiler-v1"
 DIALECT = "https://json-schema.org/draft/2020-12/schema"
 IR_ARTIFACT_ID = "codefabric.adapter.model-ir"
+DERIVATION_ID = "codefabric.derivation.adapter-models"
 
 type TypeKind = Literal[
     "boolean",
@@ -124,37 +125,25 @@ class AdapterModelIr(_IrModel):
         return self
 
 
-def _strict_json(path: Path) -> object:
-    data = path.read_bytes()
-    canonicalize_json(data)
-    return json.loads(data)
-
-
-def _catalog_records(root: Path) -> tuple[dict[str, object], dict[str, object]]:
-    catalog = _strict_json(root / "contracts/manifests/suite-manifest.json")
-    if not isinstance(catalog, dict) or not isinstance(catalog.get("artifacts"), list):
-        raise TypeError("suite catalog shape is invalid")
-    descriptor = next(
-        record
-        for record in catalog["artifacts"]
-        if isinstance(record, dict) and record.get("artifact_id") == IR_ARTIFACT_ID
-    )
-    index_path = next(
-        output["path"]
-        for record in catalog["artifacts"]
-        if isinstance(record, dict)
-        for output in record.get("generated_outputs", [])
-        if output.get("output_kind") == "artifact-index"
-    )
-    index = _strict_json(root / str(index_path))
-    if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
-        raise TypeError("artifact index shape is invalid")
-    identity = next(
-        record
-        for record in index["artifacts"]
-        if isinstance(record, dict) and record.get("artifact_id") == IR_ARTIFACT_ID
-    )
-    return descriptor, identity
+def _resolved_input_and_outputs(
+    root: Path,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    invocation = resolve_derivation(root, DERIVATION_ID)
+    inputs = invocation["artifact_inputs"]
+    if not isinstance(inputs, list) or len(inputs) != 1:
+        raise TypeError("adapter derivation requires exactly one resolved artifact")
+    identity = inputs[0]
+    if not isinstance(identity, dict) or identity.get("artifact_id") != IR_ARTIFACT_ID:
+        raise TypeError("adapter derivation resolved the wrong primary artifact")
+    derivation = invocation["derivation"]
+    if not isinstance(derivation, dict) or not isinstance(
+        derivation.get("outputs"), list
+    ):
+        raise TypeError("adapter derivation output model is invalid")
+    outputs = derivation["outputs"]
+    if not all(isinstance(output, dict) for output in outputs):
+        raise TypeError("adapter derivation contains an invalid output")
+    return identity, outputs
 
 
 def _quoted_literal(values: tuple[str, ...]) -> str:
@@ -369,8 +358,8 @@ def _schema_id(name: str, mode: str) -> str:
 
 
 def render_outputs(root: Path) -> dict[Path, bytes]:
-    descriptor, identity = _catalog_records(root)
-    authority = root / str(descriptor["authority_path"])
+    identity, outputs = _resolved_input_and_outputs(root)
+    authority = root / str(identity["authority_path"])
     ir_source = authority.read_bytes()
     ir = AdapterModelIr.model_validate_json(ir_source, strict=True)
     if (
@@ -418,8 +407,7 @@ def render_outputs(root: Path) -> dict[Path, bytes]:
     }
     return {
         Path(str(output["path"])): output_by_kind[str(output["output_kind"])]
-        for output in descriptor["generated_outputs"]
-        if output.get("producer") == "adapter-model-compiler"
+        for output in outputs
     }
 
 
@@ -450,20 +438,14 @@ def check(root: Path) -> None:
 
 
 def repro_check(root: Path) -> None:
-    descriptor, _ = _catalog_records(root)
+    identity, _ = _resolved_input_and_outputs(root)
     catalog_path = Path("contracts/manifests/suite-manifest.json")
-    index_path = next(
-        Path(str(output["path"]))
-        for record in _strict_json(root / catalog_path)["artifacts"]  # type: ignore[index]
-        for output in record.get("generated_outputs", [])  # type: ignore[union-attr]
-        if output.get("output_kind") == "artifact-index"
-    )
-    authority_path = Path(str(descriptor["authority_path"]))
+    authority_path = Path(str(identity["authority_path"]))
     with tempfile.TemporaryDirectory(prefix="codefabric-adapter-repro.") as directory:
         generated_roots = []
         for name in ("first", "second"):
             generated_root = Path(directory) / name
-            for relative in (catalog_path, index_path, authority_path):
+            for relative in (catalog_path, authority_path):
                 destination = generated_root / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(root / relative, destination)

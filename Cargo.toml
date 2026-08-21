@@ -28,6 +28,8 @@ canonical-json = [
 ]
 contracts-tooling = [
     "canonical-json",
+    "dep:prost",
+    "dep:prost-types",
     "dep:serde_path_to_error",
     "dep:serde_yaml_ng",
     "dep:tempfile",

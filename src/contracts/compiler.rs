@@ -5,6 +5,8 @@ use std::fs::{self, File};
 use std::io::{Read as _, Take};
 use std::path::{Path, PathBuf};
 
+use prost::Message as _;
+use prost_types::{DescriptorProto, EnumDescriptorProto, FileDescriptorProto, FileDescriptorSet};
 use serde::de::DeserializeOwned;
 use serde::de::IntoDeserializer as _;
 use serde_json::{Map, Value, json};
@@ -12,17 +14,14 @@ use serde_yaml_ng::Value as YamlValue;
 use thiserror::Error;
 
 use super::catalog::{
-    ArtifactDescriptor, ArtifactKind, CompiledCatalog, DigestProjection, GeneratedOutputKind,
-    NativeFormat, ResourceBudgetProfile,
+    ArtifactDescriptor, ArtifactKind, ArtifactStatus, CompiledCatalog, DigestProjection,
+    NativeFormat, ResourceBudgetProfile, SemanticProjectionSource,
 };
 use super::jcs::{canonicalize_value, checksum, decode_strict};
 use super::models::{
     ArtifactHeader, BundleDocument, FixtureOracleClass, FixtureOracleManifest, JsonlMetadata,
     RegistryDocument, RequirementRecord, ScaffoldDocument, TraceabilityRecord,
 };
-
-/// The committed semantic descriptor census compiled by the one Protobuf toolchain.
-pub const DESCRIPTOR_CENSUS_PATH: &str = "tooling/proto/descriptor-census.json";
 
 const MAX_DIAGNOSTIC_BYTES: usize = 512;
 
@@ -727,18 +726,19 @@ fn canonical_json(
     validate_header(path, header_path, &header, descriptor)?;
 
     if descriptor.authority_path == Path::new(super::catalog::CATALOG_PATH) {
-        usage.records_or_edges = catalog
-            .artifacts()
-            .map(|record| {
-                record.depends_on.len()
-                    + record.generated_outputs.len()
-                    + record
-                        .generated_outputs
-                        .iter()
-                        .map(|output| output.consumers.len())
-                        .sum::<usize>()
-            })
-            .sum();
+        usage.records_or_edges = catalog.artifact_count()
+            + catalog
+                .derivations()
+                .map(|unit| {
+                    unit.inputs.len()
+                        + unit.outputs.len()
+                        + unit
+                            .outputs
+                            .iter()
+                            .map(|output| output.consumers.len())
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
         value = serde_json::to_value(catalog.normalized_catalog())
             .expect("typed catalog serialization is infallible");
         remove_identity_fields(
@@ -1491,58 +1491,465 @@ fn canonical_proto(
     bytes: &[u8],
     catalog: &CompiledCatalog,
 ) -> Result<(ArtifactHeader, Vec<u8>, ResourceUsage), ContractCompileError> {
-    let (header, _) = comment_header(path, bytes, "//", "")?;
+    let (header, payload_start) = comment_header(path, bytes, "//", "")?;
     validate_header(path, "$header", &header, descriptor)?;
-    let census_path = repository_root.join(DESCRIPTOR_CENSUS_PATH);
-    let (_, census_output) = catalog
-        .output_record_of_kind(GeneratedOutputKind::ProtoDescriptorCensus)
-        .expect("the compiled catalog declares one descriptor-census output");
-    let census_budget = census_output
+    if descriptor.status == ArtifactStatus::Draft
+        && descriptor.semantic_projection_source == SemanticProjectionSource::Native
+    {
+        let normalized = String::from_utf8(bytes.to_vec())
+            .map_err(|error| parse_error("utf8", path, "$", error))?
+            .replace("\r\n", "\n");
+        let payload = normalized
+            .get(payload_start..)
+            .ok_or_else(|| parse_error("proto-source", path, "$", "invalid header boundary"))?
+            .as_bytes()
+            .to_vec();
+        return Ok((header, payload, ResourceUsage::default()));
+    }
+    let SemanticProjectionSource::DerivationOutput { output } =
+        &descriptor.semantic_projection_source
+    else {
+        return Err(parse_error(
+            "descriptor-source",
+            path,
+            "$",
+            "released Protobuf artifacts require a derivation-owned descriptor set",
+        ));
+    };
+    let output_record = catalog.output(output).ok_or_else(|| {
+        parse_error(
+            "descriptor-source",
+            path,
+            "$",
+            "semantic descriptor output is absent",
+        )
+    })?;
+    let maximum = output_record
         .resource_budget_profile
         .as_deref()
         .and_then(|profile| catalog.budget(profile))
-        .expect("the descriptor census selects a validated resource budget");
-    let census_bytes = read_bounded(&census_path, census_budget.max_bytes)?;
-    let census = strict_json(&census_path, "$", &census_bytes)?;
-    let files = census
-        .get("files")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            parse_error(
-                "descriptor-census",
-                &census_path,
-                "$.files",
-                "array is absent",
-            )
-        })?;
+        .unwrap_or_else(|| {
+            catalog
+                .derivation(&output.derivation_id)
+                .and_then(|unit| catalog.budget(&unit.resource_budget_profile))
+                .expect("compiled derivation selects a resource budget")
+        })
+        .max_bytes;
+    let descriptor_path = repository_root.join(&output.path);
+    let descriptor_bytes = read_bounded(&descriptor_path, maximum)?;
+    let descriptor_set = FileDescriptorSet::decode(descriptor_bytes.as_slice())
+        .map_err(|error| parse_error("descriptor-set", &descriptor_path, "$", error))?;
+    let raw_files = raw_messages(&descriptor_bytes, 1)
+        .map_err(|message| parse_error("descriptor-set", &descriptor_path, "$", message))?;
+    if raw_files.len() != descriptor_set.file.len() {
+        return Err(parse_error(
+            "descriptor-set",
+            &descriptor_path,
+            "$.files",
+            "typed and raw file counts disagree",
+        ));
+    }
     let authority = descriptor.authority_path.to_string_lossy();
     let compiler_name = descriptor
         .authority_path
         .strip_prefix("tooling/proto/source")
         .unwrap_or(&descriptor.authority_path)
         .to_string_lossy();
-    let selected = files
+    let (_, selected, raw_selected) = descriptor_set
+        .file
         .iter()
-        .find(|file| {
-            file.get("name")
-                .and_then(Value::as_str)
+        .zip(&raw_files)
+        .enumerate()
+        .find(|(_, (file, _))| {
+            file.name
+                .as_deref()
                 .is_some_and(|name| name == authority || name == compiler_name)
         })
         .ok_or_else(|| {
             parse_error(
-                "descriptor-census",
-                &census_path,
+                "descriptor-set",
+                &descriptor_path,
                 "$.files",
                 format!("descriptor is absent for {authority}"),
             )
-        })?
-        .clone();
+        })
+        .map(|(index, (file, raw))| (index, file, *raw))?;
+    let selected = normalized_proto_file(selected, raw_selected)
+        .map_err(|message| parse_error("descriptor-set", &descriptor_path, "$.files", message))?;
     let projection = json!({"files": [selected]});
     let mut usage = observe_value(&projection, 1);
     usage.records_or_edges = proto_records_or_edges(&projection);
     let canonical = canonicalize_value(&projection)
         .map_err(|error| parse_error(error.failure_class(), path, "$", error))?;
     Ok((header, canonical, usage))
+}
+
+fn read_proto_varint(bytes: &[u8], cursor: &mut usize) -> Result<u64, String> {
+    let mut value = 0_u64;
+    for shift in (0..70).step_by(7) {
+        let byte = *bytes
+            .get(*cursor)
+            .ok_or_else(|| "truncated protobuf varint".to_owned())?;
+        *cursor += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+    }
+    Err("protobuf varint exceeds 10 bytes".to_owned())
+}
+
+fn raw_messages(bytes: &[u8], wanted_tag: u32) -> Result<Vec<&[u8]>, String> {
+    let mut cursor = 0;
+    let mut matches = Vec::new();
+    while cursor < bytes.len() {
+        let key = read_proto_varint(bytes, &mut cursor)?;
+        let tag = u32::try_from(key >> 3).map_err(|_| "protobuf tag overflow".to_owned())?;
+        match key & 7 {
+            0 => {
+                let _ = read_proto_varint(bytes, &mut cursor)?;
+            }
+            1 => cursor = cursor.checked_add(8).ok_or("protobuf offset overflow")?,
+            2 => {
+                let length = usize::try_from(read_proto_varint(bytes, &mut cursor)?)
+                    .map_err(|_| "protobuf length overflow".to_owned())?;
+                let end = cursor
+                    .checked_add(length)
+                    .ok_or_else(|| "protobuf length overflow".to_owned())?;
+                let payload = bytes
+                    .get(cursor..end)
+                    .ok_or_else(|| "truncated protobuf message".to_owned())?;
+                if tag == wanted_tag {
+                    matches.push(payload);
+                }
+                cursor = end;
+            }
+            5 => cursor = cursor.checked_add(4).ok_or("protobuf offset overflow")?,
+            wire => return Err(format!("unsupported protobuf wire type {wire}")),
+        }
+        if cursor > bytes.len() {
+            return Err("truncated protobuf field".to_owned());
+        }
+    }
+    Ok(matches)
+}
+
+fn wire_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+fn normalized_options(raw_parent: &[u8], options_tag: u32) -> Result<Value, String> {
+    let options = raw_messages(raw_parent, options_tag)?;
+    match options.as_slice() {
+        [] | [[]] => Ok(json!({})),
+        [bytes] => Ok(json!({"$wire_hex": wire_hex(bytes)})),
+        _ => Err(format!("duplicate options field {options_tag}")),
+    }
+}
+
+fn proto_full_name(package: &str, parents: &[String], name: &str) -> String {
+    std::iter::once(package)
+        .chain(parents.iter().map(String::as_str))
+        .chain(std::iter::once(name))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn normalized_proto_enum(
+    package: &str,
+    parents: &[String],
+    descriptor: &EnumDescriptorProto,
+    raw: &[u8],
+) -> Result<Value, String> {
+    let raw_values = raw_messages(raw, 2)?;
+    if raw_values.len() != descriptor.value.len() {
+        return Err("typed and raw enum value counts disagree".to_owned());
+    }
+    let mut values = descriptor
+        .value
+        .iter()
+        .zip(raw_values)
+        .map(|(value, raw_value)| {
+            Ok(json!({
+                "name": value.name.as_deref().unwrap_or_default(),
+                "number": value.number.unwrap_or_default(),
+                "options": normalized_options(raw_value, 3)?,
+            }))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    values.sort_by_key(|value| {
+        (
+            value["number"].as_i64().unwrap_or_default(),
+            value["name"].as_str().unwrap_or_default().to_owned(),
+        )
+    });
+    let mut reserved_names = descriptor.reserved_name.clone();
+    reserved_names.sort();
+    let mut reserved_ranges = descriptor
+        .reserved_range
+        .iter()
+        .map(|range| {
+            json!({
+                "start": range.start.unwrap_or_default(),
+                "end_inclusive": range.end.unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    reserved_ranges.sort_by_key(|range| {
+        (
+            range["start"].as_i64().unwrap_or_default(),
+            range["end_inclusive"].as_i64().unwrap_or_default(),
+        )
+    });
+    Ok(json!({
+        "full_name": proto_full_name(package, parents, descriptor.name.as_deref().unwrap_or_default()),
+        "options": normalized_options(raw, 3)?,
+        "reserved_names": reserved_names,
+        "reserved_ranges": reserved_ranges,
+        "values": values,
+    }))
+}
+
+#[allow(clippy::too_many_lines)] // Mirrors the closed DescriptorProto semantic record in one seam.
+fn normalized_proto_message(
+    package: &str,
+    parents: &[String],
+    syntax: &str,
+    descriptor: &DescriptorProto,
+    raw: &[u8],
+) -> Result<(Vec<Value>, Vec<Value>), String> {
+    let raw_fields = raw_messages(raw, 2)?;
+    let raw_nested = raw_messages(raw, 3)?;
+    let raw_enums = raw_messages(raw, 4)?;
+    let raw_oneofs = raw_messages(raw, 8)?;
+    if raw_fields.len() != descriptor.field.len()
+        || raw_nested.len() != descriptor.nested_type.len()
+        || raw_enums.len() != descriptor.enum_type.len()
+        || raw_oneofs.len() != descriptor.oneof_decl.len()
+    {
+        return Err("typed and raw message child counts disagree".to_owned());
+    }
+    let oneof_names = descriptor
+        .oneof_decl
+        .iter()
+        .map(|oneof| oneof.name.as_deref().unwrap_or_default())
+        .collect::<Vec<_>>();
+    let mut fields = descriptor
+        .field
+        .iter()
+        .zip(raw_fields)
+        .map(|(field, raw_field)| {
+            let label = field
+                .label
+                .and_then(|value| prost_types::field_descriptor_proto::Label::try_from(value).ok())
+                .map_or("LABEL_OPTIONAL", |value| value.as_str_name());
+            let field_type = field
+                .r#type
+                .and_then(|value| prost_types::field_descriptor_proto::Type::try_from(value).ok())
+                .map_or("TYPE_DOUBLE", |value| value.as_str_name());
+            let oneof = field.oneof_index.and_then(|index| {
+                usize::try_from(index)
+                    .ok()
+                    .and_then(|index| oneof_names.get(index).copied())
+            });
+            let has_presence = syntax != "proto3"
+                || field.proto3_optional.unwrap_or(false)
+                || field.oneof_index.is_some()
+                || matches!(field_type, "TYPE_MESSAGE" | "TYPE_GROUP");
+            Ok(json!({
+                "name": field.name.as_deref().unwrap_or_default(),
+                "number": field.number.unwrap_or_default(),
+                "label": label,
+                "type": field_type,
+                "type_name": field.type_name.as_deref().unwrap_or_default(),
+                "json_name": field.json_name.as_deref().unwrap_or_default(),
+                "oneof": oneof,
+                "proto3_optional": field.proto3_optional.unwrap_or(false),
+                "has_presence": has_presence,
+                "default_value": field.default_value,
+                "options": normalized_options(raw_field, 8)?,
+            }))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    fields.sort_by_key(|field| {
+        (
+            field["number"].as_i64().unwrap_or_default(),
+            field["name"].as_str().unwrap_or_default().to_owned(),
+        )
+    });
+    let oneofs = descriptor
+        .oneof_decl
+        .iter()
+        .zip(raw_oneofs)
+        .map(|(oneof, raw_oneof)| {
+            Ok(json!({
+                "name": oneof.name.as_deref().unwrap_or_default(),
+                "options": normalized_options(raw_oneof, 2)?,
+            }))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut reserved_names = descriptor.reserved_name.clone();
+    reserved_names.sort();
+    let mut reserved_ranges = descriptor
+        .reserved_range
+        .iter()
+        .map(|range| {
+            json!({
+                "start": range.start.unwrap_or_default(),
+                "end_exclusive": range.end.unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    reserved_ranges.sort_by_key(|range| {
+        (
+            range["start"].as_i64().unwrap_or_default(),
+            range["end_exclusive"].as_i64().unwrap_or_default(),
+        )
+    });
+    let mut extension_ranges = descriptor
+        .extension_range
+        .iter()
+        .map(|range| {
+            json!({
+                "start": range.start.unwrap_or_default(),
+                "end_exclusive": range.end.unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    extension_ranges.sort_by_key(|range| {
+        (
+            range["start"].as_i64().unwrap_or_default(),
+            range["end_exclusive"].as_i64().unwrap_or_default(),
+        )
+    });
+    let name = descriptor.name.as_deref().unwrap_or_default();
+    let mut nested_parents = parents.to_vec();
+    nested_parents.push(name.to_owned());
+    let mut messages = vec![json!({
+        "full_name": proto_full_name(package, parents, name),
+        "fields": fields,
+        "oneofs": oneofs,
+        "options": normalized_options(raw, 7)?,
+        "reserved_names": reserved_names,
+        "reserved_ranges": reserved_ranges,
+        "extension_ranges": extension_ranges,
+    })];
+    let mut enums = descriptor
+        .enum_type
+        .iter()
+        .zip(raw_enums)
+        .map(|(item, raw_item)| normalized_proto_enum(package, &nested_parents, item, raw_item))
+        .collect::<Result<Vec<_>, _>>()?;
+    for (nested, raw_nested) in descriptor.nested_type.iter().zip(raw_nested) {
+        let (nested_messages, nested_enums) =
+            normalized_proto_message(package, &nested_parents, syntax, nested, raw_nested)?;
+        messages.extend(nested_messages);
+        enums.extend(nested_enums);
+    }
+    Ok((messages, enums))
+}
+
+fn normalized_proto_file(descriptor: &FileDescriptorProto, raw: &[u8]) -> Result<Value, String> {
+    let package = descriptor.package.as_deref().unwrap_or_default();
+    let syntax = descriptor.syntax.as_deref().unwrap_or("proto2");
+    let raw_messages_list = raw_messages(raw, 4)?;
+    let raw_enums = raw_messages(raw, 5)?;
+    let raw_services = raw_messages(raw, 6)?;
+    if raw_messages_list.len() != descriptor.message_type.len()
+        || raw_enums.len() != descriptor.enum_type.len()
+        || raw_services.len() != descriptor.service.len()
+    {
+        return Err("typed and raw file child counts disagree".to_owned());
+    }
+    let mut messages = Vec::new();
+    let mut enums = descriptor
+        .enum_type
+        .iter()
+        .zip(raw_enums)
+        .map(|(item, raw_item)| normalized_proto_enum(package, &[], item, raw_item))
+        .collect::<Result<Vec<_>, _>>()?;
+    for (message, raw_message) in descriptor.message_type.iter().zip(raw_messages_list) {
+        let (nested_messages, nested_enums) =
+            normalized_proto_message(package, &[], syntax, message, raw_message)?;
+        messages.extend(nested_messages);
+        enums.extend(nested_enums);
+    }
+    messages.sort_by_key(|message| message["full_name"].as_str().unwrap_or_default().to_owned());
+    enums.sort_by_key(|item| item["full_name"].as_str().unwrap_or_default().to_owned());
+    let mut services = descriptor
+        .service
+        .iter()
+        .zip(raw_services)
+        .map(|(service, raw_service)| {
+            let raw_methods = raw_messages(raw_service, 2)?;
+            if raw_methods.len() != service.method.len() {
+                return Err("typed and raw service method counts disagree".to_owned());
+            }
+            let mut methods = service
+                .method
+                .iter()
+                .zip(raw_methods)
+                .map(|(method, raw_method)| {
+                    Ok(json!({
+                        "name": method.name.as_deref().unwrap_or_default(),
+                        "input_type": method.input_type.as_deref().unwrap_or_default(),
+                        "output_type": method.output_type.as_deref().unwrap_or_default(),
+                        "client_streaming": method.client_streaming.unwrap_or(false),
+                        "server_streaming": method.server_streaming.unwrap_or(false),
+                        "options": normalized_options(raw_method, 4)?,
+                    }))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            methods.sort_by_key(|method| method["name"].as_str().unwrap_or_default().to_owned());
+            Ok(json!({
+                "full_name": proto_full_name(package, &[], service.name.as_deref().unwrap_or_default()),
+                "options": normalized_options(raw_service, 3)?,
+                "methods": methods,
+            }))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    services.sort_by_key(|service| service["full_name"].as_str().unwrap_or_default().to_owned());
+    let mut dependencies = descriptor.dependency.clone();
+    dependencies.sort();
+    let dependency = |index: &i32| {
+        usize::try_from(*index)
+            .ok()
+            .and_then(|index| descriptor.dependency.get(index))
+            .cloned()
+            .ok_or_else(|| "descriptor dependency index is out of range".to_owned())
+    };
+    let mut public_dependencies = descriptor
+        .public_dependency
+        .iter()
+        .map(dependency)
+        .collect::<Result<Vec<_>, _>>()?;
+    public_dependencies.sort();
+    let mut weak_dependencies = descriptor
+        .weak_dependency
+        .iter()
+        .map(dependency)
+        .collect::<Result<Vec<_>, _>>()?;
+    weak_dependencies.sort();
+    Ok(json!({
+        "name": descriptor.name.as_deref().unwrap_or_default(),
+        "package": package,
+        "syntax": syntax,
+        "edition": Value::Null,
+        "dependencies": dependencies,
+        "public_dependencies": public_dependencies,
+        "weak_dependencies": weak_dependencies,
+        "options": normalized_options(raw, 8)?,
+        "messages": messages,
+        "enums": enums,
+        "services": services,
+    }))
 }
 
 fn proto_records_or_edges(value: &Value) -> usize {
@@ -1834,13 +2241,12 @@ mod tests {
             compatibility_family: CompatibilityFamily::Suite,
             resource_budget_profile: "test".to_owned(),
             parser_schema_authority: None,
-            generated_outputs: Vec::new(),
+            semantic_projection_source: SemanticProjectionSource::Native,
             consumers: BTreeSet::from([ConsumerDomain::ContractTooling]),
             provenance_requirements: BTreeSet::from([
                 ProvenanceRequirement::CanonicalDigest,
                 ProvenanceRequirement::SourceDigest,
             ]),
-            depends_on: BTreeSet::new(),
         }
     }
 

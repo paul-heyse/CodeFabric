@@ -406,34 +406,78 @@ contracts/
     security-corpus-manifest.yaml
 ```
 
-Generated Rust and Python types SHALL be emitted under `generated/` and SHALL contain a header naming the source artifact digest. Hand-edited generated files are prohibited.
+Generated Rust and Python types SHALL be emitted under `generated/` and SHALL contain a
+header naming the semantic identity of the primary source artifact. Exact source identity
+remains detached in the generated artifact index, so an editorial-only source edit does
+not churn generated source. Hand-edited generated files are prohibited.
 
-The suite manifest SHALL use a closed typed catalog model. Each artifact descriptor
-declares its stable ID, native source path and kind, compatibility family, projection
-profile, generated outputs, consumer domains, provenance obligations, and resource
-budget profile. The compiler SHALL derive source and output censuses, generator
-dispatch, packaging inputs, warning/release counts, traceability joins, and artifact
-index records from that graph. It SHALL reject unknown fields and kinds, duplicate IDs
-or authority/output paths, missing sources, conflicting or cyclic derivation edges,
-path escape, and outputs with multiple authorities. Catalog record order has no
-semantic effect; diagnostics and output order are deterministic.
+The suite manifest SHALL use closed typed catalog schema version 2. The catalog has two
+peer collections: `artifacts` and `derivations`. Artifact descriptors own governed source
+authority and declare stable ID, native source path and kind, compatibility family,
+projection profile, consumer domains, provenance obligations, resource budget profile,
+and a typed `semantic_projection_source`. That source is either `Native` or one exact
+`DerivationOutput(OutputRef)`, where `OutputRef` contains a derivation ID and output path.
+Artifact descriptors SHALL NOT own generated outputs or build-order dependencies.
 
-The suite manifest's first logical descriptor SHALL describe the suite manifest itself,
-including authority path, projection, owner, compatibility family, budget profile, and
-derived artifact-index output. This is ordinary typed self-description, not a computed
-census or embedded digest. During typed projection, artifact descriptors are sorted by
-`artifact_id`; generated outputs by path; consumer/provenance sets by their stable code;
-and derivation edges by `(authority_artifact_id, output_path, consumer_code)`. Duplicate
-sort keys fail validation before projection. RFC 8785 then canonicalizes object members;
-it is not expected to reorder arrays.
+A closed `DerivationUnitDescriptor` owns each generation or compilation operation. It
+contains `derivation_id`, a closed `derivation_kind`, typed sorted inputs, typed sorted
+outputs, and a unit resource-budget profile. Producer/tool dispatch is derived from the
+kind and is never an authored command or producer field. The initial kinds are:
+
+```text
+ArtifactIndex
+CanonicalRegistrySet
+ProtobufDescriptorAndPython
+ProtobufRustFromDescriptor
+AdapterModelCompilation
+```
+
+A derivation input is exactly one of:
+
+```text
+Artifact(artifact_id, SourceBytes | CompiledSemantic)
+Output(OutputRef)
+AllCompiledArtifacts
+```
+
+`AllCompiledArtifacts` is an intrinsic accepted only by `ArtifactIndex`; it resolves to
+the complete sorted compiled-artifact set and does not make the catalog a query language.
+Arbitrary predicates, globs, platform conditionals, phase numbers, scheduling commands,
+cache directives, environment mutation, and shell fragments are forbidden.
+
+Each derivation output declares a globally unique safe repository-relative `path`, a
+closed `output_kind`, a non-empty sorted set of `primary_artifact_ids`, a sorted consumer
+set, and an optional output-specific resource budget. Output kinds may repeat; consumers
+select plural outputs within a derivation or an exact output reference, never a global
+singleton by kind. A kind defines valid input views, output kinds, and cardinality. Adding
+a kind is an additive catalog/compiler contract change.
+
+The compiler SHALL validate a graph over native-source, semantic-artifact, derivation,
+and output nodes. It SHALL reject unknown fields or kinds; duplicate/unknown IDs; missing
+artifact/output references; invalid input views; invalid kind/cardinality combinations;
+empty or unknown primary sets; authority/output path conflicts; path escape; dependency
+cycles; and output paths claimed by more than one derivation. Every released generated
+surface SHALL be reachable from exactly one unit. Catalog record order has no semantic
+effect: derivations sort by ID, inputs by typed stable reference, outputs by path, primary
+artifact IDs by ID, and consumer/provenance sets by stable code before RFC 8785 object
+canonicalization. Duplicate sort keys fail before projection.
+
+The suite manifest's first logical artifact descriptor SHALL describe the manifest
+itself, including authority path, projection, owner, compatibility family, and budget.
+It owns no generated output. The `ArtifactIndex` derivation separately consumes the
+`AllCompiledArtifacts` intrinsic. This is ordinary typed self-description, not a
+computed census or embedded digest.
 
 Computed observations do not become a second self-referential catalog. A generated
-artifact index SHALL record, for every governed source, its projection ID,
-`canonical_digest`, `source_digest`, authority, provenance, generator revision, outputs,
-and consumer views. Generated outputs identify their authority source and that source's
-digests; the index does not attempt to contain its own exact-byte digest. Rust and Python
-consumers SHALL read the same canonical index resource; language source generation is
-reserved for statically useful types and behavior.
+artifact index SHALL contain peer artifact and derivation collections. Artifact records
+own projection ID, `canonical_digest`, `source_digest`, authority, and provenance.
+Derivation records contain resolved inputs and outputs, derived generator revision/tool
+identity, and deterministic transitive lineage by artifact/output reference; they do not
+create another source-digest authority. Consumers join the peer records to recover every
+input identity. The index does not contain its own exact-byte digest. Output checksums are
+reproduction evidence, never catalog authority. Rust and Python consumers SHALL read the
+same canonical index resource; language source generation is reserved for statically
+useful types and behavior.
 
 The semantic request/response JSON Schemas SHALL be complete, closed at public boundaries, and capable of validating every normative fixture. The `.proto` files SHALL be compiled in both Rust and Python CI. Registry YAML is the human-reviewable source; canonical JSON derived from it is the fingerprinted machine form.
 
@@ -461,6 +505,16 @@ The four `.proto` authorities SHALL be compiled by one exact `grpcio-tools` invo
 into Python bindings and one committed `FileDescriptorSet` with imports included and
 source information excluded. Rust generation SHALL decode that same descriptor set and
 use the pinned Prost/Tonic descriptor APIs; it SHALL NOT invoke a second `protoc`.
+The Protobuf derivations SHALL receive resolved typed invocations rather than rescan the
+catalog. `ProtobufDescriptorAndPython` consumes every governed root as `SourceBytes`, maps
+every `FileDescriptorProto.name` back to that exact root set, and permits only declared
+well-known transitive imports. `ProtobufRustFromDescriptor` consumes the resulting
+descriptor-set `OutputRef` and emits Rust bindings through `compile_fds`.
+`descriptor-census.json` is a generated review projection and never semantic authority.
+Registry derivations emit the already-compiled canonical JSON bytes. Adapter generation
+consumes the compiled adapter-IR identity and retains distinct Pydantic validation schema,
+serialization schema, model-source, and fingerprint outputs; models and `TypeAdapter`s
+remain compiled once rather than constructed on a request path.
 Normative known-answer vectors remain independently reviewed oracles. Generator-derived,
 property, and differential corpora provide broad coverage but SHALL NOT approve or
 overwrite their own expected bytes or digests.

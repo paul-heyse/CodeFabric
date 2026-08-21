@@ -360,7 +360,12 @@ def _validate_oracle_catalog(plan_path: Path) -> dict[str, list[str]]:
     return catalog
 
 
-def validate_plan(root: Path, plan_path: Path) -> dict[str, Any]:
+def validate_plan(
+    root: Path,
+    plan_path: Path,
+    *,
+    verify_declared_inputs: bool = True,
+) -> dict[str, Any]:
     """Validate implementation-plan structure and immutable inputs."""
     values = parse_frontmatter(plan_path)
     missing = PLAN_REQUIRED_KEYS - values.keys()
@@ -384,18 +389,49 @@ def validate_plan(root: Path, plan_path: Path) -> dict[str, Any]:
     _validate_digest_pairs(root, plan_path, values)
     identifiers = plan_ids(plan_path)
     _validate_oracle_catalog(plan_path)
+    if verify_declared_inputs:
+        _validate_declared_inputs(root, plan_path, set())
+    return {**values, "ids": identifiers}
+
+
+def _accepted_input_evolution_paths(root: Path, state: Mapping[str, Any]) -> set[str]:
+    accepted: set[str] = set()
+    for deviation in state.get("plan_deviations", []):
+        if (
+            not isinstance(deviation, dict)
+            or deviation.get("kind") != "planned_design_input_evolution"
+            or not isinstance(deviation.get("packet"), str)
+            or not isinstance(deviation.get("paths"), list)
+        ):
+            continue
+        packet = deviation["packet"]
+        entry = state.get("packets", {}).get(packet)
+        if (
+            isinstance(entry, dict)
+            and entry.get("status") == "complete"
+            and commit_trust(root, entry.get("proving_commit"))["ancestor"]
+        ):
+            accepted.update(
+                path for path in deviation["paths"] if isinstance(path, str)
+            )
+    return accepted
+
+
+def _validate_declared_inputs(
+    root: Path,
+    plan_path: Path,
+    accepted_paths: set[str],
+) -> None:
     for item in declared_inputs(plan_path):
         input_path = root / item.path
         if not input_path.is_file():
             raise ArtifactContractError(
                 f"{_relative(plan_path, root)}: missing declared input {item.path}"
             )
-        observed = _sha256(input_path)
-        if observed != item.digest:
+        if _sha256(input_path) != item.digest and item.path not in accepted_paths:
             raise ArtifactContractError(
                 f"{_relative(plan_path, root)}: stale declared input {item.path}"
             )
-    return {**values, "ids": identifiers}
 
 
 def _reject_derived_keys(value: Any, path: str = "$") -> None:
@@ -504,9 +540,14 @@ def validate_artifacts(
 ) -> dict[str, Any]:
     """Validate the active plan, its current reviews, and its schema-2 state."""
     plan_path = plan_path if plan_path.is_absolute() else root / plan_path
-    plan = validate_plan(root, plan_path)
+    plan = validate_plan(root, plan_path, verify_declared_inputs=False)
     state_path = root / str(plan["state_path"])
     state = validate_state(root, state_path, expected_ids=plan["ids"])
+    _validate_declared_inputs(
+        root,
+        plan_path,
+        _accepted_input_evolution_paths(root, state),
+    )
     expected_plan_path = _relative(plan_path, root)
     if state["plan_path"] != expected_plan_path:
         raise ArtifactContractError(
@@ -581,21 +622,26 @@ def derive_plan_status(
 ) -> dict[str, Any]:
     """Derive plan freshness and packet trust without mutating state."""
     plan_path = plan_path if plan_path.is_absolute() else root / plan_path
-    plan = validate_plan(root, plan_path)
+    plan = validate_plan(root, plan_path, verify_declared_inputs=False)
     state = validate_state(
         root,
         root / str(plan["state_path"]),
         expected_ids=plan["ids"],
     )
     baseline = commit_trust(root, str(plan["baseline_commit"]))
-    inputs = [
-        {
-            "path": item.path,
-            "fresh": (root / item.path).is_file()
-            and _sha256(root / item.path) == item.digest,
-        }
-        for item in declared_inputs(plan_path)
-    ]
+    accepted_paths = _accepted_input_evolution_paths(root, state)
+    inputs = []
+    for item in declared_inputs(plan_path):
+        fresh = (root / item.path).is_file() and _sha256(
+            root / item.path
+        ) == item.digest
+        inputs.append(
+            {
+                "path": item.path,
+                "fresh": fresh,
+                "accepted_evolution": not fresh and item.path in accepted_paths,
+            }
+        )
     oracle_catalog = _validate_oracle_catalog(plan_path)
     just_recipes = load_just_recipes()
     blocks = _packet_blocks(plan_path)
@@ -648,7 +694,7 @@ def derive_plan_status(
             }
     healthy = (
         baseline["ancestor"]
-        and all(item["fresh"] for item in inputs)
+        and all(item["fresh"] or item["accepted_evolution"] for item in inputs)
         and not untrusted
         and not untrusted_entries
     )
@@ -727,7 +773,14 @@ def _status_summary(report: Mapping[str, Any]) -> dict[str, Any]:
         "baseline": report["baseline"],
         "declared_input_count": len(declared_inputs_report),
         "stale_inputs": [
-            item["path"] for item in declared_inputs_report if not item["fresh"]
+            item["path"]
+            for item in declared_inputs_report
+            if not item["fresh"] and not item["accepted_evolution"]
+        ],
+        "accepted_input_evolutions": [
+            item["path"]
+            for item in declared_inputs_report
+            if item["accepted_evolution"]
         ],
         "complete_packets": [
             packet

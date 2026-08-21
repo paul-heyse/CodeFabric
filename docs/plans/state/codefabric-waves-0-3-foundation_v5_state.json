@@ -642,6 +642,15 @@
       "summary": "Tracked auxiliary Cargo target files were removed from the current tree and reachable HEAD history before v5 adoption; DB06 is a permanent reintroduction guard."
     },
     {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP06a",
+      "paths": [
+        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md"
+      ],
+      "summary": "WP06a Required Change 1 intentionally corrects these mutable design authorities after v5 planning. The planning-time hashes remain immutable; the WP06a proving commit and derived acceptance reconcile the expected drift."
+    },
+    {
       "id": "AD-01",
       "kind": "accepted_current_truth",
       "summary": "Machine projections omit only their own root/header identities, retain nested identities, and normative prose uses prose-utf8-v1."

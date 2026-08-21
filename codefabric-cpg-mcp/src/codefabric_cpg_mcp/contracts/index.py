@@ -65,7 +65,7 @@ type DigestProjection = Literal[
     "proto-descriptor-v1",
     "yaml-ac-g-53-v1",
 ]
-type GeneratedOutputKind = Literal[
+type DerivationOutputKind = Literal[
     "artifact-index",
     "canonical-registry",
     "proto-descriptor-set",
@@ -79,11 +79,14 @@ type GeneratedOutputKind = Literal[
     "adapter-schema-manifest",
     "adapter-fingerprint-manifest",
 ]
-type GeneratedOutputProducer = Literal[
-    "contract-compiler",
-    "proto-compiler",
-    "adapter-model-compiler",
+type DerivationKind = Literal[
+    "artifact-index",
+    "canonical-registry-set",
+    "protobuf-descriptor-and-python",
+    "protobuf-rust-from-descriptor",
+    "adapter-model-compilation",
 ]
+type ArtifactInputView = Literal["source-bytes", "compiled-semantic"]
 type ProvenanceRequirement = Literal[
     "source-digest",
     "canonical-digest",
@@ -102,17 +105,80 @@ class ArtifactIndexGeneration(_ClosedModel):
 
     catalog_artifact_id: str
     artifact_count: int = Field(ge=0)
+    derivation_count: int = Field(ge=0)
     generator_revision: str
     profile: Literal["codefabric-jcs-v1"]
 
 
+class OutputRef(_ClosedModel):
+    """Stable reference to one derivation output."""
+
+    derivation_id: str
+    path: str
+
+
+class NativeSemanticProjection(_ClosedModel):
+    """A semantic projection compiled from native authority bytes."""
+
+    source_kind: Literal["native"]
+
+
+class DerivedSemanticProjection(_ClosedModel):
+    """A semantic projection compiled from a derivation output."""
+
+    source_kind: Literal["derivation-output"]
+    output: OutputRef
+
+
+type SemanticProjectionSource = Annotated[
+    NativeSemanticProjection | DerivedSemanticProjection,
+    Field(discriminator="source_kind"),
+]
+
+
+class ArtifactDerivationInput(_ClosedModel):
+    """One governed artifact input."""
+
+    input_kind: Literal["artifact"]
+    artifact_id: str
+    view: ArtifactInputView
+
+
+class OutputDerivationInput(_ClosedModel):
+    """One upstream derivation-output input."""
+
+    input_kind: Literal["output"]
+    output: OutputRef
+
+
+class AllCompiledArtifactsInput(_ClosedModel):
+    """The closed set of all compiled governed artifacts."""
+
+    input_kind: Literal["all-compiled-artifacts"]
+
+
+type DerivationInput = Annotated[
+    ArtifactDerivationInput | OutputDerivationInput | AllCompiledArtifactsInput,
+    Field(discriminator="input_kind"),
+]
+
+
 class ArtifactIndexOutput(_ClosedModel):
-    """One catalog-owned generated derivation edge."""
+    """One derivation-owned generated output edge."""
 
     path: str
-    output_kind: GeneratedOutputKind
-    producer: GeneratedOutputProducer
+    output_kind: DerivationOutputKind
+    primary_artifact_ids: tuple[str, ...]
     consumers: tuple[ConsumerDomain, ...]
+    resource_budget_profile: str | None
+
+
+class GeneratorIdentity(_ClosedModel):
+    """Maintained generator identity derived from a closed unit kind."""
+
+    generator_id: str
+    generator_revision: str
+    toolchain: tuple[str, ...]
 
 
 class ArtifactIndexRecord(_ClosedModel):
@@ -126,13 +192,25 @@ class ArtifactIndexRecord(_ClosedModel):
     compatible_suite_major: int = Field(ge=0)
     status: ArtifactStatus
     digest_projection: DigestProjection
+    semantic_projection_source: SemanticProjectionSource
     canonical_digest: Checksum
     source_digest: Checksum
     bundle_digest: Checksum | None
     compatibility_family: CompatibilityFamily
     provenance_requirements: tuple[ProvenanceRequirement, ...]
     consumers: tuple[ConsumerDomain, ...]
-    generated_outputs: tuple[ArtifactIndexOutput, ...]
+
+
+class DerivationIndexRecord(_ClosedModel):
+    """One peer derivation record and its transitive governed lineage."""
+
+    derivation_id: str
+    derivation_kind: DerivationKind
+    inputs: tuple[DerivationInput, ...]
+    outputs: tuple[ArtifactIndexOutput, ...]
+    lineage_artifact_ids: tuple[str, ...]
+    resource_budget_profile: str
+    generator: GeneratorIdentity
 
 
 class ArtifactIndex(_ClosedModel):
@@ -140,6 +218,7 @@ class ArtifactIndex(_ClosedModel):
 
     generated: ArtifactIndexGeneration = Field(alias="_generated")
     artifacts: tuple[ArtifactIndexRecord, ...]
+    derivations: tuple[DerivationIndexRecord, ...]
 
 
 _ARTIFACT_INDEX_ADAPTER = TypeAdapter(ArtifactIndex)
@@ -167,6 +246,11 @@ def artifact_index() -> ArtifactIndex:
     artifact_ids = tuple(record.artifact_id for record in index.artifacts)
     if artifact_ids != tuple(sorted(set(artifact_ids))):
         raise ValueError("artifact index IDs are not unique and strictly sorted")
+    if index.generated.derivation_count != len(index.derivations):
+        raise ValueError("artifact index derivation count disagrees with its records")
+    derivation_ids = tuple(record.derivation_id for record in index.derivations)
+    if derivation_ids != tuple(sorted(set(derivation_ids))):
+        raise ValueError("artifact index derivation IDs are not unique and sorted")
     return index
 
 

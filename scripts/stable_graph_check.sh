@@ -104,6 +104,8 @@ printf '%s' "$root_shape" | jq -e '
     ],
     "contracts-tooling": [
       "canonical-json",
+      "dep:prost",
+      "dep:prost-types",
       "dep:serde_path_to_error",
       "dep:serde_yaml_ng",
       "dep:tempfile"
@@ -230,6 +232,8 @@ printf '%s\n' "$contracts_tree" | rg -q '^serde_yaml_ng ' || \
   fail 'contracts-tooling does not activate YAML contract parsing'
 printf '%s\n' "$contracts_tree" | rg -q '^serde_path_to_error ' || \
   fail 'contracts-tooling does not activate path-aware typed diagnostics'
+printf '%s\n' "$contracts_tree" | rg -q '^prost-types ' || \
+  fail 'contracts-tooling does not activate typed descriptor-set projection'
 printf '%s\n' "$proto_tree" | rg -q '^tonic-prost-build ' || \
   fail 'proto-tooling does not activate the Rust Protobuf generator'
 

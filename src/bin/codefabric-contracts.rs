@@ -5,16 +5,21 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use codefabric::contracts::artifacts::{
-    VerificationProfile, generate, identity, verify, verify_checksum_fixture,
+    VerificationProfile, generate, identity, resolve_derivation_invocation, verify,
+    verify_checksum_fixture,
 };
 
-const USAGE: &str = "usage:\n  codefabric-contracts --identity\n  codefabric-contracts generate [--root PATH]\n  codefabric-contracts verify [--profile full|released] [--root PATH]\n  codefabric-contracts verify-checksum-fixture PATH\n";
+const USAGE: &str = "usage:\n  codefabric-contracts --identity\n  codefabric-contracts generate [--root PATH]\n  codefabric-contracts resolve-derivation DERIVATION_ID [--root PATH]\n  codefabric-contracts verify [--profile full|released] [--root PATH]\n  codefabric-contracts verify-checksum-fixture PATH\n";
 
 #[derive(Debug)]
 enum Command {
     Identity,
     Generate {
         root: PathBuf,
+    },
+    ResolveDerivation {
+        root: PathBuf,
+        derivation_id: String,
     },
     Verify {
         root: PathBuf,
@@ -74,6 +79,14 @@ fn parse() -> Result<Command, String> {
             let (root, _) = parse_root_and_profile(arguments, false)?;
             Ok(Command::Generate { root })
         }
+        "resolve-derivation" => {
+            let derivation_id = take_value(&mut arguments, command.as_str())?;
+            let (root, _) = parse_root_and_profile(arguments, false)?;
+            Ok(Command::ResolveDerivation {
+                root,
+                derivation_id,
+            })
+        }
         "verify" => {
             let (root, profile) = parse_root_and_profile(arguments, true)?;
             Ok(Command::Verify { root, profile })
@@ -99,6 +112,15 @@ fn run(command: Command) -> Result<(), String> {
         Command::Generate { root } => {
             let count = generate(Path::new(&root)).map_err(|error| error.to_string())?;
             eprintln!("generated {count} contract outputs");
+        }
+        Command::ResolveDerivation {
+            root,
+            derivation_id,
+        } => {
+            let invocation = resolve_derivation_invocation(Path::new(&root), &derivation_id)
+                .map_err(|error| error.to_string())?;
+            let encoded = serde_json::to_string(&invocation).map_err(|error| error.to_string())?;
+            println!("{encoded}");
         }
         Command::Verify { root, profile } => {
             let report = verify(Path::new(&root), profile).map_err(|error| error.to_string())?;

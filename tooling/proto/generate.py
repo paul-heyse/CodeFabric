@@ -7,7 +7,6 @@ import hashlib
 import importlib.metadata
 import importlib.resources
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -15,13 +14,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from google.protobuf import descriptor_pb2, json_format
+from google.protobuf import descriptor_pb2
 from grpc_tools import protoc
+
+from tooling.contracts.derivation import clean_environment, resolve_derivation
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = ROOT / "tooling" / "proto" / "source"
-CATALOG_PATH = ROOT / "contracts" / "manifests" / "suite-manifest.json"
 BASELINE = ROOT / "tooling" / "proto" / "compatibility-baseline.json"
+DESCRIPTOR_DERIVATION_ID = "codefabric.derivation.wave0-proto-descriptor-python"
+RUST_DERIVATION_ID = "codefabric.derivation.wave0-proto-rust"
 EXACT_PYTHON_PACKAGES = {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -30,16 +32,14 @@ EXACT_PYTHON_PACKAGES = {
 GRPC_TOOLS_PROTOC = "libprotoc 35.1"
 
 
-def contract_catalog() -> dict[str, Any]:
-    return json.loads(CATALOG_PATH.read_bytes())
+DESCRIPTOR_INVOCATION = resolve_derivation(ROOT, DESCRIPTOR_DERIVATION_ID)
+RUST_INVOCATION = resolve_derivation(ROOT, RUST_DERIVATION_ID)
 
 
 def proto_sources() -> tuple[tuple[Path, Path], ...]:
-    sources = []
-    for artifact in contract_catalog()["artifacts"]:
-        if artifact["native_format"] != "proto":
-            continue
-        authority = Path(artifact["authority_path"])
+    sources: list[tuple[Path, Path]] = []
+    for artifact in DESCRIPTOR_INVOCATION["artifact_inputs"]:
+        authority = Path(str(artifact["authority_path"]))
         try:
             compiler_name = authority.relative_to("tooling/proto/source")
         except ValueError:
@@ -51,10 +51,9 @@ def proto_sources() -> tuple[tuple[Path, Path], ...]:
 def output_destination(output_kind: str) -> Path:
     matches = [
         ROOT / output["path"]
-        for artifact in contract_catalog()["artifacts"]
-        for output in artifact["generated_outputs"]
-        if output.get("producer", "contract-compiler") == "proto-compiler"
-        and output["output_kind"] == output_kind
+        for invocation in (DESCRIPTOR_INVOCATION, RUST_INVOCATION)
+        for output in invocation["derivation"]["outputs"]
+        if output["output_kind"] == output_kind
     ]
     if len(matches) != 1:
         raise RuntimeError(
@@ -64,8 +63,6 @@ def output_destination(output_kind: str) -> Path:
 
 
 COMPILER_SOURCES = proto_sources()
-SOURCE_RELATIVE = Path("codefabric_cpg_mcp/daemon/generated/wave0_probe.proto")
-SOURCE = dict(COMPILER_SOURCES)[SOURCE_RELATIVE]
 DESCRIPTOR_DESTINATION = output_destination("proto-descriptor-set")
 CENSUS_DESTINATION = output_destination("proto-descriptor-census")
 IDENTITY_DESTINATION = output_destination("proto-toolchain-identity")
@@ -73,48 +70,39 @@ RUST_DESTINATION_FILE = output_destination("rust-proto-bindings")
 RUST_DESTINATION = RUST_DESTINATION_FILE.parent
 RUST_OUTPUT = RUST_DESTINATION_FILE.name
 PYTHON_DESTINATIONS = {
-    "wave0_probe_pb2.py": output_destination("python-proto-bindings"),
-    "wave0_probe_pb2.pyi": output_destination("python-proto-stub"),
-    "wave0_probe_pb2_grpc.py": output_destination("python-grpc-bindings"),
+    output_destination(kind).name: output_destination(kind)
+    for kind in ("python-proto-bindings", "python-proto-stub", "python-grpc-bindings")
 }
 PYTHON_OUTPUTS = tuple(PYTHON_DESTINATIONS)
-
-
-def clean_environment() -> dict[str, str]:
-    environment = os.environ.copy()
-    environment.pop("VIRTUAL_ENV", None)
-    environment.pop("UV_PROJECT_ENVIRONMENT", None)
-    return environment
 
 
 def run(command: list[str]) -> None:
     subprocess.run(command, cwd=ROOT, env=clean_environment(), check=True)
 
 
-def source_digest(path: Path = SOURCE) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def source_identities() -> dict[str, str]:
     return {
-        relative.as_posix(): source_digest(path) for relative, path in COMPILER_SOURCES
+        str(record["authority_path"]): str(record["source_digest"])
+        for record in DESCRIPTOR_INVOCATION["artifact_inputs"]
     }
 
 
-def source_set_digest() -> str:
-    digest = hashlib.sha256()
-    for relative, path in COMPILER_SOURCES:
-        digest.update(relative.as_posix().encode())
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
+def primary_semantic_identities() -> tuple[str, ...]:
+    identities = tuple(
+        str(record["canonical_digest"])
+        for record in DESCRIPTOR_INVOCATION["artifact_inputs"]
+        if record.get("canonical_digest") is not None
+    )
+    if len(identities) != len(COMPILER_SOURCES):
+        raise RuntimeError("every generated Proto source requires a semantic identity")
+    return identities
 
 
 def generated_header(comment: str) -> bytes:
+    identities = ",".join(primary_semantic_identities())
     return (
-        f"{comment} @generated from catalog proto source set "
-        f"sha256:{source_set_digest()}; do not edit.\n"
+        f"{comment} @generated from catalog primary semantic identity "
+        f"{identities}; do not edit.\n"
     ).encode()
 
 
@@ -208,17 +196,11 @@ def assert_descriptor_profile(descriptors: descriptor_pb2.FileDescriptorSet) -> 
 
 
 def normalized_options(options: Any) -> dict[str, Any]:
-    normalized = json_format.MessageToDict(
-        options,
-        preserving_proto_field_name=True,
-        always_print_fields_with_no_presence=False,
-    )
     encoded = options.SerializeToString(deterministic=True)
-    if encoded:
-        # Unknown custom extensions are preserved in the options message even when
-        # this runtime has not registered their generated Python extension module.
-        normalized["$wire_hex"] = encoded.hex()
-    return normalized
+    # The exact deterministic options wire is the cross-language semantic authority.
+    # This retains registered, unregistered, and future custom options without a
+    # hand-maintained mirror of descriptor option fields in either generator.
+    return {"$wire_hex": encoded.hex()} if encoded else {}
 
 
 def full_name(package: str, parents: tuple[str, ...], name: str) -> str:
@@ -554,7 +536,7 @@ def generate_into(root: Path) -> tuple[dict[str, Path], dict[str, Any]]:
     assert_exact_python_versions()
     rust_output = root / "rust"
     python_output = root / "python"
-    descriptor = root / "wave0-probe-descriptor.pb"
+    descriptor = root / DESCRIPTOR_DESTINATION.name
     rust_roundtrip = root / "rust-decoded-descriptor.pb"
     census_path = root / "descriptor-census.json"
     rust_output.mkdir(parents=True)
@@ -593,10 +575,18 @@ def generate_into(root: Path) -> tuple[dict[str, Path], dict[str, Any]]:
         )
 
     rust_file = rust_output / RUST_OUTPUT
-    python_package = python_output / SOURCE_RELATIVE.parent
     files = {"descriptor": descriptor, "census": census_path, "rust": rust_file}
-    for output in PYTHON_OUTPUTS:
-        files[f"python/{output}"] = python_package / output
+    generated_python = sorted(
+        path
+        for path in python_output.rglob("*")
+        if path.is_file() and path.name in PYTHON_OUTPUTS
+    )
+    if len(generated_python) != len(PYTHON_OUTPUTS):
+        raise RuntimeError(
+            "generated Python outputs do not match the typed output model"
+        )
+    for output in generated_python:
+        files[f"python/{output.name}"] = output
 
     prepend_header(rust_file, "//")
     for key, path in files.items():
@@ -674,7 +664,23 @@ def compatibility_baseline() -> dict[str, Any]:
             "missing reviewed compatibility baseline; bootstrap it explicitly from "
             "descriptor-census.json"
         )
-    return json.loads(BASELINE.read_bytes())
+    value = json.loads(BASELINE.read_bytes())
+    _normalize_option_views(value)
+    return value
+
+
+def _normalize_option_views(value: Any) -> None:
+    """Reduce legacy readable option mirrors to the exact cross-runtime wire identity."""
+
+    if isinstance(value, dict):
+        options = value.get("options")
+        if isinstance(options, dict) and "$wire_hex" in options:
+            value["options"] = {"$wire_hex": options["$wire_hex"]}
+        for child in value.values():
+            _normalize_option_views(child)
+    elif isinstance(value, list):
+        for child in value:
+            _normalize_option_views(child)
 
 
 def main() -> int:
