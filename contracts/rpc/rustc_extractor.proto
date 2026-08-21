@@ -2,10 +2,185 @@
 // artifact_kind: protobuf-schema
 // version: 1.0
 // compatible_suite_major: 1
-// status: draft
-// canonical_digest: b3:69b7abee0fcf580e76582178a07811a628af6ddf59ff227fa3543356652fec5c
-// Wave 1 reserves this authority path; WP10 authors the released protocol.
+// status: released
+// canonical_digest: b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62
+// digest_projection: proto-descriptor-v1
 syntax = "proto3";
 
-package codefabric.contracts.draft.v1;
+package codefabric.rustc.v1;
 
+import "contracts/rpc/provider_control.proto";
+
+option java_package = "dev.codefabric.rustc.v1";
+
+service RustcExtractor {
+  rpc Handshake(ExtractorHello) returns (ExtractorHelloAck);
+  rpc Extract(stream ExtractorCommand) returns (stream ExtractionEvent);
+  rpc CancelCompilation(CancelCompilationRequest) returns (codefabric.provider.v1.CancelAcknowledgement);
+}
+
+enum ExtractorEnvironmentVariable {
+  EXTRACTOR_ENVIRONMENT_VARIABLE_UNSPECIFIED = 0;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_ENDPOINT = 1;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RUN_ID = 2;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_WORKSPACE_ID = 3;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_ANALYSIS_CONTEXT_ID = 4;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_GENERATION = 5;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST = 6;
+}
+
+enum RejectionRuleErrorCode {
+  REJECTION_RULE_ERROR_CODE_UNSPECIFIED = 0;
+  REJECTION_RULE_ERROR_CODE_UNEXPECTED_OWNER = 1;
+  REJECTION_RULE_ERROR_CODE_DUPLICATE_SEQUENCE = 2;
+  REJECTION_RULE_ERROR_CODE_MISSING_END_RECORD = 3;
+  REJECTION_RULE_ERROR_CODE_COUNT_MISMATCH = 4;
+  REJECTION_RULE_ERROR_CODE_STALE_SOURCE_OR_CONTEXT = 5;
+  REJECTION_RULE_ERROR_CODE_PROTOCOL_EOF = 6;
+  REJECTION_RULE_ERROR_CODE_COMPILER_FAILED = 7;
+  REJECTION_RULE_ERROR_CODE_CREDIT_EXCEEDED = 8;
+  REJECTION_RULE_ERROR_CODE_PROVIDER_DEADLINE = 9;
+  REJECTION_RULE_ERROR_CODE_WORKSPACE_ESCAPE = 10;
+}
+
+message ExtractorHello {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  uint64 required_feature_bits = 3;
+  uint64 optional_feature_bits = 4;
+  string daemon_build = 5;
+  string output_schema_bundle_digest = 6;
+  string sandbox_profile_digest = 7;
+}
+
+message ExtractorHelloAck {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  uint64 negotiated_feature_bits = 3;
+  string extractor_build = 4;
+  string rustc_version = 5;
+  string rustc_commit = 6;
+  uint32 maximum_outstanding_chunks = 7;
+  uint64 maximum_unacknowledged_bytes = 8;
+}
+
+message PackageTargetIdentity {
+  string package_id = 1;
+  string package_name = 2;
+  string target_name = 3;
+  string target_kind = 4;
+  string crate_name = 5;
+  string crate_type = 6;
+  string crate_disambiguator = 7;
+}
+
+message CompilationBegin {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  string workspace_id = 3;
+  string analysis_context_id = 4;
+  uint64 source_generation = 5;
+  PackageTargetIdentity target = 6;
+  string rustc_version = 7;
+  string rustc_commit = 8;
+  string normalized_rustc_invocation_digest = 9;
+  string cargo_metadata_digest = 10;
+  string cargo_lock_digest = 11;
+  string cargo_config_digest = 12;
+  repeated string build_script_output_digests = 13;
+  repeated string proc_macro_output_digests = 14;
+  string source_snapshot_manifest_digest = 15;
+  repeated uint32 requested_capability_codes = 16;
+  string context_manifest_digest = 17;
+}
+
+message CompilationAccepted {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  uint64 accepted_generation = 3;
+  uint32 granted_chunk_credits = 4;
+  uint64 granted_credit_bytes = 5;
+}
+
+message CompilerOwnerKey {
+  string owner_id = 1;
+  string owner_kind = 2;
+  string file_id = 3;
+  uint32 source_start = 4;
+  uint32 source_end = 5;
+}
+
+message OwnerBegin {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  uint64 sequence = 3;
+  CompilerOwnerKey owner = 4;
+  repeated uint32 expected_observation_family_codes = 5;
+}
+
+message OwnerObservationChunk {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  uint64 sequence = 3;
+  string owner_id = 4;
+  uint32 observation_family_code = 5;
+  bytes arrow_ipc = 6;
+  optional codefabric.provider.v1.BlobReference payload_reference = 7;
+  string schema_digest = 8;
+  uint64 row_count = 9;
+  string chunk_digest = 10;
+}
+
+message OwnerEnd {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  uint64 sequence = 3;
+  string owner_id = 4;
+  map<uint32, uint64> family_counts = 5;
+  string owner_content_digest = 6;
+}
+
+message DiagnosticSummary {
+  uint32 error_count = 1;
+  uint32 warning_count = 2;
+  string diagnostics_digest = 3;
+}
+
+message CompilationEnd {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  uint64 sequence = 3;
+  int32 compiler_exit_status = 4;
+  string closed_owner_set_digest = 5;
+  repeated codefabric.provider.v1.CapabilityOutcome capability_outcomes = 6;
+  DiagnosticSummary diagnostic_summary = 7;
+  string overall_stream_digest = 8;
+  codefabric.provider.v1.ProviderRunState terminal_state = 9;
+  optional RejectionRuleErrorCode rejection_error = 10;
+}
+
+message ExtractorCommand {
+  oneof command {
+    CompilationBegin begin = 1;
+    codefabric.provider.v1.ChunkAccepted chunk_accepted = 2;
+    codefabric.provider.v1.ChunkRejected chunk_rejected = 3;
+    CancelCompilationRequest cancel = 4;
+  }
+}
+
+message ExtractionEvent {
+  oneof event {
+    CompilationAccepted compilation_accepted = 1;
+    CompilationBegin compilation_begin = 2;
+    OwnerBegin owner_begin = 3;
+    OwnerObservationChunk owner_observation_chunk = 4;
+    OwnerEnd owner_end = 5;
+    CompilationEnd compilation_end = 6;
+  }
+}
+
+message CancelCompilationRequest {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  string reason = 3;
+}

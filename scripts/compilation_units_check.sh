@@ -34,13 +34,23 @@ if rg -n 'generated_outputs|depends_on|output_of_kind|output_record_of_kind|Gene
   fail 'legacy source-owned output or global-lookup mechanics remain'
 fi
 
+if rg -n 'wave0[_-]probe|codefabric\.wave0\.v1|wave0-proto' \
+  "$repository_root/src" \
+  "$repository_root/tests" \
+  "$repository_root/tooling/proto" \
+  "$repository_root/codefabric-cpg-mcp/src" \
+  "$repository_root/codefabric-cpg-mcp/tests" \
+  "$repository_root/contracts/manifests/suite-manifest.json"; then
+  fail 'Wave-0 probe source, binding, test, or compilation-unit residue remains'
+fi
+
 for derivation_id in \
   codefabric.derivation.adapter-models \
   codefabric.derivation.artifact-index \
   codefabric.derivation.canonical-registries \
   codefabric.derivation.schema-contracts \
-  codefabric.derivation.wave0-proto-descriptor-python \
-  codefabric.derivation.wave0-proto-rust; do
+  codefabric.derivation.production-proto-descriptor-python \
+  codefabric.derivation.production-proto-rust; do
   cargo run --quiet --locked --manifest-path "$repository_root/Cargo.toml" \
     --no-default-features --features contracts-tooling --bin codefabric-contracts -- \
     resolve-derivation "$derivation_id" --root "$repository_root" |

@@ -2,10 +2,182 @@
 // artifact_kind: protobuf-schema
 // version: 1.0
 // compatible_suite_major: 1
-// status: draft
-// canonical_digest: b3:5ba59c314ad97b338ebf612a4cd9a4158e6b0e4531c1497a2af8e1c4a35fe1b0
-// Wave 1 reserves this authority path; WP10 authors the released protocol.
+// status: released
+// canonical_digest: b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973
+// digest_projection: proto-descriptor-v1
 syntax = "proto3";
 
-package codefabric.contracts.draft.v1;
+package codefabric.pyrefly.v1;
 
+import "contracts/rpc/provider_control.proto";
+
+option java_package = "dev.codefabric.pyrefly.v1";
+
+service PyreflySidecar {
+  rpc Handshake(Hello) returns (HelloAck);
+  rpc OpenContext(OpenContextRequest) returns (OpenContextResponse);
+  rpc AnalyzeModules(stream AnalyzeCommand) returns (stream AnalyzeEvent);
+  rpc CancelRun(CancelRunRequest) returns (codefabric.provider.v1.CancelAcknowledgement);
+  rpc CloseContext(CloseContextRequest) returns (CloseContextResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message Hello {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  uint64 required_feature_bits = 3;
+  uint64 optional_feature_bits = 4;
+  string daemon_build = 5;
+  repeated string supported_python_versions = 6;
+  repeated string observation_schema_digests = 7;
+  uint64 maximum_frame_bytes = 8;
+  uint64 maximum_arrow_chunk_bytes = 9;
+  string sandbox_profile_digest = 10;
+}
+
+message HelloAck {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  uint64 negotiated_feature_bits = 3;
+  string sidecar_build = 4;
+  string pyrefly_source_digest = 5;
+  repeated string supported_python_versions = 6;
+  repeated string observation_schema_digests = 7;
+  uint64 maximum_frame_bytes = 8;
+  uint64 maximum_arrow_chunk_bytes = 9;
+  string sandbox_profile_digest = 10;
+}
+
+message OpenContextRequest {
+  string workspace_id = 1;
+  string analysis_context_id = 2;
+  bytes immutable_context_manifest = 3;
+  string context_manifest_digest = 4;
+  codefabric.provider.v1.SourceSnapshotLease source_snapshot_lease = 5;
+}
+
+message OpenContextResponse {
+  string context_handle = 1;
+  string context_manifest_digest = 2;
+  int64 opened_at_unix_ms = 3;
+}
+
+message ModuleRequest {
+  string module_id = 1;
+  string module_name = 2;
+  string file_id = 3;
+  string source_digest = 4;
+  codefabric.provider.v1.BlobReference source_blob = 5;
+  uint64 dependency_generation = 6;
+  uint64 module_resolution_generation = 7;
+}
+
+message AnalyzeModulesRequest {
+  string provider_run_id = 1;
+  string workspace_id = 2;
+  string analysis_context_id = 3;
+  string context_handle = 4;
+  string context_manifest_digest = 5;
+  uint64 source_generation = 6;
+  string source_snapshot_lease_id = 7;
+  repeated ModuleRequest modules = 8;
+  repeated uint32 requested_capability_codes = 9;
+  int64 deadline_unix_ms = 10;
+  string output_schema_bundle_digest = 11;
+  uint32 initial_chunk_credits = 12;
+  uint64 initial_credit_bytes = 13;
+}
+
+message AnalyzeCommand {
+  oneof command {
+    AnalyzeModulesRequest start = 1;
+    codefabric.provider.v1.ChunkAccepted chunk_accepted = 2;
+    codefabric.provider.v1.ChunkRejected chunk_rejected = 3;
+    CancelRunRequest cancel = 4;
+  }
+}
+
+message AnalyzeEventHeader {
+  string provider_run_id = 1;
+  string workspace_id = 2;
+  string analysis_context_id = 3;
+  uint64 source_generation = 4;
+  uint64 sequence = 5;
+  string context_manifest_digest = 6;
+  string source_manifest_digest = 7;
+}
+
+message RunAccepted {
+  AnalyzeEventHeader header = 1;
+  uint32 granted_chunk_credits = 2;
+  uint64 granted_credit_bytes = 3;
+}
+
+message RunProgress {
+  AnalyzeEventHeader header = 1;
+  uint32 completed_modules = 2;
+  uint32 total_modules = 3;
+}
+
+message ModuleBegin {
+  AnalyzeEventHeader header = 1;
+  string module_id = 2;
+}
+
+message ObservationBatchChunk {
+  AnalyzeEventHeader header = 1;
+  string module_id = 2;
+  uint32 observation_family_code = 3;
+  bytes arrow_ipc = 4;
+  optional codefabric.provider.v1.BlobReference payload_reference = 5;
+  string schema_digest = 6;
+  uint64 row_count = 7;
+  string chunk_digest = 8;
+}
+
+message ModuleEnd {
+  AnalyzeEventHeader header = 1;
+  string module_id = 2;
+  map<uint32, uint64> family_counts = 3;
+  string module_digest = 4;
+}
+
+message RunTerminal {
+  AnalyzeEventHeader header = 1;
+  repeated string ordered_module_digests = 2;
+  repeated codefabric.provider.v1.CapabilityOutcome capability_outcomes = 3;
+  string overall_digest = 4;
+  codefabric.provider.v1.ProviderRunState terminal_state = 5;
+}
+
+message AnalyzeEvent {
+  oneof event {
+    RunAccepted run_accepted = 1;
+    RunProgress run_progress = 2;
+    ModuleBegin module_begin = 3;
+    ObservationBatchChunk observation_batch_chunk = 4;
+    ModuleEnd module_end = 5;
+    RunTerminal run_terminal = 6;
+  }
+}
+
+message CancelRunRequest {
+  string provider_run_id = 1;
+  string reason = 2;
+}
+
+message CloseContextRequest {
+  string context_handle = 1;
+}
+
+message CloseContextResponse {
+  bool closed = 1;
+}
+
+message ShutdownRequest {
+  string reason = 1;
+}
+
+message ShutdownResponse {
+  bool accepted = 1;
+}

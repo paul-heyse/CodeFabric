@@ -1,4 +1,4 @@
-//! Rust code generation from the compiler-independent Wave 0 descriptor IR.
+//! Rust code generation from the compiler-independent production descriptor IR.
 
 use prost::Message as _;
 use std::path::PathBuf;

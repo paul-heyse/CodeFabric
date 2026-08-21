@@ -535,6 +535,12 @@ root-fmt-write:
 proto-gen:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py write
 
+[confirm("Accept the current production descriptor census as the compatibility baseline. Continue?")]
+[doc("MUTATES: accept a reviewed Protobuf compatibility baseline and regenerate outputs")]
+[group('mutating')]
+proto-baseline-accept:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py accept-baseline
+
 [confirm("Regenerate committed contract derivatives from authority sources. Continue?")]
 [doc("MUTATES: regenerate contract indexes, canonical registries, and typed identities")]
 [group('mutating')]

@@ -1,4 +1,4 @@
-//! Local gRPC transport primitives and generated Wave 0 compatibility contract.
+//! Local gRPC transport primitives and generated production contracts.
 
 use std::io;
 use std::pin::Pin;
@@ -12,6 +12,23 @@ use tonic::{Request, Status};
 
 /// Maximum encoded and decoded control-message size on both client and server.
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+/// Maximum uncompressed query-event or result payload chunk.
+pub const MAX_PAYLOAD_CHUNK_BYTES: usize = 1024 * 1024;
+
+/// Negotiate feature bits while rejecting any unsupported required capability.
+///
+/// # Errors
+///
+/// Returns `FailedPrecondition` when the peer requires an unknown feature bit.
+pub fn negotiate_feature_bits(required: u64, optional: u64, supported: u64) -> Result<u64, Status> {
+    let unsupported = required & !supported;
+    if unsupported != 0 {
+        return Err(Status::failed_precondition(format!(
+            "unsupported required feature bits: {unsupported:#018x}"
+        )));
+    }
+    Ok((required | optional) & supported)
+}
 
 /// Peer identity captured from the accepted Unix socket before gRPC dispatch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,8 +160,29 @@ impl Interceptor for SameUserInterceptor {
     }
 }
 
-/// Generated Wave 0 probe types and client/server surfaces.
+/// Generated types and client/server surfaces from the one production FDS.
 #[allow(clippy::all, clippy::pedantic)]
 pub mod generated {
-    include!("generated/codefabric.wave0.v1.rs");
+    pub mod codefabric {
+        pub mod cpgd {
+            pub mod v1 {
+                include!("generated/codefabric.cpgd.v1.rs");
+            }
+        }
+        pub mod provider {
+            pub mod v1 {
+                include!("generated/codefabric.provider.v1.rs");
+            }
+        }
+        pub mod pyrefly {
+            pub mod v1 {
+                include!("generated/codefabric.pyrefly.v1.rs");
+            }
+        }
+        pub mod rustc {
+            pub mod v1 {
+                include!("generated/codefabric.rustc.v1.rs");
+            }
+        }
+    }
 }

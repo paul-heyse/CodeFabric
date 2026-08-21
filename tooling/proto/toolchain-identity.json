@@ -1,7 +1,7 @@
 {
   "authority": "single grpc_tools.protoc invocation -> descriptor + Python; Rust compile_fds",
-  "descriptor_sha256": "a515bb2b875a8555ca43d1c2b35a58b465185c71b10de2cb6107388aebdba3b7",
-  "generated_sha256": "7ab8d057c2e90d71bc02c56551e8103df88c0c1d09108e0ff9b490c3b53b63ee",
+  "descriptor_sha256": "feacad4e38b0712d486caa9b13d23b3273fb840d43abdb6aaa16458b81e2ba39",
+  "generated_sha256": "48d55ba7ea9cd26148aff9470648f24dd6adb8ea19ae53f2ec8c70b5996a775f",
   "python": {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -24,10 +24,9 @@
   },
   "schema": 3,
   "sources": {
-    "contracts/rpc/cpg_query_service.proto": "b3:33bf7fb15d6c260f2cd7d3b0ee6580a5626b3d45206eec169ad64d8101a16168",
-    "contracts/rpc/provider_control.proto": "b3:715ba8a6f39a9b3af4719f420d3521eac3e2db8a5ab54256d5d63b056bb68986",
-    "contracts/rpc/pyrefly_sidecar.proto": "b3:b890c02c1e9eb01e7da24600d9f1322099c578e7d27a1ef23f31b5ca27c0d63c",
-    "contracts/rpc/rustc_extractor.proto": "b3:079021224530a5f0f85f613b7f8a82d33bb5d72ba3bd214c6edf7da556c761ed",
-    "tooling/proto/source/codefabric_cpg_mcp/daemon/generated/wave0_probe.proto": "b3:3a935d4cdef808b190276108c8ae8a2e5d1fa1d0166a73fbf07988c9eefe35d0"
+    "contracts/rpc/cpg_query_service.proto": "b3:eba80a4b95280db5d635d2a3a6d8bbd45f9ee2841ce67b1a9cc49867543fa83b",
+    "contracts/rpc/provider_control.proto": "b3:551c806998a74dd44370fff37328d971acc1042cd402319e332d127be79c4318",
+    "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
+    "contracts/rpc/rustc_extractor.proto": "b3:2d3a327183e2d56b83078fb77ed0b810e6bc0382b7e856e0e0028ee713114d4e"
   }
 }

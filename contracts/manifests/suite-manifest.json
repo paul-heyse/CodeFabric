@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "draft",
-  "canonical_digest": "b3:b1b354a919a42166392ca8a5344b7b9cbbda1af9a04c16cac801e00af353fabc",
+  "canonical_digest": "b3:f9be9a6f3b5f0102119180dc32eab5bab4347b005c6fbb726a37d59e22b22191",
   "digest_projection": "json-jcs-v1",
   "catalog_schema_version": 2,
   "resource_budget_profiles": [
@@ -1483,7 +1483,7 @@
       "owner": "semantic-query",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "proto-descriptor-v1",
       "compatibility_family": "rpc",
       "resource_budget_profile": "proto-standard",
@@ -1503,8 +1503,8 @@
       "semantic_projection_source": {
         "source_kind": "derivation-output",
         "output": {
-          "derivation_id": "codefabric.derivation.wave0-proto-descriptor-python",
-          "path": "tooling/proto/wave0-probe-descriptor.pb"
+          "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
+          "path": "tooling/proto/production-descriptor.pb"
         }
       }
     },
@@ -1516,7 +1516,7 @@
       "owner": "fact-generation",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "rpc",
       "resource_budget_profile": "yaml-standard",
@@ -1545,7 +1545,7 @@
       "owner": "fact-generation",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "proto-descriptor-v1",
       "compatibility_family": "rpc",
       "resource_budget_profile": "proto-standard",
@@ -1565,8 +1565,8 @@
       "semantic_projection_source": {
         "source_kind": "derivation-output",
         "output": {
-          "derivation_id": "codefabric.derivation.wave0-proto-descriptor-python",
-          "path": "tooling/proto/wave0-probe-descriptor.pb"
+          "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
+          "path": "tooling/proto/production-descriptor.pb"
         }
       }
     },
@@ -1578,7 +1578,7 @@
       "owner": "fact-generation",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "proto-descriptor-v1",
       "compatibility_family": "rpc",
       "resource_budget_profile": "proto-standard",
@@ -1599,8 +1599,8 @@
       "semantic_projection_source": {
         "source_kind": "derivation-output",
         "output": {
-          "derivation_id": "codefabric.derivation.wave0-proto-descriptor-python",
-          "path": "tooling/proto/wave0-probe-descriptor.pb"
+          "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
+          "path": "tooling/proto/production-descriptor.pb"
         }
       }
     },
@@ -1612,7 +1612,7 @@
       "owner": "fact-generation",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "proto-descriptor-v1",
       "compatibility_family": "rpc",
       "resource_budget_profile": "proto-standard",
@@ -1633,8 +1633,8 @@
       "semantic_projection_source": {
         "source_kind": "derivation-output",
         "output": {
-          "derivation_id": "codefabric.derivation.wave0-proto-descriptor-python",
-          "path": "tooling/proto/wave0-probe-descriptor.pb"
+          "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
+          "path": "tooling/proto/production-descriptor.pb"
         }
       }
     },
@@ -1890,39 +1890,6 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
-    },
-    {
-      "artifact_id": "codefabric.tooling.wave0-probe",
-      "authority_path": "tooling/proto/source/codefabric_cpg_mcp/daemon/generated/wave0_probe.proto",
-      "artifact_kind": "protobuf-schema",
-      "native_format": "proto",
-      "owner": "suite",
-      "version": "1.0",
-      "compatible_suite_major": 1,
-      "status": "released",
-      "digest_projection": "proto-descriptor-v1",
-      "compatibility_family": "toolchain",
-      "resource_budget_profile": "proto-standard",
-      "parser_schema_authority": "tooling/proto/wave0-probe-descriptor.pb",
-      "consumers": [
-        "contract-tooling",
-        "governance",
-        "python-adapter",
-        "rust-core"
-      ],
-      "provenance_requirements": [
-        "canonical-digest",
-        "generator-revision",
-        "native-validation",
-        "source-digest"
-      ],
-      "semantic_projection_source": {
-        "source_kind": "derivation-output",
-        "output": {
-          "derivation_id": "codefabric.derivation.wave0-proto-descriptor-python",
-          "path": "tooling/proto/wave0-probe-descriptor.pb"
-        }
       }
     }
   ],
@@ -2404,7 +2371,7 @@
       "resource_budget_profile": "yaml-standard"
     },
     {
-      "derivation_id": "codefabric.derivation.wave0-proto-descriptor-python",
+      "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
       "derivation_kind": "protobuf-descriptor-and-python",
       "inputs": [
         {
@@ -2426,135 +2393,44 @@
           "input_kind": "artifact",
           "artifact_id": "codefabric.rpc.rustc-extractor",
           "view": "source-bytes"
-        },
-        {
-          "input_kind": "artifact",
-          "artifact_id": "codefabric.tooling.wave0-probe",
-          "view": "source-bytes"
         }
       ],
       "outputs": [
-        {
-          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2.py",
-          "output_kind": "python-proto-bindings",
-          "consumers": [
-            "packaging",
-            "python-adapter"
-          ],
-          "primary_artifact_ids": [
-            "codefabric.rpc.cpg-query-service",
-            "codefabric.rpc.provider-control",
-            "codefabric.rpc.pyrefly-sidecar",
-            "codefabric.rpc.rustc-extractor",
-            "codefabric.tooling.wave0-probe"
-          ]
-        },
-        {
-          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2.pyi",
-          "output_kind": "python-proto-stub",
-          "consumers": [
-            "packaging",
-            "python-adapter"
-          ],
-          "primary_artifact_ids": [
-            "codefabric.rpc.cpg-query-service",
-            "codefabric.rpc.provider-control",
-            "codefabric.rpc.pyrefly-sidecar",
-            "codefabric.rpc.rustc-extractor",
-            "codefabric.tooling.wave0-probe"
-          ]
-        },
-        {
-          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/wave0_probe_pb2_grpc.py",
-          "output_kind": "python-grpc-bindings",
-          "consumers": [
-            "packaging",
-            "python-adapter"
-          ],
-          "primary_artifact_ids": [
-            "codefabric.rpc.cpg-query-service",
-            "codefabric.rpc.provider-control",
-            "codefabric.rpc.pyrefly-sidecar",
-            "codefabric.rpc.rustc-extractor",
-            "codefabric.tooling.wave0-probe"
-          ]
-        },
-        {
-          "path": "tooling/proto/descriptor-census.json",
-          "output_kind": "proto-descriptor-census",
-          "resource_budget_profile": "proto-descriptor-census",
-          "consumers": [
-            "contract-tooling",
-            "governance"
-          ],
-          "primary_artifact_ids": [
-            "codefabric.rpc.cpg-query-service",
-            "codefabric.rpc.provider-control",
-            "codefabric.rpc.pyrefly-sidecar",
-            "codefabric.rpc.rustc-extractor",
-            "codefabric.tooling.wave0-probe"
-          ]
-        },
-        {
-          "path": "tooling/proto/toolchain-identity.json",
-          "output_kind": "proto-toolchain-identity",
-          "consumers": [
-            "governance"
-          ],
-          "primary_artifact_ids": [
-            "codefabric.rpc.cpg-query-service",
-            "codefabric.rpc.provider-control",
-            "codefabric.rpc.pyrefly-sidecar",
-            "codefabric.rpc.rustc-extractor",
-            "codefabric.tooling.wave0-probe"
-          ]
-        },
-        {
-          "path": "tooling/proto/wave0-probe-descriptor.pb",
-          "output_kind": "proto-descriptor-set",
-          "consumers": [
-            "contract-tooling",
-            "python-adapter",
-            "rust-core"
-          ],
-          "primary_artifact_ids": [
-            "codefabric.rpc.cpg-query-service",
-            "codefabric.rpc.provider-control",
-            "codefabric.rpc.pyrefly-sidecar",
-            "codefabric.rpc.rustc-extractor",
-            "codefabric.tooling.wave0-probe"
-          ]
-        }
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter","pyrefly-sidecar"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter","pyrefly-sidecar"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter","pyrefly-sidecar"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"tooling/proto/descriptor-census.json","output_kind":"proto-descriptor-census","resource_budget_profile":"proto-descriptor-census","consumers":["contract-tooling","governance"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"tooling/proto/production-descriptor.pb","output_kind":"proto-descriptor-set","consumers":["contract-tooling","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"tooling/proto/toolchain-identity.json","output_kind":"proto-toolchain-identity","consumers":["governance"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]}
       ],
       "resource_budget_profile": "proto-standard"
     },
     {
-      "derivation_id": "codefabric.derivation.wave0-proto-rust",
+      "derivation_id": "codefabric.derivation.production-proto-rust",
       "derivation_kind": "protobuf-rust-from-descriptor",
       "inputs": [
         {
           "input_kind": "output",
           "output": {
-            "derivation_id": "codefabric.derivation.wave0-proto-descriptor-python",
-            "path": "tooling/proto/wave0-probe-descriptor.pb"
+            "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
+            "path": "tooling/proto/production-descriptor.pb"
           }
         }
       ],
       "outputs": [
-        {
-          "path": "src/generated/codefabric.wave0.v1.rs",
-          "output_kind": "rust-proto-bindings",
-          "consumers": [
-            "rust-core"
-          ],
-          "primary_artifact_ids": [
-            "codefabric.rpc.cpg-query-service",
-            "codefabric.rpc.provider-control",
-            "codefabric.rpc.pyrefly-sidecar",
-            "codefabric.rpc.rustc-extractor",
-            "codefabric.tooling.wave0-probe"
-          ]
-        }
+        {"path":"src/generated/codefabric.cpgd.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"src/generated/codefabric.provider.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"src/generated/codefabric.pyrefly.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
+        {"path":"src/generated/codefabric.rustc.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]}
       ],
       "resource_budget_profile": "proto-standard"
     }

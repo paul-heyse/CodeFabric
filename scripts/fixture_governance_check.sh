@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-normative_pattern='contracts/fixtures/(jcs/vectors|projections/vectors|proto/wave0_probe)\.json'
+normative_pattern='contracts/fixtures/(jcs/vectors|projections/vectors|proto/production_wire)\.json'
 
 if rg -n "$normative_pattern" \
   "$repository_root/justfile" "$repository_root/scripts" \

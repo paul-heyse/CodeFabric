@@ -129,10 +129,19 @@ def test_wp04_operational_acceptance() -> None:
 
 
 def test_wp05_behavioral_acceptance() -> None:
-    assert "rust_protobuf_matches_the_shared_wire_fixture" in _text(
-        "tests/integration/rpc.rs"
-    )
+    assert "wp10_behavioral_acceptance" in _text("tests/integration/rpc.rs")
     assert "DESCRIPTOR" in _text("codefabric-cpg-mcp/tests/test_proto.py")
+    census = _json("tooling/proto/descriptor-census.json")
+    assert isinstance(census, dict)
+    files = census.get("files")
+    assert isinstance(files, list)
+    assert {item["package"] for item in files} == {
+        "codefabric.cpgd.v1",
+        "codefabric.provider.v1",
+        "codefabric.pyrefly.v1",
+        "codefabric.rustc.v1",
+    }
+    assert (ROOT / "tooling/proto/production-descriptor.pb").is_file()
 
 
 def test_wp05_structural_acceptance() -> None:

@@ -1,5 +1,12 @@
 # Fixture oracle change record
 
+## 2026-08-21 production protocol cutover
+
+- Replaced the Wave-0 probe wire vector and descriptor with owner-reviewed known answers
+  for the four released production protocol packages.
+- The production descriptor baseline is generated from the one grpcio-tools invocation;
+  the four wire cases remain independent cross-language known answers.
+
 ## 2026-08-21 schema contract generation
 
 - Added a committed mutation oracle proving a schema fingerprint change without an

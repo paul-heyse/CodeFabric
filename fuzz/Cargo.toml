@@ -11,7 +11,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-codefabric = { path = "..", default-features = false, features = ["contracts-tooling"] }
+codefabric = { path = "..", default-features = false, features = ["contracts-tooling", "rpc"] }
+prost = "=0.14.4"
 
 [[bin]]
 name = "jcs_decode_canonicalize"
@@ -37,6 +38,13 @@ bench = false
 [[bin]]
 name = "registry"
 path = "fuzz_targets/registry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "proto_decode"
+path = "fuzz_targets/proto_decode.rs"
 test = false
 doc = false
 bench = false

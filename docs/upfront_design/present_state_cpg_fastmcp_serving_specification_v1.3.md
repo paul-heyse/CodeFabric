@@ -531,7 +531,9 @@ service CpgQueryService {
   rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
   rpc GetStatus(StatusRequest) returns (StatusResponse);
   rpc ValidateQuery(ValidateQueryRequest) returns (ValidateQueryResponse);
-  rpc ExecuteQuery(ExecuteQueryRequest) returns (stream QueryEvent);
+  rpc StartQuery(StartQueryRequest) returns (StartQueryResponse);
+  rpc StreamQuery(StreamQueryRequest) returns (stream QueryEvent);
+  rpc AttachQuery(AttachQueryRequest) returns (stream QueryEvent);
   rpc CancelQuery(CancelQueryRequest) returns (CancelQueryResponse);
   rpc ReadResult(ReadResultRequest) returns (stream ResultChunk);
   rpc ReleaseResult(ReleaseResultRequest) returns (ReleaseResultResponse);
@@ -546,41 +548,47 @@ enum FreshnessPolicy {
   REQUIRE_SEMANTIC_CURRENT = 5;
 }
 
-message ExecuteQueryRequest {
+message StartQueryRequest {
   string agent_instance_id = 1;
   string workspace_id = 2;
-  string semantic_request_id = 3;
-  string mcp_call_id = 4;
-  string rpc_attempt_id = 5;
+  string mcp_call_id = 3;
+  string rpc_attempt_id = 4;
+  optional string semantic_request_id = 5;
   string semantic_query_spec_version = 6;
   bytes request_json = 7;
-  DeliveryPreference delivery_preference = 8;
-  int64 deadline_unix_ms = 9;
-  TraceContext trace = 10;
-  string capability_token = 11;
-  FreshnessPolicy freshness_policy = 12;
+  string request_checksum = 8;
+  FreshnessPolicy freshness_policy = 9;
+  DeliveryPreference delivery_preference = 10;
+  string host_capability_profile_digest = 11;
+  int64 deadline_unix_ms = 12;
+  string idempotency_key = 13;
+  PayloadCompression payload_compression = 14;
+}
+
+message StartQueryResponse {
+  string daemon_query_id = 1;
+  bytes resume_token = 2;
+  int64 accepted_at_unix_ms = 3;
+  QueryExecutionState query_execution_state = 4;
+  string queue_class = 5;
+  optional uint32 queue_position = 6;
+  string negotiated_request_version = 7;
+  string negotiated_response_version = 8;
+  string effective_semantic_request_id = 9;
 }
 
 message QueryEvent {
   oneof event {
-    QueryAccepted accepted = 1;
-    QuerySnapshotPinned snapshot_pinned = 2;
-    QueryProgress progress = 3;
-    InlineResponse inline_response = 4;
-    ResultManifest result_manifest = 5;
-    QueryFailure failure = 6;
-    QueryCompleted completed = 7;
+    SnapshotPinnedEvent snapshot_pinned = 1;
+    ProgressEvent progress = 2;
+    ResponseChunkEvent response_chunk = 3;
+    ArtifactReadyEvent artifact_ready = 4;
+    TerminalEvent terminal = 5;
   }
-}
-
-message QueryAccepted {
-  string daemon_query_id = 1;
-  string workspace_id = 2;
-  string normalized_idempotency_key = 3;
 }
 ```
 
-The first stream event SHALL be `QueryAccepted`, emitted before a potentially long freshness wait. This gives the adapter a cancellation handle immediately. `QuerySnapshotPinned` follows after the freshness barrier and contains the canonical `PublicSnapshotMetadata` record.
+`StartQuery` SHALL return the durable `daemon_query_id` and opaque resume token before a potentially long freshness wait. This gives the adapter a cancellation and reconnection handle immediately. `StreamQuery` consumes that handle for the initial event stream; `AttachQuery` resumes after a caller-provided `uint64` sequence. The first semantic event is `SnapshotPinnedEvent`, emitted after the freshness barrier with the canonical `PublicSnapshotMetadata` record. Every event carries one monotonically increasing `uint64` sequence and exactly one of the five variants above.
 
 The RPC freshness enum SHALL match the canonical request's top-level freshness policy; a mismatch is `INVALID_REQUEST_SCHEMA`. The Protobuf contract does not duplicate all semantic query-form models.
 
@@ -640,37 +648,45 @@ Performs:
 
 It SHALL NOT execute the fact retrieval plan.
 
-### 11.4 `ExecuteQuery`
+### 11.4 `StartQuery`
 
-Runs the complete semantic query request against one pinned snapshot and emits progress and one terminal delivery result.
+Validates transport metadata and returns the accepted query handle, resume token, negotiated versions, and effective semantic request ID without waiting for freshness, planning, or execution.
 
-### 11.5 `CancelQuery`
+### 11.5 `StreamQuery`
+
+Starts delivery for an accepted query and emits snapshot, progress, response-chunk or artifact, and terminal events in sequence order.
+
+### 11.6 `AttachQuery`
+
+Reattaches to an accepted query from a caller-provided sequence/checksum cursor. Replay follows the negotiated orphan-retention and idempotency rules.
+
+### 11.7 `CancelQuery`
 
 Best-effort explicit cancellation for cases where transport cancellation is not sufficient or cleanup must be confirmed.
 
-### 11.6 `ReadResult`
+### 11.8 `ReadResult`
 
 Streams bytes for an immutable, agent-scoped result artifact or one of its logical subresources.
 
-### 11.7 `ReleaseResult`
+### 11.9 `ReleaseResult`
 
 Allows early deletion after the agent no longer needs the result. TTL cleanup remains authoritative.
 
 ---
 
-## 12. Execute-query lifecycle
+## 12. Query lifecycle
 
 ```text
 1. authenticate agent capability and exact workspace_id
 2. validate adapter byte/JSON structural limits
 3. establish semantic_request_id, mcp_call_id, rpc_attempt_id
 4. normalize idempotency key inputs
-5. emit QueryAccepted with daemon_query_id
+5. return StartQueryResponse with daemon_query_id and resume_token
 6. validate canonical request schema and RPC/request freshness agreement
 7. resolve target scope needed by the freshness policy
 8. apply lifecycle freshness barrier
 9. atomically clone Arc<ServingSnapshot> and acquire lease
-10. emit QuerySnapshotPinned/PublicSnapshotMetadata
+10. emit SnapshotPinnedEvent/PublicSnapshotMetadata on StreamQuery or AttachQuery
 11. resolve semantic phrases and type-check query dependency DAG
 12. reject evaluative, negative-without-coverage, cross-workspace, or unbounded requests
 13. compile internal PlanSpec and qualified DataFusion plans against the leased catalog
@@ -678,7 +694,7 @@ Allows early deletion after the agent no longer needs the result. TTL cleanup re
 15. materialize canonical response and orthogonal statuses/coverage
 16. validate deterministic order, response schema, and checksum
 17. deliver inline or persist immutable snapshot-scoped artifact
-18. emit terminal completion and release execution resources
+18. emit exactly one TerminalEvent and release execution resources
 19. retain only artifact/snapshot leases required for configured TTL
 ```
 
@@ -723,7 +739,7 @@ The adapter maps these events to `Context.report_progress(...)`. Debug-only phys
 
 ### 14.1 Accepted-handle cancellation
 
-`ExecuteQuery` emits `QueryAccepted` first. The adapter records `daemon_query_id` before awaiting freshness, planning, or terminal delivery.
+`StartQuery` returns the accepted handle first. The adapter records `daemon_query_id` and the opaque resume token before opening `StreamQuery` or awaiting freshness, planning, or terminal delivery.
 
 If MCP cancellation or STDIO closure occurs:
 
@@ -2487,6 +2503,7 @@ ProgressCallback = Callable[[float, float | None, str], Awaitable[None]]
 class AcceptedQuery:
     daemon_query_id: str
     workspace_id: str
+    resume_token: bytes
     events: AsyncIterator[DaemonQueryEvent]
 
 class CpgDaemonClient:
@@ -2520,7 +2537,7 @@ class CpgDaemonClient:
     async def aclose(self) -> None: ...
 ```
 
-`start_query` returns only after consuming the mandatory first `QueryAccepted` event. The interface exposes no Arrow/DataFusion/Delta/graph types.
+`start_query` returns as soon as the unary `StartQuery` response supplies the accepted handle and resume token, then binds `events` to `StreamQuery`. Reattachment uses the same opaque token with an event sequence cursor. The interface exposes no Arrow/DataFusion/Delta/graph types.
 
 ## 58. Primary tool implementation pattern
 

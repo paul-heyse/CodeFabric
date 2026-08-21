@@ -27,7 +27,7 @@ def baseline() -> dict[str, object]:
 def project_file(census: dict[str, object]) -> dict[str, object]:
     files = census["files"]
     assert isinstance(files, list)
-    return next(file for file in files if file["package"] == "codefabric.wave0.v1")
+    return next(file for file in files if file["package"] == "codefabric.cpgd.v1")
 
 
 def message(census: dict[str, object], name: str) -> dict[str, object]:
@@ -48,6 +48,46 @@ def test_descriptor_census_covers_every_compiler_source() -> None:
     assert expected <= names
 
 
+def test_wp10_structural_acceptance_covers_four_production_packages() -> None:
+    census = json.loads(CENSUS_DESTINATION.read_bytes())
+    packages = {file["package"] for file in census["files"]}
+    assert packages == {
+        "codefabric.cpgd.v1",
+        "codefabric.provider.v1",
+        "codefabric.pyrefly.v1",
+        "codefabric.rustc.v1",
+    }
+    cpg = next(
+        file for file in census["files"] if file["package"] == "codefabric.cpgd.v1"
+    )
+    service = next(
+        item
+        for item in cpg["services"]
+        if item["full_name"] == "codefabric.cpgd.v1.CpgQueryService"
+    )
+    assert [method["name"] for method in service["methods"]] == sorted(
+        [
+            "AttachQuery",
+            "CancelQuery",
+            "GetStatus",
+            "Handshake",
+            "ReadResult",
+            "ReleaseResult",
+            "StartQuery",
+            "StreamQuery",
+            "ValidateQuery",
+        ]
+    )
+    event = message(census, "codefabric.cpgd.v1.QueryEvent")
+    assert [field["name"] for field in event["fields"]] == [
+        "snapshot_pinned",
+        "progress",
+        "response_chunk",
+        "artifact_ready",
+        "terminal",
+    ]
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -64,7 +104,7 @@ def test_incompatible_descriptor_changes_fail(
     baseline: dict[str, object], mutation: str
 ) -> None:
     current = deepcopy(baseline)
-    envelope = message(current, "codefabric.wave0.v1.ProbeEnvelope")
+    envelope = message(current, "codefabric.cpgd.v1.StartQueryRequest")
     fields = envelope["fields"]
     assert isinstance(fields, list)
     if mutation == "field_number_reuse":
@@ -72,13 +112,17 @@ def test_incompatible_descriptor_changes_fail(
     elif mutation == "removal_without_reservation":
         del fields[0]
     elif mutation == "presence_drift":
-        note = next(field for field in fields if field["name"] == "note")
-        note["proto3_optional"] = False
-        note["has_presence"] = False
-        note["oneof"] = None
+        semantic_request_id = next(
+            field for field in fields if field["name"] == "semantic_request_id"
+        )
+        semantic_request_id["proto3_optional"] = False
+        semantic_request_id["has_presence"] = False
+        semantic_request_id["oneof"] = None
     elif mutation == "oneof_drift":
-        trace_id = next(field for field in fields if field["name"] == "trace_id")
-        trace_id["oneof"] = None
+        semantic_request_id = next(
+            field for field in fields if field["name"] == "semantic_request_id"
+        )
+        semantic_request_id["oneof"] = None
     elif mutation == "cardinality_drift":
         method = project_file(current)["services"][0]["methods"][0]
         method["client_streaming"] = True
@@ -96,7 +140,7 @@ def test_removed_field_requires_both_name_and_number_reservation(
     baseline: dict[str, object],
 ) -> None:
     current = deepcopy(baseline)
-    envelope = message(current, "codefabric.wave0.v1.ProbeEnvelope")
+    envelope = message(current, "codefabric.cpgd.v1.StartQueryRequest")
     fields = envelope["fields"]
     assert isinstance(fields, list)
     payload = fields.pop(0)

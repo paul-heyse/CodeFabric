@@ -2,7 +2,7 @@
 
 `generate.py` invokes the adapter-locked `grpc_tools.protoc` exactly once per
 generation root. That invocation emits the Python modules and
-`wave0-probe-descriptor.pb`. The Rust generator decodes those same descriptor bytes,
+`production-descriptor.pb`. The Rust generator decodes those same descriptor bytes,
 round-trips them as an integrity check, and passes the resulting
 `FileDescriptorSet` to `tonic_prost_build::Builder::compile_fds`.
 
@@ -12,6 +12,11 @@ compatibility checks. `compatibility-baseline.json` is deliberately not rewritte
 review. Compatible additive schema changes update generated outputs and the census while
 leaving the baseline intact. Field and enum removal requires reserving both the old name
 and number.
+
+The four governed source files are one compilation unit and generate four Python module
+triples plus four Rust package files. Output paths come only from the typed catalog;
+there is no per-package compiler invocation or filename switch. `just
+proto-baseline-accept` is the explicit, confirm-gated first-release/breaking-review path.
 
 `just proto-check` proves checked-in drift, exact package intent, negative compatibility
 cases, Python descriptor equivalence, and Rust descriptor decoding. `just

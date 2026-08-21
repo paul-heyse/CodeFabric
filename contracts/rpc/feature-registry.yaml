@@ -2,7 +2,24 @@ artifact_id: codefabric.rpc.feature-registry
 artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:9759e6e90be31e394d331bd43dabaed933789e7d4e02cd9335aac0f6d89e08b7"
-records: []
-
+status: released
+canonical_digest: "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41"
+records:
+  - {domain: CPGD, bit: 0, feature: QUERY_RESUME, requirement: optional, introduced: "1.0"}
+  - {domain: CPGD, bit: 1, feature: RESULT_RESOURCES, requirement: optional, introduced: "1.0"}
+  - {domain: CPGD, bit: 2, feature: ZSTD_PAYLOADS, requirement: optional, introduced: "1.0"}
+  - {domain: CPGD, bit: 3, feature: TRACE_CONTEXT, requirement: optional, introduced: "1.0"}
+  - {domain: PROVIDER, bit: 16, feature: ACCEPTED_HANDLE_EVENTS, requirement: required, introduced: "1.0"}
+  - {domain: PROVIDER, bit: 17, feature: CREDIT_CONTROL, requirement: required, introduced: "1.0"}
+  - {domain: PYREFLY, bit: 32, feature: ARROW_IPC_OBSERVATIONS, requirement: required, introduced: "1.0"}
+  - {domain: PYREFLY, bit: 33, feature: MULTI_CONTEXT, requirement: optional, introduced: "1.0"}
+  - {domain: RUSTC, bit: 48, feature: CLOSED_OWNER_STREAM, requirement: required, introduced: "1.0"}
+  - {domain: RUSTC, bit: 49, feature: PARTIAL_COMPILATION, requirement: disabled, introduced: "2.0"}
+  - {domain: PROVIDER_CONTROL, rule: CREDIT_LIMITS, maximum_outstanding_chunks: 4, maximum_unacknowledged_bytes: 16777216, introduced: "1.0"}
+  - {domain: PROVIDER_EVENT, wire_event: ACCEPTED, application_event: ACCEPTED, mapping_version: "1.0"}
+  - {domain: PROVIDER_EVENT, wire_event: PROGRESS, application_event: PROGRESS, mapping_version: "1.0"}
+  - {domain: PROVIDER_EVENT, wire_event: SCOPE_BEGIN, application_event: SCOPE_BEGIN, mapping_version: "1.0"}
+  - {domain: PROVIDER_EVENT, wire_event: OBSERVATION_CHUNK, application_event: OBSERVATION_CHUNK, mapping_version: "1.0"}
+  - {domain: PROVIDER_EVENT, wire_event: SCOPE_END, application_event: SCOPE_END, mapping_version: "1.0"}
+  - {domain: PROVIDER_EVENT, wire_event: TERMINAL, application_event: TERMINAL, mapping_version: "1.0"}
+  - {domain: PROVIDER_EVENT, wire_event: CANCEL_ACKNOWLEDGED, application_event: CANCEL_ACKNOWLEDGED, mapping_version: "1.0"}

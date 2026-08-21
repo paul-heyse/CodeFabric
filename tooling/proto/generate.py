@@ -1,4 +1,4 @@
-"""Generate and verify Wave 0 bindings from one committed descriptor authority."""
+"""Generate and verify all production bindings from one descriptor authority."""
 
 from __future__ import annotations
 
@@ -20,10 +20,9 @@ from grpc_tools import protoc
 from tooling.contracts.derivation import clean_environment, resolve_derivation
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_ROOT = ROOT / "tooling" / "proto" / "source"
 BASELINE = ROOT / "tooling" / "proto" / "compatibility-baseline.json"
-DESCRIPTOR_DERIVATION_ID = "codefabric.derivation.wave0-proto-descriptor-python"
-RUST_DERIVATION_ID = "codefabric.derivation.wave0-proto-rust"
+DESCRIPTOR_DERIVATION_ID = "codefabric.derivation.production-proto-descriptor-python"
+RUST_DERIVATION_ID = "codefabric.derivation.production-proto-rust"
 EXACT_PYTHON_PACKAGES = {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -40,40 +39,44 @@ def proto_sources() -> tuple[tuple[Path, Path], ...]:
     sources: list[tuple[Path, Path]] = []
     for artifact in DESCRIPTOR_INVOCATION["artifact_inputs"]:
         authority = Path(str(artifact["authority_path"]))
-        try:
-            compiler_name = authority.relative_to("tooling/proto/source")
-        except ValueError:
-            compiler_name = authority
-        sources.append((compiler_name, ROOT / authority))
+        sources.append((authority, ROOT / authority))
     return tuple(sorted(sources))
 
 
-def output_destination(output_kind: str) -> Path:
-    matches = [
+def output_destinations(output_kind: str) -> tuple[Path, ...]:
+    matches = sorted(
         ROOT / output["path"]
         for invocation in (DESCRIPTOR_INVOCATION, RUST_INVOCATION)
         for output in invocation["derivation"]["outputs"]
         if output["output_kind"] == output_kind
-    ]
+    )
+    if not matches:
+        raise RuntimeError(f"catalog declares no {output_kind} proto outputs")
+    return tuple(matches)
+
+
+def one_output_destination(output_kind: str) -> Path:
+    matches = output_destinations(output_kind)
     if len(matches) != 1:
         raise RuntimeError(
-            f"catalog must declare one {output_kind} proto output, got {matches}"
+            f"catalog must declare one {output_kind} output, got {matches}"
         )
     return matches[0]
 
 
 COMPILER_SOURCES = proto_sources()
-DESCRIPTOR_DESTINATION = output_destination("proto-descriptor-set")
-CENSUS_DESTINATION = output_destination("proto-descriptor-census")
-IDENTITY_DESTINATION = output_destination("proto-toolchain-identity")
-RUST_DESTINATION_FILE = output_destination("rust-proto-bindings")
-RUST_DESTINATION = RUST_DESTINATION_FILE.parent
-RUST_OUTPUT = RUST_DESTINATION_FILE.name
-PYTHON_DESTINATIONS = {
-    output_destination(kind).name: output_destination(kind)
-    for kind in ("python-proto-bindings", "python-proto-stub", "python-grpc-bindings")
+DESCRIPTOR_DESTINATION = one_output_destination("proto-descriptor-set")
+CENSUS_DESTINATION = one_output_destination("proto-descriptor-census")
+IDENTITY_DESTINATION = one_output_destination("proto-toolchain-identity")
+RUST_DESTINATIONS = {
+    destination.name: destination
+    for destination in output_destinations("rust-proto-bindings")
 }
-PYTHON_OUTPUTS = tuple(PYTHON_DESTINATIONS)
+PYTHON_DESTINATIONS = {
+    destination.name: destination
+    for kind in ("python-proto-bindings", "python-proto-stub", "python-grpc-bindings")
+    for destination in output_destinations(kind)
+}
 
 
 def run(command: list[str]) -> None:
@@ -160,7 +163,6 @@ def invoke_compiler(python_output: Path, descriptor: Path) -> None:
     arguments = [
         "grpc_tools.protoc",
         f"-I{ROOT}",
-        f"-I{SOURCE_ROOT}",
         f"-I{bundled_include}",
         f"--python_out={python_output}",
         f"--pyi_out={python_output}",
@@ -532,6 +534,13 @@ def assert_compatible(baseline: dict[str, Any], current: dict[str, Any]) -> None
                     )
 
 
+def normalize_python_imports(path: Path) -> None:
+    """Make protoc's package-root imports valid in the committed flat package."""
+    source = path.read_text(encoding="utf-8")
+    normalized = source.replace("from contracts.rpc import ", "from . import ")
+    path.write_text(normalized, encoding="utf-8")
+
+
 def generate_into(root: Path) -> tuple[dict[str, Path], dict[str, Any]]:
     assert_exact_python_versions()
     rust_output = root / "rust"
@@ -574,26 +583,35 @@ def generate_into(root: Path) -> tuple[dict[str, Path], dict[str, Any]]:
             "Rust descriptor decode/re-encode drifted from the compiler IR"
         )
 
-    rust_file = rust_output / RUST_OUTPUT
-    files = {"descriptor": descriptor, "census": census_path, "rust": rust_file}
+    files = {"descriptor": descriptor, "census": census_path}
+    generated_rust = sorted(
+        path for path in rust_output.rglob("*.rs") if path.name in RUST_DESTINATIONS
+    )
+    if {path.name for path in generated_rust} != set(RUST_DESTINATIONS):
+        raise RuntimeError("generated Rust outputs do not match the typed output model")
+    for output in generated_rust:
+        files[f"rust/{output.name}"] = output
+
     generated_python = sorted(
         path
         for path in python_output.rglob("*")
-        if path.is_file() and path.name in PYTHON_OUTPUTS
+        if path.is_file() and path.name in PYTHON_DESTINATIONS
     )
-    if len(generated_python) != len(PYTHON_OUTPUTS):
+    if {path.name for path in generated_python} != set(PYTHON_DESTINATIONS):
         raise RuntimeError(
             "generated Python outputs do not match the typed output model"
         )
     for output in generated_python:
+        normalize_python_imports(output)
         files[f"python/{output.name}"] = output
 
-    prepend_header(rust_file, "//")
+    for output in generated_rust:
+        prepend_header(output, "//")
+        run(["rustfmt", "--edition", "2024", str(output)])
+        run(["rustfmt", "--edition", "2024", "--check", str(output)])
     for key, path in files.items():
         if key.startswith("python/"):
             prepend_header(path, "#")
-    run(["rustfmt", "--edition", "2024", str(rust_file)])
-    run(["rustfmt", "--edition", "2024", "--check", str(rust_file)])
     return files, census
 
 
@@ -635,8 +653,8 @@ def destination_files() -> dict[str, Path]:
     files = {
         "descriptor": DESCRIPTOR_DESTINATION,
         "census": CENSUS_DESTINATION,
-        "rust": RUST_DESTINATION / RUST_OUTPUT,
     }
+    files.update({f"rust/{name}": path for name, path in RUST_DESTINATIONS.items()})
     files.update({f"python/{name}": path for name, path in PYTHON_DESTINATIONS.items()})
     return files
 
@@ -650,7 +668,6 @@ def assert_equal(expected: dict[str, Path], actual: dict[str, Path]) -> None:
 
 
 def write_outputs(files: dict[str, Path], identity_value: dict[str, Any]) -> None:
-    RUST_DESTINATION.mkdir(parents=True, exist_ok=True)
     for name, source in files.items():
         destination = destination_files()[name]
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -685,15 +702,24 @@ def _normalize_option_views(value: Any) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("write", "check", "repro-check"))
+    parser.add_argument(
+        "mode", choices=("write", "check", "repro-check", "accept-baseline")
+    )
     arguments = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="codefabric-proto-a-") as first_raw:
         first_files, first_census = generate_into(Path(first_raw))
-        baseline = compatibility_baseline()
-        assert_compatible(baseline, first_census)
         versions = assert_exact_python_versions()
         first_identity = identity(first_files, versions)
+
+        if arguments.mode == "accept-baseline":
+            write_outputs(first_files, first_identity)
+            BASELINE.write_bytes(encoded_json(first_census))
+            print(first_identity["generated_sha256"])
+            return 0
+
+        baseline = compatibility_baseline()
+        assert_compatible(baseline, first_census)
 
         if arguments.mode == "write":
             write_outputs(first_files, first_identity)

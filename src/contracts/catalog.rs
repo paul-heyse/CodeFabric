@@ -14,9 +14,9 @@ pub const CATALOG_PATH: &str = "contracts/manifests/suite-manifest.json";
 /// Stable derivation IDs used by maintained generators.
 pub const ARTIFACT_INDEX_DERIVATION_ID: &str = "codefabric.derivation.artifact-index";
 pub const REGISTRY_DERIVATION_ID: &str = "codefabric.derivation.canonical-registries";
-pub const WAVE0_PROTO_PYTHON_DERIVATION_ID: &str =
-    "codefabric.derivation.wave0-proto-descriptor-python";
-pub const WAVE0_PROTO_RUST_DERIVATION_ID: &str = "codefabric.derivation.wave0-proto-rust";
+pub const PRODUCTION_PROTO_PYTHON_DERIVATION_ID: &str =
+    "codefabric.derivation.production-proto-descriptor-python";
+pub const PRODUCTION_PROTO_RUST_DERIVATION_ID: &str = "codefabric.derivation.production-proto-rust";
 pub const ADAPTER_MODEL_DERIVATION_ID: &str = "codefabric.derivation.adapter-models";
 
 /// Hard bootstrap cap checked before the catalog can select its own named profile.
@@ -663,16 +663,16 @@ pub fn generator_identity(kind: DerivationKind) -> GeneratorIdentity {
         },
         DerivationKind::ProtobufDescriptorAndPython => GeneratorIdentity {
             generator_id: "codefabric-proto-python".to_owned(),
-            generator_revision: "descriptor-first-v2".to_owned(),
+            generator_revision: "production-descriptor-first-v1".to_owned(),
             toolchain: vec![
                 "grpcio-tools=1.83.0".to_owned(),
                 "protobuf=7.36.0".to_owned(),
-                "libprotoc=34.0".to_owned(),
+                "libprotoc=35.1".to_owned(),
             ],
         },
         DerivationKind::ProtobufRustFromDescriptor => GeneratorIdentity {
             generator_id: "codefabric-proto-rust".to_owned(),
-            generator_revision: "compile-fds-v2".to_owned(),
+            generator_revision: "production-compile-fds-v1".to_owned(),
             toolchain: vec![
                 "prost=0.14.4".to_owned(),
                 "tonic-prost-build=0.14.6".to_owned(),

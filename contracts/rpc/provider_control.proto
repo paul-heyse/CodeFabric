@@ -2,10 +2,250 @@
 // artifact_kind: protobuf-schema
 // version: 1.0
 // compatible_suite_major: 1
-// status: draft
-// canonical_digest: b3:600bc0072c5a938c6ae1e7818d42c837d7141ddbebf3a0c732a2da13f943f47c
-// Wave 1 reserves this authority path; WP10 authors the released protocol.
+// status: released
+// canonical_digest: b3:76fc832df6769913a0fdad1b08509082dffb0183b89fba8cc4cafe0d60216315
+// digest_projection: proto-descriptor-v1
 syntax = "proto3";
 
-package codefabric.contracts.draft.v1;
+package codefabric.provider.v1;
 
+option java_package = "dev.codefabric.provider.v1";
+
+// ProviderControl is the common accepted-handle lifecycle for every provider.
+service ProviderControl {
+  rpc Submit(ProviderJobSpec) returns (AcceptedProviderJob);
+  rpc StreamEvents(ProviderEventStreamRequest) returns (stream ProviderEvent);
+  rpc Cancel(CancelProviderRunRequest) returns (CancelAcknowledgement);
+}
+
+// Values match the ontology ProviderRunState registry codes exactly.
+enum ProviderRunState {
+  PROVIDER_RUN_STATE_UNSPECIFIED = 0;
+  PROVIDER_RUN_STATE_QUEUED = 10;
+  PROVIDER_RUN_STATE_RUNNING = 20;
+  PROVIDER_RUN_STATE_SUCCEEDED = 30;
+  PROVIDER_RUN_STATE_PARTIAL = 40;
+  PROVIDER_RUN_STATE_FAILED = 50;
+  PROVIDER_RUN_STATE_TIMED_OUT = 60;
+  PROVIDER_RUN_STATE_CANCELLED = 70;
+  PROVIDER_RUN_STATE_SUPERSEDED = 80;
+  PROVIDER_RUN_STATE_CRASHED = 90;
+  PROVIDER_RUN_STATE_PROTOCOL_ERROR = 100;
+  PROVIDER_RUN_STATE_STALE_RESULT = 110;
+  PROVIDER_RUN_STATE_STALE_GIT_BASELINE = 120;
+}
+
+enum ProviderPlacement {
+  PROVIDER_PLACEMENT_UNSPECIFIED = 0;
+  PROVIDER_PLACEMENT_IN_PROCESS = 1;
+  PROVIDER_PLACEMENT_SIDECAR = 2;
+  PROVIDER_PLACEMENT_COMPILER_GROUP = 3;
+}
+
+enum ProviderPriorityClass {
+  PROVIDER_PRIORITY_CLASS_UNSPECIFIED = 0;
+  PROVIDER_PRIORITY_CLASS_INTERACTIVE = 1;
+  PROVIDER_PRIORITY_CLASS_CONTINUOUS = 2;
+  PROVIDER_PRIORITY_CLASS_BACKGROUND = 3;
+}
+
+enum ProviderScopeKind {
+  PROVIDER_SCOPE_KIND_UNSPECIFIED = 0;
+  PROVIDER_SCOPE_KIND_WORKSPACE = 1;
+  PROVIDER_SCOPE_KIND_ANALYSIS_CONTEXT = 2;
+  PROVIDER_SCOPE_KIND_BUILD_UNIT = 3;
+  PROVIDER_SCOPE_KIND_MODULE_OR_CRATE = 4;
+  PROVIDER_SCOPE_KIND_SOURCE_FILE = 5;
+  PROVIDER_SCOPE_KIND_SEMANTIC_OWNER = 6;
+  PROVIDER_SCOPE_KIND_CALLABLE_OR_MIR_BODY = 7;
+  PROVIDER_SCOPE_KIND_WORKSPACE_GLOBAL_DERIVATION = 8;
+}
+
+enum ProviderEventKind {
+  PROVIDER_EVENT_KIND_UNSPECIFIED = 0;
+  PROVIDER_EVENT_KIND_ACCEPTED = 1;
+  PROVIDER_EVENT_KIND_PROGRESS = 2;
+  PROVIDER_EVENT_KIND_SCOPE_BEGIN = 3;
+  PROVIDER_EVENT_KIND_OBSERVATION_CHUNK = 4;
+  PROVIDER_EVENT_KIND_SCOPE_END = 5;
+  PROVIDER_EVENT_KIND_TERMINAL = 6;
+  PROVIDER_EVENT_KIND_CANCEL_ACKNOWLEDGED = 7;
+}
+
+enum CancelAcknowledgementState {
+  CANCEL_ACKNOWLEDGEMENT_STATE_UNSPECIFIED = 0;
+  CANCEL_ACKNOWLEDGEMENT_STATE_NOT_FOUND = 1;
+  CANCEL_ACKNOWLEDGEMENT_STATE_CANCELLATION_REQUESTED = 2;
+  CANCEL_ACKNOWLEDGEMENT_STATE_CANCELLED = 3;
+  CANCEL_ACKNOWLEDGEMENT_STATE_ALREADY_TERMINAL = 4;
+  CANCEL_ACKNOWLEDGEMENT_STATE_FORCE_TERMINATED = 5;
+}
+
+// These numeric values are the AC-G-36 protocol-wide credit limits.
+enum CreditControlLimit {
+  CREDIT_CONTROL_LIMIT_UNSPECIFIED = 0;
+  CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS = 4;
+  CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB = 16;
+}
+
+message BlobReference {
+  string blob_id = 1;
+  string content_digest = 2;
+  uint64 byte_length = 3;
+  string read_only_uri = 4;
+}
+
+message SourceSnapshotLease {
+  string lease_id = 1;
+  string workspace_id = 2;
+  uint64 source_generation = 3;
+  string source_manifest_digest = 4;
+  int64 expires_at_unix_ms = 5;
+  repeated BlobReference blobs = 6;
+}
+
+message ProviderScope {
+  ProviderScopeKind scope_kind = 1;
+  string scope_id = 2;
+}
+
+message ResourceEstimate {
+  uint64 input_bytes = 1;
+  uint64 expected_output_bytes = 2;
+  uint32 cpu_weight = 3;
+  uint32 memory_mib = 4;
+}
+
+message ProviderJobSpec {
+  string provider_run_id = 1;
+  string workspace_id = 2;
+  string analysis_context_id = 3;
+  uint64 source_generation = 4;
+  SourceSnapshotLease source_snapshot_lease = 5;
+  repeated uint32 requested_capability_codes = 6;
+  repeated ProviderScope scopes = 7;
+  ProviderPriorityClass priority_class = 8;
+  ResourceEstimate resource_estimate = 9;
+  int64 deadline_unix_ms = 10;
+  string supersession_key = 11;
+  repeated string required_bundle_digests = 12;
+  repeated string required_schema_digests = 13;
+  string idempotency_key = 14;
+}
+
+message AcceptedProviderJob {
+  string provider_run_id = 1;
+  uint64 accepted_generation = 2;
+  ProviderRunState state = 3;
+  int64 accepted_at_unix_ms = 4;
+  string event_resume_token = 5;
+}
+
+message ProviderEventStreamRequest {
+  string provider_run_id = 1;
+  string event_resume_token = 2;
+  uint64 after_sequence = 3;
+}
+
+message ProviderEventHeader {
+  string provider_run_id = 1;
+  string workspace_id = 2;
+  string analysis_context_id = 3;
+  uint64 source_generation = 4;
+  uint64 sequence = 5;
+  int64 event_at_unix_ms = 6;
+  string event_checksum = 7;
+}
+
+message ProviderAcceptedEvent {
+  ProviderEventHeader header = 1;
+  uint64 accepted_generation = 2;
+}
+
+message ProviderProgressEvent {
+  ProviderEventHeader header = 1;
+  uint32 completed_units = 2;
+  uint32 total_units = 3;
+  string phase = 4;
+}
+
+message ProviderScopeBeginEvent {
+  ProviderEventHeader header = 1;
+  ProviderScope scope = 2;
+}
+
+message ProviderObservationChunkEvent {
+  ProviderEventHeader header = 1;
+  ProviderScope scope = 2;
+  uint32 observation_family_code = 3;
+  bytes arrow_ipc = 4;
+  optional BlobReference payload_reference = 5;
+  string schema_digest = 6;
+  uint64 row_count = 7;
+  string chunk_digest = 8;
+}
+
+message ProviderScopeEndEvent {
+  ProviderEventHeader header = 1;
+  ProviderScope scope = 2;
+  map<uint32, uint64> family_counts = 3;
+  string scope_digest = 4;
+}
+
+message CapabilityOutcome {
+  uint32 capability_code = 1;
+  uint32 owner_capability_state_code = 2;
+  uint32 completeness_state_code = 3;
+  string reason_code = 4;
+}
+
+message ProviderTerminalEvent {
+  ProviderEventHeader header = 1;
+  ProviderRunState state = 2;
+  repeated CapabilityOutcome capability_outcomes = 3;
+  string overall_digest = 4;
+  optional string error_code = 5;
+}
+
+message CancelAcknowledgedEvent {
+  ProviderEventHeader header = 1;
+  CancelAcknowledgementState state = 2;
+}
+
+message ProviderEvent {
+  oneof event {
+    ProviderAcceptedEvent accepted = 1;
+    ProviderProgressEvent progress = 2;
+    ProviderScopeBeginEvent scope_begin = 3;
+    ProviderObservationChunkEvent observation_chunk = 4;
+    ProviderScopeEndEvent scope_end = 5;
+    ProviderTerminalEvent terminal = 6;
+    CancelAcknowledgedEvent cancel_acknowledged = 7;
+  }
+}
+
+message CancelProviderRunRequest {
+  string provider_run_id = 1;
+  string reason = 2;
+  string idempotency_key = 3;
+}
+
+message CancelAcknowledgement {
+  string provider_run_id = 1;
+  CancelAcknowledgementState state = 2;
+  int64 acknowledged_at_unix_ms = 3;
+  optional ProviderRunState terminal_state = 4;
+  repeated string cleaning_up_components = 5;
+  bool forced_termination = 6;
+}
+
+message ChunkAccepted {
+  uint64 sequence = 1;
+  uint64 next_credit_bytes = 2;
+  uint32 next_credit_chunks = 3;
+}
+
+message ChunkRejected {
+  uint64 sequence = 1;
+  string error_code = 2;
+}

@@ -563,7 +563,7 @@ fn classified_fixture_paths(
         "tooling/proto/compatibility-baseline.json",
         "tooling/proto/descriptor-census.json",
         "tooling/proto/toolchain-identity.json",
-        "tooling/proto/wave0-probe-descriptor.pb",
+        "tooling/proto/production-descriptor.pb",
     ] {
         if !repository_root.join(relative).is_file() {
             return Err(parse_error(

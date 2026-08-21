@@ -3,9 +3,11 @@
 import grpc
 
 MAX_CONTROL_MESSAGE_BYTES = 4 * 1024 * 1024
+GRPC_DEFAULT_AUTHORITY = "localhost"
 GRPC_MESSAGE_OPTIONS = (
     ("grpc.max_send_message_length", MAX_CONTROL_MESSAGE_BYTES),
     ("grpc.max_receive_message_length", MAX_CONTROL_MESSAGE_BYTES),
+    ("grpc.default_authority", GRPC_DEFAULT_AUTHORITY),
 )
 
 
