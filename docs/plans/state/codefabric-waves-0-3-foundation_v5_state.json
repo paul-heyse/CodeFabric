@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP11",
+  "current_packet": "WP12",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -376,15 +376,22 @@
       "blockers": []
     },
     "WP11": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ed11f625a43dd53e814650c8f0557e484a365f26",
       "deviations": [
         {
-          "kind": "substrate_only",
-          "summary": "The closed AC-G-07 bundle model exists; eight production bundle member sets, deployment content, CF-ID allocation, and traceability closure remain open."
+          "kind": "accepted_design_correction",
+          "summary": "Bundle membership is a closed catalog relation expanded by the generator, requirements use closed catalog-backed trace selectors, traceability is fully derived from requirements, and owner source/text digests are refreshed programmatically instead of copied by hand."
+        },
+        {
+          "kind": "library_grounded_deployment_validation",
+          "summary": "The released AC-G-08 YAML instance is validated against its governed Draft 2020-12 schema with exact jsonschema 4.26.0 and PyYAML 6.0.3 pins, both captured in the toolchain identity."
         }
       ],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first deployment-profile generation exposed serde's kebab-case rendering of x86_64 as x86-64; the closed enum now uses exact per-variant wire spellings from AC-G-08.",
+        "The first isolated contract reproduction omitted the lock and isolated-domain identity files newly bound by the toolchain contract; the reproduction root now copies that exact closed input set."
+      ],
       "blockers": []
     },
     "WP12": {
@@ -514,8 +521,8 @@
       "blockers": []
     },
     "M02": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ed11f625a43dd53e814650c8f0557e484a365f26",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -537,15 +544,15 @@
   },
   "decommission_batches": {
     "DB01": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ed11f625a43dd53e814650c8f0557e484a365f26",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB02": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ed11f625a43dd53e814650c8f0557e484a365f26",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -558,15 +565,15 @@
       "blockers": []
     },
     "DB04": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ed11f625a43dd53e814650c8f0557e484a365f26",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB05": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ed11f625a43dd53e814650c8f0557e484a365f26",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -874,6 +881,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Complete WP11 by populating every production bundle, releasing the local deployment profile and schema, allocating CF-IDs, closing traceability orphans, and proving released-profile zero warnings plus DB02, DB04, and DB05.",
-  "updated_at": "2026-08-21T08:26:09Z"
+  "next_action": "Execute WP12: implement the catalog-driven daemon configuration loader with typed settings, exact local-workstation defaults, bounded overrides, and named behavioral/structural/negative/operational acceptance oracles.",
+  "updated_at": "2026-08-21T09:10:42Z"
 }
