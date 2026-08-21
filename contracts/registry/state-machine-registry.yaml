@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679"
+canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a"
 records:
   - machine_id: WorkspaceLifecycle
     version: "1.0"
@@ -123,8 +123,8 @@ records:
     transitions:
       - {from: STAGING, event: outputs-staged, guard: manifest-complete, to: VALIDATING, actions: [validate-tables], idempotency_key: publication:validate, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: VALIDATING, event: validation-passed, guard: constraints-green, to: VALIDATED, actions: [seal-manifest], idempotency_key: publication:validated, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: VALIDATED, event: pointer-lease-held, guard: predecessor-matches, to: COMMITTING, actions: [write-tables, write-pointer], idempotency_key: publication:commit, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: COMMITTING, event: commit-complete, guard: durable-commit-visible, to: COMPLETE, actions: [release-lease], idempotency_key: publication:complete, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATED, event: pointer-lease-held, guard: predecessor-matches, to: COMMITTING, actions: [prepare-pointer-commit], idempotency_key: publication:commit, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: COMMITTING, event: commit-complete, guard: durable-commit-visible, to: COMPLETE, actions: [mark-pointer-eligible], idempotency_key: publication:complete, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: STAGING, event: abandoned, guard: superseded, to: ABANDONED, actions: [discard-staging], idempotency_key: publication:abandon, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: VALIDATING, event: validation-failed, guard: terminal-validation-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: publication:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: VALIDATED, event: commit-failed, guard: terminal-storage-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: publication:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}

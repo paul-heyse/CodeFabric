@@ -35,6 +35,15 @@ pub enum MaterializationRole {
     OperationalProjection,
 }
 
+/// Closed role in the acyclic durable-publication manifest graph.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicationPinRole {
+    PinnedData,
+    ManifestControl,
+    PointerControl,
+    NotPublished,
+}
+
 /// One immutable generated schema contract.
 #[derive(Clone, Debug)]
 pub struct TableSpec {
@@ -51,6 +60,7 @@ pub struct TableSpec {
     pub durable_mutation: DurableMutationClass,
     pub overlay_mutation: OverlayMutationPolicy,
     pub materialization_role: MaterializationRole,
+    pub publication_pin_role: PublicationPinRole,
     pub dependencies: &'static [i16],
     pub required_for_publication: bool,
 }
@@ -126,6 +136,7 @@ struct GeneratedTableSpec {
     durable_mutation: DurableMutationClass,
     overlay_mutation: OverlayMutationPolicy,
     materialization_role: MaterializationRole,
+    publication_pin_role: PublicationPinRole,
     dependencies: &'static [i16],
     required_for_publication: bool,
 }
@@ -230,6 +241,15 @@ const fn materialization_name(value: MaterializationRole) -> &'static str {
     }
 }
 
+const fn publication_pin_name(value: PublicationPinRole) -> &'static str {
+    match value {
+        PublicationPinRole::PinnedData => "PINNED_DATA",
+        PublicationPinRole::ManifestControl => "MANIFEST_CONTROL",
+        PublicationPinRole::PointerControl => "POINTER_CONTROL",
+        PublicationPinRole::NotPublished => "NOT_PUBLISHED",
+    }
+}
+
 fn build(contract: GeneratedTableSpec) -> TableSpec {
     let metadata = HashMap::from([
         (
@@ -273,6 +293,10 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
             materialization_name(contract.materialization_role).to_owned(),
         ),
         (
+            "com.codefabric.cpg.publication_pin_role".to_owned(),
+            publication_pin_name(contract.publication_pin_role).to_owned(),
+        ),
+        (
             "com.codefabric.cpg.compatibility_mode".to_owned(),
             "suite-major-1".to_owned(),
         ),
@@ -298,6 +322,7 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         durable_mutation: contract.durable_mutation,
         overlay_mutation: contract.overlay_mutation,
         materialization_role: contract.materialization_role,
+        publication_pin_role: contract.publication_pin_role,
         dependencies: contract.dependencies,
         required_for_publication: contract.required_for_publication,
     }
@@ -339,7 +364,7 @@ mod tests {
                 .data_type(),
             &DataType::Binary
         );
-        assert_eq!(entity.arrow_schema.metadata().len(), 11);
+        assert_eq!(entity.arrow_schema.metadata().len(), 12);
         assert_eq!(
             entity
                 .arrow_schema
@@ -347,6 +372,14 @@ mod tests {
                 .get("com.codefabric.cpg.durable_mutation_class")
                 .map(String::as_str),
             Some("OWNER_REPLACED_FACT")
+        );
+        assert_eq!(
+            entity
+                .arrow_schema
+                .metadata()
+                .get("com.codefabric.cpg.publication_pin_role")
+                .map(String::as_str),
+            Some("PINNED_DATA")
         );
         assert!(tables.iter().all(|table| {
             !table

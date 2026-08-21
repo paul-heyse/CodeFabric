@@ -46,7 +46,7 @@
     },
     {
       "artifact_id": "codefabric.registry.state-machine-registry",
-      "canonical_digest": "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679",
+      "canonical_digest": "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -67,17 +67,17 @@
     },
     {
       "artifact_id": "codefabric.schema.public-status.schema",
-      "canonical_digest": "b3:fcaf2392851929b98a4e1b7e399760842d927fea712b006322e720b7b7d01c91",
+      "canonical_digest": "b3:05ba4c6e7e02b7c2e65b5879553f5859da70336259430c8ec1f4653c64098252",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:6db34f5220cfbf6eacf44f1242b454ee42273187911d89403a7b3851c603ddd7",
+  "bundle_digest": "b3:2f3432d3e907895c3d2db47389d1f166111257f7b32ff5b610a958b779942608",
   "bundle_kind": "tool-contract",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:78633b3823e4046ce973722e475a762b4c3a3682ad9c91adb867e06f2f993c5c",
+  "canonical_digest": "b3:570b58e7f44664230052ed85369e292b78c797b53304932518281065703ab783",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0

@@ -25,6 +25,9 @@ use crate::schema_registry::{DurableMutationClass, TableSpec, table_spec, table_
 pub enum MutationPhase {
     OwnerDelete,
     OwnerAppend,
+    PublicationAppend,
+    PublicationTransition,
+    SingletonUpsert,
 }
 
 /// Closed writer operation selected from the generated durable mutation class.
@@ -73,6 +76,9 @@ impl MutationPhase {
         match self {
             Self::OwnerDelete => "owner-delete",
             Self::OwnerAppend => "owner-append",
+            Self::PublicationAppend => "publication-append",
+            Self::PublicationTransition => "publication-transition",
+            Self::SingletonUpsert => "singleton-upsert",
         }
     }
 }
@@ -207,7 +213,7 @@ pub fn batch_checksum(batch: &RecordBatch) -> Result<[u8; 32], FabricError> {
     Ok(*hasher.finalize().as_bytes())
 }
 
-fn application_id(
+pub(super) fn application_id(
     workspace_id: [u8; 16],
     table_code: i16,
     phase: MutationPhase,
@@ -264,7 +270,7 @@ fn metadata(prepared: &PreparedMutation) -> BTreeMap<String, Value> {
     ])
 }
 
-fn commit_properties(prepared: &PreparedMutation) -> CommitProperties {
+pub(super) fn commit_properties(prepared: &PreparedMutation) -> CommitProperties {
     CommitProperties::default()
         .with_max_retries(0)
         .with_metadata(metadata(prepared))
@@ -355,7 +361,7 @@ fn validate_request(
     Ok((spec, owners))
 }
 
-fn phase_spec(
+pub(super) fn phase_spec(
     request: &OwnerMutationRequest,
     owners: &[[u8; 16]],
     phase: MutationPhase,
@@ -376,7 +382,7 @@ fn phase_spec(
     })
 }
 
-async fn reload_table(table: &mut super::FabricTable) -> Result<(), FabricError> {
+pub(super) async fn reload_table(table: &mut super::FabricTable) -> Result<(), FabricError> {
     let url = LocalProviderFactory::file_url(&table.path)?;
     table.delta = DeltaTableBuilder::from_url(url)?.load().await?;
     table.provider = exact_provider(
@@ -411,7 +417,7 @@ async fn commit_metadata_matches(
     }))
 }
 
-async fn reconcile_prepared<J: MutationJournal>(
+pub(super) async fn reconcile_prepared<J: MutationJournal>(
     table: &mut super::FabricTable,
     journal: &mut J,
     prepared: &PreparedMutation,
@@ -473,7 +479,7 @@ async fn owner_batch(
     Ok(concat_batches(&spec.arrow_schema, &batches)?)
 }
 
-fn storage_batch(batch: &RecordBatch) -> Result<RecordBatch, FabricError> {
+pub(super) fn storage_batch(batch: &RecordBatch) -> Result<RecordBatch, FabricError> {
     let fields = batch.schema().fields().clone();
     let columns = batch.columns().to_vec();
     Ok(RecordBatch::try_new(
@@ -521,7 +527,7 @@ async fn delete_phase<J: MutationJournal>(
     Ok((Some(version), metrics.num_deleted_rows, false))
 }
 
-async fn append_phase<J: MutationJournal>(
+pub(super) async fn append_phase<J: MutationJournal>(
     table: &mut super::FabricTable,
     journal: &mut J,
     spec: MutationPhaseSpec,

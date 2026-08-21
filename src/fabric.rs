@@ -28,9 +28,14 @@ use crate::schema_registry::{TableSpec, table_spec, table_specs};
 use crate::workspace_registry::WorkspaceRecord;
 
 mod mutation;
+mod publication;
 pub use mutation::{
     MutationFaultPoint, MutationJournal, MutationPhase, MutationPhaseSpec, MutationResult,
     OwnerMutationRequest, PreparedMutation, batch_checksum,
+};
+pub use publication::{
+    CurrentPublicationRecord, OwnerPublicationWrite, PublicationFaultPoint, PublicationOutcome,
+    PublicationPins, PublicationRequest, PublicationTableRecord,
 };
 
 const SCHEMA_DIGEST_KEY: &str = "com.codefabric.cpg.schema_digest";
@@ -55,6 +60,12 @@ pub enum FabricError {
     MutationJournal(String),
     #[error("MUTATION_FAULT:{0:?}")]
     MutationFault(MutationFaultPoint),
+    #[error("PUBLICATION_INTEGRITY:{0}")]
+    PublicationIntegrity(String),
+    #[error("CURRENT_POINTER_CONFLICT:{0}")]
+    CurrentPointerConflict(String),
+    #[error("PUBLICATION_FAULT:{0:?}")]
+    PublicationFault(PublicationFaultPoint),
     #[error("fabric I/O at {path}: {source}")]
     Io {
         path: PathBuf,

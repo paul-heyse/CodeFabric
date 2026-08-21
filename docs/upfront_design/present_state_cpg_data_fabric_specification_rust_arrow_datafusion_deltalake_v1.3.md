@@ -721,6 +721,7 @@ com.codefabric.cpg.partition_columns
 com.codefabric.cpg.durable_mutation_class
 com.codefabric.cpg.overlay_mutation_policy
 com.codefabric.cpg.materialization_role
+com.codefabric.cpg.publication_pin_role
 com.codefabric.cpg.compatibility_mode
 ```
 
@@ -760,6 +761,7 @@ pub struct TableSpec {
     pub durable_mutation: DurableMutationClass,
     pub overlay_mutation: OverlayMutationPolicy,
     pub materialization_role: MaterializationRole,
+    pub publication_pin_role: PublicationPinRole,
     pub dependencies: &'static [i16],
     pub required_for_publication: bool,
 }
@@ -779,13 +781,22 @@ OverlayMutationPolicy:
 MaterializationRole:
   DURABLE_EFFECTIVE | BUNDLE_DIMENSION | QUERY_TIME_DERIVED |
   OPERATIONAL_PROJECTION
+
+PublicationPinRole:
+  PINNED_DATA | MANIFEST_CONTROL | POINTER_CONTROL | NOT_PUBLISHED
 ```
 
 Durable mutation governs Delta writes, overlay mutation governs how an
 existing effective table participates in a hot snapshot, and materialization
 role governs whether the surface is durable fact state, bundle-backed,
 computed from a leased snapshot, or an operational projection. No axis may be
-derived implicitly from another.
+derived implicitly from another. Publication pin role makes the manifest graph
+acyclic: `PINNED_DATA` tables receive `publication_table` rows;
+`MANIFEST_CONTROL` tables (`publication` and `publication_table`) carry the
+manifest but never recursively pin themselves; `POINTER_CONTROL` changes last;
+and `NOT_PUBLISHED` tables are excluded. `required_for_publication` means a
+table participates in the durable publication protocol, not that every such
+table is recursively listed in its own manifest.
 
 The registry SHALL generate or validate:
 
@@ -2571,6 +2582,12 @@ Blind append retry is prohibited.
 
 ### 71.1 Durable base publication
 
+The generated `PublicationPinRole` is the sole membership authority for the
+version map. The publisher SHALL emit exactly one row for every `PINNED_DATA`
+table and no row for `MANIFEST_CONTROL`, `POINTER_CONTROL`, or `NOT_PUBLISHED`.
+This preserves the invariant that every query-data version is pinned while
+preventing a self-referential manifest or a pointer-version cycle.
+
 1. create publication row in `STAGING` for one `workspace_id`;
 2. pin source generation, inventory digest, context set, Git/inclusion fingerprints, and all bundle/toolchain versions;
 3. write affected owner replacements to Delta tables;
@@ -2579,6 +2596,12 @@ Blind append retry is prohibited.
 6. transition through `VALIDATING` → `VALIDATED` → `COMMITTING` → `COMPLETE`;
 7. compare-and-swap `current_publication[workspace_id]` last;
 8. on failure mark `FAILED` or `ABANDONED`; never expose intermediate table versions through serving views.
+
+The generated durable-publication state machine SHALL therefore treat
+`COMMITTING` as preparation of a pointer-eligible complete manifest. It SHALL
+NOT carry a `write-pointer` or lease-release action before `COMPLETE`; the
+separate AC-G-26 CAS runs after `COMPLETE` and releases the workspace
+publication lease only after post-commit pointer verification.
 
 ### 71.2 Interactive ServingSnapshot activation
 

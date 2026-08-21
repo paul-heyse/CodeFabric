@@ -914,10 +914,10 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
     RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: GIT_ACCELERATION_STATUS_VALUES },
     RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: EFFECT_KIND_VALUES },
     RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: RESOURCE_KIND_VALUES },
-    RegistryDomainEntry { domain: "WORKSPACE_LIFECYCLE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: WORKSPACE_LIFECYCLE_VALUES },
-    RegistryDomainEntry { domain: "UPDATE_WAVE_STATE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: UPDATE_WAVE_STATE_VALUES },
-    RegistryDomainEntry { domain: "ARTIFACT_STATE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: ARTIFACT_STATE_VALUES },
-    RegistryDomainEntry { domain: "WORKSPACE_REGISTRY_LIFECYCLE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: WORKSPACE_REGISTRY_LIFECYCLE_VALUES },
+    RegistryDomainEntry { domain: "WORKSPACE_LIFECYCLE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: WORKSPACE_LIFECYCLE_VALUES },
+    RegistryDomainEntry { domain: "UPDATE_WAVE_STATE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: UPDATE_WAVE_STATE_VALUES },
+    RegistryDomainEntry { domain: "ARTIFACT_STATE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: ARTIFACT_STATE_VALUES },
+    RegistryDomainEntry { domain: "WORKSPACE_REGISTRY_LIFECYCLE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: WORKSPACE_REGISTRY_LIFECYCLE_VALUES },
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1019,8 +1019,8 @@ pub const OWNER_CAPABILITY_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
 pub const DURABLE_PUBLICATION_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
     StateTransitionEntry { from: "STAGING", event: "outputs-staged", guard: "manifest-complete", to: "VALIDATING", actions: &["validate-tables"], idempotency_key: "publication:validate", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "VALIDATING", event: "validation-passed", guard: "constraints-green", to: "VALIDATED", actions: &["seal-manifest"], idempotency_key: "publication:validated", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
-    StateTransitionEntry { from: "VALIDATED", event: "pointer-lease-held", guard: "predecessor-matches", to: "COMMITTING", actions: &["write-tables", "write-pointer"], idempotency_key: "publication:commit", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
-    StateTransitionEntry { from: "COMMITTING", event: "commit-complete", guard: "durable-commit-visible", to: "COMPLETE", actions: &["release-lease"], idempotency_key: "publication:complete", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "VALIDATED", event: "pointer-lease-held", guard: "predecessor-matches", to: "COMMITTING", actions: &["prepare-pointer-commit"], idempotency_key: "publication:commit", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "COMMITTING", event: "commit-complete", guard: "durable-commit-visible", to: "COMPLETE", actions: &["mark-pointer-eligible"], idempotency_key: "publication:complete", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "STAGING", event: "abandoned", guard: "superseded", to: "ABANDONED", actions: &["discard-staging"], idempotency_key: "publication:abandon", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "VALIDATING", event: "validation-failed", guard: "terminal-validation-error", to: "FAILED", actions: &["publish-diagnostic"], idempotency_key: "publication:failed", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "VALIDATED", event: "commit-failed", guard: "terminal-storage-error", to: "FAILED", actions: &["publish-diagnostic"], idempotency_key: "publication:failed", error_on_illegal: "STATE_TRANSITION_VIOLATION" },

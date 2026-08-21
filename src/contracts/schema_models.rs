@@ -61,6 +61,16 @@ pub enum MaterializationRole {
     OperationalProjection,
 }
 
+/// Participation of one table in the acyclic durable publication manifest.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PublicationPinRole {
+    PinnedData,
+    ManifestControl,
+    PointerControl,
+    NotPublished,
+}
+
 /// One closed Arrow field declaration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -92,6 +102,7 @@ pub struct TableContract {
     pub durable_mutation: DurableMutationClass,
     pub overlay_mutation: OverlayMutationPolicy,
     pub materialization_role: MaterializationRole,
+    pub publication_pin_role: PublicationPinRole,
     pub dependencies: Vec<i16>,
     pub required_for_publication: bool,
 }
@@ -235,6 +246,36 @@ impl SchemaContractIr {
                         "{} exposes an overlay tombstone as a durable fact",
                         table.name
                     ));
+                }
+                _ => {}
+            }
+            if matches!(table.publication_pin_role, PublicationPinRole::NotPublished)
+                == table.required_for_publication
+            {
+                return Err(format!(
+                    "{} has inconsistent publication requirement and pin role",
+                    table.name
+                ));
+            }
+            match table.publication_pin_role {
+                PublicationPinRole::ManifestControl
+                    if table.durable_mutation != DurableMutationClass::PublicationAppend =>
+                {
+                    return Err(format!(
+                        "{} is manifest control without publication mutation policy",
+                        table.name
+                    ));
+                }
+                PublicationPinRole::PointerControl
+                    if table.durable_mutation != DurableMutationClass::CurrentSingleton =>
+                {
+                    return Err(format!(
+                        "{} is pointer control without singleton mutation policy",
+                        table.name
+                    ));
+                }
+                PublicationPinRole::NotPublished if table.required_for_publication => {
+                    return Err(format!("{} is both unpublished and required", table.name));
                 }
                 _ => {}
             }

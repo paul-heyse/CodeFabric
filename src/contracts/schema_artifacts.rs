@@ -570,7 +570,7 @@ fn render_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
             rust_strings(&table.zorder_columns)
         )
         .unwrap();
-        writeln!(output, "        durable_mutation: DurableMutationClass::{:?}, overlay_mutation: OverlayMutationPolicy::{:?}, materialization_role: MaterializationRole::{:?},", table.durable_mutation, table.overlay_mutation, table.materialization_role).unwrap();
+        writeln!(output, "        durable_mutation: DurableMutationClass::{:?}, overlay_mutation: OverlayMutationPolicy::{:?}, materialization_role: MaterializationRole::{:?}, publication_pin_role: PublicationPinRole::{:?},", table.durable_mutation, table.overlay_mutation, table.materialization_role, table.publication_pin_role).unwrap();
         writeln!(
             output,
             "        dependencies: &{:?}, required_for_publication: {},",

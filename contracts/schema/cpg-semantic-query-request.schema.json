@@ -420,7 +420,7 @@
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
     "artifact_kind": "json-schema",
-    "canonical_digest": "b3:28eead140d02de0059ea3b68c4fc2e2cd8d3a6273e4f54e5d7dccebc98834f58",
+    "canonical_digest": "b3:6791d625e584c1d5093e5c6cd4c0037ec009074ffb55967f966df3ae253ff22d",
     "compatible_suite_major": 1,
     "generator_revision": "codefabric-schema-contracts-v1",
     "status": "released",
@@ -429,7 +429,7 @@
   "x-codefabric-generated": {
     "generator_revision": "codefabric-schema-contracts-v1",
     "source_artifact_id": "codefabric.schema.contract-ir",
-    "source_canonical_digest": "b3:f079063b066fac7dbef4b8c17696b9fbb05f0e798452508c948a855673548887",
-    "source_digest": "b3:573034240903820a896ffc8cf7e2895cbcaeac976ecaf781e512c13dba09074d"
+    "source_canonical_digest": "b3:97f4fafd253cf9e43eee056f2fd9016161e6f37a5ddd184a4bd7deaeb7076bb9",
+    "source_digest": "b3:f6c115d3373782f6f2c5fa445a071f23c1d3cf7e502c9f4e78e5adc05c7a998c"
   }
 }

@@ -16,7 +16,7 @@ use arrow_schema::ArrowError;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::schema_registry::{TableSpec, table_spec};
+use crate::schema_registry::{DurableMutationClass, TableSpec, table_spec};
 
 const MAX_STREAMS: usize = 64;
 const MAX_ROWS_PER_STREAM: usize = 65_536;
@@ -839,8 +839,23 @@ pub fn validate_fact_batch(
     let spec = table_spec(table_code).ok_or_else(|| {
         FactIngestError::Protocol(format!("table code {table_code} is not generated"))
     })?;
-    if !matches!(table_code, 100 | 110 | 120 | 130) {
-        return Err(invalid(spec, "table-family", "not a universal fact table"));
+    if !matches!(
+        spec.durable_mutation,
+        DurableMutationClass::OwnerReplacedFact | DurableMutationClass::DerivedOwnerReplaced
+    ) || [
+        "workspace_id",
+        "analysis_context_id",
+        "source_generation",
+        "owner_id",
+    ]
+    .iter()
+    .any(|column| spec.arrow_schema.index_of(column).is_err())
+    {
+        return Err(invalid(
+            spec,
+            "table-family",
+            "not a generated owner-scoped fact table",
+        ));
     }
     if batch.schema() != spec.arrow_schema {
         return Err(invalid(
