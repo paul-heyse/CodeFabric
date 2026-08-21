@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP09",
+  "current_packet": "WP10",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -346,15 +346,18 @@
       "blockers": []
     },
     "WP09": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "35a2466bc5af2377827587eea12b9c96f8f3f84f",
       "deviations": [
         {
-          "kind": "substrate_only",
-          "summary": "Contract-IR-to-Pydantic generation and FastMCP fingerprint substrate exist; production TableSpecs, SQLite DDL, snapshots, state schemas, and public JSON Schemas remain open."
+          "kind": "accepted_design_correction",
+          "summary": "The schema compiler makes the closed schema Contract IR, rather than hand-authored Rust declarations, the sole TableSpec/DDL/public-schema authority and confines Delta Kernel conversion types to the fabric boundary."
         }
       ],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first adapter aggregate found that the Python artifact-index model had not admitted the new closed schema derivation and output kinds; the strict Pydantic literals and a census assertion now track the catalog vocabulary.",
+        "The first repository-wide gate rejected a direct delta-rs type in schema_registry; Delta conversion now stays behind the fabric boundary while the public registry exposes only application-owned Arrow validation."
+      ],
       "blockers": []
     },
     "WP10": {
@@ -682,6 +685,14 @@
       "summary": "WP08 reconciles stale public-error spellings in the two mutable owner authorities. The planning-time hashes remain immutable; the WP08 proving commit and regenerated artifact identities provide the accepted evolution."
     },
     {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP09",
+      "paths": [
+        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
+      ],
+      "summary": "WP09 makes the closed schema Contract IR the single source for generated TableSpecs, operational DDL, and public schemas. The planning-time hash remains immutable; the WP09 proving commit and regenerated artifact identities provide the accepted evolution."
+    },
+    {
       "id": "AD-01",
       "kind": "accepted_current_truth",
       "summary": "Machine projections omit only their own root/header identities, retain nested identities, and normative prose uses prose-utf8-v1."
@@ -852,6 +863,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Complete WP09 from the landed Contract-IR-to-Pydantic substrate: generate production TableSpecs, SQLite DDL, snapshot/state schemas, public JSON Schemas, and adapter contracts from the typed catalog and registry authorities.",
-  "updated_at": "2026-08-21T06:49:08Z"
+  "next_action": "Complete WP10 by replacing the Wave-0 probe with the four governed production protocol packages in the one-FDS compilation unit, then prove the generated Rust/Python bindings, descriptor census, compatibility baseline, and cross-language protocol behavior.",
+  "updated_at": "2026-08-21T07:41:50Z"
 }
