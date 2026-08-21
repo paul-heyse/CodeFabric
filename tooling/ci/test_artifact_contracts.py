@@ -91,7 +91,8 @@ def test_packet_trust_requires_ancestor_commit(tmp_path: Path) -> None:
 def test_wp00_behavioral_acceptance() -> None:
     state = validate_state(ROOT, STATE)
     assert state["schema_version"] == 2
-    assert state["current_packet"] == "WP00"
+    assert state["current_packet"] in state["packets"]
+    assert state["packets"]["WP00"]["status"] in {"in_progress", "complete"}
     assert commit_trust(ROOT, state["baseline_commit"])["ancestor"]
 
 
@@ -112,6 +113,7 @@ def test_wp00_negative_zero_state(tmp_path: Path) -> None:
 
     unproved = deepcopy(state)
     unproved["packets"]["WP00"]["status"] = "complete"
+    unproved["packets"]["WP00"]["proving_commit"] = None
     unproved_path = tmp_path / "unproved.json"
     _write_state(unproved_path, unproved)
     with pytest.raises(ArtifactContractError, match="requires a proving commit"):
