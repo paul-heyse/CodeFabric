@@ -3,7 +3,7 @@ artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:d87824d9501407fa69e16855b2fc11ff639a610d926456373d47d71518dbb92f"
+canonical_digest: "b3:b0085e7c6dc24e0135816753079dea9b273a047bd1a6b042c9913401c53a3a12"
 digest_projection: yaml-ac-g-53-v1
 generator_revision: codefabric-contracts/1.0
 profile_id: local-workstation-v1
@@ -18,6 +18,9 @@ hot_overlay_journal: disabled
 source_blob_persistence: runtime-lease-only
 result_artifact_ttl_seconds: 3600
 source_result_artifact_ttl_seconds: 1800
+coordinator_command_capacity: 64
+maximum_concurrent_source_reads: 4
+maximum_concurrent_gix_jobs: 2
 source_image_limits:
   ordinary_maximum_bytes: 16777216
   explicit_maximum_bytes: 67108864

@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir b3:48d87050b4108b63c099f71abd94278a76ebcd46129645fd8d69075b7e8d5a0e; codefabric-schema-contracts-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir b3:659cfa1717fb34e8fd13ea20560f71afd5f73766ef1814502ef8897348e51323; codefabric-schema-contracts-v1; do not edit.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE workspace_registration (
@@ -121,6 +121,7 @@ CREATE TABLE worktree_state (
   reconcile_required INTEGER NOT NULL,
   updated_at TEXT NOT NULL,
   last_diagnostic_id BLOB,
+  inventory_digest BLOB,
   PRIMARY KEY (workspace_id),
   UNIQUE (worktree_id)
 ) STRICT;
@@ -176,11 +177,18 @@ CREATE TABLE source_blob_lease_member (
 CREATE TABLE git_state_vector (
   workspace_id BLOB NOT NULL,
   source_generation INTEGER NOT NULL,
-  head_oid BLOB,
-  head_tree_oid BLOB,
-  index_fingerprint BLOB NOT NULL,
-  worktree_fingerprint BLOB NOT NULL,
-  inclusion_fingerprint BLOB NOT NULL,
+  repository_id BLOB NOT NULL,
+  worktree_id BLOB NOT NULL,
+  head_kind_code INTEGER NOT NULL,
+  head_target BLOB,
+  head_tree BLOB,
+  index_fingerprint BLOB,
+  index_entry_count INTEGER,
+  has_conflict_stages INTEGER NOT NULL,
+  repository_state_code INTEGER NOT NULL,
+  inclusion_policy_fingerprint BLOB NOT NULL,
+  attributes_fingerprint BLOB NOT NULL,
+  worktree_inventory_digest BLOB NOT NULL,
   captured_at TEXT NOT NULL,
   PRIMARY KEY (workspace_id, source_generation)
 ) STRICT;

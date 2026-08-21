@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::contracts::index::artifact_index;
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str = include_str!("../contracts/schema/operational-store.sql");
 const SCHEMA_IR_ARTIFACT_ID: &str = "codefabric.schema.contract-ir";
@@ -328,8 +328,13 @@ impl OperationalStore {
             1 => {
                 migrate_v1_to_v2(&transaction)?;
                 migrate_v2_to_v3(&transaction)?;
+                migrate_v3_to_v4(&transaction)?;
             }
-            2 => migrate_v2_to_v3(&transaction)?,
+            2 => {
+                migrate_v2_to_v3(&transaction)?;
+                migrate_v3_to_v4(&transaction)?;
+            }
+            3 => migrate_v3_to_v4(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -425,6 +430,65 @@ fn migrate_v2_to_v3(transaction: &Transaction<'_>) -> Result<(), OperationalStor
         transaction.execute_batch(&generated_table_ddl(table)?)?;
     }
     Ok(())
+}
+
+fn migrate_v3_to_v4(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    if !table_has_column(transaction, "worktree_state", "inventory_digest")? {
+        transaction
+            .execute_batch("ALTER TABLE worktree_state ADD COLUMN inventory_digest BLOB;")?;
+    }
+    // Historical migration fixtures can contain the current generated table while
+    // exercising an older version of another table. Preserve an already-v4 Git vector.
+    if table_has_column(transaction, "git_state_vector", "head_target")? {
+        return Ok(());
+    }
+    transaction.execute_batch("ALTER TABLE git_state_vector RENAME TO git_state_vector_v3;")?;
+    transaction.execute_batch(&generated_table_ddl("git_state_vector")?)?;
+    transaction.execute_batch(
+        "INSERT INTO git_state_vector (
+           workspace_id, source_generation, repository_id, worktree_id,
+           head_kind_code, head_target, head_tree, index_fingerprint,
+           index_entry_count, has_conflict_stages, repository_state_code,
+           inclusion_policy_fingerprint, attributes_fingerprint,
+           worktree_inventory_digest, captured_at
+         )
+         SELECT old.workspace_id, old.source_generation,
+           state.repository_id, state.worktree_id,
+           CASE WHEN old.head_oid IS NULL THEN 30 ELSE 10 END,
+           CASE length(old.head_oid)
+             WHEN 20 THEN CAST(X'01' || old.head_oid AS BLOB)
+             WHEN 32 THEN CAST(X'02' || old.head_oid AS BLOB)
+             ELSE NULL
+           END,
+           CASE length(old.head_tree_oid)
+             WHEN 20 THEN CAST(X'01' || old.head_tree_oid AS BLOB)
+             WHEN 32 THEN CAST(X'02' || old.head_tree_oid AS BLOB)
+             ELSE NULL
+           END,
+           old.index_fingerprint, NULL, 0, 10,
+           old.inclusion_fingerprint, zeroblob(32), old.worktree_fingerprint,
+           old.captured_at
+         FROM git_state_vector_v3 AS old
+         JOIN worktree_state AS state USING (workspace_id)
+         WHERE state.repository_id IS NOT NULL AND state.worktree_id IS NOT NULL;
+         DROP TABLE git_state_vector_v3;",
+    )?;
+    Ok(())
+}
+
+fn table_has_column(
+    transaction: &Transaction<'_>,
+    table: &str,
+    column: &str,
+) -> Result<bool, OperationalStoreError> {
+    let mut statement = transaction.prepare("SELECT name FROM pragma_table_info(?1)")?;
+    let mut rows = statement.query([table])?;
+    while let Some(row) = rows.next()? {
+        if row.get::<_, String>(0)? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 impl OperationalReaderFactory {
@@ -807,7 +871,7 @@ mod tests {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v3")
+                    .contains("pre-migration-v4")
             })
             .unwrap()
             .path();
@@ -831,7 +895,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v3"))
+                    .contains("pre-migration-v4"))
                 .count(),
             1
         );
@@ -844,7 +908,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v3"))
+                    .contains("pre-migration-v4"))
                 .count(),
             2
         );

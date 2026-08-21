@@ -704,6 +704,9 @@ hot_overlay_journal: disabled
 source_blob_persistence: runtime-lease-only
 result_artifact_ttl_seconds: 3600
 source_result_artifact_ttl_seconds: 1800
+coordinator_command_capacity: 64
+maximum_concurrent_source_reads: 4
+maximum_concurrent_gix_jobs: 2
 source_image_limits:
   ordinary_maximum_bytes: 16777216
   explicit_maximum_bytes: 67108864

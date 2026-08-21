@@ -11,6 +11,8 @@
     "workspace_registration", "operational_store", "fact_store", "object_store",
     "hot_overlay_journal", "source_blob_persistence", "result_artifact_ttl_seconds",
     "source_result_artifact_ttl_seconds", "source_image_limits", "inventory_limits",
+    "coordinator_command_capacity", "maximum_concurrent_source_reads",
+    "maximum_concurrent_gix_jobs",
     "default_query_freshness", "provider_sandbox",
     "follow_directory_symlinks", "follow_internal_file_symlinks",
     "index_external_dependency_bodies", "semantic_query_language", "canonical_json",
@@ -45,6 +47,9 @@
     "source_result_artifact_ttl_seconds": {"const": 1800},
     "source_image_limits": {"$ref": "#/$defs/sourceImageLimits"},
     "inventory_limits": {"$ref": "#/$defs/inventoryLimits"},
+    "coordinator_command_capacity": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "maximum_concurrent_source_reads": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "maximum_concurrent_gix_jobs": {"type": "integer", "minimum": 1, "maximum": 65535},
     "default_query_freshness": {"const": "REQUIRE_CURRENT_FOR_TARGETS"},
     "provider_sandbox": {"const": "required-for-untrusted"},
     "follow_directory_symlinks": {"const": false},
@@ -105,6 +110,6 @@
     "version": "1.0",
     "compatible_suite_major": 1,
     "status": "released",
-    "canonical_digest": "b3:3af4d9f1d0cf03ac5e524bed62c00621dbc112c7a5f1239a14a97209f16229a3"
+    "canonical_digest": "b3:4595d92b7e9e8ceeeb8fb5299ca863e19d5231119cf0539545798dcb29e59a1c"
   }
 }

@@ -5,16 +5,22 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write as _};
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::Mutex;
 
 use crate::contracts::catalog::ArtifactKind;
 use crate::contracts::index::artifact_index;
 use crate::contracts::models::DeploymentProfileDocument;
+use crate::coordinator::{
+    CoordinatorError, WorkspaceCoordinatorManager, WorkspaceHealthStatus,
+    persisted_workspace_health,
+};
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::workspace_registry::{
     RelinkProof, RemovalPolicy, WorkspaceRecord, WorkspaceRegistry, WorkspaceRegistryError,
@@ -253,6 +259,7 @@ pub struct AdminResponse {
     pub workspace_readiness: String,
     pub shutdown_mode: Option<String>,
     pub workspaces: Vec<WorkspaceRecord>,
+    pub workspace_health: Vec<WorkspaceHealthStatus>,
     pub error_code: Option<String>,
 }
 
@@ -280,6 +287,8 @@ pub enum DaemonError {
     Admin(String),
     #[error(transparent)]
     OperationalStore(#[from] OperationalStoreError),
+    #[error(transparent)]
+    Coordinator(#[from] CoordinatorError),
 }
 
 fn private_directory(path: &Path) -> Result<(), DaemonError> {
@@ -494,50 +503,109 @@ async fn write_response(
         .map_err(|source| DaemonError::Admin(format!("response write: {source}")))
 }
 
-fn workspace_readiness(store: &OperationalStore) -> Result<String, DaemonError> {
-    let reader = store.reader_factory().open()?;
-    let count = reader
-        .with_connection(|connection| {
-            connection.query_row(
-                "SELECT COUNT(*) FROM workspace_registration WHERE status_code != 90",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-        })
-        .map_err(OperationalStoreError::from)?;
-    Ok(if count == 0 {
+fn workspace_readiness(health: &[WorkspaceHealthStatus]) -> String {
+    if health.is_empty() {
         "NO_WORKSPACES_READY"
+    } else if health
+        .iter()
+        .any(|workspace| workspace.readiness == "READY")
+    {
+        "WORKSPACES_READY"
     } else {
-        "WORKSPACES_REGISTERED"
+        "WORKSPACE_BOOTSTRAPPING"
     }
-    .to_owned())
+    .to_owned()
 }
 
-fn execute_workspace_command(
-    store: &mut OperationalStore,
+async fn execute_workspace_command(
+    store: &Arc<Mutex<OperationalStore>>,
+    coordinators: &mut WorkspaceCoordinatorManager,
     command: WorkspaceAdminCommand,
 ) -> AdminResponse {
-    let result = execute_workspace_command_inner(store, command);
+    let bootstrap_workspace = match &command {
+        WorkspaceAdminCommand::Enable { workspace_id }
+        | WorkspaceAdminCommand::Reconcile { workspace_id } => Some(*workspace_id),
+        _ => None,
+    };
+    let stop_workspace = match &command {
+        WorkspaceAdminCommand::Disable { workspace_id }
+        | WorkspaceAdminCommand::Remove { workspace_id, .. } => Some(*workspace_id),
+        _ => None,
+    };
+    let result = {
+        let mut store = store.lock().await;
+        execute_workspace_command_inner(&mut store, command)
+    };
     match result {
-        Ok(workspaces) => match workspace_readiness(store) {
-            Ok(workspace_readiness) => AdminResponse {
-                accepted: true,
-                daemon_liveness: "LIVE".to_owned(),
-                workspace_readiness,
-                shutdown_mode: None,
-                workspaces,
-                error_code: None,
-            },
-            Err(_) => internal_admin_response(),
-        },
+        Ok(workspaces) => {
+            if let Some(workspace_id) = stop_workspace
+                && coordinators.stop(workspace_id).await.is_err()
+            {
+                return internal_admin_response();
+            }
+            if let Some(workspace_id) = bootstrap_workspace {
+                let handle = match coordinators.handle(workspace_id) {
+                    Some(handle) => handle,
+                    None => match coordinators.spawn(workspace_id).await {
+                        Ok(handle) => handle,
+                        Err(_) => return internal_admin_response(),
+                    },
+                };
+                if let Err(error) = handle.bootstrap().await {
+                    return coordinator_admin_response(&error);
+                }
+            }
+            match health_response(store).await {
+                Ok((workspace_readiness, workspace_health)) => AdminResponse {
+                    accepted: true,
+                    daemon_liveness: "LIVE".to_owned(),
+                    workspace_readiness,
+                    shutdown_mode: None,
+                    workspaces,
+                    workspace_health,
+                    error_code: None,
+                },
+                Err(_) => internal_admin_response(),
+            }
+        }
         Err(error) => AdminResponse {
             accepted: false,
             daemon_liveness: "LIVE".to_owned(),
             workspace_readiness: "UNCHANGED".to_owned(),
             shutdown_mode: None,
             workspaces: Vec::new(),
+            workspace_health: Vec::new(),
             error_code: Some(workspace_error_code(&error).to_owned()),
         },
+    }
+}
+
+async fn health_response(
+    store: &Arc<Mutex<OperationalStore>>,
+) -> Result<(String, Vec<WorkspaceHealthStatus>), DaemonError> {
+    let health = {
+        let store = store.lock().await;
+        persisted_workspace_health(&store)?
+    };
+    Ok((workspace_readiness(&health), health))
+}
+
+fn coordinator_admin_response(error: &CoordinatorError) -> AdminResponse {
+    AdminResponse {
+        accepted: false,
+        daemon_liveness: "LIVE".to_owned(),
+        workspace_readiness: "WORKSPACE_BOOTSTRAPPING".to_owned(),
+        shutdown_mode: None,
+        workspaces: Vec::new(),
+        workspace_health: Vec::new(),
+        error_code: Some(
+            if matches!(error, CoordinatorError::SourceChanged) {
+                "WORKSPACE_BOOTSTRAPPING"
+            } else {
+                "INTERNAL"
+            }
+            .to_owned(),
+        ),
     }
 }
 
@@ -548,6 +616,7 @@ fn internal_admin_response() -> AdminResponse {
         workspace_readiness: "UNKNOWN".to_owned(),
         shutdown_mode: None,
         workspaces: Vec::new(),
+        workspace_health: Vec::new(),
         error_code: Some("INTERNAL".to_owned()),
     }
 }
@@ -637,7 +706,9 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
         .static_config
         .state_root
         .join(&config.static_config.operational_database);
-    let mut operational_store = OperationalStore::open(&operational_database)?;
+    let operational_store = Arc::new(Mutex::new(OperationalStore::open(&operational_database)?));
+    let mut coordinators = WorkspaceCoordinatorManager::new(Arc::clone(&operational_store))?;
+    coordinators.restore_and_bootstrap().await?;
     if config.static_config.socket_endpoint.exists() {
         fs::remove_file(&config.static_config.socket_endpoint).map_err(|source| {
             DaemonError::Io {
@@ -688,20 +759,23 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
                     AdminCommand::Stop => Some("stop".to_owned()),
                     AdminCommand::Drain => Some("drain".to_owned()),
                 };
+                let (workspace_readiness, workspace_health) =
+                    health_response(&operational_store).await?;
                 (
                     AdminResponse {
                         accepted: true,
                         daemon_liveness: "LIVE".to_owned(),
-                        workspace_readiness: workspace_readiness(&operational_store)?,
+                        workspace_readiness,
                         shutdown_mode: shutdown_mode.clone(),
                         workspaces: Vec::new(),
+                        workspace_health,
                         error_code: None,
                     },
                     shutdown_mode,
                 )
             }
             AdminEnvelope::Workspace(command) => (
-                execute_workspace_command(&mut operational_store, command),
+                execute_workspace_command(&operational_store, &mut coordinators, command).await,
                 None,
             ),
         };
@@ -722,8 +796,9 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
     for step in steps {
         tracing::info!(shutdown_step = step, "joined daemon shutdown");
     }
+    coordinators.shutdown_all().await?;
     if drained {
-        operational_store.checkpoint()?;
+        operational_store.lock().await.checkpoint()?;
     }
     drop(listener);
     fs::remove_file(&config.static_config.socket_endpoint).map_err(|source| DaemonError::Io {

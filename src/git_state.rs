@@ -865,7 +865,7 @@ pub fn apply_to_source_inventory(
 }
 
 #[cfg(feature = "daemon")]
-fn encode_object_id(object_id: &GitObjectId) -> Vec<u8> {
+pub(crate) fn encode_object_id(object_id: &GitObjectId) -> Vec<u8> {
     let mut encoded = Vec::with_capacity(object_id.bytes.len() + 1);
     encoded.push(match object_id.algorithm {
         GitHashAlgorithm::Sha1 => 1,
