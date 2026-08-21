@@ -29,6 +29,8 @@ pub mod secure_path;
 #[cfg(feature = "canonical-json")]
 pub mod snapshot;
 #[cfg(feature = "daemon")]
+pub mod snapshot_runtime;
+#[cfg(feature = "daemon")]
 pub mod source_image;
 #[cfg(feature = "daemon")]
 pub mod workspace_registry;

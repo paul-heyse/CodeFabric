@@ -164,6 +164,68 @@ pub enum SnapshotManifestError {
     Identity(#[from] IdentityError),
 }
 
+impl ServingSnapshotManifest {
+    /// Recompute and verify both immutable identities from the typed body.
+    ///
+    /// # Errors
+    ///
+    /// Rejects any malformed body field, digest, or public identity.
+    pub fn validate(&self) -> Result<(), SnapshotManifestError> {
+        let expected = self.body.clone().derive()?;
+        if expected.snapshot_id != self.snapshot_id
+            || expected.manifest_digest != self.manifest_digest
+        {
+            return Err(SnapshotManifestError::InvalidField(
+                "snapshot_id or manifest_digest",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Decode the public snapshot identity to its durable 16-byte key.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed or wrongly typed public identity text.
+    pub fn raw_snapshot_id(&self) -> Result<[u8; 16], SnapshotManifestError> {
+        decode_public_id(IdentityDomain::ServingSnapshot, None, &self.snapshot_id)
+            .map_err(|_| SnapshotManifestError::InvalidField("snapshot_id"))
+    }
+
+    /// Decode the workspace identity bound by this manifest.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed or wrongly typed public identity text.
+    pub fn raw_workspace_id(&self) -> Result<[u8; 16], SnapshotManifestError> {
+        decode_public_id(IdentityDomain::Workspace, None, &self.body.workspace_id)
+            .map_err(|_| SnapshotManifestError::InvalidField("workspace_id"))
+    }
+
+    /// Decode the durable publication identity bound by this manifest.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed or wrongly typed public identity text.
+    pub fn raw_publication_id(&self) -> Result<[u8; 16], SnapshotManifestError> {
+        decode_public_id(
+            IdentityDomain::Publication,
+            None,
+            &self.body.base_publication.publication_id,
+        )
+        .map_err(|_| SnapshotManifestError::InvalidField("base_publication.publication_id"))
+    }
+
+    /// Decode the raw manifest digest after validating its framing.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a digest without valid BLAKE3 framing and lowercase hex.
+    pub fn raw_manifest_digest(&self) -> Result<[u8; 32], SnapshotManifestError> {
+        decode_digest(&self.manifest_digest, "manifest_digest")
+    }
+}
+
 fn text(value: &str) -> CbefValue {
     CbefValue::Utf8 {
         value: value.to_owned(),

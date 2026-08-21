@@ -18,7 +18,7 @@ use crate::identity::{
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::registries::{
-    EventStreamHealth, GitAccelerationStatus, SourceTrustState,
+    EventStreamHealth, GitAccelerationStatus, SnapshotLeaseState, SourceTrustState,
     WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS, WORKSPACE_REGISTRY_LIFECYCLE_VALUES,
     WorkspaceLifecycle, WorkspaceRegistryLifecycle, generated_transition, registry_state_name,
 };
@@ -952,8 +952,14 @@ fn active_lease_count(
     workspace_id: [u8; 16],
 ) -> Result<i64, WorkspaceRegistryError> {
     Ok(transaction.query_row(
-        "SELECT (SELECT COUNT(*) FROM snapshot_lease WHERE workspace_id=?1) + (SELECT COUNT(*) FROM result_artifact_lease WHERE workspace_id=?1)",
-        [workspace_id.as_slice()],
+        "SELECT COUNT(*) FROM snapshot_lease
+         WHERE workspace_id=?1 AND state_code IN (?2, ?3, ?4)",
+        params![
+            workspace_id.as_slice(),
+            SnapshotLeaseState::Active as u16,
+            SnapshotLeaseState::Releasing as u16,
+            SnapshotLeaseState::Orphaned as u16,
+        ],
         |row| row.get(0),
     )?)
 }
@@ -1133,8 +1139,22 @@ mod tests {
             .store
             .write_transaction(|transaction| {
                 transaction.execute(
-                    "INSERT INTO snapshot_lease(lease_id, workspace_id, snapshot_id, owner_id, expires_at) VALUES (?1, ?2, ?3, 'test', 'forever')",
-                    params![[0x81_u8; 16].as_slice(), workspace_id.as_slice(), [0x82_u8; 16].as_slice()],
+                    "INSERT INTO snapshot_lease(
+                       lease_id, lease_kind_code, workspace_id, snapshot_id,
+                       base_publication_id, required_delta_versions_bytes,
+                       requires_overlay, agent_instance_id, created_at,
+                       last_heartbeat_at, expires_at, state_code,
+                       process_instance_id, orphaned_at, artifact_expires_at,
+                       source_blob_lease_id
+                     ) VALUES (?1, 10, ?2, ?3, ?4, X'7b7d', 0, NULL,
+                               1, 1, 300, 10, ?5, NULL, NULL, NULL)",
+                    params![
+                        [0x81_u8; 16].as_slice(),
+                        workspace_id.as_slice(),
+                        [0x82_u8; 16].as_slice(),
+                        [0x83_u8; 16].as_slice(),
+                        [0x84_u8; 16].as_slice()
+                    ],
                 )?;
                 Ok::<(), WorkspaceRegistryError>(())
             })

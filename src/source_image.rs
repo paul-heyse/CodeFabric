@@ -567,6 +567,49 @@ impl SourceImageStore {
         Ok(())
     }
 
+    /// Acquire one serving-snapshot holder over a closed set of source blobs.
+    ///
+    /// Each snapshot lease uses its own holder identity, while all member blobs share
+    /// one source-blob lease record. An empty source set requires no coupled lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns a persistence, identity, or missing-blob failure.
+    pub fn acquire_serving_snapshot_lease(
+        &mut self,
+        store: &mut OperationalStore,
+        workspace_id: [u8; 16],
+        source_generation: u64,
+        holder_id: [u8; 16],
+        blob_digests: &[[u8; 32]],
+        ttl: Duration,
+    ) -> Result<Option<[u8; 16]>, SourceImageError> {
+        let mut source_lease_id = None;
+        for &blob_digest in blob_digests {
+            let lease = acquire_source_blob_lease(
+                store,
+                blob_digest,
+                workspace_id,
+                source_generation,
+                SourceBlobHolderKind::ServingSnapshot,
+                holder_id,
+                ttl,
+            )?;
+            if let Some(expected) = source_lease_id
+                && expected != lease.lease_id
+            {
+                return Err(SourceImageError::BlobDigestMismatch);
+            }
+            source_lease_id = Some(lease.lease_id);
+        }
+        self.metrics.acquired_leases = self
+            .metrics
+            .acquired_leases
+            .saturating_add(u64::from(source_lease_id.is_some()));
+        self.refresh_lease_metrics(store)?;
+        Ok(source_lease_id)
+    }
+
     /// Renew an active source-blob lease.
     ///
     /// # Errors
@@ -1386,6 +1429,61 @@ mod tests {
                 "source_inventory"
             ]
         );
+    }
+
+    #[test]
+    fn wp24_source_blob_lease_coupling() {
+        let (_directory, mut store, workspace_id, root, mut images) = fixture();
+        fs::write(root.join("snapshot.rs"), b"pub fn snapshot() {}\n").unwrap();
+        let CaptureOutcome::Published(image) = images
+            .capture(&mut store, &request(workspace_id, b"snapshot.rs"))
+            .unwrap()
+        else {
+            panic!("stable source was not published");
+        };
+        let source_lease_id = images
+            .acquire_serving_snapshot_lease(
+                &mut store,
+                workspace_id,
+                0,
+                [0x91; 16],
+                &[image.digest],
+                Duration::from_mins(5),
+            )
+            .unwrap()
+            .unwrap();
+        let serving_holders: i64 = store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM source_blob_lease
+                     WHERE lease_id=?1 AND holder_kind_code=?2 AND holder_id=?3",
+                    params![
+                        source_lease_id.as_slice(),
+                        SourceBlobHolderKind::ServingSnapshot as u16,
+                        [0x91_u8; 16].as_slice(),
+                    ],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(serving_holders, 1);
+        images.release(&mut store, source_lease_id).unwrap();
+        let remaining: i64 = store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM source_blob_lease WHERE lease_id=?1",
+                    [source_lease_id.as_slice()],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[test]

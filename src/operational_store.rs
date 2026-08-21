@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::contracts::index::artifact_index;
 use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
 
-const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION: u32 = 6;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str = include_str!("../contracts/schema/operational-store.sql");
 const SCHEMA_IR_ARTIFACT_ID: &str = "codefabric.schema.contract-ir";
@@ -333,17 +333,24 @@ impl OperationalStore {
                 migrate_v2_to_v3(&transaction)?;
                 migrate_v3_to_v4(&transaction)?;
                 migrate_v4_to_v5(&transaction)?;
+                migrate_v5_to_v6(&transaction)?;
             }
             2 => {
                 migrate_v2_to_v3(&transaction)?;
                 migrate_v3_to_v4(&transaction)?;
                 migrate_v4_to_v5(&transaction)?;
+                migrate_v5_to_v6(&transaction)?;
             }
             3 => {
                 migrate_v3_to_v4(&transaction)?;
                 migrate_v4_to_v5(&transaction)?;
+                migrate_v5_to_v6(&transaction)?;
             }
-            4 => migrate_v4_to_v5(&transaction)?,
+            4 => {
+                migrate_v4_to_v5(&transaction)?;
+                migrate_v5_to_v6(&transaction)?;
+            }
+            5 => migrate_v5_to_v6(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -677,6 +684,24 @@ fn migrate_v3_to_v4(transaction: &Transaction<'_>) -> Result<(), OperationalStor
 
 fn migrate_v4_to_v5(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
     transaction.execute_batch(&generated_table_ddl("table_mutation_operation")?)?;
+    Ok(())
+}
+
+fn migrate_v5_to_v6(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    transaction.execute_batch(
+        "DROP TABLE snapshot_lease;
+         DROP TABLE result_artifact_lease;
+         DROP TABLE serving_snapshot_manifest;
+         DROP TABLE active_snapshot;",
+    )?;
+    for table in [
+        "snapshot_lease",
+        "result_artifact_lease",
+        "serving_snapshot_manifest",
+        "active_snapshot",
+    ] {
+        transaction.execute_batch(&generated_table_ddl(table)?)?;
+    }
     Ok(())
 }
 
@@ -1075,7 +1100,7 @@ mod tests {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v5")
+                    .contains("pre-migration-v6")
             })
             .unwrap()
             .path();
@@ -1099,7 +1124,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v5"))
+                    .contains("pre-migration-v6"))
                 .count(),
             1
         );
@@ -1112,7 +1137,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v5"))
+                    .contains("pre-migration-v6"))
                 .count(),
             2
         );
@@ -1124,8 +1149,22 @@ mod tests {
                     rusqlite::params![vec![7_u8; 16], vec![6_u8; 16], vec![5_u8; 16], b"/workspace", vec![9_u8; 16], br#"["metadata"]"#, vec![4_u8; 32], vec![3_u8; 32]],
                 )?;
                 transaction.execute(
-                    "INSERT INTO snapshot_lease(lease_id, workspace_id, snapshot_id, owner_id, expires_at) VALUES (?1, ?2, ?3, 'test', '2027-01-01')",
-                    rusqlite::params![vec![1_u8; 16], vec![7_u8; 16], vec![2_u8; 16]],
+                    "INSERT INTO snapshot_lease(
+                       lease_id, lease_kind_code, workspace_id, snapshot_id,
+                       base_publication_id, required_delta_versions_bytes,
+                       requires_overlay, agent_instance_id, created_at,
+                       last_heartbeat_at, expires_at, state_code,
+                       process_instance_id, orphaned_at, artifact_expires_at,
+                       source_blob_lease_id
+                     ) VALUES (?1, 10, ?2, ?3, ?4, X'7b7d', 0, NULL,
+                               1, 1, 300, 10, ?5, NULL, NULL, NULL)",
+                    rusqlite::params![
+                        vec![1_u8; 16],
+                        vec![7_u8; 16],
+                        vec![2_u8; 16],
+                        vec![3_u8; 16],
+                        vec![4_u8; 16]
+                    ],
                 )?;
                 for (id, terminal_at) in [(1_u8, Some("2026-01-01")), (2, None)] {
                     transaction.execute(

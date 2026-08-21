@@ -1132,30 +1132,31 @@ These are operational-store records exposed read-only through DataFusion.
 serving_snapshot_manifest:
   snapshot_id
   workspace_id
-  base_publication_id
-  source_generation
-  source_inventory_digest
-  analysis_context_set_id
-  overlay_generation
-  overlay_checksum
-  overlay_table_manifest_bytes
-  capability_index_checksum
-  diagnostics_index_checksum
-  source_trust_state_code
-  event_stream_health_code
-  git_acceleration_status_code
-  bundle_versions
-  serving_activation_state_code
+  publication_id
+  state_code
+  manifest_body_bytes       # exact AC-G-19 CBEF body
+  manifest_json_bytes       # closed typed diagnostic/read model
+  manifest_digest
   created_at
+  activated_at optional
+  retired_at optional
 
 active_snapshot:
   workspace_id
   snapshot_id
-  pointer_generation
+  created_at
   activated_at
+  observed_durable_pointer_generation
+  active_pointer_generation
+  lease_count
 ```
 
 `ServingActivationState` values are `BUILDING`, `VALIDATING`, `READY`, `ACTIVE`, `RETIRED`, and `FAILED`.
+The immutable manifest authority is the complete typed AC-G-19 document. The
+operational row stores that document's canonical CBEF bytes and its closed JSON
+view rather than duplicating selected manifest fields into independently
+maintained columns. Activation timestamps, pointer generations, and lease counts
+remain mutable records and therefore never participate in snapshot identity.
 
 ### 13.9 `owner`
 
@@ -4280,7 +4281,16 @@ last_heartbeat_at
 expires_at
 state: ACTIVE | RELEASING | RELEASED | EXPIRED | ORPHANED
 process_instance_id
+orphaned_at optional
+artifact_expires_at optional
+source_blob_lease_id optional
 ```
+
+`snapshot_lease` is the sole authority for snapshot identity, lifecycle, and
+source-artifact coupling. `result_artifact_lease`, when present, is a normalized
+extension keyed by the same `lease_id`; it adds only `artifact_uri`, `checksum`,
+and artifact expiry and does not repeat workspace, snapshot, publication, state,
+or process ownership.
 
 Rules:
 

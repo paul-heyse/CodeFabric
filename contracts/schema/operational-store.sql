@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir b3:97f4fafd253cf9e43eee056f2fd9016161e6f37a5ddd184a4bd7deaeb7076bb9; codefabric-schema-contracts-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir b3:517b3ab5a19918b85846371397477575644f72aca97666897bcc58cc301759e5; codefabric-schema-contracts-v1; do not edit.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE workspace_registration (
@@ -286,63 +286,51 @@ CREATE TABLE hot_overlay_manifest (
 
 CREATE TABLE snapshot_lease (
   lease_id BLOB NOT NULL,
+  lease_kind_code INTEGER NOT NULL,
   workspace_id BLOB NOT NULL,
   snapshot_id BLOB NOT NULL,
-  owner_id TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
+  base_publication_id BLOB NOT NULL,
+  required_delta_versions_bytes BLOB NOT NULL,
+  requires_overlay INTEGER NOT NULL,
+  agent_instance_id BLOB,
+  created_at INTEGER NOT NULL,
+  last_heartbeat_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  state_code INTEGER NOT NULL,
+  process_instance_id BLOB NOT NULL,
+  orphaned_at INTEGER,
+  artifact_expires_at INTEGER,
+  source_blob_lease_id BLOB,
   PRIMARY KEY (lease_id)
 ) STRICT;
 
 CREATE TABLE result_artifact_lease (
   lease_id BLOB NOT NULL,
-  workspace_id BLOB NOT NULL,
-  snapshot_id BLOB NOT NULL,
   artifact_uri TEXT NOT NULL,
   checksum BLOB NOT NULL,
-  owner_id TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
   PRIMARY KEY (lease_id)
 ) STRICT;
 
 CREATE TABLE serving_snapshot_manifest (
   snapshot_id BLOB NOT NULL,
   workspace_id BLOB NOT NULL,
-  repository_id BLOB,
-  worktree_id BLOB,
-  registration_revision INTEGER NOT NULL,
-  source_generation INTEGER NOT NULL,
-  admitted_event_sequence INTEGER NOT NULL,
-  reconciled_event_sequence INTEGER NOT NULL,
-  inventory_digest BLOB NOT NULL,
-  authorization_fingerprint BLOB NOT NULL,
-  inclusion_policy_fingerprint BLOB NOT NULL,
-  path_profile_version TEXT NOT NULL,
-  source_trust_state_code INTEGER NOT NULL,
-  event_stream_health_code INTEGER NOT NULL,
-  git_acceleration_status_code INTEGER NOT NULL,
-  git_state_fingerprint BLOB,
-  context_set_id BLOB NOT NULL,
-  contexts_manifest_bytes BLOB NOT NULL,
   publication_id BLOB NOT NULL,
-  base_tables_manifest_bytes BLOB NOT NULL,
-  overlay_generation INTEGER NOT NULL,
-  overlay_digest BLOB NOT NULL,
-  overlay_total_memory_bytes INTEGER NOT NULL,
-  overlay_tables_manifest_bytes BLOB NOT NULL,
-  capability_index_digest BLOB NOT NULL,
-  diagnostic_index_digest BLOB NOT NULL,
-  dependency_graph_digest BLOB NOT NULL,
-  bundle_ids_bytes BLOB NOT NULL,
-  limits_profile_digest BLOB NOT NULL,
+  state_code INTEGER NOT NULL,
+  manifest_body_bytes BLOB NOT NULL,
+  manifest_json_bytes BLOB NOT NULL,
   manifest_digest BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  activated_at INTEGER,
+  retired_at INTEGER,
   PRIMARY KEY (snapshot_id)
 ) STRICT;
 
 CREATE TABLE active_snapshot (
   workspace_id BLOB NOT NULL,
   snapshot_id BLOB NOT NULL,
-  created_at TEXT NOT NULL,
-  activated_at TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  activated_at INTEGER NOT NULL,
   observed_durable_pointer_generation INTEGER NOT NULL,
   active_pointer_generation INTEGER NOT NULL,
   lease_count INTEGER NOT NULL,

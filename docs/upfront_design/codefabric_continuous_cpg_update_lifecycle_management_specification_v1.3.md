@@ -4594,7 +4594,17 @@ application transactions remain the per-table commit authority.
 
 ### 130.8 `hot_overlay_manifest`, `snapshot_lease`, and `result_artifact_lease`
 
-Carry complete workspace/snapshot/base/overlay/context/checksum/expiry ownership required for recovery and safe retirement.
+`snapshot_lease` carries the complete workspace, snapshot, base-publication,
+required-version, overlay, holder/process, heartbeat, expiry, lifecycle, orphan,
+and optional source-blob-holder coupling required for recovery and safe
+retirement. It is the sole snapshot-lease authority. `result_artifact_lease` is
+a normalized extension keyed by `lease_id` and adds only the artifact URI,
+checksum, and artifact expiry; it does not duplicate snapshot identity or lease
+lifecycle. `serving_snapshot_manifest` stores the exact AC-G-19 CBEF body, the
+closed typed JSON view, and its digest, while activation observations remain in
+`active_snapshot` and mutable activation columns. The v5-to-v6 pre-production
+migration replaces the earlier unimplemented scaffold tables with this model;
+no compatibility authority is retained.
 
 ### 130.9 Compatibility view
 

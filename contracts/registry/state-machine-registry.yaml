@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a"
+canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938"
 records:
   - machine_id: WorkspaceLifecycle
     version: "1.0"
@@ -143,6 +143,17 @@ records:
       - {from: VALIDATING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: serving:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: READY, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: serving:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: ACTIVE, event: terminal-failure, guard: active-snapshot-invalid, to: FAILED, actions: [withdraw-pointer, publish-diagnostic], idempotency_key: serving:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: SnapshotLeaseState
+    version: "1.0"
+    states: [{code: 10, name: ACTIVE, slug: active, meaning: Lease is active}, {code: 20, name: RELEASING, slug: releasing, meaning: Coupled resources are being released}, {code: 30, name: RELEASED, slug: released, meaning: Lease released}, {code: 40, name: EXPIRED, slug: expired, meaning: Lease and grace expired}, {code: 50, name: ORPHANED, slug: orphaned, meaning: Owning process ended without release}]
+    initial_state: ACTIVE
+    terminal_states: [RELEASED, EXPIRED]
+    transitions:
+      - {from: ACTIVE, event: release-requested, guard: holder-finished, to: RELEASING, actions: [release-source-artifacts], idempotency_key: snapshot-lease:releasing, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RELEASING, event: resources-released, guard: source-artifacts-released, to: RELEASED, actions: [decrement-snapshot-lease-count], idempotency_key: snapshot-lease:released, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACTIVE, event: ttl-expired, guard: heartbeat-expired, to: EXPIRED, actions: [release-source-artifacts, decrement-snapshot-lease-count], idempotency_key: snapshot-lease:expired, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACTIVE, event: process-restart, guard: process-instance-absent, to: ORPHANED, actions: [retain-crash-grace], idempotency_key: snapshot-lease:orphaned, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ORPHANED, event: crash-grace-expired, guard: expiry-and-grace-passed, to: EXPIRED, actions: [release-source-artifacts, decrement-snapshot-lease-count], idempotency_key: snapshot-lease:expired, error_on_illegal: STATE_TRANSITION_VIOLATION}
   - machine_id: QueryExecutionState
     version: "1.0"
     states: [{code: 10, name: ACCEPTED, slug: accepted, meaning: Accepted}, {code: 20, name: RUNNING, slug: running, meaning: Running}, {code: 30, name: COMPLETE, slug: complete, meaning: Complete}, {code: 40, name: FAILED, slug: failed, meaning: Failed}, {code: 50, name: CANCELLED, slug: cancelled, meaning: Cancelled}, {code: 60, name: DEADLINE_EXCEEDED, slug: deadline-exceeded, meaning: Deadline exceeded}, {code: 70, name: NOT_EXECUTED_DEPENDENCY, slug: not-executed-dependency, meaning: Dependency prevented execution}]

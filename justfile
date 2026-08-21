@@ -128,6 +128,11 @@ wave3-integration-check:
     cargo nextest run --locked -E 'test(/wp(19|2[0-6])/)' --no-tests=fail
     cargo test --doc
 
+[doc("Validate that a vacuum dry-run cannot include retained snapshot files")]
+[group('test')]
+vacuum-dry-run-check:
+    cargo nextest run --locked -E 'test(/wp24_negative_zero_state/)' --no-tests=fail
+
 [doc("Run the seeded 10,000-attempt three-size source-capture race campaign")]
 [group('test')]
 source-capture-race-check:

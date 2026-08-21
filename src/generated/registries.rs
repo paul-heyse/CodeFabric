@@ -482,6 +482,63 @@ pub const SERVING_ACTIVATION_STATE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
+pub enum SnapshotLeaseKind {
+    Query = 10,
+    ResultArtifact = 20,
+    ResourceRead = 30,
+    Maintenance = 40,
+}
+impl TryFrom<u16> for SnapshotLeaseKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Query),
+            20 => Ok(Self::ResultArtifact),
+            30 => Ok(Self::ResourceRead),
+            40 => Ok(Self::Maintenance),
+            _ => Err(UnknownRegistryCode { domain: "SNAPSHOT_LEASE_KIND", code }),
+        }
+    }
+}
+pub const SNAPSHOT_LEASE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "QUERY", slug: "query" },
+    RegistryEntry { code: 20, name: "RESULT_ARTIFACT", slug: "result-artifact" },
+    RegistryEntry { code: 30, name: "RESOURCE_READ", slug: "resource-read" },
+    RegistryEntry { code: 40, name: "MAINTENANCE", slug: "maintenance" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum SnapshotLeaseState {
+    Active = 10,
+    Releasing = 20,
+    Released = 30,
+    Expired = 40,
+    Orphaned = 50,
+}
+impl TryFrom<u16> for SnapshotLeaseState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Active),
+            20 => Ok(Self::Releasing),
+            30 => Ok(Self::Released),
+            40 => Ok(Self::Expired),
+            50 => Ok(Self::Orphaned),
+            _ => Err(UnknownRegistryCode { domain: "SNAPSHOT_LEASE_STATE", code }),
+        }
+    }
+}
+pub const SNAPSHOT_LEASE_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "ACTIVE", slug: "active" },
+    RegistryEntry { code: 20, name: "RELEASING", slug: "releasing" },
+    RegistryEntry { code: 30, name: "RELEASED", slug: "released" },
+    RegistryEntry { code: 40, name: "EXPIRED", slug: "expired" },
+    RegistryEntry { code: 50, name: "ORPHANED", slug: "orphaned" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
 pub enum SourceTrustState {
     Unverified = 10,
     Verifying = 20,
@@ -895,29 +952,31 @@ pub canonical_digest: &'static str, pub values: &'static [RegistryEntry],
 }
 
 pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
-    RegistryDomainEntry { domain: "EVIDENCE_CERTAINTY", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: EVIDENCE_CERTAINTY_VALUES },
-    RegistryDomainEntry { domain: "RESOLUTION_CLASS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: RESOLUTION_CLASS_VALUES },
-    RegistryDomainEntry { domain: "DIRECTNESS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: DIRECTNESS_VALUES },
-    RegistryDomainEntry { domain: "COMPLETENESS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: COMPLETENESS_VALUES },
-    RegistryDomainEntry { domain: "OWNER_CAPABILITY_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: OWNER_CAPABILITY_STATE_VALUES },
-    RegistryDomainEntry { domain: "PROVIDER_RUN_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: PROVIDER_RUN_STATE_VALUES },
-    RegistryDomainEntry { domain: "QUERY_EXECUTION_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: QUERY_EXECUTION_STATE_VALUES },
-    RegistryDomainEntry { domain: "QUERY_AVAILABILITY_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: QUERY_AVAILABILITY_STATE_VALUES },
-    RegistryDomainEntry { domain: "COMPLETENESS_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: COMPLETENESS_STATE_VALUES },
-    RegistryDomainEntry { domain: "FRESHNESS_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: FRESHNESS_STATE_VALUES },
-    RegistryDomainEntry { domain: "LIMIT_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: LIMIT_STATE_VALUES },
-    RegistryDomainEntry { domain: "DEPENDENCY_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: DEPENDENCY_STATE_VALUES },
-    RegistryDomainEntry { domain: "DURABLE_PUBLICATION_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: DURABLE_PUBLICATION_STATE_VALUES },
-    RegistryDomainEntry { domain: "SERVING_ACTIVATION_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: SERVING_ACTIVATION_STATE_VALUES },
-    RegistryDomainEntry { domain: "SOURCE_TRUST_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: SOURCE_TRUST_STATE_VALUES },
-    RegistryDomainEntry { domain: "EVENT_STREAM_HEALTH", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: EVENT_STREAM_HEALTH_VALUES },
-    RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: GIT_ACCELERATION_STATUS_VALUES },
-    RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: EFFECT_KIND_VALUES },
-    RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: RESOURCE_KIND_VALUES },
-    RegistryDomainEntry { domain: "WORKSPACE_LIFECYCLE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: WORKSPACE_LIFECYCLE_VALUES },
-    RegistryDomainEntry { domain: "UPDATE_WAVE_STATE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: UPDATE_WAVE_STATE_VALUES },
-    RegistryDomainEntry { domain: "ARTIFACT_STATE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: ARTIFACT_STATE_VALUES },
-    RegistryDomainEntry { domain: "WORKSPACE_REGISTRY_LIFECYCLE", version: "1.0", canonical_digest: "b3:5df95bbacb0aae59b465107d2304c454e0e26692c0d1cd30469d9fd1aa8e9f3a", values: WORKSPACE_REGISTRY_LIFECYCLE_VALUES },
+    RegistryDomainEntry { domain: "EVIDENCE_CERTAINTY", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: EVIDENCE_CERTAINTY_VALUES },
+    RegistryDomainEntry { domain: "RESOLUTION_CLASS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: RESOLUTION_CLASS_VALUES },
+    RegistryDomainEntry { domain: "DIRECTNESS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: DIRECTNESS_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: COMPLETENESS_VALUES },
+    RegistryDomainEntry { domain: "OWNER_CAPABILITY_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: OWNER_CAPABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "PROVIDER_RUN_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: PROVIDER_RUN_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_EXECUTION_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: QUERY_EXECUTION_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_AVAILABILITY_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: QUERY_AVAILABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: COMPLETENESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "FRESHNESS_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: FRESHNESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "LIMIT_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: LIMIT_STATE_VALUES },
+    RegistryDomainEntry { domain: "DEPENDENCY_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: DEPENDENCY_STATE_VALUES },
+    RegistryDomainEntry { domain: "DURABLE_PUBLICATION_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: DURABLE_PUBLICATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SERVING_ACTIVATION_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SERVING_ACTIVATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_KIND", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SNAPSHOT_LEASE_KIND_VALUES },
+    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SNAPSHOT_LEASE_STATE_VALUES },
+    RegistryDomainEntry { domain: "SOURCE_TRUST_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SOURCE_TRUST_STATE_VALUES },
+    RegistryDomainEntry { domain: "EVENT_STREAM_HEALTH", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: EVENT_STREAM_HEALTH_VALUES },
+    RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: GIT_ACCELERATION_STATUS_VALUES },
+    RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: EFFECT_KIND_VALUES },
+    RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: RESOURCE_KIND_VALUES },
+    RegistryDomainEntry { domain: "WORKSPACE_LIFECYCLE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: WORKSPACE_LIFECYCLE_VALUES },
+    RegistryDomainEntry { domain: "UPDATE_WAVE_STATE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: UPDATE_WAVE_STATE_VALUES },
+    RegistryDomainEntry { domain: "ARTIFACT_STATE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: ARTIFACT_STATE_VALUES },
+    RegistryDomainEntry { domain: "WORKSPACE_REGISTRY_LIFECYCLE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: WORKSPACE_REGISTRY_LIFECYCLE_VALUES },
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1036,6 +1095,14 @@ pub const SERVING_ACTIVATION_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
     StateTransitionEntry { from: "VALIDATING", event: "terminal-failure", guard: "unrecoverable", to: "FAILED", actions: &["publish-diagnostic"], idempotency_key: "serving:failed", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "READY", event: "terminal-failure", guard: "unrecoverable", to: "FAILED", actions: &["publish-diagnostic"], idempotency_key: "serving:failed", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
     StateTransitionEntry { from: "ACTIVE", event: "terminal-failure", guard: "active-snapshot-invalid", to: "FAILED", actions: &["withdraw-pointer", "publish-diagnostic"], idempotency_key: "serving:failed", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+];
+
+pub const SNAPSHOT_LEASE_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
+    StateTransitionEntry { from: "ACTIVE", event: "release-requested", guard: "holder-finished", to: "RELEASING", actions: &["release-source-artifacts"], idempotency_key: "snapshot-lease:releasing", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "RELEASING", event: "resources-released", guard: "source-artifacts-released", to: "RELEASED", actions: &["decrement-snapshot-lease-count"], idempotency_key: "snapshot-lease:released", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "ACTIVE", event: "ttl-expired", guard: "heartbeat-expired", to: "EXPIRED", actions: &["release-source-artifacts", "decrement-snapshot-lease-count"], idempotency_key: "snapshot-lease:expired", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "ACTIVE", event: "process-restart", guard: "process-instance-absent", to: "ORPHANED", actions: &["retain-crash-grace"], idempotency_key: "snapshot-lease:orphaned", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
+    StateTransitionEntry { from: "ORPHANED", event: "crash-grace-expired", guard: "expiry-and-grace-passed", to: "EXPIRED", actions: &["release-source-artifacts", "decrement-snapshot-lease-count"], idempotency_key: "snapshot-lease:expired", error_on_illegal: "STATE_TRANSITION_VIOLATION" },
 ];
 
 pub const QUERY_EXECUTION_STATE_TRANSITIONS: &[StateTransitionEntry] = &[

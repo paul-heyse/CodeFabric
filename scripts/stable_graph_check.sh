@@ -44,6 +44,7 @@ require_one_version tonic 0.14.6
 require_one_version tonic-prost 0.14.6
 require_one_version tower 0.5.3
 require_one_version base64 0.22.1
+require_one_version arc-swap 1.9.2
 require_one_version serde_json 1.0.151
 require_one_version serde_json_canonicalizer 0.3.2
 require_one_version serde_path_to_error 0.1.20
@@ -137,6 +138,7 @@ printf '%s' "$root_shape" | jq -e '
       "dep:url"
     ],
     "daemon": [
+      "dep:arc-swap",
       "contracts-tooling",
       "data-fabric",
       "repository-state",

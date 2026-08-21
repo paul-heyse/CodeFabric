@@ -25,7 +25,7 @@
     },
     {
       "artifact_id": "codefabric.registry.enum-registry",
-      "canonical_digest": "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7",
+      "canonical_digest": "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -73,11 +73,11 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:d74a8d2a7bf0de2fb8eb0319cb3fbe7cb0329a406426c5ca7a20c7aa77ccf2a0",
+  "bundle_digest": "b3:ce0fc110a552b4a0c80ac88deaffd452090ec82cf50614ea50f516094ebe4eae",
   "bundle_kind": "ontology",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:9a0846c9760b7b530b5a18d54555dd97d22273ca0e163ac17218c440cdb3ace5",
+  "canonical_digest": "b3:efe604184b624274af2fa8da6e8b3d94e19bada0c45f076c940781a022c744e1",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0

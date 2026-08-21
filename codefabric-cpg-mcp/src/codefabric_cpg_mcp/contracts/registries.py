@@ -133,6 +133,21 @@ class ServingActivationState(IntEnum):
     FAILED = 60
 
 
+class SnapshotLeaseKind(IntEnum):
+    QUERY = 10
+    RESULT_ARTIFACT = 20
+    RESOURCE_READ = 30
+    MAINTENANCE = 40
+
+
+class SnapshotLeaseState(IntEnum):
+    ACTIVE = 10
+    RELEASING = 20
+    RELEASED = 30
+    EXPIRED = 40
+    ORPHANED = 50
+
+
 class SourceTrustState(IntEnum):
     UNVERIFIED = 10
     VERIFYING = 20
@@ -725,6 +740,55 @@ ENUM_TRIPLES = MappingProxyType(
                 60,
                 "FAILED",
                 "failed",
+            ),
+        ),
+        "SNAPSHOT_LEASE_KIND": (
+            (
+                10,
+                "QUERY",
+                "query",
+            ),
+            (
+                20,
+                "RESULT_ARTIFACT",
+                "result-artifact",
+            ),
+            (
+                30,
+                "RESOURCE_READ",
+                "resource-read",
+            ),
+            (
+                40,
+                "MAINTENANCE",
+                "maintenance",
+            ),
+        ),
+        "SNAPSHOT_LEASE_STATE": (
+            (
+                10,
+                "ACTIVE",
+                "active",
+            ),
+            (
+                20,
+                "RELEASING",
+                "releasing",
+            ),
+            (
+                30,
+                "RELEASED",
+                "released",
+            ),
+            (
+                40,
+                "EXPIRED",
+                "expired",
+            ),
+            (
+                50,
+                "ORPHANED",
+                "orphaned",
             ),
         ),
         "SOURCE_TRUST_STATE": (
@@ -2264,6 +2328,59 @@ STATE_TRANSITIONS = MappingProxyType(
                     "publish-diagnostic",
                 ),
                 "serving:failed",
+                "STATE_TRANSITION_VIOLATION",
+            ),
+        ),
+        "SnapshotLeaseState": (
+            (
+                "ACTIVE",
+                "release-requested",
+                "holder-finished",
+                "RELEASING",
+                ("release-source-artifacts",),
+                "snapshot-lease:releasing",
+                "STATE_TRANSITION_VIOLATION",
+            ),
+            (
+                "RELEASING",
+                "resources-released",
+                "source-artifacts-released",
+                "RELEASED",
+                ("decrement-snapshot-lease-count",),
+                "snapshot-lease:released",
+                "STATE_TRANSITION_VIOLATION",
+            ),
+            (
+                "ACTIVE",
+                "ttl-expired",
+                "heartbeat-expired",
+                "EXPIRED",
+                (
+                    "release-source-artifacts",
+                    "decrement-snapshot-lease-count",
+                ),
+                "snapshot-lease:expired",
+                "STATE_TRANSITION_VIOLATION",
+            ),
+            (
+                "ACTIVE",
+                "process-restart",
+                "process-instance-absent",
+                "ORPHANED",
+                ("retain-crash-grace",),
+                "snapshot-lease:orphaned",
+                "STATE_TRANSITION_VIOLATION",
+            ),
+            (
+                "ORPHANED",
+                "crash-grace-expired",
+                "expiry-and-grace-passed",
+                "EXPIRED",
+                (
+                    "release-source-artifacts",
+                    "decrement-snapshot-lease-count",
+                ),
+                "snapshot-lease:expired",
                 "STATE_TRANSITION_VIOLATION",
             ),
         ),

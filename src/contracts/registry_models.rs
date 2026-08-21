@@ -905,6 +905,14 @@ pub fn validate_enum_domains(records: &[EnumDomain]) -> Result<(), String> {
             ],
         ),
         (
+            "SNAPSHOT_LEASE_KIND",
+            &["QUERY", "RESULT_ARTIFACT", "RESOURCE_READ", "MAINTENANCE"],
+        ),
+        (
+            "SNAPSHOT_LEASE_STATE",
+            &["ACTIVE", "RELEASING", "RELEASED", "EXPIRED", "ORPHANED"],
+        ),
+        (
             "SOURCE_TRUST_STATE",
             &[
                 "UNVERIFIED",
@@ -1680,7 +1688,7 @@ pub fn validate_phrase_records(records: &[PhraseRecord]) -> Result<(), String> {
 }
 
 pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
-    const REQUIRED: [&str; 12] = [
+    const REQUIRED: [&str; 13] = [
         "WorkspaceLifecycle",
         "SourceTrustState",
         "EventStreamHealth",
@@ -1690,6 +1698,7 @@ pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
         "OwnerCapabilityState",
         "DurablePublicationState",
         "ServingActivationState",
+        "SnapshotLeaseState",
         "QueryExecutionState",
         "ArtifactState",
         "WorkspaceRegistryLifecycle",
@@ -1700,7 +1709,8 @@ pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
         .collect();
     if ids != REQUIRED.into_iter().collect() {
         return Err(
-            "state-machine registry must contain the exact AC-G-25 roster plus AC-G-10".into(),
+            "state-machine registry must contain the exact AC-G-25/AC-G-23 roster plus AC-G-10"
+                .into(),
         );
     }
     for machine in records {
