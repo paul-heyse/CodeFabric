@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP26",
+  "current_packet": "WP24",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -636,10 +636,26 @@
       "blockers": []
     },
     "WP26": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "2a2f2c630aa0c3745c1273e6aee402cac5d52ac2",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "FAB 12.6 now orders overlay wrapping before private-catalog registration and registers only wrapped providers. Integrity validation then runs against exactly the immutable objects exposed to leases, and frozen catalog/schema providers reject every registration or deregistration path."
+        },
+        {
+          "kind": "classified_handle_cutover",
+          "summary": "The closed five-value DeltaAccessProfile and sole DeltaHandleFactory govern both exact-version snapshot reads and pre-existing mutable reloads. QUERY_SERVING always retains statistics, writer reloads name OPTIMIZE_DML, and an ast-grep gate prevents DeltaTableBuilder construction outside the factory."
+        },
+        {
+          "kind": "user_directed_non_timing_evidence",
+          "summary": "Construction-duration measurement was intentionally omitted under the accepted non-timing evidence policy. Operational evidence emits provider count, exact-version count, overlay generation, deterministic construction stages, and pointer-identical provider reuse."
+        }
+      ],
+      "failed_approaches": [
+        "The first generalized DeltaHandleFactory compared a latest-version load against None and therefore rejected every non-query profile. Exact-version equality is now enforced only when a version is supplied, while QUERY_SERVING still requires one by type-checked policy.",
+        "The first full gate correctly detected drift after the authoritative FAB activation-order correction. Running the governed contract generator propagated source identities and restored zero-warning verification; no digest was edited manually."
+      ],
       "blockers": []
     }
   },
