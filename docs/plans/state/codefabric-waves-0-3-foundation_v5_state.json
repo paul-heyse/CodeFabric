@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP10",
+  "current_packet": "WP11",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -361,15 +361,18 @@
       "blockers": []
     },
     "WP10": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "8d9099e93ec83158ab42e533b19ddd431e4ee700",
       "deviations": [
         {
-          "kind": "substrate_only",
-          "summary": "The one-FDS Wave-0 compiler substrate exists; the four production protocols, bindings, census, and interoperability proof remain open."
+          "kind": "accepted_design_correction",
+          "summary": "Serving section 9 and its client sketch now match AC-G-58's accepted-handle nine-RPC protocol and exact five-variant QueryEvent model; the superseded ExecuteQuery example was removed before generation."
         }
       ],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first Python grpcio client to Rust UDS probe was reset before handler dispatch because the Python UDS channel supplied an incompatible HTTP/2 authority. The production channel now fixes grpc.default_authority to localhost, and the cross-language behavioral oracle passes through the shared channel helper.",
+        "The first repository-wide gate found a historical Wave-0 reconciliation test coupled to the removed probe-specific Rust test name. The oracle now validates the single production FDS, exact four-package census, Python DESCRIPTOR surface, and named WP10 behavioral test."
+      ],
       "blockers": []
     },
     "WP11": {
@@ -548,8 +551,8 @@
       "blockers": []
     },
     "DB03": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "8d9099e93ec83158ab42e533b19ddd431e4ee700",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -691,6 +694,14 @@
         "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
       ],
       "summary": "WP09 makes the closed schema Contract IR the single source for generated TableSpecs, operational DDL, and public schemas. The planning-time hash remains immutable; the WP09 proving commit and regenerated artifact identities provide the accepted evolution."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP10",
+      "paths": [
+        "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md"
+      ],
+      "summary": "WP10 removes the stale seven-RPC ExecuteQuery example and aligns the serving authority with AC-G-58's accepted-handle nine-RPC protocol and exact five-event stream. The planning-time hash remains immutable; the WP10 proving commit, shared FDS, and regenerated artifact identities provide the accepted evolution."
     },
     {
       "id": "AD-01",
@@ -863,6 +874,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Complete WP10 by replacing the Wave-0 probe with the four governed production protocol packages in the one-FDS compilation unit, then prove the generated Rust/Python bindings, descriptor census, compatibility baseline, and cross-language protocol behavior.",
-  "updated_at": "2026-08-21T07:41:50Z"
+  "next_action": "Complete WP11 by populating every production bundle, releasing the local deployment profile and schema, allocating CF-IDs, closing traceability orphans, and proving released-profile zero warnings plus DB02, DB04, and DB05.",
+  "updated_at": "2026-08-21T08:26:09Z"
 }
