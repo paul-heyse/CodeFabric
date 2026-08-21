@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP08b",
+  "current_packet": "WP09",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -336,10 +336,13 @@
       "blockers": []
     },
     "WP08b": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "518449a6eb592a000d7565b6b1c173815a0f6e4a",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first generated Python alias view used a multiline one-element tuple that Ruff would rewrite, and the heterogeneous lookup test left canonical_text as an int-or-string-or-tuple union under Pyrefly. The emitter now produces canonical immutable tuple syntax and the test narrows the selected field explicitly.",
+        "The first phrase validator was one monolithic function and used redundant Phrase enum suffixes, which failed the repository's Clippy policy. Record-level validation is now a separate reusable seam and the closed AST variants use explicit wire renames."
+      ],
       "blockers": []
     },
     "WP09": {
@@ -849,6 +852,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Implement WP08b phrase mappings, the bounded english-controlled-v1 grammar, and the closed model-pack schema from the catalog-driven registry unit.",
-  "updated_at": "2026-08-21T06:13:27Z"
+  "next_action": "Complete WP09 from the landed Contract-IR-to-Pydantic substrate: generate production TableSpecs, SQLite DDL, snapshot/state schemas, public JSON Schemas, and adapter contracts from the typed catalog and registry authorities.",
+  "updated_at": "2026-08-21T06:49:08Z"
 }
