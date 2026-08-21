@@ -3,8 +3,8 @@
   "artifact_kind": "manifest",
   "version": "1.0",
   "compatible_suite_major": 1,
-  "status": "draft",
-  "canonical_digest": "b3:f9be9a6f3b5f0102119180dc32eab5bab4347b005c6fbb726a37d59e22b22191",
+  "status": "released",
+  "canonical_digest": "b3:52380a1322c2281b3880d1b8b4b73d0b5b832217257ad6dcd1eb52eae41b6b3f",
   "digest_projection": "json-jcs-v1",
   "catalog_schema_version": 2,
   "resource_budget_profiles": [
@@ -136,7 +136,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.adapter.fastmcp-input.schema",
@@ -151,15 +154,27 @@
       "compatibility_family": "adapter",
       "resource_budget_profile": "json-schema",
       "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
-      "consumers": ["contract-tooling", "governance", "python-adapter"],
-      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
         "output": {
           "derivation_id": "codefabric.derivation.adapter-models",
           "path": "contracts/adapter/fastmcp-input.schema.json"
         }
-      }
+      },
+      "bundle_membership": [
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.adapter.fastmcp-output.schema",
@@ -174,15 +189,27 @@
       "compatibility_family": "adapter",
       "resource_budget_profile": "json-schema",
       "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
-      "consumers": ["contract-tooling", "governance", "python-adapter"],
-      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
         "output": {
           "derivation_id": "codefabric.derivation.adapter-models",
           "path": "contracts/adapter/fastmcp-output.schema.json"
         }
-      }
+      },
+      "bundle_membership": [
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.adapter.fastmcp-public-meta.schema",
@@ -197,15 +224,27 @@
       "compatibility_family": "adapter",
       "resource_budget_profile": "json-schema",
       "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
-      "consumers": ["contract-tooling", "governance", "python-adapter"],
-      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
         "output": {
           "derivation_id": "codefabric.derivation.adapter-models",
           "path": "contracts/adapter/fastmcp-public-meta.schema.json"
         }
-      }
+      },
+      "bundle_membership": [
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.bundles.derivation-bundle",
@@ -215,7 +254,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -244,7 +283,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -273,7 +312,7 @@
       "owner": "ontology",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -302,7 +341,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -331,7 +370,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -360,7 +399,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -389,7 +428,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -418,7 +457,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "bundle-ac-g-07-v1",
       "compatibility_family": "bundle",
       "resource_budget_profile": "json-bundle",
@@ -447,7 +486,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "conformance",
       "resource_budget_profile": "yaml-standard",
@@ -474,7 +513,7 @@
       "owner": "lifecycle",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "deployment",
       "resource_budget_profile": "yaml-standard",
@@ -709,7 +748,7 @@
       "owner": "lifecycle",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "conformance",
       "resource_budget_profile": "yaml-standard",
@@ -756,7 +795,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.identity.path-canonicalization-v1",
@@ -786,7 +828,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.identity.type-algebra-v1",
@@ -816,7 +861,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.manifests.deployment-profile.schema",
@@ -826,7 +874,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "suite",
       "resource_budget_profile": "json-schema",
@@ -853,7 +901,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "jsonl-jcs-v1",
       "compatibility_family": "traceability",
       "resource_budget_profile": "jsonl-manifest",
@@ -880,7 +928,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "conformance",
       "resource_budget_profile": "json-catalog",
@@ -907,7 +955,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "suite",
       "resource_budget_profile": "json-catalog",
@@ -934,7 +982,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "jsonl-jcs-v1",
       "compatibility_family": "traceability",
       "resource_budget_profile": "jsonl-manifest",
@@ -978,7 +1026,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "query-language"
+      ]
     },
     {
       "artifact_id": "codefabric.query.planspec.schema",
@@ -1009,7 +1060,10 @@
           "derivation_id": "codefabric.derivation.schema-contracts",
           "path": "contracts/query/planspec.schema.json"
         }
-      }
+      },
+      "bundle_membership": [
+        "query-language"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.capability-registry",
@@ -1038,7 +1092,11 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "provider",
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.derivation-registry",
@@ -1067,7 +1125,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "derivation"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.enum-registry",
@@ -1096,7 +1157,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.error-registry",
@@ -1125,7 +1189,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.flag-registry",
@@ -1154,7 +1221,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.model-pack.schema",
@@ -1183,7 +1253,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "model-pack"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.ontology-entity-registry",
@@ -1212,7 +1285,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.ontology-fact-registry",
@@ -1241,7 +1317,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.ontology-property-registry",
@@ -1270,7 +1349,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.ontology-relation-registry",
@@ -1299,7 +1381,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.phrase-registry",
@@ -1328,7 +1413,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "query-language"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.projection-registry",
@@ -1357,7 +1445,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "derivation"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.provider-registry",
@@ -1386,7 +1477,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "provider"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.summary-registry",
@@ -1415,7 +1509,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "derivation"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.state-machine-registry",
@@ -1444,7 +1541,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.registry.unknown-registry",
@@ -1473,7 +1573,10 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "ontology"
+      ]
     },
     {
       "artifact_id": "codefabric.rpc.cpg-query-service",
@@ -1506,7 +1609,11 @@
           "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
           "path": "tooling/proto/production-descriptor.pb"
         }
-      }
+      },
+      "bundle_membership": [
+        "query-language",
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.rpc.feature-registry",
@@ -1535,7 +1642,12 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
-      }
+      },
+      "bundle_membership": [
+        "provider",
+        "query-language",
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.rpc.provider-control",
@@ -1568,7 +1680,10 @@
           "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
           "path": "tooling/proto/production-descriptor.pb"
         }
-      }
+      },
+      "bundle_membership": [
+        "provider"
+      ]
     },
     {
       "artifact_id": "codefabric.rpc.pyrefly-sidecar",
@@ -1602,7 +1717,10 @@
           "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
           "path": "tooling/proto/production-descriptor.pb"
         }
-      }
+      },
+      "bundle_membership": [
+        "provider"
+      ]
     },
     {
       "artifact_id": "codefabric.rpc.rustc-extractor",
@@ -1636,7 +1754,10 @@
           "derivation_id": "codefabric.derivation.production-proto-descriptor-python",
           "path": "tooling/proto/production-descriptor.pb"
         }
-      }
+      },
+      "bundle_membership": [
+        "provider"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.contract-ir",
@@ -1651,9 +1772,24 @@
       "compatibility_family": "schema",
       "resource_budget_profile": "json-catalog",
       "parser_schema_authority": "codefabric-schema-contract-ir-v1",
-      "consumers": ["contract-tooling", "governance", "python-adapter", "rust-core"],
-      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
-      "semantic_projection_source": {"source_kind": "native"}
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "python-adapter",
+        "rust-core"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "semantic_projection_source": {
+        "source_kind": "native"
+      },
+      "bundle_membership": [
+        "schema"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.analysis-context.schema",
@@ -1682,8 +1818,14 @@
       ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
-        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/analysis-context.schema.json"}
-      }
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/schema/analysis-context.schema.json"
+        }
+      },
+      "bundle_membership": [
+        "schema"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
@@ -1712,8 +1854,15 @@
       ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
-        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/cpg-semantic-query-request.schema.json"}
-      }
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/schema/cpg-semantic-query-request.schema.json"
+        }
+      },
+      "bundle_membership": [
+        "query-language",
+        "schema"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
@@ -1742,8 +1891,15 @@
       ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
-        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/cpg-semantic-query-response.schema.json"}
-      }
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/schema/cpg-semantic-query-response.schema.json"
+        }
+      },
+      "bundle_membership": [
+        "query-language",
+        "schema"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
@@ -1772,8 +1928,14 @@
       ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
-        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/public-snapshot-metadata.schema.json"}
-      }
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/schema/public-snapshot-metadata.schema.json"
+        }
+      },
+      "bundle_membership": [
+        "schema"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.public-status.schema",
@@ -1802,8 +1964,15 @@
       ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
-        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/public-status.schema.json"}
-      }
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/schema/public-status.schema.json"
+        }
+      },
+      "bundle_membership": [
+        "schema",
+        "tool-contract"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.serving-snapshot.schema",
@@ -1832,8 +2001,14 @@
       ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
-        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/serving-snapshot.schema.json"}
-      }
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/schema/serving-snapshot.schema.json"
+        }
+      },
+      "bundle_membership": [
+        "schema"
+      ]
     },
     {
       "artifact_id": "codefabric.schema.source-context.schema",
@@ -1862,8 +2037,14 @@
       ],
       "semantic_projection_source": {
         "source_kind": "derivation-output",
-        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/source-context.schema.json"}
-      }
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/schema/source-context.schema.json"
+        }
+      },
+      "bundle_membership": [
+        "schema"
+      ]
     },
     {
       "artifact_id": "codefabric.security.security-corpus-manifest",
@@ -1873,7 +2054,7 @@
       "owner": "suite",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "conformance",
       "resource_budget_profile": "yaml-standard",
@@ -1881,6 +2062,41 @@
       "consumers": [
         "contract-tooling",
         "governance"
+      ],
+      "provenance_requirements": [
+        "canonical-digest",
+        "generator-revision",
+        "native-validation",
+        "source-digest"
+      ],
+      "semantic_projection_source": {
+        "source_kind": "native"
+      }
+    },
+    {
+      "artifact_id": "codefabric.toolchain.identity",
+      "authority_path": "contracts/toolchain/toolchain-identity.json",
+      "artifact_kind": "manifest",
+      "native_format": "json",
+      "owner": "suite",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "toolchain",
+      "bundle_membership": [
+        "toolchain"
+      ],
+      "resource_budget_profile": "json-catalog",
+      "parser_schema_authority": "codefabric-toolchain-identity-v1",
+      "consumers": [
+        "contract-tooling",
+        "governance",
+        "packaging",
+        "python-adapter",
+        "pyrefly-sidecar",
+        "rust-core",
+        "rustc-extractor"
       ],
       "provenance_requirements": [
         "canonical-digest",
@@ -1949,7 +2165,11 @@
           "path": "contracts/adapter/fastmcp-input.schema.json",
           "output_kind": "adapter-public-schema",
           "resource_budget_profile": "json-schema",
-          "consumers": ["contract-tooling", "governance", "python-adapter"],
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter"
+          ],
           "primary_artifact_ids": [
             "codefabric.adapter.fastmcp-input.schema",
             "codefabric.adapter.model-ir"
@@ -1959,7 +2179,11 @@
           "path": "contracts/adapter/fastmcp-output.schema.json",
           "output_kind": "adapter-public-schema",
           "resource_budget_profile": "json-schema",
-          "consumers": ["contract-tooling", "governance", "python-adapter"],
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter"
+          ],
           "primary_artifact_ids": [
             "codefabric.adapter.fastmcp-output.schema",
             "codefabric.adapter.model-ir"
@@ -1969,7 +2193,11 @@
           "path": "contracts/adapter/fastmcp-public-meta.schema.json",
           "output_kind": "adapter-public-schema",
           "resource_budget_profile": "json-schema",
-          "consumers": ["contract-tooling", "governance", "python-adapter"],
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter"
+          ],
           "primary_artifact_ids": [
             "codefabric.adapter.fastmcp-public-meta.schema",
             "codefabric.adapter.model-ir"
@@ -2009,20 +2237,168 @@
       "derivation_id": "codefabric.derivation.schema-contracts",
       "derivation_kind": "schema-contract-compilation",
       "inputs": [
-        {"input_kind":"artifact","artifact_id":"codefabric.schema.contract-ir","view":"compiled-semantic"}
+        {
+          "input_kind": "artifact",
+          "artifact_id": "codefabric.schema.contract-ir",
+          "view": "compiled-semantic"
+        }
       ],
       "outputs": [
-        {"path":"contracts/query/planspec.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.query.planspec.schema","codefabric.schema.contract-ir"]},
-        {"path":"contracts/schema/analysis-context.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.analysis-context.schema","codefabric.schema.contract-ir"]},
-        {"path":"contracts/schema/arrow-delta/table-specs.json","output_kind":"table-spec-manifest","resource_budget_profile":"json-catalog","consumers":["contract-tooling","governance","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir"]},
-        {"path":"contracts/schema/cpg-semantic-query-request.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.cpg-semantic-query-request.schema"]},
-        {"path":"contracts/schema/cpg-semantic-query-response.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.cpg-semantic-query-response.schema"]},
-        {"path":"contracts/schema/operational-store.sql","output_kind":"operational-store-ddl","consumers":["governance","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir"]},
-        {"path":"contracts/schema/public-snapshot-metadata.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.public-snapshot-metadata.schema"]},
-        {"path":"contracts/schema/public-status.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.public-status.schema"]},
-        {"path":"contracts/schema/serving-snapshot.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.serving-snapshot.schema"]},
-        {"path":"contracts/schema/source-context.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.source-context.schema"]},
-        {"path":"src/generated/table_specs.rs","output_kind":"rust-table-spec-bindings","consumers":["contract-tooling","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir"]}
+        {
+          "path": "contracts/query/planspec.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.query.planspec.schema",
+            "codefabric.schema.contract-ir"
+          ]
+        },
+        {
+          "path": "contracts/schema/analysis-context.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.analysis-context.schema",
+            "codefabric.schema.contract-ir"
+          ]
+        },
+        {
+          "path": "contracts/schema/arrow-delta/table-specs.json",
+          "output_kind": "table-spec-manifest",
+          "resource_budget_profile": "json-catalog",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir"
+          ]
+        },
+        {
+          "path": "contracts/schema/cpg-semantic-query-request.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir",
+            "codefabric.schema.cpg-semantic-query-request.schema"
+          ]
+        },
+        {
+          "path": "contracts/schema/cpg-semantic-query-response.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir",
+            "codefabric.schema.cpg-semantic-query-response.schema"
+          ]
+        },
+        {
+          "path": "contracts/schema/operational-store.sql",
+          "output_kind": "operational-store-ddl",
+          "consumers": [
+            "governance",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir"
+          ]
+        },
+        {
+          "path": "contracts/schema/public-snapshot-metadata.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir",
+            "codefabric.schema.public-snapshot-metadata.schema"
+          ]
+        },
+        {
+          "path": "contracts/schema/public-status.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir",
+            "codefabric.schema.public-status.schema"
+          ]
+        },
+        {
+          "path": "contracts/schema/serving-snapshot.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir",
+            "codefabric.schema.serving-snapshot.schema"
+          ]
+        },
+        {
+          "path": "contracts/schema/source-context.schema.json",
+          "output_kind": "public-json-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": [
+            "contract-tooling",
+            "governance",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir",
+            "codefabric.schema.source-context.schema"
+          ]
+        },
+        {
+          "path": "src/generated/table_specs.rs",
+          "output_kind": "rust-table-spec-bindings",
+          "consumers": [
+            "contract-tooling",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.schema.contract-ir"
+          ]
+        }
       ],
       "resource_budget_profile": "json-catalog"
     },
@@ -2396,21 +2772,223 @@
         }
       ],
       "outputs": [
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter","pyrefly-sidecar"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter","pyrefly-sidecar"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter","pyrefly-sidecar"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.py","output_kind":"python-proto-bindings","consumers":["packaging","python-adapter","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.pyi","output_kind":"python-proto-stub","consumers":["packaging","python-adapter","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2_grpc.py","output_kind":"python-grpc-bindings","consumers":["packaging","python-adapter","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"tooling/proto/descriptor-census.json","output_kind":"proto-descriptor-census","resource_budget_profile":"proto-descriptor-census","consumers":["contract-tooling","governance"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"tooling/proto/production-descriptor.pb","output_kind":"proto-descriptor-set","consumers":["contract-tooling","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"tooling/proto/toolchain-identity.json","output_kind":"proto-toolchain-identity","consumers":["governance"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]}
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
+          "output_kind": "python-proto-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi",
+          "output_kind": "python-proto-stub",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2_grpc.py",
+          "output_kind": "python-grpc-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.py",
+          "output_kind": "python-proto-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.pyi",
+          "output_kind": "python-proto-stub",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2_grpc.py",
+          "output_kind": "python-grpc-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.py",
+          "output_kind": "python-proto-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter",
+            "pyrefly-sidecar"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.pyi",
+          "output_kind": "python-proto-stub",
+          "consumers": [
+            "packaging",
+            "python-adapter",
+            "pyrefly-sidecar"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2_grpc.py",
+          "output_kind": "python-grpc-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter",
+            "pyrefly-sidecar"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.py",
+          "output_kind": "python-proto-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter",
+            "rustc-extractor"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.pyi",
+          "output_kind": "python-proto-stub",
+          "consumers": [
+            "packaging",
+            "python-adapter",
+            "rustc-extractor"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2_grpc.py",
+          "output_kind": "python-grpc-bindings",
+          "consumers": [
+            "packaging",
+            "python-adapter",
+            "rustc-extractor"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "tooling/proto/descriptor-census.json",
+          "output_kind": "proto-descriptor-census",
+          "resource_budget_profile": "proto-descriptor-census",
+          "consumers": [
+            "contract-tooling",
+            "governance"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "tooling/proto/production-descriptor.pb",
+          "output_kind": "proto-descriptor-set",
+          "consumers": [
+            "contract-tooling",
+            "python-adapter",
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "tooling/proto/toolchain-identity.json",
+          "output_kind": "proto-toolchain-identity",
+          "consumers": [
+            "governance"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        }
       ],
       "resource_budget_profile": "proto-standard"
     },
@@ -2427,10 +3005,59 @@
         }
       ],
       "outputs": [
-        {"path":"src/generated/codefabric.cpgd.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"src/generated/codefabric.provider.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"src/generated/codefabric.pyrefly.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]},
-        {"path":"src/generated/codefabric.rustc.v1.rs","output_kind":"rust-proto-bindings","consumers":["rust-core","rustc-extractor"],"primary_artifact_ids":["codefabric.rpc.cpg-query-service","codefabric.rpc.provider-control","codefabric.rpc.pyrefly-sidecar","codefabric.rpc.rustc-extractor"]}
+        {
+          "path": "src/generated/codefabric.cpgd.v1.rs",
+          "output_kind": "rust-proto-bindings",
+          "consumers": [
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "src/generated/codefabric.provider.v1.rs",
+          "output_kind": "rust-proto-bindings",
+          "consumers": [
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "src/generated/codefabric.pyrefly.v1.rs",
+          "output_kind": "rust-proto-bindings",
+          "consumers": [
+            "rust-core"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        },
+        {
+          "path": "src/generated/codefabric.rustc.v1.rs",
+          "output_kind": "rust-proto-bindings",
+          "consumers": [
+            "rust-core",
+            "rustc-extractor"
+          ],
+          "primary_artifact_ids": [
+            "codefabric.rpc.cpg-query-service",
+            "codefabric.rpc.provider-control",
+            "codefabric.rpc.pyrefly-sidecar",
+            "codefabric.rpc.rustc-extractor"
+          ]
+        }
       ],
       "resource_budget_profile": "proto-standard"
     }

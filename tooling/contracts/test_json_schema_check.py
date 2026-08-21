@@ -11,14 +11,18 @@ import tomllib
 
 from tooling.contracts.json_schema_check import (
     CATALOG_PATH,
+    DEPLOYMENT_PROFILE_PATH,
+    DEPLOYMENT_SCHEMA_PATH,
     DRAFT_2020_12_URI,
     JSONSCHEMA_VERSION,
     MODEL_PACK_NEGATIVE_PATH,
     MODEL_PACK_POSITIVE_PATH,
     MODEL_PACK_SCHEMA_PATH,
+    PYYAML_VERSION,
     SCHEMA_DRIFT_FIXTURE_PATH,
     SchemaCatalogError,
     validate_catalog_schemas,
+    validate_deployment_profile,
     validate_model_pack_examples,
     validate_schema_drift_fixture,
 )
@@ -103,6 +107,12 @@ def test_wp09_negative_schema_version_drift_fixture_is_executable() -> None:
     assert fixture["expected_error"] == "SCHEMA_VERSION_NOT_ADVANCED"
 
 
+def test_deployment_profile_matches_schema() -> None:
+    validate_deployment_profile(REPOSITORY_ROOT)
+    assert (REPOSITORY_ROOT / DEPLOYMENT_SCHEMA_PATH).is_file()
+    assert (REPOSITORY_ROOT / DEPLOYMENT_PROFILE_PATH).is_file()
+
+
 @pytest.mark.parametrize(
     "dialect", [None, "https://json-schema.org/draft/2019-09/schema"]
 )
@@ -177,3 +187,4 @@ def test_jsonschema_build_dependency_is_exact() -> None:
     )
 
     assert f"jsonschema=={JSONSCHEMA_VERSION}" in pyproject["dependency-groups"]["dev"]
+    assert f"pyyaml=={PYYAML_VERSION}" in pyproject["dependency-groups"]["dev"]

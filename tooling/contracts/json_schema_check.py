@@ -10,6 +10,7 @@ from importlib.metadata import version
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import yaml
 from codefabric_cpg_mcp.contracts.json import canonicalize_value, checksum
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
@@ -17,6 +18,7 @@ from jsonschema.exceptions import SchemaError
 CATALOG_PATH = PurePosixPath("contracts/manifests/suite-manifest.json")
 DRAFT_2020_12_URI = "https://json-schema.org/draft/2020-12/schema"
 JSONSCHEMA_VERSION = "4.26.0"
+PYYAML_VERSION = "6.0.3"
 SCHEMA_ID_PREFIX = "https://codefabric.dev/"
 MAX_DIAGNOSTIC_CHARS = 500
 CATALOG_BOOTSTRAP_MAX_BYTES = 262_144
@@ -31,6 +33,13 @@ MODEL_PACK_FIXTURE_MAX_BYTES = 262_144
 SCHEMA_DRIFT_FIXTURE_PATH = PurePosixPath(
     "contracts/fixtures/negative/schema-version-drift.json"
 )
+DEPLOYMENT_SCHEMA_PATH = PurePosixPath(
+    "contracts/manifests/deployment-profile.schema.json"
+)
+DEPLOYMENT_PROFILE_PATH = PurePosixPath(
+    "contracts/deployment/local-workstation-v1.yaml"
+)
+DEPLOYMENT_PROFILE_MAX_BYTES = 262_144
 
 
 class SchemaCatalogError(ValueError):
@@ -339,6 +348,39 @@ def validate_schema_drift_fixture(repository_root: Path) -> None:
         )
 
 
+def validate_deployment_profile(repository_root: Path) -> None:
+    """Validate the released AC-G-08 YAML instance against its governed schema."""
+
+    schema = _load_json(
+        repository_root / DEPLOYMENT_SCHEMA_PATH,
+        DEPLOYMENT_SCHEMA_PATH,
+        DEPLOYMENT_PROFILE_MAX_BYTES,
+    )
+    try:
+        profile = yaml.safe_load(
+            _read_bounded(
+                repository_root / DEPLOYMENT_PROFILE_PATH,
+                DEPLOYMENT_PROFILE_PATH,
+                DEPLOYMENT_PROFILE_MAX_BYTES,
+            )
+        )
+    except (UnicodeDecodeError, yaml.YAMLError) as error:
+        raise SchemaCatalogError(
+            "invalid_deployment_yaml", DEPLOYMENT_PROFILE_PATH, str(error)
+        ) from error
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(profile),
+        key=lambda error: error.json_path,
+    )
+    if errors:
+        error = errors[0]
+        raise SchemaCatalogError(
+            "invalid_deployment_profile",
+            DEPLOYMENT_PROFILE_PATH,
+            f"{error.json_path}: {error.message}",
+        )
+
+
 def validate_catalog_schemas(repository_root: Path) -> tuple[PurePosixPath, ...]:
     """Validate the complete catalog-derived JSON Schema set."""
 
@@ -355,6 +397,12 @@ def validate_catalog_schemas(repository_root: Path) -> tuple[PurePosixPath, ...]
             CATALOG_PATH,
             "jsonschema Draft202012Validator does not expose the expected bundled metaschema",
         )
+    if yaml.__version__ != PYYAML_VERSION:
+        raise SchemaCatalogError(
+            "pyyaml_version_mismatch",
+            DEPLOYMENT_PROFILE_PATH,
+            f"expected PyYAML {PYYAML_VERSION}, resolved {yaml.__version__}",
+        )
 
     schema_inputs = catalog_schema_inputs(repository_root)
     for schema_path, maximum_bytes in schema_inputs:
@@ -363,6 +411,8 @@ def validate_catalog_schemas(repository_root: Path) -> tuple[PurePosixPath, ...]
             validate_model_pack_examples(repository_root, maximum_bytes)
     if (repository_root / SCHEMA_DRIFT_FIXTURE_PATH).is_file():
         validate_schema_drift_fixture(repository_root)
+    if (repository_root / DEPLOYMENT_SCHEMA_PATH).is_file():
+        validate_deployment_profile(repository_root)
     return tuple(path for path, _ in schema_inputs)
 
 

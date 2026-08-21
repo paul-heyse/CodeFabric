@@ -1,5 +1,10 @@
 # Fixture oracle change record
 
+## 2026-08-21 Wave 1 release
+
+- Added the owner-reviewed broken trace edge to an unallocated `CF-ARCH-9999`
+  requirement and made the released verifier prove its rejection on every run.
+
 ## 2026-08-21 production protocol cutover
 
 - Replaced the Wave-0 probe wire vector and descriptor with owner-reviewed known answers

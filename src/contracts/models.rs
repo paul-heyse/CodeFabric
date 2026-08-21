@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use super::catalog::ContractOwner;
-use super::catalog::{ArtifactKind, ArtifactStatus, DigestProjection};
+use super::catalog::{ArtifactKind, ArtifactStatus, BundleKind, DigestProjection};
 
 /// Typed identity header embedded in machine-readable contract authorities.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -27,45 +27,6 @@ pub struct ArtifactHeader {
     pub digest_projection: Option<DigestProjection>,
     /// Optional generator identity on generated authorities.
     pub generator_revision: Option<String>,
-}
-
-/// Closed compatibility-bundle family defined by AC-G-07.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BundleKind {
-    /// Derived-analysis contracts.
-    Derivation,
-    /// Externally extensible model-pack contracts.
-    ModelPack,
-    /// Fact ontology contracts.
-    Ontology,
-    /// Provider contracts.
-    Provider,
-    /// Semantic query-language contracts.
-    QueryLanguage,
-    /// Public storage and response schema contracts.
-    Schema,
-    /// MCP tool-contract models.
-    ToolContract,
-    /// Exact compiler and storage-substrate identities.
-    Toolchain,
-}
-
-impl BundleKind {
-    /// Stable artifact-ID component for this bundle family.
-    #[must_use]
-    pub const fn artifact_slug(self) -> &'static str {
-        match self {
-            Self::Derivation => "derivation",
-            Self::ModelPack => "model-pack",
-            Self::Ontology => "ontology",
-            Self::Provider => "provider",
-            Self::QueryLanguage => "query-language",
-            Self::Schema => "schema",
-            Self::ToolContract => "tool-contract",
-            Self::Toolchain => "toolchain",
-        }
-    }
 }
 
 /// One compatibility-sensitive artifact retained in an AC-G-07 bundle identity.
@@ -145,6 +106,189 @@ pub struct BundleDocument {
     pub signature: Option<String>,
 }
 
+/// Exact storage, protocol, adapter, and provider boundary identities in the toolchain bundle.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolchainIdentityDocument {
+    /// Common governed artifact header.
+    #[serde(flatten)]
+    pub header: ArtifactHeader,
+    /// Declared Rust compatibility floor.
+    pub rust_version: String,
+    /// Exact Arrow family version.
+    pub arrow_version: String,
+    /// Exact Parquet version.
+    pub parquet_version: String,
+    /// Exact DataFusion version.
+    pub datafusion_version: String,
+    /// Exact `object_store` version.
+    pub object_store_version: String,
+    /// Immutable delta-rs source revision.
+    pub delta_rs_git_rev: String,
+    /// Declared pre-release deltalake package version.
+    pub deltalake_declared_version: String,
+    /// Exact BLAKE3 identity of the root Cargo lock.
+    pub cargo_lock_digest: String,
+    /// Python serving-boundary pins.
+    pub adapter: AdapterToolchainIdentity,
+    /// Shared Protobuf compilation-boundary pins.
+    pub protobuf: ProtobufToolchainIdentity,
+    /// Isolated nightly extractor identity.
+    pub rustc_extractor: ExtractorToolchainIdentity,
+    /// Isolated Pyrefly sidecar identity.
+    pub pyrefly: PyreflyToolchainIdentity,
+    /// Provider pins recorded before their later adoption waves.
+    pub recorded_provider_pins: ProviderPinSet,
+}
+
+/// Exact Python adapter dependency identities.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdapterToolchainIdentity {
+    pub python: String,
+    pub fastmcp: String,
+    pub pydantic: String,
+    pub pydantic_settings: String,
+    pub grpcio: String,
+    pub protobuf: String,
+    pub jsonschema: String,
+    pub pyyaml: String,
+    pub source_digest: String,
+}
+
+/// Exact single-FDS generator/runtime identities.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProtobufToolchainIdentity {
+    pub grpcio_tools: String,
+    pub libprotoc: String,
+    pub prost: String,
+    pub tonic: String,
+    pub source_digest: String,
+}
+
+/// Exact isolated rustc extractor identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractorToolchainIdentity {
+    pub toolchain: String,
+    pub rustc_release: String,
+    pub rustc_commit_hash: String,
+    pub source_digest: String,
+}
+
+/// Exact isolated Pyrefly sidecar identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PyreflyToolchainIdentity {
+    pub version: String,
+    pub git_commit: String,
+    pub locked_source_blake3: String,
+    pub source_digest: String,
+}
+
+/// Exact later-wave provider versions recorded without adopting them early.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderPinSet {
+    pub tree_sitter: String,
+    pub tree_sitter_python: String,
+    pub ruff: String,
+    pub ruff_component_crates: String,
+    pub petgraph: String,
+}
+
+/// One supported deployment platform code.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum DeploymentPlatform {
+    #[serde(rename = "linux-x86_64")]
+    LinuxX86_64,
+    #[serde(rename = "linux-aarch64")]
+    LinuxAarch64,
+    #[serde(rename = "macos-aarch64")]
+    MacosAarch64,
+    #[serde(rename = "macos-x86_64")]
+    MacosX86_64,
+}
+
+/// Platform-specific root selection and private-mode contract.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlatformRootProfile {
+    pub platform_family: String,
+    pub state_root_options: Vec<String>,
+    pub runtime_root_options: Vec<String>,
+    pub config_root_options: Vec<String>,
+    pub directory_mode: String,
+    pub private_file_mode: String,
+}
+
+/// Closed AC-G-08 local workstation deployment profile.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeploymentProfileDocument {
+    /// Common governed artifact header.
+    #[serde(flatten)]
+    pub header: ArtifactHeader,
+    pub profile_id: String,
+    pub supported_platforms: BTreeSet<DeploymentPlatform>,
+    pub windows_support: String,
+    pub network_listeners: String,
+    pub workspace_registration: String,
+    pub operational_store: String,
+    pub fact_store: String,
+    pub object_store: String,
+    pub hot_overlay_journal: String,
+    pub source_blob_persistence: String,
+    pub result_artifact_ttl_seconds: u32,
+    pub source_result_artifact_ttl_seconds: u32,
+    pub default_query_freshness: String,
+    pub provider_sandbox: String,
+    pub follow_directory_symlinks: bool,
+    pub follow_internal_file_symlinks: bool,
+    pub index_external_dependency_bodies: bool,
+    pub semantic_query_language: String,
+    pub canonical_json: String,
+    pub platform_roots: Vec<PlatformRootProfile>,
+}
+
+/// One versioned adversarial security case.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityCaseRecord {
+    pub case_id: String,
+    pub threat_class: String,
+    pub required_platforms: Vec<String>,
+    pub fixture_path: String,
+    pub operation: String,
+    pub expected_status_or_error: String,
+    pub expected_public_fields: Vec<String>,
+    pub forbidden_observations: Vec<String>,
+    pub resource_bounds: SecurityResourceBounds,
+    pub cleanup_assertions: Vec<String>,
+}
+
+/// Bounded resource contract for one adversarial case.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityResourceBounds {
+    pub maximum_input_bytes: u64,
+    pub maximum_output_bytes: u64,
+    pub maximum_duration_ms: u64,
+}
+
+/// Closed AC-G-84 security-corpus manifest.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityCorpusManifest {
+    /// Common governed artifact header.
+    #[serde(flatten)]
+    pub header: ArtifactHeader,
+    pub corpus_id: String,
+    pub corpus_version: String,
+    pub records: Vec<SecurityCaseRecord>,
+}
+
 /// The first record of a governed JSON Lines source.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -185,6 +329,27 @@ pub enum RequirementStatus {
     Active,
     /// The requirement is retained for compatibility but no longer newly authored.
     Deprecated,
+    /// The requirement was replaced while its stable identity remains reserved.
+    Superseded,
+}
+
+/// Closed catalog-backed expansions used to derive trace edges without duplicating
+/// registry and schema inventories in the requirements authority.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TraceSelector {
+    /// Every released ontology entity, relation, property, fact, and unknown kind.
+    AllOntologyKinds,
+    /// Every released generation capability code.
+    AllCapabilityCodes,
+    /// Every released schema-contract table field.
+    AllTableFields,
+    /// Every released semantic-query phrase identity.
+    AllQueryPhraseIds,
+    /// Every released public response-schema field.
+    AllResponseFields,
+    /// Every released public error code.
+    AllErrorCodes,
 }
 
 /// Closed cross-domain trace references carried by a requirement.
@@ -479,6 +644,9 @@ pub struct RequirementRecord {
     pub implements: Vec<String>,
     /// Typed cross-domain trace groups.
     pub traces_to: RequirementTraces,
+    /// Catalog-backed groups expanded into `traces_to` by the contract generator.
+    #[serde(default)]
+    pub trace_selectors: BTreeSet<TraceSelector>,
     /// Verification obligations.
     pub verified_by: Vec<String>,
     /// Human provenance.
@@ -495,8 +663,24 @@ pub struct TraceabilityRecord {
     pub requirement_id: String,
     /// Implementation surfaces.
     pub implements: Vec<String>,
+    /// Fully expanded typed cross-domain trace edges.
+    pub traces_to: RequirementTraces,
     /// Verification obligations.
     pub verified_by: Vec<String>,
+}
+
+/// Committed expected-failure trace record exercised by the release verifier.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrokenTraceEdgeFixture {
+    /// Stable negative-fixture identity.
+    pub fixture_id: String,
+    /// Governed traceability artifact receiving the candidate edge.
+    pub target_artifact: String,
+    /// Candidate trace record that must be rejected.
+    pub trace: TraceabilityRecord,
+    /// Stable target failure class.
+    pub expected_failure_class: String,
 }
 
 /// Closed fixture-oracle evidence class.

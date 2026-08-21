@@ -2,7 +2,39 @@ artifact_id: codefabric.deployment.local-workstation-v1
 artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:15247cb69a9e8203f3aa86a8e759367c156738b5196322cae7525c7629ae5b8f"
-records: []
-
+status: released
+canonical_digest: "b3:49357d369cf0bc88a02823b3670a1942759ec272997612673f7293f512bf734e"
+digest_projection: yaml-ac-g-53-v1
+generator_revision: codefabric-contracts/1.0
+profile_id: local-workstation-v1
+supported_platforms: [linux-x86_64, linux-aarch64, macos-aarch64, macos-x86_64]
+windows_support: unsupported
+network_listeners: disabled
+workspace_registration: explicit-only
+operational_store: sqlite-wal
+fact_store: delta-local-filesystem
+object_store: local-filesystem
+hot_overlay_journal: disabled
+source_blob_persistence: runtime-lease-only
+result_artifact_ttl_seconds: 3600
+source_result_artifact_ttl_seconds: 1800
+default_query_freshness: REQUIRE_CURRENT_FOR_TARGETS
+provider_sandbox: required-for-untrusted
+follow_directory_symlinks: false
+follow_internal_file_symlinks: false
+index_external_dependency_bodies: false
+semantic_query_language: english-controlled-v1
+canonical_json: rfc8785-plus-codefabric-v1
+platform_roots:
+  - platform_family: linux
+    state_root_options: ["$XDG_STATE_HOME/codefabric", "~/.local/state/codefabric"]
+    runtime_root_options: ["$XDG_RUNTIME_DIR/codefabric"]
+    config_root_options: ["$XDG_CONFIG_HOME/codefabric", "~/.config/codefabric"]
+    directory_mode: "0700"
+    private_file_mode: "0600"
+  - platform_family: macos
+    state_root_options: ["~/Library/Application Support/CodeFabric"]
+    runtime_root_options: ["$TMPDIR/codefabric-<uid>"]
+    config_root_options: ["~/Library/Application Support/CodeFabric/config"]
+    directory_mode: "0700"
+    private_file_mode: "0600"

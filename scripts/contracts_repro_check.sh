@@ -33,6 +33,16 @@ for isolated in "$temporary_root/first" "$temporary_root/second" "$temporary_roo
     jq -r '.records[].path' \
       "$repository_root/contracts/manifests/fixture-oracles.json"
   )
+  # The closed toolchain identity binds these repository/package lock and isolated-domain
+  # identity files. Keep the reproduction root self-contained without copying build output.
+  for toolchain_input in \
+    Cargo.lock \
+    codefabric-cpg-mcp/uv.lock \
+    rustc-extractor/toolchain-identity.json \
+    pyrefly-sidecar/toolchain-identity.json; do
+    mkdir -p "$(dirname "$isolated/$toolchain_input")"
+    cp "$repository_root/$toolchain_input" "$isolated/$toolchain_input"
+  done
   if [[ "$isolated" == "$temporary_root/reordered" ]]; then
     reordered_catalog="$(mktemp "$temporary_root/catalog-reordered.XXXXXX")"
     jq '.artifacts |= reverse | .derivations |= reverse | .resource_budget_profiles |= reverse' \

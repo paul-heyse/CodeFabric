@@ -1,0 +1,55 @@
+{
+  "adapter": {
+    "fastmcp": "3.4.7",
+    "grpcio": "1.83.0",
+    "jsonschema": "4.26.0",
+    "protobuf": "7.36.0",
+    "pydantic": "2.13.4",
+    "pydantic_settings": "2.15.0",
+    "python": "3.14.7",
+    "pyyaml": "6.0.3",
+    "source_digest": "b3:edecd82d69bbf3f1d2416c727f25d67680136416dd461878838fd6dd8372b3ac"
+  },
+  "arrow_version": "58.4.0",
+  "artifact_id": "codefabric.toolchain.identity",
+  "artifact_kind": "manifest",
+  "canonical_digest": "b3:f2b614602c522937fdb580248a255422b4c5b72f472f59ecec0e8f74a363257e",
+  "cargo_lock_digest": "b3:ae330349ce25662376fb9ba54394fdeb4aaf1b23ca1ecfafaef6d2b696fbb909",
+  "compatible_suite_major": 1,
+  "datafusion_version": "54.1.0",
+  "delta_rs_git_rev": "9f9223197469897ef05ae4369eb4fd1390174e65",
+  "deltalake_declared_version": "1.0.0",
+  "digest_projection": "json-jcs-v1",
+  "generator_revision": "codefabric-contracts/1.0",
+  "object_store_version": "0.13.2",
+  "parquet_version": "58.4.0",
+  "protobuf": {
+    "grpcio_tools": "1.83.0",
+    "libprotoc": "35.1",
+    "prost": "0.14.4",
+    "source_digest": "b3:4dcdc7830bbf217cea85a3c57b4ff012f4d8945d255d6880e7097634ac6fbb1a",
+    "tonic": "0.14.6"
+  },
+  "pyrefly": {
+    "git_commit": "1933169ad8ee9e4d4114112eb56ef0811fb0a094",
+    "locked_source_blake3": "1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e",
+    "source_digest": "b3:625273ca63499fc508d80008dd10fbfcd53f4a887bf1a3b937dcc95432c5409a",
+    "version": "1.2.0"
+  },
+  "recorded_provider_pins": {
+    "petgraph": "0.8.3",
+    "ruff": "0.16.1",
+    "ruff_component_crates": "0.0.7",
+    "tree_sitter": "0.26.12",
+    "tree_sitter_python": "0.25.0"
+  },
+  "rust_version": "1.94.1",
+  "rustc_extractor": {
+    "rustc_commit_hash": "8fa1c96cfd489e4c27654c144ae871ce2c4db6c6",
+    "rustc_release": "1.100.0-nightly",
+    "source_digest": "b3:8eb688ce3a3d55f7ee234d0f45db70abe8f7d985f8d90b7a1397ecf6cacb6b05",
+    "toolchain": "nightly-2026-08-18"
+  },
+  "status": "released",
+  "version": "1.0"
+}

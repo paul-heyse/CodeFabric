@@ -2,7 +2,50 @@ artifact_id: codefabric.security.security-corpus-manifest
 artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:bf9c9fa5a6cd11a35a32e2e8c03b59bf6ced90d574951e8129dab82a8742e5dd"
-records: []
-
+status: released
+canonical_digest: "b3:e5af8843cd0fb444562906eb9cc1aaa6ceb66406392652fa8e6894f2a7ba52ef"
+digest_projection: yaml-ac-g-53-v1
+generator_revision: codefabric-contracts/1.0
+corpus_id: codefabric-security-v1
+corpus_version: "1.0"
+records:
+  - case_id: duplicate-json-member
+    threat_class: semantic-request-parser
+    required_platforms: [platform-independent]
+    fixture_path: contracts/fixtures/jcs/vectors.json
+    operation: replay-negative-duplicate-member-vectors
+    expected_status_or_error: REJECTED_VALIDATION
+    expected_public_fields: [failure_class]
+    forbidden_observations: [source-content, credential-material, stack-trace]
+    resource_bounds: {maximum_input_bytes: 1048576, maximum_output_bytes: 4096, maximum_duration_ms: 5000}
+    cleanup_assertions: [no-result-artifact, no-temporary-file]
+  - case_id: executable-model-pack-field
+    threat_class: executable-extension
+    required_platforms: [platform-independent]
+    fixture_path: contracts/fixtures/model-packs/invalid-executable-field.json
+    operation: validate-model-pack
+    expected_status_or_error: REJECTED_VALIDATION
+    expected_public_fields: [failure_class]
+    forbidden_observations: [process-execution, network-access, source-content]
+    resource_bounds: {maximum_input_bytes: 262144, maximum_output_bytes: 4096, maximum_duration_ms: 5000}
+    cleanup_assertions: [no-child-process, no-result-artifact]
+  - case_id: invalid-contract-digest
+    threat_class: artifact-integrity
+    required_platforms: [platform-independent]
+    fixture_path: contracts/fixtures/negative/drifted-digest.json
+    operation: verify-contract-checksum
+    expected_status_or_error: REJECTED_VALIDATION
+    expected_public_fields: [failure_class]
+    forbidden_observations: [accepted-artifact, source-content, credential-material]
+    resource_bounds: {maximum_input_bytes: 262144, maximum_output_bytes: 4096, maximum_duration_ms: 5000}
+    cleanup_assertions: [no-generated-output, no-source-mutation]
+  - case_id: bounded-protobuf-decode
+    threat_class: rpc-framing
+    required_platforms: [platform-independent]
+    fixture_path: contracts/fixtures/proto/production_wire.json
+    operation: decode-four-production-protobuf-packages
+    expected_status_or_error: ACCEPTED_BOUNDED
+    expected_public_fields: [package, message, wire_hex]
+    forbidden_observations: [credential-material, source-content, unbounded-allocation]
+    resource_bounds: {maximum_input_bytes: 4194304, maximum_output_bytes: 1048576, maximum_duration_ms: 5000}
+    cleanup_assertions: [no-result-artifact, no-temporary-file]

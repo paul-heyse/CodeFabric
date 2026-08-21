@@ -2,7 +2,13 @@ artifact_id: codefabric.faults.fault-point-registry
 artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:44f802e63c4d72af3ea13d8b5fc42083a7b98a948a188710ffa68ce241c95a99"
+status: released
+canonical_digest: "b3:0bb9f1e05a675672e6233fe2fec19ef2c4fe3cdf027e71af6dd134491232512f"
+digest_projection: yaml-ac-g-53-v1
+generator_revision: codefabric-contracts/1.0
 records: []
-
+owner_acceptance:
+  approver: lifecycle-owner
+  accepted_at: "2026-08-21"
+  construction_rule: Empty initial allocation because Wave 1 introduces no production lifecycle transition or persistence fault hook
+  source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

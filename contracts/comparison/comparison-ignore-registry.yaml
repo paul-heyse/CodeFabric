@@ -2,7 +2,42 @@ artifact_id: codefabric.comparison.comparison-ignore-registry
 artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:691169af33119c3b661599820a0c08a93bff661afdaa6ca790bc5032b7579032"
-records: []
-
+status: released
+canonical_digest: "b3:b3f2432b390c40f6cab2a7888fc791fe1d0a1748733ede9a2512318d41ace343"
+digest_projection: yaml-ac-g-53-v1
+generator_revision: codefabric-contracts/1.0
+records:
+  - {field_name: wall_clock_timestamp, category: clock, rationale: Operational observation time is not semantic fact content, semantic: false}
+  - {field_name: monotonic_clock_value, category: clock, rationale: Process-local monotonic time is not portable semantic content, semantic: false}
+  - {field_name: process_id, category: process, rationale: Process allocation changes between equivalent runs, semantic: false}
+  - {field_name: thread_id, category: process, rationale: Thread allocation changes between equivalent runs, semantic: false}
+  - {field_name: provider_run_id, category: execution, rationale: Run locators are normalized through semantic evidence, semantic: false}
+  - {field_name: operation_id, category: execution, rationale: Operation locators are not facts, semantic: false}
+  - {field_name: rpc_request_id, category: request, rationale: Transport request identity is not query meaning, semantic: false}
+  - {field_name: mcp_request_id, category: request, rationale: Adapter request identity is not query meaning, semantic: false}
+  - {field_name: temporary_staging_path, category: storage, rationale: Ephemeral path allocation is not durable meaning, semantic: false}
+  - {field_name: delta_physical_file_name, category: storage, rationale: Delta physical layout is below the semantic table contract, semantic: false}
+  - {field_name: delta_file_order, category: storage, rationale: Physical file order is normalized by canonical row ordering, semantic: false}
+  - {field_name: object_store_etag, category: storage, rationale: Non-semantic store validators are not content identities, semantic: false}
+  - {field_name: lease_id, category: lease, rationale: Lease locators are operational, semantic: false}
+  - {field_name: lease_expiry_time, category: lease, rationale: Lease expiry is operational, semantic: false}
+  - {field_name: metrics_sample, category: telemetry, rationale: Metrics do not alter terminal semantic state, semantic: false}
+  - {field_name: trace_id, category: telemetry, rationale: Trace correlation is operational, semantic: false}
+  - {field_name: span_id, category: telemetry, rationale: Span correlation is operational, semantic: false}
+  - {field_name: retry_counter, category: execution, rationale: Retries are ignored only when terminal state is unchanged, semantic: false}
+  - {field_name: publication_id, category: activation, rationale: Publication locator is compared through content identity, semantic: false}
+  - {field_name: serving_snapshot_id, category: activation, rationale: Snapshot locator is not an equality field, semantic: false}
+  - {field_name: active_pointer_generation, category: activation, rationale: Pointer generation is an activation locator, semantic: false}
+  - {field_name: durable_pointer_generation, category: activation, rationale: Pointer generation is an activation locator, semantic: false}
+  - {field_name: source_generation, category: generation, rationale: Generation is normalized through source content, semantic: false}
+  - {field_name: update_generation, category: generation, rationale: Generation is normalized through effective state, semantic: false}
+  - {field_name: overlay_generation, category: generation, rationale: Generation is normalized through effective overlay content, semantic: false}
+  - {field_name: admitted_event_sequence, category: event, rationale: Event sequence is normalized through terminal state, semantic: false}
+  - {field_name: reconciled_event_sequence, category: event, rationale: Event sequence is normalized through terminal state, semantic: false}
+  - {field_name: provider_last_updated_generation, category: generation, rationale: Provider generation is normalized through provider state and content, semantic: false}
+  - {field_name: capability_last_updated_generation, category: generation, rationale: Capability generation is normalized through capability state and content, semantic: false}
+owner_acceptance:
+  approver: suite-owner
+  accepted_at: "2026-08-21"
+  construction_rule: Verbatim initial exclusion classes from SUITE section 79.3 with one stable field key per class
+  source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

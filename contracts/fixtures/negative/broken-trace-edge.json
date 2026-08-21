@@ -1,0 +1,22 @@
+{
+  "fixture_id": "wp11-broken-trace-edge",
+  "target_artifact": "codefabric.manifests.traceability",
+  "trace": {
+    "requirement_id": "CF-ARCH-9999",
+    "implements": [
+      "contracts/fixtures/negative/broken-trace-edge.json"
+    ],
+    "traces_to": {
+      "ontology_kinds": [],
+      "capability_codes": [],
+      "table_fields": [],
+      "query_phrase_ids": [],
+      "response_fields": [],
+      "error_codes": []
+    },
+    "verified_by": [
+      "integration::contracts::wp11_negative_zero_state"
+    ]
+  },
+  "expected_failure_class": "unknown-requirement"
+}

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::catalog::{ArtifactKind, ArtifactStatus, DigestProjection};
+use super::catalog::{ArtifactKind, ArtifactStatus, ContractOwner, DigestProjection};
 use super::models::{ArtifactHeader, OwnerAcceptance};
 
 /// Registry envelope used once a family has an owner-accepted initial allocation.
@@ -27,6 +27,42 @@ pub struct AcceptedRegistry<T> {
     pub generator_revision: Option<String>,
     pub records: Vec<T>,
     pub owner_acceptance: OwnerAcceptance,
+}
+
+/// One operational field explicitly excluded from semantic snapshot comparison.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonIgnoreRecord {
+    pub field_name: String,
+    pub category: String,
+    pub rationale: String,
+    pub semantic: bool,
+}
+
+/// Closed deterministic actions admitted by the fault harness.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaultAction {
+    ReturnError,
+    MutateFixture,
+    BlockOnBarrier,
+    TerminateProcess,
+    DropMessage,
+    DuplicateMessage,
+    ReorderWithNext,
+    CloseChannel,
+}
+
+/// One named deterministic fault point.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FaultPointRecord {
+    pub code: String,
+    pub owner: ContractOwner,
+    pub allowed_actions: BTreeSet<FaultAction>,
+    pub production_exposable: bool,
+    pub expected_invariants: BTreeSet<String>,
+    pub scenarios: BTreeSet<String>,
 }
 
 impl<T> AcceptedRegistry<T> {
@@ -633,6 +669,44 @@ fn kebab(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// Validate the closed initial comparison-ignore allocation.
+pub fn validate_comparison_ignores(records: &[ComparisonIgnoreRecord]) -> Result<(), String> {
+    let mut fields = BTreeSet::new();
+    for record in records {
+        if record.field_name.is_empty()
+            || record.category.is_empty()
+            || record.rationale.is_empty()
+            || record.semantic
+            || !fields.insert(&record.field_name)
+        {
+            return Err(
+                "comparison ignores require unique fields, rationale, and semantic=false".into(),
+            );
+        }
+    }
+    if records.is_empty() {
+        return Err("the released comparison-ignore registry cannot be empty".into());
+    }
+    Ok(())
+}
+
+/// Validate append-only deterministic fault-point records.
+pub fn validate_fault_points(records: &[FaultPointRecord]) -> Result<(), String> {
+    let mut codes = BTreeSet::new();
+    for record in records {
+        if !upper_snake(&record.code)
+            || !codes.insert(&record.code)
+            || record.allowed_actions.is_empty()
+            || record.production_exposable
+            || record.expected_invariants.is_empty()
+            || record.scenarios.is_empty()
+        {
+            return Err("fault points require a unique code, actions, invariants, scenarios, and production_exposable=false".into());
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_records<T: RegistryRecord>(records: &[T]) -> Result<(), String> {

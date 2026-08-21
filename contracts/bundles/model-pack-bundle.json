@@ -1,12 +1,20 @@
 {
   "artifact_id": "codefabric.bundles.model-pack-bundle",
   "artifact_kind": "bundle-manifest",
-  "artifacts": [],
-  "bundle_digest": "b3:af039dbd1c1239f21d5739d17fc25448f706f6581f377c818eb086e443169fb8",
+  "artifacts": [
+    {
+      "artifact_id": "codefabric.registry.model-pack.schema",
+      "canonical_digest": "b3:425ef0f440c3a064af8026ab0a3ebde47dc2dbc490416d7ea8023cbe4c55260b",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    }
+  ],
+  "bundle_digest": "b3:390a5e7f5da0bce4251409907b0c5e022fc1ff5828a564d2dfa47d6b82f7080d",
   "bundle_kind": "model-pack",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:5a97b5460f921b32ce9cfe2bab314de2b34edc24d524d09902e7839fb4bc6999",
+  "canonical_digest": "b3:e48652f9b7a371dce0ed1fb756d678b2cd625aecd93149ba24984c5880aa993c",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
@@ -16,6 +24,6 @@
     "generator_id": "codefabric-contracts",
     "generator_version": "1.0"
   },
-  "status": "draft",
+  "status": "released",
   "version": "1.0"
 }

@@ -1,12 +1,20 @@
 {
   "artifact_id": "codefabric.bundles.toolchain-bundle",
   "artifact_kind": "bundle-manifest",
-  "artifacts": [],
-  "bundle_digest": "b3:78e12fc585eb574bf81fb759febda062d0c87eaf21c1e7eaab85e6367bc5a33d",
+  "artifacts": [
+    {
+      "artifact_id": "codefabric.toolchain.identity",
+      "canonical_digest": "b3:f2b614602c522937fdb580248a255422b4c5b72f472f59ecec0e8f74a363257e",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    }
+  ],
+  "bundle_digest": "b3:069bc01ee1bd9b9eea7f6f9454b1077df744ef7b4ad19263ef104e61904aa70e",
   "bundle_kind": "toolchain",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:2ac569dfa3412f64d15c2c66a0b28d7703d6eab883f330995d2c9d3d62dd814d",
+  "canonical_digest": "b3:ff3a5e5d7a61248b028b5ca74741369da34dcc740761c4181274971f120382d6",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
@@ -16,6 +24,6 @@
     "generator_id": "codefabric-contracts",
     "generator_version": "1.0"
   },
-  "status": "draft",
+  "status": "released",
   "version": "1.0"
 }

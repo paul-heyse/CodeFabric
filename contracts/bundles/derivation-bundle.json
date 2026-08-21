@@ -1,12 +1,34 @@
 {
   "artifact_id": "codefabric.bundles.derivation-bundle",
   "artifact_kind": "bundle-manifest",
-  "artifacts": [],
-  "bundle_digest": "b3:f0d3f986d7b03921743bded084a3807518d86a8c1685c61db759de07210b1221",
+  "artifacts": [
+    {
+      "artifact_id": "codefabric.registry.derivation-registry",
+      "canonical_digest": "b3:48b4deb6890017b14457f31ad03add128af391c78179d56d3b53697fce90cd60",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.registry.projection-registry",
+      "canonical_digest": "b3:2f9c4bd292da802fe2f2f9e1ccbdcdb034fffa52b01e9b42b7682afadea70c6f",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.registry.summary-registry",
+      "canonical_digest": "b3:cb86c470b1640a80ecc2668bca9312862f38441be08d906b7967aaba272606e1",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    }
+  ],
+  "bundle_digest": "b3:826f2f92b932bd3f926bfd4c9823cfe7430bacf35d5e8b9c2f688f1c19a8231d",
   "bundle_kind": "derivation",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:878dfee0fad119af76fb226567159545fb3bbc37b174fc46c874b78ad395448e",
+  "canonical_digest": "b3:925d58922477b7b9d6f7f15086c84313f4a71db2f80608e223673fd8d23f3db6",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
@@ -16,6 +38,6 @@
     "generator_id": "codefabric-contracts",
     "generator_version": "1.0"
   },
-  "status": "draft",
+  "status": "released",
   "version": "1.0"
 }

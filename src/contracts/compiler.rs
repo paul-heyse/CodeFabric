@@ -19,16 +19,18 @@ use super::catalog::{
 };
 use super::jcs::{canonicalize_value, checksum, decode_strict};
 use super::models::{
-    ArtifactHeader, BundleDocument, CbefContract, FixtureOracleClass, FixtureOracleManifest,
-    JsonlMetadata, PathCanonicalizationContract, RegistryDocument, RequirementRecord,
-    ScaffoldDocument, TraceabilityRecord, TypeAlgebraContract,
+    ArtifactHeader, BundleDocument, CbefContract, DeploymentPlatform, DeploymentProfileDocument,
+    FixtureOracleClass, FixtureOracleManifest, JsonlMetadata, PathCanonicalizationContract,
+    RegistryDocument, RequirementRecord, ScaffoldDocument, SecurityCorpusManifest,
+    ToolchainIdentityDocument, TraceabilityRecord, TypeAlgebraContract,
 };
 use super::registry_models::{
-    AcceptedRegistry, Capability, DerivationDefinition, EntityKind, EnumDomain, FactKind,
-    FlagDomain, PhraseRecord, Projection, PropertyKind, Provider, PublicError, RelationKind,
-    StateMachine, SummaryProfile, UnknownKind, contains_evaluative_kind,
-    validate_capability_records, validate_entity_records, validate_enum_domains,
-    validate_error_records, validate_fact_records, validate_flag_domains, validate_phrase_records,
+    AcceptedRegistry, Capability, ComparisonIgnoreRecord, DerivationDefinition, EntityKind,
+    EnumDomain, FactKind, FaultPointRecord, FlagDomain, PhraseRecord, Projection, PropertyKind,
+    Provider, PublicError, RelationKind, StateMachine, SummaryProfile, UnknownKind,
+    contains_evaluative_kind, validate_capability_records, validate_comparison_ignores,
+    validate_entity_records, validate_enum_domains, validate_error_records, validate_fact_records,
+    validate_fault_points, validate_flag_domains, validate_phrase_records,
     validate_projection_records, validate_property_records, validate_provider_records,
     validate_relation_records, validate_state_machines, validate_summary_records,
     validate_unknown_records,
@@ -664,8 +666,10 @@ type CanonicalJson = (
 );
 
 fn canonical_bundle_json(
+    repository_root: &Path,
     path: &Path,
     descriptor: &ArtifactDescriptor,
+    catalog: &CompiledCatalog,
     value: Value,
     mut usage: ResourceUsage,
 ) -> Result<CanonicalJson, ContractCompileError> {
@@ -673,6 +677,33 @@ fn canonical_bundle_json(
     let header = document.header();
     validate_header(path, "$", &header, descriptor)?;
     validate_bundle(path, descriptor, &mut document)?;
+    let expected = catalog
+        .artifacts()
+        .filter(|artifact| artifact.bundle_membership.contains(&document.bundle_kind))
+        .collect::<Vec<_>>();
+    if expected.len() != document.artifacts.len() {
+        return Err(parse_error(
+            "bundle-membership",
+            path,
+            "$.artifacts",
+            "bundle members do not match the typed catalog membership set",
+        ));
+    }
+    for (member, artifact) in document.artifacts.iter().zip(expected) {
+        let compiled = compile_artifact_for_generation(repository_root, catalog, artifact)?;
+        if member.artifact_id != artifact.artifact_id
+            || member.version != artifact.version
+            || member.canonical_digest != compiled.canonical_digest
+            || !member.required
+        {
+            return Err(parse_error(
+                "bundle-membership",
+                path,
+                "$.artifacts",
+                "bundle member identity drifted from the typed catalog",
+            ));
+        }
+    }
     usage.records_or_edges = document.artifacts.len();
     let embedded_bundle_digest = Some(document.bundle_digest.clone());
     let mut artifact_value =
@@ -703,6 +734,105 @@ fn canonical_bundle_json(
     ))
 }
 
+fn validate_toolchain_identity(
+    repository_root: &Path,
+    path: &Path,
+    document: &ToolchainIdentityDocument,
+) -> Result<(), ContractCompileError> {
+    let fixed = [
+        (&document.rust_version, "1.94.1"),
+        (&document.arrow_version, "58.4.0"),
+        (&document.parquet_version, "58.4.0"),
+        (&document.datafusion_version, "54.1.0"),
+        (&document.object_store_version, "0.13.2"),
+        (
+            &document.delta_rs_git_rev,
+            "9f9223197469897ef05ae4369eb4fd1390174e65",
+        ),
+        (&document.deltalake_declared_version, "1.0.0"),
+        (&document.adapter.python, "3.14.7"),
+        (&document.adapter.fastmcp, "3.4.7"),
+        (&document.adapter.pydantic, "2.13.4"),
+        (&document.adapter.pydantic_settings, "2.15.0"),
+        (&document.adapter.grpcio, "1.83.0"),
+        (&document.adapter.protobuf, "7.36.0"),
+        (&document.adapter.jsonschema, "4.26.0"),
+        (&document.adapter.pyyaml, "6.0.3"),
+        (&document.protobuf.grpcio_tools, "1.83.0"),
+        (&document.protobuf.libprotoc, "35.1"),
+        (&document.protobuf.prost, "0.14.4"),
+        (&document.protobuf.tonic, "0.14.6"),
+        (&document.rustc_extractor.toolchain, "nightly-2026-08-18"),
+        (&document.rustc_extractor.rustc_release, "1.100.0-nightly"),
+        (
+            &document.rustc_extractor.rustc_commit_hash,
+            "8fa1c96cfd489e4c27654c144ae871ce2c4db6c6",
+        ),
+        (&document.pyrefly.version, "1.2.0"),
+        (
+            &document.pyrefly.git_commit,
+            "1933169ad8ee9e4d4114112eb56ef0811fb0a094",
+        ),
+        (
+            &document.pyrefly.locked_source_blake3,
+            "1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e",
+        ),
+        (&document.recorded_provider_pins.tree_sitter, "0.26.12"),
+        (
+            &document.recorded_provider_pins.tree_sitter_python,
+            "0.25.0",
+        ),
+        (&document.recorded_provider_pins.ruff, "0.16.1"),
+        (
+            &document.recorded_provider_pins.ruff_component_crates,
+            "0.0.7",
+        ),
+        (&document.recorded_provider_pins.petgraph, "0.8.3"),
+    ];
+    if fixed.iter().any(|(actual, expected)| actual != expected) {
+        return Err(parse_error(
+            "toolchain-identity",
+            path,
+            "$",
+            "one or more exact toolchain pins drifted",
+        ));
+    }
+    let digest_sources = [
+        (&document.cargo_lock_digest, "Cargo.lock"),
+        (
+            &document.adapter.source_digest,
+            "codefabric-cpg-mcp/uv.lock",
+        ),
+        (
+            &document.protobuf.source_digest,
+            "tooling/proto/toolchain-identity.json",
+        ),
+        (
+            &document.rustc_extractor.source_digest,
+            "rustc-extractor/toolchain-identity.json",
+        ),
+        (
+            &document.pyrefly.source_digest,
+            "pyrefly-sidecar/toolchain-identity.json",
+        ),
+    ];
+    for (claimed, relative) in digest_sources {
+        let actual = checksum(
+            &fs::read(repository_root.join(relative))
+                .map_err(|error| parse_error("toolchain-identity", path, relative, error))?,
+        );
+        if claimed != &actual {
+            return Err(parse_error(
+                "toolchain-identity",
+                path,
+                relative,
+                "source digest drifted",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn canonical_json(
     repository_root: &Path,
     path: &Path,
@@ -713,7 +843,7 @@ fn canonical_json(
     let mut value = strict_json(path, "$", bytes)?;
     let usage = observe_value(&value, 1);
     if descriptor.digest_projection == DigestProjection::BundleAcG07V1 {
-        return canonical_bundle_json(path, descriptor, value, usage);
+        return canonical_bundle_json(repository_root, path, descriptor, catalog, value, usage);
     }
     let mut usage = usage;
     let object = value
@@ -767,6 +897,16 @@ fn canonical_json(
             value
                 .as_object_mut()
                 .expect("typed fixture manifest serializes as an object"),
+        );
+    } else if descriptor.artifact_id == "codefabric.toolchain.identity" {
+        let document: ToolchainIdentityDocument = typed(path, "$", value)?;
+        validate_toolchain_identity(repository_root, path, &document)?;
+        value = serde_json::to_value(document)
+            .expect("typed toolchain identity serialization is infallible");
+        remove_identity_fields(
+            value
+                .as_object_mut()
+                .expect("typed toolchain identity serializes as an object"),
         );
     } else if descriptor.artifact_kind == ArtifactKind::JsonSchema {
         let header = value
@@ -1305,9 +1445,131 @@ fn validate_type_algebra_contract(
     Ok(())
 }
 
+fn validate_deployment_profile(
+    path: &Path,
+    document: &DeploymentProfileDocument,
+) -> Result<(), ContractCompileError> {
+    let platforms = BTreeSet::from([
+        DeploymentPlatform::LinuxX86_64,
+        DeploymentPlatform::LinuxAarch64,
+        DeploymentPlatform::MacosAarch64,
+        DeploymentPlatform::MacosX86_64,
+    ]);
+    let exact = [
+        (&document.profile_id, "local-workstation-v1"),
+        (&document.windows_support, "unsupported"),
+        (&document.network_listeners, "disabled"),
+        (&document.workspace_registration, "explicit-only"),
+        (&document.operational_store, "sqlite-wal"),
+        (&document.fact_store, "delta-local-filesystem"),
+        (&document.object_store, "local-filesystem"),
+        (&document.hot_overlay_journal, "disabled"),
+        (&document.source_blob_persistence, "runtime-lease-only"),
+        (
+            &document.default_query_freshness,
+            "REQUIRE_CURRENT_FOR_TARGETS",
+        ),
+        (&document.provider_sandbox, "required-for-untrusted"),
+        (&document.semantic_query_language, "english-controlled-v1"),
+        (&document.canonical_json, "rfc8785-plus-codefabric-v1"),
+    ];
+    if document.supported_platforms != platforms
+        || exact.iter().any(|(actual, expected)| actual != expected)
+        || document.result_artifact_ttl_seconds != 3600
+        || document.source_result_artifact_ttl_seconds != 1800
+        || document.follow_directory_symlinks
+        || document.follow_internal_file_symlinks
+        || document.index_external_dependency_bodies
+        || document.platform_roots.len() != 2
+        || document.platform_roots.iter().any(|root| {
+            root.platform_family.is_empty()
+                || root.state_root_options.is_empty()
+                || root.runtime_root_options.is_empty()
+                || root.config_root_options.is_empty()
+                || root.directory_mode != "0700"
+                || root.private_file_mode != "0600"
+        })
+    {
+        return Err(parse_error(
+            "deployment-profile",
+            path,
+            "$",
+            "the AC-G-08 local-workstation-v1 field set drifted",
+        ));
+    }
+    let families = document
+        .platform_roots
+        .iter()
+        .map(|root| root.platform_family.as_str())
+        .collect::<BTreeSet<_>>();
+    if families != BTreeSet::from(["linux", "macos"]) {
+        return Err(parse_error(
+            "deployment-profile",
+            path,
+            "$.platform_roots",
+            "exactly one Linux and one macOS root profile are required",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_security_corpus(
+    repository_root: &Path,
+    path: &Path,
+    document: &SecurityCorpusManifest,
+) -> Result<(), ContractCompileError> {
+    if document.corpus_id != "codefabric-security-v1"
+        || document.corpus_version != "1.0"
+        || document.records.is_empty()
+    {
+        return Err(parse_error(
+            "security-corpus",
+            path,
+            "$",
+            "the released security corpus requires its stable identity and at least one case",
+        ));
+    }
+    let mut identifiers = BTreeSet::new();
+    let accepted = BTreeSet::from([
+        "ACCEPTED_BOUNDED",
+        "REJECTED_AUTHENTICATION",
+        "REJECTED_AUTHORIZATION",
+        "REJECTED_VALIDATION",
+        "REJECTED_RESOURCE_LIMIT",
+        "EXCLUDED_UNSUPPORTED_INPUT",
+        "SANDBOX_DENIED",
+        "PROVIDER_TERMINATED_BOUNDED",
+        "DEGRADED_WITH_EXPLICIT_CAPABILITY_GAP",
+    ]);
+    for (index, record) in document.records.iter().enumerate() {
+        if record.case_id.is_empty()
+            || !identifiers.insert(&record.case_id)
+            || record.threat_class.is_empty()
+            || record.required_platforms.is_empty()
+            || record.operation.is_empty()
+            || !accepted.contains(record.expected_status_or_error.as_str())
+            || record.forbidden_observations.is_empty()
+            || record.cleanup_assertions.is_empty()
+            || record.resource_bounds.maximum_input_bytes == 0
+            || record.resource_bounds.maximum_output_bytes == 0
+            || record.resource_bounds.maximum_duration_ms == 0
+            || !repository_root.join(&record.fixture_path).is_file()
+        {
+            return Err(parse_error(
+                "security-corpus",
+                path,
+                format!("$.records[{index}]"),
+                "security case identity, fixture, outcome, bounds, or cleanup contract is invalid",
+            ));
+        }
+    }
+    Ok(())
+}
+
 // The exhaustive match is the closed family-dispatch table for typed YAML ingress.
 #[allow(clippy::too_many_lines)]
 fn canonical_yaml(
+    repository_root: &Path,
     path: &Path,
     descriptor: &ArtifactDescriptor,
     bytes: &[u8],
@@ -1454,6 +1716,12 @@ fn canonical_yaml(
                     "codefabric.registry.state-machine-registry" => {
                         accepted!(StateMachine, validate_state_machines)
                     }
+                    "codefabric.comparison.comparison-ignore-registry" => {
+                        accepted!(ComparisonIgnoreRecord, validate_comparison_ignores)
+                    }
+                    "codefabric.faults.fault-point-registry" => {
+                        accepted!(FaultPointRecord, validate_fault_points)
+                    }
                     _ => {
                         let document: RegistryDocument<Value> = typed(path, "$", value.clone())?;
                         let records = document.records.len();
@@ -1486,6 +1754,24 @@ fn canonical_yaml(
                 value = serde_json::to_value(&document)
                     .expect("typed type-algebra contract serialization is infallible");
                 (document.header.artifact_header(), records)
+            }
+            "codefabric.deployment.local-workstation-v1" => {
+                let document: DeploymentProfileDocument = typed(path, "$", value.clone())?;
+                validate_deployment_profile(path, &document)?;
+                let records = document.platform_roots.len();
+                let header = document.header.clone();
+                value = serde_json::to_value(document)
+                    .expect("typed deployment profile serialization is infallible");
+                (header, records)
+            }
+            "codefabric.security.security-corpus-manifest" => {
+                let document: SecurityCorpusManifest = typed(path, "$", value.clone())?;
+                validate_security_corpus(repository_root, path, &document)?;
+                let records = document.records.len();
+                let header = document.header.clone();
+                value = serde_json::to_value(document)
+                    .expect("typed security corpus serialization is infallible");
+                (header, records)
             }
             _ => {
                 let document: ScaffoldDocument<Value> = typed(path, "$", value.clone())?;
@@ -2547,7 +2833,8 @@ fn compile_artifact_inner(
                 (Some(header), canonical, bundle, embedded_bundle, usage)
             }
             NativeFormat::Yaml => {
-                let (header, canonical, usage) = canonical_yaml(&path, descriptor, &bytes)?;
+                let (header, canonical, usage) =
+                    canonical_yaml(repository_root, &path, descriptor, &bytes)?;
                 (Some(header), canonical, None, None, usage)
             }
             NativeFormat::Jsonl => {
@@ -2733,85 +3020,46 @@ mod tests {
     use std::io::Write as _;
 
     use super::*;
-    use crate::contracts::catalog::{
-        ArtifactStatus, CompatibilityFamily, ConsumerDomain, ContractOwner, ProvenanceRequirement,
-    };
-
-    fn descriptor(
-        format: NativeFormat,
-        kind: ArtifactKind,
-        profile: DigestProjection,
-    ) -> ArtifactDescriptor {
-        ArtifactDescriptor {
-            artifact_id: "codefabric.test".to_owned(),
-            authority_path: PathBuf::from("contracts/test"),
-            artifact_kind: kind,
-            native_format: format,
-            owner: ContractOwner::Suite,
-            version: "1.0".to_owned(),
-            compatible_suite_major: 1,
-            status: ArtifactStatus::Draft,
-            digest_projection: profile,
-            compatibility_family: CompatibilityFamily::Suite,
-            resource_budget_profile: "test".to_owned(),
-            parser_schema_authority: None,
-            semantic_projection_source: SemanticProjectionSource::Native,
-            consumers: BTreeSet::from([ConsumerDomain::ContractTooling]),
-            provenance_requirements: BTreeSet::from([
-                ProvenanceRequirement::CanonicalDigest,
-                ProvenanceRequirement::SourceDigest,
-            ]),
-        }
-    }
+    use crate::contracts::catalog::ContractCatalog;
 
     #[test]
     fn bundle_projection_uses_the_closed_sorted_model_and_retains_member_identity() {
-        let mut descriptor = descriptor(
-            NativeFormat::Json,
-            ArtifactKind::BundleManifest,
-            DigestProjection::BundleAcG07V1,
-        );
-        descriptor.artifact_id = "codefabric.bundles.schema-bundle".to_owned();
-        let source = br#"{
-            "artifact_id":"codefabric.bundles.schema-bundle","artifact_kind":"bundle-manifest",
-            "version":"1.0","compatible_suite_major":1,"status":"draft",
-            "canonical_digest":"b3:1111111111111111111111111111111111111111111111111111111111111111",
-            "bundle_kind":"schema","bundle_version":"1.0","bundle_major":1,
-            "artifacts":[
-                {"artifact_id":"z","version":"1.0","canonical_digest":"b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","required":false,"feature_bits":[]},
-                {"artifact_id":"a","version":"1.0","canonical_digest":"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","required":true,"feature_bits":["z","a"]}
-            ],
-            "compatibility":{"minimum_consumer_minor":0,"maximum_consumer_minor":1},
-            "created_by":{"generator_id":"codefabric-contracts","generator_version":"1.0"},
-            "bundle_digest":"b3:2222222222222222222222222222222222222222222222222222222222222222",
-            "signature":"test-signature"
-        }"#;
-        let value = strict_json(Path::new("test.json"), "$", source).unwrap();
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let catalog = ContractCatalog::load(repository_root).unwrap();
+        let descriptor = catalog
+            .artifact("codefabric.bundles.schema-bundle")
+            .unwrap();
+        let path = repository_root.join(&descriptor.authority_path);
+        let source = fs::read(&path).unwrap();
+        let mut value = strict_json(&path, "$", &source).unwrap();
+        value["artifacts"][0]["feature_bits"] = json!(["z", "a"]);
+        value["signature"] = "test-signature".into();
         let (_, canonical, bundle_digest, embedded_bundle_digest, _) = canonical_bundle_json(
-            Path::new("test.json"),
-            &descriptor,
+            repository_root,
+            &path,
+            descriptor,
+            &catalog,
             value,
             ResourceUsage::default(),
         )
         .unwrap();
         let mut projected = decode_strict(&canonical).unwrap();
         assert!(projected.get("canonical_digest").is_none());
-        assert_eq!(projected["artifacts"][0]["artifact_id"], "a");
-        assert_eq!(
-            projected["artifacts"][0]["canonical_digest"],
-            "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        );
         assert_eq!(projected["artifacts"][0]["feature_bits"], json!(["a", "z"]));
         assert_eq!(projected["signature"], "test-signature");
         assert_eq!(
             embedded_bundle_digest.as_deref(),
-            Some("b3:2222222222222222222222222222222222222222222222222222222222222222")
+            strict_json(&path, "$", &source).unwrap()["bundle_digest"].as_str()
         );
-        let mut reordered = strict_json(Path::new("test.json"), "$", source).unwrap();
+        let mut reordered = strict_json(&path, "$", &source).unwrap();
+        reordered["artifacts"][0]["feature_bits"] = json!(["a", "z"]);
+        reordered["signature"] = "test-signature".into();
         reordered["artifacts"].as_array_mut().unwrap().reverse();
         let (_, reordered_canonical, reordered_bundle_digest, _, _) = canonical_bundle_json(
-            Path::new("test.json"),
-            &descriptor,
+            repository_root,
+            &path,
+            descriptor,
+            &catalog,
             reordered,
             ResourceUsage::default(),
         )
@@ -2819,12 +3067,13 @@ mod tests {
         assert_eq!(canonical, reordered_canonical);
         assert_eq!(bundle_digest, reordered_bundle_digest);
 
-        let mut semantic_mutation = strict_json(Path::new("test.json"), "$", source).unwrap();
-        semantic_mutation["artifacts"][0]["canonical_digest"] =
-            "b3:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into();
+        let mut semantic_mutation = strict_json(&path, "$", &source).unwrap();
+        semantic_mutation["compatibility"]["maximum_consumer_minor"] = 1.into();
         let (_, mutated_canonical, mutated_bundle_digest, _, _) = canonical_bundle_json(
-            Path::new("test.json"),
-            &descriptor,
+            repository_root,
+            &path,
+            descriptor,
+            &catalog,
             semantic_mutation,
             ResourceUsage::default(),
         )

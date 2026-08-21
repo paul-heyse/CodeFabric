@@ -289,6 +289,7 @@ A machine record SHALL contain:
 requirement_id: CF-QUERY-0042
 source_artifact: code_property_graph_semantic_query_specification
 source_section: "48.3"
+normative_text: "Exact normalized normative statement"
 normative_text_digest: "b3:..."
 implements:
   - rust module or generated artifact identifier
@@ -299,10 +300,23 @@ traces_to:
   query_phrase_ids: []
   response_fields: []
   error_codes: []
+trace_selectors:
+  - all-query-phrase-ids
+  - all-response-fields
 verified_by:
   - test IDs
 status: active | deprecated | superseded
 ```
+
+`trace_selectors` is an optional closed set of catalog-backed expansions. The initial
+selectors cover all ontology kinds, capability codes, table fields, query phrase IDs,
+response fields, and error codes. The contract generator resolves these selectors from
+the same typed registries and Contract IR used by their consumers, writes the expanded
+`traces_to` edges, and derives `traceability.jsonl` from the requirement records. A
+second hand-maintained trace inventory is prohibited. Reordering or extending a selected
+registry therefore updates the trace graph programmatically. The generator likewise
+resolves `source_artifact` against the typed catalog and refreshes the detached accepted
+source digest and normalized normative-text digest; digest strings are not authored twice.
 
 The trace graph SHALL support these mandatory paths:
 
@@ -411,6 +425,8 @@ contracts/
     comparison-ignore-registry.yaml
   security/
     security-corpus-manifest.yaml
+  toolchain/
+    toolchain-identity.json
 ```
 
 Generated Rust and Python types SHALL be emitted under `generated/` and SHALL contain a
@@ -422,7 +438,8 @@ The suite manifest SHALL use closed typed catalog schema version 2. The catalog 
 peer collections: `artifacts` and `derivations`. Artifact descriptors own governed source
 authority and declare stable ID, native source path and kind, compatibility family,
 projection profile, consumer domains, provenance obligations, resource budget profile,
-and a typed `semantic_projection_source`. That source is either `Native` or one exact
+zero or more closed `bundle_membership` values, and a typed
+`semantic_projection_source`. That source is either `Native` or one exact
 `DerivationOutput(OutputRef)`, where `OutputRef` contains a derivation ID and output path.
 Artifact descriptors SHALL NOT own generated outputs or build-order dependencies.
 When a generated public file is itself governed (for example a released JSON Schema),
@@ -522,6 +539,9 @@ emitters consume the typed Contract IR rather than rediscovering metadata lexica
 Every catalog descriptor names explicit byte, depth, collection, token/alias, graph,
 and diagnostic budgets appropriate to its source kind. JSON Schema inputs SHALL pass
 Draft 2020-12 metaschema validation with the suite-pinned validator before release.
+The AC-G-08 YAML deployment instance SHALL additionally validate against
+`deployment-profile.schema.json` with the exact suite-pinned safe YAML loader and the
+same bounded source bytes; schema validity alone is not instance evidence.
 
 The four `.proto` authorities SHALL be compiled by one exact `grpcio-tools` invocation
 into Python bindings and one committed `FileDescriptorSet` with imports included and
@@ -540,6 +560,12 @@ remain compiled once rather than constructed on a request path.
 Normative known-answer vectors remain independently reviewed oracles. Generator-derived,
 property, and differential corpora provide broad coverage but SHALL NOT approve or
 overwrite their own expected bytes or digests.
+
+All eight built-in bundle manifests are compiler-owned views of the catalog's closed
+`bundle_membership` relation. Generation sorts members by artifact ID and copies each
+member's compiled canonical identity and catalog version; release verification rejects
+missing, extra, duplicate, optional, or stale members. Hand-maintaining bundle arrays or
+assigning membership in a second source is prohibited.
 
 ## AC-G-06 — Canonical enum and flag registry
 ### Decision
@@ -629,7 +655,10 @@ Built-in bundles are trusted by exact digest shipped with the binary. External m
 
 `ServingSnapshot` stores both the human version and exact digest for every bundle. Query responses expose versions and abbreviated digests; diagnostics expose full digests only to authorized clients.
 
-The `toolchain` bundle SHALL record the exact storage-substrate identity, because the durable data plane is reproducible only against a specific compiler and a specific pre-release storage engine even where fact meaning is unaffected:
+The `toolchain` bundle SHALL contain the closed `toolchain-identity` artifact and record
+every exact build/runtime boundary identity, because the durable data plane and its
+generated adapters are reproducible only against specific compilers and dependency
+graphs even where fact meaning is unaffected:
 
 ```text
 rust_version
@@ -640,6 +669,12 @@ object_store_version
 delta_rs_git_rev
 deltalake_declared_version
 cargo_lock_digest
+adapter: python, fastmcp, pydantic, pydantic-settings, grpcio, protobuf, jsonschema,
+  PyYAML, uv-lock digest
+protobuf: grpcio-tools, libprotoc, prost, tonic, toolchain-identity digest
+rustc_extractor: toolchain, release, commit hash, identity digest
+pyrefly: version, commit, locked source, identity digest
+recorded_provider_pins: tree-sitter, tree-sitter-python, Ruff components, petgraph
 ```
 
 `delta_rs_git_rev` is required because the pinned `deltalake` dependency is an untagged pre-release revision; a declared crate version alone does not identify it. Changing any of these values changes the toolchain bundle digest and therefore the canonical build/deployment bundle digest.

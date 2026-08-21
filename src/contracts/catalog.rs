@@ -156,6 +156,57 @@ pub enum CompatibilityFamily {
     ModelPack,
 }
 
+/// Compatibility bundles that may include a governed artifact.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BundleKind {
+    /// Derived-analysis contracts.
+    Derivation,
+    /// Externally extensible model-pack contracts.
+    ModelPack,
+    /// Fact ontology contracts.
+    Ontology,
+    /// Provider contracts.
+    Provider,
+    /// Semantic query-language contracts.
+    QueryLanguage,
+    /// Public storage and response schema contracts.
+    Schema,
+    /// MCP tool-contract models.
+    ToolContract,
+    /// Exact compiler and storage-substrate identities.
+    Toolchain,
+}
+
+impl BundleKind {
+    /// Stable artifact-ID component for this bundle family.
+    #[must_use]
+    pub const fn artifact_slug(self) -> &'static str {
+        match self {
+            Self::Derivation => "derivation",
+            Self::ModelPack => "model-pack",
+            Self::Ontology => "ontology",
+            Self::Provider => "provider",
+            Self::QueryLanguage => "query-language",
+            Self::Schema => "schema",
+            Self::ToolContract => "tool-contract",
+            Self::Toolchain => "toolchain",
+        }
+    }
+
+    /// All built-in bundle families in canonical order.
+    pub const ALL: [Self; 8] = [
+        Self::Derivation,
+        Self::ModelPack,
+        Self::Ontology,
+        Self::Provider,
+        Self::QueryLanguage,
+        Self::Schema,
+        Self::ToolContract,
+        Self::Toolchain,
+    ];
+}
+
 /// Domain that consumes an artifact or generated output.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -427,6 +478,9 @@ pub struct ArtifactDescriptor {
     pub digest_projection: DigestProjection,
     /// Independently negotiated compatibility family.
     pub compatibility_family: CompatibilityFamily,
+    /// Compatibility bundles whose identity includes this artifact.
+    #[serde(default)]
+    pub bundle_membership: BTreeSet<BundleKind>,
     /// Named resource budget.
     pub resource_budget_profile: String,
     /// Native schema/parser authority, when distinct from the source itself.
@@ -1467,6 +1521,7 @@ mod tests {
             status: ArtifactStatus::Draft,
             digest_projection: DigestProjection::JsonJcsV1,
             compatibility_family: CompatibilityFamily::Suite,
+            bundle_membership: BTreeSet::new(),
             resource_budget_profile: "test".to_owned(),
             parser_schema_authority: None,
             semantic_projection_source: SemanticProjectionSource::Native,

@@ -1,12 +1,55 @@
 {
   "artifact_id": "codefabric.bundles.provider-bundle",
   "artifact_kind": "bundle-manifest",
-  "artifacts": [],
-  "bundle_digest": "b3:fec19dd60938da3e6cd663f71310b55415519ffe28dfee37a418d24a3560fd8e",
+  "artifacts": [
+    {
+      "artifact_id": "codefabric.registry.capability-registry",
+      "canonical_digest": "b3:1bb7395ee44b7c263e27ea087875555374f1e2e7e253891949c0ff13876da8dc",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.registry.provider-registry",
+      "canonical_digest": "b3:8d77a6275af6036a5f14fcceeb3fd5d488d1466eb56886a1c4e6ba87118a9d79",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.rpc.feature-registry",
+      "canonical_digest": "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.rpc.provider-control",
+      "canonical_digest": "b3:76fc832df6769913a0fdad1b08509082dffb0183b89fba8cc4cafe0d60216315",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.rpc.pyrefly-sidecar",
+      "canonical_digest": "b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.rpc.rustc-extractor",
+      "canonical_digest": "b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    }
+  ],
+  "bundle_digest": "b3:bf59a5af0484086229f525cfda4b0100542d5da2e87281168c82b807480657cf",
   "bundle_kind": "provider",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:84931a7b27cd34c0ee76af3c0ca7cf2f495f43ff461c75d5bfe8cbe10bdc4a85",
+  "canonical_digest": "b3:ba4222df2214ab9550f60a5d3ef7ec15c8d540e02fab340f410ec9310072ca8a",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
@@ -16,6 +59,6 @@
     "generator_id": "codefabric-contracts",
     "generator_version": "1.0"
   },
-  "status": "draft",
+  "status": "released",
   "version": "1.0"
 }

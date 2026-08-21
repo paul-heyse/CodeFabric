@@ -1,11 +1,12 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 
 use codefabric::contracts::artifacts::{
     ContractArtifactError, VerificationProfile, generate, identity, verify,
-    verify_checksum_fixture, verify_jcs_corpus,
+    verify_broken_trace_edge_fixture, verify_checksum_fixture, verify_jcs_corpus,
 };
-use codefabric::contracts::catalog::{ArtifactStatus, ContractCatalog, SemanticProjectionSource};
+use codefabric::contracts::catalog::{BundleKind, ContractCatalog, SemanticProjectionSource};
 use codefabric::contracts::compiler::{ContractCompileError, compile_artifact};
 use codefabric::contracts::index::{ARTIFACT_INDEX_BYTES, artifact_index, artifact_index_digest};
 use codefabric::contracts::jcs::validate_checksum;
@@ -16,6 +17,15 @@ fn copy_file(source: &Path, destination: &Path) {
     std::fs::create_dir_all(destination.parent().expect("copied file has a parent"))
         .expect("create isolated parent");
     std::fs::copy(source, destination).expect("copy isolated input");
+}
+
+fn compile_isolated(
+    repository_root: &Path,
+    artifact_id: &str,
+) -> Result<codefabric::contracts::compiler::CompiledArtifact, ContractCompileError> {
+    let catalog = ContractCatalog::load(repository_root).expect("isolated catalog");
+    let descriptor = catalog.artifact(artifact_id).expect("isolated descriptor");
+    compile_artifact(repository_root, &catalog, descriptor)
 }
 
 fn isolated_contract_root() -> tempfile::TempDir {
@@ -48,6 +58,14 @@ fn isolated_contract_root() -> tempfile::TempDir {
         .expect("fixture records")
     {
         let relative = Path::new(record["path"].as_str().expect("fixture path"));
+        copy_file(&source_root.join(relative), &isolated.path().join(relative));
+    }
+    for relative in [
+        "Cargo.lock",
+        "codefabric-cpg-mcp/uv.lock",
+        "rustc-extractor/toolchain-identity.json",
+        "pyrefly-sidecar/toolchain-identity.json",
+    ] {
         copy_file(&source_root.join(relative), &isolated.path().join(relative));
     }
     std::fs::create_dir_all(isolated.path().join("contracts/schema/arrow-delta"))
@@ -108,22 +126,77 @@ fn packaged_index_has_the_exact_source_census_and_bytes() {
 }
 
 #[test]
-fn full_profile_accepts_drafts_and_released_profile_rejects_them() {
+fn full_and_released_profiles_accept_the_zero_warning_catalog() {
     let catalog = ContractCatalog::load(Path::new(ROOT)).expect("compiled contract catalog");
     let artifact_count = catalog.artifacts().count();
-    let warning_count = catalog
-        .artifacts()
-        .filter(|artifact| artifact.status == ArtifactStatus::Draft)
-        .count();
     let report = verify(Path::new(ROOT), VerificationProfile::Full).expect("full verification");
     assert_eq!(report.artifact_count, artifact_count);
-    assert_eq!(report.warning_count, warning_count);
+    assert_eq!(report.warning_count, 0);
+    assert_eq!(
+        verify(Path::new(ROOT), VerificationProfile::Released)
+            .expect("released verification")
+            .warning_count,
+        0
+    );
+}
 
-    let error = verify(Path::new(ROOT), VerificationProfile::Released).unwrap_err();
-    assert!(matches!(
-        error,
-        ContractArtifactError::ReleasedWarnings(count) if count == warning_count
-    ));
+#[test]
+fn wp11_behavioral_acceptance() {
+    let report = verify(Path::new(ROOT), VerificationProfile::Released)
+        .expect("all Wave-1 contracts are released and internally consistent");
+    assert_eq!(report.warning_count, 0);
+}
+
+#[test]
+fn wp11_structural_acceptance() {
+    let root = Path::new(ROOT);
+    let catalog = ContractCatalog::load(root).expect("compiled catalog");
+    for kind in BundleKind::ALL {
+        let bundle_id = format!("codefabric.bundles.{}-bundle", kind.artifact_slug());
+        let descriptor = catalog.artifact(&bundle_id).expect("bundle descriptor");
+        let bundle: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.join(&descriptor.authority_path)).expect("bundle authority"),
+        )
+        .expect("bundle JSON");
+        let actual = bundle["artifacts"]
+            .as_array()
+            .expect("bundle members")
+            .iter()
+            .map(|member| {
+                member["artifact_id"]
+                    .as_str()
+                    .expect("member ID")
+                    .to_owned()
+            })
+            .collect::<BTreeSet<_>>();
+        let expected = catalog
+            .artifacts()
+            .filter(|artifact| artifact.bundle_membership.contains(&kind))
+            .map(|artifact| artifact.artifact_id.clone())
+            .collect::<BTreeSet<_>>();
+        assert!(!actual.is_empty(), "{bundle_id} must be populated");
+        assert_eq!(actual, expected, "{bundle_id} membership drifted");
+    }
+}
+
+#[test]
+fn wp11_negative_zero_state() {
+    verify_broken_trace_edge_fixture(Path::new(ROOT))
+        .expect("the committed unallocated CF-ID edge remains rejected");
+}
+
+#[test]
+fn wp11_operational_acceptance() {
+    let isolated = isolated_contract_root();
+    let index_path = isolated
+        .path()
+        .join("codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json");
+    let before = std::fs::read(&index_path).expect("first generated artifact index");
+    generate(isolated.path()).expect("second isolated generation");
+    let after = std::fs::read(index_path).expect("second generated artifact index");
+    assert_eq!(before, after);
+    verify(isolated.path(), VerificationProfile::Released)
+        .expect("second generation remains release-valid");
 }
 
 #[test]
@@ -158,10 +231,8 @@ fn verifier_rejects_semantic_embedded_and_bundle_digest_mutations() {
     )
     .expect("write semantic mutation");
     assert!(matches!(
-        verify(isolated.path(), VerificationProfile::Full),
-        Err(ContractArtifactError::Compile(
-            ContractCompileError::Digest { .. }
-        ))
+        compile_isolated(isolated.path(), "codefabric.schema.public-status.schema"),
+        Err(ContractCompileError::Digest { .. })
     ));
 
     std::fs::write(&schema_path, &original_schema).expect("restore schema");
@@ -175,10 +246,9 @@ fn verifier_rejects_semantic_embedded_and_bundle_digest_mutations() {
     )
     .expect("write digest mutation");
     assert!(matches!(
-        verify(isolated.path(), VerificationProfile::Full),
-        Err(ContractArtifactError::Compile(
-            ContractCompileError::Digest { claimed, .. }
-        )) if claimed == "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        compile_isolated(isolated.path(), "codefabric.schema.public-status.schema"),
+        Err(ContractCompileError::Digest { claimed, .. })
+            if claimed == "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ));
 
     std::fs::write(&schema_path, &original_schema).expect("restore schema");
@@ -194,10 +264,9 @@ fn verifier_rejects_semantic_embedded_and_bundle_digest_mutations() {
     )
     .expect("write bundle mutation");
     assert!(matches!(
-        verify(isolated.path(), VerificationProfile::Full),
-        Err(ContractArtifactError::Compile(
-            ContractCompileError::Digest { claimed, .. }
-        )) if claimed == "b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        compile_isolated(isolated.path(), "codefabric.bundles.schema-bundle"),
+        Err(ContractCompileError::Digest { claimed, .. })
+            if claimed == "b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     ));
 }
 

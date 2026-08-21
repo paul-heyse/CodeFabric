@@ -1,12 +1,62 @@
 {
   "artifact_id": "codefabric.bundles.query-language-bundle",
   "artifact_kind": "bundle-manifest",
-  "artifacts": [],
-  "bundle_digest": "b3:a200c7f65b525be4a19391783d6970e330158e083358d07c503445110451cb15",
+  "artifacts": [
+    {
+      "artifact_id": "codefabric.query.english-controlled-v1",
+      "canonical_digest": "b3:e337ede8c7843ed8058b7e5c1f0871a1707ac2d03df8cc2519c4b8999ffbf0a8",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.query.planspec.schema",
+      "canonical_digest": "b3:309e5cd67ba4437418d30d2ad569227d2ad20ca7f91d32cb6a9c7368be6dd4df",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.registry.phrase-registry",
+      "canonical_digest": "b3:f889d4a52ef079e0b3a372a5e11dae9005c587c0d006aa39eca89107d25d1092",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.rpc.cpg-query-service",
+      "canonical_digest": "b3:502dfd819e70a154db899bd6bdbe580d01bb56f1654790d5adb241199d43b434",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.rpc.feature-registry",
+      "canonical_digest": "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
+      "canonical_digest": "b3:f11300f63bf6c4fb21487ce9c989eed3a236869ed3bac6bd50c4a2b61dd313e5",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
+      "canonical_digest": "b3:df5ba2d47a01ffa770c4b2902ca4e4fd20a0d5ccf1dafe85318fddde6c8af039",
+      "feature_bits": [],
+      "required": true,
+      "version": "1.0"
+    }
+  ],
+  "bundle_digest": "b3:683528acd017f65ee4c531fe5512cb7992e183b704dab8fd700426fbe319e406",
   "bundle_kind": "query-language",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:2b400bcf3ba1aa5313d01a23228be866affc468d187f197ff9a2728539e003e1",
+  "canonical_digest": "b3:beeec203020ebafa6267eda56268a84eff490809cecd30a0f389d874ae0569c6",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
@@ -16,6 +66,6 @@
     "generator_id": "codefabric-contracts",
     "generator_version": "1.0"
   },
-  "status": "draft",
+  "status": "released",
   "version": "1.0"
 }

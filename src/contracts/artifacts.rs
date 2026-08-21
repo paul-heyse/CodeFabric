@@ -14,8 +14,8 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 use super::catalog::{
-    ARTIFACT_INDEX_DERIVATION_ID, CatalogError, CompiledCatalog, ContractCatalog, DerivationInput,
-    DerivationOutputKind, REGISTRY_DERIVATION_ID, ResolvedDerivationInvocation,
+    ARTIFACT_INDEX_DERIVATION_ID, BundleKind, CatalogError, CompiledCatalog, ContractCatalog,
+    DerivationInput, DerivationOutputKind, REGISTRY_DERIVATION_ID, ResolvedDerivationInvocation,
     SemanticProjectionSource, generator_identity,
 };
 use super::compiler::{ContractCompileError, compile_artifact, compile_artifact_for_generation};
@@ -28,11 +28,14 @@ use super::jcs::{
     non_string_map_records, validate_bytes, validate_checksum, validate_int64,
     validate_lowercase_public, validate_uint64,
 };
-use super::models::{RequirementRecord, TraceabilityRecord};
+use super::models::{BrokenTraceEdgeFixture, RequirementRecord, TraceSelector, TraceabilityRecord};
 use super::registry_models::{
-    EnumDomain, FlagDomain, PhraseRecord, StateMachine, validate_duplicate_authorities,
+    AcceptedRegistry, Capability, EntityKind, EnumDomain, FactKind, FlagDomain, PhraseRecord,
+    PropertyKind, PublicError, RelationKind, StateMachine, UnknownKind,
+    validate_duplicate_authorities,
 };
 use super::schema_artifacts::render_schema_outputs;
+use super::schema_models::SchemaContractIr;
 
 /// Verifier strictness profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1121,6 +1124,431 @@ fn embed_semantic_digests(repository_root: &Path) -> Result<(), ContractArtifact
     Ok(())
 }
 
+fn pretty_json(value: &Value) -> Result<Vec<u8>, ContractArtifactError> {
+    let mut bytes =
+        serde_json::to_vec_pretty(value).map_err(|source| ContractArtifactError::Canonical {
+            path: PathBuf::from("generated JSON"),
+            source: CanonicalJsonError::Serialization(source),
+        })?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn sync_toolchain_identity(repository_root: &Path) -> Result<(), ContractArtifactError> {
+    let relative = Path::new("contracts/toolchain/toolchain-identity.json");
+    let path = repository_root.join(relative);
+    let mut value =
+        decode_strict(&read(&path)?).map_err(|source| ContractArtifactError::Canonical {
+            path: path.clone(),
+            source,
+        })?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?;
+    let set_digest = |target: &mut Value, key: &str, source: &str| {
+        let target = target
+            .as_object_mut()
+            .and_then(|value| value.get_mut(key))
+            .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?;
+        *target = Value::String(checksum(&read(&repository_root.join(source))?));
+        Ok::<(), ContractArtifactError>(())
+    };
+    object.insert(
+        "cargo_lock_digest".to_owned(),
+        Value::String(checksum(&read(&repository_root.join("Cargo.lock"))?)),
+    );
+    set_digest(
+        object
+            .get_mut("adapter")
+            .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?,
+        "source_digest",
+        "codefabric-cpg-mcp/uv.lock",
+    )?;
+    set_digest(
+        object
+            .get_mut("protobuf")
+            .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?,
+        "source_digest",
+        "tooling/proto/toolchain-identity.json",
+    )?;
+    set_digest(
+        object
+            .get_mut("rustc_extractor")
+            .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?,
+        "source_digest",
+        "rustc-extractor/toolchain-identity.json",
+    )?;
+    set_digest(
+        object
+            .get_mut("pyrefly")
+            .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?,
+        "source_digest",
+        "pyrefly-sidecar/toolchain-identity.json",
+    )?;
+    write_atomic(&path, &pretty_json(&value)?)
+}
+
+fn typed_yaml_artifact<T: DeserializeOwned>(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+    artifact_id: &str,
+) -> Result<T, ContractArtifactError> {
+    let descriptor = catalog
+        .artifact(artifact_id)
+        .ok_or_else(|| ContractArtifactError::Metadata(repository_root.to_owned()))?;
+    let path = repository_root.join(&descriptor.authority_path);
+    serde_yaml_ng::from_slice(&read(&path)?)
+        .map_err(|error| fixture_failure(&path, format!("typed YAML decode failed: {error}")))
+}
+
+struct TraceUniverses {
+    ontology_kinds: BTreeSet<String>,
+    capability_codes: BTreeSet<String>,
+    table_fields: BTreeSet<String>,
+    query_phrase_ids: BTreeSet<String>,
+    response_fields: BTreeSet<String>,
+    error_codes: BTreeSet<String>,
+}
+
+#[allow(clippy::too_many_lines)] // One typed census keeps every trace family in one source join.
+fn trace_universes(repository_root: &Path) -> Result<TraceUniverses, ContractArtifactError> {
+    let catalog = ContractCatalog::load(repository_root)?;
+    let ontology_kinds = [
+        typed_yaml_artifact::<AcceptedRegistry<EntityKind>>(
+            repository_root,
+            &catalog,
+            "codefabric.registry.ontology-entity-registry",
+        )?
+        .records
+        .into_iter()
+        .map(|record| record.canonical_name)
+        .collect::<BTreeSet<_>>(),
+        typed_yaml_artifact::<AcceptedRegistry<RelationKind>>(
+            repository_root,
+            &catalog,
+            "codefabric.registry.ontology-relation-registry",
+        )?
+        .records
+        .into_iter()
+        .map(|record| record.canonical_name)
+        .collect(),
+        typed_yaml_artifact::<AcceptedRegistry<PropertyKind>>(
+            repository_root,
+            &catalog,
+            "codefabric.registry.ontology-property-registry",
+        )?
+        .records
+        .into_iter()
+        .map(|record| record.canonical_name)
+        .collect(),
+        typed_yaml_artifact::<AcceptedRegistry<FactKind>>(
+            repository_root,
+            &catalog,
+            "codefabric.registry.ontology-fact-registry",
+        )?
+        .records
+        .into_iter()
+        .map(|record| record.canonical_name)
+        .collect(),
+        typed_yaml_artifact::<AcceptedRegistry<UnknownKind>>(
+            repository_root,
+            &catalog,
+            "codefabric.registry.unknown-registry",
+        )?
+        .records
+        .into_iter()
+        .map(|record| record.name)
+        .collect(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<BTreeSet<_>>();
+    let capability_codes = typed_yaml_artifact::<AcceptedRegistry<Capability>>(
+        repository_root,
+        &catalog,
+        "codefabric.registry.capability-registry",
+    )?
+    .records
+    .into_iter()
+    .map(|record| record.capability_code)
+    .collect::<BTreeSet<_>>();
+    let query_phrase_ids = typed_yaml_artifact::<AcceptedRegistry<PhraseRecord>>(
+        repository_root,
+        &catalog,
+        "codefabric.registry.phrase-registry",
+    )?
+    .records
+    .into_iter()
+    .map(|record| record.phrase_id)
+    .collect::<BTreeSet<_>>();
+    let error_codes = typed_yaml_artifact::<AcceptedRegistry<PublicError>>(
+        repository_root,
+        &catalog,
+        "codefabric.registry.error-registry",
+    )?
+    .records
+    .into_iter()
+    .map(|record| record.code.to_string())
+    .collect::<BTreeSet<_>>();
+
+    let schema_descriptor = catalog
+        .artifact("codefabric.schema.contract-ir")
+        .ok_or_else(|| ContractArtifactError::Metadata(repository_root.to_owned()))?;
+    let schema_path = repository_root.join(&schema_descriptor.authority_path);
+    let schema: SchemaContractIr =
+        serde_json::from_value(decode_strict(&read(&schema_path)?).map_err(|source| {
+            ContractArtifactError::Canonical {
+                path: schema_path.clone(),
+                source,
+            }
+        })?)
+        .map_err(|error| {
+            fixture_failure(&schema_path, format!("typed JSON decode failed: {error}"))
+        })?;
+    let table_fields = schema
+        .tables
+        .into_iter()
+        .flat_map(|table| {
+            let name = table.name;
+            table
+                .columns
+                .into_iter()
+                .map(move |column| format!("{name}.{}", column.name))
+        })
+        .collect::<BTreeSet<_>>();
+
+    let response_descriptor = catalog
+        .artifact("codefabric.schema.cpg-semantic-query-response.schema")
+        .ok_or_else(|| ContractArtifactError::Metadata(repository_root.to_owned()))?;
+    let response_path = repository_root.join(&response_descriptor.authority_path);
+    let response = decode_strict(&read(&response_path)?).map_err(|source| {
+        ContractArtifactError::Canonical {
+            path: response_path.clone(),
+            source,
+        }
+    })?;
+    let response_fields = response
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ContractArtifactError::Metadata(response_path.clone()))?
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    Ok(TraceUniverses {
+        ontology_kinds,
+        capability_codes,
+        table_fields,
+        query_phrase_ids,
+        response_fields,
+        error_codes,
+    })
+}
+
+#[allow(clippy::too_many_lines)] // One record pass prevents partial requirement rewrites.
+fn sync_requirements(repository_root: &Path) -> Result<(), ContractArtifactError> {
+    let TraceUniverses {
+        ontology_kinds,
+        capability_codes,
+        table_fields,
+        query_phrase_ids,
+        response_fields,
+        error_codes,
+    } = trace_universes(repository_root)?;
+    let catalog = ContractCatalog::load(repository_root)?;
+
+    let path = repository_root.join("contracts/manifests/requirements.jsonl");
+    let bytes = read(&path)?;
+    let mut lines = bytes
+        .strip_suffix(b"\n")
+        .unwrap_or(&bytes)
+        .split(|byte| *byte == b'\n');
+    let first = lines
+        .next()
+        .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?;
+    let mut metadata = decode_strict(first).map_err(|source| ContractArtifactError::Canonical {
+        path: path.clone(),
+        source,
+    })?;
+    metadata
+        .as_object_mut()
+        .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?
+        .insert("status".to_owned(), Value::String("released".to_owned()));
+    let mut output =
+        serde_json::to_vec(&metadata).map_err(|source| ContractArtifactError::Canonical {
+            path: path.clone(),
+            source: CanonicalJsonError::Serialization(source),
+        })?;
+    output.push(b'\n');
+    for line in lines {
+        let value = decode_strict(line).map_err(|source| ContractArtifactError::Canonical {
+            path: path.clone(),
+            source,
+        })?;
+        let mut requirement: RequirementRecord =
+            serde_json::from_value(value).map_err(|error| {
+                fixture_failure(&path, format!("typed JSONL decode failed: {error}"))
+            })?;
+        requirement.normative_text_digest = checksum(requirement.normative_text.as_bytes());
+        let source_matches = catalog
+            .artifacts()
+            .filter(|artifact| {
+                artifact
+                    .authority_path
+                    .file_stem()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|stem| {
+                        stem == requirement.source_artifact
+                            || stem.starts_with(&format!("{}_v", requirement.source_artifact))
+                    })
+            })
+            .collect::<Vec<_>>();
+        let [source_descriptor] = source_matches.as_slice() else {
+            return Err(ContractArtifactError::Traceability {
+                path: path.clone(),
+                message: format!(
+                    "requirement {} source_artifact resolves to {} catalog records",
+                    requirement.requirement_id,
+                    source_matches.len()
+                ),
+            });
+        };
+        requirement.owner_acceptance.source_digest =
+            compile_artifact_for_generation(repository_root, &catalog, source_descriptor)?
+                .source_digest;
+        for selector in &requirement.trace_selectors {
+            match selector {
+                TraceSelector::AllOntologyKinds => {
+                    requirement.traces_to.ontology_kinds = ontology_kinds.iter().cloned().collect();
+                }
+                TraceSelector::AllCapabilityCodes => {
+                    requirement.traces_to.capability_codes =
+                        capability_codes.iter().cloned().collect();
+                }
+                TraceSelector::AllTableFields => {
+                    requirement.traces_to.table_fields = table_fields.iter().cloned().collect();
+                }
+                TraceSelector::AllQueryPhraseIds => {
+                    requirement.traces_to.query_phrase_ids =
+                        query_phrase_ids.iter().cloned().collect();
+                }
+                TraceSelector::AllResponseFields => {
+                    requirement.traces_to.response_fields =
+                        response_fields.iter().cloned().collect();
+                }
+                TraceSelector::AllErrorCodes => {
+                    requirement.traces_to.error_codes = error_codes.iter().cloned().collect();
+                }
+            }
+        }
+        output.extend(serde_json::to_vec(&requirement).map_err(|source| {
+            ContractArtifactError::Canonical {
+                path: path.clone(),
+                source: CanonicalJsonError::Serialization(source),
+            }
+        })?);
+        output.push(b'\n');
+    }
+    write_atomic(&path, &output)
+}
+
+fn sync_traceability(repository_root: &Path) -> Result<(), ContractArtifactError> {
+    let requirements_path = repository_root.join("contracts/manifests/requirements.jsonl");
+    let traceability_path = repository_root.join("contracts/manifests/traceability.jsonl");
+    let requirements = read(&requirements_path)?;
+    let traceability = read(&traceability_path)?;
+    let first_line = traceability
+        .split(|byte| *byte == b'\n')
+        .next()
+        .ok_or_else(|| ContractArtifactError::Metadata(traceability_path.clone()))?;
+    let mut metadata =
+        decode_strict(first_line).map_err(|source| ContractArtifactError::Canonical {
+            path: traceability_path.clone(),
+            source,
+        })?;
+    metadata
+        .as_object_mut()
+        .ok_or_else(|| ContractArtifactError::Metadata(traceability_path.clone()))?
+        .insert("status".to_owned(), Value::String("released".to_owned()));
+    let mut output =
+        serde_json::to_vec(&metadata).map_err(|source| ContractArtifactError::Canonical {
+            path: traceability_path.clone(),
+            source: CanonicalJsonError::Serialization(source),
+        })?;
+    output.push(b'\n');
+    for line in requirements
+        .strip_suffix(b"\n")
+        .unwrap_or(&requirements)
+        .split(|byte| *byte == b'\n')
+        .skip(1)
+    {
+        let value = decode_strict(line).map_err(|source| ContractArtifactError::Canonical {
+            path: requirements_path.clone(),
+            source,
+        })?;
+        let requirement: RequirementRecord =
+            serde_json::from_value(value).map_err(|source| ContractArtifactError::Canonical {
+                path: requirements_path.clone(),
+                source: CanonicalJsonError::Serialization(source),
+            })?;
+        let trace = TraceabilityRecord {
+            requirement_id: requirement.requirement_id,
+            implements: requirement.implements,
+            traces_to: requirement.traces_to,
+            verified_by: requirement.verified_by,
+        };
+        output.extend(serde_json::to_vec(&trace).map_err(|source| {
+            ContractArtifactError::Canonical {
+                path: traceability_path.clone(),
+                source: CanonicalJsonError::Serialization(source),
+            }
+        })?);
+        output.push(b'\n');
+    }
+    write_atomic(&traceability_path, &output)
+}
+
+fn sync_bundle_members(repository_root: &Path) -> Result<(), ContractArtifactError> {
+    let catalog = ContractCatalog::load(repository_root)?;
+    for kind in BundleKind::ALL {
+        let bundle_id = format!("codefabric.bundles.{}-bundle", kind.artifact_slug());
+        let descriptor = catalog
+            .artifact(&bundle_id)
+            .ok_or_else(|| ContractArtifactError::Metadata(repository_root.to_owned()))?;
+        let path = repository_root.join(&descriptor.authority_path);
+        let mut value =
+            decode_strict(&read(&path)?).map_err(|source| ContractArtifactError::Canonical {
+                path: path.clone(),
+                source,
+            })?;
+        let members = catalog
+            .artifacts()
+            .filter(|artifact| artifact.bundle_membership.contains(&kind))
+            .map(|artifact| {
+                let compiled =
+                    compile_artifact_for_generation(repository_root, &catalog, artifact)?;
+                Ok(serde_json::json!({
+                    "artifact_id": artifact.artifact_id,
+                    "version": artifact.version,
+                    "canonical_digest": compiled.canonical_digest,
+                    "required": true,
+                    "feature_bits": [],
+                }))
+            })
+            .collect::<Result<Vec<_>, ContractArtifactError>>()?;
+        if members.is_empty() {
+            return Err(ContractArtifactError::Metadata(path));
+        }
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?;
+        object.insert("artifacts".to_owned(), Value::Array(members));
+        object.insert("status".to_owned(), Value::String("released".to_owned()));
+        write_atomic(&path, &pretty_json(&value)?)?;
+    }
+    Ok(())
+}
+
 /// Generate every committed model-derived contract output using atomic replacement.
 ///
 /// # Errors
@@ -1131,6 +1559,10 @@ pub fn generate(repository_root: &Path) -> Result<usize, ContractArtifactError> 
     for (relative, bytes) in render_schema_outputs(repository_root, &catalog)? {
         write_atomic(&repository_root.join(relative), &bytes)?;
     }
+    sync_toolchain_identity(repository_root)?;
+    sync_requirements(repository_root)?;
+    sync_traceability(repository_root)?;
+    sync_bundle_members(repository_root)?;
     embed_semantic_digests(repository_root)?;
     let outputs = render_outputs(repository_root)?;
     for (relative, bytes) in &outputs {
@@ -1263,6 +1695,7 @@ fn non_empty_strings(values: &[String]) -> bool {
     !values.is_empty() && values.iter().all(|value| !value.is_empty())
 }
 
+#[allow(clippy::too_many_lines)] // One verifier keeps ID, edge, and universe checks atomic.
 fn verify_traceability(
     repository_root: &Path,
     catalog: &CompiledCatalog,
@@ -1278,6 +1711,13 @@ fn verify_traceability(
     let compiled_requirements = compile_artifact(repository_root, catalog, requirements)?;
     let compiled_traceability = compile_artifact(repository_root, catalog, traceability)?;
     let mut requirement_ids = BTreeSet::new();
+    let mut expected_trace_records = BTreeMap::new();
+    let mut traced_ontology_kinds = BTreeSet::new();
+    let mut traced_capability_codes = BTreeSet::new();
+    let mut traced_table_fields = BTreeSet::new();
+    let mut traced_query_phrase_ids = BTreeSet::new();
+    let mut traced_response_fields = BTreeSet::new();
+    let mut traced_error_codes = BTreeSet::new();
     for record in typed_jsonl_records::<RequirementRecord>(
         &requirements_path,
         &compiled_requirements.canonical_bytes,
@@ -1302,12 +1742,58 @@ fn verify_traceability(
                 ),
             });
         }
+        traced_ontology_kinds.extend(record.traces_to.ontology_kinds.iter().cloned());
+        traced_capability_codes.extend(record.traces_to.capability_codes.iter().cloned());
+        traced_table_fields.extend(record.traces_to.table_fields.iter().cloned());
+        traced_query_phrase_ids.extend(record.traces_to.query_phrase_ids.iter().cloned());
+        traced_response_fields.extend(record.traces_to.response_fields.iter().cloned());
+        traced_error_codes.extend(record.traces_to.error_codes.iter().cloned());
+        expected_trace_records.insert(
+            identifier,
+            (
+                record.implements.clone(),
+                record.traces_to.clone(),
+                record.verified_by.clone(),
+            ),
+        );
     }
     if requirement_ids.is_empty() {
         return Err(ContractArtifactError::Traceability {
             path: requirements_path.clone(),
             message: "no CF-* requirement records exist".to_owned(),
         });
+    }
+    let expected = trace_universes(repository_root)?;
+    for (label, actual, expected) in [
+        (
+            "ontology kinds",
+            &traced_ontology_kinds,
+            &expected.ontology_kinds,
+        ),
+        (
+            "capability codes",
+            &traced_capability_codes,
+            &expected.capability_codes,
+        ),
+        ("table fields", &traced_table_fields, &expected.table_fields),
+        (
+            "query phrase IDs",
+            &traced_query_phrase_ids,
+            &expected.query_phrase_ids,
+        ),
+        (
+            "response fields",
+            &traced_response_fields,
+            &expected.response_fields,
+        ),
+        ("error codes", &traced_error_codes, &expected.error_codes),
+    ] {
+        if actual != expected {
+            return Err(ContractArtifactError::Traceability {
+                path: requirements_path.clone(),
+                message: format!("released trace coverage is not exact for {label}"),
+            });
+        }
     }
 
     let mut traced_ids = BTreeSet::new();
@@ -1320,6 +1806,13 @@ fn verify_traceability(
             || !traced_ids.insert(identifier.clone())
             || !non_empty_strings(&record.implements)
             || !non_empty_strings(&record.verified_by)
+            || expected_trace_records.get(&identifier).is_none_or(
+                |(implements, traces_to, verified_by)| {
+                    implements != &record.implements
+                        || traces_to != &record.traces_to
+                        || verified_by != &record.verified_by
+                },
+            )
         {
             return Err(ContractArtifactError::Traceability {
                 path: traceability_path.clone(),
@@ -1332,6 +1825,54 @@ fn verify_traceability(
             path: traceability_path,
             message: "one or more requirements have no trace record".to_owned(),
         });
+    }
+    Ok(())
+}
+
+/// Prove the committed WP11 broken-edge fixture is rejected as an unknown requirement.
+///
+/// # Errors
+///
+/// Returns an error if the fixture is malformed, its target contract drifts, or the
+/// candidate edge is no longer rejected by the released requirement inventory.
+pub fn verify_broken_trace_edge_fixture(
+    repository_root: &Path,
+) -> Result<(), ContractArtifactError> {
+    let path = repository_root.join("contracts/fixtures/negative/broken-trace-edge.json");
+    let fixture: BrokenTraceEdgeFixture =
+        serde_json::from_value(decode_strict(&read(&path)?).map_err(|source| {
+            ContractArtifactError::Canonical {
+                path: path.clone(),
+                source,
+            }
+        })?)
+        .map_err(|error| fixture_failure(&path, format!("typed fixture decode failed: {error}")))?;
+    if fixture.fixture_id != "wp11-broken-trace-edge"
+        || fixture.target_artifact != "codefabric.manifests.traceability"
+        || fixture.expected_failure_class != "unknown-requirement"
+    {
+        return Err(fixture_failure(
+            &path,
+            "fixture identity or expected class drifted",
+        ));
+    }
+    let catalog = ContractCatalog::load(repository_root)?;
+    let requirements = catalog
+        .artifact("codefabric.manifests.requirements")
+        .ok_or_else(|| ContractArtifactError::Metadata(path.clone()))?;
+    let compiled = compile_artifact(repository_root, &catalog, requirements)?;
+    let requirement_ids = typed_jsonl_records::<RequirementRecord>(
+        &repository_root.join(&requirements.authority_path),
+        &compiled.canonical_bytes,
+    )?
+    .into_iter()
+    .map(|record| record.requirement_id)
+    .collect::<BTreeSet<_>>();
+    if requirement_ids.contains(&fixture.trace.requirement_id) {
+        return Err(fixture_failure(
+            &path,
+            "broken trace edge unexpectedly resolved to a released requirement",
+        ));
     }
     Ok(())
 }
@@ -1358,6 +1899,7 @@ pub fn verify(
         compile_artifact(repository_root, &catalog, artifact)?;
     }
     verify_traceability(repository_root, &catalog)?;
+    verify_broken_trace_edge_fixture(repository_root)?;
     verify_generated(repository_root)?;
     verify_jcs_corpus(&contracts_root.join("fixtures/jcs/vectors.json"))?;
     verify_jcs_differential(&contracts_root.join("fixtures/jcs/differential-cases.json"))?;
