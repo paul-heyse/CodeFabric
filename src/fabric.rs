@@ -27,6 +27,12 @@ use crate::identity::{IdentityDomain, SOURCE_CONTEXT_ID, context_set_identity, e
 use crate::schema_registry::{TableSpec, table_spec, table_specs};
 use crate::workspace_registry::WorkspaceRecord;
 
+mod mutation;
+pub use mutation::{
+    MutationFaultPoint, MutationJournal, MutationPhase, MutationPhaseSpec, MutationResult,
+    OwnerMutationRequest, PreparedMutation, batch_checksum,
+};
+
 const SCHEMA_DIGEST_KEY: &str = "com.codefabric.cpg.schema_digest";
 const TYPE_WIDENING_KEY: &str = "delta.enableTypeWidening";
 const TARGET_FILE_SIZE_BYTES: &str = "134217728";
@@ -43,6 +49,12 @@ pub enum FabricError {
     TableInvariant { table: String, detail: String },
     #[error("LOCAL_STORAGE_PROFILE_REJECTED:{0}")]
     LocalProfile(String),
+    #[error("MUTATION_CONFLICT:{0}")]
+    MutationConflict(String),
+    #[error("MUTATION_JOURNAL:{0}")]
+    MutationJournal(String),
+    #[error("MUTATION_FAULT:{0:?}")]
+    MutationFault(MutationFaultPoint),
     #[error("fabric I/O at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -217,8 +229,8 @@ impl TableProvider for ContractTableProvider {
 pub struct FabricTable {
     pub table_code: i16,
     pub path: PathBuf,
-    delta: DeltaTable,
-    provider: Arc<dyn TableProvider>,
+    pub(super) delta: DeltaTable,
+    pub(super) provider: Arc<dyn TableProvider>,
 }
 
 impl FabricTable {
@@ -244,7 +256,7 @@ impl FabricTable {
 /// Complete local Delta namespace for one registered workspace.
 pub struct WorkspaceFabric {
     pub namespace: WorkspaceNamespace,
-    tables: BTreeMap<i16, FabricTable>,
+    pub(super) tables: BTreeMap<i16, FabricTable>,
 }
 
 /// Registry-owned projection of one Git common-directory record.
@@ -270,6 +282,11 @@ impl WorkspaceFabric {
     }
 
     async fn replace(&mut self, table_code: i16, batch: RecordBatch) -> Result<(), FabricError> {
+        let spec = table_spec(table_code).ok_or_else(|| FabricError::TableInvariant {
+            table: table_code.to_string(),
+            detail: "generated table is absent from the schema registry".into(),
+        })?;
+        mutation::enforce_write_kind(spec, mutation::DurableWriteKind::BootstrapReplace)?;
         let entry =
             self.tables
                 .get_mut(&table_code)
@@ -290,8 +307,7 @@ impl WorkspaceFabric {
             .with_save_mode(SaveMode::Overwrite)
             .await?;
         entry.delta = table;
-        entry.provider =
-            exact_provider(&entry.delta, table_spec(table_code).expect("known code")).await?;
+        entry.provider = exact_provider(&entry.delta, spec).await?;
         Ok(())
     }
 

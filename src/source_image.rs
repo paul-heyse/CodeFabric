@@ -1563,6 +1563,7 @@ mod tests {
                  DROP TABLE source_blob;
                  DROP TABLE source_blob_lease;
                  DROP TABLE source_blob_lease_member;
+                 DROP TABLE table_mutation_operation;
                  PRAGMA user_version=2;",
             )
             .unwrap();

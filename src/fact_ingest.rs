@@ -1118,9 +1118,50 @@ impl IngestCounters {
 /// Validated reconciliation result. No writer capability is exposed.
 #[derive(Debug)]
 pub struct CanonicalIngestOutput {
-    pub batches: BTreeMap<i16, RecordBatch>,
+    pub batches: BTreeMap<i16, ValidatedFactBatch>,
     pub conflicts: Vec<ConflictRecord>,
     pub metrics: IngestMetrics,
+}
+
+/// Exact-schema fact batch admitted through the sole validation boundary.
+#[derive(Clone, Debug)]
+pub struct ValidatedFactBatch {
+    table_code: i16,
+    batch: RecordBatch,
+}
+
+impl ValidatedFactBatch {
+    /// Admit a batch only after the complete generated validation matrix.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stable failing validation class.
+    pub fn validate(
+        table_code: i16,
+        batch: RecordBatch,
+        scope: FactScope,
+    ) -> Result<Self, FactIngestError> {
+        validate_fact_batch(&batch, table_code, scope)?;
+        Ok(Self { table_code, batch })
+    }
+
+    /// Generated table code this batch exactly satisfies.
+    #[must_use]
+    pub const fn table_code(&self) -> i16 {
+        self.table_code
+    }
+
+    /// Read-only access for queries, checksums, and the policy-enforcing writer.
+    #[must_use]
+    pub const fn batch(&self) -> &RecordBatch {
+        &self.batch
+    }
+
+    /// Number of validated fact rows.
+    #[must_use]
+    pub fn num_rows(&self) -> usize {
+        self.batch.num_rows()
+    }
 }
 
 #[derive(Clone)]
@@ -1349,15 +1390,19 @@ impl SyntheticCanonicalIngest {
         let candidates =
             collect_candidates(expected_scope, streams, provider_precedence, &mut metrics)?;
         let (selected, evidence, conflicts) = reconcile_candidates(candidates, provider_precedence);
-        let batches = encode_selected(selected, &evidence)?;
-        for (&table_code, batch) in &batches {
-            validate_fact_batch(batch, table_code, expected_scope)?;
-        }
-        metrics.rows_encoded = batches
+        let encoded = encode_selected(selected, &evidence)?;
+        metrics.rows_encoded = encoded
             .values()
             .map(RecordBatch::num_rows)
             .map(|rows| u64::try_from(rows).unwrap_or(u64::MAX))
             .sum();
+        let batches = encoded
+            .into_iter()
+            .map(|(table_code, batch)| {
+                ValidatedFactBatch::validate(table_code, batch, expected_scope)
+                    .map(|batch| (table_code, batch))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
         metrics.conflicts = u64::try_from(conflicts.len()).unwrap_or(u64::MAX);
         Ok(CanonicalIngestOutput {
             batches,
@@ -1607,7 +1652,12 @@ mod tests {
             fixture.expected.rejected_provider_code
         );
         assert_eq!(
-            binary_column(&output.batches[&110], table_spec(110).unwrap(), "target_id").value(0),
+            binary_column(
+                output.batches[&110].batch(),
+                table_spec(110).unwrap(),
+                "target_id",
+            )
+            .value(0),
             targets[0]
         );
 

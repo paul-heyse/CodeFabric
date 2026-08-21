@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir b3:659cfa1717fb34e8fd13ea20560f71afd5f73766ef1814502ef8897348e51323; codefabric-schema-contracts-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir b3:f079063b066fac7dbef4b8c17696b9fbb05f0e798452508c948a855673548887; codefabric-schema-contracts-v1; do not edit.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE workspace_registration (
@@ -251,6 +251,25 @@ CREATE TABLE git_operation_run (
   terminal_at TEXT,
   diagnostic_id BLOB,
   PRIMARY KEY (git_operation_run_id)
+) STRICT;
+
+CREATE TABLE table_mutation_operation (
+  operation_id BLOB NOT NULL,
+  table_code INTEGER NOT NULL,
+  mutation_phase TEXT NOT NULL,
+  application_id TEXT NOT NULL,
+  application_version INTEGER NOT NULL,
+  publication_id BLOB NOT NULL,
+  owner_set_fingerprint BLOB NOT NULL,
+  input_checksum BLOB NOT NULL,
+  expected_output_checksum BLOB NOT NULL,
+  expected_predecessor INTEGER,
+  state_code INTEGER NOT NULL,
+  delta_version INTEGER,
+  created_at TEXT NOT NULL,
+  completed_at TEXT,
+  PRIMARY KEY (operation_id, table_code, mutation_phase),
+  UNIQUE (application_id, application_version)
 ) STRICT;
 
 CREATE TABLE hot_overlay_manifest (

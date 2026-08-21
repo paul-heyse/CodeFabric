@@ -4583,11 +4583,20 @@ Carries workspace, analysis context, wave, provider, owner/build unit, source ge
 
 Carries workspace, baseline/result Git fingerprints, candidate/verified counts, state, timing, and diagnostic.
 
-### 130.7 `hot_overlay_manifest`, `snapshot_lease`, and `result_artifact_lease`
+### 130.7 `table_mutation_operation`
+
+Carries the generated Data Fabric §70 coordinator journal for every retryable
+Delta mutation phase: operation/publication/table identity, application
+identity and monotonic version, owner-set and input/expected-output checksums,
+expected predecessor and committed Delta version, lifecycle state, and timing.
+The operational database is the sole application-version allocator; Delta
+application transactions remain the per-table commit authority.
+
+### 130.8 `hot_overlay_manifest`, `snapshot_lease`, and `result_artifact_lease`
 
 Carry complete workspace/snapshot/base/overlay/context/checksum/expiry ownership required for recovery and safe retirement.
 
-### 130.8 Compatibility view
+### 130.9 Compatibility view
 
 `workspace_update_state` MAY remain as a compatibility projection of `worktree_state`. New code uses the explicit workspace identity.
 

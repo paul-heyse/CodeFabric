@@ -2545,6 +2545,14 @@ commit. The commit uses
 version))`. This is the primary per-table duplicate/conflict marker; it does not
 replace CodeFabric's multi-table publication and pointer protocols.
 
+The generated operational Contract IR SHALL define `table_mutation_operation` as
+the sole coordinator journal and monotonic-version allocator. Its primary key is
+`(operation_id, table_code, mutation_phase)` and `(application_id,
+application_version)` is unique. It stores the complete metadata tuple above,
+the expected output checksum and predecessor Delta version, the lifecycle state,
+and the committed Delta version. No sibling handwritten DDL or in-memory version
+authority is permitted.
+
 Retry logic SHALL:
 
 1. reload latest table state;

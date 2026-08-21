@@ -301,6 +301,7 @@ impl SchemaContractIr {
             "source_blob_lease",
             "source_blob_lease_member",
             "source_inventory",
+            "table_mutation_operation",
             "update_wave",
             "update_wave_item",
             "workspace_generation",

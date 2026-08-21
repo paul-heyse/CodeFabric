@@ -8,12 +8,13 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use rusqlite::backup::Backup;
-use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
+use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior};
 use thiserror::Error;
 
 use crate::contracts::index::artifact_index;
+use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
 
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str = include_str!("../contracts/schema/operational-store.sql");
 const SCHEMA_IR_ARTIFACT_ID: &str = "codefabric.schema.contract-ir";
@@ -75,6 +76,8 @@ pub enum OperationalStoreError {
     DdlLineage(String),
     #[error("injected operational-store fault at {0:?}")]
     InjectedFault(StoreFaultPoint),
+    #[error("table mutation operation record conflict: {0}")]
+    MutationRecord(String),
 }
 
 #[derive(Debug)]
@@ -329,12 +332,18 @@ impl OperationalStore {
                 migrate_v1_to_v2(&transaction)?;
                 migrate_v2_to_v3(&transaction)?;
                 migrate_v3_to_v4(&transaction)?;
+                migrate_v4_to_v5(&transaction)?;
             }
             2 => {
                 migrate_v2_to_v3(&transaction)?;
                 migrate_v3_to_v4(&transaction)?;
+                migrate_v4_to_v5(&transaction)?;
             }
-            3 => migrate_v3_to_v4(&transaction)?,
+            3 => {
+                migrate_v3_to_v4(&transaction)?;
+                migrate_v4_to_v5(&transaction)?;
+            }
+            4 => migrate_v4_to_v5(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -385,6 +394,196 @@ impl OperationalStore {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct StoredMutation {
+    application_id: String,
+    application_version: i64,
+    publication_id: Vec<u8>,
+    owner_set_fingerprint: Vec<u8>,
+    input_checksum: Vec<u8>,
+    expected_output_checksum: Vec<u8>,
+    expected_predecessor: Option<i64>,
+    state_code: i64,
+    delta_version: Option<i64>,
+}
+
+fn sqlite_version(version: Option<u64>) -> Result<Option<i64>, OperationalStoreError> {
+    version
+        .map(|value| {
+            i64::try_from(value).map_err(|_| {
+                OperationalStoreError::MutationRecord("Delta version exceeds i64".into())
+            })
+        })
+        .transpose()
+}
+
+fn delta_version(version: Option<i64>) -> Result<Option<u64>, OperationalStoreError> {
+    version
+        .map(|value| {
+            u64::try_from(value)
+                .map_err(|_| OperationalStoreError::MutationRecord("negative Delta version".into()))
+        })
+        .transpose()
+}
+
+impl OperationalStore {
+    fn prepare_mutation(
+        &mut self,
+        spec: &MutationPhaseSpec,
+    ) -> Result<PreparedMutation, OperationalStoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let stored = transaction
+            .query_row(
+                "SELECT application_id, application_version, publication_id,
+                        owner_set_fingerprint, input_checksum, expected_output_checksum,
+                        expected_predecessor, state_code, delta_version
+                   FROM table_mutation_operation
+                  WHERE operation_id=?1 AND table_code=?2 AND mutation_phase=?3",
+                rusqlite::params![spec.operation_id, spec.table_code, spec.phase.as_str()],
+                |row| {
+                    Ok(StoredMutation {
+                        application_id: row.get(0)?,
+                        application_version: row.get(1)?,
+                        publication_id: row.get(2)?,
+                        owner_set_fingerprint: row.get(3)?,
+                        input_checksum: row.get(4)?,
+                        expected_output_checksum: row.get(5)?,
+                        expected_predecessor: row.get(6)?,
+                        state_code: row.get(7)?,
+                        delta_version: row.get(8)?,
+                    })
+                },
+            )
+            .optional()?;
+        if let Some(stored) = stored {
+            let exact = stored.application_id == spec.application_id
+                && stored.publication_id.as_slice() == spec.publication_id
+                && stored.owner_set_fingerprint.as_slice() == spec.owner_set_fingerprint
+                && stored.input_checksum.as_slice() == spec.input_checksum
+                && stored.expected_output_checksum.as_slice() == spec.expected_output_checksum
+                && stored.expected_predecessor == sqlite_version(spec.expected_predecessor)?
+                && matches!(stored.state_code, 10 | 20)
+                && (stored.state_code == 20) == stored.delta_version.is_some();
+            if !exact {
+                return Err(OperationalStoreError::MutationRecord(
+                    "operation identity was reused with different fields".into(),
+                ));
+            }
+            transaction.commit()?;
+            return Ok(PreparedMutation {
+                spec: spec.clone(),
+                application_version: stored.application_version,
+                committed_delta_version: delta_version(stored.delta_version)?,
+            });
+        }
+        let predecessor_claimed = transaction.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM table_mutation_operation
+                  WHERE application_id=?1 AND expected_predecessor IS ?2
+                    AND operation_id<>?3
+             )",
+            rusqlite::params![
+                spec.application_id,
+                sqlite_version(spec.expected_predecessor)?,
+                spec.operation_id,
+            ],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if predecessor_claimed {
+            return Err(OperationalStoreError::MutationRecord(
+                "application predecessor is already claimed by another operation".into(),
+            ));
+        }
+        let prior: Option<i64> = transaction.query_row(
+            "SELECT MAX(application_version) FROM table_mutation_operation WHERE application_id=?1",
+            [&spec.application_id],
+            |row| row.get(0),
+        )?;
+        let application_version = prior.unwrap_or(0).checked_add(1).ok_or_else(|| {
+            OperationalStoreError::MutationRecord("application version exhausted".into())
+        })?;
+        transaction.execute(
+            "INSERT INTO table_mutation_operation(
+                 operation_id, table_code, mutation_phase, application_id,
+                 application_version, publication_id, owner_set_fingerprint,
+                 input_checksum, expected_output_checksum, expected_predecessor,
+                 state_code, delta_version, created_at, completed_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,10,NULL,
+                       strftime('%Y-%m-%dT%H:%M:%fZ','now'),NULL)",
+            rusqlite::params![
+                spec.operation_id,
+                spec.table_code,
+                spec.phase.as_str(),
+                spec.application_id,
+                application_version,
+                spec.publication_id,
+                spec.owner_set_fingerprint,
+                spec.input_checksum,
+                spec.expected_output_checksum,
+                sqlite_version(spec.expected_predecessor)?,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(PreparedMutation {
+            spec: spec.clone(),
+            application_version,
+            committed_delta_version: None,
+        })
+    }
+
+    fn commit_mutation(
+        &mut self,
+        prepared: &PreparedMutation,
+        version: u64,
+    ) -> Result<(), OperationalStoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let version = sqlite_version(Some(version))?.expect("Some remains Some");
+        let changed = transaction.execute(
+            "UPDATE table_mutation_operation
+                SET state_code=20, delta_version=?1,
+                    completed_at=COALESCE(completed_at,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+              WHERE operation_id=?2 AND table_code=?3 AND mutation_phase=?4
+                AND application_id=?5 AND application_version=?6
+                AND (delta_version IS NULL OR delta_version=?1)",
+            rusqlite::params![
+                version,
+                prepared.spec.operation_id,
+                prepared.spec.table_code,
+                prepared.spec.phase.as_str(),
+                prepared.spec.application_id,
+                prepared.application_version,
+            ],
+        )?;
+        if changed != 1 {
+            return Err(OperationalStoreError::MutationRecord(
+                "prepared operation is absent or committed at another Delta version".into(),
+            ));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+}
+
+impl MutationJournal for OperationalStore {
+    fn prepare(&mut self, spec: &MutationPhaseSpec) -> Result<PreparedMutation, String> {
+        self.prepare_mutation(spec)
+            .map_err(|error| error.to_string())
+    }
+
+    fn mark_committed(
+        &mut self,
+        prepared: &PreparedMutation,
+        delta_version: u64,
+    ) -> Result<(), String> {
+        self.commit_mutation(prepared, delta_version)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -473,6 +672,11 @@ fn migrate_v3_to_v4(transaction: &Transaction<'_>) -> Result<(), OperationalStor
          WHERE state.repository_id IS NOT NULL AND state.worktree_id IS NOT NULL;
          DROP TABLE git_state_vector_v3;",
     )?;
+    Ok(())
+}
+
+fn migrate_v4_to_v5(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    transaction.execute_batch(&generated_table_ddl("table_mutation_operation")?)?;
     Ok(())
 }
 
@@ -871,7 +1075,7 @@ mod tests {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v4")
+                    .contains("pre-migration-v5")
             })
             .unwrap()
             .path();
@@ -895,7 +1099,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v4"))
+                    .contains("pre-migration-v5"))
                 .count(),
             1
         );
@@ -908,7 +1112,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v4"))
+                    .contains("pre-migration-v5"))
                 .count(),
             2
         );
@@ -1019,6 +1223,7 @@ mod tests {
                  DROP TABLE source_blob;
                  DROP TABLE source_blob_lease;
                  DROP TABLE source_blob_lease_member;
+                 DROP TABLE table_mutation_operation;
                  PRAGMA user_version=1;",
             )
             .unwrap();
