@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP07",
+  "current_packet": "WP08",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -299,8 +299,8 @@
       "blockers": []
     },
     "WP07": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "9277b16cf8a4a97d316c8b3834e0b858eff37d8d",
       "deviations": [
         {
           "kind": "resolved_historical_blocker",
@@ -310,11 +310,14 @@
           "summary": "The remediation plan is locally complete through WP08 and its WP09 local gates are green, but M04 cannot release v4 WP07 until v4 M01 has a GitHub Actions Ubuntu clean-checkout just ci-fast result."
         }
       ],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first fixture-census replay only scanned the legacy contract_ingress fuzz directory, leaving other committed fuzz corpora outside governance. The census now owns all of fuzz/corpus and classifies every existing seed.",
+        "The first aggregate gate exposed a DB01 zero-state self-match in its own Python reconciliation test. The packaging scan now excludes that assurance implementation while retaining every executable and configuration surface."
+      ],
       "blockers": []
     },
     "WP08": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
