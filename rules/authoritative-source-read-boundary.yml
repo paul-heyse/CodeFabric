@@ -1,0 +1,27 @@
+id: authoritative-source-read-boundary
+language: Rust
+severity: error
+message: Authoritative source bytes must be read through secure_path.
+note: Configuration, contract, database, entropy, and Git-advisory boundaries are explicitly non-source readers.
+files:
+  - src/**/*.rs
+ignores:
+  - src/secure_path.rs
+  - src/daemon.rs
+  - src/identity.rs
+  - src/operational_store.rs
+  - src/contracts/**/*.rs
+rule:
+  any:
+    - pattern: std::fs::read($PATH)
+    - pattern: fs::read($PATH)
+    - pattern: tokio::fs::read($PATH)
+    - pattern: std::fs::read_to_string($PATH)
+    - pattern: fs::read_to_string($PATH)
+    - pattern: tokio::fs::read_to_string($PATH)
+    - pattern: std::fs::File::open($PATH)
+    - pattern: fs::File::open($PATH)
+    - pattern: File::open($PATH)
+    - pattern: std::fs::OpenOptions::new()
+    - pattern: fs::OpenOptions::new()
+    - pattern: OpenOptions::new()

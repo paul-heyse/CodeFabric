@@ -20,6 +20,8 @@ pub mod registries;
 pub mod rpc;
 #[cfg(feature = "data-fabric")]
 pub mod schema_registry;
+#[cfg(feature = "daemon")]
+pub mod secure_path;
 #[cfg(feature = "canonical-json")]
 pub mod snapshot;
 #[cfg(feature = "daemon")]

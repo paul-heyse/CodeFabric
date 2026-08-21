@@ -1,0 +1,23 @@
+id: authoritative-source-read-boundary
+valid:
+  - |
+      fn read_source(root: &SecureRoot, path: &PlatformPath) -> Result<Vec<u8>, SecurePathError> {
+          root.read_file(path)
+      }
+invalid:
+  - |
+      fn read_source(path: &Path) {
+          let _bytes = std::fs::read(path);
+      }
+  - |
+      fn read_source(path: &Path) {
+          let _text = fs::read_to_string(path);
+      }
+  - |
+      fn read_source(path: &Path) {
+          let _file = File::open(path);
+      }
+  - |
+      fn read_source(path: &Path) {
+          let _file = std::fs::OpenOptions::new().read(true).open(path);
+      }

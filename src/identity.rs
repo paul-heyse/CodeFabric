@@ -708,6 +708,31 @@ pub fn context_set_identity(
     })
 }
 
+/// Derive the AC-G-12 present-state source-file identity from its comparison key.
+///
+/// # Errors
+///
+/// Returns an error only if the closed CBEF source-file recipe cannot be encoded.
+pub fn source_file_identity(path: &WorkspacePath) -> Result<DerivedIdentity, IdentityError> {
+    derive_identity(&CbefRecord {
+        domain: IdentityDomain::SourceFile,
+        fields: vec![
+            CbefField {
+                tag: 1,
+                value: CbefValue::Id(path.workspace_id),
+            },
+            CbefField {
+                tag: 2,
+                value: CbefValue::Id(SOURCE_CONTEXT_ID),
+            },
+            CbefField {
+                tag: 3,
+                value: CbefValue::Bytes(path.comparison_key_bytes.clone()),
+            },
+        ],
+    })
+}
+
 /// AC-G-11 root-authorization fields whose CBEF digest is persisted as the fingerprint.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RootAuthorizationInput {

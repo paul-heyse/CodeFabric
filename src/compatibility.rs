@@ -99,24 +99,3 @@ pub const fn git_hash_algorithm_count() -> usize {
 pub fn delta_application_transaction_version() -> i64 {
     crate::fabric::application_transaction().version
 }
-
-/// Opens a file relative to a trusted directory descriptor without following a final
-/// symlink.
-///
-/// # Errors
-///
-/// Returns the operating-system error from the descriptor-relative open.
-pub fn descriptor_relative_open(
-    directory: &std::fs::File,
-    relative: &std::path::Path,
-) -> std::io::Result<std::fs::File> {
-    use rustix::fs::{Mode, OFlags, openat};
-
-    let descriptor = openat(
-        directory,
-        relative,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::empty(),
-    )?;
-    Ok(std::fs::File::from(descriptor))
-}

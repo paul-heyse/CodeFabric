@@ -1422,6 +1422,7 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
             "WORKSPACE_NOT_AUTHORIZED",
             "PATH_OUTSIDE_AUTHORIZED_ROOT",
             "SOURCE_ACCESS_DENIED",
+            "BLOCKED_PATH_COLLISION",
             "FRESHNESS_DEADLINE_EXCEEDED",
             "CAPABILITY_UNAVAILABLE",
             "NEGATIVE_PROOF_INDETERMINATE",
