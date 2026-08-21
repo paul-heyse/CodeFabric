@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP18",
+  "current_packet": "WP19",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -503,10 +503,19 @@
       "blockers": []
     },
     "WP18": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "20a7fa42977d67554a1139359091d2e517592e86",
+      "deviations": [
+        {
+          "kind": "accepted_model_closure",
+          "summary": "The operational Contract IR now stores the complete typed GitStateVector and a workspace-level authoritative inventory digest. This aligns the generated schema with Lifecycle section 50 and lets non-Git health restore inventory identity without deriving it from Git rows."
+        }
+      ],
+      "failed_approaches": [
+        "The first generated-profile verification exposed that the newly required coordinator limits had been added to the closed YAML model and instance but not its governing JSON Schema. The same three bounded fields are now required by that schema.",
+        "The schema-v4 migration initially assumed every historical test fixture carried the v3 Git vector shape and old backup assertions named v3. The migration now detects an already-current generated table, and the assertions follow the v4 lineage.",
+        "The first assembled Wave-2 run observed one transient failure in WP17's byte-identical Git metadata oracle. The exact test passed immediately in isolation, alongside WP18 concurrency, and on the repeated Wave-2 and full ci-fast runs; no assertion was weakened."
+      ],
       "blockers": []
     },
     "WP19": {
@@ -594,8 +603,8 @@
       "blockers": []
     },
     "M03": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "20a7fa42977d67554a1139359091d2e517592e86",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -965,6 +974,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP18: implement the per-workspace coordinator actor, cold bootstrap without watchers, warm restart, G0/G1 state fencing, and pre-ready health/admin diagnostics.",
-  "updated_at": "2026-08-21T11:48:55Z"
+  "next_action": "Execute WP19: replace the data-fabric compatibility seams with the generated schema-registry runtime, local Delta namespace, provider-factory boundary, constrained control-plane tables, and exact round-trip validation.",
+  "updated_at": "2026-08-21T12:17:12Z"
 }
