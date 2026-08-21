@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP12",
+  "current_packet": "WP13",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -395,10 +395,17 @@
       "blockers": []
     },
     "WP12": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "b27d909772405965f4d4aff605fa4a63b4618e05",
+      "deviations": [
+        {
+          "kind": "dependency_identity",
+          "summary": "The closed daemon configuration boundary uses exact toml 1.1.4+spec-1.1.0; the exact resolved identity is governed by the toolchain contract and stable graph check."
+        }
+      ],
+      "failed_approaches": [
+        "The initial lock-file open omitted an explicit truncate policy; Clippy required the singleton lease to state truncate(false), preserving the durable lock inode while process-scoped try_lock owns exclusivity."
+      ],
       "blockers": []
     },
     "WP13": {
@@ -881,6 +888,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP12: implement the catalog-driven daemon configuration loader with typed settings, exact local-workstation defaults, bounded overrides, and named behavioral/structural/negative/operational acceptance oracles.",
-  "updated_at": "2026-08-21T09:10:42Z"
+  "next_action": "Execute WP13: implement the catalog-generated SQLite WAL operational store, migrations with online backup, newer-schema refusal, coordinator-only writer boundary, and named behavioral/structural/negative/operational acceptance oracles.",
+  "updated_at": "2026-08-21T09:28:57Z"
 }
