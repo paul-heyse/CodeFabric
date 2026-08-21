@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP13",
+  "current_packet": "WP14",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -409,10 +409,18 @@
       "blockers": []
     },
     "WP13": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "8d1dc56de9b1bd87a173376267ab0c31de7ad234",
+      "deviations": [
+        {
+          "kind": "model_completion",
+          "summary": "The closed schema Contract IR now supplies the plan-required workspace registration, generation counter, nested-root exclusion, credential metadata, and audit-event tables; all SQL and downstream identities are generated from that authority."
+        }
+      ],
+      "failed_approaches": [
+        "The first coordinator guard bound the SQLite writer to an OS thread. Tokio correctly moved the daemon task between workers, so ownership was corrected to one open writer plus Rust mutable ownership rather than invalid thread affinity.",
+        "The first full gate exposed a legacy test with a hard-coded 12-table count. It now derives the expected count from the generated DDL, eliminating recurrent count/hash maintenance churn."
+      ],
       "blockers": []
     },
     "WP14": {
@@ -888,6 +896,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP13: implement the catalog-generated SQLite WAL operational store, migrations with online backup, newer-schema refusal, coordinator-only writer boundary, and named behavioral/structural/negative/operational acceptance oracles.",
-  "updated_at": "2026-08-21T09:28:57Z"
+  "next_action": "Execute WP14: implement the generated workspace registry and lifecycle machines, CBEF identities, private administrative IPC/CLI, nested-root exclusions, persisted revisions, and audit records.",
+  "updated_at": "2026-08-21T09:44:06Z"
 }
