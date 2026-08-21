@@ -120,10 +120,8 @@ impl ServingSnapshotCandidate {
         };
         body.overlay.overlay_generation = providers.overlay_generation();
         body.overlay.overlay_digest = framed_digest(providers.overlay_checksum());
-        if providers.overlay_generation() == 0 {
-            body.overlay.total_memory_bytes = 0;
-            body.overlay.tables.clear();
-        }
+        body.overlay.total_memory_bytes = providers.overlay_memory_bytes();
+        body.overlay.tables = providers.overlay_tables().to_vec();
         let manifest = body.derive()?;
         Self::validate_and_bind(manifest, providers, source_blob_digests)
     }
@@ -142,6 +140,8 @@ impl ServingSnapshotCandidate {
         if manifest.raw_publication_id()? != providers.publication_id()
             || manifest.body.overlay.overlay_generation != providers.overlay_generation()
             || manifest.body.overlay.overlay_digest != framed_digest(providers.overlay_checksum())
+            || manifest.body.overlay.total_memory_bytes != providers.overlay_memory_bytes()
+            || manifest.body.overlay.tables != providers.overlay_tables()
         {
             return Err(SnapshotRuntimeError::Candidate(
                 "manifest publication or overlay differs from frozen catalog".into(),

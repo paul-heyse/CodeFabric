@@ -29,12 +29,18 @@ use crate::schema_registry::{TableSpec, table_spec, table_specs};
 use crate::workspace_registry::WorkspaceRecord;
 
 mod mutation;
+mod overlay;
 mod publication;
 mod snapshot_catalog;
 pub use mutation::{
     MutationFaultPoint, MutationJournal, MutationPhase, MutationPhaseSpec, MutationResult,
     OwnerMutationRequest, PreparedMutation, batch_checksum,
 };
+pub use overlay::{
+    ConsolidatedOverlay, OverlayConsolidationRequest, OverlayMutation, OverlayTable,
+};
+#[cfg(feature = "daemon")]
+pub use overlay::{OverlayRebaseFaultPoint, OverlayRebaseOutcome, OverlayRebaseRequest};
 pub use publication::{
     CurrentPublicationRecord, OwnerPublicationWrite, PublicationFaultPoint, PublicationOutcome,
     PublicationPins, PublicationRequest, PublicationTableRecord,
@@ -77,6 +83,14 @@ pub enum FabricError {
     SnapshotProviderIntegrity(String),
     #[error("SNAPSHOT_CATALOG_FROZEN:{0}")]
     SnapshotCatalogFrozen(String),
+    #[error("OVERLAY_POLICY_VIOLATION:{0}")]
+    OverlayPolicyViolation(String),
+    #[error("OVERLAY_GENERATION_CONFLICT:{0}")]
+    OverlayGenerationConflict(String),
+    #[error("OVERLAY_MEMORY_RESERVATION:{0}")]
+    OverlayMemoryReservation(String),
+    #[error("OVERLAY_REBASE_RESTART_REQUIRED:{0}")]
+    OverlayRebaseRestartRequired(String),
     #[error("fabric I/O at {path}: {source}")]
     Io {
         path: PathBuf,

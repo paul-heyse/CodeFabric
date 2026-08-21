@@ -38,6 +38,8 @@ contracts-tooling = [
 ]
 data-fabric = [
     "canonical-json",
+    "contracts-tooling",
+    "repository-state",
     "dep:async-trait",
     "dep:arrow",
     "dep:arrow-array",

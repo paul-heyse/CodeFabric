@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:b3f2432b390c40f6cab2a7888fc791fe1d0a1748733ede9a2512318d41ace343"
+canonical_digest: "b3:a718c360e281dceb93124dcadb7c5ba49826c6270862f915705e45591b874153"
 digest_projection: yaml-ac-g-53-v1
 generator_revision: codefabric-contracts/1.0
 records:
@@ -18,6 +18,8 @@ records:
   - {field_name: temporary_staging_path, category: storage, rationale: Ephemeral path allocation is not durable meaning, semantic: false}
   - {field_name: delta_physical_file_name, category: storage, rationale: Delta physical layout is below the semantic table contract, semantic: false}
   - {field_name: delta_file_order, category: storage, rationale: Physical file order is normalized by canonical row ordering, semantic: false}
+  - {field_name: delta_version, category: storage, rationale: Delta commit allocation is compared through effective logical table content, semantic: false}
+  - {field_name: table_uri, category: storage, rationale: Local table placement is below effective logical table content, semantic: false}
   - {field_name: object_store_etag, category: storage, rationale: Non-semantic store validators are not content identities, semantic: false}
   - {field_name: lease_id, category: lease, rationale: Lease locators are operational, semantic: false}
   - {field_name: lease_expiry_time, category: lease, rationale: Lease expiry is operational, semantic: false}
@@ -32,6 +34,7 @@ records:
   - {field_name: source_generation, category: generation, rationale: Generation is normalized through source content, semantic: false}
   - {field_name: update_generation, category: generation, rationale: Generation is normalized through effective state, semantic: false}
   - {field_name: overlay_generation, category: generation, rationale: Generation is normalized through effective overlay content, semantic: false}
+  - {field_name: overlay_memory_bytes, category: telemetry, rationale: Allocator accounting is operational and cannot change logical overlay content, semantic: false}
   - {field_name: admitted_event_sequence, category: event, rationale: Event sequence is normalized through terminal state, semantic: false}
   - {field_name: reconciled_event_sequence, category: event, rationale: Event sequence is normalized through terminal state, semantic: false}
   - {field_name: provider_last_updated_generation, category: generation, rationale: Provider generation is normalized through provider state and content, semantic: false}

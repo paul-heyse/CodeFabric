@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:f8271264e41054a56b7e5819c7e75308f9c279edd1cb263b572c98eeea2503e8"
+canonical_digest: "b3:61f3562945bfb6608b0cf9462c599692d3bd15142301f78b4b1683a60ac4e06c"
 digest_projection: yaml-ac-g-53-v1
 generator_revision: codefabric-contracts/1.0
 records:
@@ -31,8 +31,26 @@ records:
     production_exposable: false
     expected_invariants: [live-holder-preserved, idempotent-garbage-collection]
     scenarios: [source-blob-concurrent-release-gc]
+  - code: OVERLAY_REBASE_AFTER_FLUSH_CAPTURE
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [captured-overlay-immutable, durable-pointer-unchanged]
+    scenarios: [overlay-three-snapshot-rebase]
+  - code: OVERLAY_REBASE_AFTER_PUBLICATION_CAS
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [durable-pointer-recoverable, old-snapshot-remains-leasable]
+    scenarios: [overlay-three-snapshot-rebase]
+  - code: OVERLAY_REBASE_BEFORE_SNAPSHOT_ACTIVATION
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [effective-content-validated, active-snapshot-unchanged]
+    scenarios: [overlay-three-snapshot-rebase]
 owner_acceptance:
   approver: lifecycle-owner
   accepted_at: "2026-08-21"
-  construction_rule: Append-only deterministic Wave-2 source capture, publication, lease, restart, and garbage-collection seams
+  construction_rule: Append-only deterministic Wave-2 source capture and Wave-3 overlay-rebase durability seams
   source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

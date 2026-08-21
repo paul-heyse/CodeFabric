@@ -16,7 +16,7 @@ pub mod daemon;
 pub mod identity;
 #[cfg(feature = "daemon")]
 pub mod inventory;
-#[cfg(feature = "daemon")]
+#[cfg(feature = "data-fabric")]
 pub mod operational_store;
 /// Generated categorical and lifecycle registry types.
 pub mod registries;
@@ -32,7 +32,7 @@ pub mod snapshot;
 pub mod snapshot_runtime;
 #[cfg(feature = "daemon")]
 pub mod source_image;
-#[cfg(feature = "daemon")]
+#[cfg(feature = "data-fabric")]
 pub mod workspace_registry;
 
 #[cfg(feature = "data-fabric")]

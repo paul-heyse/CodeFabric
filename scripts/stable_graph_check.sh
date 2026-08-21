@@ -118,6 +118,8 @@ printf '%s' "$root_shape" | jq -e '
     ],
     "data-fabric": [
       "canonical-json",
+      "contracts-tooling",
+      "repository-state",
       "dep:async-trait",
       "dep:arrow",
       "dep:arrow-array",

@@ -10,6 +10,7 @@ use super::{
 };
 use crate::fabric::batch_checksum;
 use crate::schema_registry::{PublicationPinRole, TableSpec, table_spec, table_specs};
+use crate::snapshot::SnapshotOverlayTable;
 use arrow_array::{Array as _, BinaryArray, RecordBatch};
 use arrow_select::concat::concat_batches;
 use async_trait::async_trait;
@@ -156,6 +157,8 @@ impl DeltaHandleFactory {
 pub trait SnapshotOverlayProviderFactory: fmt::Debug + Send + Sync {
     fn generation(&self) -> u64;
     fn checksum(&self) -> [u8; 32];
+    fn memory_bytes(&self) -> u64;
+    fn table_manifests(&self) -> Vec<SnapshotOverlayTable>;
 
     /// Wrap one exact-version base provider with this immutable overlay generation.
     ///
@@ -180,6 +183,14 @@ impl SnapshotOverlayProviderFactory for EmptySnapshotOverlay {
 
     fn checksum(&self) -> [u8; 32] {
         *blake3::hash(b"codefabric-empty-overlay-v1\0").as_bytes()
+    }
+
+    fn memory_bytes(&self) -> u64 {
+        0
+    }
+
+    fn table_manifests(&self) -> Vec<SnapshotOverlayTable> {
+        Vec::new()
     }
 
     fn wrap(
@@ -380,6 +391,8 @@ pub struct SnapshotProviderCatalog {
     publication_id: [u8; 16],
     overlay_generation: u64,
     overlay_checksum: [u8; 32],
+    overlay_memory_bytes: u64,
+    overlay_tables: Arc<[SnapshotOverlayTable]>,
     providers: BTreeMap<i16, SnapshotProviderRecord>,
     catalog: Arc<FrozenCatalogProvider>,
     trace: Vec<SnapshotConstructionStage>,
@@ -400,6 +413,8 @@ impl SnapshotProviderCatalog {
             publication_id,
             overlay_generation,
             overlay_checksum,
+            overlay_memory_bytes: 0,
+            overlay_tables: Arc::from([]),
             providers: BTreeMap::new(),
             catalog: Arc::new(FrozenCatalogProvider { schema }),
             trace: vec![
@@ -460,6 +475,8 @@ impl SnapshotProviderCatalog {
             publication_id,
             overlay_generation: 0,
             overlay_checksum,
+            overlay_memory_bytes: 0,
+            overlay_tables: Arc::from([]),
             providers,
             catalog: Arc::new(FrozenCatalogProvider { schema }),
             trace: vec![
@@ -541,6 +558,8 @@ impl SnapshotProviderCatalog {
             publication_id: publication.publication_id,
             overlay_generation: overlay.generation(),
             overlay_checksum: overlay.checksum(),
+            overlay_memory_bytes: overlay.memory_bytes(),
+            overlay_tables: overlay.table_manifests().into(),
             providers: wrapped,
             catalog,
             trace,
@@ -568,6 +587,16 @@ impl SnapshotProviderCatalog {
     }
 
     #[must_use]
+    pub const fn overlay_memory_bytes(&self) -> u64 {
+        self.overlay_memory_bytes
+    }
+
+    #[must_use]
+    pub fn overlay_tables(&self) -> &[SnapshotOverlayTable] {
+        &self.overlay_tables
+    }
+
+    #[must_use]
     pub fn trace(&self) -> &[SnapshotConstructionStage] {
         &self.trace
     }
@@ -586,6 +615,18 @@ impl SnapshotProviderCatalog {
     #[must_use]
     pub fn provider_records(&self) -> impl ExactSizeIterator<Item = &SnapshotProviderRecord> {
         self.providers.values()
+    }
+
+    /// Digest the exact effective table contents while excluding base/publication locators.
+    #[must_use]
+    pub fn effective_state_digest(&self) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"codefabric-effective-snapshot-v1\0");
+        for (&table_code, record) in &self.providers {
+            hasher.update(&table_code.to_be_bytes());
+            hasher.update(&record.effective_content_digest);
+        }
+        *hasher.finalize().as_bytes()
     }
 
     #[must_use]

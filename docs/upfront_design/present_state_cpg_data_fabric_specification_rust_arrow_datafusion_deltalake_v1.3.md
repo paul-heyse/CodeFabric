@@ -4156,19 +4156,28 @@ Tombstone Arrow schemas are:
 owner_tombstone:
   workspace_id         id16
   analysis_context_id  id16
+  source_generation     int64
+  overlay_generation    int64
   table_code            code16
   owner_id              id16
-  tombstone_generation  int64
+  owner_bucket          bucket16
   reason_code           code16
+  tombstone_digest      hash32
 
 primary_key_tombstone:
   workspace_id         id16
   analysis_context_id  id16
+  source_generation     int64
+  overlay_generation    int64
   table_code            code16
-  encoded_primary_key   binary  // CBEF encoding of table primary-key fields
-  tombstone_generation  int64
+  primary_key_digest    hash32  // digest of Arrow row-encoded table primary-key fields
   reason_code           code16
+  tombstone_digest      hash32
 ```
+
+These are the verbatim generated schemas for table codes 900 and 901. Implementations
+MAY retain the Arrow row-encoded primary key beside the public digest inside the immutable
+index so DataFusion can construct a typed anti-join without decoding or adding query columns.
 
 Replacement batches SHALL be:
 
