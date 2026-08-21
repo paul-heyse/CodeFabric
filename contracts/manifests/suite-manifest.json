@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "draft",
-  "canonical_digest": "b3:f58ca8bd386dbcb32a164fab989c90842c5cff66123f003b7760b7c5704db6d8",
+  "canonical_digest": "b3:22e61e266305d3bf0e74760d88c5cc87e677a376a1ae48cd06da103f74cdf066",
   "digest_projection": "json-jcs-v1",
   "catalog_schema_version": 2,
   "resource_budget_profiles": [
@@ -667,7 +667,7 @@
       "owner": "ontology",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "identity",
       "resource_budget_profile": "yaml-standard",
@@ -682,6 +682,7 @@
         "canonical-digest",
         "generator-revision",
         "native-validation",
+        "owner-acceptance",
         "source-digest"
       ],
       "semantic_projection_source": {
@@ -696,7 +697,7 @@
       "owner": "ontology",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "identity",
       "resource_budget_profile": "yaml-standard",
@@ -711,6 +712,7 @@
         "canonical-digest",
         "generator-revision",
         "native-validation",
+        "owner-acceptance",
         "source-digest"
       ],
       "semantic_projection_source": {
@@ -725,7 +727,7 @@
       "owner": "ontology",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "yaml-ac-g-53-v1",
       "compatibility_family": "identity",
       "resource_budget_profile": "yaml-standard",
@@ -740,6 +742,7 @@
         "canonical-digest",
         "generator-revision",
         "native-validation",
+        "owner-acceptance",
         "source-digest"
       ],
       "semantic_projection_source": {

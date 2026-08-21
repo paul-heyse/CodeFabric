@@ -2,7 +2,56 @@ artifact_id: codefabric.identity.type-algebra-v1
 artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:57d3b918ad2c33d5c3933e248b0a5d6facb13e1e144ec68a40d49f444cdf98a2"
-rules: []
-
+status: released
+canonical_digest: "b3:73da9c1c7479b44bed00612631e7ff8fa648ccaea31bd715597233b7accdc22d"
+algebra_version: 1
+constructors:
+  - {code: 1, name: Unknown, operands: [{name: reason_code, role: registry-code}]}
+  - {code: 2, name: Error, operands: [{name: diagnostic_class, role: registry-code}]}
+  - {code: 3, name: AnyDynamic, operands: [{name: language_semantics, role: registry-code}]}
+  - {code: 4, name: NeverBottom, operands: []}
+  - {code: 5, name: NullNone, operands: []}
+  - {code: 6, name: Primitive, operands: [{name: language, role: registry-code}, {name: canonical_name, role: semantic-string}]}
+  - {code: 7, name: Nominal, operands: [{name: declaration_entity_id, role: entity-id}, {name: ordered_type_args, role: ordered-type-id-list}]}
+  - {code: 8, name: Alias, operands: [{name: alias_entity_id, role: entity-id}, {name: target_type_id, role: type-id}, {name: transparency, role: registry-code}]}
+  - {code: 9, name: Literal, operands: [{name: canonical_scalar_value, role: tagged-scalar}]}
+  - {code: 10, name: Union, operands: [{name: member_type_ids, role: sorted-unique-type-id-set}]}
+  - {code: 11, name: Intersection, operands: [{name: member_type_ids, role: sorted-unique-type-id-set}]}
+  - {code: 12, name: Tuple, operands: [{name: ordered_elements, role: ordered-type-id-list}, {name: variadic_tail, role: optional-type-id}]}
+  - {code: 13, name: Callable, operands: [{name: parameters, role: ordered-parameter-list}, {name: return_type, role: type-id}, {name: receiver, role: optional-type-id}, {name: variadic, role: boolean}, {name: effects_profile, role: optional-registry-code}]}
+  - {code: 14, name: TypeObject, operands: [{name: instance_type, role: type-id}]}
+  - {code: 15, name: ClassObject, operands: [{name: class_entity_id, role: entity-id}]}
+  - {code: 16, name: Generic, operands: [{name: parameter_binders, role: ordered-binder-list}, {name: body, role: type-id}]}
+  - {code: 17, name: TypeVariable, operands: [{name: parameter_entity_id, role: entity-id}, {name: variance, role: registry-code}, {name: bounds, role: sorted-unique-type-id-set}, {name: constraints, role: sorted-unique-type-id-set}, {name: default, role: optional-type-id}]}
+  - {code: 18, name: AssociatedType, operands: [{name: owner_entity_id, role: entity-id}, {name: item_entity_id, role: entity-id}, {name: substitutions, role: ordered-type-id-list}]}
+  - {code: 19, name: Projection, operands: [{name: base_type, role: type-id}, {name: trait_or_protocol, role: entity-id}, {name: member, role: semantic-string}]}
+  - {code: 20, name: Reference, operands: [{name: mutability, role: registry-code}, {name: region, role: canonical-region}, {name: pointee, role: type-id}]}
+  - {code: 21, name: RawPointer, operands: [{name: mutability, role: registry-code}, {name: pointee, role: type-id}]}
+  - {code: 22, name: Array, operands: [{name: element, role: type-id}, {name: const_length, role: const-algebra}]}
+  - {code: 23, name: Slice, operands: [{name: element, role: type-id}]}
+  - {code: 24, name: Mapping, operands: [{name: key, role: type-id}, {name: value, role: type-id}]}
+  - {code: 25, name: Sequence, operands: [{name: element, role: type-id}]}
+  - {code: 26, name: Structural, operands: [{name: required_members, role: encoded-key-sorted-map}]}
+  - {code: 27, name: FunctionDefinition, operands: [{name: callable_entity_id, role: entity-id}, {name: substitutions, role: ordered-type-id-list}]}
+  - {code: 28, name: FunctionPointer, operands: [{name: signature, role: type-id}]}
+  - {code: 29, name: Closure, operands: [{name: closure_entity_id, role: entity-id}, {name: substitutions, role: ordered-type-id-list}]}
+  - {code: 30, name: Coroutine, operands: [{name: coroutine_entity_id, role: entity-id}, {name: yield_type, role: type-id}, {name: return_type, role: type-id}, {name: resume_type, role: type-id}]}
+  - {code: 31, name: DynTrait, operands: [{name: principal_and_auto_traits, role: ordered-entity-id-list}, {name: region, role: canonical-region}]}
+  - {code: 32, name: ImplTrait, operands: [{name: opaque_entity_id, role: entity-id}, {name: bounds, role: sorted-unique-type-id-set}]}
+  - {code: 33, name: ConstArgument, operands: [{name: value, role: const-algebra}]}
+  - {code: 34, name: RecursiveBinder, operands: [{name: binder_arity, role: unsigned-16}, {name: body, role: type-id}]}
+  - {code: 35, name: BoundVariable, operands: [{name: de_bruijn_index, role: unsigned-16}, {name: variable_index, role: unsigned-16}, {name: kind, role: registry-code}]}
+normalization:
+  flatten_set_constructors: true
+  sort_unique_member_ids: true
+  python_optional_to_union: true
+  aliases_are_first_class: true
+  de_bruijn_binders: true
+  provider_debug_strings_forbidden: true
+identity_domain: TYPE
+identity_scope: [workspace_id, analysis_context_id]
+owner_acceptance:
+  approver: repository-owner
+  accepted_at: "2026-08-20"
+  construction_rule: declaration-order allocation over the complete AC-G-15 constructor algebra
+  source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"

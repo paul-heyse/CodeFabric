@@ -2,7 +2,185 @@ artifact_id: codefabric.identity.cbef-v1
 artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:9dbf8fb6f1b6d1bc66e578ad355927ede96c566fdcb82ac1b72d7a947c11ddd2"
-rules: []
-
+status: released
+canonical_digest: "b3:50dd3315b6e10cf6d0df710d70e9b2d1d59545d8c2d5c7a4ec426c101a7fc0f3"
+format_name: CBEF-v1
+format_version: 1
+magic_ascii: CFID
+byte_order: big-endian
+record_frame:
+  - {name: magic, width_bytes: 4}
+  - {name: format_version, width_bytes: 1}
+  - {name: record_domain, width_bytes: 2}
+  - {name: field_count, width_bytes: 2}
+  - {name: fields, width_bytes: 0}
+field_frame:
+  - {name: field_tag, width_bytes: 2}
+  - {name: type_code, width_bytes: 1}
+  - {name: payload_length, width_bytes: 4}
+  - {name: payload, width_bytes: 0}
+type_codes:
+  - {code: 0, name: ABSENT, payload: zero-bytes}
+  - {code: 1, name: BYTES, payload: exact-bytes}
+  - {code: 2, name: UTF8, payload: normalized-utf8}
+  - {code: 3, name: RAW_PATH, payload: platform-byte-plus-exact-path-bytes}
+  - {code: 4, name: UNSIGNED, payload: schema-width-big-endian}
+  - {code: 5, name: SIGNED, payload: schema-width-twos-complement-big-endian}
+  - {code: 6, name: BOOLEAN, payload: one-byte-zero-or-one}
+  - {code: 7, name: ID, payload: exact-16-bytes}
+  - {code: 8, name: DIGEST, payload: exact-32-bytes}
+  - {code: 9, name: ORDERED_LIST, payload: u32-count-plus-length-prefixed-typed-elements}
+  - {code: 10, name: SET, payload: u32-count-plus-sorted-unique-length-prefixed-typed-elements}
+  - {code: 11, name: MAP, payload: u32-count-plus-encoded-key-sorted-length-prefixed-typed-pairs}
+  - {code: 12, name: TAGGED_UNION, payload: u16-variant-plus-u32-length-plus-typed-value}
+domains:
+  - code: 1
+    name: WORKSPACE
+    public_prefix: workspace
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: organization_slug, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 2, name: workspace_root_digest, type_code: DIGEST}
+  - code: 2
+    name: REPOSITORY
+    public_prefix: repository
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: vcs_kind, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 3, name: origin_identity_digest, type_code: DIGEST}
+  - code: 3
+    name: WORKTREE
+    public_prefix: worktree
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: repository_id, type_code: ID}
+      - {tag: 3, name: relative_root, type_code: RAW_PATH}
+  - code: 4
+    name: ANALYSIS_CONTEXT
+    public_prefix: context
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: language_slug, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 3, name: environment_digest, type_code: DIGEST}
+  - code: 5
+    name: CONTEXT_SET
+    public_prefix: context-set
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: context_ids, type_code: SET, member_type: ID}
+  - code: 6
+    name: SOURCE_FILE
+    public_prefix: file
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: source_context_id, type_code: ID}
+      - {tag: 3, name: comparison_key_bytes, type_code: BYTES}
+  - code: 7
+    name: OWNER
+    public_prefix: owner
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: owner_kind, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 4, name: semantic_key, type_code: BYTES}
+  - code: 8
+    name: ENTITY
+    public_prefix: entity
+    kind_slug_required: true
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: kind_code, type_code: UNSIGNED, width_bytes: 2}
+      - {tag: 4, name: owner_id, type_code: ID}
+      - {tag: 5, name: semantic_key, type_code: BYTES}
+  - code: 9
+    name: RELATION_FACT
+    public_prefix: fact
+    kind_slug_required: true
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: relation_kind_code, type_code: UNSIGNED, width_bytes: 2}
+      - {tag: 4, name: subject_entity_id, type_code: ID}
+      - {tag: 5, name: object_entity_id, type_code: ID}
+      - {tag: 6, name: role, type_code: TAGGED_UNION, member_type: ABSENT-or-UTF8-NONE}
+  - code: 10
+    name: PROPERTY_FACT
+    public_prefix: fact
+    kind_slug_required: true
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: property_kind_code, type_code: UNSIGNED, width_bytes: 2}
+      - {tag: 4, name: subject_entity_id, type_code: ID}
+      - {tag: 5, name: canonical_value, type_code: TAGGED_UNION, member_type: scalar-value}
+  - code: 11
+    name: TYPE
+    public_prefix: type
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: algebra_version, type_code: UNSIGNED, width_bytes: 2}
+      - {tag: 4, name: canonical_type_term, type_code: BYTES}
+  - code: 12
+    name: PUBLICATION
+    public_prefix: publication
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: serving_snapshot_id, type_code: ID}
+      - {tag: 3, name: publication_sequence, type_code: UNSIGNED, width_bytes: 8}
+  - code: 13
+    name: SERVING_SNAPSHOT
+    public_prefix: snapshot
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: publication_id, type_code: ID}
+      - {tag: 3, name: bundle_digest, type_code: DIGEST}
+  - code: 14
+    name: RESULT_ARTIFACT
+    public_prefix: artifact
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: query_digest, type_code: DIGEST}
+      - {tag: 4, name: result_kind, type_code: UTF8, normalization: ASCII_LOWER}
+  - code: 15
+    name: SOURCE_CONTEXT
+    public_prefix: source-context
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: symbolic_name, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 2, name: suite_constant_id, type_code: ID}
+  - code: 16
+    name: UNKNOWN_REMAINDER
+    public_prefix: unknown
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: owner_or_query_scope_id, type_code: ID}
+      - {tag: 4, name: unknown_kind_code, type_code: UNSIGNED, width_bytes: 2}
+      - {tag: 5, name: originating_role, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 6, name: reason_code, type_code: UNSIGNED, width_bytes: 2}
+      - {tag: 7, name: candidate_set_digest, type_code: TAGGED_UNION, member_type: ABSENT-or-DIGEST}
+      - {tag: 8, name: program_point, type_code: TAGGED_UNION, member_type: ABSENT-or-BYTES}
+digest_algorithm: BLAKE3-256
+id_derivation: first-16-bytes
+symbolic_source_context: context:source
+symbolic_source_context_id_hex: ffffffffffffffffffffffffffffffff
+collision_error: ID_COLLISION
+owner_acceptance:
+  approver: repository-owner
+  accepted_at: "2026-08-20"
+  construction_rule: AC-G-13 declaration-order allocation with one-based recipe tags
+  source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"

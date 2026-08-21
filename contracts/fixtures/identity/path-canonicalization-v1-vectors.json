@@ -1,0 +1,124 @@
+{
+  "profile": "path-canonicalization-v1",
+  "construction": "independent owner-reviewed stdlib percent/base64url/unicodedata calculation",
+  "cases": [
+    {
+      "id": "unix-percent-invalid",
+      "workspace_id_hex": "22222222222222222222222222222222",
+      "platform_code": 1,
+      "case_sensitivity_mode": "sensitive",
+      "components_hex": [
+        "737263",
+        "612562",
+        "ff"
+      ],
+      "expected_raw_hex": "7372632f6125622fff",
+      "expected_canonical_hex": "7372632f61253235622f254646",
+      "expected_comparison_hex": "7372632f6125622fff",
+      "expected_display": "src/a%b/%FF",
+      "expected_display_is_lossy": true,
+      "expected_uri": "codefabric://workspace/22222222222222222222222222222222/path/c3JjL2ElYi__"
+    },
+    {
+      "id": "unix-control",
+      "workspace_id_hex": "22222222222222222222222222222222",
+      "platform_code": 1,
+      "case_sensitivity_mode": "sensitive",
+      "components_hex": [
+        "610062",
+        "706c61696e"
+      ],
+      "expected_raw_hex": "6100622f706c61696e",
+      "expected_canonical_hex": "61253030622f706c61696e",
+      "expected_comparison_hex": "6100622f706c61696e",
+      "expected_display": "a\u0000b/plain",
+      "expected_display_is_lossy": false,
+      "expected_uri": "codefabric://workspace/22222222222222222222222222222222/path/YQBiL3BsYWlu"
+    },
+    {
+      "id": "macos-full-casefold-a",
+      "workspace_id_hex": "22222222222222222222222222222222",
+      "platform_code": 2,
+      "case_sensitivity_mode": "insensitive",
+      "components_hex": [
+        "53747261c39f65"
+      ],
+      "expected_raw_hex": "53747261c39f65",
+      "expected_canonical_hex": "53747261c39f65",
+      "expected_comparison_hex": "73747261737365",
+      "expected_display": "Straße",
+      "expected_display_is_lossy": false,
+      "expected_uri": "codefabric://workspace/22222222222222222222222222222222/path/U3RyYcOfZQ"
+    },
+    {
+      "id": "macos-full-casefold-b",
+      "workspace_id_hex": "22222222222222222222222222222222",
+      "platform_code": 2,
+      "case_sensitivity_mode": "insensitive",
+      "components_hex": [
+        "53545241535345"
+      ],
+      "expected_raw_hex": "53545241535345",
+      "expected_canonical_hex": "53545241535345",
+      "expected_comparison_hex": "73747261737365",
+      "expected_display": "STRASSE",
+      "expected_display_is_lossy": false,
+      "expected_uri": "codefabric://workspace/22222222222222222222222222222222/path/U1RSQVNTRQ"
+    },
+    {
+      "id": "macos-nfd-composed",
+      "workspace_id_hex": "22222222222222222222222222222222",
+      "platform_code": 2,
+      "case_sensitivity_mode": "insensitive",
+      "components_hex": [
+        "c3856e67737472c3b66d"
+      ],
+      "expected_raw_hex": "c3856e67737472c3b66d",
+      "expected_canonical_hex": "c3856e67737472c3b66d",
+      "expected_comparison_hex": "61cc8a6e677374726fcc886d",
+      "expected_display": "Ångström",
+      "expected_display_is_lossy": false,
+      "expected_uri": "codefabric://workspace/22222222222222222222222222222222/path/w4VuZ3N0csO2bQ"
+    },
+    {
+      "id": "macos-nfd-decomposed",
+      "workspace_id_hex": "22222222222222222222222222222222",
+      "platform_code": 2,
+      "case_sensitivity_mode": "insensitive",
+      "components_hex": [
+        "41cc8a6e677374726fcc886d"
+      ],
+      "expected_raw_hex": "41cc8a6e677374726fcc886d",
+      "expected_canonical_hex": "41cc8a6e677374726fcc886d",
+      "expected_comparison_hex": "61cc8a6e677374726fcc886d",
+      "expected_display": "Ångström",
+      "expected_display_is_lossy": false,
+      "expected_uri": "codefabric://workspace/22222222222222222222222222222222/path/QcyKbmdzdHJvzIht"
+    },
+    {
+      "id": "macos-invalid-byte-fallback",
+      "workspace_id_hex": "22222222222222222222222222222222",
+      "platform_code": 2,
+      "case_sensitivity_mode": "insensitive",
+      "components_hex": [
+        "6e616d65ff"
+      ],
+      "expected_raw_hex": "6e616d65ff",
+      "expected_canonical_hex": "6e616d65254646",
+      "expected_comparison_hex": "6e616d65ff",
+      "expected_display": "name%FF",
+      "expected_display_is_lossy": true,
+      "expected_uri": "codefabric://workspace/22222222222222222222222222222222/path/bmFtZf8"
+    }
+  ],
+  "collision_pairs": [
+    [
+      "macos-full-casefold-a",
+      "macos-full-casefold-b"
+    ],
+    [
+      "macos-nfd-composed",
+      "macos-nfd-decomposed"
+    ]
+  ]
+}

@@ -19,8 +19,9 @@ use super::catalog::{
 };
 use super::jcs::{canonicalize_value, checksum, decode_strict};
 use super::models::{
-    ArtifactHeader, BundleDocument, FixtureOracleClass, FixtureOracleManifest, JsonlMetadata,
-    RegistryDocument, RequirementRecord, ScaffoldDocument, TraceabilityRecord,
+    ArtifactHeader, BundleDocument, CbefContract, FixtureOracleClass, FixtureOracleManifest,
+    JsonlMetadata, PathCanonicalizationContract, RegistryDocument, RequirementRecord,
+    ScaffoldDocument, TraceabilityRecord, TypeAlgebraContract,
 };
 
 const MAX_DIAGNOSTIC_BYTES: usize = 512;
@@ -545,7 +546,7 @@ fn classified_fixture_paths(
     repository_root: &Path,
 ) -> Result<BTreeSet<String>, ContractCompileError> {
     let mut paths = BTreeSet::new();
-    for relative in ["contracts/fixtures", "fuzz/corpus/contract_ingress"] {
+    for relative in ["contracts/fixtures", "fuzz/corpus"] {
         collect_regular_files(repository_root, &repository_root.join(relative), &mut paths)?;
     }
     for relative in [
@@ -936,6 +937,364 @@ fn scan_yaml_subset(bytes: &[u8]) -> YamlIndicators {
     found
 }
 
+fn validate_canonical_sequence(
+    path: &Path,
+    actual: impl IntoIterator<Item = impl AsRef<str>>,
+    expected: &[&str],
+    label: &str,
+) -> Result<(), ContractCompileError> {
+    let actual = actual
+        .into_iter()
+        .map(|value| value.as_ref().to_owned())
+        .collect::<Vec<_>>();
+    if actual != expected {
+        return Err(parse_error(
+            "typed-record",
+            path,
+            label,
+            format!("expected closed declaration order {expected:?}, found {actual:?}"),
+        ));
+    }
+    Ok(())
+}
+
+// The format, code table, and all domain recipes are intentionally reviewed together.
+#[allow(clippy::items_after_statements, clippy::too_many_lines)]
+fn validate_cbef_contract(
+    path: &Path,
+    document: &CbefContract,
+) -> Result<(), ContractCompileError> {
+    if document.format_name != "CBEF-v1"
+        || document.format_version != 1
+        || document.magic_ascii != "CFID"
+        || document.byte_order != "big-endian"
+        || document.digest_algorithm != "BLAKE3-256"
+        || document.id_derivation != "first-16-bytes"
+        || document.symbolic_source_context != "context:source"
+        || document.symbolic_source_context_id_hex != "ffffffffffffffffffffffffffffffff"
+        || document.collision_error != "ID_COLLISION"
+    {
+        return Err(parse_error(
+            "typed-record",
+            path,
+            "$",
+            "CBEF-v1 fixed format identity drifted",
+        ));
+    }
+    let record_frame = document
+        .record_frame
+        .iter()
+        .map(|member| (member.name.as_str(), member.width_bytes))
+        .collect::<Vec<_>>();
+    if record_frame
+        != [
+            ("magic", 4),
+            ("format_version", 1),
+            ("record_domain", 2),
+            ("field_count", 2),
+            ("fields", 0),
+        ]
+    {
+        return Err(parse_error(
+            "typed-record",
+            path,
+            "$.record_frame",
+            "record framing must match AC-G-13",
+        ));
+    }
+    let field_frame = document
+        .field_frame
+        .iter()
+        .map(|member| (member.name.as_str(), member.width_bytes))
+        .collect::<Vec<_>>();
+    if field_frame
+        != [
+            ("field_tag", 2),
+            ("type_code", 1),
+            ("payload_length", 4),
+            ("payload", 0),
+        ]
+    {
+        return Err(parse_error(
+            "typed-record",
+            path,
+            "$.field_frame",
+            "field framing must match AC-G-13",
+        ));
+    }
+
+    const TYPE_NAMES: [&str; 13] = [
+        "ABSENT",
+        "BYTES",
+        "UTF8",
+        "RAW_PATH",
+        "UNSIGNED",
+        "SIGNED",
+        "BOOLEAN",
+        "ID",
+        "DIGEST",
+        "ORDERED_LIST",
+        "SET",
+        "MAP",
+        "TAGGED_UNION",
+    ];
+    validate_canonical_sequence(
+        path,
+        document.type_codes.iter().map(|record| &record.name),
+        &TYPE_NAMES,
+        "$.type_codes",
+    )?;
+    for (code, record) in document.type_codes.iter().enumerate() {
+        if usize::from(record.code) != code || record.payload.is_empty() {
+            return Err(parse_error(
+                "typed-record",
+                path,
+                format!("$.type_codes[{code}]"),
+                "type code must equal its zero-based declaration index and define payload framing",
+            ));
+        }
+    }
+
+    const DOMAIN_NAMES: [&str; 16] = [
+        "WORKSPACE",
+        "REPOSITORY",
+        "WORKTREE",
+        "ANALYSIS_CONTEXT",
+        "CONTEXT_SET",
+        "SOURCE_FILE",
+        "OWNER",
+        "ENTITY",
+        "RELATION_FACT",
+        "PROPERTY_FACT",
+        "TYPE",
+        "PUBLICATION",
+        "SERVING_SNAPSHOT",
+        "RESULT_ARTIFACT",
+        "SOURCE_CONTEXT",
+        "UNKNOWN_REMAINDER",
+    ];
+    const PREFIXES: [&str; 16] = [
+        "workspace",
+        "repository",
+        "worktree",
+        "context",
+        "context-set",
+        "file",
+        "owner",
+        "entity",
+        "fact",
+        "fact",
+        "type",
+        "publication",
+        "snapshot",
+        "artifact",
+        "source-context",
+        "unknown",
+    ];
+    validate_canonical_sequence(
+        path,
+        document.domains.iter().map(|record| &record.name),
+        &DOMAIN_NAMES,
+        "$.domains",
+    )?;
+    for (index, domain) in document.domains.iter().enumerate() {
+        if usize::from(domain.code) != index + 1
+            || domain.public_prefix != PREFIXES[index]
+            || domain.kind_slug_required != matches!(index, 7..=9)
+            || domain.fields.is_empty()
+        {
+            return Err(parse_error(
+                "typed-record",
+                path,
+                format!("$.domains[{index}]"),
+                "domain code, prefix, kind-slug policy, or recipe drifted",
+            ));
+        }
+        let mut field_names = BTreeSet::new();
+        for (field_index, field) in domain.fields.iter().enumerate() {
+            let expected_tag = u16::try_from(field_index + 1).expect("identity recipes are small");
+            let known_type = TYPE_NAMES.contains(&field.type_code.as_str());
+            let integer_width_valid = if matches!(field.type_code.as_str(), "UNSIGNED" | "SIGNED") {
+                field
+                    .width_bytes
+                    .is_some_and(|width| matches!(width, 1 | 2 | 4 | 8 | 16))
+            } else {
+                field.width_bytes.is_none()
+            };
+            let normalization_valid = if field.type_code == "UTF8" {
+                field.normalization.as_deref().is_some_and(|rule| {
+                    matches!(
+                        rule,
+                        "NONE"
+                            | "NFC"
+                            | "NFKC"
+                            | "ASCII_LOWER"
+                            | "PYTHON_IDENTIFIER_NFKC"
+                            | "RUST_CANONICAL"
+                    )
+                })
+            } else {
+                field.normalization.is_none()
+            };
+            let container_shape_valid = if matches!(
+                field.type_code.as_str(),
+                "ORDERED_LIST" | "SET" | "MAP" | "TAGGED_UNION"
+            ) {
+                field
+                    .member_type
+                    .as_ref()
+                    .is_some_and(|value| !value.is_empty())
+            } else {
+                field.member_type.is_none()
+            };
+            if field.tag != expected_tag
+                || field.name.is_empty()
+                || !field_names.insert(&field.name)
+                || !known_type
+                || !integer_width_valid
+                || !normalization_valid
+                || !container_shape_valid
+            {
+                return Err(parse_error(
+                    "typed-record",
+                    path,
+                    format!("$.domains[{index}].fields[{field_index}]"),
+                    "field tags, names, type, width, normalization, and container shape must be closed",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::items_after_statements)]
+fn validate_path_contract(
+    path: &Path,
+    document: &PathCanonicalizationContract,
+) -> Result<(), ContractCompileError> {
+    if document.component_separator != "/"
+        || document.escaped_bytes != ["/", "%", "non-display"]
+        || document.percent_hex_case != "uppercase"
+        || !document.reversible
+        || document.resolves_symlinks
+        || document.canonical_uri_template
+            != "codefabric://workspace/<workspace-hex>/path/<base64url-no-pad-raw-relative-bytes>"
+        || document.ordering != ["comparison_key_bytes", "raw_relative_path_bytes"]
+        || document.collision_error != "BLOCKED_PATH_COLLISION"
+    {
+        return Err(parse_error(
+            "typed-record",
+            path,
+            "$",
+            "AC-G-18 fixed path rules drifted",
+        ));
+    }
+    const PLATFORM_NAMES: [&str; 3] = ["UNIX", "MACOS", "WINDOWS_WTF8"];
+    validate_canonical_sequence(
+        path,
+        document.platforms.iter().map(|record| &record.name),
+        &PLATFORM_NAMES,
+        "$.platforms",
+    )?;
+    for (index, platform) in document.platforms.iter().enumerate() {
+        if usize::from(platform.code) != index + 1
+            || platform.runtime_status.is_empty()
+            || platform.comparison.is_empty()
+        {
+            return Err(parse_error(
+                "typed-record",
+                path,
+                format!("$.platforms[{index}]"),
+                "platform allocation must be one-based and complete",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::items_after_statements)]
+fn validate_type_algebra_contract(
+    path: &Path,
+    document: &TypeAlgebraContract,
+) -> Result<(), ContractCompileError> {
+    const CONSTRUCTORS: [&str; 35] = [
+        "Unknown",
+        "Error",
+        "AnyDynamic",
+        "NeverBottom",
+        "NullNone",
+        "Primitive",
+        "Nominal",
+        "Alias",
+        "Literal",
+        "Union",
+        "Intersection",
+        "Tuple",
+        "Callable",
+        "TypeObject",
+        "ClassObject",
+        "Generic",
+        "TypeVariable",
+        "AssociatedType",
+        "Projection",
+        "Reference",
+        "RawPointer",
+        "Array",
+        "Slice",
+        "Mapping",
+        "Sequence",
+        "Structural",
+        "FunctionDefinition",
+        "FunctionPointer",
+        "Closure",
+        "Coroutine",
+        "DynTrait",
+        "ImplTrait",
+        "ConstArgument",
+        "RecursiveBinder",
+        "BoundVariable",
+    ];
+    if document.algebra_version != 1
+        || document.identity_domain != "TYPE"
+        || document.identity_scope != ["workspace_id", "analysis_context_id"]
+        || !document.normalization.flatten_set_constructors
+        || !document.normalization.sort_unique_member_ids
+        || !document.normalization.python_optional_to_union
+        || !document.normalization.aliases_are_first_class
+        || !document.normalization.de_bruijn_binders
+        || !document.normalization.provider_debug_strings_forbidden
+    {
+        return Err(parse_error(
+            "typed-record",
+            path,
+            "$",
+            "AC-G-15 algebra version, scope, or normalization rules drifted",
+        ));
+    }
+    validate_canonical_sequence(
+        path,
+        document.constructors.iter().map(|record| &record.name),
+        &CONSTRUCTORS,
+        "$.constructors",
+    )?;
+    for (index, constructor) in document.constructors.iter().enumerate() {
+        if usize::from(constructor.code) != index + 1
+            || constructor
+                .operands
+                .iter()
+                .any(|operand| operand.name.is_empty() || operand.role.is_empty())
+        {
+            return Err(parse_error(
+                "typed-record",
+                path,
+                format!("$.constructors[{index}]"),
+                "constructor codes and operand models must be complete",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn canonical_yaml(
     path: &Path,
     descriptor: &ArtifactDescriptor,
@@ -974,23 +1333,49 @@ fn canonical_yaml(
             let records = document.records.len();
             (document.header(), records)
         }
-        ArtifactKind::YamlContract => {
-            let document: ScaffoldDocument<Value> = typed(path, "$", value.clone())?;
-            if document.records.is_some() == document.rules.is_some() {
-                return Err(parse_error(
-                    "typed-record",
-                    path,
-                    "$",
-                    "exactly one of records or rules is required",
-                ));
+        ArtifactKind::YamlContract => match descriptor.artifact_id.as_str() {
+            "codefabric.identity.cbef-v1" => {
+                let document: CbefContract = typed(path, "$", value.clone())?;
+                validate_cbef_contract(path, &document)?;
+                let records = document.domains.len() + document.type_codes.len();
+                value = serde_json::to_value(&document)
+                    .expect("typed CBEF contract serialization is infallible");
+                (document.header.artifact_header(), records)
             }
-            let records = document
-                .records
-                .as_ref()
-                .or(document.rules.as_ref())
-                .map_or(0, Vec::len);
-            (document.header(), records)
-        }
+            "codefabric.identity.path-canonicalization-v1" => {
+                let document: PathCanonicalizationContract = typed(path, "$", value.clone())?;
+                validate_path_contract(path, &document)?;
+                let records = document.platforms.len();
+                value = serde_json::to_value(&document)
+                    .expect("typed path contract serialization is infallible");
+                (document.header.artifact_header(), records)
+            }
+            "codefabric.identity.type-algebra-v1" => {
+                let document: TypeAlgebraContract = typed(path, "$", value.clone())?;
+                validate_type_algebra_contract(path, &document)?;
+                let records = document.constructors.len();
+                value = serde_json::to_value(&document)
+                    .expect("typed type-algebra contract serialization is infallible");
+                (document.header.artifact_header(), records)
+            }
+            _ => {
+                let document: ScaffoldDocument<Value> = typed(path, "$", value.clone())?;
+                if document.records.is_some() == document.rules.is_some() {
+                    return Err(parse_error(
+                        "typed-record",
+                        path,
+                        "$",
+                        "exactly one of records or rules is required",
+                    ));
+                }
+                let records = document
+                    .records
+                    .as_ref()
+                    .or(document.rules.as_ref())
+                    .map_or(0, Vec::len);
+                (document.header(), records)
+            }
+        },
         _ => {
             return Err(parse_error(
                 "typed-record",

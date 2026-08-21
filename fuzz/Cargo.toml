@@ -26,3 +26,10 @@ path = "fuzz_targets/contract_ingress.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "identity"
+path = "fuzz_targets/identity.rs"
+test = false
+doc = false
+bench = false

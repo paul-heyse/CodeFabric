@@ -50,6 +50,8 @@ require_one_version serde_path_to_error 0.1.20
 require_one_version serde_yaml_ng 0.10.0
 require_one_version tempfile 3.27.0
 require_one_version thiserror 2.0.20
+require_one_version unicode-casefold 0.2.0
+require_one_version unicode-normalization 0.1.25
 
 delta_sources="$(printf '%s' "$metadata" | jq -r \
   '.packages[] | select(.name | test("^deltalake($|-)")) | .source' | sort -u)"
@@ -94,7 +96,9 @@ printf '%s' "$root_shape" | jq -e '
       "dep:serde",
       "dep:serde_json",
       "dep:serde_json_canonicalizer",
-      "dep:thiserror"
+      "dep:thiserror",
+      "dep:unicode-casefold",
+      "dep:unicode-normalization"
     ],
     "compatibility-probes": [
       "canonical-json",

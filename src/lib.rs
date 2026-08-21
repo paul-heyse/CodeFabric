@@ -8,6 +8,8 @@
 pub mod compatibility;
 #[cfg(any(feature = "canonical-json", feature = "contracts-tooling"))]
 pub mod contracts;
+#[cfg(feature = "canonical-json")]
+pub mod identity;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 

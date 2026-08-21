@@ -2,7 +2,22 @@ artifact_id: codefabric.identity.path-canonicalization-v1
 artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:29fd88a10110f7f2604d7da8aab6b59da951a312e789854609cfec67e03cb01b"
-rules: []
-
+status: released
+canonical_digest: "b3:7efb391e76722d272c9953dbe305190f7793014e699d1fbe462eeb24665a6762"
+component_separator: /
+escaped_bytes: ["/", "%", non-display]
+percent_hex_case: uppercase
+reversible: true
+resolves_symlinks: false
+platforms:
+  - {code: 1, name: UNIX, runtime_status: released, comparison: byte-exact}
+  - {code: 2, name: MACOS, runtime_status: released, comparison: volume-probe-then-nfd-full-casefold-or-byte-exact-fallback}
+  - {code: 3, name: WINDOWS_WTF8, runtime_status: reserved, comparison: reserved-not-decoded-in-1.x}
+canonical_uri_template: codefabric://workspace/<workspace-hex>/path/<base64url-no-pad-raw-relative-bytes>
+ordering: [comparison_key_bytes, raw_relative_path_bytes]
+collision_error: BLOCKED_PATH_COLLISION
+owner_acceptance:
+  approver: repository-owner
+  accepted_at: "2026-08-20"
+  construction_rule: direct transcription of AC-G-18 platform and encoding rules
+  source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"
