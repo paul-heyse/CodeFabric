@@ -116,6 +116,12 @@ root-doctest:
 [group('test')]
 root-test: root-test-rust root-doctest
 
+[doc("Run the current Wave-2 daemon/control-plane acceptance oracles")]
+[group('test')]
+wave2-integration-check:
+    cargo nextest run --locked -E 'test(/wp1[2-8]/)' --no-tests=fail
+    cargo test --doc
+
 # ----------------------------------------------------------------- fast / PR gates
 
 [doc("Fast unused-dependency hygiene")]

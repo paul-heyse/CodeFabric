@@ -669,6 +669,7 @@ object_store_version
 delta_rs_git_rev
 deltalake_declared_version
 cargo_lock_digest
+toml_version
 adapter: python, fastmcp, pydantic, pydantic-settings, grpcio, protobuf, jsonschema,
   PyYAML, uv-lock digest
 protobuf: grpcio-tools, libprotoc, prost, tonic, toolchain-identity digest

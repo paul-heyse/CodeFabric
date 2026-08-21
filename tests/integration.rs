@@ -5,6 +5,8 @@ mod integration {
     mod compatibility;
     #[cfg(feature = "contracts-tooling")]
     mod contracts;
+    #[cfg(feature = "daemon")]
+    mod daemon;
     #[cfg(feature = "rpc")]
     mod rpc;
 }

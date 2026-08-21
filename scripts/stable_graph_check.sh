@@ -50,6 +50,7 @@ require_one_version serde_path_to_error 0.1.20
 require_one_version serde_yaml_ng 0.10.0
 require_one_version tempfile 3.27.0
 require_one_version thiserror 2.0.20
+require_one_version toml 1.1.4+spec-1.1.0
 require_one_version unicode-casefold 0.2.0
 require_one_version unicode-normalization 0.1.25
 
@@ -81,7 +82,7 @@ root_shape="$(printf '%s' "$metadata" | jq -c --arg root "$root" '
   | {
       edition,
       rust_version,
-      crate_types: ([.targets[] | select(.name == "codefabric") | .crate_types[]] | unique),
+      crate_types: ([.targets[] | select(.crate_types | index("rlib")) | .crate_types[]] | unique),
       features
     }
 ')"
@@ -131,8 +132,15 @@ printf '%s' "$root_shape" | jq -e '
       "dep:parquet",
       "dep:tracing"
     ],
+    "daemon": [
+      "contracts-tooling",
+      "repository-state",
+      "rpc",
+      "dep:toml",
+      "dep:tracing"
+    ],
     "default": ["local-workstation"],
-    "local-workstation": ["contracts-tooling", "compatibility-probes"],
+    "local-workstation": ["daemon", "compatibility-probes"],
     "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
     "repository-state": ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"],
     "rpc": ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"],
@@ -197,7 +205,7 @@ for required in aws azure gcp http cloud quick-xml; do
 done
 
 default_tree="$(cargo tree --locked --edges normal --prefix none)"
-for required in datafusion deltalake gix tonic serde_json_canonicalizer; do
+for required in datafusion deltalake gix toml tonic serde_json_canonicalizer; do
   printf '%s\n' "$default_tree" | rg -q "^${required} " || \
     fail "default local-workstation graph omits required package $required"
 done

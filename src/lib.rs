@@ -8,6 +8,8 @@
 pub mod compatibility;
 #[cfg(any(feature = "canonical-json", feature = "contracts-tooling"))]
 pub mod contracts;
+#[cfg(feature = "daemon")]
+pub mod daemon;
 #[cfg(feature = "canonical-json")]
 pub mod identity;
 /// Generated categorical and lifecycle registry types.

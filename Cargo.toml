@@ -56,7 +56,14 @@ data-fabric = [
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
-local-workstation = ["contracts-tooling", "compatibility-probes"]
+daemon = [
+    "contracts-tooling",
+    "repository-state",
+    "rpc",
+    "dep:toml",
+    "dep:tracing",
+]
+local-workstation = ["daemon", "compatibility-probes"]
 proto-tooling = ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"]
 s3-storage = ["data-fabric", "deltalake/s3"]
 
@@ -93,7 +100,8 @@ tempfile = { version = "=3.27.0", optional = true }
 thiserror = { version = "=2.0.20", optional = true }
 unicode-casefold = { version = "=0.2.0", optional = true }
 unicode-normalization = { version = "=0.1.25", optional = true }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"], optional = true }
+toml = { version = "=1.1.4", default-features = false, features = ["std", "parse", "serde"], optional = true }
 tonic = { version = "=0.14.6", features = ["transport"], optional = true }
 tonic-prost = { version = "=0.14.6", optional = true }
 tonic-prost-build = { version = "=0.14.6", optional = true }
@@ -120,6 +128,16 @@ required-features = ["proto-tooling"]
 name = "codefabric-contracts"
 path = "src/bin/codefabric-contracts.rs"
 required-features = ["contracts-tooling"]
+
+[[bin]]
+name = "codefabricd"
+path = "src/bin/codefabricd.rs"
+required-features = ["daemon"]
+
+[[bin]]
+name = "codefabric"
+path = "src/bin/codefabric.rs"
+required-features = ["daemon"]
 
 [lints.rust]
 unsafe_code = "deny"

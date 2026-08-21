@@ -750,6 +750,7 @@ fn validate_toolchain_identity(
             "9f9223197469897ef05ae4369eb4fd1390174e65",
         ),
         (&document.deltalake_declared_version, "1.0.0"),
+        (&document.toml_version, "1.1.4+spec-1.1.0"),
         (&document.adapter.python, "3.14.7"),
         (&document.adapter.fastmcp, "3.4.7"),
         (&document.adapter.pydantic, "2.13.4"),

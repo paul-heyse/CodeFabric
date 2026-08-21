@@ -127,6 +127,8 @@ pub struct ToolchainIdentityDocument {
     pub delta_rs_git_rev: String,
     /// Declared pre-release deltalake package version.
     pub deltalake_declared_version: String,
+    /// Exact TOML parser used at the daemon configuration boundary.
+    pub toml_version: String,
     /// Exact BLAKE3 identity of the root Cargo lock.
     pub cargo_lock_digest: String,
     /// Python serving-boundary pins.
