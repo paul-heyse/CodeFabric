@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP16",
+  "current_packet": "WP17",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -458,10 +458,28 @@
       "blockers": []
     },
     "WP16": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "1303582279e77f58638f79f140784d2185763e3d",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "The planning text's metadata-only stable-read fence is insufficient on filesystems whose observable metadata can repeat during rapid in-place mutation. AC-G-33 and Lifecycle section 33 now require two exact reads and hashes from the same authorized descriptor with M0/M1/M2 equality and D0/D1 equality before publication."
+        },
+        {
+          "kind": "model_completion",
+          "summary": "One snapshot holder owns a typed lease header with a normalized set of blob members rather than one duplicated lease row per blob. The generated provider-control SourceSnapshotLease is projected from that durable model with path-free content-addressed references."
+        },
+        {
+          "kind": "forward_schema_migration",
+          "summary": "WP16 expands the generated operational model with source inventory, blob, lease-header, and lease-member tables, advancing the store to schema version 3. Fresh databases install current generated DDL; version-1 and version-2 stores are backed up and migrated through registered steps."
+        }
+      ],
+      "failed_approaches": [
+        "The first security-fixture regeneration correctly rejected the new race campaign until the fixture-oracle manifest classified its property-oracle role and change record.",
+        "The first ignored-campaign invocation used Cargo's exact filter and selected zero tests; the named just recipe now uses the packet selector and proves one campaign containing exactly 10,000 attempts.",
+        "The first Wave-2 integration rerun exposed WP13 migration-backup assertions still naming schema version 2. They now derive the current version-3 backup lineage expected after the additive source-table migration.",
+        "The first full gate treated rustix's upstream OFlags::WRONLY identifier as prose. A narrowly documented spelling exception preserves the real API name without excluding source from spelling checks."
+      ],
       "blockers": []
     },
     "WP17": {
@@ -744,6 +762,16 @@
         "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md"
       ],
       "summary": "WP10 removes the stale seven-RPC ExecuteQuery example and aligns the serving authority with AC-G-58's accepted-handle nine-RPC protocol and exact five-event stream. The planning-time hash remains immutable; the WP10 proving commit, shared FDS, and regenerated artifact identities provide the accepted evolution."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP16",
+      "paths": [
+        "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
+        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md"
+      ],
+      "summary": "WP16 intentionally strengthens the source capture fence, makes the inventory Merkle framing normative, closes the snapshot-lease lifecycle, and records enforceable deployment limits. The planning-time hashes remain immutable; the WP16 proving commit, generated contracts, security campaign, and derived acceptance reconcile the expected drift."
     },
     {
       "id": "AD-01",
