@@ -1,13 +1,14 @@
 //! AC-G-11 descriptor-relative source authorization and byte reads.
 
 use std::ffi::{OsStr, OsString};
-use std::io::Read as _;
+use std::io::{Read as _, Seek as _, SeekFrom};
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+use std::os::unix::fs::MetadataExt as _;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rustix::fs::{FileType, Mode, OFlags, fstat, open, openat};
+use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, fstat, open, openat, statat};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -54,6 +55,17 @@ pub enum SecurePathError {
     Registry(#[from] WorkspaceRegistryError),
     #[error(transparent)]
     Identity(#[from] IdentityError),
+}
+
+/// Stable-read failures distinguished from authorization failures for capability evidence.
+#[derive(Debug, Error)]
+pub enum StableReadError {
+    #[error(transparent)]
+    Secure(#[from] SecurePathError),
+    #[error("source image exceeds its configured byte limit")]
+    SizeLimitExceeded { observed: u64, limit: u64 },
+    #[error("source changed while its immutable image was captured")]
+    ChangedDuringRead,
 }
 
 impl SecurePathError {
@@ -221,7 +233,56 @@ pub struct AuthorizedSourceBytes {
     pub bytes: Vec<u8>,
 }
 
+/// Filesystem metadata retained to audit the stable-read fence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StableFileMetadata {
+    pub device: u64,
+    pub inode: u64,
+    pub size: u64,
+    pub mode: u32,
+    pub modified_seconds: i64,
+    pub modified_nanoseconds: i64,
+    pub changed_seconds: i64,
+    pub changed_nanoseconds: i64,
+}
+
+/// A byte-exact read proven stable by metadata and duplicate-content fences.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StableFileRead {
+    pub bytes: Vec<u8>,
+    pub metadata: StableFileMetadata,
+}
+
+/// Entry kind observed without following a directory-entry symlink.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SecureDirectoryEntryKind {
+    RegularFile,
+    Directory,
+    Symlink,
+    Other,
+}
+
+/// One byte-native child entry from an authorized directory descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SecureDirectoryEntry {
+    pub name: Vec<u8>,
+    pub kind: SecureDirectoryEntryKind,
+    pub size: u64,
+}
+
 impl SecureRoot {
+    /// Registered workspace identity for this authorized root.
+    #[must_use]
+    pub const fn workspace_id(&self) -> [u8; 16] {
+        self.authorization.workspace_id
+    }
+
+    /// Native path encoding selected at registration.
+    #[must_use]
+    pub const fn platform_code(&self) -> PlatformCode {
+        self.authorization.platform_code
+    }
+
     /// Validate the persisted fingerprint, open the root no-follow, and verify its identity.
     ///
     /// # Errors
@@ -306,18 +367,119 @@ impl SecureRoot {
     ///
     /// Returns a stable source-access rejection when identity changes during the read.
     pub fn read_file(&self, path: &PlatformPath) -> Result<Vec<u8>, SecurePathError> {
+        self.read_stable_file(path, u64::MAX)
+            .map(|read| read.bytes)
+            .map_err(|error| match error {
+                StableReadError::Secure(error) => error,
+                StableReadError::SizeLimitExceeded { .. } | StableReadError::ChangedDuringRead => {
+                    SecurePathError::SourceAccessDenied
+                }
+            })
+    }
+
+    /// Read twice from one authorized descriptor and require identical metadata and bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an authorization, byte-limit, I/O, or concurrent-change failure.
+    pub fn read_stable_file(
+        &self,
+        path: &PlatformPath,
+        maximum_bytes: u64,
+    ) -> Result<StableFileRead, StableReadError> {
         let descriptor = self.open_file(path)?;
-        let before = descriptor_identity(&descriptor)?;
         let mut file = std::fs::File::from(descriptor);
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
+        let before = stable_metadata(&file)?;
+        if before.size > maximum_bytes {
+            return Err(StableReadError::SizeLimitExceeded {
+                observed: before.size,
+                limit: maximum_bytes,
+            });
+        }
+        let capacity =
+            usize::try_from(before.size).map_err(|_| StableReadError::SizeLimitExceeded {
+                observed: before.size,
+                limit: maximum_bytes,
+            })?;
+        let first = read_bounded(&mut file, capacity)?;
+        let middle = stable_metadata(&file)?;
+        file.seek(SeekFrom::Start(0))
             .map_err(|_| SecurePathError::OperatingSystem)?;
-        let after = descriptor_identity(&file)?;
-        if before != after {
-            return Err(SecurePathError::SourceAccessDenied);
+        let second = read_bounded(&mut file, capacity)?;
+        let after = stable_metadata(&file)?;
+        if before != middle || middle != after || first != second {
+            return Err(StableReadError::ChangedDuringRead);
         }
         self.revalidate_root()?;
-        Ok(bytes)
+        Ok(StableFileRead {
+            bytes: first,
+            metadata: after,
+        })
+    }
+
+    /// Enumerate one authorized directory without following symlinks.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable rejection for unsafe paths, mount changes, or entry-count overflow.
+    pub fn list_directory(
+        &self,
+        path: Option<&PlatformPath>,
+        maximum_entries: usize,
+    ) -> Result<Vec<SecureDirectoryEntry>, SecurePathError> {
+        self.revalidate_root()?;
+        let descriptor = match path {
+            Some(path) => self.open_directory_beneath(path)?,
+            None => openat(
+                &self.descriptor,
+                OsStr::from_bytes(b"."),
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
+                Mode::empty(),
+            )
+            .map_err(|_| SecurePathError::OutsideAuthorizedRoot)?,
+        };
+        let mut directory = Dir::new(descriptor).map_err(|_| SecurePathError::OperatingSystem)?;
+        let mut entries = Vec::new();
+        while let Some(entry) = directory.read() {
+            let entry = entry.map_err(|_| SecurePathError::OperatingSystem)?;
+            let name = entry.file_name().to_bytes();
+            if matches!(name, b"." | b"..") {
+                continue;
+            }
+            if entries.len() == maximum_entries {
+                return Err(SecurePathError::SourceAccessDenied);
+            }
+            let stat = statat(
+                directory
+                    .fd()
+                    .map_err(|_| SecurePathError::OperatingSystem)?,
+                entry.file_name(),
+                AtFlags::SYMLINK_NOFOLLOW,
+            )
+            .map_err(|_| SecurePathError::OperatingSystem)?;
+            ensure_same_device(self.root_identity.device, device_id(stat.st_dev)?)?;
+            let file_type = FileType::from_raw_mode(stat.st_mode);
+            let kind = if file_type.is_file() {
+                SecureDirectoryEntryKind::RegularFile
+            } else if file_type.is_dir() {
+                SecureDirectoryEntryKind::Directory
+            } else if file_type.is_symlink() {
+                SecureDirectoryEntryKind::Symlink
+            } else {
+                SecureDirectoryEntryKind::Other
+            };
+            entries.push(SecureDirectoryEntry {
+                name: name.to_vec(),
+                kind,
+                size: stat
+                    .st_size
+                    .try_into()
+                    .map_err(|_| SecurePathError::OperatingSystem)?,
+            });
+        }
+        entries.sort_by(|left, right| left.name.cmp(&right.name));
+        self.revalidate_root()?;
+        Ok(entries)
     }
 
     fn revalidate_root(&self) -> Result<(), SecurePathError> {
@@ -409,6 +571,31 @@ impl SecureRoot {
         }
         .map_err(|_| SecurePathError::OutsideAuthorizedRoot)?;
         Ok(opened)
+    }
+
+    fn open_directory_beneath(&self, path: &PlatformPath) -> Result<OwnedFd, SecurePathError> {
+        let (final_component, directory_components) = path
+            .components
+            .split_last()
+            .ok_or(SecurePathError::InvalidRelativePath("empty"))?;
+        let mut current = None::<OwnedFd>;
+        for component in directory_components
+            .iter()
+            .chain(std::iter::once(final_component))
+        {
+            let base = current.as_ref().unwrap_or(&self.descriptor);
+            let opened = openat(
+                base,
+                OsStr::from_bytes(component),
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
+                Mode::empty(),
+            )
+            .map_err(|_| SecurePathError::OutsideAuthorizedRoot)?;
+            let stat = fstat(&opened).map_err(|_| SecurePathError::OperatingSystem)?;
+            ensure_same_device(self.root_identity.device, device_id(stat.st_dev)?)?;
+            current = Some(opened);
+        }
+        current.ok_or(SecurePathError::InvalidRelativePath("empty"))
     }
 }
 
@@ -508,6 +695,40 @@ fn descriptor_identity(
         device: device_id(stat.st_dev)?,
         inode: stat.st_ino as u64,
     })
+}
+
+fn stable_metadata(file: &std::fs::File) -> Result<StableFileMetadata, SecurePathError> {
+    let metadata = file
+        .metadata()
+        .map_err(|_| SecurePathError::OperatingSystem)?;
+    Ok(StableFileMetadata {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        size: metadata.size(),
+        mode: metadata.mode(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    })
+}
+
+fn read_bounded(
+    file: &mut std::fs::File,
+    expected_size: usize,
+) -> Result<Vec<u8>, StableReadError> {
+    let mut bytes = Vec::with_capacity(expected_size);
+    file.take(
+        u64::try_from(expected_size)
+            .unwrap_or(u64::MAX)
+            .saturating_add(1),
+    )
+    .read_to_end(&mut bytes)
+    .map_err(|_| SecurePathError::OperatingSystem)?;
+    if bytes.len() != expected_size {
+        return Err(StableReadError::ChangedDuringRead);
+    }
+    Ok(bytes)
 }
 
 fn device_id(raw: rustix::fs::Dev) -> Result<u64, SecurePathError> {

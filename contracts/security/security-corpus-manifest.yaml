@@ -3,7 +3,7 @@ artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:e5af8843cd0fb444562906eb9cc1aaa6ceb66406392652fa8e6894f2a7ba52ef"
+canonical_digest: "b3:b83c0b8607050d1e29d59b1344a9589d358df7a89f8a5e41ce9f56ce172d0c3f"
 digest_projection: yaml-ac-g-53-v1
 generator_revision: codefabric-contracts/1.0
 corpus_id: codefabric-security-v1
@@ -49,3 +49,13 @@ records:
     forbidden_observations: [credential-material, source-content, unbounded-allocation]
     resource_bounds: {maximum_input_bytes: 4194304, maximum_output_bytes: 1048576, maximum_duration_ms: 5000}
     cleanup_assertions: [no-result-artifact, no-temporary-file]
+  - case_id: concurrent-source-capture
+    threat_class: filesystem-race
+    required_platforms: [linux, macos]
+    fixture_path: contracts/fixtures/security/source-capture-race-v1.json
+    operation: capture-during-active-rewriter
+    expected_status_or_error: ACCEPTED_BOUNDED
+    expected_public_fields: [attempts, published, deferred, false_stable]
+    forbidden_observations: [false-stable-image, source-path-disclosure, unbounded-retry]
+    resource_bounds: {maximum_input_bytes: 15728640, maximum_output_bytes: 4096, maximum_duration_ms: 300000}
+    cleanup_assertions: [no-temporary-file, no-unleased-blob]

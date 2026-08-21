@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir b3:8f9e1ed9f532a518bfd4e7b7ec398a119845c2f8cdb26da691b6e1227c2b1c30; codefabric-schema-contracts-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir b3:48d87050b4108b63c099f71abd94278a76ebcd46129645fd8d69075b7e8d5a0e; codefabric-schema-contracts-v1; do not edit.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE workspace_registration (
@@ -123,6 +123,54 @@ CREATE TABLE worktree_state (
   last_diagnostic_id BLOB,
   PRIMARY KEY (workspace_id),
   UNIQUE (worktree_id)
+) STRICT;
+
+CREATE TABLE source_inventory (
+  workspace_id BLOB NOT NULL,
+  source_generation INTEGER NOT NULL,
+  path_bytes BLOB NOT NULL,
+  path_display TEXT NOT NULL,
+  comparison_key_bytes BLOB NOT NULL,
+  file_id BLOB,
+  content_digest BLOB,
+  byte_length INTEGER NOT NULL,
+  file_kind_code INTEGER NOT NULL,
+  language_code TEXT,
+  inventory_classification_code INTEGER NOT NULL,
+  inclusion_state_code INTEGER NOT NULL,
+  git_repo_path_bytes BLOB,
+  git_blob_oid BLOB,
+  current_file_owner BLOB,
+  PRIMARY KEY (workspace_id, source_generation, path_bytes)
+) STRICT;
+
+CREATE TABLE source_blob (
+  blob_digest BLOB NOT NULL,
+  byte_length INTEGER NOT NULL,
+  line_index_digest BLOB NOT NULL,
+  encoding_code INTEGER NOT NULL,
+  newline_code INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (blob_digest)
+) STRICT;
+
+CREATE TABLE source_blob_lease (
+  lease_id BLOB NOT NULL,
+  workspace_id BLOB NOT NULL,
+  source_generation INTEGER NOT NULL,
+  holder_kind_code INTEGER NOT NULL,
+  holder_id BLOB NOT NULL,
+  state_code INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  orphaned_at INTEGER,
+  PRIMARY KEY (lease_id),
+  UNIQUE (workspace_id, source_generation, holder_kind_code, holder_id)
+) STRICT;
+
+CREATE TABLE source_blob_lease_member (
+  lease_id BLOB NOT NULL,
+  blob_digest BLOB NOT NULL,
+  PRIMARY KEY (lease_id, blob_digest)
 ) STRICT;
 
 CREATE TABLE git_state_vector (

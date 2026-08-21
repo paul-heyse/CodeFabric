@@ -1913,10 +1913,10 @@ pub struct SourceImage {
 Capture algorithm:
 
 1. read metadata;
-2. open and read current filesystem bytes;
-3. compute the CodeFabric BLAKE3 digest;
-4. reread metadata;
-5. verify stable size, file identity, and source-generation fence;
+2. open and read current filesystem bytes from the authorized descriptor;
+3. compute the CodeFabric BLAKE3 digest, rewind that descriptor, and read/hash the bytes again;
+4. capture metadata after each read;
+5. verify identical content digests, stable size, file identity, mtime/change token, and source-generation fence;
 6. if changed, retry or defer;
 7. publish the source image only when stable.
 
@@ -1959,7 +1959,7 @@ Use the bounded generic CodeFabric inventory walker.
 
 ### 34.3 Inventory digest
 
-A Merkle-style directory/root digest SHOULD be maintained so one file update changes only the affected path and ancestor hashes.
+A Merkle-style directory/root digest SHALL be maintained so one file update changes only the affected path and ancestor hashes. File leaves use BLAKE3 over the typed `codefabric.inventory.file.v1` frame containing the length-prefixed raw workspace path, content digest (or the all-zero unsupported marker), byte length, file-kind code, classification code, and inclusion-state code. Directory nodes use the typed `codefabric.inventory.directory.v1` frame over byte-name-sorted `(length-prefixed child name, child kind, child digest)` entries. The root node digest is `worktree_inventory_digest`.
 
 The inventory digest is based on current worktree state, not merely HEAD or index state.
 

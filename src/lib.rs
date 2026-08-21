@@ -13,6 +13,8 @@ pub mod daemon;
 #[cfg(feature = "canonical-json")]
 pub mod identity;
 #[cfg(feature = "daemon")]
+pub mod inventory;
+#[cfg(feature = "daemon")]
 pub mod operational_store;
 /// Generated categorical and lifecycle registry types.
 pub mod registries;
@@ -24,6 +26,8 @@ pub mod schema_registry;
 pub mod secure_path;
 #[cfg(feature = "canonical-json")]
 pub mod snapshot;
+#[cfg(feature = "daemon")]
+pub mod source_image;
 #[cfg(feature = "daemon")]
 pub mod workspace_registry;
 

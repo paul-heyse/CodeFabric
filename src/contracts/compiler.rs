@@ -1480,6 +1480,17 @@ fn validate_deployment_profile(
         || exact.iter().any(|(actual, expected)| actual != expected)
         || document.result_artifact_ttl_seconds != 3600
         || document.source_result_artifact_ttl_seconds != 1800
+        || document.source_image_limits.ordinary_maximum_bytes != 16 * 1024 * 1024
+        || document.source_image_limits.explicit_maximum_bytes != 64 * 1024 * 1024
+        || document.source_image_limits.stable_read_retry_count != 3
+        || document.source_image_limits.orphan_grace_seconds != 300
+        || document.source_image_limits.garbage_collection_batch_size != 256
+        || document.inventory_limits.maximum_file_count != 1_000_000
+        || document.inventory_limits.maximum_directory_count != 100_000
+        || document.inventory_limits.maximum_directory_depth != 128
+        || document.inventory_limits.maximum_total_bytes_considered != 17_179_869_184
+        || document.inventory_limits.maximum_duration_ms != 300_000
+        || document.inventory_limits.maximum_entries_per_directory != 100_000
         || document.follow_directory_symlinks
         || document.follow_internal_file_symlinks
         || document.index_external_dependency_bodies

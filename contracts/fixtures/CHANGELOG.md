@@ -1,5 +1,10 @@
 # Fixture oracle change record
 
+## 2026-08-21 source capture race
+
+- Added the seeded three-size, 10,000-attempt concurrent source-capture property
+  campaign required by WP16.
+
 ## 2026-08-21 Wave 1 release
 
 - Added the owner-reviewed broken trace edge to an unallocated `CF-ARCH-9999`

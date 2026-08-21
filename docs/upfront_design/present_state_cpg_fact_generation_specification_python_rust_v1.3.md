@@ -4365,10 +4365,10 @@ Stable read algorithm:
 
 1. open securely beneath the authorized root;
 2. capture metadata `M0`;
-3. read exact bytes with size limit;
-4. capture metadata `M1`;
-5. reject/retry if identity, size, mtime, or relevant change token differs;
-6. hash bytes;
+3. read exact bytes with size limit and compute digest `D0`;
+4. capture metadata `M1`, rewind the same descriptor, reread exact bytes, compute digest `D1`, and capture metadata `M2`;
+5. reject/retry unless `M0 == M1 == M2` for identity, size, mtime, and relevant change token and `D0 == D1` byte-for-byte;
+6. adopt `D0` as the source digest;
 7. store immutable blob using temp-write, `fsync`, mode `0400`, atomic rename;
 8. build line-index artifact and manifest;
 9. issue a snapshot lease.
@@ -4412,7 +4412,14 @@ Encoding classification:
 
 Every provider request includes the expected digest; every terminal output echoes it. Digest mismatch is `SOURCE_SNAPSHOT_MISMATCH` and rejects output.
 
-Runtime source blobs are lease-scoped and removed after all provider, snapshot, and source-artifact leases release. They are not semantic history.
+Runtime source blobs are lease-scoped and removed after all provider-run,
+serving-snapshot, and source-artifact holders release. One typed snapshot-lease header
+may own multiple blob members. Acquisition, renewal, release, restart orphaning, and
+garbage collection are serialized through the operational-store writer. Restarted
+active leases become orphaned and remain protective through the deployment-profile
+grace period. Garbage collection rechecks holder protection inside the same write
+transaction as member/metadata removal, deletes a bounded batch, and is idempotent.
+Runtime source blobs are not semantic history.
 ## AC-G-34 — Build and project-configuration discovery
 ### Decision
 

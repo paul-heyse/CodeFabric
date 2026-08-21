@@ -3,12 +3,36 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:0bb9f1e05a675672e6233fe2fec19ef2c4fe3cdf027e71af6dd134491232512f"
+canonical_digest: "b3:f8271264e41054a56b7e5819c7e75308f9c279edd1cb263b572c98eeea2503e8"
 digest_projection: yaml-ac-g-53-v1
 generator_revision: codefabric-contracts/1.0
-records: []
+records:
+  - code: SOURCE_CAPTURE_AFTER_FIRST_READ
+    owner: fact-generation
+    allowed_actions: [mutate_fixture, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [no-false-stable-image, bounded-retry]
+    scenarios: [source-capture-concurrent-mutation]
+  - code: SOURCE_BLOB_BEFORE_RENAME
+    owner: lifecycle
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [no-partial-blob, content-addressed-name]
+    scenarios: [source-blob-atomic-publication]
+  - code: SOURCE_LEASE_AFTER_ORPHAN
+    owner: lifecycle
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [orphan-grace-preserved, live-holder-preserved]
+    scenarios: [source-lease-restart-recovery]
+  - code: SOURCE_GC_BEFORE_DELETE
+    owner: lifecycle
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [live-holder-preserved, idempotent-garbage-collection]
+    scenarios: [source-blob-concurrent-release-gc]
 owner_acceptance:
   approver: lifecycle-owner
   accepted_at: "2026-08-21"
-  construction_rule: Empty initial allocation because Wave 1 introduces no production lifecycle transition or persistence fault hook
+  construction_rule: Append-only deterministic Wave-2 source capture, publication, lease, restart, and garbage-collection seams
   source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

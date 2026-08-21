@@ -225,6 +225,29 @@ pub struct PlatformRootProfile {
     pub private_file_mode: String,
 }
 
+/// Bounded AC-G-33 source-image capture defaults.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceImageLimitProfile {
+    pub ordinary_maximum_bytes: u64,
+    pub explicit_maximum_bytes: u64,
+    pub stable_read_retry_count: u8,
+    pub orphan_grace_seconds: u64,
+    pub garbage_collection_batch_size: u32,
+}
+
+/// Six independently enforceable generic-inventory bounds.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct InventoryLimitProfile {
+    pub maximum_file_count: u64,
+    pub maximum_directory_count: u64,
+    pub maximum_directory_depth: u32,
+    pub maximum_total_bytes_considered: u64,
+    pub maximum_duration_ms: u64,
+    pub maximum_entries_per_directory: u64,
+}
+
 /// Closed AC-G-08 local workstation deployment profile.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -244,6 +267,8 @@ pub struct DeploymentProfileDocument {
     pub source_blob_persistence: String,
     pub result_artifact_ttl_seconds: u32,
     pub source_result_artifact_ttl_seconds: u32,
+    pub source_image_limits: SourceImageLimitProfile,
+    pub inventory_limits: InventoryLimitProfile,
     pub default_query_freshness: String,
     pub provider_sandbox: String,
     pub follow_directory_symlinks: bool,

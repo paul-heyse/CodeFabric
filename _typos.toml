@@ -41,3 +41,7 @@ ba = "ba"
 # "mis-attribution", "mis-cited". A standard English prefix that `typos` splits on the
 # hyphen and then reports as a misspelling of "miss"/"mist".
 mis = "mis"
+
+# rustix mirrors the POSIX `O_WRONLY` flag as `OFlags::WRONLY`. This is an upstream API
+# identifier, not prose and not a misspelling we can rename.
+WRONLY = "WRONLY"

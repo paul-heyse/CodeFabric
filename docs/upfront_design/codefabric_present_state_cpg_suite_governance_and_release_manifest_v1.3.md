@@ -704,6 +704,19 @@ hot_overlay_journal: disabled
 source_blob_persistence: runtime-lease-only
 result_artifact_ttl_seconds: 3600
 source_result_artifact_ttl_seconds: 1800
+source_image_limits:
+  ordinary_maximum_bytes: 16777216
+  explicit_maximum_bytes: 67108864
+  stable_read_retry_count: 3
+  orphan_grace_seconds: 300
+  garbage_collection_batch_size: 256
+inventory_limits:
+  maximum_file_count: 1000000
+  maximum_directory_count: 100000
+  maximum_directory_depth: 128
+  maximum_total_bytes_considered: 17179869184
+  maximum_duration_ms: 300000
+  maximum_entries_per_directory: 100000
 default_query_freshness: REQUIRE_CURRENT_FOR_TARGETS
 provider_sandbox: required-for-untrusted
 follow_directory_symlinks: false

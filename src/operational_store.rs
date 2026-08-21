@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::contracts::index::artifact_index;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str = include_str!("../contracts/schema/operational-store.sql");
 const SCHEMA_IR_ARTIFACT_ID: &str = "codefabric.schema.contract-ir";
@@ -325,7 +325,11 @@ impl OperationalStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         match version {
             0 => transaction.execute_batch(OPERATIONAL_DDL)?,
-            1 => migrate_v1_to_v2(&transaction)?,
+            1 => {
+                migrate_v1_to_v2(&transaction)?;
+                migrate_v2_to_v3(&transaction)?;
+            }
+            2 => migrate_v2_to_v3(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -408,6 +412,18 @@ fn migrate_v1_to_v2(transaction: &Transaction<'_>) -> Result<(), OperationalStor
     )?;
     transaction.execute_batch(&generated_table_ddl("repository_registration")?)?;
     transaction.execute_batch(&generated_table_ddl("worktree_registration")?)?;
+    Ok(())
+}
+
+fn migrate_v2_to_v3(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    for table in [
+        "source_inventory",
+        "source_blob",
+        "source_blob_lease",
+        "source_blob_lease_member",
+    ] {
+        transaction.execute_batch(&generated_table_ddl(table)?)?;
+    }
     Ok(())
 }
 
@@ -791,7 +807,7 @@ mod tests {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v2")
+                    .contains("pre-migration-v3")
             })
             .unwrap()
             .path();
@@ -815,7 +831,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v2"))
+                    .contains("pre-migration-v3"))
                 .count(),
             1
         );
@@ -828,7 +844,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v2"))
+                    .contains("pre-migration-v3"))
                 .count(),
             2
         );
@@ -887,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    fn wp14_operational_schema_v1_migrates_to_v2() {
+    fn wp14_operational_schema_v1_migrates_to_current() {
         let (_directory, path) = database();
         let store = OperationalStore::open(&path).unwrap();
         drop(store);
@@ -935,6 +951,10 @@ mod tests {
                  DROP TABLE workspace_registration_v2;
                  DROP TABLE repository_registration;
                  DROP TABLE worktree_registration;
+                 DROP TABLE source_inventory;
+                 DROP TABLE source_blob;
+                 DROP TABLE source_blob_lease;
+                 DROP TABLE source_blob_lease_member;
                  PRAGMA user_version=1;",
             )
             .unwrap();

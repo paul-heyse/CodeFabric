@@ -122,6 +122,11 @@ wave2-integration-check:
     cargo nextest run --locked -E 'test(/wp1[2-8]/)' --no-tests=fail
     cargo test --doc
 
+[doc("Run the seeded 10,000-attempt three-size source-capture race campaign")]
+[group('test')]
+source-capture-race-check:
+    cargo test --locked wp16_source_capture_race_campaign -- --ignored
+
 # ----------------------------------------------------------------- fast / PR gates
 
 [doc("Fast unused-dependency hygiene")]
