@@ -18,7 +18,9 @@ use super::mutation::{
     DurableWriteKind, append_phase, application_id, commit_properties, enforce_write_kind,
     reconcile_prepared, reload_table, storage_batch,
 };
-use super::{FabricError, LocalProviderFactory, WorkspaceFabric, exact_provider};
+use super::{
+    DeltaAccessProfile, FabricError, LocalProviderFactory, WorkspaceFabric, exact_provider,
+};
 use crate::fabric::{
     MutationJournal, MutationPhase, MutationPhaseSpec, OwnerMutationRequest, batch_checksum,
 };
@@ -626,7 +628,7 @@ async fn transition_publication<J: MutationJournal>(
         ));
     }
     let table = fabric.tables.get_mut(&5).expect("publication table exists");
-    reload_table(table).await?;
+    reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
     let prepared = journal
         .prepare(&phase(
             request,
@@ -691,7 +693,12 @@ async fn transition_publication<J: MutationJournal>(
         )));
     }
     table.delta = delta;
-    table.provider = exact_provider(&table.delta, table_spec(5).unwrap()).await?;
+    table.provider = exact_provider(
+        &table.delta,
+        table_spec(5).unwrap(),
+        DeltaAccessProfile::QueryServing,
+    )
+    .await?;
     let version = table.delta.version().ok_or_else(|| {
         FabricError::PublicationIntegrity("publication transition returned no version".into())
     })?;
@@ -708,7 +715,7 @@ async fn mark_manifest_validated<J: MutationJournal>(
     records: &BTreeMap<i16, PublicationTableRecord>,
 ) -> Result<(), FabricError> {
     let table = fabric.tables.get_mut(&6).expect("publication_table exists");
-    reload_table(table).await?;
+    reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
     let mut payload = Vec::with_capacity(records.len() * 34);
     for record in records.values() {
         payload.extend_from_slice(&record.table_code.to_be_bytes());
@@ -753,7 +760,12 @@ async fn mark_manifest_validated<J: MutationJournal>(
         )));
     }
     table.delta = delta;
-    table.provider = exact_provider(&table.delta, table_spec(6).unwrap()).await?;
+    table.provider = exact_provider(
+        &table.delta,
+        table_spec(6).unwrap(),
+        DeltaAccessProfile::QueryServing,
+    )
+    .await?;
     let version = table.delta.version().ok_or_else(|| {
         FabricError::PublicationIntegrity("manifest validation returned no version".into())
     })?;
@@ -810,7 +822,7 @@ async fn commit_pointer<J: MutationJournal>(
     let spec = table_spec(7).unwrap();
     enforce_write_kind(spec, DurableWriteKind::CurrentPointerSwap)?;
     let table = fabric.tables.get_mut(&7).expect("current pointer exists");
-    reload_table(table).await?;
+    reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
     let next = CurrentPublicationRecord {
         workspace_id: request.pins.workspace_id,
         publication_id: request.pins.publication_id,
@@ -874,7 +886,8 @@ async fn commit_pointer<J: MutationJournal>(
             .await
             .map_err(|error| FabricError::CurrentPointerConflict(error.to_string()))?;
         table.delta = delta;
-        table.provider = exact_provider(&table.delta, spec).await?;
+        table.provider =
+            exact_provider(&table.delta, spec, DeltaAccessProfile::QueryServing).await?;
         let version = table.delta.version().ok_or_else(|| {
             FabricError::CurrentPointerConflict("pointer commit returned no version".into())
         })?;
@@ -882,7 +895,7 @@ async fn commit_pointer<J: MutationJournal>(
             .mark_committed(&prepared, version)
             .map_err(FabricError::MutationJournal)?;
     }
-    reload_table(table).await?;
+    reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
     let verified = read_current_pointer(table).await?;
     if verified.as_ref() != Some(&next) {
         return Err(FabricError::CurrentPointerConflict(
@@ -922,7 +935,7 @@ async fn stage_publication<J: MutationJournal>(
         0,
     )?;
     let table = fabric.tables.get_mut(&5).expect("publication table exists");
-    reload_table(table).await?;
+    reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
     enforce_write_kind(table_spec(5).unwrap(), DurableWriteKind::PublicationAppend)?;
     let checksum = batch_checksum(&staging)?;
     let phase = phase(
@@ -989,7 +1002,7 @@ async fn write_publication_manifest<J: MutationJournal>(
     let manifest = publication_table_batch(&records.values().cloned().collect::<Vec<_>>())?;
     let checksum = batch_checksum(&manifest)?;
     let table = fabric.tables.get_mut(&6).expect("publication_table exists");
-    reload_table(table).await?;
+    reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
     enforce_write_kind(table_spec(6).unwrap(), DurableWriteKind::PublicationAppend)?;
     let phase = phase(
         request,

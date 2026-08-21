@@ -1,0 +1,18 @@
+id: delta-handle-factory-only
+language: Rust
+severity: error
+message: Delta handles must be opened by the access-profile-aware DeltaHandleFactory.
+note: Keep DeltaTableBuilder inside snapshot_catalog.rs so every open names one closed access profile.
+files:
+  - src/fabric.rs
+  - src/fabric/**/*.rs
+ignores:
+  - src/fabric/snapshot_catalog.rs
+rule:
+  any:
+    - all:
+        - kind: scoped_identifier
+        - regex: "DeltaTableBuilder::"
+    - all:
+        - kind: use_declaration
+        - regex: "(^|\\s)(deltalake::)?DeltaTableBuilder"

@@ -10,12 +10,11 @@ use arrow_select::concat::concat_batches;
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::{Expr, col, lit};
 use datafusion::prelude::SessionContext;
-use deltalake::DeltaTableBuilder;
 use deltalake::kernel::{Transaction, transaction::CommitProperties};
 use deltalake::protocol::SaveMode;
 use serde_json::Value;
 
-use super::{FabricError, LocalProviderFactory, WorkspaceFabric, exact_provider};
+use super::{DeltaAccessProfile, DeltaHandleFactory, FabricError, WorkspaceFabric, exact_provider};
 use crate::fact_ingest::ValidatedFactBatch;
 use crate::identity::{IdentityDomain, encode_public_id};
 use crate::schema_registry::{DurableMutationClass, TableSpec, table_spec, table_specs};
@@ -382,12 +381,22 @@ pub(super) fn phase_spec(
     })
 }
 
-pub(super) async fn reload_table(table: &mut super::FabricTable) -> Result<(), FabricError> {
-    let url = LocalProviderFactory::file_url(&table.path)?;
-    table.delta = DeltaTableBuilder::from_url(url)?.load().await?;
+pub(super) async fn reload_table(
+    table: &mut super::FabricTable,
+    profile: DeltaAccessProfile,
+) -> Result<(), FabricError> {
+    if profile != DeltaAccessProfile::OptimizeDml || profile.skip_stats() {
+        return Err(FabricError::SnapshotProviderIntegrity(
+            "mutable Delta reload requires the OPTIMIZE_DML full-statistics profile".into(),
+        ));
+    }
+    table.delta = DeltaHandleFactory::open(&table.path.to_string_lossy(), None, profile)
+        .await?
+        .into_table();
     table.provider = exact_provider(
         &table.delta,
         table_spec(table.table_code).expect("opened generated table"),
+        DeltaAccessProfile::QueryServing,
     )
     .await?;
     Ok(())
@@ -422,7 +431,7 @@ pub(super) async fn reconcile_prepared<J: MutationJournal>(
     journal: &mut J,
     prepared: &PreparedMutation,
 ) -> Result<Option<u64>, FabricError> {
-    reload_table(table).await?;
+    reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
     let observed = transaction_version(table, &prepared.spec.application_id).await?;
     if let Some(committed) = prepared.committed_delta_version {
         // delta-rs deliberately elides a predicate-delete commit when no file
@@ -516,6 +525,7 @@ async fn delete_phase<J: MutationJournal>(
     table.provider = exact_provider(
         &table.delta,
         table_spec(table.table_code).expect("generated mutation table"),
+        DeltaAccessProfile::QueryServing,
     )
     .await?;
     let version = table.delta.version().ok_or_else(|| {
@@ -555,6 +565,7 @@ pub(super) async fn append_phase<J: MutationJournal>(
     table.provider = exact_provider(
         &table.delta,
         table_spec(table.table_code).expect("generated mutation table"),
+        DeltaAccessProfile::QueryServing,
     )
     .await?;
     let version = table.delta.version().ok_or_else(|| {
@@ -600,7 +611,7 @@ impl WorkspaceFabric {
                 detail: "workspace table is absent".into(),
             }
         })?;
-        reload_table(table).await?;
+        reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
         let delete = phase_spec(
             request,
             &owners,
@@ -611,7 +622,7 @@ impl WorkspaceFabric {
         )?;
         let (delete_version, deleted_rows, delete_replayed) =
             delete_phase(table, journal, delete, &owners).await?;
-        reload_table(table).await?;
+        reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
         if !delete_replayed {
             let deleted_batch = owner_batch(table, spec, &owners).await?;
             if deleted_batch.num_rows() != 0 || batch_checksum(&deleted_batch)? != empty_checksum {
@@ -643,7 +654,7 @@ impl WorkspaceFabric {
             ));
         }
         let append_version = append_phase(table, journal, append, batch.batch()).await?;
-        reload_table(table).await?;
+        reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
         let final_batch = owner_batch(table, spec, &owners).await?;
         let final_checksum = batch_checksum(&final_batch)?;
         if final_batch.num_rows() != batch.num_rows() || final_checksum != input_checksum {
@@ -706,7 +717,7 @@ impl WorkspaceFabric {
                         table: spec.name.into(),
                         detail: "bootstrapped owner table is absent".into(),
                     })?;
-            reload_table(table).await?;
+            reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
             let existing = owner_batch(table, spec, &owners).await?;
             let input_checksum = batch_checksum(&existing)?;
             let empty_checksum =
@@ -729,7 +740,7 @@ impl WorkspaceFabric {
             )?;
             let (delete_version, deleted_rows, _) =
                 delete_phase(table, journal, delete, &owners).await?;
-            reload_table(table).await?;
+            reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
             let final_batch = owner_batch(table, spec, &owners).await?;
             if final_batch.num_rows() != 0 || batch_checksum(&final_batch)? != empty_checksum {
                 return Err(FabricError::MutationConflict(format!(

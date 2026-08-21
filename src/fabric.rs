@@ -13,6 +13,7 @@ use arrow_array::{
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::catalog::{Session, TableProvider};
+use datafusion::common::Statistics;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::{SessionConfig, SessionContext, col};
@@ -29,6 +30,7 @@ use crate::workspace_registry::WorkspaceRecord;
 
 mod mutation;
 mod publication;
+mod snapshot_catalog;
 pub use mutation::{
     MutationFaultPoint, MutationJournal, MutationPhase, MutationPhaseSpec, MutationResult,
     OwnerMutationRequest, PreparedMutation, batch_checksum,
@@ -36,6 +38,11 @@ pub use mutation::{
 pub use publication::{
     CurrentPublicationRecord, OwnerPublicationWrite, PublicationFaultPoint, PublicationOutcome,
     PublicationPins, PublicationRequest, PublicationTableRecord,
+};
+pub use snapshot_catalog::{
+    DeltaAccessProfile, DeltaHandleFactory, DeltaMaterializationPosture, EmptySnapshotOverlay,
+    ProfiledDeltaHandle, SnapshotConstructionMetrics, SnapshotConstructionStage,
+    SnapshotOverlayProviderFactory, SnapshotProviderCatalog, SnapshotProviderRecord,
 };
 
 const SCHEMA_DIGEST_KEY: &str = "com.codefabric.cpg.schema_digest";
@@ -66,6 +73,10 @@ pub enum FabricError {
     CurrentPointerConflict(String),
     #[error("PUBLICATION_FAULT:{0:?}")]
     PublicationFault(PublicationFaultPoint),
+    #[error("SNAPSHOT_PROVIDER_INTEGRITY:{0}")]
+    SnapshotProviderIntegrity(String),
+    #[error("SNAPSHOT_CATALOG_FROZEN:{0}")]
+    SnapshotCatalogFrozen(String),
     #[error("fabric I/O at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -234,6 +245,10 @@ impl TableProvider for ContractTableProvider {
     ) -> datafusion::error::Result<Vec<TableProviderFilterPushDown>> {
         self.inner.supports_filters_pushdown(filters)
     }
+
+    fn statistics(&self) -> Option<Statistics> {
+        self.inner.statistics()
+    }
 }
 
 /// One opened table bound to its immutable generated contract.
@@ -318,7 +333,8 @@ impl WorkspaceFabric {
             .with_save_mode(SaveMode::Overwrite)
             .await?;
         entry.delta = table;
-        entry.provider = exact_provider(&entry.delta, spec).await?;
+        entry.provider =
+            exact_provider(&entry.delta, spec, DeltaAccessProfile::QueryServing).await?;
         Ok(())
     }
 
@@ -427,10 +443,10 @@ pub async fn bootstrap_workspace_with_repository(
             path: path.clone(),
             source,
         })?;
-        let mut table = create_or_open(&path, spec).await?;
+        let mut table = create_or_open(&path, spec, DeltaAccessProfile::OptimizeDml).await?;
         table = install_constraints(table, spec).await?;
         validate_open_table(&table, spec)?;
-        let provider = exact_provider(&table, spec).await?;
+        let provider = exact_provider(&table, spec, DeltaAccessProfile::QueryServing).await?;
         tables.insert(
             spec.table_code,
             FabricTable {
@@ -446,7 +462,16 @@ pub async fn bootstrap_workspace_with_repository(
     Ok(fabric)
 }
 
-async fn create_or_open(path: &Path, spec: &TableSpec) -> Result<DeltaTable, FabricError> {
+async fn create_or_open(
+    path: &Path,
+    spec: &TableSpec,
+    profile: DeltaAccessProfile,
+) -> Result<DeltaTable, FabricError> {
+    if profile != DeltaAccessProfile::OptimizeDml || profile.skip_stats() {
+        return Err(FabricError::SnapshotProviderIntegrity(
+            "table creation requires the OPTIMIZE_DML full-statistics profile".into(),
+        ));
+    }
     let url = LocalProviderFactory::file_url(path)?;
     let kernel: deltalake::kernel::StructType = spec.arrow_schema.as_ref().try_into_kernel()?;
     let mut configuration = HashMap::from([
@@ -612,10 +637,16 @@ fn validate_contract_identity(
     Ok(())
 }
 
-async fn exact_provider(
+pub(super) async fn exact_provider(
     table: &DeltaTable,
     spec: &TableSpec,
+    profile: DeltaAccessProfile,
 ) -> Result<Arc<dyn TableProvider>, FabricError> {
+    if profile != DeltaAccessProfile::QueryServing || profile.skip_stats() {
+        return Err(FabricError::SnapshotProviderIntegrity(
+            "DataFusion providers require the QUERY_SERVING statistics profile".into(),
+        ));
+    }
     // Delta/DataFusion defaults to Arrow view types for Parquet scans. The governed
     // schema deliberately uses ordinary Utf8/Binary, so bind the provider to the
     // library's session option instead of maintaining a conversion layer.

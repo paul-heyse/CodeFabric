@@ -925,10 +925,10 @@ Activation order:
 1. read the immutable durable publication manifest
 2. resolve the exact Delta version for each required table from publication_table
 3. construct an exact-version delta-rs table/snapshot/provider
-4. register the provider in the candidate snapshot's private DataFusion catalog
-5. wrap it with the CodeFabric overlay-aware provider (section 91)
-6. run activation integrity checks
-7. freeze the catalog and provider set
+4. wrap it with the CodeFabric overlay-aware provider (section 91)
+5. register only the wrapped provider in the candidate snapshot's private DataFusion catalog
+6. run activation integrity checks against the wrapped providers and exact manifest
+7. freeze the catalog and provider set so registration/deregistration always fails
 8. atomically activate the new ServingSnapshot
 9. every lease reuses those exact provider objects
 ```
