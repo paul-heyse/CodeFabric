@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP22",
+  "current_packet": "WP26",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -587,10 +587,31 @@
       "blockers": []
     },
     "WP22": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "f7bbc75e015b28afe718b971984092d5d29f68a2",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "The schema Contract IR now generates a closed PublicationPinRole. Only PINNED_DATA tables receive publication_table rows; publication, publication_table, current_publication, and non-durable overlays are explicitly classified to eliminate a self-referential manifest while retaining generated protocol participation."
+        },
+        {
+          "kind": "accepted_design_correction",
+          "summary": "The generated durable-publication state machine now makes COMMITTING to COMPLETE establish pointer eligibility only. Pointer CAS and lease release occur after COMPLETE and exact read-back, preventing a generated transition action from exposing an incomplete publication."
+        },
+        {
+          "kind": "replan_trigger_resolution",
+          "summary": "The AC-G-26 hedge is realized with the coordinator journal's BEGIN IMMEDIATE predecessor claim plus a max-retry-zero Delta singleton overwrite and exact post-commit read-back. Concurrent stale writers receive CURRENT_POINTER_CONFLICT without relying on undocumented Delta conflict behavior."
+        },
+        {
+          "kind": "user_directed_non_timing_evidence",
+          "summary": "Publication latency measurement was intentionally omitted under the accepted non-timing evidence policy. Operational acceptance instead proves restart recovery at all five registered fault points, committed journal counts, terminal diagnostics, exact table census, and pointer read-back."
+        }
+      ],
+      "failed_approaches": [
+        "The first orchestration placed every publication phase in one method and failed strict Clippy size/complexity review. It was split into typed staging, owner-write, manifest, validation, completion, and pointer helpers without lint suppression.",
+        "The first full gate retained an eleven-key schema-metadata assertion after publication_pin_role became generated Arrow metadata. The proof now asserts all twelve keys and the exact PINNED_DATA semantic value.",
+        "The first targeted mutation run found two weak assertions: manifest key and batch censuses were not varied independently, and COMPLETE metadata was not read back. Focused tests now isolate both census legs and assert the persisted completion timestamp and published-table count; the rerun caught both previously missed mutants."
+      ],
       "blockers": []
     },
     "WP23": {
