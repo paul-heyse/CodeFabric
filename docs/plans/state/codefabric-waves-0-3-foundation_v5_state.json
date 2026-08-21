@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP19",
+  "current_packet": "WP20",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -519,10 +519,26 @@
       "blockers": []
     },
     "WP19": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "a56b04e08bd4c5ed4b1ba217534598cd3309f126",
+      "deviations": [
+        {
+          "kind": "pinned_library_native_mapping",
+          "summary": "The pinned CreateBuilder rejects an explicit delta.columnMapping.mode value even when it is none. WP19 therefore omits the property and fails closed whenever Delta resolves a column-mapping mode, which is the library-native representation of no column mapping. Delta's canonical Arrow list child name `element`, its schema_force_view_types=false session option, and its separation of field metadata from top-level Arrow metadata are used programmatically for exact round trips."
+        },
+        {
+          "kind": "accepted_advisory_exception_refresh",
+          "summary": "The live RustSec review retains four exact-version exceptions: two unmaintained upstream macro dependencies and two quick-xml vulnerabilities reachable only through kernel-forced latent object_store cloud features. The local provider factory rejects cloud schemes and configuration before construction; the machine registry now assigns review to M04 and any earlier dependency/cloud-profile change."
+        }
+      ],
+      "failed_approaches": [
+        "The first exact provider build accepted DataFusion's default Utf8View/BinaryView optimization, which disagreed with governed Utf8/Binary schemas. The provider now uses the pinned schema_force_view_types=false session option.",
+        "The initial generated id-list child used Arrow's generic `item` name. Delta canonicalizes lists to `element`; the single logical-type mapping and list builder now use that native convention.",
+        "The first control-row write passed governed top-level Arrow schema metadata directly to Delta, whose StructType persists only field metadata. Writes now use the native storage schema while table properties and the provider facade restore the governed top-level metadata.",
+        "The initial advisory gate hard-coded WP19 ownership and could not represent a reviewed handoff. It now validates owner and trigger from the machine-readable registry.",
+        "The first full aggregate after WP19 observed WP17's read-only Git snapshot oracle change while a detached Git auto-maintenance task completed. Git fixture auto-maintenance and auto-GC are now disabled; focused stress and repeated full aggregates are green.",
+        "The first aggregate after dependency-feature changes correctly failed the exact stable graph and Delta boundary scans. The authoritative FAB feature table and graph oracle were updated, and Delta conversion/digest code was moved wholly back inside src/fabric.rs."
+      ],
       "blockers": []
     },
     "WP20": {
@@ -974,6 +990,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP19: replace the data-fabric compatibility seams with the generated schema-registry runtime, local Delta namespace, provider-factory boundary, constrained control-plane tables, and exact round-trip validation.",
-  "updated_at": "2026-08-21T12:17:12Z"
+  "next_action": "Execute WP20: implement the universal fact core, closed observation boundary, generated encoders, bounded batch validation, reconciliation ownership, and deterministic semantic indexes on the WP19 fabric.",
+  "updated_at": "2026-08-21T13:04:12Z"
 }
