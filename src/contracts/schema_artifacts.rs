@@ -758,6 +758,11 @@ mod tests {
         )
         .unwrap();
         for table in [
+            "workspace_registration",
+            "workspace_generation",
+            "nested_root_exclusion",
+            "credential_metadata",
+            "audit_event",
             "common_repository_state",
             "worktree_state",
             "git_state_vector",

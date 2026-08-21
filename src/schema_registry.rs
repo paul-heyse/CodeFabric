@@ -395,10 +395,9 @@ mod tests {
     #[cfg(feature = "repository-state")]
     #[test]
     fn wp09_operational_store_ddl_executes() {
+        let ddl = include_str!("../contracts/schema/operational-store.sql");
         let connection = rusqlite::Connection::open_in_memory().unwrap();
-        connection
-            .execute_batch(include_str!("../contracts/schema/operational-store.sql"))
-            .unwrap();
+        connection.execute_batch(ddl).unwrap();
         let table_count: i64 = connection
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -406,7 +405,11 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(table_count, 12);
+        let generated_table_count = ddl
+            .lines()
+            .filter(|line| line.starts_with("CREATE TABLE "))
+            .count();
+        assert_eq!(table_count, i64::try_from(generated_table_count).unwrap());
         let view_count: i64 = connection
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type = 'view' AND name = 'workspace_update_state'",

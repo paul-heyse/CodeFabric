@@ -12,6 +12,8 @@ pub mod contracts;
 pub mod daemon;
 #[cfg(feature = "canonical-json")]
 pub mod identity;
+#[cfg(feature = "daemon")]
+pub mod operational_store;
 /// Generated categorical and lifecycle registry types.
 pub mod registries;
 #[cfg(feature = "rpc")]

@@ -15,6 +15,7 @@ use tokio::net::{UnixListener, UnixStream};
 use crate::contracts::catalog::ArtifactKind;
 use crate::contracts::index::artifact_index;
 use crate::contracts::models::DeploymentProfileDocument;
+use crate::operational_store::{OperationalStore, OperationalStoreError};
 
 const CONFIG_MAX_BYTES: u64 = 262_144;
 const ADMIN_MESSAGE_MAX_BYTES: usize = 65_536;
@@ -227,6 +228,8 @@ pub enum DaemonError {
     LeaseHeld,
     #[error("administrative protocol failure: {0}")]
     Admin(String),
+    #[error(transparent)]
+    OperationalStore(#[from] OperationalStoreError),
 }
 
 fn private_directory(path: &Path) -> Result<(), DaemonError> {
@@ -446,6 +449,7 @@ async fn write_response(
 /// # Errors
 ///
 /// Returns startup, permission, socket, protocol, or joined-shutdown failures.
+#[allow(clippy::too_many_lines)] // The ordered lifecycle is kept visible as one joined sequence.
 pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
     config.validate()?;
     for root in [
@@ -456,6 +460,11 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
         private_directory(root)?;
     }
     let lease = DaemonLease::acquire(&config)?;
+    let operational_database = config
+        .static_config
+        .state_root
+        .join(&config.static_config.operational_database);
+    let mut operational_store = OperationalStore::open(&operational_database)?;
     if config.static_config.socket_endpoint.exists() {
         fs::remove_file(&config.static_config.socket_endpoint).map_err(|source| {
             DaemonError::Io {
@@ -530,11 +539,15 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
     for step in steps {
         tracing::info!(shutdown_step = step, "joined daemon shutdown");
     }
+    if drained {
+        operational_store.checkpoint()?;
+    }
     drop(listener);
     fs::remove_file(&config.static_config.socket_endpoint).map_err(|source| DaemonError::Io {
         path: config.static_config.socket_endpoint.clone(),
         source,
     })?;
+    drop(operational_store);
     Ok(DaemonExit {
         drained,
         shutdown_steps: steps.to_vec(),

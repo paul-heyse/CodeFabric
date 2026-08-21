@@ -262,7 +262,7 @@ impl SchemaContractIr {
         }
         let mut operational_names = BTreeSet::new();
         for table in &self.operational_tables {
-            if !operational_names.insert(&table.name) {
+            if !operational_names.insert(table.name.as_str()) {
                 return Err(format!("duplicate operational table: {}", table.name));
             }
             let columns = table
@@ -282,6 +282,28 @@ impl SchemaContractIr {
                     ));
                 }
             }
+        }
+        let expected_operational_names = BTreeSet::from([
+            "active_snapshot",
+            "audit_event",
+            "common_repository_state",
+            "credential_metadata",
+            "git_operation_run",
+            "git_state_vector",
+            "hot_overlay_manifest",
+            "nested_root_exclusion",
+            "provider_run",
+            "result_artifact_lease",
+            "serving_snapshot_manifest",
+            "snapshot_lease",
+            "update_wave",
+            "update_wave_item",
+            "workspace_generation",
+            "workspace_registration",
+            "worktree_state",
+        ]);
+        if operational_names != expected_operational_names {
+            return Err("operational table census differs from the closed AC-G-27 set".into());
         }
         let schemas = self
             .public_schemas

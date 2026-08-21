@@ -1,5 +1,68 @@
--- @generated from codefabric.schema.contract-ir b3:d089e858c0c887fb99ea2d1c1c583913e3ec25ea82df4a531a3946f0b68df240; codefabric-schema-contracts-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir b3:6e1676db70ef175bc81ce857f4594c462a6374a512a7ef4d5f2fcdd2a7652a74; codefabric-schema-contracts-v1; do not edit.
 PRAGMA foreign_keys = ON;
+
+CREATE TABLE workspace_registration (
+  workspace_id BLOB NOT NULL,
+  workspace_registration_nonce BLOB NOT NULL,
+  registration_revision INTEGER NOT NULL,
+  administrative_key BLOB NOT NULL,
+  root_path_bytes BLOB NOT NULL,
+  root_path_display TEXT NOT NULL,
+  repository_id BLOB,
+  worktree_id BLOB,
+  authorization_fingerprint BLOB NOT NULL,
+  context_fingerprint BLOB NOT NULL,
+  status_code INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id),
+  UNIQUE (administrative_key)
+) STRICT;
+
+CREATE TABLE workspace_generation (
+  workspace_id BLOB NOT NULL,
+  source_generation INTEGER NOT NULL,
+  admitted_event_sequence INTEGER NOT NULL,
+  reconciled_event_sequence INTEGER NOT NULL,
+  durable_generation INTEGER NOT NULL,
+  active_pointer_generation INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id)
+) STRICT;
+
+CREATE TABLE nested_root_exclusion (
+  parent_workspace_id BLOB NOT NULL,
+  child_workspace_id BLOB NOT NULL,
+  relative_path_bytes BLOB NOT NULL,
+  relative_path_display TEXT NOT NULL,
+  authorization_fingerprint BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (parent_workspace_id, child_workspace_id)
+) STRICT;
+
+CREATE TABLE credential_metadata (
+  credential_id BLOB NOT NULL,
+  workspace_id BLOB NOT NULL,
+  agent_id TEXT NOT NULL,
+  credential_hash BLOB NOT NULL,
+  operations_mask INTEGER NOT NULL,
+  issued_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  revocation_reason_code INTEGER,
+  PRIMARY KEY (credential_id)
+) STRICT;
+
+CREATE TABLE audit_event (
+  event_id BLOB NOT NULL,
+  workspace_id BLOB,
+  event_code INTEGER NOT NULL,
+  actor_id TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  details_digest BLOB NOT NULL,
+  diagnostic_id BLOB,
+  PRIMARY KEY (event_id)
+) STRICT;
 
 CREATE TABLE common_repository_state (
   repository_id BLOB NOT NULL,
