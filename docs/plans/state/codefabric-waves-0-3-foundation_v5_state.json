@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP14",
+  "current_packet": "WP15",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -424,10 +424,22 @@
       "blockers": []
     },
     "WP14": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "cb6608a5cb573bc9b307b6f443af4cf7caccb52c",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "The released CBEF machine authority still encoded obsolete path-derived workspace/repository/worktree recipes and omitted the AC-G-11 root-authorization domain, while the lifecycle registry omitted the design-required OPENING and BOOTSTRAPPING disable transitions. The authorities, generated products, KATs, and LIFE transition summary now agree with AC-G-09/10/11."
+        },
+        {
+          "kind": "forward_schema_migration",
+          "summary": "WP14 expands the WP13 generated operational model, so the store advances to schema version 2. Fresh databases install the current generated DDL directly; version-1 stores are backed up and rebuilt from generated target table definitions, with legacy registrations preserved in FAILED state pending explicit relink."
+        }
+      ],
+      "failed_approaches": [
+        "The first focused cargo test command supplied multiple positional test filters, which Cargo rejects; the unchanged tests were rerun with one packet filter per invocation.",
+        "The first daemon readiness compile attempted to propagate rusqlite::Error directly into DaemonError; the boundary now maps through OperationalStoreError, preserving the existing error taxonomy."
+      ],
       "blockers": []
     },
     "WP15": {
@@ -896,6 +908,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP14: implement the generated workspace registry and lifecycle machines, CBEF identities, private administrative IPC/CLI, nested-root exclusions, persisted revisions, and audit records.",
-  "updated_at": "2026-08-21T09:44:06Z"
+  "next_action": "Execute WP15: implement AC-G-11 root authorization, lexical rejection, descriptor-relative secure open, root-identity revalidation, and the adversarial path fixture matrix.",
+  "updated_at": "2026-08-21T10:23:19Z"
 }
