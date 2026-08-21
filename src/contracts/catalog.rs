@@ -132,6 +132,8 @@ pub enum CompatibilityFamily {
     Ontology,
     /// ID and path identity contracts.
     Identity,
+    /// Lifecycle and operational-state contracts.
+    Lifecycle,
     /// Storage and public JSON schemas.
     Schema,
     /// Provider/generation contracts.
@@ -198,6 +200,10 @@ pub enum DerivationOutputKind {
     ArtifactIndex,
     /// Canonical JSON derived from a registry.
     CanonicalRegistry,
+    /// Statically typed Rust lookups generated from all accepted registries.
+    RustRegistryBindings,
+    /// Statically typed Python lookups generated from all accepted registries.
+    PythonRegistryBindings,
     /// One compiler-owned descriptor set shared by all language generators.
     ProtoDescriptorSet,
     /// Normalized typed view of the shared descriptor set.
@@ -1163,11 +1169,17 @@ fn validate_derivation_shape(
                         view: ArtifactInputView::CompiledSemantic,
                     } if artifacts.get(artifact_id).is_some_and(|artifact| artifact.artifact_kind == ArtifactKind::Registry)
                 )
-            }) || derivation.outputs.len() != derivation.inputs.len()
-                || derivation
-                    .outputs
-                    .iter()
-                    .any(|output| output.output_kind != DerivationOutputKind::CanonicalRegistry)
+            }) || count(DerivationOutputKind::CanonicalRegistry) != derivation.inputs.len()
+                || count(DerivationOutputKind::RustRegistryBindings) != 1
+                || count(DerivationOutputKind::PythonRegistryBindings) != 1
+                || derivation.outputs.iter().any(|output| {
+                    !matches!(
+                        output.output_kind,
+                        DerivationOutputKind::CanonicalRegistry
+                            | DerivationOutputKind::RustRegistryBindings
+                            | DerivationOutputKind::PythonRegistryBindings
+                    )
+                })
         }
         DerivationKind::ProtobufDescriptorAndPython => {
             derivation.inputs.iter().any(|input| {
@@ -1451,13 +1463,29 @@ mod tests {
                 artifact_id: artifact_id.to_owned(),
                 view: ArtifactInputView::CompiledSemantic,
             }],
-            outputs: vec![DerivationOutput {
-                path: PathBuf::from(output),
-                output_kind: DerivationOutputKind::CanonicalRegistry,
-                primary_artifact_ids: BTreeSet::from([artifact_id.to_owned()]),
-                consumers: BTreeSet::from([ConsumerDomain::ContractTooling]),
-                resource_budget_profile: None,
-            }],
+            outputs: vec![
+                DerivationOutput {
+                    path: PathBuf::from(output),
+                    output_kind: DerivationOutputKind::CanonicalRegistry,
+                    primary_artifact_ids: BTreeSet::from([artifact_id.to_owned()]),
+                    consumers: BTreeSet::from([ConsumerDomain::ContractTooling]),
+                    resource_budget_profile: None,
+                },
+                DerivationOutput {
+                    path: PathBuf::from(format!("generated/{id}.rs")),
+                    output_kind: DerivationOutputKind::RustRegistryBindings,
+                    primary_artifact_ids: BTreeSet::from([artifact_id.to_owned()]),
+                    consumers: BTreeSet::from([ConsumerDomain::ContractTooling]),
+                    resource_budget_profile: None,
+                },
+                DerivationOutput {
+                    path: PathBuf::from(format!("generated/{id}.py")),
+                    output_kind: DerivationOutputKind::PythonRegistryBindings,
+                    primary_artifact_ids: BTreeSet::from([artifact_id.to_owned()]),
+                    consumers: BTreeSet::from([ConsumerDomain::ContractTooling]),
+                    resource_budget_profile: None,
+                },
+            ],
             resource_budget_profile: "test".to_owned(),
         }
     }
@@ -1510,7 +1538,7 @@ mod tests {
             compiled.package_data(ConsumerDomain::PythonAdapter),
             [Path::new("contracts/generated/synthetic.json")]
         );
-        assert_eq!(compiled.outputs().count(), 1);
+        assert_eq!(compiled.outputs().count(), 3);
         assert_eq!(compiled.derivation_order(), ["registry-set"]);
         assert_eq!(
             compiled

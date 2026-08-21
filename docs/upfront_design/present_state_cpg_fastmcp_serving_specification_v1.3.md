@@ -1766,7 +1766,7 @@ The adapter preserves the semantic-query 1.3 canonical error code/envelope. Adap
 | `DAEMON_UNAVAILABLE` | local transport/service unavailable | ToolError |
 | `CONTRACT_MISMATCH` | RPC/schema/bundle incompatibility | startup failure or ToolError |
 
-Semantic errors retain codes such as `INVALID_REQUEST_SCHEMA`, `AMBIGUOUS_SEMANTIC_PHRASE`, `CONTEXT_NOT_INDEXED`, `COMPOSITE_SNAPSHOT_UNSUPPORTED`, `CURRENT_FACTS_UNAVAILABLE`, `FRESHNESS_DEADLINE_EXCEEDED`, `RESOURCE_LIMIT_REJECTED`, `CANCELLED`, and `INTERNAL`.
+Semantic errors retain codes such as `INVALID_REQUEST_SCHEMA`, `SEMANTIC_PHRASE_AMBIGUOUS`, `CONTEXT_NOT_INDEXED`, `COMPOSITE_SNAPSHOT_UNSUPPORTED`, `CURRENT_FACTS_UNAVAILABLE`, `FRESHNESS_DEADLINE_EXCEEDED`, `RESOURCE_LIMIT_REJECTED`, `CANCELLED`, and `INTERNAL`.
 
 The public error envelope carries code, layer, retryability, safe message, and optional field/phrase/candidates/dependency/diagnostic ID. The adapter SHALL not rename semantic failures.
 

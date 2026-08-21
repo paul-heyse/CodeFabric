@@ -2,7 +2,21 @@ artifact_id: codefabric.registry.flag-registry
 artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:f0e04084879290edc19b70a242160bbf118e45025032e1a781a6b5ec62767bbe"
-records: []
-
+status: released
+canonical_digest: "b3:84c31308671ff1f88e23c75fa80595d4b7056a86593a6f1cd5e289714893298f"
+records:
+  - domain: FACT_FLAGS
+    width_bits: 64
+    values:
+      - {bit: 0, name: GENERATED, slug: generated, meaning: Fact originates in generated source}
+      - {bit: 1, name: LOWERED, slug: lowered, meaning: Fact originates in lowered representation}
+      - {bit: 2, name: EXTERNAL, slug: external, meaning: Endpoint is outside indexed source}
+      - {bit: 3, name: UNKNOWN_REMAINDER, slug: unknown-remainder, meaning: Open remainder is explicit}
+      - {bit: 32, name: PYTHON_PROFILE, slug: python-profile, meaning: Python profile applies}
+      - {bit: 33, name: RUST_PROFILE, slug: rust-profile, meaning: Rust profile applies}
+      - {bit: 48, name: COMPILER_SYNTHETIC, slug: compiler-synthetic, meaning: Compiler synthesized representation}
+owner_acceptance:
+  approver: suite-governance-owner
+  accepted_at: "2026-08-21"
+  construction_rule: AC-G-06 64-bit partition with reserved bits unallocated
+  source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"

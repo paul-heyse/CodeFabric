@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -28,6 +29,9 @@ use super::jcs::{
     validate_lowercase_public, validate_uint64,
 };
 use super::models::{RequirementRecord, TraceabilityRecord};
+use super::registry_models::{
+    EnumDomain, FlagDomain, StateMachine, validate_duplicate_authorities,
+};
 
 /// Verifier strictness profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -261,6 +265,539 @@ fn render_registry_outputs(
     Ok(())
 }
 
+fn registry_value(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+    artifact_id: &str,
+) -> Result<Value, ContractArtifactError> {
+    let artifact = catalog
+        .artifact(artifact_id)
+        .ok_or_else(|| ContractArtifactError::Missing(PathBuf::from(artifact_id)))?;
+    let compiled = compile_artifact(repository_root, catalog, artifact)?;
+    decode_strict(&compiled.canonical_bytes).map_err(|source| ContractArtifactError::Canonical {
+        path: artifact.authority_path.clone(),
+        source,
+    })
+}
+
+fn pascal_case(value: &str) -> String {
+    value
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            let mut rendered = String::new();
+            if let Some(first) = chars.next() {
+                rendered.extend(first.to_uppercase());
+            }
+            rendered.extend(chars.flat_map(char::to_lowercase));
+            rendered
+        })
+        .collect()
+}
+
+fn screaming_snake_from_pascal(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|character| {
+            if character.is_uppercase() {
+                vec!['_', character]
+            } else {
+                vec![character.to_ascii_uppercase()]
+            }
+        })
+        .collect::<String>()
+        .trim_start_matches('_')
+        .to_owned()
+}
+
+fn emit_rust_enum(output: &mut String, name: &str, values: &[super::registry_models::EnumValue]) {
+    let type_name = pascal_case(name);
+    writeln!(output, "#[derive(Clone, Copy, Debug, Eq, PartialEq)]").unwrap();
+    writeln!(output, "#[repr(u16)]").unwrap();
+    writeln!(output, "pub enum {type_name} {{").unwrap();
+    for value in values {
+        writeln!(output, "    {} = {},", pascal_case(&value.name), value.code).unwrap();
+    }
+    writeln!(output, "}}").unwrap();
+    writeln!(output, "impl TryFrom<u16> for {type_name} {{").unwrap();
+    writeln!(output, "    type Error = UnknownRegistryCode;").unwrap();
+    writeln!(
+        output,
+        "    fn try_from(code: u16) -> Result<Self, Self::Error> {{"
+    )
+    .unwrap();
+    writeln!(output, "        match code {{").unwrap();
+    for value in values {
+        writeln!(
+            output,
+            "            {} => Ok(Self::{}),",
+            value.code,
+            pascal_case(&value.name)
+        )
+        .unwrap();
+    }
+    writeln!(
+        output,
+        "            _ => Err(UnknownRegistryCode {{ domain: \"{name}\", code }}),"
+    )
+    .unwrap();
+    writeln!(output, "        }}").unwrap();
+    writeln!(output, "    }}").unwrap();
+    writeln!(output, "}}").unwrap();
+}
+
+// This is a deliberately linear emitter: keeping every generated Rust view in one
+// pass makes the authority-to-output mapping auditable and order deterministic.
+#[allow(clippy::too_many_lines)]
+fn render_rust_registry_bindings(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<Vec<u8>, ContractArtifactError> {
+    let authority_families = [
+        (
+            "entity",
+            "codefabric.registry.ontology-entity-registry",
+            "kind_slug",
+        ),
+        (
+            "relation",
+            "codefabric.registry.ontology-relation-registry",
+            "relation_slug",
+        ),
+        (
+            "property",
+            "codefabric.registry.ontology-property-registry",
+            "property_slug",
+        ),
+        (
+            "fact",
+            "codefabric.registry.ontology-fact-registry",
+            "fact_slug",
+        ),
+    ];
+    let mut authority_slugs = Vec::new();
+    for (family, artifact_id, field) in authority_families {
+        let value = registry_value(repository_root, catalog, artifact_id)?;
+        let records = value["records"]
+            .as_array()
+            .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+        for record in records {
+            let slug = record[field]
+                .as_str()
+                .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+            authority_slugs.push((family.to_owned(), slug.to_owned()));
+        }
+    }
+    validate_duplicate_authorities(
+        authority_slugs
+            .iter()
+            .map(|(family, slug)| (family.as_str(), slug.as_str())),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("ontology duplicate authority")))?;
+    let enums: Vec<EnumDomain> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.enum-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("enum-registry")))?;
+    let flags: Vec<FlagDomain> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.flag-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("flag-registry")))?;
+    let machines: Vec<StateMachine> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.state-machine-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("state-machine-registry")))?;
+
+    let mut output = String::from(
+        "// @generated by codefabric-contracts; edit registry authorities instead.\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct UnknownRegistryCode { pub domain: &'static str, pub code: u16 }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RegistryEntry { pub code: u16, pub name: &'static str, pub slug: &'static str }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct FlagEntry { pub mask: u64, pub name: &'static str, pub slug: &'static str }\n\n",
+    );
+    for domain in &enums {
+        emit_rust_enum(&mut output, &domain.domain, &domain.values);
+        writeln!(
+            output,
+            "pub const {}_VALUES: &[RegistryEntry] = &[",
+            domain.domain
+        )
+        .unwrap();
+        for value in &domain.values {
+            writeln!(
+                output,
+                "    RegistryEntry {{ code: {}, name: {:?}, slug: {:?} }},",
+                value.code, value.name, value.slug
+            )
+            .unwrap();
+        }
+        writeln!(output, "];\n").unwrap();
+    }
+    let enum_type_names = enums
+        .iter()
+        .map(|domain| pascal_case(&domain.domain))
+        .collect::<BTreeSet<_>>();
+    for machine in &machines {
+        if enum_type_names.contains(&machine.machine_id) {
+            continue;
+        }
+        emit_rust_enum(&mut output, &machine.machine_id, &machine.states);
+        let constant = screaming_snake_from_pascal(&machine.machine_id);
+        writeln!(output, "pub const {constant}_VALUES: &[RegistryEntry] = &[").unwrap();
+        for value in &machine.states {
+            writeln!(
+                output,
+                "    RegistryEntry {{ code: {}, name: {:?}, slug: {:?} }},",
+                value.code, value.name, value.slug
+            )
+            .unwrap();
+        }
+        writeln!(output, "];\n").unwrap();
+    }
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct StateTransitionEntry {\n\
+             pub from: &'static str, pub event: &'static str, pub guard: &'static str,\n\
+             pub to: &'static str, pub actions: &'static [&'static str],\n\
+             pub idempotency_key: &'static str, pub error_on_illegal: &'static str,\n\
+         }\n\n",
+    );
+    for machine in &machines {
+        let constant = screaming_snake_from_pascal(&machine.machine_id);
+        writeln!(
+            output,
+            "pub const {constant}_TRANSITIONS: &[StateTransitionEntry] = &["
+        )
+        .unwrap();
+        for transition in &machine.transitions {
+            writeln!(
+                output,
+                "    StateTransitionEntry {{ from: {:?}, event: {:?}, guard: {:?}, to: {:?}, actions: &{:?}, idempotency_key: {:?}, error_on_illegal: {:?} }},",
+                transition.from,
+                transition.event,
+                transition.guard,
+                transition.to,
+                transition.actions,
+                transition.idempotency_key,
+                transition.error_on_illegal,
+            )
+            .unwrap();
+        }
+        writeln!(output, "];\n").unwrap();
+    }
+    for domain in &flags {
+        writeln!(
+            output,
+            "pub const {}_FLAGS: &[FlagEntry] = &[",
+            domain.domain
+        )
+        .unwrap();
+        for value in &domain.values {
+            writeln!(
+                output,
+                "    FlagEntry {{ mask: 1_u64 << {}, name: {:?}, slug: {:?} }},",
+                value.bit, value.name, value.slug
+            )
+            .unwrap();
+        }
+        writeln!(output, "];\n").unwrap();
+    }
+    let families = [
+        (
+            "ENTITY_KIND_IDS",
+            "codefabric.registry.ontology-entity-registry",
+            "canonical_name",
+        ),
+        (
+            "RELATION_KIND_IDS",
+            "codefabric.registry.ontology-relation-registry",
+            "canonical_name",
+        ),
+        (
+            "PROPERTY_KIND_IDS",
+            "codefabric.registry.ontology-property-registry",
+            "canonical_name",
+        ),
+        (
+            "FACT_KIND_IDS",
+            "codefabric.registry.ontology-fact-registry",
+            "canonical_name",
+        ),
+        (
+            "UNKNOWN_IDS",
+            "codefabric.registry.unknown-registry",
+            "name",
+        ),
+        (
+            "PROJECTION_IDS",
+            "codefabric.registry.projection-registry",
+            "projection_id",
+        ),
+        (
+            "SUMMARY_PROFILE_IDS",
+            "codefabric.registry.summary-registry",
+            "summary_profile_id",
+        ),
+        (
+            "CAPABILITY_IDS",
+            "codefabric.registry.capability-registry",
+            "capability_code",
+        ),
+        (
+            "PROVIDER_IDS",
+            "codefabric.registry.provider-registry",
+            "provider_id",
+        ),
+        (
+            "PUBLIC_ERROR_IDS",
+            "codefabric.registry.error-registry",
+            "name",
+        ),
+        (
+            "DERIVATION_IDS",
+            "codefabric.registry.derivation-registry",
+            "derivation_id",
+        ),
+    ];
+    for (constant, artifact_id, field) in families {
+        let value = registry_value(repository_root, catalog, artifact_id)?;
+        let records = value["records"]
+            .as_array()
+            .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+        writeln!(output, "pub const {constant}: &[&str] = &[").unwrap();
+        for record in records {
+            let id = record[field]
+                .as_str()
+                .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+            writeln!(output, "    {id:?},").unwrap();
+        }
+        writeln!(output, "];\n").unwrap();
+    }
+    let content_len = output.trim_end().len();
+    output.truncate(content_len);
+    output.push('\n');
+    Ok(output.into_bytes())
+}
+
+// This mirrors the Rust emitter as one deterministic pass over the same typed model.
+#[allow(clippy::too_many_lines)]
+fn render_python_registry_bindings(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<Vec<u8>, ContractArtifactError> {
+    let enums: Vec<EnumDomain> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.enum-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("enum-registry")))?;
+    let flags: Vec<FlagDomain> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.flag-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("flag-registry")))?;
+    let machines: Vec<StateMachine> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.state-machine-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("state-machine-registry")))?;
+    let mut output = String::from(
+        "\"\"\"Generated registry types and immutable lookup views.\"\"\"\n\n\
+         from enum import IntEnum, IntFlag\n\
+         from types import MappingProxyType\n\n\n",
+    );
+    for domain in &enums {
+        writeln!(output, "class {}(IntEnum):", pascal_case(&domain.domain)).unwrap();
+        for value in &domain.values {
+            writeln!(output, "    {} = {}", value.name, value.code).unwrap();
+        }
+        writeln!(output).unwrap();
+        writeln!(output).unwrap();
+    }
+    let enum_type_names = enums
+        .iter()
+        .map(|domain| pascal_case(&domain.domain))
+        .collect::<BTreeSet<_>>();
+    for machine in &machines {
+        if enum_type_names.contains(&machine.machine_id) {
+            continue;
+        }
+        writeln!(output, "class {}(IntEnum):", machine.machine_id).unwrap();
+        for value in &machine.states {
+            writeln!(output, "    {} = {}", value.name, value.code).unwrap();
+        }
+        writeln!(output).unwrap();
+        writeln!(output).unwrap();
+    }
+    for domain in &flags {
+        writeln!(output, "class {}(IntFlag):", pascal_case(&domain.domain)).unwrap();
+        writeln!(output, "    NONE = 0").unwrap();
+        for value in &domain.values {
+            writeln!(output, "    {} = 1 << {}", value.name, value.bit).unwrap();
+        }
+        writeln!(output).unwrap();
+        writeln!(output).unwrap();
+    }
+    writeln!(output, "ENUM_TRIPLES = MappingProxyType(").unwrap();
+    writeln!(output, "    {{").unwrap();
+    for domain in &enums {
+        writeln!(output, "        {:?}: (", domain.domain).unwrap();
+        for value in &domain.values {
+            writeln!(output, "            (").unwrap();
+            writeln!(output, "                {},", value.code).unwrap();
+            writeln!(output, "                {:?},", value.name).unwrap();
+            writeln!(output, "                {:?},", value.slug).unwrap();
+            writeln!(output, "            ),").unwrap();
+        }
+        writeln!(output, "        ),").unwrap();
+    }
+    writeln!(output, "    }}").unwrap();
+    writeln!(output, ")\n").unwrap();
+    writeln!(output, "STATE_TRANSITIONS = MappingProxyType(").unwrap();
+    writeln!(output, "    {{").unwrap();
+    for machine in &machines {
+        writeln!(output, "        {:?}: (", machine.machine_id).unwrap();
+        for transition in &machine.transitions {
+            writeln!(output, "            (").unwrap();
+            for value in [
+                &transition.from,
+                &transition.event,
+                &transition.guard,
+                &transition.to,
+            ] {
+                writeln!(output, "                {value:?},").unwrap();
+            }
+            if transition.actions.len() == 1 {
+                writeln!(output, "                ({:?},),", transition.actions[0]).unwrap();
+            } else {
+                writeln!(output, "                (").unwrap();
+                for action in &transition.actions {
+                    writeln!(output, "                    {action:?},").unwrap();
+                }
+                writeln!(output, "                ),").unwrap();
+            }
+            writeln!(output, "                {:?},", transition.idempotency_key).unwrap();
+            writeln!(output, "                {:?},", transition.error_on_illegal).unwrap();
+            writeln!(output, "            ),").unwrap();
+        }
+        writeln!(output, "        ),").unwrap();
+    }
+    writeln!(output, "    }}").unwrap();
+    writeln!(output, ")\n").unwrap();
+    let families = [
+        (
+            "entity_kinds",
+            "codefabric.registry.ontology-entity-registry",
+            "canonical_name",
+        ),
+        (
+            "relation_kinds",
+            "codefabric.registry.ontology-relation-registry",
+            "canonical_name",
+        ),
+        (
+            "property_kinds",
+            "codefabric.registry.ontology-property-registry",
+            "canonical_name",
+        ),
+        (
+            "fact_kinds",
+            "codefabric.registry.ontology-fact-registry",
+            "canonical_name",
+        ),
+        ("unknowns", "codefabric.registry.unknown-registry", "name"),
+        (
+            "projections",
+            "codefabric.registry.projection-registry",
+            "projection_id",
+        ),
+        (
+            "summary_profiles",
+            "codefabric.registry.summary-registry",
+            "summary_profile_id",
+        ),
+        (
+            "capabilities",
+            "codefabric.registry.capability-registry",
+            "capability_code",
+        ),
+        (
+            "providers",
+            "codefabric.registry.provider-registry",
+            "provider_id",
+        ),
+        (
+            "public_errors",
+            "codefabric.registry.error-registry",
+            "name",
+        ),
+        (
+            "derivations",
+            "codefabric.registry.derivation-registry",
+            "derivation_id",
+        ),
+    ];
+    writeln!(output, "REGISTRY_IDS = MappingProxyType(").unwrap();
+    writeln!(output, "    {{").unwrap();
+    for (family, artifact_id, field) in families {
+        let value = registry_value(repository_root, catalog, artifact_id)?;
+        let records = value["records"]
+            .as_array()
+            .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+        if records.is_empty() {
+            writeln!(output, "        {family:?}: (),").unwrap();
+        } else if records.len() == 1 {
+            let id = records[0][field]
+                .as_str()
+                .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+            writeln!(output, "        {family:?}: ({id:?},),").unwrap();
+        } else {
+            writeln!(output, "        {family:?}: (").unwrap();
+            for record in records {
+                let id = record[field]
+                    .as_str()
+                    .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+                writeln!(output, "            {id:?},").unwrap();
+            }
+            writeln!(output, "        ),").unwrap();
+        }
+    }
+    writeln!(output, "    }}").unwrap();
+    writeln!(output, ")").unwrap();
+    let content_len = output.trim_end().len();
+    output.truncate(content_len);
+    output.push('\n');
+    Ok(output.into_bytes())
+}
+
 fn render_index(
     repository_root: &Path,
     index_path: &Path,
@@ -295,6 +832,24 @@ fn render_outputs(
     let artifact_records = collect_artifact_records(repository_root, &catalog)?;
     let derivation_records = collect_derivation_records(&catalog);
     render_registry_outputs(repository_root, &catalog, &mut outputs)?;
+    let rust_bindings = required_output(
+        &catalog,
+        REGISTRY_DERIVATION_ID,
+        DerivationOutputKind::RustRegistryBindings,
+    )?;
+    outputs.insert(
+        rust_bindings,
+        render_rust_registry_bindings(repository_root, &catalog)?,
+    );
+    let python_bindings = required_output(
+        &catalog,
+        REGISTRY_DERIVATION_ID,
+        DerivationOutputKind::PythonRegistryBindings,
+    )?;
+    outputs.insert(
+        python_bindings,
+        render_python_registry_bindings(repository_root, &catalog)?,
+    );
     let generated_index = required_output(
         &catalog,
         ARTIFACT_INDEX_DERIVATION_ID,

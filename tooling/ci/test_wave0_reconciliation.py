@@ -169,8 +169,14 @@ def test_wp06_behavioral_acceptance() -> None:
 
 def test_wp06_structural_acceptance() -> None:
     catalog = _json("contracts/manifests/suite-manifest.json")
+    index = _json(
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json"
+    )
     assert isinstance(catalog, dict)
-    assert len(catalog["artifacts"]) == 58
+    catalog_ids = {artifact["artifact_id"] for artifact in catalog["artifacts"]}
+    index_ids = {artifact["artifact_id"] for artifact in index["artifacts"]}
+    assert catalog_ids == index_ids
+    assert len(catalog_ids) == index["_generated"]["artifact_count"]
     assert catalog["catalog_schema_version"] == 2
 
 

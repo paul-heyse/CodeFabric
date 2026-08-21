@@ -261,7 +261,9 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
    - expose a stable repository command equivalent to `codefabric-contracts verify --profile full`.
 
 3. **Ontology and categorical registries**
-   - entity, relation, property, unknown, projection, summary, capability, error, provider, derivation, phrase, enum, and flag registries;
+   - entity, relation, property, fact-kind, unknown, projection, summary, capability,
+     error, provider, derivation, lifecycle-state-machine, phrase, enum, and flag
+     registries;
    - append-only code validation and duplicate-authority detection.
 
 4. **Identity and canonicalization specifications**

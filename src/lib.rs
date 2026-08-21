@@ -10,6 +10,8 @@ pub mod compatibility;
 pub mod contracts;
 #[cfg(feature = "canonical-json")]
 pub mod identity;
+/// Generated categorical and lifecycle registry types.
+pub mod registries;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 

@@ -354,6 +354,7 @@ contracts/
     ontology-entity-registry.yaml
     ontology-relation-registry.yaml
     ontology-property-registry.yaml
+    ontology-fact-registry.yaml
     unknown-registry.yaml
     projection-registry.yaml
     summary-registry.yaml
@@ -361,6 +362,7 @@ contracts/
     error-registry.yaml
     provider-registry.yaml
     derivation-registry.yaml
+    state-machine-registry.yaml
     phrase-registry.yaml
     model-pack.schema.json
   identity/
@@ -2040,6 +2042,7 @@ contracts/registry/flag-registry.yaml
 contracts/registry/ontology-entity-registry.yaml
 contracts/registry/ontology-relation-registry.yaml
 contracts/registry/ontology-property-registry.yaml
+contracts/registry/ontology-fact-registry.yaml
 contracts/registry/unknown-registry.yaml
 contracts/registry/projection-registry.yaml
 contracts/registry/summary-registry.yaml
@@ -2047,6 +2050,7 @@ contracts/registry/capability-registry.yaml
 contracts/registry/error-registry.yaml
 contracts/registry/provider-registry.yaml
 contracts/registry/derivation-registry.yaml
+contracts/registry/state-machine-registry.yaml
 contracts/registry/phrase-registry.yaml
 contracts/registry/model-pack.schema.json
 contracts/identity/cbef-v1.yaml

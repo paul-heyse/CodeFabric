@@ -1099,7 +1099,7 @@ Depending on request policy:
 
 - wait for a freshness barrier up to deadline;
 - trigger targeted priority refresh;
-- or return `CURRENT_FACTS_NOT_YET_AVAILABLE`.
+- or return `CURRENT_FACTS_UNAVAILABLE`.
 
 ### 10.3 Multiple agents editing concurrently
 

@@ -1,0 +1,197 @@
+artifact_id: codefabric.registry.state-machine-registry
+artifact_kind: registry
+version: "1.0"
+compatible_suite_major: 1
+status: released
+canonical_digest: "b3:b311fadc860762595be32821eea279651f6920c80eb0b862da8359ae9fd7b7a3"
+records:
+  - machine_id: WorkspaceLifecycle
+    version: "1.0"
+    states: [{code: 10, name: BOOTSTRAPPING, slug: bootstrapping, meaning: Building first valid snapshot}, {code: 20, name: READY, slug: ready, meaning: Current workspace ready}, {code: 30, name: DEGRADED, slug: degraded, meaning: Last snapshot retained with degraded source}, {code: 40, name: DISABLED, slug: disabled, meaning: Providers and watchers stopped}, {code: 50, name: FAILED, slug: failed, meaning: Workspace failed}]
+    initial_state: BOOTSTRAPPING
+    terminal_states: [DISABLED, FAILED]
+    transitions:
+      - {from: BOOTSTRAPPING, event: first-valid-snapshot-activated, guard: snapshot-valid, to: READY, actions: [publish-readiness], idempotency_key: workspace:first-snapshot, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: BOOTSTRAPPING, event: bootstrap-failed, guard: terminal-failure, to: FAILED, actions: [publish-diagnostic], idempotency_key: workspace:bootstrap-failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: source-inaccessible, guard: source-read-failed, to: DEGRADED, actions: [preserve-last-snapshot, reject-strict-current], idempotency_key: workspace:degraded, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: disable, guard: operator-authorized, to: DISABLED, actions: [stop-watchers, stop-providers], idempotency_key: workspace:disable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DEGRADED, event: source-reconciled, guard: source-current, to: READY, actions: [publish-readiness], idempotency_key: workspace:recover, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DEGRADED, event: disable, guard: operator-authorized, to: DISABLED, actions: [stop-watchers, stop-providers], idempotency_key: workspace:disable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DEGRADED, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: workspace:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: SourceTrustState
+    version: "1.0"
+    states: [{code: 10, name: UNVERIFIED, slug: unverified, meaning: Source not verified}, {code: 20, name: VERIFYING, slug: verifying, meaning: Source verification active}, {code: 30, name: CURRENT, slug: current, meaning: Source current}, {code: 40, name: POTENTIALLY_STALE, slug: potentially-stale, meaning: Relevant event admitted}, {code: 50, name: UNAVAILABLE, slug: unavailable, meaning: Source unavailable}]
+    initial_state: UNVERIFIED
+    terminal_states: [UNAVAILABLE]
+    transitions:
+      - {from: UNVERIFIED, event: verification-started, guard: root-authorized, to: VERIFYING, actions: [open-authoritative-source], idempotency_key: source:verify, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VERIFYING, event: source-reconciled, guard: stable-reads-accepted, to: CURRENT, actions: [advance-source-generation], idempotency_key: source:current, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VERIFYING, event: source-failed, guard: terminal-read-failure, to: UNAVAILABLE, actions: [publish-capability-gap], idempotency_key: source:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: CURRENT, event: relevant-event-admitted, guard: event-in-boundary, to: POTENTIALLY_STALE, actions: [increment-barrier-sequence], idempotency_key: source:event, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: CURRENT, event: source-failed, guard: terminal-read-failure, to: UNAVAILABLE, actions: [publish-capability-gap], idempotency_key: source:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: POTENTIALLY_STALE, event: verification-started, guard: reconciliation-admitted, to: VERIFYING, actions: [open-authoritative-source], idempotency_key: source:reverify, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: POTENTIALLY_STALE, event: source-failed, guard: terminal-read-failure, to: UNAVAILABLE, actions: [publish-capability-gap], idempotency_key: source:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: EventStreamHealth
+    version: "1.0"
+    states: [{code: 10, name: HEALTHY, slug: healthy, meaning: Event stream healthy}, {code: 20, name: RESCAN_REQUIRED, slug: rescan-required, meaning: Authoritative rescan required}, {code: 30, name: DEGRADED, slug: degraded, meaning: Event stream degraded}, {code: 40, name: UNAVAILABLE, slug: unavailable, meaning: Event stream unavailable}]
+    initial_state: HEALTHY
+    terminal_states: [UNAVAILABLE]
+    transitions:
+      - {from: HEALTHY, event: overflow, guard: overflow-or-rescan-flag, to: RESCAN_REQUIRED, actions: [schedule-authoritative-rescan], idempotency_key: events:rescan, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: HEALTHY, event: backend-degraded, guard: backend-warning, to: DEGRADED, actions: [schedule-reconciliation], idempotency_key: events:degraded, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: HEALTHY, event: backend-lost, guard: backend-terminal, to: UNAVAILABLE, actions: [publish-diagnostic], idempotency_key: events:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RESCAN_REQUIRED, event: rescan-complete, guard: authoritative-walk-complete, to: HEALTHY, actions: [advance-reconciled-sequence], idempotency_key: events:healthy, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RESCAN_REQUIRED, event: backend-lost, guard: backend-terminal, to: UNAVAILABLE, actions: [publish-diagnostic], idempotency_key: events:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DEGRADED, event: backend-lost, guard: backend-terminal, to: UNAVAILABLE, actions: [publish-diagnostic], idempotency_key: events:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: GitAccelerationStatus
+    version: "1.0"
+    states: [{code: 10, name: NOT_A_GIT_WORKTREE, slug: not-a-git-worktree, meaning: No Git worktree}, {code: 20, name: GIT_UNAVAILABLE, slug: git-unavailable, meaning: Git unavailable}, {code: 30, name: GIT_READY, slug: git-ready, meaning: Git acceleration ready}, {code: 40, name: GIT_METADATA_DIRTY, slug: git-metadata-dirty, meaning: Metadata changed}, {code: 50, name: GIT_SCANNING, slug: git-scanning, meaning: Git scan active}, {code: 60, name: GIT_OPERATION_IN_PROGRESS, slug: git-operation-in-progress, meaning: Git operation active}, {code: 70, name: GIT_BULK_RECONCILING, slug: git-bulk-reconciling, meaning: Bulk reconciliation active}, {code: 80, name: GIT_DEGRADED, slug: git-degraded, meaning: Git degraded}]
+    initial_state: GIT_SCANNING
+    terminal_states: [NOT_A_GIT_WORKTREE, GIT_UNAVAILABLE]
+    transitions:
+      - {from: GIT_SCANNING, event: not-worktree, guard: discovery-complete, to: NOT_A_GIT_WORKTREE, actions: [use-generic-inventory], idempotency_key: git:not-worktree, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_SCANNING, event: git-failed, guard: discovery-failed, to: GIT_UNAVAILABLE, actions: [use-generic-inventory], idempotency_key: git:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_SCANNING, event: scan-complete, guard: repository-stable, to: GIT_READY, actions: [publish-git-baseline], idempotency_key: git:ready, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_READY, event: metadata-changed, guard: metadata-path-event, to: GIT_METADATA_DIRTY, actions: [invalidate-git-baseline], idempotency_key: git:dirty, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_READY, event: operation-started, guard: operation-marker-present, to: GIT_OPERATION_IN_PROGRESS, actions: [defer-fast-lane], idempotency_key: git:operation, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_READY, event: acceleration-failed, guard: recoverable-error, to: GIT_DEGRADED, actions: [use-generic-inventory], idempotency_key: git:degraded, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_METADATA_DIRTY, event: bulk-reconcile-started, guard: stable-window, to: GIT_BULK_RECONCILING, actions: [run-authoritative-reconciliation], idempotency_key: git:bulk, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_OPERATION_IN_PROGRESS, event: operation-ended, guard: markers-cleared, to: GIT_BULK_RECONCILING, actions: [run-authoritative-reconciliation], idempotency_key: git:bulk, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_BULK_RECONCILING, event: reconcile-failed, guard: terminal-git-failure, to: GIT_UNAVAILABLE, actions: [use-generic-inventory], idempotency_key: git:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_DEGRADED, event: git-failed, guard: terminal-git-failure, to: GIT_UNAVAILABLE, actions: [use-generic-inventory], idempotency_key: git:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: UpdateWaveState
+    version: "1.0"
+    states: [{code: 10, name: COLLECTING, slug: collecting, meaning: Gathering paths}, {code: 20, name: SNAPSHOTTING, slug: snapshotting, meaning: Freezing source set}, {code: 30, name: RUNNING, slug: running, meaning: Providers and derivations running}, {code: 40, name: PUBLISHING, slug: publishing, meaning: Publishing result}, {code: 50, name: COMPLETE, slug: complete, meaning: Wave complete}, {code: 60, name: FAILED, slug: failed, meaning: Wave failed}, {code: 70, name: SUPERSEDED, slug: superseded, meaning: Wave superseded}]
+    initial_state: COLLECTING
+    terminal_states: [COMPLETE, FAILED, SUPERSEDED]
+    transitions:
+      - {from: COLLECTING, event: gather-barrier-closed, guard: stable-window, to: SNAPSHOTTING, actions: [freeze-path-set], idempotency_key: wave:snapshot, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SNAPSHOTTING, event: source-image-accepted, guard: reads-stable, to: RUNNING, actions: [schedule-providers], idempotency_key: wave:run, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: outputs-staged, guard: required-capabilities-terminal, to: PUBLISHING, actions: [validate-publication], idempotency_key: wave:publish, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PUBLISHING, event: activation-complete, guard: pointer-active, to: COMPLETE, actions: [release-wave-resources], idempotency_key: wave:complete, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: COLLECTING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SNAPSHOTTING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [cancel-providers, discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: COLLECTING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SNAPSHOTTING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PUBLISHING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: ProviderRunState
+    version: "1.0"
+    states: [{code: 10, name: QUEUED, slug: queued, meaning: Waiting for admission}, {code: 20, name: RUNNING, slug: running, meaning: Provider active}, {code: 30, name: SUCCEEDED, slug: succeeded, meaning: Complete output accepted}, {code: 40, name: PARTIAL, slug: partial, meaning: Partial output accepted}, {code: 50, name: FAILED, slug: failed, meaning: Domain failure}, {code: 60, name: TIMED_OUT, slug: timed-out, meaning: Deadline expired}, {code: 70, name: CANCELLED, slug: cancelled, meaning: Cancelled}, {code: 80, name: SUPERSEDED, slug: superseded, meaning: Superseded}, {code: 90, name: CRASHED, slug: crashed, meaning: Process crashed}, {code: 100, name: PROTOCOL_ERROR, slug: protocol-error, meaning: Protocol violated}, {code: 110, name: STALE_RESULT, slug: stale-result, meaning: Stale result rejected}, {code: 120, name: STALE_GIT_BASELINE, slug: stale-git-baseline, meaning: Git baseline invalidated}]
+    initial_state: QUEUED
+    terminal_states: [SUCCEEDED, PARTIAL, FAILED, TIMED_OUT, CANCELLED, SUPERSEDED, CRASHED, PROTOCOL_ERROR, STALE_RESULT, STALE_GIT_BASELINE]
+    transitions:
+      - {from: QUEUED, event: permit-granted, guard: capacity-available, to: RUNNING, actions: [start-deadline], idempotency_key: provider:start, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: QUEUED, event: cancelled, guard: cancellation-active, to: CANCELLED, actions: [release-permit], idempotency_key: provider:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: QUEUED, event: superseded, guard: newer-generation, to: SUPERSEDED, actions: [discard-request], idempotency_key: provider:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: QUEUED, event: git-baseline-stale, guard: git-baseline-invalid, to: STALE_GIT_BASELINE, actions: [discard-request], idempotency_key: provider:stale-git, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: terminal-manifest-complete, guard: manifest-valid, to: SUCCEEDED, actions: [stage-output], idempotency_key: provider:success, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: terminal-manifest-partial, guard: manifest-valid-and-partial, to: PARTIAL, actions: [stage-output], idempotency_key: provider:partial, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: domain-failure, guard: failure-valid, to: FAILED, actions: [stage-diagnostic], idempotency_key: provider:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: deadline-expired, guard: deadline-reached, to: TIMED_OUT, actions: [cancel-provider], idempotency_key: provider:timeout, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: cancelled, guard: cancellation-acknowledged, to: CANCELLED, actions: [discard-output], idempotency_key: provider:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: superseded, guard: newer-generation, to: SUPERSEDED, actions: [cancel-provider, discard-output], idempotency_key: provider:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: process-exited, guard: unexpected-exit, to: CRASHED, actions: [stage-diagnostic], idempotency_key: provider:crashed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: protocol-violated, guard: framing-or-credit-invalid, to: PROTOCOL_ERROR, actions: [terminate-provider, stage-diagnostic], idempotency_key: provider:protocol, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: stale-result, guard: source-generation-changed, to: STALE_RESULT, actions: [discard-output], idempotency_key: provider:stale, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: git-baseline-stale, guard: git-baseline-invalid, to: STALE_GIT_BASELINE, actions: [discard-output], idempotency_key: provider:stale-git, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: OwnerCapabilityState
+    version: "1.0"
+    states: [{code: 10, name: CURRENT, slug: current, meaning: Current}, {code: 20, name: PENDING, slug: pending, meaning: Pending}, {code: 30, name: INVALIDATED, slug: invalidated, meaning: Invalidated}, {code: 40, name: PARTIAL, slug: partial, meaning: Partial}, {code: 50, name: UNAVAILABLE_PARSE, slug: unavailable-parse, meaning: Parse unavailable}, {code: 60, name: UNAVAILABLE_COMPILE, slug: unavailable-compile, meaning: Compile unavailable}, {code: 70, name: UNAVAILABLE_PROVIDER, slug: unavailable-provider, meaning: Provider unavailable}, {code: 80, name: UNAVAILABLE_DERIVATION, slug: unavailable-derivation, meaning: Derivation unavailable}, {code: 90, name: EXCLUDED, slug: excluded, meaning: Excluded}, {code: 100, name: UNSUPPORTED, slug: unsupported, meaning: Unsupported}, {code: 110, name: REMOVED, slug: removed, meaning: Removed}, {code: 120, name: NOT_APPLICABLE, slug: not-applicable, meaning: Not applicable}]
+    initial_state: PENDING
+    terminal_states: [CURRENT, PARTIAL, UNAVAILABLE_PARSE, UNAVAILABLE_COMPILE, UNAVAILABLE_PROVIDER, UNAVAILABLE_DERIVATION, EXCLUDED, UNSUPPORTED, REMOVED, NOT_APPLICABLE]
+    transitions:
+      - {from: PENDING, event: capability-current, guard: completeness-satisfied, to: CURRENT, actions: [record-coverage], idempotency_key: capability:current, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: capability-partial, guard: remainder-characterized, to: PARTIAL, actions: [record-coverage], idempotency_key: capability:partial, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: parse-unavailable, guard: parse-terminal, to: UNAVAILABLE_PARSE, actions: [record-gap], idempotency_key: capability:parse, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: compile-unavailable, guard: compile-terminal, to: UNAVAILABLE_COMPILE, actions: [record-gap], idempotency_key: capability:compile, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: provider-unavailable, guard: provider-terminal, to: UNAVAILABLE_PROVIDER, actions: [record-gap], idempotency_key: capability:provider, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: derivation-unavailable, guard: derivation-terminal, to: UNAVAILABLE_DERIVATION, actions: [record-gap], idempotency_key: capability:derivation, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: excluded, guard: scope-excluded, to: EXCLUDED, actions: [record-exclusion], idempotency_key: capability:excluded, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: unsupported, guard: registry-applicability-unsupported, to: UNSUPPORTED, actions: [record-gap], idempotency_key: capability:unsupported, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: removed, guard: owner-removed, to: REMOVED, actions: [record-removal], idempotency_key: capability:removed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: not-applicable, guard: applicability-false, to: NOT_APPLICABLE, actions: [record-applicability], idempotency_key: capability:not-applicable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PENDING, event: source-invalidated, guard: source-generation-changed, to: INVALIDATED, actions: [schedule-recompute], idempotency_key: capability:invalidated, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: INVALIDATED, event: recompute-scheduled, guard: owner-present, to: PENDING, actions: [enqueue-owner], idempotency_key: capability:pending, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: INVALIDATED, event: owner-removed, guard: owner-absent, to: REMOVED, actions: [record-removal], idempotency_key: capability:removed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: DurablePublicationState
+    version: "1.0"
+    states: [{code: 10, name: STAGING, slug: staging, meaning: Staging}, {code: 20, name: VALIDATING, slug: validating, meaning: Validating}, {code: 30, name: VALIDATED, slug: validated, meaning: Validated}, {code: 40, name: COMMITTING, slug: committing, meaning: Committing}, {code: 50, name: COMPLETE, slug: complete, meaning: Complete}, {code: 60, name: FAILED, slug: failed, meaning: Failed}, {code: 70, name: ABANDONED, slug: abandoned, meaning: Abandoned}]
+    initial_state: STAGING
+    terminal_states: [COMPLETE, FAILED, ABANDONED]
+    transitions:
+      - {from: STAGING, event: outputs-staged, guard: manifest-complete, to: VALIDATING, actions: [validate-tables], idempotency_key: publication:validate, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATING, event: validation-passed, guard: constraints-green, to: VALIDATED, actions: [seal-manifest], idempotency_key: publication:validated, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATED, event: pointer-lease-held, guard: predecessor-matches, to: COMMITTING, actions: [write-tables, write-pointer], idempotency_key: publication:commit, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: COMMITTING, event: commit-complete, guard: durable-commit-visible, to: COMPLETE, actions: [release-lease], idempotency_key: publication:complete, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: STAGING, event: abandoned, guard: superseded, to: ABANDONED, actions: [discard-staging], idempotency_key: publication:abandon, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATING, event: validation-failed, guard: terminal-validation-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: publication:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATED, event: commit-failed, guard: terminal-storage-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: publication:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: COMMITTING, event: commit-failed, guard: terminal-storage-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: publication:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: ServingActivationState
+    version: "1.0"
+    states: [{code: 10, name: BUILDING, slug: building, meaning: Building}, {code: 20, name: VALIDATING, slug: validating, meaning: Validating}, {code: 30, name: READY, slug: ready, meaning: Ready}, {code: 40, name: ACTIVE, slug: active, meaning: Active}, {code: 50, name: RETIRED, slug: retired, meaning: Retired}, {code: 60, name: FAILED, slug: failed, meaning: Failed}]
+    initial_state: BUILDING
+    terminal_states: [RETIRED, FAILED]
+    transitions:
+      - {from: BUILDING, event: snapshot-built, guard: publication-complete, to: VALIDATING, actions: [run-serving-validation], idempotency_key: serving:validate, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATING, event: validation-passed, guard: schema-and-index-green, to: READY, actions: [acquire-pointer-lease], idempotency_key: serving:ready, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: pointer-cas-succeeded, guard: predecessor-matches, to: ACTIVE, actions: [retire-prior-snapshot], idempotency_key: serving:active, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACTIVE, event: successor-activated, guard: successor-active, to: RETIRED, actions: [release-active-role], idempotency_key: serving:retired, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: BUILDING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: serving:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: serving:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: serving:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACTIVE, event: terminal-failure, guard: active-snapshot-invalid, to: FAILED, actions: [withdraw-pointer, publish-diagnostic], idempotency_key: serving:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: QueryExecutionState
+    version: "1.0"
+    states: [{code: 10, name: ACCEPTED, slug: accepted, meaning: Accepted}, {code: 20, name: RUNNING, slug: running, meaning: Running}, {code: 30, name: COMPLETE, slug: complete, meaning: Complete}, {code: 40, name: FAILED, slug: failed, meaning: Failed}, {code: 50, name: CANCELLED, slug: cancelled, meaning: Cancelled}, {code: 60, name: DEADLINE_EXCEEDED, slug: deadline-exceeded, meaning: Deadline exceeded}, {code: 70, name: NOT_EXECUTED_DEPENDENCY, slug: not-executed-dependency, meaning: Dependency prevented execution}]
+    initial_state: ACCEPTED
+    terminal_states: [COMPLETE, FAILED, CANCELLED, DEADLINE_EXCEEDED, NOT_EXECUTED_DEPENDENCY]
+    transitions:
+      - {from: ACCEPTED, event: stream-attached, guard: request-authorized, to: RUNNING, actions: [record-barrier, begin-planning], idempotency_key: query:run, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACCEPTED, event: dependency-failed, guard: prerequisite-terminal, to: NOT_EXECUTED_DEPENDENCY, actions: [release-request], idempotency_key: query:dependency, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACCEPTED, event: cancelled, guard: cancellation-active, to: CANCELLED, actions: [release-request], idempotency_key: query:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: canonical-response-committed, guard: response-valid, to: COMPLETE, actions: [release-execution-resources], idempotency_key: query:complete, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: execution-failed, guard: terminal-domain-error, to: FAILED, actions: [release-execution-resources], idempotency_key: query:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: cancelled, guard: cancellation-acknowledged, to: CANCELLED, actions: [release-execution-resources], idempotency_key: query:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: RUNNING, event: deadline-expired, guard: deadline-reached, to: DEADLINE_EXCEEDED, actions: [cancel-execution, release-execution-resources], idempotency_key: query:deadline, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: ArtifactState
+    version: "1.0"
+    states: [{code: 10, name: BUILDING, slug: building, meaning: Building}, {code: 20, name: READY, slug: ready, meaning: Ready}, {code: 30, name: ACTIVE, slug: active, meaning: Active lease}, {code: 40, name: EXPIRED, slug: expired, meaning: Expired}, {code: 50, name: FAILED, slug: failed, meaning: Failed}]
+    initial_state: BUILDING
+    terminal_states: [EXPIRED, FAILED]
+    transitions:
+      - {from: BUILDING, event: bytes-committed, guard: checksum-valid, to: READY, actions: [publish-resource-reference], idempotency_key: artifact:ready, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: lease-acquired, guard: resource-not-expired, to: ACTIVE, actions: [increment-lease-count], idempotency_key: artifact:active, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: ttl-expired, guard: no-active-leases, to: EXPIRED, actions: [schedule-gc], idempotency_key: artifact:expired, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACTIVE, event: final-lease-released, guard: ttl-expired, to: EXPIRED, actions: [schedule-gc], idempotency_key: artifact:expired, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: BUILDING, event: build-failed, guard: terminal-write-error, to: FAILED, actions: [discard-partial-bytes], idempotency_key: artifact:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: integrity-failed, guard: checksum-mismatch, to: FAILED, actions: [withdraw-resource-reference], idempotency_key: artifact:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACTIVE, event: integrity-failed, guard: checksum-mismatch, to: FAILED, actions: [withdraw-resource-reference], idempotency_key: artifact:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: WorkspaceRegistryLifecycle
+    version: "1.0"
+    states: [{code: 10, name: REGISTERING, slug: registering, meaning: Registration active}, {code: 20, name: DISABLED, slug: disabled, meaning: Registered and disabled}, {code: 30, name: OPENING, slug: opening, meaning: Opening root}, {code: 40, name: BOOTSTRAPPING, slug: bootstrapping, meaning: Building first snapshot}, {code: 50, name: READY, slug: ready, meaning: Ready}, {code: 60, name: DEGRADED, slug: degraded, meaning: Degraded}, {code: 70, name: DISABLING, slug: disabling, meaning: Disabling}, {code: 80, name: REMOVING, slug: removing, meaning: Removing}, {code: 90, name: REMOVED, slug: removed, meaning: Removed}, {code: 100, name: FAILED, slug: failed, meaning: Failed}]
+    initial_state: REGISTERING
+    terminal_states: [REMOVED]
+    transitions:
+      - {from: REGISTERING, event: registration-created, guard: root-authorized, to: DISABLED, actions: [persist-registration], idempotency_key: registry:registered, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DISABLED, event: enable, guard: operator-authorized, to: OPENING, actions: [open-root], idempotency_key: registry:open, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DISABLED, event: remove, guard: no-active-leases, to: REMOVING, actions: [stop-workspace], idempotency_key: registry:remove, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: OPENING, event: root-opened, guard: root-identity-matches, to: BOOTSTRAPPING, actions: [start-inventory], idempotency_key: registry:bootstrap, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: OPENING, event: open-failed, guard: terminal-root-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: registry:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: BOOTSTRAPPING, event: first-snapshot-active, guard: snapshot-valid, to: READY, actions: [publish-readiness], idempotency_key: registry:ready, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: BOOTSTRAPPING, event: bootstrap-failed, guard: terminal-build-error, to: FAILED, actions: [publish-diagnostic], idempotency_key: registry:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: source-degraded, guard: source-not-current, to: DEGRADED, actions: [preserve-last-snapshot], idempotency_key: registry:degraded, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: READY, event: disable, guard: operator-authorized, to: DISABLING, actions: [stop-watchers, stop-providers], idempotency_key: registry:disable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DEGRADED, event: source-current, guard: reconciliation-complete, to: READY, actions: [publish-readiness], idempotency_key: registry:ready, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DEGRADED, event: disable, guard: operator-authorized, to: DISABLING, actions: [stop-watchers, stop-providers], idempotency_key: registry:disable, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DISABLING, event: stopped, guard: no-provider-work, to: DISABLED, actions: [persist-disabled], idempotency_key: registry:disabled, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: REMOVING, event: removal-complete, guard: retention-policy-applied, to: REMOVED, actions: [retire-registration], idempotency_key: registry:removed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAILED, event: disable, guard: operator-authorized, to: DISABLED, actions: [persist-disabled], idempotency_key: registry:disabled, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAILED, event: remove, guard: no-active-leases, to: REMOVING, actions: [stop-workspace], idempotency_key: registry:remove, error_on_illegal: STATE_TRANSITION_VIOLATION}
+owner_acceptance:
+  approver: lifecycle-owner
+  accepted_at: "2026-08-21"
+  construction_rule: AC-G-25 mandatory roster plus the AC-G-10 workspace registry lifecycle
+  source_digest: "b3:0ed942923f13216ae9b0a6c50a59a9ab80f645f59be34fb12fd692f9f47675c6"

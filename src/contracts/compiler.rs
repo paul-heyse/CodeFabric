@@ -23,6 +23,15 @@ use super::models::{
     JsonlMetadata, PathCanonicalizationContract, RegistryDocument, RequirementRecord,
     ScaffoldDocument, TraceabilityRecord, TypeAlgebraContract,
 };
+use super::registry_models::{
+    AcceptedRegistry, Capability, DerivationDefinition, EntityKind, EnumDomain, FactKind,
+    FlagDomain, Projection, PropertyKind, Provider, PublicError, RelationKind, StateMachine,
+    SummaryProfile, UnknownKind, contains_evaluative_kind, validate_capability_records,
+    validate_entity_records, validate_enum_domains, validate_error_records, validate_fact_records,
+    validate_flag_domains, validate_projection_records, validate_property_records,
+    validate_provider_records, validate_relation_records, validate_state_machines,
+    validate_summary_records, validate_unknown_records,
+};
 
 const MAX_DIAGNOSTIC_BYTES: usize = 512;
 
@@ -1295,6 +1304,8 @@ fn validate_type_algebra_contract(
     Ok(())
 }
 
+// The exhaustive match is the closed family-dispatch table for typed YAML ingress.
+#[allow(clippy::too_many_lines)]
 fn canonical_yaml(
     path: &Path,
     descriptor: &ArtifactDescriptor,
@@ -1328,11 +1339,105 @@ fn canonical_yaml(
     usage.aliases = aliases;
 
     let (header, records) = match descriptor.artifact_kind {
-        ArtifactKind::Registry => {
-            let document: RegistryDocument<Value> = typed(path, "$", value.clone())?;
-            let records = document.records.len();
-            (document.header(), records)
-        }
+        ArtifactKind::Registry => match descriptor.artifact_id.as_str() {
+            "codefabric.registry.phrase-registry" => {
+                let document: RegistryDocument<Value> = typed(path, "$", value.clone())?;
+                let records = document.records.len();
+                (document.header(), records)
+            }
+            artifact_id => {
+                macro_rules! accepted {
+                    ($record:ty, $validator:expr) => {{
+                        let document: AcceptedRegistry<$record> = typed(path, "$", value.clone())?;
+                        if contains_evaluative_kind(&value) {
+                            return Err(parse_error(
+                                "evaluative-ontology-kind",
+                                path,
+                                "$.records",
+                                "evaluative conclusions are forbidden from factual registries",
+                            ));
+                        }
+                        ($validator)(&document.records).map_err(|error| {
+                            parse_error("registry-invariant", path, "$.records", error)
+                        })?;
+                        super::jcs::validate_checksum(&document.owner_acceptance.source_digest)
+                            .map_err(|error| {
+                                parse_error(
+                                    error.failure_class(),
+                                    path,
+                                    "$.owner_acceptance.source_digest",
+                                    error,
+                                )
+                            })?;
+                        let records = document.records.len();
+                        let header = document.header();
+                        value = serde_json::to_value(&document)
+                            .expect("typed accepted registry serialization is infallible");
+                        (header, records)
+                    }};
+                }
+                match artifact_id {
+                    "codefabric.registry.enum-registry" => {
+                        accepted!(EnumDomain, validate_enum_domains)
+                    }
+                    "codefabric.registry.flag-registry" => {
+                        accepted!(FlagDomain, validate_flag_domains)
+                    }
+                    "codefabric.registry.ontology-entity-registry" => {
+                        accepted!(EntityKind, validate_entity_records)
+                    }
+                    "codefabric.registry.ontology-relation-registry" => {
+                        accepted!(RelationKind, validate_relation_records)
+                    }
+                    "codefabric.registry.ontology-property-registry" => {
+                        accepted!(PropertyKind, validate_property_records)
+                    }
+                    "codefabric.registry.ontology-fact-registry" => {
+                        accepted!(FactKind, validate_fact_records)
+                    }
+                    "codefabric.registry.unknown-registry" => {
+                        accepted!(UnknownKind, validate_unknown_records)
+                    }
+                    "codefabric.registry.projection-registry" => {
+                        accepted!(Projection, validate_projection_records)
+                    }
+                    "codefabric.registry.summary-registry" => {
+                        accepted!(SummaryProfile, validate_summary_records)
+                    }
+                    "codefabric.registry.capability-registry" => {
+                        accepted!(Capability, validate_capability_records)
+                    }
+                    "codefabric.registry.provider-registry" => {
+                        accepted!(Provider, validate_provider_records)
+                    }
+                    "codefabric.registry.error-registry" => {
+                        accepted!(PublicError, validate_error_records)
+                    }
+                    "codefabric.registry.derivation-registry" => accepted!(
+                        DerivationDefinition,
+                        |records: &[DerivationDefinition]| {
+                            let mut ids = BTreeSet::new();
+                            if records
+                                .iter()
+                                .all(|record| ids.insert(&record.derivation_id))
+                            {
+                                Ok(())
+                            } else {
+                                Err("derivation IDs must be unique".to_owned())
+                            }
+                        }
+                    ),
+                    "codefabric.registry.state-machine-registry" => {
+                        accepted!(StateMachine, validate_state_machines)
+                    }
+                    _ => {
+                        let document: RegistryDocument<Value> = typed(path, "$", value.clone())?;
+                        let records = document.records.len();
+                        (document.header(), records)
+                    }
+                }
+            }
+        },
         ArtifactKind::YamlContract => match descriptor.artifact_id.as_str() {
             "codefabric.identity.cbef-v1" => {
                 let document: CbefContract = typed(path, "$", value.clone())?;

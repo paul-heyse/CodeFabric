@@ -2,7 +2,23 @@ artifact_id: codefabric.registry.summary-registry
 artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:9929ca1d6a18700f9cc4f717c854b28ff597a24d44bab1491cc525c5941a37d6"
-records: []
-
+status: released
+canonical_digest: "b3:cb86c470b1640a80ecc2668bca9312862f38441be08d906b7967aaba272606e1"
+records:
+  - summary_profile_id: CALLABLE_SUMMARY_BALANCED_V1
+    version: "1.0"
+    input_projection: EFFECT_V1
+    precision_profile: BALANCED_V1
+    included_direct_fact_families: [calls, reads, writes, moves, copies, borrows, drops, effects, resources, raises, panics, unwinds, allocations, spawns, locks, sends, receives]
+    call_projection: CALL_SOUND_V1
+    aggregation_operators: [set-union, count-sum, boolean-or]
+    unknown_external_propagation: propagate-registered-effect-memory-resource-remainders
+    fixpoint_algorithm: sorted-scc-condensation-bottom-up
+    widening: profile-threshold-with-analysis-widened-flag
+    support_witness_policy: deterministic-minimal-path
+    completeness_rule: every-direct-and-transitive-family-explicit
+owner_acceptance:
+  approver: ontology-owner
+  accepted_at: "2026-08-21"
+  construction_rule: AC-G-75 initial balanced callable summary profile
+  source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"

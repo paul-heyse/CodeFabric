@@ -2,7 +2,69 @@ artifact_id: codefabric.registry.enum-registry
 artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
-status: draft
-canonical_digest: "b3:903dde7cfb45bb75a8d6a101e5cca0827972e15cc6b320ddfb385bdb97374a4b"
-records: []
-
+status: released
+canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7"
+records:
+  - {domain: EVIDENCE_CERTAINTY, width_bits: 16, values: [{code: 10, name: SOURCE_EXACT, slug: source-exact, meaning: Exact source or syntax observation}, {code: 20, name: COMPILER_EXACT, slug: compiler-exact, meaning: Exact compiler or lowered fact}, {code: 30, name: STATIC_SEMANTIC, slug: static-semantic, meaning: Deterministic static semantic result}, {code: 40, name: SOUND_MAY, slug: sound-may, meaning: Conservative sound set member}, {code: 50, name: MODELLED, slug: modelled, meaning: Deterministic model-pack fact}, {code: 60, name: HEURISTIC, slug: heuristic, meaning: Reproducible non-sound heuristic}, {code: 70, name: UNRESOLVED, slug: unresolved, meaning: Explicit unresolved proposition}]}
+  - {domain: RESOLUTION_CLASS, width_bits: 16, values: [{code: 10, name: EXACT, slug: exact, meaning: One exact endpoint or value}, {code: 20, name: STATICALLY_RESOLVED, slug: statically-resolved, meaning: Statically selected endpoint}, {code: 30, name: SOUND_POSSIBLE, slug: sound-possible, meaning: Conservative sound candidate}, {code: 40, name: POSSIBLE, slug: possible, meaning: Possible but not proven sound}, {code: 50, name: MODELLED, slug: modelled, meaning: External semantic model result}, {code: 60, name: HEURISTIC, slug: heuristic, meaning: Heuristic result}, {code: 70, name: UNRESOLVED, slug: unresolved, meaning: Unresolved endpoint retained}, {code: 80, name: UNAVAILABLE, slug: unavailable, meaning: Fact family unavailable}, {code: 90, name: NOT_APPLICABLE, slug: not-applicable, meaning: Resolution does not apply}]}
+  - {domain: DIRECTNESS, width_bits: 16, values: [{code: 10, name: DIRECT, slug: direct, meaning: Directly authored or extracted}, {code: 20, name: TRANSITIVE, slug: transitive, meaning: Mechanically derived closure}, {code: 30, name: SUMMARY, slug: summary, meaning: Deterministic summary}, {code: 40, name: NOT_APPLICABLE, slug: not-applicable, meaning: Directness does not apply}]}
+  - {domain: COMPLETENESS, width_bits: 16, values: [{code: 10, name: COMPLETE, slug: complete, meaning: Complete for declared scope}, {code: 20, name: PARTIAL, slug: partial, meaning: Characterized remainder}, {code: 30, name: INDETERMINATE, slug: indeterminate, meaning: Missing information prevents claim}, {code: 40, name: UNAVAILABLE, slug: unavailable, meaning: Family unavailable}, {code: 50, name: NOT_APPLICABLE, slug: not-applicable, meaning: Family does not apply}]}
+  - {domain: OWNER_CAPABILITY_STATE, width_bits: 16, values: [{code: 10, name: CURRENT, slug: current, meaning: Current}, {code: 20, name: PENDING, slug: pending, meaning: Pending}, {code: 30, name: INVALIDATED, slug: invalidated, meaning: Invalidated}, {code: 40, name: PARTIAL, slug: partial, meaning: Partial}, {code: 50, name: UNAVAILABLE_PARSE, slug: unavailable-parse, meaning: Parse unavailable}, {code: 60, name: UNAVAILABLE_COMPILE, slug: unavailable-compile, meaning: Compile unavailable}, {code: 70, name: UNAVAILABLE_PROVIDER, slug: unavailable-provider, meaning: Provider unavailable}, {code: 80, name: UNAVAILABLE_DERIVATION, slug: unavailable-derivation, meaning: Derivation unavailable}, {code: 90, name: EXCLUDED, slug: excluded, meaning: Excluded}, {code: 100, name: UNSUPPORTED, slug: unsupported, meaning: Unsupported}, {code: 110, name: REMOVED, slug: removed, meaning: Removed}, {code: 120, name: NOT_APPLICABLE, slug: not-applicable, meaning: Not applicable}]}
+  - {domain: PROVIDER_RUN_STATE, width_bits: 16, values: [{code: 10, name: QUEUED, slug: queued, meaning: Waiting for execution}, {code: 20, name: RUNNING, slug: running, meaning: Provider work active}, {code: 30, name: SUCCEEDED, slug: succeeded, meaning: Complete output accepted}, {code: 40, name: PARTIAL, slug: partial, meaning: Partial output accepted}, {code: 50, name: FAILED, slug: failed, meaning: Terminal domain failure}, {code: 60, name: TIMED_OUT, slug: timed-out, meaning: Deadline expired}, {code: 70, name: CANCELLED, slug: cancelled, meaning: Cancellation acknowledged}, {code: 80, name: SUPERSEDED, slug: superseded, meaning: Newer generation superseded run}, {code: 90, name: CRASHED, slug: crashed, meaning: Provider process terminated}, {code: 100, name: PROTOCOL_ERROR, slug: protocol-error, meaning: Protocol violation}, {code: 110, name: STALE_RESULT, slug: stale-result, meaning: Stale output rejected}, {code: 120, name: STALE_GIT_BASELINE, slug: stale-git-baseline, meaning: Git baseline invalidated}]}
+  - {domain: QUERY_EXECUTION_STATE, width_bits: 16, values: [{code: 10, name: ACCEPTED, slug: accepted, meaning: Accepted}, {code: 20, name: RUNNING, slug: running, meaning: Running}, {code: 30, name: COMPLETE, slug: complete, meaning: Complete}, {code: 40, name: FAILED, slug: failed, meaning: Failed}, {code: 50, name: CANCELLED, slug: cancelled, meaning: Cancelled}, {code: 60, name: DEADLINE_EXCEEDED, slug: deadline-exceeded, meaning: Deadline exceeded}, {code: 70, name: NOT_EXECUTED_DEPENDENCY, slug: not-executed-dependency, meaning: Dependency prevented execution}]}
+  - {domain: QUERY_AVAILABILITY_STATE, width_bits: 16, values: [{code: 10, name: AVAILABLE, slug: available, meaning: Available}, {code: 20, name: PARTIAL, slug: partial, meaning: Partial}, {code: 30, name: UNAVAILABLE, slug: unavailable, meaning: Unavailable}, {code: 40, name: NOT_APPLICABLE, slug: not-applicable, meaning: Not applicable}]}
+  - {domain: COMPLETENESS_STATE, width_bits: 16, values: [{code: 10, name: COMPLETE, slug: complete, meaning: Complete}, {code: 20, name: PARTIAL, slug: partial, meaning: Partial}, {code: 30, name: INDETERMINATE, slug: indeterminate, meaning: Indeterminate}, {code: 40, name: UNAVAILABLE, slug: unavailable, meaning: Unavailable}, {code: 50, name: NOT_APPLICABLE, slug: not-applicable, meaning: Not applicable}]}
+  - {domain: FRESHNESS_STATE, width_bits: 16, values: [{code: 10, name: CURRENT, slug: current, meaning: Current}, {code: 20, name: POTENTIALLY_STALE, slug: potentially-stale, meaning: Potentially stale}, {code: 30, name: UNAVAILABLE, slug: unavailable, meaning: Unavailable}]}
+  - {domain: LIMIT_STATE, width_bits: 16, values: [{code: 10, name: NOT_APPLIED, slug: not-applied, meaning: No limit applied}, {code: 20, name: EXPLICIT_LIMIT_REACHED, slug: explicit-limit-reached, meaning: Requested limit reached}, {code: 30, name: HARD_LIMIT_REJECTED, slug: hard-limit-rejected, meaning: Hard limit rejected}]}
+  - {domain: DEPENDENCY_STATE, width_bits: 16, values: [{code: 10, name: READY, slug: ready, meaning: Ready}, {code: 20, name: FAILED_DEPENDENCY, slug: failed-dependency, meaning: Dependency failed}, {code: 30, name: NOT_APPLICABLE, slug: not-applicable, meaning: Not applicable}]}
+  - {domain: DURABLE_PUBLICATION_STATE, width_bits: 16, values: [{code: 10, name: STAGING, slug: staging, meaning: Staging}, {code: 20, name: VALIDATING, slug: validating, meaning: Validating}, {code: 30, name: VALIDATED, slug: validated, meaning: Validated}, {code: 40, name: COMMITTING, slug: committing, meaning: Committing}, {code: 50, name: COMPLETE, slug: complete, meaning: Complete}, {code: 60, name: FAILED, slug: failed, meaning: Failed}, {code: 70, name: ABANDONED, slug: abandoned, meaning: Abandoned}]}
+  - {domain: SERVING_ACTIVATION_STATE, width_bits: 16, values: [{code: 10, name: BUILDING, slug: building, meaning: Building}, {code: 20, name: VALIDATING, slug: validating, meaning: Validating}, {code: 30, name: READY, slug: ready, meaning: Ready}, {code: 40, name: ACTIVE, slug: active, meaning: Active}, {code: 50, name: RETIRED, slug: retired, meaning: Retired}, {code: 60, name: FAILED, slug: failed, meaning: Failed}]}
+  - {domain: SOURCE_TRUST_STATE, width_bits: 16, values: [{code: 10, name: UNVERIFIED, slug: unverified, meaning: Unverified}, {code: 20, name: VERIFYING, slug: verifying, meaning: Verifying}, {code: 30, name: CURRENT, slug: current, meaning: Current}, {code: 40, name: POTENTIALLY_STALE, slug: potentially-stale, meaning: Potentially stale}, {code: 50, name: UNAVAILABLE, slug: unavailable, meaning: Unavailable}]}
+  - {domain: EVENT_STREAM_HEALTH, width_bits: 16, values: [{code: 10, name: HEALTHY, slug: healthy, meaning: Healthy}, {code: 20, name: RESCAN_REQUIRED, slug: rescan-required, meaning: Rescan required}, {code: 30, name: DEGRADED, slug: degraded, meaning: Degraded}, {code: 40, name: UNAVAILABLE, slug: unavailable, meaning: Unavailable}]}
+  - {domain: GIT_ACCELERATION_STATUS, width_bits: 16, values: [{code: 10, name: NOT_A_GIT_WORKTREE, slug: not-a-git-worktree, meaning: Not a Git worktree}, {code: 20, name: GIT_UNAVAILABLE, slug: git-unavailable, meaning: Git unavailable}, {code: 30, name: GIT_READY, slug: git-ready, meaning: Git ready}, {code: 40, name: GIT_METADATA_DIRTY, slug: git-metadata-dirty, meaning: Git metadata dirty}, {code: 50, name: GIT_SCANNING, slug: git-scanning, meaning: Git scanning}, {code: 60, name: GIT_OPERATION_IN_PROGRESS, slug: git-operation-in-progress, meaning: Git operation in progress}, {code: 70, name: GIT_BULK_RECONCILING, slug: git-bulk-reconciling, meaning: Git bulk reconciliation}, {code: 80, name: GIT_DEGRADED, slug: git-degraded, meaning: Git degraded}]}
+  - domain: EFFECT_KIND
+    width_bits: 16
+    values:
+      - {code: 10, name: READ_MEMORY, slug: read-memory, meaning: Read memory}
+      - {code: 20, name: WRITE_MEMORY, slug: write-memory, meaning: Write memory}
+      - {code: 30, name: ALLOCATE_MEMORY, slug: allocate-memory, meaning: Allocate memory}
+      - {code: 40, name: DEALLOCATE_MEMORY, slug: deallocate-memory, meaning: Deallocate memory}
+      - {code: 50, name: READ_FILE, slug: read-file, meaning: Read file}
+      - {code: 60, name: WRITE_FILE, slug: write-file, meaning: Write file}
+      - {code: 70, name: READ_NETWORK, slug: read-network, meaning: Read network}
+      - {code: 80, name: WRITE_NETWORK, slug: write-network, meaning: Write network}
+      - {code: 90, name: READ_DATABASE, slug: read-database, meaning: Read database}
+      - {code: 100, name: WRITE_DATABASE, slug: write-database, meaning: Write database}
+      - {code: 110, name: BEGIN_TRANSACTION, slug: begin-transaction, meaning: Begin transaction}
+      - {code: 120, name: COMMIT_TRANSACTION, slug: commit-transaction, meaning: Commit transaction}
+      - {code: 130, name: ROLLBACK_TRANSACTION, slug: rollback-transaction, meaning: Roll back transaction}
+      - {code: 140, name: READ_STANDARD_INPUT, slug: read-standard-input, meaning: Read standard input}
+      - {code: 150, name: WRITE_STANDARD_OUTPUT, slug: write-standard-output, meaning: Write standard output}
+      - {code: 160, name: LOG_OR_TELEMETRY, slug: log-or-telemetry, meaning: Log or telemetry}
+      - {code: 170, name: READ_ENVIRONMENT, slug: read-environment, meaning: Read environment}
+      - {code: 180, name: WRITE_ENVIRONMENT, slug: write-environment, meaning: Write environment}
+      - {code: 190, name: SPAWN_PROCESS, slug: spawn-process, meaning: Spawn process}
+      - {code: 200, name: SPAWN_THREAD_OR_TASK, slug: spawn-thread-or-task, meaning: Spawn thread or task}
+      - {code: 210, name: BLOCK_THREAD, slug: block-thread, meaning: Block thread}
+      - {code: 220, name: SLEEP_OR_WAIT, slug: sleep-or-wait, meaning: Sleep or wait}
+      - {code: 230, name: LOAD_DYNAMIC_LIBRARY, slug: load-dynamic-library, meaning: Load dynamic library}
+      - {code: 240, name: ACQUIRE_LOCK, slug: acquire-lock, meaning: Acquire lock}
+      - {code: 250, name: RELEASE_LOCK, slug: release-lock, meaning: Release lock}
+      - {code: 260, name: SEND_CHANNEL, slug: send-channel, meaning: Send channel}
+      - {code: 270, name: RECEIVE_CHANNEL, slug: receive-channel, meaning: Receive channel}
+      - {code: 280, name: READ_TIME, slug: read-time, meaning: Read time}
+      - {code: 290, name: READ_RANDOMNESS, slug: read-randomness, meaning: Read randomness}
+      - {code: 300, name: READ_GLOBAL_STATE, slug: read-global-state, meaning: Read global state}
+      - {code: 310, name: WRITE_GLOBAL_STATE, slug: write-global-state, meaning: Write global state}
+      - {code: 320, name: RAISE_EXCEPTION, slug: raise-exception, meaning: Raise exception}
+      - {code: 330, name: PANIC_OR_ABORT, slug: panic-or-abort, meaning: Panic or abort}
+      - {code: 340, name: UNSAFE_OPERATION, slug: unsafe-operation, meaning: Unsafe operation}
+      - {code: 350, name: FFI_CALL, slug: ffi-call, meaning: FFI call}
+      - {code: 360, name: DYNAMIC_CODE_EXECUTION, slug: dynamic-code-execution, meaning: Dynamic code execution}
+      - {code: 370, name: UNKNOWN_EXTERNAL_EFFECT, slug: unknown-external-effect, meaning: Unknown external effect}
+  - {domain: RESOURCE_KIND, width_bits: 16, values: [{code: 10, name: FILE_HANDLE, slug: file-handle, meaning: File handle}, {code: 20, name: SOCKET_OR_CONNECTION, slug: socket-or-connection, meaning: Socket or connection}, {code: 30, name: DATABASE_CONNECTION_OR_TRANSACTION, slug: database-connection-or-transaction, meaning: Database connection or transaction}, {code: 40, name: LOCK_GUARD, slug: lock-guard, meaning: Lock guard}, {code: 50, name: CHANNEL_ENDPOINT, slug: channel-endpoint, meaning: Channel endpoint}, {code: 60, name: PROCESS_HANDLE, slug: process-handle, meaning: Process handle}, {code: 70, name: THREAD_OR_TASK_HANDLE, slug: thread-or-task-handle, meaning: Thread or task handle}, {code: 80, name: MEMORY_ALLOCATION, slug: memory-allocation, meaning: Memory allocation}, {code: 90, name: USER_DEFINED_MODELLED_RESOURCE, slug: user-defined-modelled-resource, meaning: User-defined modelled resource}, {code: 100, name: UNKNOWN_RESOURCE, slug: unknown-resource, meaning: Unknown resource}]}
+owner_acceptance:
+  approver: ontology-owner
+  accepted_at: "2026-08-21"
+  construction_rule: Verbatim §62 tables and declaration-order allocations for AC-G-77
+  source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"

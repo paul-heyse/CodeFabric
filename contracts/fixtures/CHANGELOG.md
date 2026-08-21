@@ -1,5 +1,10 @@
 # Fixture oracle change record
 
+## 2026-08-21 Wave 1 registry KATs
+
+- Added independent code/name/slug examples for every categorical domain and fixed
+  64-bit flag-word composition answers consumed by both generated language views.
+
 ## 2026-08-20 full fuzz corpus governance
 
 - Extended fixture census governance from one fuzz target directory to every committed
