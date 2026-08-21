@@ -1401,3 +1401,70 @@ pub const PHRASE_IDS: &[&str] = &[
     "Q93_RUST_UNSAFE_FFI",
     "Q94_RUST_COMPILE_TIME_VALUES",
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OntologyCodeEntry {
+pub code: i32, pub family_code: i16,
+}
+
+pub const ENTITY_KIND_CODES: &[OntologyCodeEntry] = &[
+    OntologyCodeEntry { code: 10, family_code: 1 },
+    OntologyCodeEntry { code: 20, family_code: 2 },
+    OntologyCodeEntry { code: 30, family_code: 2 },
+    OntologyCodeEntry { code: 40, family_code: 3 },
+    OntologyCodeEntry { code: 50, family_code: 3 },
+    OntologyCodeEntry { code: 60, family_code: 3 },
+    OntologyCodeEntry { code: 70, family_code: 4 },
+    OntologyCodeEntry { code: 80, family_code: 5 },
+    OntologyCodeEntry { code: 90, family_code: 5 },
+    OntologyCodeEntry { code: 100, family_code: 5 },
+    OntologyCodeEntry { code: 110, family_code: 5 },
+    OntologyCodeEntry { code: 120, family_code: 6 },
+    OntologyCodeEntry { code: 130, family_code: 6 },
+    OntologyCodeEntry { code: 140, family_code: 7 },
+    OntologyCodeEntry { code: 150, family_code: 8 },
+    OntologyCodeEntry { code: 160, family_code: 9 },
+    OntologyCodeEntry { code: 170, family_code: 9 },
+    OntologyCodeEntry { code: 180, family_code: 12 },
+    OntologyCodeEntry { code: 190, family_code: 12 },
+    OntologyCodeEntry { code: 200, family_code: 13 },
+    OntologyCodeEntry { code: 210, family_code: 13 },
+    OntologyCodeEntry { code: 220, family_code: 14 },
+    OntologyCodeEntry { code: 230, family_code: 15 },
+    OntologyCodeEntry { code: 240, family_code: 15 },
+];
+
+pub const RELATION_KIND_CODES: &[OntologyCodeEntry] = &[
+    OntologyCodeEntry { code: 10, family_code: 2 },
+    OntologyCodeEntry { code: 20, family_code: 3 },
+    OntologyCodeEntry { code: 30, family_code: 5 },
+    OntologyCodeEntry { code: 40, family_code: 5 },
+    OntologyCodeEntry { code: 50, family_code: 6 },
+    OntologyCodeEntry { code: 60, family_code: 7 },
+    OntologyCodeEntry { code: 70, family_code: 8 },
+    OntologyCodeEntry { code: 80, family_code: 9 },
+    OntologyCodeEntry { code: 90, family_code: 9 },
+    OntologyCodeEntry { code: 100, family_code: 13 },
+    OntologyCodeEntry { code: 110, family_code: 13 },
+    OntologyCodeEntry { code: 120, family_code: 12 },
+    OntologyCodeEntry { code: 130, family_code: 12 },
+];
+
+pub const PROPERTY_KIND_CODES: &[OntologyCodeEntry] = &[
+    OntologyCodeEntry { code: 10, family_code: 0 },
+    OntologyCodeEntry { code: 20, family_code: 0 },
+    OntologyCodeEntry { code: 30, family_code: 0 },
+    OntologyCodeEntry { code: 40, family_code: 0 },
+    OntologyCodeEntry { code: 50, family_code: 0 },
+    OntologyCodeEntry { code: 60, family_code: 0 },
+    OntologyCodeEntry { code: 70, family_code: 0 },
+    OntologyCodeEntry { code: 80, family_code: 0 },
+    OntologyCodeEntry { code: 90, family_code: 0 },
+    OntologyCodeEntry { code: 100, family_code: 0 },
+];
+
+pub const FACT_KIND_CODES: &[OntologyCodeEntry] = &[
+    OntologyCodeEntry { code: 10, family_code: 0 },
+    OntologyCodeEntry { code: 20, family_code: 0 },
+    OntologyCodeEntry { code: 30, family_code: 0 },
+];

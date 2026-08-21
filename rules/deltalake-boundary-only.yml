@@ -1,8 +1,8 @@
 id: deltalake-boundary-only
 language: Rust
 severity: error
-message: delta-rs types and functions belong only in the fabric boundary.
-note: Convert delta-rs values to application-owned DTOs before returning across the boundary.
+message: delta-rs reader and writer capabilities belong only in the fabric boundary.
+note: Keep Delta mutation handles private and return application-owned DTOs or read-only providers.
 files:
   - src/**/*.rs
 ignores:

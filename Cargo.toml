@@ -54,6 +54,7 @@ data-fabric = [
     "dep:object_store",
     "dep:parquet",
     "dep:tracing",
+    "dep:tokio",
     "dep:url",
 ]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]

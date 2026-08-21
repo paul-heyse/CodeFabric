@@ -133,6 +133,7 @@ printf '%s' "$root_shape" | jq -e '
       "dep:object_store",
       "dep:parquet",
       "dep:tracing",
+      "dep:tokio",
       "dep:url"
     ],
     "daemon": [

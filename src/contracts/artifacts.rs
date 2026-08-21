@@ -710,6 +710,58 @@ fn render_rust_registry_bindings(
         }
         writeln!(output, "];\n").unwrap();
     }
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct OntologyCodeEntry {\n\
+             pub code: i32, pub family_code: i16,\n\
+         }\n\n",
+    );
+    for (constant, artifact_id, code_field, family_field) in [
+        (
+            "ENTITY_KIND_CODES",
+            "codefabric.registry.ontology-entity-registry",
+            "kind_code",
+            Some("family_code"),
+        ),
+        (
+            "RELATION_KIND_CODES",
+            "codefabric.registry.ontology-relation-registry",
+            "relation_code",
+            Some("family_code"),
+        ),
+        (
+            "PROPERTY_KIND_CODES",
+            "codefabric.registry.ontology-property-registry",
+            "property_code",
+            None,
+        ),
+        (
+            "FACT_KIND_CODES",
+            "codefabric.registry.ontology-fact-registry",
+            "fact_code",
+            None,
+        ),
+    ] {
+        let value = registry_value(repository_root, catalog, artifact_id)?;
+        let records = value["records"]
+            .as_array()
+            .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+        writeln!(output, "pub const {constant}: &[OntologyCodeEntry] = &[").unwrap();
+        for record in records {
+            let code = record[code_field]
+                .as_i64()
+                .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from(artifact_id)))?;
+            let family_code = family_field
+                .and_then(|field| record[field].as_i64())
+                .unwrap_or_default();
+            writeln!(
+                output,
+                "    OntologyCodeEntry {{ code: {code}, family_code: {family_code} }},"
+            )
+            .unwrap();
+        }
+        writeln!(output, "];\n").unwrap();
+    }
     let content_len = output.trim_end().len();
     output.truncate(content_len);
     output.push('\n');

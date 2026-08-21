@@ -1,5 +1,10 @@
 # Fixture oracle change record
 
+## 2026-08-21 synthetic canonical ingest
+
+- Added an owner-reviewed two-provider conflict known answer covering deterministic
+  precedence selection, evidence retention, and conflict materialization.
+
 ## 2026-08-21 source capture race
 
 - Added the seeded three-size, 10,000-attempt concurrent source-capture property

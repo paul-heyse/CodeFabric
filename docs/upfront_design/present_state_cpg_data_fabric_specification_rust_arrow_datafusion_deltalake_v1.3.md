@@ -359,7 +359,7 @@ data-fabric = [
   "dep:arrow", "dep:arrow-array", "dep:arrow-buffer", "dep:arrow-cast",
   "dep:arrow-ord", "dep:arrow-row", "dep:arrow-schema", "dep:arrow-select",
   "dep:arrow-string", "dep:datafusion", "dep:deltalake", "dep:futures",
-  "dep:object_store", "dep:parquet", "dep:tracing", "dep:url",
+  "dep:object_store", "dep:parquet", "dep:tracing", "dep:tokio", "dep:url",
 ]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = [

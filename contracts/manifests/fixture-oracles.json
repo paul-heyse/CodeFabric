@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "released",
-  "canonical_digest": "b3:e4693ba5bbc79ccad38f34faf0d591c47d2c6d3236d6cd243adad04ff15cce1d",
+  "canonical_digest": "b3:b74e0db4f4b3a73e95d417fd823d77f6c1b6d7f2b7c5238fece81557dc9c6e8e",
   "records": [
     {"path":"contracts/fixtures/identity/cbef-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed CBEF framing and BLAKE3 known answers for all domains and core type codes","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
     {"path":"contracts/fixtures/identity/path-canonicalization-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed percent, base64url, NFD, and full-casefold known answers","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
@@ -20,6 +20,7 @@
     {"path":"contracts/fixtures/projections/vectors.json","oracle_class":"normative-kat","origin":"Exact SUITE AC-G-02 worked vectors independently recomputed during M01 review","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
     {"path":"contracts/fixtures/proto/production_wire.json","oracle_class":"normative-kat","origin":"Owner-reviewed four-package Protocol Buffers binary wire-format known answers","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-production-protocol-cutover"},
     {"path":"contracts/fixtures/security/source-capture-race-v1.json","oracle_class":"property","origin":"Seeded bounded concurrent-rewriter source-capture campaign with zero false-stable publications","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-source-capture-race"},
+    {"path":"contracts/fixtures/synthetic/conflicting-observations-v1.json","oracle_class":"normative-kat","origin":"Owner-reviewed canonical-ingest precedence, evidence, and conflict known answer","owner":"data-fabric","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-synthetic-canonical-ingest"},
     {"path":"contracts/fixtures/registries/enum-flag-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed enum code/name/slug and 64-bit flag-word known answers","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-wave-1-registry-kats"},
     {"path":"fuzz/corpus/contract_ingress/ebnf-seed","oracle_class":"property","origin":"Minimal valid shared EBNF ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
     {"path":"fuzz/corpus/contract_ingress/json-seed","oracle_class":"property","origin":"Minimal valid strict-JSON ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},

@@ -217,8 +217,28 @@ impl TableProvider for ContractTableProvider {
 pub struct FabricTable {
     pub table_code: i16,
     pub path: PathBuf,
-    pub delta: DeltaTable,
-    pub provider: Arc<dyn TableProvider>,
+    delta: DeltaTable,
+    provider: Arc<dyn TableProvider>,
+}
+
+impl FabricTable {
+    /// Current Delta transaction version for diagnostics and publication fencing.
+    #[must_use]
+    pub fn version(&self) -> Option<u64> {
+        self.delta.version()
+    }
+
+    /// Exact generated schema exposed by the read-only provider facade.
+    #[must_use]
+    pub fn schema(&self) -> SchemaRef {
+        self.provider.schema()
+    }
+
+    /// Clone the read-only query provider without exposing a Delta writer.
+    #[must_use]
+    pub fn provider(&self) -> Arc<dyn TableProvider> {
+        Arc::clone(&self.provider)
+    }
 }
 
 /// Complete local Delta namespace for one registered workspace.
