@@ -630,8 +630,27 @@ def derive_plan_status(
             "recipes_resolve": recipes_resolve,
             "trusted": trusted,
         }
+    completion_groups: dict[str, dict[str, Any]] = {}
+    untrusted_entries: list[str] = []
+    for group in ("milestones", "decommission_batches"):
+        completion_groups[group] = {}
+        for identifier, entry in state[group].items():
+            commit = commit_trust(root, entry["proving_commit"])
+            trusted = entry["status"] == "complete" and commit["ancestor"]
+            qualified = f"{group}.{identifier}"
+            if entry["status"] == "complete" and not trusted:
+                untrusted_entries.append(qualified)
+            completion_groups[group][identifier] = {
+                "status": entry["status"],
+                "proving_commit": entry["proving_commit"],
+                "commit": commit,
+                "trusted": trusted,
+            }
     healthy = (
-        baseline["ancestor"] and all(item["fresh"] for item in inputs) and not untrusted
+        baseline["ancestor"]
+        and all(item["fresh"] for item in inputs)
+        and not untrusted
+        and not untrusted_entries
     )
     return {
         "schema_version": 1,
@@ -639,7 +658,9 @@ def derive_plan_status(
         "baseline": {"commit": plan["baseline_commit"], **baseline},
         "declared_inputs": inputs,
         "packets": packet_status,
+        **completion_groups,
         "untrusted_complete_packets": untrusted,
+        "untrusted_complete_entries": untrusted_entries,
         "healthy": healthy,
     }
 
@@ -713,7 +734,18 @@ def _status_summary(report: Mapping[str, Any]) -> dict[str, Any]:
             for packet, status in packets.items()
             if status["status"] == "complete"
         ],
+        "complete_milestones": [
+            identifier
+            for identifier, status in report["milestones"].items()
+            if status["status"] == "complete"
+        ],
+        "complete_decommission_batches": [
+            identifier
+            for identifier, status in report["decommission_batches"].items()
+            if status["status"] == "complete"
+        ],
         "untrusted_complete_packets": report["untrusted_complete_packets"],
+        "untrusted_complete_entries": report["untrusted_complete_entries"],
         "healthy": report["healthy"],
     }
 

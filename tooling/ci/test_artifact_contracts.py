@@ -143,4 +143,6 @@ def test_wp00_operational_acceptance() -> None:
         "tracked-target-zero-state-check",
     } <= recipes.keys()
     assert check_tracked_target_zero_state(ROOT)["tracked_target_paths"] == 0
-    assert derive_plan_status(ROOT, DEFAULT_PLAN)["healthy"]
+    status = derive_plan_status(ROOT, DEFAULT_PLAN)
+    assert status["healthy"]
+    assert status["untrusted_complete_entries"] == []
