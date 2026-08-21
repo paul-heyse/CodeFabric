@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP15",
+  "current_packet": "WP16",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -443,10 +443,18 @@
       "blockers": []
     },
     "WP15": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "ca83179dc6a30d21e3b8ec3deeb72c463f242874",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "AC-G-12 and WP15 required the stable BLOCKED_PATH_COLLISION diagnostic, but AC-G-65 and the closed released error registry omitted it. Code 2030 now owns that workspace-scoped identity failure and all catalog, bundle, Rust, and Python derivatives are regenerated from the corrected authority."
+        }
+      ],
+      "failed_approaches": [
+        "The first contract regeneration correctly rejected BLOCKED_PATH_COLLISION as an unowned public-error value. Adding it to the model's exact owner allocation allowed generated outputs to converge.",
+        "The first aggregate gate found the Python structural census still asserted 60 public errors. The assertion now tracks the closed 61-entry authority and the full gate passes."
+      ],
       "blockers": []
     },
     "WP16": {
