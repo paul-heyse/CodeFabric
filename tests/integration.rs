@@ -7,6 +7,8 @@ mod integration {
     mod contracts;
     #[cfg(feature = "daemon")]
     mod daemon;
+    #[cfg(feature = "daemon")]
+    mod git_state;
     #[cfg(feature = "rpc")]
     mod rpc;
 }

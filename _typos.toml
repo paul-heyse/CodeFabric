@@ -45,3 +45,7 @@ mis = "mis"
 # rustix mirrors the POSIX `O_WRONLY` flag as `OFlags::WRONLY`. This is an upstream API
 # identifier, not prose and not a misspelling we can rename.
 WRONLY = "WRONLY"
+
+# gix-dir names its byte-native repository-relative path field `rela_path`.
+# This is a pinned upstream public API identifier and cannot be renamed locally.
+rela = "rela"

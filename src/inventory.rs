@@ -363,7 +363,7 @@ impl InventoryWalker {
     }
 }
 
-fn persist_inventory(
+pub(crate) fn persist_inventory(
     store: &mut OperationalStore,
     workspace_id: [u8; 16],
     source_generation: u64,
@@ -438,7 +438,7 @@ fn require_source_generation(
     Ok(())
 }
 
-fn merkle_inventory_digest(records: &[SourceInventoryRecord]) -> [u8; 32] {
+pub(crate) fn merkle_inventory_digest(records: &[SourceInventoryRecord]) -> [u8; 32] {
     let mut directories = BTreeMap::<Vec<u8>, Vec<(Vec<u8>, u8, [u8; 32])>>::new();
     for record in records {
         let (parent, name) = split_parent(&record.path.raw_relative_path_bytes);

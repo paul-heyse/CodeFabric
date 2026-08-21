@@ -2496,6 +2496,14 @@ pub struct GitStateVector {
 }
 ```
 
+The `inclusion_policy_fingerprint`, `attributes_fingerprint`, and
+`worktree_inventory_digest` are authoritative observations owned by the policy compiler and
+the descriptor-relative inventory boundary. They SHALL be supplied to Git state capture as
+one immutable `GitStateObservations` value. The Git adapter SHALL bind them into the returned
+vector but SHALL NOT recreate them by independently walking source files or accepting ambient
+configuration. This keeps gix responsible for Git-native classification while current stable
+filesystem bytes remain source truth.
+
 ### 50.1 Object ID representation
 
 ```rust
@@ -5337,18 +5345,20 @@ pub trait GitStateAdapter {
     fn open_worktree(
         &self,
         root: &PlatformPath,
+        registered: &RegisteredGitIdentity,
         policy: &GitTrustPolicy,
     ) -> Result<GitStateSnapshot, GitStateError>;
 
     fn capture_state(
         &self,
         identity: &GitWorktreeIdentity,
+        observations: &GitStateObservations,
     ) -> Result<GitStateVector, GitStateError>;
 
     fn inventory(
         &self,
         identity: &GitWorktreeIdentity,
-        policy: &SourceInclusionPolicy,
+        observations: &GitStateObservations,
         cancel: &CancellationToken,
     ) -> Result<GitInventoryResult, GitStateError>;
 

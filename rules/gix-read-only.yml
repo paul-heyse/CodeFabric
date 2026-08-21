@@ -1,0 +1,15 @@
+id: gix-read-only
+language: Rust
+severity: error
+message: The Git boundary is read-only; mutation, checkout, and external-command APIs are forbidden.
+note: Status outcome changes remain in memory and must never be written back.
+files:
+  - src/git_state.rs
+rule:
+  any:
+    - pattern: $REPO.edit_reference($$$ARGS)
+    - pattern: $REPO.write_object($$$ARGS)
+    - pattern: $REPO.checkout($$$ARGS)
+    - pattern: $OUTCOME.write_changes()
+    - pattern: Command::new($$$ARGS)
+    - pattern: std::process::Command::new($$$ARGS)

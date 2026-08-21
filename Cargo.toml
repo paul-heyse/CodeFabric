@@ -54,7 +54,14 @@ data-fabric = [
     "dep:tracing",
 ]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
-repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
+repository-state = [
+    "dep:blake3",
+    "dep:gix",
+    "dep:rusqlite",
+    "dep:rustix",
+    "dep:thiserror",
+    "dep:url",
+]
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
 daemon = [
     "contracts-tooling",

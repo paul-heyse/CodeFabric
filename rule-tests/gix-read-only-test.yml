@@ -1,0 +1,19 @@
+id: gix-read-only
+valid:
+  - |
+      fn inspect(repository: &Repository) {
+          let _head = repository.head();
+      }
+invalid:
+  - |
+      fn mutate(repository: &Repository) {
+          repository.edit_reference("refs/heads/main", Default::default());
+      }
+  - |
+      fn persist(outcome: &mut Outcome) {
+          outcome.write_changes();
+      }
+  - |
+      fn shell_out() {
+          Command::new("git");
+      }

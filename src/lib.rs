@@ -34,4 +34,4 @@ pub mod workspace_registry;
 #[cfg(feature = "data-fabric")]
 mod fabric;
 #[cfg(feature = "repository-state")]
-mod git_state;
+pub mod git_state;

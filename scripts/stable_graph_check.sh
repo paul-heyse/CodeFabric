@@ -142,7 +142,7 @@ printf '%s' "$root_shape" | jq -e '
     "default": ["local-workstation"],
     "local-workstation": ["daemon", "compatibility-probes"],
     "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
-    "repository-state": ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"],
+    "repository-state": ["dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix", "dep:thiserror", "dep:url"],
     "rpc": ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"],
     "s3-storage": ["data-fabric", "deltalake/s3"]
   }
