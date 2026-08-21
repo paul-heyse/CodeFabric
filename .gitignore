@@ -6,6 +6,8 @@
 /target/
 /fuzz/target/
 /fuzz/artifacts/
+/rustc-extractor/target/
+/pyrefly-sidecar/target/
 
 # Python adapter build domain
 /.venv/
