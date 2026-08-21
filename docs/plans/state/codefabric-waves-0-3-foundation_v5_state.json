@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP20",
+  "current_packet": "WP21",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -542,10 +542,23 @@
       "blockers": []
     },
     "WP20": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "e0f350180b8142ac9d62270f9678614568b87746",
+      "deviations": [
+        {
+          "kind": "user_directed_non_timing_evidence",
+          "summary": "The WP20 preflight timing benchmark was intentionally omitted. The user confirmed that timing evidence would not change this design; acceptance uses functional Arrow-kernel composition, exact bounded rows, and non-timing counters only."
+        },
+        {
+          "kind": "generated_contract_binding",
+          "summary": "Typed builders bind every array to its generated TableSpec column name before RecordBatch construction. This preserves model-driven order and detects same-physical-type semantic swaps without a serde row hot loop. Arrow RowConverter supplies the programmatic composite-key row encoding used by the sort/adjacent duplicate check."
+        }
+      ],
+      "failed_approaches": [
+        "The first metrics shape returned validation_failures only inside successful outputs, making the counter structurally unable to observe rejection. SyntheticCanonicalIngest is now a reusable thread-safe monitored ingress whose cumulative counters record both successes and rejected calls.",
+        "The initial broad cargo-mutants invocation selected 220 mutations and created a fresh scratch target, forcing an unrelated DataFusion dependency rebuild. It was interrupted without claiming evidence; a scoped in-place run against the four validator/reconciliation whole-function removals caught every compilable mutant (4 caught, 7 intentionally non-Default return substitutions unviable) while reusing the repository cache.",
+        "The first strict Clippy pass identified oversized ingress and property-encoder functions. Candidate collection, reconciliation, and property representation construction were separated into closed helpers; no lint suppression was added to production code."
+      ],
       "blockers": []
     },
     "WP21": {
@@ -990,6 +1003,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP20: implement the universal fact core, closed observation boundary, generated encoders, bounded batch validation, reconciliation ownership, and deterministic semantic indexes on the WP19 fabric.",
-  "updated_at": "2026-08-21T13:04:12Z"
+  "next_action": "Execute WP21: enforce generated mutation classes through the sole fabric writer, implement owner replacement and owner deletion, and prove idempotent replay without publication-pointer exposure.",
+  "updated_at": "2026-08-21T13:38:41Z"
 }
