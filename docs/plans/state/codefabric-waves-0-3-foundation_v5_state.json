@@ -4,11 +4,11 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP00",
+  "current_packet": "WP06a",
   "packets": {
     "WP00": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "b8a31cb516f18a643c5aedc706fccf8fb8f20d3c",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -288,7 +288,7 @@
       "blockers": []
     },
     "WP06a": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -467,8 +467,8 @@
   },
   "milestones": {
     "M00": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "b8a31cb516f18a643c5aedc706fccf8fb8f20d3c",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -544,8 +544,8 @@
       "blockers": []
     },
     "DB06": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "b8a31cb516f18a643c5aedc706fccf8fb8f20d3c",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -812,6 +812,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Complete WP00 artifact, trust-derivation, and tracked-target gates; prove them at a commit; then activate WP06a.",
-  "updated_at": "2026-08-21T03:40:55Z"
+  "next_action": "Implement WP06a first-class typed compilation units and revalidate the contract, Proto, adapter, and output-ownership cutover.",
+  "updated_at": "2026-08-21T03:42:09Z"
 }
