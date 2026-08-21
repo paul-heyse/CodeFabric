@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP17",
+  "current_packet": "WP18",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -483,10 +483,23 @@
       "blockers": []
     },
     "WP17": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "acf2185c974db2289cc8e1ed5fc930cf68aad9e4",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "Lifecycle section 156 now passes the registration-owned repository/worktree IDs into exact-path open and passes one immutable GitStateObservations value into state capture and inventory. This removes impossible implicit identity derivation and prevents the gix boundary from independently recreating policy or authoritative-byte fingerprints."
+        },
+        {
+          "kind": "platform_fixture_adaptation",
+          "summary": "APFS rejects invalid UTF-8 host filenames with EILSEQ, so the macOS byte-native proof writes an invalid UTF-8 pathname directly into the real Git index. gix preserves and classifies the exact bytes without requiring an impossible APFS directory entry."
+        }
+      ],
+      "failed_approaches": [
+        "The first non-UTF-8 fixture attempted to create an invalid UTF-8 APFS filename and failed with EILSEQ. The fixture now constructs the byte-native Git index entry directly, which tests the intended Git path boundary on macOS.",
+        "The first blocking-metrics expectation counted a request cancelled while queued as a completed blocking job. The contract now distinguishes interrupted queued work from jobs that actually acquired a permit and completed.",
+        "The first aggregate structural check exposed the repository-state feature assertion had not yet gained its direct blake3 and thiserror edges. The exact stable-graph model now includes both production dependencies."
+      ],
       "blockers": []
     },
     "WP18": {
@@ -774,6 +787,14 @@
       "summary": "WP16 intentionally strengthens the source capture fence, makes the inventory Merkle framing normative, closes the snapshot-lease lifecycle, and records enforceable deployment limits. The planning-time hashes remain immutable; the WP16 proving commit, generated contracts, security campaign, and derived acceptance reconcile the expected drift."
     },
     {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP17",
+      "paths": [
+        "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md"
+      ],
+      "summary": "WP17 makes registration identity and the three non-Git state-vector observations explicit adapter inputs. The planning-time hash remains immutable; the WP17 proving commit, regenerated artifact identities, real SHA-1/SHA-256 fixtures, and no-write oracle reconcile the expected drift."
+    },
+    {
       "id": "AD-01",
       "kind": "accepted_current_truth",
       "summary": "Machine projections omit only their own root/header identities, retain nested identities, and normative prose uses prose-utf8-v1."
@@ -944,6 +965,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP15: implement AC-G-11 root authorization, lexical rejection, descriptor-relative secure open, root-identity revalidation, and the adversarial path fixture matrix.",
-  "updated_at": "2026-08-21T10:23:19Z"
+  "next_action": "Execute WP18: implement the per-workspace coordinator actor, cold bootstrap without watchers, warm restart, G0/G1 state fencing, and pre-ready health/admin diagnostics.",
+  "updated_at": "2026-08-21T11:48:55Z"
 }
