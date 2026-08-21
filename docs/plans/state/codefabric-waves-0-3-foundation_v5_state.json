@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP23",
+  "current_packet": "WP25",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -615,10 +615,26 @@
       "blockers": []
     },
     "WP23": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "92b4b57c99c97d68b12a425907747344607e9853",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "FAB AC-G-20 now reproduces the generated table-900/table-901 tombstone schemas verbatim and explicitly permits an immutable internal Arrow row-encoded key beside the public primary_key_digest. This removes the prior prose/schema mismatch while preserving typed DataFusion anti-joins."
+        },
+        {
+          "kind": "dependency_closed_feature_surface",
+          "summary": "The data-fabric feature now declares its existing contracts-tooling and repository-state dependencies, and the SQLite/workspace modules it already consumed are gated at that dependency-closed surface. The stable-graph oracle and every single-feature build prove the corrected shape."
+        },
+        {
+          "kind": "user_directed_non_timing_evidence",
+          "summary": "Overlay operational timing was intentionally omitted. Acceptance instead proves exact DataFusion memory reservation bytes, deterministic generation/content digests, immutable plan construction, and bit-exact effective-state equality across the durable rebase boundary."
+        }
+      ],
+      "failed_approaches": [
+        "The standalone data-fabric Clippy check exposed a pre-existing hidden dependency on daemon-gated workspace and operational-store modules. The feature is now dependency-closed and all thirteen feature surfaces pass.",
+        "The first expanded implementation failed strict documentation, Debug completeness, function-size, and needless-allocation lints. The consolidator was split into request validation and deterministic selection helpers, all public fallible APIs document errors, and no lint suppression was introduced."
+      ],
       "blockers": []
     },
     "WP24": {
@@ -1070,6 +1086,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP23: implement generated-policy overlay mutation, deterministic consolidation, tombstones, immutable overlay tables, and the durable three-snapshot rebase protocol over WP22 publication and WP24 activation.",
-  "updated_at": "2026-08-21T17:02:04Z"
+  "next_action": "Execute WP25: build the leased-snapshot-only DataFusion serving session, private catalogs and generated views, read-only statement policy, bounded execution resources, and pinned-query snapshot barrier.",
+  "updated_at": "2026-08-21T17:37:37Z"
 }
