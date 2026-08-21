@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import sys
 from importlib.metadata import version
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from codefabric_cpg_mcp.contracts.json import canonicalize_value, checksum
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
@@ -26,6 +28,9 @@ MODEL_PACK_NEGATIVE_PATH = PurePosixPath(
     "contracts/fixtures/model-packs/invalid-executable-field.json"
 )
 MODEL_PACK_FIXTURE_MAX_BYTES = 262_144
+SCHEMA_DRIFT_FIXTURE_PATH = PurePosixPath(
+    "contracts/fixtures/negative/schema-version-drift.json"
+)
 
 
 class SchemaCatalogError(ValueError):
@@ -259,6 +264,81 @@ def validate_model_pack_examples(repository_root: Path, maximum_bytes: int) -> N
         )
 
 
+def _pointer_parent(document: Any, pointer: str) -> tuple[dict[str, Any], str]:
+    if not pointer.startswith("/"):
+        raise ValueError("JSON pointer must be absolute")
+    parts = [
+        part.replace("~1", "/").replace("~0", "~") for part in pointer[1:].split("/")
+    ]
+    value = document
+    for part in parts[:-1]:
+        if not isinstance(value, dict) or part not in value:
+            raise ValueError(f"JSON pointer component is absent: {part}")
+        value = value[part]
+    if not isinstance(value, dict) or not parts or parts[-1] not in value:
+        raise ValueError("JSON pointer leaf is absent")
+    return value, parts[-1]
+
+
+def validate_schema_drift_fixture(repository_root: Path) -> None:
+    """Prove semantic schema drift without a version advance changes its fingerprint."""
+
+    fixture = _load_json(
+        repository_root / SCHEMA_DRIFT_FIXTURE_PATH,
+        SCHEMA_DRIFT_FIXTURE_PATH,
+        MODEL_PACK_FIXTURE_MAX_BYTES,
+    )
+    if not isinstance(fixture, dict):
+        raise SchemaCatalogError(
+            "invalid_schema_drift_fixture",
+            SCHEMA_DRIFT_FIXTURE_PATH,
+            "fixture root must be an object",
+        )
+    try:
+        schema_path = _safe_authority_path(fixture["schema_path"])
+        schema = _load_json(
+            repository_root / schema_path,
+            schema_path,
+            MODEL_PACK_FIXTURE_MAX_BYTES,
+        )
+        version_parent, version_key = _pointer_parent(
+            schema, fixture["version_pointer"]
+        )
+        original_version = version_parent[version_key]
+        mutated = copy.deepcopy(schema)
+        mutation_parent, mutation_key = _pointer_parent(
+            mutated, fixture["mutation_pointer"]
+        )
+        mutation_parent[mutation_key] = fixture["replacement"]
+        mutated_version_parent, mutated_version_key = _pointer_parent(
+            mutated, fixture["version_pointer"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise SchemaCatalogError(
+            "invalid_schema_drift_fixture",
+            SCHEMA_DRIFT_FIXTURE_PATH,
+            str(error),
+        ) from error
+    if fixture.get("expected_error") != "SCHEMA_VERSION_NOT_ADVANCED":
+        raise SchemaCatalogError(
+            "invalid_schema_drift_fixture",
+            SCHEMA_DRIFT_FIXTURE_PATH,
+            "expected_error is not SCHEMA_VERSION_NOT_ADVANCED",
+        )
+    if mutated_version_parent[mutated_version_key] != original_version:
+        raise SchemaCatalogError(
+            "invalid_schema_drift_fixture",
+            SCHEMA_DRIFT_FIXTURE_PATH,
+            "negative fixture unexpectedly advances the schema version",
+        )
+    if checksum(canonicalize_value(schema)) == checksum(canonicalize_value(mutated)):
+        raise SchemaCatalogError(
+            "invalid_schema_drift_fixture",
+            SCHEMA_DRIFT_FIXTURE_PATH,
+            "semantic mutation did not change the canonical schema fingerprint",
+        )
+
+
 def validate_catalog_schemas(repository_root: Path) -> tuple[PurePosixPath, ...]:
     """Validate the complete catalog-derived JSON Schema set."""
 
@@ -281,6 +361,8 @@ def validate_catalog_schemas(repository_root: Path) -> tuple[PurePosixPath, ...]
         validate_schema(repository_root, schema_path, maximum_bytes)
         if schema_path == MODEL_PACK_SCHEMA_PATH:
             validate_model_pack_examples(repository_root, maximum_bytes)
+    if (repository_root / SCHEMA_DRIFT_FIXTURE_PATH).is_file():
+        validate_schema_drift_fixture(repository_root)
     return tuple(path for path, _ in schema_inputs)
 
 

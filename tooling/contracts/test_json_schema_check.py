@@ -16,9 +16,11 @@ from tooling.contracts.json_schema_check import (
     MODEL_PACK_NEGATIVE_PATH,
     MODEL_PACK_POSITIVE_PATH,
     MODEL_PACK_SCHEMA_PATH,
+    SCHEMA_DRIFT_FIXTURE_PATH,
     SchemaCatalogError,
     validate_catalog_schemas,
     validate_model_pack_examples,
+    validate_schema_drift_fixture,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -91,6 +93,14 @@ def test_model_pack_schema_enforces_declarative_non_executable_records() -> None
     validate_model_pack_examples(REPOSITORY_ROOT, maximum)
     assert (REPOSITORY_ROOT / MODEL_PACK_POSITIVE_PATH).is_file()
     assert (REPOSITORY_ROOT / MODEL_PACK_NEGATIVE_PATH).is_file()
+
+
+def test_wp09_negative_schema_version_drift_fixture_is_executable() -> None:
+    validate_schema_drift_fixture(REPOSITORY_ROOT)
+    fixture = json.loads(
+        (REPOSITORY_ROOT / SCHEMA_DRIFT_FIXTURE_PATH).read_text(encoding="utf-8")
+    )
+    assert fixture["expected_error"] == "SCHEMA_VERSION_NOT_ADVANCED"
 
 
 @pytest.mark.parametrize(

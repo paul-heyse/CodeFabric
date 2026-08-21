@@ -1,16 +1,435 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://codefabric.dev/contracts/schema/cpg-semantic-query-request.schema.json",
-  "title": "Draft cpg-semantic-query-request contract",
-  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "properties": {
+    "cost_budget": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "freshness_policy": {
+      "enum": [
+        "current_required",
+        "wait_for_current",
+        "best_available_snapshot"
+      ],
+      "type": "string"
+    },
+    "queries": {
+      "items": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "find code entities"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "retrieve facts"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "follow relationships"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "find paths"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "match a code fact pattern"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "combine result sets"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "summarize facts"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "query_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request": {
+                "const": "fetch source context"
+              },
+              "where": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "label",
+              "input",
+              "where",
+              "limit"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "response_projection": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "semantic_request_id": {
+      "type": "string"
+    },
+    "specification": {
+      "const": "composable semantic CPG fact query"
+    },
+    "version": {
+      "const": "1.3"
+    },
+    "workspace_id": {
+      "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "specification",
+    "version",
+    "semantic_request_id",
+    "workspace_id",
+    "freshness_policy",
+    "queries",
+    "response_projection",
+    "cost_budget"
+  ],
+  "title": "CPG semantic query request",
+  "type": "object",
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
     "artifact_kind": "json-schema",
-    "version": "1.0",
+    "canonical_digest": "b3:f11300f63bf6c4fb21487ce9c989eed3a236869ed3bac6bd50c4a2b61dd313e5",
     "compatible_suite_major": 1,
-    "status": "draft",
-    "canonical_digest": "b3:45c03be5ef98fe34d387a8be1adf9c11b72d5b9d8bf7e4a0e216a6d5c2d8f267"
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "status": "released",
+    "version": "1.0"
+  },
+  "x-codefabric-generated": {
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "source_artifact_id": "codefabric.schema.contract-ir",
+    "source_canonical_digest": "b3:d089e858c0c887fb99ea2d1c1c583913e3ec25ea82df4a531a3946f0b68df240",
+    "source_digest": "b3:6cc839b2d8683df70adc161a6356a051b6d76520fa738c4828d32b34613a774c"
   }
 }
-

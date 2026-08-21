@@ -1,5 +1,6 @@
 # Arrow/Delta contract outputs
 
-This directory is reserved by AC-G-05 for generated Arrow and Delta schema artifacts.
-WP09 authors the released artifacts; WP06 establishes and verifies the directory.
-
+`table-specs.json` is the canonical review projection of
+`contracts/schema/schema-contract-ir.json`. The same cataloged compilation unit emits
+`src/generated/table_specs.rs` and `contracts/schema/operational-store.sql`; none is an
+independent authority and all are byte-for-byte reproducible.

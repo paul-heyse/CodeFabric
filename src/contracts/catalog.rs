@@ -224,6 +224,16 @@ pub enum DerivationOutputKind {
     AdapterSchemaManifest,
     /// Named canonical schema and protocol fingerprints.
     AdapterFingerprintManifest,
+    /// Public Draft 2020-12 schema compiled from adapter Contract IR.
+    AdapterPublicSchema,
+    /// Public Draft 2020-12 schema compiled from the schema Contract IR.
+    PublicJsonSchema,
+    /// Canonical `TableSpec` registry compiled from the schema Contract IR.
+    TableSpecManifest,
+    /// Rust `TableSpec` declarations compiled from the schema Contract IR.
+    RustTableSpecBindings,
+    /// `SQLite` operational-store DDL compiled from the schema Contract IR.
+    OperationalStoreDdl,
 }
 
 /// Closed model-level derivation operation.
@@ -240,6 +250,8 @@ pub enum DerivationKind {
     ProtobufRustFromDescriptor,
     /// Compile Pydantic models, schema views, and fingerprints from Contract IR.
     AdapterModelCompilation,
+    /// Compile `TableSpec` records, public schemas, and operational DDL from schema Contract IR.
+    SchemaContractCompilation,
 }
 
 /// View of a governed artifact consumed by a derivation.
@@ -668,8 +680,17 @@ pub fn generator_identity(kind: DerivationKind) -> GeneratorIdentity {
         },
         DerivationKind::AdapterModelCompilation => GeneratorIdentity {
             generator_id: "codefabric-adapter-models".to_owned(),
-            generator_revision: "contract-ir-pydantic-v2".to_owned(),
+            generator_revision: "codefabric-adapter-model-compiler-v1".to_owned(),
             toolchain: vec!["pydantic=2.13.4".to_owned(), "fastmcp=3.4.7".to_owned()],
+        },
+        DerivationKind::SchemaContractCompilation => GeneratorIdentity {
+            generator_id: "codefabric-schema-contracts".to_owned(),
+            generator_revision: "codefabric-schema-contracts-v1".to_owned(),
+            toolchain: vec![
+                "serde=1".to_owned(),
+                "serde-json-canonicalizer=0.3.2".to_owned(),
+                "arrow-schema=58.4.0".to_owned(),
+            ],
         },
     }
 }
@@ -1019,8 +1040,8 @@ fn compile_derivations(
     let mut outputs = BTreeMap::new();
     let authority_paths = artifacts
         .values()
-        .map(|artifact| &artifact.authority_path)
-        .collect::<BTreeSet<_>>();
+        .map(|artifact| (&artifact.authority_path, artifact))
+        .collect::<BTreeMap<_, _>>();
     for derivation in descriptors {
         if derivation.derivation_id.is_empty() {
             return Err(graph_error(CATALOG_PATH, "derivation ID is empty"));
@@ -1085,11 +1106,20 @@ fn compile_derivations(
                     "output path is not a safe repository-relative path",
                 ));
             }
-            if authority_paths.contains(&output.path) {
-                return Err(graph_error(
-                    &output.path,
-                    "generated output conflicts with an authority path",
-                ));
+            if let Some(artifact) = authority_paths.get(&output.path) {
+                let self_owned_generated_authority =
+                    matches!(
+                        &artifact.semantic_projection_source,
+                        SemanticProjectionSource::DerivationOutput { output: source }
+                            if source.derivation_id == derivation.derivation_id
+                                && source.path == output.path
+                    ) && output.primary_artifact_ids.contains(&artifact.artifact_id);
+                if !self_owned_generated_authority {
+                    return Err(graph_error(
+                        &output.path,
+                        "generated output conflicts with an unrelated authority path",
+                    ));
+                }
             }
             if output.primary_artifact_ids.is_empty() {
                 return Err(graph_error(&output.path, "output has no primary artifacts"));
@@ -1143,6 +1173,7 @@ fn compile_derivations(
     Ok((derivations, outputs))
 }
 
+#[allow(clippy::too_many_lines)] // The closed-kind matrix is clearest as one exhaustive match.
 fn validate_derivation_shape(
     derivation: &DerivationUnitDescriptor,
     artifacts: &ArtifactsById,
@@ -1225,10 +1256,26 @@ fn validate_derivation_shape(
                         ..
                     }
                 )
-                || derivation.outputs.len() != 3
+                || derivation.outputs.len() != 6
                 || count(DerivationOutputKind::PythonAdapterModels) != 1
                 || count(DerivationOutputKind::AdapterSchemaManifest) != 1
                 || count(DerivationOutputKind::AdapterFingerprintManifest) != 1
+                || count(DerivationOutputKind::AdapterPublicSchema) != 3
+        }
+        DerivationKind::SchemaContractCompilation => {
+            derivation.inputs.len() != 1
+                || !matches!(
+                    derivation.inputs[0],
+                    DerivationInput::Artifact {
+                        view: ArtifactInputView::CompiledSemantic,
+                        ..
+                    }
+                )
+                || count(DerivationOutputKind::TableSpecManifest) != 1
+                || count(DerivationOutputKind::RustTableSpecBindings) != 1
+                || count(DerivationOutputKind::OperationalStoreDdl) != 1
+                || count(DerivationOutputKind::PublicJsonSchema) != 8
+                || derivation.outputs.len() != 11
         }
     };
     if invalid {

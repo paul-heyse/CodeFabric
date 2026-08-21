@@ -81,6 +81,11 @@ type DerivationOutputKind = Literal[
     "python-adapter-models",
     "adapter-schema-manifest",
     "adapter-fingerprint-manifest",
+    "adapter-public-schema",
+    "public-json-schema",
+    "table-spec-manifest",
+    "rust-table-spec-bindings",
+    "operational-store-ddl",
 ]
 type DerivationKind = Literal[
     "artifact-index",
@@ -88,6 +93,7 @@ type DerivationKind = Literal[
     "protobuf-descriptor-and-python",
     "protobuf-rust-from-descriptor",
     "adapter-model-compilation",
+    "schema-contract-compilation",
 ]
 type ArtifactInputView = Literal["source-bytes", "compiled-semantic"]
 type ProvenanceRequirement = Literal[

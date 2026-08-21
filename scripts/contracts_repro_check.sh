@@ -46,7 +46,7 @@ while IFS= read -r output_path; do
   cmp "$temporary_root/first/$output_path" "$temporary_root/second/$output_path"
 done < <(
   jq -r '.derivations[] |
-    select(.derivation_kind == "artifact-index" or .derivation_kind == "canonical-registry-set") |
+    select(.derivation_kind == "artifact-index" or .derivation_kind == "canonical-registry-set" or .derivation_kind == "schema-contract-compilation") |
     .outputs[].path' \
     "$repository_root/contracts/manifests/suite-manifest.json"
 )
@@ -54,8 +54,9 @@ done < <(
 while IFS= read -r output_path; do
   cmp "$temporary_root/first/$output_path" "$temporary_root/reordered/$output_path"
 done < <(
-  jq -r '.derivations[].outputs[] |
-    select(.output_kind == "canonical-registry") | .path' \
+  jq -r '.derivations[] |
+    select(.derivation_kind == "canonical-registry-set" or .derivation_kind == "schema-contract-compilation") |
+    .outputs[].path' \
     "$repository_root/contracts/manifests/suite-manifest.json"
 )
 

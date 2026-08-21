@@ -126,5 +126,15 @@ def test_packaged_index_has_the_exact_source_census_and_bytes() -> None:
     assert len(index.artifacts) == len(catalog["artifacts"])
     assert artifact_index_digest() == checksum(repository_resource)
     validate_checksum(artifact_index_digest())
+    schema_units = [
+        unit for unit in index.derivations if unit.derivation_kind == "schema-contract-compilation"
+    ]
+    assert len(schema_units) == 1
+    assert {output.output_kind for output in schema_units[0].outputs} == {
+        "operational-store-ddl",
+        "public-json-schema",
+        "rust-table-spec-bindings",
+        "table-spec-manifest",
+    }
     for artifact in index.artifacts:
         validate_checksum(artifact.canonical_digest)

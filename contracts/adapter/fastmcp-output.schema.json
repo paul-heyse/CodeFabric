@@ -1,0 +1,858 @@
+{
+  "$defs": {
+    "Delivery": {
+      "discriminator": {
+        "mapping": {
+          "inline": "#/$defs/InlineDelivery",
+          "resource": "#/$defs/ResourceDelivery"
+        },
+        "propertyName": "mode"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/InlineDelivery"
+        },
+        {
+          "$ref": "#/$defs/ResourceDelivery"
+        }
+      ]
+    },
+    "InlineDelivery": {
+      "additionalProperties": false,
+      "description": "Generated InlineDelivery wire contract.",
+      "properties": {
+        "canonical_mime_type": {
+          "const": "application/json",
+          "default": "application/json",
+          "description": "Canonical response media type.",
+          "title": "Canonical Mime Type",
+          "type": "string"
+        },
+        "checksum": {
+          "description": "Canonical result checksum.",
+          "pattern": "^b3:[0-9a-f]{64}$",
+          "title": "Checksum",
+          "type": "string"
+        },
+        "mode": {
+          "const": "inline",
+          "default": "inline",
+          "description": "Inline delivery discriminator.",
+          "title": "Mode",
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Daemon-authoritative canonical response object."
+        },
+        "result_bytes": {
+          "description": "Exact canonical result size.",
+          "minimum": 0,
+          "title": "Result Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "result_bytes",
+        "checksum",
+        "response"
+      ],
+      "title": "InlineDelivery",
+      "type": "object"
+    },
+    "InlineReference": {
+      "additionalProperties": false,
+      "description": "Generated InlineReference wire contract.",
+      "properties": {
+        "media_type": {
+          "description": "Reference media type.",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "mode": {
+          "const": "inline",
+          "default": "inline",
+          "description": "Inline reference discriminator.",
+          "title": "Mode",
+          "type": "string"
+        },
+        "text": {
+          "description": "Packaged reference content.",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "media_type",
+        "text"
+      ],
+      "title": "InlineReference",
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {},
+    "QueryCounts": {
+      "additionalProperties": false,
+      "description": "Generated QueryCounts wire contract.",
+      "properties": {
+        "fact_count": {
+          "description": "Facts returned.",
+          "minimum": 0,
+          "title": "Fact Count",
+          "type": "integer"
+        },
+        "result_count": {
+          "description": "Logical query results returned.",
+          "minimum": 0,
+          "title": "Result Count",
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Whether an explicit limit affected delivery.",
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fact_count",
+        "result_count",
+        "truncated"
+      ],
+      "title": "QueryCounts",
+      "type": "object"
+    },
+    "QueryStatus": {
+      "additionalProperties": false,
+      "description": "Generated QueryStatus wire contract.",
+      "properties": {
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Safe status explanation.",
+          "title": "Message"
+        },
+        "query_id": {
+          "description": "Logical query identity.",
+          "title": "Query Id",
+          "type": "string"
+        },
+        "state": {
+          "description": "Terminal query state.",
+          "enum": [
+            "COMPLETE",
+            "FAILED",
+            "CANCELLED",
+            "DEADLINE_EXCEEDED"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query_id",
+        "state"
+      ],
+      "title": "QueryStatus",
+      "type": "object"
+    },
+    "QueryToolOutput": {
+      "additionalProperties": false,
+      "description": "Generated QueryToolOutput wire contract.",
+      "properties": {
+        "availability_state": {
+          "description": "Availability state.",
+          "enum": [
+            "AVAILABLE",
+            "PARTIAL",
+            "UNAVAILABLE"
+          ],
+          "title": "Availability State",
+          "type": "string"
+        },
+        "completeness_state": {
+          "description": "Completeness state.",
+          "enum": [
+            "COMPLETE",
+            "PARTIAL",
+            "INDETERMINATE",
+            "UNAVAILABLE"
+          ],
+          "title": "Completeness State",
+          "type": "string"
+        },
+        "counts": {
+          "$ref": "#/$defs/QueryCounts",
+          "description": "Query counts."
+        },
+        "delivery": {
+          "$ref": "#/$defs/Delivery",
+          "description": "Discriminated delivery result."
+        },
+        "execution_state": {
+          "description": "Execution state.",
+          "enum": [
+            "COMPLETE",
+            "FAILED",
+            "CANCELLED",
+            "DEADLINE_EXCEEDED"
+          ],
+          "title": "Execution State",
+          "type": "string"
+        },
+        "freshness_state": {
+          "description": "Freshness state.",
+          "enum": [
+            "CURRENT",
+            "POTENTIALLY_STALE",
+            "UNAVAILABLE"
+          ],
+          "title": "Freshness State",
+          "type": "string"
+        },
+        "limit_state": {
+          "description": "Limit state.",
+          "enum": [
+            "NOT_APPLIED",
+            "EXPLICIT_LIMIT_REACHED",
+            "HARD_LIMIT_REJECTED"
+          ],
+          "title": "Limit State",
+          "type": "string"
+        },
+        "mcp_call_id": {
+          "description": "MCP invocation correlation identity.",
+          "title": "Mcp Call Id",
+          "type": "string"
+        },
+        "notices": {
+          "description": "Safe public notices.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Notices",
+          "type": "array"
+        },
+        "query_statuses": {
+          "description": "Per-query terminal statuses.",
+          "items": {
+            "$ref": "#/$defs/QueryStatus"
+          },
+          "title": "Query Statuses",
+          "type": "array"
+        },
+        "semantic_request_id": {
+          "description": "Semantic idempotency identity.",
+          "title": "Semantic Request Id",
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/SnapshotSummary",
+          "description": "Pinned public snapshot."
+        }
+      },
+      "required": [
+        "semantic_request_id",
+        "mcp_call_id",
+        "execution_state",
+        "availability_state",
+        "completeness_state",
+        "freshness_state",
+        "limit_state",
+        "snapshot",
+        "delivery",
+        "counts",
+        "query_statuses",
+        "notices"
+      ],
+      "title": "QueryToolOutput",
+      "type": "object"
+    },
+    "ReferenceToolOutput": {
+      "discriminator": {
+        "mapping": {
+          "inline": "#/$defs/InlineReference",
+          "resource": "#/$defs/ResourceReference"
+        },
+        "propertyName": "mode"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/InlineReference"
+        },
+        {
+          "$ref": "#/$defs/ResourceReference"
+        }
+      ]
+    },
+    "ResourceDelivery": {
+      "additionalProperties": false,
+      "description": "Generated ResourceDelivery wire contract.",
+      "properties": {
+        "canonical_mime_type": {
+          "const": "application/json",
+          "default": "application/json",
+          "description": "Canonical response media type.",
+          "title": "Canonical Mime Type",
+          "type": "string"
+        },
+        "checksum": {
+          "description": "Canonical result checksum.",
+          "pattern": "^b3:[0-9a-f]{64}$",
+          "title": "Checksum",
+          "type": "string"
+        },
+        "mode": {
+          "const": "resource",
+          "default": "resource",
+          "description": "Resource delivery discriminator.",
+          "title": "Mode",
+          "type": "string"
+        },
+        "preview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional bounded preview."
+        },
+        "result_bytes": {
+          "description": "Exact canonical result size.",
+          "minimum": 0,
+          "title": "Result Bytes",
+          "type": "integer"
+        },
+        "result_resource": {
+          "$ref": "#/$defs/ResultResource",
+          "description": "Immutable result resource."
+        }
+      },
+      "required": [
+        "result_bytes",
+        "checksum",
+        "result_resource"
+      ],
+      "title": "ResourceDelivery",
+      "type": "object"
+    },
+    "ResourceReference": {
+      "additionalProperties": false,
+      "description": "Generated ResourceReference wire contract.",
+      "properties": {
+        "media_type": {
+          "description": "Reference media type.",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "mode": {
+          "const": "resource",
+          "default": "resource",
+          "description": "Resource reference discriminator.",
+          "title": "Mode",
+          "type": "string"
+        },
+        "uri": {
+          "description": "Constrained MCP resource URI.",
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri",
+        "media_type"
+      ],
+      "title": "ResourceReference",
+      "type": "object"
+    },
+    "ResultResource": {
+      "additionalProperties": false,
+      "description": "Generated ResultResource wire contract.",
+      "properties": {
+        "expires_at": {
+          "description": "RFC 3339 expiry timestamp.",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "manifest_uri": {
+          "description": "Result manifest URI.",
+          "title": "Manifest Uri",
+          "type": "string"
+        },
+        "subresource_uris": {
+          "description": "Bounded result subresources.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Subresource Uris",
+          "type": "array"
+        },
+        "uri": {
+          "description": "Immutable result URI.",
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri",
+        "manifest_uri",
+        "expires_at",
+        "subresource_uris"
+      ],
+      "title": "ResultResource",
+      "type": "object"
+    },
+    "SnapshotSummary": {
+      "additionalProperties": false,
+      "description": "Generated SnapshotSummary wire contract.",
+      "properties": {
+        "analysis_context_ids": {
+          "description": "Ordered analysis-context identities.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Analysis Context Ids",
+          "type": "array"
+        },
+        "analysis_context_set_id": {
+          "description": "Analysis-context set identity.",
+          "title": "Analysis Context Set Id",
+          "type": "string"
+        },
+        "base_table_version_digest": {
+          "description": "Base table version identity.",
+          "pattern": "^b3:[0-9a-f]{64}$",
+          "title": "Base Table Version Digest",
+          "type": "string"
+        },
+        "capability_summaries": {
+          "description": "Explicit public capability summaries.",
+          "items": {
+            "$ref": "#/$defs/JsonObject"
+          },
+          "title": "Capability Summaries",
+          "type": "array"
+        },
+        "derivation_bundle_version": {
+          "description": "Derivation bundle version.",
+          "title": "Derivation Bundle Version",
+          "type": "string"
+        },
+        "diagnostic_references": {
+          "description": "Safe diagnostic reference identities.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Diagnostic References",
+          "type": "array"
+        },
+        "durable_base_publication": {
+          "description": "Durable publication identity.",
+          "title": "Durable Base Publication",
+          "type": "string"
+        },
+        "event_stream_health": {
+          "description": "Lifecycle event-stream health.",
+          "title": "Event Stream Health",
+          "type": "string"
+        },
+        "freshness_state": {
+          "description": "Snapshot freshness state.",
+          "enum": [
+            "CURRENT",
+            "POTENTIALLY_STALE",
+            "UNAVAILABLE"
+          ],
+          "title": "Freshness State",
+          "type": "string"
+        },
+        "git_acceleration_status": {
+          "description": "Git acceleration status.",
+          "title": "Git Acceleration Status",
+          "type": "string"
+        },
+        "git_operation_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Safe Git operation summary."
+        },
+        "ontology_version": {
+          "description": "Ontology contract version.",
+          "title": "Ontology Version",
+          "type": "string"
+        },
+        "overlay_checksum": {
+          "description": "Overlay identity.",
+          "pattern": "^b3:[0-9a-f]{64}$",
+          "title": "Overlay Checksum",
+          "type": "string"
+        },
+        "overlay_generation": {
+          "description": "Overlay generation.",
+          "minimum": 0,
+          "title": "Overlay Generation",
+          "type": "integer"
+        },
+        "pending_update_count": {
+          "description": "Pending update count.",
+          "minimum": 0,
+          "title": "Pending Update Count",
+          "type": "integer"
+        },
+        "provider_bundle_version": {
+          "description": "Provider bundle version.",
+          "title": "Provider Bundle Version",
+          "type": "string"
+        },
+        "query_language_version": {
+          "description": "Query-language contract version.",
+          "title": "Query Language Version",
+          "type": "string"
+        },
+        "repository_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repository identity when available.",
+          "title": "Repository Id"
+        },
+        "schema_bundle_version": {
+          "description": "Schema bundle version.",
+          "title": "Schema Bundle Version",
+          "type": "string"
+        },
+        "snapshot_id": {
+          "description": "Immutable snapshot identity.",
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "source_generation": {
+          "description": "Monotonic source generation.",
+          "minimum": 0,
+          "title": "Source Generation",
+          "type": "integer"
+        },
+        "source_inventory_digest": {
+          "description": "Canonical source inventory identity.",
+          "pattern": "^b3:[0-9a-f]{64}$",
+          "title": "Source Inventory Digest",
+          "type": "string"
+        },
+        "source_trust_state": {
+          "description": "Source trust state.",
+          "title": "Source Trust State",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Authorized workspace identity.",
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "worktree_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Worktree identity when available.",
+          "title": "Worktree Id"
+        }
+      },
+      "required": [
+        "snapshot_id",
+        "workspace_id",
+        "source_generation",
+        "source_inventory_digest",
+        "durable_base_publication",
+        "base_table_version_digest",
+        "overlay_generation",
+        "overlay_checksum",
+        "analysis_context_set_id",
+        "analysis_context_ids",
+        "freshness_state",
+        "source_trust_state",
+        "event_stream_health",
+        "git_acceleration_status",
+        "pending_update_count",
+        "ontology_version",
+        "schema_bundle_version",
+        "provider_bundle_version",
+        "derivation_bundle_version",
+        "query_language_version",
+        "capability_summaries",
+        "diagnostic_references"
+      ],
+      "title": "SnapshotSummary",
+      "type": "object"
+    },
+    "StatusToolOutput": {
+      "additionalProperties": false,
+      "description": "Generated StatusToolOutput wire contract.",
+      "properties": {
+        "agent_instance_id": {
+          "description": "Agent instance identity.",
+          "title": "Agent Instance Id",
+          "type": "string"
+        },
+        "capability_statuses": {
+          "description": "Explicit public capability statuses.",
+          "items": {
+            "$ref": "#/$defs/JsonObject"
+          },
+          "title": "Capability Statuses",
+          "type": "array"
+        },
+        "freshness_state": {
+          "description": "Active freshness state.",
+          "enum": [
+            "CURRENT",
+            "POTENTIALLY_STALE",
+            "UNAVAILABLE"
+          ],
+          "title": "Freshness State",
+          "type": "string"
+        },
+        "notices": {
+          "description": "Safe public notices.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Notices",
+          "type": "array"
+        },
+        "ready": {
+          "description": "Adapter readiness.",
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "service_limits": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Safe hard service limits."
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SnapshotSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active snapshot when available."
+        },
+        "supported_languages": {
+          "description": "Supported source languages.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Languages",
+          "type": "array"
+        },
+        "supported_request_forms": {
+          "description": "Supported semantic request forms.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Request Forms",
+          "type": "array"
+        },
+        "versions": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Explicit public component versions."
+        },
+        "workspace_id": {
+          "description": "Authorized workspace identity.",
+          "title": "Workspace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ready",
+        "workspace_id",
+        "agent_instance_id",
+        "versions",
+        "supported_languages",
+        "supported_request_forms",
+        "capability_statuses",
+        "freshness_state",
+        "service_limits",
+        "notices"
+      ],
+      "title": "StatusToolOutput",
+      "type": "object"
+    },
+    "ValidateQueryOutput": {
+      "additionalProperties": false,
+      "description": "Generated ValidateQueryOutput wire contract.",
+      "properties": {
+        "capability_requirements": {
+          "description": "Required capabilities.",
+          "items": {
+            "$ref": "#/$defs/JsonObject"
+          },
+          "title": "Capability Requirements",
+          "type": "array"
+        },
+        "dependency_graph": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Resolved dependency graph."
+        },
+        "errors": {
+          "description": "Validation failures.",
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "normalized_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Daemon-normalized semantic request."
+        },
+        "request_id": {
+          "description": "Validation request identity.",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "resolved_semantics": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Resolved semantic phrases."
+        },
+        "resource_estimate": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Bounded resource estimate."
+        },
+        "valid": {
+          "description": "Whether the semantic request is valid.",
+          "title": "Valid",
+          "type": "boolean"
+        },
+        "warnings": {
+          "description": "Validation warnings.",
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "valid",
+        "request_id",
+        "dependency_graph",
+        "resolved_semantics",
+        "capability_requirements",
+        "resource_estimate",
+        "errors",
+        "warnings"
+      ],
+      "title": "ValidateQueryOutput",
+      "type": "object"
+    },
+    "ValidationIssue": {
+      "additionalProperties": false,
+      "description": "Generated ValidationIssue wire contract.",
+      "properties": {
+        "code": {
+          "description": "Stable validation code.",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "description": "Safe issue explanation.",
+          "title": "Message",
+          "type": "string"
+        },
+        "path": {
+          "description": "Safe logical path.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Path",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "path",
+        "message"
+      ],
+      "title": "ValidationIssue",
+      "type": "object"
+    }
+  },
+  "$id": "https://codefabric.dev/contracts/adapter/fastmcp-output.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/QueryToolOutput"
+    },
+    {
+      "$ref": "#/$defs/ValidateQueryOutput"
+    },
+    {
+      "$ref": "#/$defs/StatusToolOutput"
+    },
+    {
+      "$ref": "#/$defs/ReferenceToolOutput"
+    }
+  ],
+  "title": "FastMCP tool output contracts",
+  "x-codefabric-artifact": {
+    "artifact_id": "codefabric.adapter.fastmcp-output.schema",
+    "artifact_kind": "json-schema",
+    "canonical_digest": "b3:cf04918e334a5f75ca3962434d86b063322f6090492bd290711b39849fc420eb",
+    "compatible_suite_major": 1,
+    "generator_revision": "codefabric-adapter-model-compiler-v1",
+    "status": "released",
+    "version": "1.0"
+  },
+  "x-codefabric-generated": {
+    "generator_revision": "codefabric-adapter-model-compiler-v1",
+    "profile": "codefabric-jcs-v1",
+    "source_artifact_id": "codefabric.adapter.model-ir",
+    "source_canonical_digest": "b3:e9a5df2b3a872e47faa4bb539bf4eb845319a3479666b672c2de356e09f240c0",
+    "source_digest": "b3:434e2ab2d029722008c2a5743c6547bf2f4fa3658569891f896832d7c858c823"
+  }
+}

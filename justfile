@@ -540,12 +540,15 @@ proto-gen:
 [group('mutating')]
 contracts-gen:
     cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- generate
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py write
+    cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- generate
 
 [confirm("Regenerate committed Pydantic models and schema resources from Contract IR. Continue?")]
 [doc("MUTATES: regenerate adapter models, schemas, and fingerprints")]
 [group('mutating')]
 adapter-contracts-gen:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py write
+    cargo run --locked --no-default-features --features contracts-tooling --bin codefabric-contracts -- generate
 
 [doc("MUTATES: emit fixture candidates to an isolated review directory")]
 [group('mutating')]

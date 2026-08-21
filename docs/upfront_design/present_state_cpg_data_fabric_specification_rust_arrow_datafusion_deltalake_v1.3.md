@@ -731,7 +731,13 @@ Metadata is advisory unless consumed by explicit validation code. It SHALL NOT r
 
 ## 11. Schema registry
 
-All schemas SHALL be defined once in a Rust schema registry.
+All schemas SHALL be defined once in the closed schema Contract IR and compiled by the
+cataloged `SchemaContractCompilation` unit into a Rust schema registry, canonical review
+manifest, operational SQLite DDL, and public JSON Schemas. Generated Rust is the static
+execution view, not a sibling authority. The compiler rejects unknown fields, duplicate
+table identities, missing key/dependency columns, illegal policy cross-products,
+opaque JSON/EAV columns, `Utf8View`, and incomplete output censuses before it emits any
+surface.
 
 ```rust
 pub struct TableSpec {

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_committed_outputs_are_exact_and_all_schemas_pass_the_metaschema() -> None:
     outputs = render_outputs(ROOT)
-    assert len(outputs) == 3
+    assert len(outputs) == 6
     assert all(
         (ROOT / path).read_bytes() == expected for path, expected in outputs.items()
     )
@@ -33,6 +33,37 @@ def test_committed_outputs_are_exact_and_all_schemas_pass_the_metaschema() -> No
     for mode in ("validation", "serialization"):
         for schema in schemas[mode].values():
             Draft202012Validator.check_schema(schema)
+    for path in (
+        "contracts/adapter/fastmcp-input.schema.json",
+        "contracts/adapter/fastmcp-output.schema.json",
+        "contracts/adapter/fastmcp-public-meta.schema.json",
+    ):
+        schema = json.loads((ROOT / path).read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+        assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+        assert schema["$id"] == f"https://codefabric.dev/{path}"
+        assert schema["x-codefabric-artifact"]["status"] == "released"
+
+
+def test_wp09_behavioral_acceptance_public_views_are_model_derived() -> None:
+    input_schema = json.loads(
+        (ROOT / "contracts/adapter/fastmcp-input.schema.json").read_text()
+    )
+    output_schema = json.loads(
+        (ROOT / "contracts/adapter/fastmcp-output.schema.json").read_text()
+    )
+    metadata_schema = json.loads(
+        (ROOT / "contracts/adapter/fastmcp-public-meta.schema.json").read_text()
+    )
+    assert {branch["$ref"].split("/")[-1] for branch in input_schema["anyOf"]} == {
+        "QueryToolInput",
+        "ValidateToolInput",
+        "StatusToolInput",
+        "ReferenceToolInput",
+    }
+    assert "QueryToolOutput" in output_schema["$defs"]
+    assert metadata_schema["title"] == "FastMCP public metadata contract"
+    assert metadata_schema["additionalProperties"] is False
 
 
 def test_contract_ir_rejects_unknown_fields_and_references() -> None:

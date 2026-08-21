@@ -21,6 +21,7 @@ jq -e '
   and ([.derivations[] | select(.derivation_kind == "protobuf-descriptor-and-python")] | length == 1)
   and ([.derivations[] | select(.derivation_kind == "protobuf-rust-from-descriptor")] | length == 1)
   and ([.derivations[] | select(.derivation_kind == "adapter-model-compilation")] | length == 1)
+  and ([.derivations[] | select(.derivation_kind == "schema-contract-compilation")] | length == 1)
 ' "$catalog" >/dev/null || fail 'catalog v2 structural oracle failed'
 
 if rg -n 'generated_outputs|depends_on|output_of_kind|output_record_of_kind|GeneratedOutputKind|GeneratedOutputProducer|SOURCE_RELATIVE' \
@@ -37,6 +38,7 @@ for derivation_id in \
   codefabric.derivation.adapter-models \
   codefabric.derivation.artifact-index \
   codefabric.derivation.canonical-registries \
+  codefabric.derivation.schema-contracts \
   codefabric.derivation.wave0-proto-descriptor-python \
   codefabric.derivation.wave0-proto-rust; do
   cargo run --quiet --locked --manifest-path "$repository_root/Cargo.toml" \

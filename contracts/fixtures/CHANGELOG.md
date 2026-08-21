@@ -1,5 +1,10 @@
 # Fixture oracle change record
 
+## 2026-08-21 schema contract generation
+
+- Added a committed mutation oracle proving a schema fingerprint change without an
+  artifact-version advance is rejected as `SCHEMA_VERSION_NOT_ADVANCED`.
+
 ## 2026-08-21 controlled language and model packs
 
 - Added owner-reviewed positive and executable-field-negative cases for the closed,

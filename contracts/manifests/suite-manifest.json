@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "draft",
-  "canonical_digest": "b3:2e2b96ab8d351510b811c9e8e9302fa021c3959d568156cf9c1b353a89f58e4d",
+  "canonical_digest": "b3:b1b354a919a42166392ca8a5344b7b9cbbda1af9a04c16cac801e00af353fabc",
   "digest_projection": "json-jcs-v1",
   "catalog_schema_version": 2,
   "resource_budget_profiles": [
@@ -117,7 +117,7 @@
       "owner": "serving",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "adapter",
       "resource_budget_profile": "json-catalog",
@@ -136,6 +136,75 @@
       ],
       "semantic_projection_source": {
         "source_kind": "native"
+      }
+    },
+    {
+      "artifact_id": "codefabric.adapter.fastmcp-input.schema",
+      "authority_path": "contracts/adapter/fastmcp-input.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "serving",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "adapter",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "consumers": ["contract-tooling", "governance", "python-adapter"],
+      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "semantic_projection_source": {
+        "source_kind": "derivation-output",
+        "output": {
+          "derivation_id": "codefabric.derivation.adapter-models",
+          "path": "contracts/adapter/fastmcp-input.schema.json"
+        }
+      }
+    },
+    {
+      "artifact_id": "codefabric.adapter.fastmcp-output.schema",
+      "authority_path": "contracts/adapter/fastmcp-output.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "serving",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "adapter",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "consumers": ["contract-tooling", "governance", "python-adapter"],
+      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "semantic_projection_source": {
+        "source_kind": "derivation-output",
+        "output": {
+          "derivation_id": "codefabric.derivation.adapter-models",
+          "path": "contracts/adapter/fastmcp-output.schema.json"
+        }
+      }
+    },
+    {
+      "artifact_id": "codefabric.adapter.fastmcp-public-meta.schema",
+      "authority_path": "contracts/adapter/fastmcp-public-meta.schema.json",
+      "artifact_kind": "json-schema",
+      "native_format": "json",
+      "owner": "serving",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "adapter",
+      "resource_budget_profile": "json-schema",
+      "parser_schema_authority": "https://json-schema.org/draft/2020-12/schema",
+      "consumers": ["contract-tooling", "governance", "python-adapter"],
+      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "semantic_projection_source": {
+        "source_kind": "derivation-output",
+        "output": {
+          "derivation_id": "codefabric.derivation.adapter-models",
+          "path": "contracts/adapter/fastmcp-public-meta.schema.json"
+        }
       }
     },
     {
@@ -919,7 +988,7 @@
       "owner": "semantic-query",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "query",
       "resource_budget_profile": "json-schema",
@@ -935,7 +1004,11 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {
+          "derivation_id": "codefabric.derivation.schema-contracts",
+          "path": "contracts/query/planspec.schema.json"
+        }
       }
     },
     {
@@ -1566,6 +1639,23 @@
       }
     },
     {
+      "artifact_id": "codefabric.schema.contract-ir",
+      "authority_path": "contracts/schema/schema-contract-ir.json",
+      "artifact_kind": "manifest",
+      "native_format": "json",
+      "owner": "data-fabric",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "json-jcs-v1",
+      "compatibility_family": "schema",
+      "resource_budget_profile": "json-catalog",
+      "parser_schema_authority": "codefabric-schema-contract-ir-v1",
+      "consumers": ["contract-tooling", "governance", "python-adapter", "rust-core"],
+      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "semantic_projection_source": {"source_kind": "native"}
+    },
+    {
       "artifact_id": "codefabric.schema.analysis-context.schema",
       "authority_path": "contracts/schema/analysis-context.schema.json",
       "artifact_kind": "json-schema",
@@ -1573,7 +1663,7 @@
       "owner": "ontology",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "schema",
       "resource_budget_profile": "json-schema",
@@ -1591,7 +1681,8 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/analysis-context.schema.json"}
       }
     },
     {
@@ -1602,7 +1693,7 @@
       "owner": "semantic-query",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "schema",
       "resource_budget_profile": "json-schema",
@@ -1620,7 +1711,8 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/cpg-semantic-query-request.schema.json"}
       }
     },
     {
@@ -1631,7 +1723,7 @@
       "owner": "semantic-query",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "schema",
       "resource_budget_profile": "json-schema",
@@ -1649,7 +1741,8 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/cpg-semantic-query-response.schema.json"}
       }
     },
     {
@@ -1660,7 +1753,7 @@
       "owner": "lifecycle",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "schema",
       "resource_budget_profile": "json-schema",
@@ -1678,7 +1771,8 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/public-snapshot-metadata.schema.json"}
       }
     },
     {
@@ -1689,7 +1783,7 @@
       "owner": "serving",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "schema",
       "resource_budget_profile": "json-schema",
@@ -1707,7 +1801,8 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/public-status.schema.json"}
       }
     },
     {
@@ -1718,7 +1813,7 @@
       "owner": "lifecycle",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "schema",
       "resource_budget_profile": "json-schema",
@@ -1736,7 +1831,8 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/serving-snapshot.schema.json"}
       }
     },
     {
@@ -1747,7 +1843,7 @@
       "owner": "ontology",
       "version": "1.0",
       "compatible_suite_major": 1,
-      "status": "draft",
+      "status": "released",
       "digest_projection": "json-jcs-v1",
       "compatibility_family": "schema",
       "resource_budget_profile": "json-schema",
@@ -1765,7 +1861,8 @@
         "source-digest"
       ],
       "semantic_projection_source": {
-        "source_kind": "native"
+        "source_kind": "derivation-output",
+        "output": {"derivation_id":"codefabric.derivation.schema-contracts","path":"contracts/schema/source-context.schema.json"}
       }
     },
     {
@@ -1880,6 +1977,36 @@
           "primary_artifact_ids": [
             "codefabric.adapter.model-ir"
           ]
+        },
+        {
+          "path": "contracts/adapter/fastmcp-input.schema.json",
+          "output_kind": "adapter-public-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": ["contract-tooling", "governance", "python-adapter"],
+          "primary_artifact_ids": [
+            "codefabric.adapter.fastmcp-input.schema",
+            "codefabric.adapter.model-ir"
+          ]
+        },
+        {
+          "path": "contracts/adapter/fastmcp-output.schema.json",
+          "output_kind": "adapter-public-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": ["contract-tooling", "governance", "python-adapter"],
+          "primary_artifact_ids": [
+            "codefabric.adapter.fastmcp-output.schema",
+            "codefabric.adapter.model-ir"
+          ]
+        },
+        {
+          "path": "contracts/adapter/fastmcp-public-meta.schema.json",
+          "output_kind": "adapter-public-schema",
+          "resource_budget_profile": "json-schema",
+          "consumers": ["contract-tooling", "governance", "python-adapter"],
+          "primary_artifact_ids": [
+            "codefabric.adapter.fastmcp-public-meta.schema",
+            "codefabric.adapter.model-ir"
+          ]
         }
       ],
       "resource_budget_profile": "json-catalog"
@@ -1908,6 +2035,27 @@
             "codefabric.manifests.suite-manifest"
           ]
         }
+      ],
+      "resource_budget_profile": "json-catalog"
+    },
+    {
+      "derivation_id": "codefabric.derivation.schema-contracts",
+      "derivation_kind": "schema-contract-compilation",
+      "inputs": [
+        {"input_kind":"artifact","artifact_id":"codefabric.schema.contract-ir","view":"compiled-semantic"}
+      ],
+      "outputs": [
+        {"path":"contracts/query/planspec.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.query.planspec.schema","codefabric.schema.contract-ir"]},
+        {"path":"contracts/schema/analysis-context.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.analysis-context.schema","codefabric.schema.contract-ir"]},
+        {"path":"contracts/schema/arrow-delta/table-specs.json","output_kind":"table-spec-manifest","resource_budget_profile":"json-catalog","consumers":["contract-tooling","governance","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir"]},
+        {"path":"contracts/schema/cpg-semantic-query-request.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.cpg-semantic-query-request.schema"]},
+        {"path":"contracts/schema/cpg-semantic-query-response.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.cpg-semantic-query-response.schema"]},
+        {"path":"contracts/schema/operational-store.sql","output_kind":"operational-store-ddl","consumers":["governance","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir"]},
+        {"path":"contracts/schema/public-snapshot-metadata.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.public-snapshot-metadata.schema"]},
+        {"path":"contracts/schema/public-status.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.public-status.schema"]},
+        {"path":"contracts/schema/serving-snapshot.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.serving-snapshot.schema"]},
+        {"path":"contracts/schema/source-context.schema.json","output_kind":"public-json-schema","resource_budget_profile":"json-schema","consumers":["contract-tooling","governance","python-adapter","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir","codefabric.schema.source-context.schema"]},
+        {"path":"src/generated/table_specs.rs","output_kind":"rust-table-spec-bindings","consumers":["contract-tooling","rust-core"],"primary_artifact_ids":["codefabric.schema.contract-ir"]}
       ],
       "resource_budget_profile": "json-catalog"
     },

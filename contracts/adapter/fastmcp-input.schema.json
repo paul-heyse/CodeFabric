@@ -1,0 +1,120 @@
+{
+  "$defs": {
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {},
+    "QueryToolInput": {
+      "additionalProperties": false,
+      "description": "Generated QueryToolInput wire contract.",
+      "properties": {
+        "delivery": {
+          "default": "automatic",
+          "description": "MCP delivery preference only.",
+          "enum": [
+            "automatic",
+            "inline",
+            "resource"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Complete daemon-owned semantic request object."
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "QueryToolInput",
+      "type": "object"
+    },
+    "ReferenceToolInput": {
+      "additionalProperties": false,
+      "description": "Generated ReferenceToolInput wire contract.",
+      "properties": {
+        "reference": {
+          "description": "Constrained packaged reference identity.",
+          "enum": [
+            "agent_guide",
+            "query_specification",
+            "request_schema",
+            "response_schema",
+            "query_tool_output_schema",
+            "validate_tool_output_schema",
+            "status_tool_output_schema",
+            "reference_tool_output_schema",
+            "recipe_index",
+            "capabilities"
+          ],
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference"
+      ],
+      "title": "ReferenceToolInput",
+      "type": "object"
+    },
+    "StatusToolInput": {
+      "additionalProperties": false,
+      "description": "Generated StatusToolInput wire contract.",
+      "properties": {},
+      "title": "StatusToolInput",
+      "type": "object"
+    },
+    "ValidateToolInput": {
+      "additionalProperties": false,
+      "description": "Generated ValidateToolInput wire contract.",
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/JsonObject",
+          "description": "Complete daemon-owned semantic request object."
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "ValidateToolInput",
+      "type": "object"
+    }
+  },
+  "$id": "https://codefabric.dev/contracts/adapter/fastmcp-input.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/QueryToolInput"
+    },
+    {
+      "$ref": "#/$defs/ValidateToolInput"
+    },
+    {
+      "$ref": "#/$defs/StatusToolInput"
+    },
+    {
+      "$ref": "#/$defs/ReferenceToolInput"
+    }
+  ],
+  "title": "FastMCP tool input contracts",
+  "x-codefabric-artifact": {
+    "artifact_id": "codefabric.adapter.fastmcp-input.schema",
+    "artifact_kind": "json-schema",
+    "canonical_digest": "b3:f3ac8fbcd72225717fa0ffb376729182e65f6e88b466e960bf085bdc96c90ab7",
+    "compatible_suite_major": 1,
+    "generator_revision": "codefabric-adapter-model-compiler-v1",
+    "status": "released",
+    "version": "1.0"
+  },
+  "x-codefabric-generated": {
+    "generator_revision": "codefabric-adapter-model-compiler-v1",
+    "profile": "codefabric-jcs-v1",
+    "source_artifact_id": "codefabric.adapter.model-ir",
+    "source_canonical_digest": "b3:e9a5df2b3a872e47faa4bb539bf4eb845319a3479666b672c2de356e09f240c0",
+    "source_digest": "b3:434e2ab2d029722008c2a5743c6547bf2f4fa3658569891f896832d7c858c823"
+  }
+}

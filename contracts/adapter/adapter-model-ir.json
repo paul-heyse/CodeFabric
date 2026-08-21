@@ -3,8 +3,8 @@
   "artifact_kind": "manifest",
   "version": "1.0",
   "compatible_suite_major": 1,
-  "status": "draft",
-  "canonical_digest": "b3:9b10f70490161d9d306f0b521d768a90c97c20672759e78a7c810feb15b0fa46",
+  "status": "released",
+  "canonical_digest": "b3:e9a5df2b3a872e47faa4bb539bf4eb845319a3479666b672c2de356e09f240c0",
   "schema_version": 1,
   "models": [
     {

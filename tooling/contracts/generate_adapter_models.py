@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
+import json
+import operator
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from functools import reduce
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
@@ -17,7 +21,7 @@ from codefabric_cpg_mcp.contracts.json import (
     canonicalize_value,
     checksum,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from tooling.contracts.derivation import resolve_derivation
 
@@ -25,6 +29,36 @@ GENERATOR_REVISION = "codefabric-adapter-model-compiler-v1"
 DIALECT = "https://json-schema.org/draft/2020-12/schema"
 IR_ARTIFACT_ID = "codefabric.adapter.model-ir"
 DERIVATION_ID = "codefabric.derivation.adapter-models"
+PUBLIC_SCHEMA_ARTIFACTS = {
+    "contracts/adapter/fastmcp-input.schema.json": (
+        "codefabric.adapter.fastmcp-input.schema",
+        "FastMCP tool input contracts",
+        (
+            "QueryToolInput",
+            "ValidateToolInput",
+            "StatusToolInput",
+            "ReferenceToolInput",
+        ),
+        "validation",
+    ),
+    "contracts/adapter/fastmcp-output.schema.json": (
+        "codefabric.adapter.fastmcp-output.schema",
+        "FastMCP tool output contracts",
+        (
+            "QueryToolOutput",
+            "ValidateQueryOutput",
+            "StatusToolOutput",
+            "ReferenceToolOutput",
+        ),
+        "serialization",
+    ),
+    "contracts/adapter/fastmcp-public-meta.schema.json": (
+        "codefabric.adapter.fastmcp-public-meta.schema",
+        "FastMCP public metadata contract",
+        ("PublicToolMeta",),
+        "serialization",
+    ),
+}
 
 type TypeKind = Literal[
     "boolean",
@@ -357,6 +391,41 @@ def _schema_id(name: str, mode: str) -> str:
     return f"https://codefabric.dev/schema/adapter/1.0/{slug}.{mode}.schema.json"
 
 
+def _public_schema(
+    module: ModuleType,
+    path: str,
+    artifact_id: str,
+    title: str,
+    model_names: tuple[str, ...],
+    mode: Literal["validation", "serialization"],
+    generated: dict[str, object],
+) -> bytes:
+    model_types = tuple(getattr(module, name) for name in model_names)
+    contract_type = (
+        model_types[0] if len(model_types) == 1 else reduce(operator.or_, model_types)
+    )
+    schema = TypeAdapter(contract_type).json_schema(mode=mode, by_alias=True)
+    schema["$schema"] = DIALECT
+    schema["$id"] = f"https://codefabric.dev/{path}"
+    schema["title"] = title
+    schema["x-codefabric-generated"] = generated
+    schema["x-codefabric-artifact"] = {
+        "artifact_id": artifact_id,
+        "artifact_kind": "json-schema",
+        "version": "1.0",
+        "compatible_suite_major": 1,
+        "status": "released",
+        "canonical_digest": "b3:" + "0" * 64,
+        "generator_revision": GENERATOR_REVISION,
+    }
+    projection = copy.deepcopy(schema)
+    del projection["x-codefabric-artifact"]["canonical_digest"]
+    schema["x-codefabric-artifact"]["canonical_digest"] = checksum(
+        canonicalize_value(projection)
+    )
+    return (json.dumps(schema, indent=2, sort_keys=True) + "\n").encode()
+
+
 def render_outputs(root: Path) -> dict[Path, bytes]:
     identity, outputs = _resolved_input_and_outputs(root)
     authority = root / str(identity["authority_path"])
@@ -405,10 +474,46 @@ def render_outputs(root: Path) -> dict[Path, bytes]:
         "adapter-schema-manifest": canonicalize_value(schema_manifest),
         "adapter-fingerprint-manifest": canonicalize_value(fingerprint_manifest),
     }
-    return {
-        Path(str(output["path"])): output_by_kind[str(output["output_kind"])]
-        for output in outputs
+    public_schemas = {
+        path: _public_schema(
+            module,
+            path,
+            artifact_id,
+            title,
+            model_names,
+            mode,
+            generated,
+        )
+        for path, (
+            artifact_id,
+            title,
+            model_names,
+            mode,
+        ) in PUBLIC_SCHEMA_ARTIFACTS.items()
     }
+    rendered: dict[Path, bytes] = {}
+    for output in outputs:
+        path = str(output["path"])
+        kind = str(output["output_kind"])
+        if kind == "adapter-public-schema":
+            try:
+                rendered[Path(path)] = public_schemas[path]
+            except KeyError as error:
+                raise ValueError(
+                    f"unknown adapter public-schema output: {path}"
+                ) from error
+        else:
+            try:
+                rendered[Path(path)] = output_by_kind[kind]
+            except KeyError as error:
+                raise ValueError(f"unknown adapter output kind: {kind}") from error
+    if set(public_schemas) != {
+        path.as_posix()
+        for path in rendered
+        if path.as_posix().startswith("contracts/adapter/")
+    }:
+        raise ValueError("adapter public-schema output census is incomplete")
+    return rendered
 
 
 def _write_atomic(path: Path, data: bytes) -> None:

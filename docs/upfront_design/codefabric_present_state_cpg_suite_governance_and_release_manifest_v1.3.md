@@ -370,6 +370,7 @@ contracts/
     type-algebra-v1.yaml
     path-canonicalization-v1.yaml
   schema/
+    schema-contract-ir.json
     analysis-context.schema.json
     serving-snapshot.schema.json
     public-snapshot-metadata.schema.json
@@ -377,7 +378,8 @@ contracts/
     cpg-semantic-query-request.schema.json
     cpg-semantic-query-response.schema.json
     public-status.schema.json
-    arrow-delta/
+    arrow-delta/table-specs.json
+    operational-store.sql
   query/
     english-controlled-v1.ebnf
     planspec.schema.json
@@ -389,6 +391,9 @@ contracts/
     feature-registry.yaml
   adapter/
     adapter-model-ir.json
+    fastmcp-input.schema.json
+    fastmcp-output.schema.json
+    fastmcp-public-meta.schema.json
   bundles/
     ontology-bundle.json
     schema-bundle.json
@@ -420,6 +425,12 @@ projection profile, consumer domains, provenance obligations, resource budget pr
 and a typed `semantic_projection_source`. That source is either `Native` or one exact
 `DerivationOutput(OutputRef)`, where `OutputRef` contains a derivation ID and output path.
 Artifact descriptors SHALL NOT own generated outputs or build-order dependencies.
+When a generated public file is itself governed (for example a released JSON Schema),
+its descriptor catalogs that file's identity and selects the exact owning
+`DerivationOutput` as its semantic-projection source. The descriptor does not thereby
+become an independent source or output owner. The output path MAY equal that descriptor's
+authority path only for this self-owned generated-authority case; unrelated
+authority/output path collisions remain invalid.
 
 A closed `DerivationUnitDescriptor` owns each generation or compilation operation. It
 contains `derivation_id`, a closed `derivation_kind`, typed sorted inputs, typed sorted
@@ -432,6 +443,7 @@ CanonicalRegistrySet
 ProtobufDescriptorAndPython
 ProtobufRustFromDescriptor
 AdapterModelCompilation
+SchemaContractCompilation
 ```
 
 A derivation input is exactly one of:
@@ -463,6 +475,14 @@ surface SHALL be reachable from exactly one unit. Catalog record order has no se
 effect: derivations sort by ID, inputs by typed stable reference, outputs by path, primary
 artifact IDs by ID, and consumer/provenance sets by stable code before RFC 8785 object
 canonicalization. Duplicate sort keys fail before projection.
+
+`SchemaContractCompilation` consumes the closed schema Contract IR and owns the complete
+Arrow/Delta `TableSpec` manifest, generated Rust registry, operational SQLite DDL, and
+the eight public schema artifacts. It rejects duplicate table codes/names, unknown key or
+dependency columns, illegal mutation/materialization combinations, opaque JSON/EAV table
+columns, `Utf8View`, incomplete public-schema censuses, and any generated public schema
+whose descriptor does not point back to that exact output. Adapter public schemas remain
+owned by `AdapterModelCompilation` and are generated from its strict Pydantic models.
 
 The suite manifest's first logical artifact descriptor SHALL describe the manifest
 itself, including authority path, projection, owner, compatibility family, and budget.

@@ -1,16 +1,183 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://codefabric.dev/contracts/schema/source-context.schema.json",
-  "title": "Draft source-context contract",
-  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "properties": {
+    "associated_entity_ids": {
+      "items": {
+        "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "associated_fact_ids": {
+      "items": {
+        "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "content": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "const": "UTF-8"
+            },
+            "kind": {
+              "const": "text"
+            },
+            "lossless": {
+              "const": true
+            },
+            "newline_kind": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text",
+            "encoding",
+            "newline_kind",
+            "lossless"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "base64": {
+              "contentEncoding": "base64",
+              "type": "string"
+            },
+            "encoding": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "bytes"
+            },
+            "newline_kind": {
+              "type": "string"
+            },
+            "text_unavailable_reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "base64",
+            "encoding",
+            "newline_kind",
+            "text_unavailable_reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "context_id": {
+      "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "context_kind": {
+      "type": "string"
+    },
+    "source_reference": {
+      "additionalProperties": false,
+      "properties": {
+        "end_byte": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "additionalProperties": false,
+          "properties": {
+            "bytes_base64": {
+              "contentEncoding": "base64",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "display": {
+              "type": "string"
+            },
+            "display_is_lossy": {
+              "type": "boolean"
+            },
+            "encoding_code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "display",
+            "bytes_base64",
+            "encoding_code",
+            "display_is_lossy"
+          ],
+          "type": "object"
+        },
+        "source_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "source_file_id": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "start_byte": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workspace_id": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "source_file_id",
+        "path",
+        "source_digest",
+        "start_byte",
+        "end_byte"
+      ],
+      "type": "object"
+    },
+    "syntax_outline": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "context_id",
+    "source_reference",
+    "context_kind",
+    "content",
+    "associated_entity_ids",
+    "associated_fact_ids",
+    "syntax_outline"
+  ],
+  "title": "Source context",
+  "type": "object",
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.schema.source-context.schema",
     "artifact_kind": "json-schema",
-    "version": "1.0",
+    "canonical_digest": "b3:33c893be140c56654e92c7ac1cce3b46d2122befef4ba5936f079449050dbc1a",
     "compatible_suite_major": 1,
-    "status": "draft",
-    "canonical_digest": "b3:6af4e946880ef8fb95d6e3e16f4693386e2a124dea6aff5a6b3f90441df785bd"
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "status": "released",
+    "version": "1.0"
+  },
+  "x-codefabric-generated": {
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "source_artifact_id": "codefabric.schema.contract-ir",
+    "source_canonical_digest": "b3:d089e858c0c887fb99ea2d1c1c583913e3ec25ea82df4a531a3946f0b68df240",
+    "source_digest": "b3:6cc839b2d8683df70adc161a6356a051b6d76520fa738c4828d32b34613a774c"
   }
 }
-

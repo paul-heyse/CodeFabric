@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "draft",
-  "canonical_digest": "b3:18629123f9c877553e9bd5d1125786181341cfc89d4647f68928dc41efdf0b2a",
+  "canonical_digest": "b3:5240c9f3bf80829d2e34b445cb19fd99b3e1abd7fcdce575855f7e438c6113f6",
   "records": [
     {"path":"contracts/fixtures/identity/cbef-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed CBEF framing and BLAKE3 known answers for all domains and core type codes","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
     {"path":"contracts/fixtures/identity/path-canonicalization-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed percent, base64url, NFD, and full-casefold known answers","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
@@ -13,6 +13,7 @@
     {"path":"contracts/fixtures/jcs/vectors.json","oracle_class":"normative-kat","origin":"RFC 8785 edge cases plus owner-reviewed Query AC-G-53 profile answers","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
     {"path":"contracts/fixtures/negative/drifted-digest.json","oracle_class":"negative-class","origin":"Owner-reviewed digest-mismatch failure class","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
     {"path":"contracts/fixtures/negative/perturbed-artifact.json","oracle_class":"negative-class","origin":"Owner-reviewed perturbed-source failure class","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
+    {"path":"contracts/fixtures/negative/schema-version-drift.json","oracle_class":"negative-class","origin":"Owner-reviewed proof that semantic schema drift without a version advance fails fingerprint governance","owner":"data-fabric","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-schema-contract-generation"},
     {"path":"contracts/fixtures/model-packs/invalid-executable-field.json","oracle_class":"negative-class","origin":"Owner-reviewed proof that executable fields are rejected by the closed AC-G-38 model-pack schema","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-controlled-language-and-model-packs"},
     {"path":"contracts/fixtures/model-packs/valid-minimal.json","oracle_class":"normative-kat","origin":"Owner-reviewed minimal declarative AC-G-38 model-pack schema acceptance case","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-controlled-language-and-model-packs"},
     {"path":"contracts/fixtures/projections/vectors.json","oracle_class":"normative-kat","origin":"Exact SUITE AC-G-02 worked vectors independently recomputed during M01 review","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},

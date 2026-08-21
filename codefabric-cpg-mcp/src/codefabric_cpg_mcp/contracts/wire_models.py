@@ -1,4 +1,4 @@
-# @generated from codefabric.adapter.model-ir b3:9b10f70490161d9d306f0b521d768a90c97c20672759e78a7c810feb15b0fa46; codefabric-adapter-model-compiler-v1; do not edit.
+# @generated from codefabric.adapter.model-ir b3:e9a5df2b3a872e47faa4bb539bf4eb845319a3479666b672c2de356e09f240c0; codefabric-adapter-model-compiler-v1; do not edit.
 """Statically typed public adapter contracts compiled from Contract IR."""
 
 from typing import Annotated, Literal

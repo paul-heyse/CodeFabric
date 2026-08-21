@@ -248,7 +248,8 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
    - load only the closed typed catalog in `contracts/manifests/suite-manifest.json`,
      compile native sources through staged typed ingress and cross-record validation,
      and derive every source/output census, consumer edge, and provenance obligation;
-   - use catalog schema v2: artifact descriptors own native source authority while
+   - use catalog schema v2: artifact descriptors catalog governed native or generated
+     authority identity while
      closed typed derivation units own outputs, complete source sets, producer/tool
      dispatch, resource budgets, consumers, and transitive lineage;
    - permit only typed artifact source/semantic views, exact output references, and the
@@ -273,9 +274,14 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
    - canonical JSON and checksum vectors.
 
 5. **Schema generation**
-   - Arrow/Delta schemas and table metadata;
+   - one closed schema Contract IR compiled by a typed derivation unit into Arrow/Delta
+     schemas and table metadata, a generated Rust `TableSpec` registry, and operational
+     SQLite DDL;
    - analysis context, `ServingSnapshot`, public snapshot metadata, source context, public status, semantic request/response, and `PlanSpec` schemas;
-   - FastMCP public input/output schemas.
+   - generated public schemas are cataloged authorities whose semantic source is their
+     exact sole derivation output, never hand-maintained sibling definitions;
+   - FastMCP public input/output schemas generated from the adapter Contract IR through
+     Pydantic validation/serialization views.
 
 6. **Protocol generation**
    - daemon query service, provider control, Pyrefly sidecar, and rustc extractor Protobuf packages;

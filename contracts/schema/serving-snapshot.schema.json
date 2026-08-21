@@ -1,16 +1,437 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://codefabric.dev/contracts/schema/serving-snapshot.schema.json",
-  "title": "Draft serving-snapshot contract",
-  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "properties": {
+    "base_publication": {
+      "additionalProperties": false,
+      "properties": {
+        "publication_id": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "delta_version": {
+                "type": "integer"
+              },
+              "effective_content_digest": {
+                "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "primary_key_digest": {
+                "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "row_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "schema_digest": {
+                "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "table_code": {
+                "type": "integer"
+              },
+              "table_uri": {
+                "format": "uri-reference",
+                "type": "string"
+              }
+            },
+            "required": [
+              "table_code",
+              "table_uri",
+              "delta_version",
+              "schema_digest",
+              "row_count",
+              "primary_key_digest",
+              "effective_content_digest"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "publication_id",
+        "tables"
+      ],
+      "type": "object"
+    },
+    "bundles": {
+      "additionalProperties": false,
+      "properties": {
+        "derivation_bundle_id": {
+          "type": "string"
+        },
+        "model_pack_bundle_id": {
+          "type": "string"
+        },
+        "ontology_bundle_id": {
+          "type": "string"
+        },
+        "provider_bundle_id": {
+          "type": "string"
+        },
+        "query_language_bundle_id": {
+          "type": "string"
+        },
+        "schema_bundle_id": {
+          "type": "string"
+        },
+        "toolchain_bundle_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ontology_bundle_id",
+        "schema_bundle_id",
+        "provider_bundle_id",
+        "derivation_bundle_id",
+        "query_language_bundle_id",
+        "model_pack_bundle_id",
+        "toolchain_bundle_id"
+      ],
+      "type": "object"
+    },
+    "contexts": {
+      "additionalProperties": false,
+      "properties": {
+        "context_set_id": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "default_python_context_id": {
+          "anyOf": [
+            {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "default_rust_context_id": {
+          "anyOf": [
+            {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "records": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "analysis_context_id": {
+                "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "capability_partition_digest": {
+                "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "context_manifest_digest": {
+                "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "analysis_context_id",
+              "context_manifest_digest",
+              "capability_partition_digest"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "context_set_id",
+        "default_python_context_id",
+        "default_rust_context_id",
+        "records"
+      ],
+      "type": "object"
+    },
+    "indexes": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_index_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "dependency_graph_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "diagnostic_index_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability_index_digest",
+        "diagnostic_index_digest",
+        "dependency_graph_digest"
+      ],
+      "type": "object"
+    },
+    "limits_profile_digest": {
+      "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "manifest_digest": {
+      "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "manifest_version": {
+      "const": "1.0"
+    },
+    "overlay": {
+      "additionalProperties": false,
+      "properties": {
+        "overlay_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "overlay_generation": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tables": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "key_tombstone_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mutation_policy": {
+                "type": "string"
+              },
+              "owner_tombstone_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "replacement_row_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "row_digest": {
+                "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "table_code": {
+                "type": "integer"
+              },
+              "table_replacement": {
+                "type": "boolean"
+              },
+              "tombstone_digest": {
+                "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "table_code",
+              "mutation_policy",
+              "replacement_row_count",
+              "owner_tombstone_count",
+              "key_tombstone_count",
+              "table_replacement",
+              "row_digest",
+              "tombstone_digest"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "total_memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "overlay_generation",
+        "overlay_digest",
+        "total_memory_bytes",
+        "tables"
+      ],
+      "type": "object"
+    },
+    "registration_revision": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "repository_id": {
+      "anyOf": [
+        {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "snapshot_id": {
+      "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "admitted_event_sequence": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "authorization_fingerprint": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "event_stream_health": {
+          "enum": [
+            "HEALTHY",
+            "RESCAN_REQUIRED",
+            "DEGRADED",
+            "UNAVAILABLE"
+          ],
+          "type": "string"
+        },
+        "git_acceleration_status": {
+          "type": "string"
+        },
+        "git_state_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inclusion_policy_fingerprint": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "inventory_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "path_profile_version": {
+          "type": "string"
+        },
+        "reconciled_event_sequence": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_generation": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_trust_state": {
+          "enum": [
+            "CURRENT",
+            "POTENTIALLY_STALE",
+            "UNAVAILABLE"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_generation",
+        "admitted_event_sequence",
+        "reconciled_event_sequence",
+        "inventory_digest",
+        "authorization_fingerprint",
+        "inclusion_policy_fingerprint",
+        "path_profile_version",
+        "source_trust_state",
+        "event_stream_health",
+        "git_acceleration_status",
+        "git_state_fingerprint"
+      ],
+      "type": "object"
+    },
+    "workspace_id": {
+      "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "worktree_id": {
+      "anyOf": [
+        {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "manifest_version",
+    "snapshot_id",
+    "workspace_id",
+    "repository_id",
+    "worktree_id",
+    "registration_revision",
+    "source",
+    "contexts",
+    "base_publication",
+    "overlay",
+    "indexes",
+    "bundles",
+    "limits_profile_digest",
+    "manifest_digest"
+  ],
+  "title": "Serving snapshot manifest",
+  "type": "object",
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.schema.serving-snapshot.schema",
     "artifact_kind": "json-schema",
-    "version": "1.0",
+    "canonical_digest": "b3:ddcaaab79e950f069641047bb2b36cd8c1188ce9b37f556adc8cb313439a80d6",
     "compatible_suite_major": 1,
-    "status": "draft",
-    "canonical_digest": "b3:13e9946cde8cd44c238896c85f8448a12f2d28f845f1ea038ddd23ffe62ff1fc"
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "status": "released",
+    "version": "1.0"
+  },
+  "x-codefabric-cbef-field-order": [
+    "manifest_version",
+    "workspace_id",
+    "repository_id",
+    "worktree_id",
+    "registration_revision",
+    "source",
+    "contexts",
+    "base_publication",
+    "overlay",
+    "indexes",
+    "bundles",
+    "limits_profile_digest"
+  ],
+  "x-codefabric-generated": {
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "source_artifact_id": "codefabric.schema.contract-ir",
+    "source_canonical_digest": "b3:d089e858c0c887fb99ea2d1c1c583913e3ec25ea82df4a531a3946f0b68df240",
+    "source_digest": "b3:6cc839b2d8683df70adc161a6356a051b6d76520fa738c4828d32b34613a774c"
+  },
+  "x-codefabric-identity": {
+    "excluded_from_body": [
+      "snapshot_id",
+      "manifest_digest"
+    ],
+    "manifest_digest": "BLAKE3-256(codefabric-serving-snapshot-manifest-v1 || CBEF-v1(body))",
+    "snapshot_id": "BLAKE3-128(CBEF-v1(SERVING_SNAPSHOT, manifest_digest))"
   }
 }
-

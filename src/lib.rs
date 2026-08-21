@@ -14,6 +14,10 @@ pub mod identity;
 pub mod registries;
 #[cfg(feature = "rpc")]
 pub mod rpc;
+#[cfg(feature = "data-fabric")]
+pub mod schema_registry;
+#[cfg(feature = "canonical-json")]
+pub mod snapshot;
 
 #[cfg(feature = "data-fabric")]
 mod fabric;

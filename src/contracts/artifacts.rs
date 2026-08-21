@@ -32,6 +32,7 @@ use super::models::{RequirementRecord, TraceabilityRecord};
 use super::registry_models::{
     EnumDomain, FlagDomain, PhraseRecord, StateMachine, validate_duplicate_authorities,
 };
+use super::schema_artifacts::render_schema_outputs;
 
 /// Verifier strictness profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -947,6 +948,7 @@ fn render_outputs(
 ) -> Result<BTreeMap<PathBuf, Vec<u8>>, ContractArtifactError> {
     let catalog = ContractCatalog::load(repository_root)?;
     let mut outputs = BTreeMap::new();
+    outputs.extend(render_schema_outputs(repository_root, &catalog)?);
     let artifact_records = collect_artifact_records(repository_root, &catalog)?;
     let derivation_records = collect_derivation_records(&catalog);
     render_registry_outputs(repository_root, &catalog, &mut outputs)?;
@@ -1125,6 +1127,10 @@ fn embed_semantic_digests(repository_root: &Path) -> Result<(), ContractArtifact
 ///
 /// Returns an error for missing/invalid sources, canonicalization, or filesystem failure.
 pub fn generate(repository_root: &Path) -> Result<usize, ContractArtifactError> {
+    let catalog = ContractCatalog::load(repository_root)?;
+    for (relative, bytes) in render_schema_outputs(repository_root, &catalog)? {
+        write_atomic(&repository_root.join(relative), &bytes)?;
+    }
     embed_semantic_digests(repository_root)?;
     let outputs = render_outputs(repository_root)?;
     for (relative, bytes) in &outputs {

@@ -1,16 +1,516 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://codefabric.dev/contracts/schema/cpg-semantic-query-response.schema.json",
-  "title": "Draft cpg-semantic-query-response contract",
-  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "properties": {
+    "availability_state": {
+      "type": "string"
+    },
+    "completeness_state": {
+      "type": "string"
+    },
+    "entities": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "pattern": "^(entity|fact|path|group|context):"
+      },
+      "type": "object"
+    },
+    "errors": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_interpretations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "code": {
+            "type": "string"
+          },
+          "diagnostic_id": {
+            "anyOf": [
+              {
+                "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failed_dependency_query_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "layer": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "safe_message": {
+            "type": "string"
+          },
+          "semantic_phrase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "layer",
+          "retryable",
+          "safe_message",
+          "field",
+          "semantic_phrase",
+          "candidate_interpretations",
+          "failed_dependency_query_id",
+          "diagnostic_id"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "execution_state": {
+      "type": "string"
+    },
+    "facts": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "pattern": "^(entity|fact|path|group|context):"
+      },
+      "type": "object"
+    },
+    "failed_query_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "freshness_state": {
+      "type": "string"
+    },
+    "groups": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "pattern": "^(entity|fact|path|group|context):"
+      },
+      "type": "object"
+    },
+    "limit_state": {
+      "type": "string"
+    },
+    "not_executed_dependency_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "paths": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "pattern": "^(entity|fact|path|group|context):"
+      },
+      "type": "object"
+    },
+    "query_results": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "availability_state": {
+            "type": "string"
+          },
+          "completeness_state": {
+            "type": "string"
+          },
+          "coverage": {
+            "type": "object"
+          },
+          "dependency_state": {
+            "type": "string"
+          },
+          "entity_ids": {
+            "items": {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "candidate_interpretations": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "uniqueItems": true
+                },
+                "code": {
+                  "type": "string"
+                },
+                "diagnostic_id": {
+                  "anyOf": [
+                    {
+                      "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failed_dependency_query_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "field": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "layer": {
+                  "type": "string"
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "safe_message": {
+                  "type": "string"
+                },
+                "semantic_phrase": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "code",
+                "layer",
+                "retryable",
+                "safe_message",
+                "field",
+                "semantic_phrase",
+                "candidate_interpretations",
+                "failed_dependency_query_id",
+                "diagnostic_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "execution_state": {
+            "type": "string"
+          },
+          "fact_ids": {
+            "items": {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "freshness_state": {
+            "type": "string"
+          },
+          "group_ids": {
+            "items": {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit_state": {
+            "type": "string"
+          },
+          "notices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "path_ids": {
+            "items": {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query_id": {
+            "type": "string"
+          },
+          "request": {
+            "type": "string"
+          },
+          "resolved_semantics": {
+            "type": "object"
+          },
+          "source_context_ids": {
+            "items": {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "query_id",
+          "request",
+          "execution_state",
+          "availability_state",
+          "completeness_state",
+          "freshness_state",
+          "limit_state",
+          "dependency_state",
+          "resolved_semantics",
+          "entity_ids",
+          "fact_ids",
+          "path_ids",
+          "group_ids",
+          "source_context_ids",
+          "coverage",
+          "errors",
+          "notices"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "semantic_request_id": {
+      "type": "string"
+    },
+    "snapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "analysis_context_ids": {
+          "items": {
+            "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "analysis_context_set_id": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "base_table_version_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "capability_summaries": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "derivation_bundle_version": {
+          "type": "string"
+        },
+        "diagnostic_references": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "durable_base_publication": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "event_stream_health": {
+          "type": "string"
+        },
+        "freshness_state": {
+          "enum": [
+            "CURRENT",
+            "POTENTIALLY_STALE",
+            "UNAVAILABLE"
+          ],
+          "type": "string"
+        },
+        "git_acceleration_status": {
+          "type": "string"
+        },
+        "git_operation_summary": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "ontology_version": {
+          "type": "string"
+        },
+        "overlay_checksum": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "overlay_generation": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pending_update_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider_bundle_version": {
+          "type": "string"
+        },
+        "query_language_version": {
+          "type": "string"
+        },
+        "repository_id": {
+          "anyOf": [
+            {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_bundle_version": {
+          "type": "string"
+        },
+        "snapshot_id": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "source_generation": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_inventory_digest": {
+          "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "source_trust_state": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "worktree_id": {
+          "anyOf": [
+            {
+              "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "snapshot_id",
+        "workspace_id",
+        "repository_id",
+        "worktree_id",
+        "source_generation",
+        "source_inventory_digest",
+        "durable_base_publication",
+        "base_table_version_digest",
+        "overlay_generation",
+        "overlay_checksum",
+        "analysis_context_set_id",
+        "analysis_context_ids",
+        "freshness_state",
+        "source_trust_state",
+        "event_stream_health",
+        "git_acceleration_status",
+        "git_operation_summary",
+        "pending_update_count",
+        "ontology_version",
+        "schema_bundle_version",
+        "provider_bundle_version",
+        "derivation_bundle_version",
+        "query_language_version",
+        "capability_summaries",
+        "diagnostic_references"
+      ],
+      "type": "object"
+    },
+    "source_contexts": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "pattern": "^(entity|fact|path|group|context):"
+      },
+      "type": "object"
+    },
+    "specification": {
+      "const": "composable semantic CPG fact query response"
+    },
+    "successful_query_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "const": "1.3"
+    }
+  },
+  "required": [
+    "specification",
+    "version",
+    "semantic_request_id",
+    "execution_state",
+    "availability_state",
+    "completeness_state",
+    "freshness_state",
+    "limit_state",
+    "successful_query_count",
+    "failed_query_count",
+    "not_executed_dependency_count",
+    "snapshot",
+    "entities",
+    "facts",
+    "paths",
+    "groups",
+    "source_contexts",
+    "query_results",
+    "errors"
+  ],
+  "title": "CPG semantic query response",
+  "type": "object",
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
     "artifact_kind": "json-schema",
-    "version": "1.0",
+    "canonical_digest": "b3:df5ba2d47a01ffa770c4b2902ca4e4fd20a0d5ccf1dafe85318fddde6c8af039",
     "compatible_suite_major": 1,
-    "status": "draft",
-    "canonical_digest": "b3:ed68f1fc7058a3e8508ada51ef5a66ebd41fcbcdcc8146ee28af5bf5b19c22f5"
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "status": "released",
+    "version": "1.0"
+  },
+  "x-codefabric-generated": {
+    "generator_revision": "codefabric-schema-contracts-v1",
+    "source_artifact_id": "codefabric.schema.contract-ir",
+    "source_canonical_digest": "b3:d089e858c0c887fb99ea2d1c1c583913e3ec25ea82df4a531a3946f0b68df240",
+    "source_digest": "b3:6cc839b2d8683df70adc161a6356a051b6d76520fa738c4828d32b34613a774c"
   }
 }
-
