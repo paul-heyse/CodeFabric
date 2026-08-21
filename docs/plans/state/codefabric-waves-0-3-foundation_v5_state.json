@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": "WP24",
+  "current_packet": "WP23",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -622,10 +622,22 @@
       "blockers": []
     },
     "WP24": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "1b30273736161547e340629b81d58352acedb2f4",
+      "deviations": [
+        {
+          "kind": "accepted_design_correction",
+          "summary": "FAB AC-G-23 and LIFE 130.8 now use the generated normalized snapshot_lease and result_artifact_lease model, while serving-snapshot leases remain explicitly coupled to WP16 source-blob holder records. The pre-production schema-v5 scaffolds migrate atomically to the generated schema-v6 model."
+        },
+        {
+          "kind": "user_directed_non_timing_evidence",
+          "summary": "Snapshot construction timing was intentionally omitted under the accepted non-timing evidence policy. Functional evidence instead proves exact catalog-derived table identities, deterministic construction stages, durable commit-before-swap ordering, restart recovery, and retention-set enforcement."
+        }
+      ],
+      "failed_approaches": [
+        "The initial activation/recovery mutation run exposed five missing independent assertions around zero-generation predecessor matching and durable manifest byte verification. Direct negative cases now catch all five; the bounded critical census finishes with 43 caught, 3 compile-unviable, and no surviving mutant.",
+        "The expanded negative test exceeded the repository's strict function-size lint. Its recovery-corruption, candidate-mismatch, and vacuum-retention cases were factored into named helpers without lint suppression or reduced assertions."
+      ],
       "blockers": []
     },
     "WP25": {
@@ -1058,6 +1070,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP22: implement durable publication, immutable publication rows, complete publication-table version maps, and compare-and-swap activation of the current pointer.",
-  "updated_at": "2026-08-21T14:24:50Z"
+  "next_action": "Execute WP23: implement generated-policy overlay mutation, deterministic consolidation, tombstones, immutable overlay tables, and the durable three-snapshot rebase protocol over WP22 publication and WP24 activation.",
+  "updated_at": "2026-08-21T17:02:04Z"
 }
