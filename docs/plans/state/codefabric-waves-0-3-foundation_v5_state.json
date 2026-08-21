@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e",
   "status": "executing",
-  "current_packet": null,
+  "current_packet": "WP07",
   "packets": {
     "WP00": {
       "status": "complete",
@@ -14,8 +14,8 @@
       "blockers": []
     },
     "WP01": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dfaf6d17ca829b2f7145334e17e9fdde91a91e75",
       "deviations": [
         {
           "kind": "historical_judgment_migration",
@@ -60,8 +60,8 @@
       "blockers": []
     },
     "WP02": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dfaf6d17ca829b2f7145334e17e9fdde91a91e75",
       "deviations": [
         {
           "kind": "historical_judgment_migration",
@@ -99,8 +99,8 @@
       "blockers": []
     },
     "WP03": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dfaf6d17ca829b2f7145334e17e9fdde91a91e75",
       "deviations": [
         {
           "kind": "historical_judgment_migration",
@@ -139,8 +139,8 @@
       "blockers": []
     },
     "WP04": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dfaf6d17ca829b2f7145334e17e9fdde91a91e75",
       "deviations": [
         {
           "kind": "historical_judgment_migration",
@@ -166,8 +166,8 @@
       "blockers": []
     },
     "WP05": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dfaf6d17ca829b2f7145334e17e9fdde91a91e75",
       "deviations": [
         {
           "kind": "accepted_design_correction",
@@ -227,8 +227,8 @@
       "blockers": []
     },
     "WP06": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dfaf6d17ca829b2f7145334e17e9fdde91a91e75",
       "deviations": [
         {
           "kind": "accepted_remediation_supersession",
@@ -299,7 +299,7 @@
       "blockers": []
     },
     "WP07": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [
         {
@@ -478,8 +478,8 @@
       "blockers": []
     },
     "M01": {
-      "status": "stale",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dfaf6d17ca829b2f7145334e17e9fdde91a91e75",
       "deviations": [
         {
           "kind": "assurance_scope",
