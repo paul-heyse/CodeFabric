@@ -116,6 +116,8 @@ printf '%s' "$root_shape" | jq -e '
       "dep:tempfile"
     ],
     "data-fabric": [
+      "canonical-json",
+      "dep:async-trait",
       "dep:arrow",
       "dep:arrow-array",
       "dep:arrow-buffer",
@@ -130,10 +132,12 @@ printf '%s' "$root_shape" | jq -e '
       "dep:futures",
       "dep:object_store",
       "dep:parquet",
-      "dep:tracing"
+      "dep:tracing",
+      "dep:url"
     ],
     "daemon": [
       "contracts-tooling",
+      "data-fabric",
       "repository-state",
       "rpc",
       "dep:toml",

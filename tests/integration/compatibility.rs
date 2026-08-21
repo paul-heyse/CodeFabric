@@ -22,5 +22,4 @@ async fn stable_dependency_contract_is_executable() {
     compatibility::arrow_family_probe().expect("Arrow family kernels");
     compatibility::utility_probe().expect("utilities");
     assert_eq!(compatibility::git_hash_algorithm_count(), 2);
-    assert_eq!(compatibility::delta_application_transaction_version(), 1);
 }

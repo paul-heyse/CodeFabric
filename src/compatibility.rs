@@ -93,9 +93,3 @@ pub fn utility_probe() -> Result<(), Box<dyn std::error::Error>> {
 pub const fn git_hash_algorithm_count() -> usize {
     crate::git_state::supported_hash_algorithms().len()
 }
-
-/// Returns a Delta application-transaction version without exposing Delta-owned types.
-#[must_use]
-pub fn delta_application_transaction_version() -> i64 {
-    crate::fabric::application_transaction().version
-}

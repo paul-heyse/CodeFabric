@@ -34,6 +34,6 @@ pub mod source_image;
 pub mod workspace_registry;
 
 #[cfg(feature = "data-fabric")]
-mod fabric;
+pub mod fabric;
 #[cfg(feature = "repository-state")]
 pub mod git_state;

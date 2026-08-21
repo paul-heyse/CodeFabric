@@ -284,6 +284,17 @@ fn registry_value(
     })
 }
 
+fn registry_digest(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+    artifact_id: &str,
+) -> Result<String, ContractArtifactError> {
+    let artifact = catalog
+        .artifact(artifact_id)
+        .ok_or_else(|| ContractArtifactError::Missing(PathBuf::from(artifact_id)))?;
+    Ok(compile_artifact(repository_root, catalog, artifact)?.canonical_digest)
+}
+
 fn pascal_case(value: &str) -> String {
     if !value.contains('_')
         && value.chars().any(char::is_lowercase)
@@ -405,15 +416,21 @@ fn render_rust_registry_bindings(
             .map(|(family, slug)| (family.as_str(), slug.as_str())),
     )
     .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("ontology duplicate authority")))?;
-    let enums: Vec<EnumDomain> = serde_json::from_value(
-        registry_value(
-            repository_root,
-            catalog,
-            "codefabric.registry.enum-registry",
-        )?["records"]
-            .clone(),
-    )
-    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("enum-registry")))?;
+    let enum_registry = registry_value(
+        repository_root,
+        catalog,
+        "codefabric.registry.enum-registry",
+    )?;
+    let enum_version = enum_registry["version"]
+        .as_str()
+        .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from("enum-registry version")))?;
+    let enum_digest = registry_digest(
+        repository_root,
+        catalog,
+        "codefabric.registry.enum-registry",
+    )?;
+    let enums: Vec<EnumDomain> = serde_json::from_value(enum_registry["records"].clone())
+        .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("enum-registry")))?;
     let flags: Vec<FlagDomain> = serde_json::from_value(
         registry_value(
             repository_root,
@@ -423,15 +440,23 @@ fn render_rust_registry_bindings(
             .clone(),
     )
     .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("flag-registry")))?;
-    let machines: Vec<StateMachine> = serde_json::from_value(
-        registry_value(
-            repository_root,
-            catalog,
-            "codefabric.registry.state-machine-registry",
-        )?["records"]
-            .clone(),
-    )
-    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("state-machine-registry")))?;
+    let state_machine_registry = registry_value(
+        repository_root,
+        catalog,
+        "codefabric.registry.state-machine-registry",
+    )?;
+    let state_machine_version = state_machine_registry["version"].as_str().ok_or_else(|| {
+        ContractArtifactError::Metadata(PathBuf::from("state-machine-registry version"))
+    })?;
+    let state_machine_digest = registry_digest(
+        repository_root,
+        catalog,
+        "codefabric.registry.state-machine-registry",
+    )?;
+    let machines: Vec<StateMachine> =
+        serde_json::from_value(state_machine_registry["records"].clone()).map_err(|_| {
+            ContractArtifactError::Metadata(PathBuf::from("state-machine-registry"))
+        })?;
     let phrases: Vec<PhraseRecord> = serde_json::from_value(
         registry_value(
             repository_root,
@@ -509,6 +534,35 @@ fn render_rust_registry_bindings(
         }
         writeln!(output, "];\n").unwrap();
     }
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RegistryDomainEntry {\n\
+             pub domain: &'static str, pub version: &'static str,\n\
+             pub canonical_digest: &'static str, pub values: &'static [RegistryEntry],\n\
+         }\n\n\
+         pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[\n",
+    );
+    let mut emitted_domains = BTreeSet::new();
+    for domain in &enums {
+        emitted_domains.insert(domain.domain.clone());
+        let domain_name = &domain.domain;
+        writeln!(
+            output,
+            "    RegistryDomainEntry {{ domain: {domain_name:?}, version: {enum_version:?}, canonical_digest: {enum_digest:?}, values: {domain_name}_VALUES }},"
+        )
+        .unwrap();
+    }
+    for machine in &machines {
+        let constant = screaming_snake_from_pascal(&machine.machine_id);
+        if emitted_domains.insert(constant.clone()) {
+            writeln!(
+                output,
+                "    RegistryDomainEntry {{ domain: {constant:?}, version: {state_machine_version:?}, canonical_digest: {state_machine_digest:?}, values: {constant}_VALUES }},"
+            )
+            .unwrap();
+        }
+    }
+    output.push_str("];\n\n");
     output.push_str(
         "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct StateTransitionEntry {\n\

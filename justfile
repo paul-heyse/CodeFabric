@@ -122,6 +122,12 @@ wave2-integration-check:
     cargo nextest run --locked -E 'test(/wp1[2-8]/)' --no-tests=fail
     cargo test --doc
 
+[doc("Run the current Wave-3 fabric/publication acceptance oracles")]
+[group('test')]
+wave3-integration-check:
+    cargo nextest run --locked -E 'test(/wp(19|2[0-6])/)' --no-tests=fail
+    cargo test --doc
+
 [doc("Run the seeded 10,000-attempt three-size source-capture race campaign")]
 [group('test')]
 source-capture-race-check:

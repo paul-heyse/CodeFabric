@@ -90,6 +90,10 @@ fn init_repository(root: &Path, object_format: Option<&str>) {
         root,
         &args(["config", "user.email", "codefabric@example.invalid"]),
     );
+    // Git may launch detached auto-maintenance after a fixture mutation. Disable it so
+    // the read-only gix oracle measures only the adapter under test.
+    git(root, &args(["config", "maintenance.auto", "false"]));
+    git(root, &args(["config", "gc.auto", "0"]));
 }
 
 fn commit_file(root: &Path, path: &str, bytes: &[u8]) {

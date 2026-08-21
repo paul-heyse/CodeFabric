@@ -347,19 +347,28 @@ credentials, endpoints, or storage-option maps:
 default = ["local-workstation"]
 canonical-json = [
   "dep:base64", "dep:blake3", "dep:serde", "dep:serde_json",
-  "dep:serde_json_canonicalizer", "dep:thiserror",
+  "dep:serde_json_canonicalizer", "dep:thiserror", "dep:unicode-casefold",
+  "dep:unicode-normalization",
 ]
-contracts-tooling = ["canonical-json", "dep:serde_yaml_ng", "dep:tempfile"]
+contracts-tooling = [
+  "canonical-json", "dep:prost", "dep:prost-types", "dep:serde_path_to_error",
+  "dep:serde_yaml_ng", "dep:tempfile",
+]
 data-fabric = [
+  "canonical-json", "dep:async-trait",
   "dep:arrow", "dep:arrow-array", "dep:arrow-buffer", "dep:arrow-cast",
   "dep:arrow-ord", "dep:arrow-row", "dep:arrow-schema", "dep:arrow-select",
   "dep:arrow-string", "dep:datafusion", "dep:deltalake", "dep:futures",
-  "dep:object_store", "dep:parquet", "dep:tracing",
+  "dep:object_store", "dep:parquet", "dep:tracing", "dep:url",
 ]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
-repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
+repository-state = [
+  "dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix", "dep:thiserror",
+  "dep:url",
+]
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
-local-workstation = ["contracts-tooling", "compatibility-probes"]
+daemon = ["contracts-tooling", "data-fabric", "repository-state", "rpc", "dep:toml", "dep:tracing"]
+local-workstation = ["daemon", "compatibility-probes"]
 proto-tooling = ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"]
 s3-storage = ["data-fabric", "deltalake/s3"]
 ```

@@ -1130,6 +1130,7 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "arrow-string",
+ "async-trait",
  "base64",
  "blake3",
  "datafusion",

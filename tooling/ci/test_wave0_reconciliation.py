@@ -20,7 +20,10 @@ def _json(relative: str) -> object:
 def test_wp01_behavioral_acceptance() -> None:
     source = _text("tests/integration/compatibility.rs")
     assert "stable_dependency_contract_is_executable" in source
-    assert "application_transaction" in source
+    assert "application_transaction" not in source
+    fabric = _text("src/fabric.rs")
+    assert "wp19_behavioral_acceptance" in fabric
+    assert "bootstrap_workspace_with_repository" in fabric
 
 
 def test_wp01_structural_acceptance() -> None:

@@ -19,9 +19,10 @@ fail() {
 }
 
 jq -e '
-  .schema_version == 1
-  and .review_owner_packet == "WP19"
-  and .review_trigger == "before_wp19_completion"
+  . as $registry
+  | .schema_version == 1
+  and (.review_owner_packet | length > 0)
+  and (.review_trigger | length > 0)
   and (.exceptions | length > 0)
   and ([.exceptions[].advisory_id] | length == (unique | length))
   and all(
@@ -32,8 +33,8 @@ jq -e '
     and (.classification == "vulnerability" or .classification == "unmaintained")
     and (.affected_surface | length > 0)
     and (.rationale | length > 0)
-    and .owner_packet == "WP19"
-    and .review_trigger == "before_wp19_completion"
+    and .owner_packet == $registry.review_owner_packet
+    and (.review_trigger | length > 0)
   )
 ' "$registry" >/dev/null || fail 'registry shape, uniqueness, owner, or review trigger is invalid'
 
@@ -78,5 +79,6 @@ if $run_audit; then
   cargo audit "${audit_args[@]}"
 fi
 
-printf 'advisory policy check passed (%s exact exceptions; WP19 review)\n' \
-  "$(jq '.exceptions | length' "$registry")"
+printf 'advisory policy check passed (%s exact exceptions; owner %s)\n' \
+  "$(jq '.exceptions | length' "$registry")" \
+  "$(jq -r '.review_owner_packet' "$registry")"

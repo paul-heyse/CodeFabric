@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rusqlite::OptionalExtension as _;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
@@ -21,7 +22,9 @@ use crate::coordinator::{
     CoordinatorError, WorkspaceCoordinatorManager, WorkspaceHealthStatus,
     persisted_workspace_health,
 };
-use crate::operational_store::{OperationalStore, OperationalStoreError};
+use crate::fabric::{CommonRepositoryRecord, FabricError, bootstrap_workspace_with_repository};
+use crate::operational_store::{OperationalReaderFactory, OperationalStore, OperationalStoreError};
+use crate::registries::WorkspaceRegistryLifecycle;
 use crate::workspace_registry::{
     RelinkProof, RemovalPolicy, WorkspaceRecord, WorkspaceRegistry, WorkspaceRegistryError,
     WorkspaceSourceRegistration,
@@ -289,6 +292,10 @@ pub enum DaemonError {
     OperationalStore(#[from] OperationalStoreError),
     #[error(transparent)]
     Coordinator(#[from] CoordinatorError),
+    #[error(transparent)]
+    WorkspaceRegistry(#[from] WorkspaceRegistryError),
+    #[error(transparent)]
+    Fabric(#[from] FabricError),
 }
 
 fn private_directory(path: &Path) -> Result<(), DaemonError> {
@@ -520,9 +527,10 @@ fn workspace_readiness(health: &[WorkspaceHealthStatus]) -> String {
 async fn execute_workspace_command(
     store: &Arc<Mutex<OperationalStore>>,
     coordinators: &mut WorkspaceCoordinatorManager,
+    state_root: &Path,
     command: WorkspaceAdminCommand,
 ) -> AdminResponse {
-    let bootstrap_workspace = match &command {
+    let coordinator_bootstrap = match &command {
         WorkspaceAdminCommand::Enable { workspace_id }
         | WorkspaceAdminCommand::Reconcile { workspace_id } => Some(*workspace_id),
         _ => None,
@@ -543,7 +551,7 @@ async fn execute_workspace_command(
             {
                 return internal_admin_response();
             }
-            if let Some(workspace_id) = bootstrap_workspace {
+            if let Some(workspace_id) = coordinator_bootstrap {
                 let handle = match coordinators.handle(workspace_id) {
                     Some(handle) => handle,
                     None => match coordinators.spawn(workspace_id).await {
@@ -554,6 +562,12 @@ async fn execute_workspace_command(
                 if let Err(error) = handle.bootstrap().await {
                     return coordinator_admin_response(&error);
                 }
+            }
+            if bootstrap_fabrics(state_root, store, &workspaces)
+                .await
+                .is_err()
+            {
+                return internal_admin_response();
             }
             match health_response(store).await {
                 Ok((workspace_readiness, workspace_health)) => AdminResponse {
@@ -578,6 +592,68 @@ async fn execute_workspace_command(
             error_code: Some(workspace_error_code(&error).to_owned()),
         },
     }
+}
+
+fn common_repository_record(
+    readers: &OperationalReaderFactory,
+    repository_id: Option<[u8; 16]>,
+) -> Result<Option<CommonRepositoryRecord>, DaemonError> {
+    let Some(repository_id) = repository_id else {
+        return Ok(None);
+    };
+    let reader = readers.open()?;
+    let row = reader
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT common_dir_path_bytes, common_dir_path_display, object_format_code, trust_policy_fingerprint, updated_at FROM common_repository_state WHERE repository_id=?1",
+                    [repository_id.as_slice()],
+                    |row| {
+                        Ok((
+                            row.get::<_, Vec<u8>>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Vec<u8>>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                )
+                .optional()
+        })
+        .map_err(OperationalStoreError::from)?;
+    let Some((path_bytes, path_display, object_format, fingerprint, updated_at)) = row else {
+        return Ok(None);
+    };
+    let trust_policy_fingerprint = fingerprint.try_into().map_err(|_| {
+        DaemonError::Admin("persisted repository trust fingerprint has invalid width".into())
+    })?;
+    let object_format_code = i16::try_from(object_format).map_err(|_| {
+        DaemonError::Admin("persisted repository object format is out of range".into())
+    })?;
+    Ok(Some(CommonRepositoryRecord {
+        repository_id,
+        common_dir_path_bytes: path_bytes,
+        common_dir_path_display: path_display,
+        object_format_code,
+        trust_policy_fingerprint,
+        updated_at,
+    }))
+}
+
+async fn bootstrap_fabrics(
+    state_root: &Path,
+    store: &Arc<Mutex<OperationalStore>>,
+    workspaces: &[WorkspaceRecord],
+) -> Result<(), DaemonError> {
+    let readers = store.lock().await.reader_factory();
+    for workspace in workspaces {
+        if workspace.status == WorkspaceRegistryLifecycle::Removed {
+            continue;
+        }
+        let repository = common_repository_record(&readers, workspace.repository_id)?;
+        bootstrap_workspace_with_repository(state_root, workspace, repository.as_ref()).await?;
+    }
+    Ok(())
 }
 
 async fn health_response(
@@ -709,6 +785,16 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
     let operational_store = Arc::new(Mutex::new(OperationalStore::open(&operational_database)?));
     let mut coordinators = WorkspaceCoordinatorManager::new(Arc::clone(&operational_store))?;
     coordinators.restore_and_bootstrap().await?;
+    let workspaces = {
+        let mut store = operational_store.lock().await;
+        WorkspaceRegistry::new(&mut store).list()?
+    };
+    bootstrap_fabrics(
+        &config.static_config.state_root,
+        &operational_store,
+        &workspaces,
+    )
+    .await?;
     if config.static_config.socket_endpoint.exists() {
         fs::remove_file(&config.static_config.socket_endpoint).map_err(|source| {
             DaemonError::Io {
@@ -775,7 +861,13 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
                 )
             }
             AdminEnvelope::Workspace(command) => (
-                execute_workspace_command(&operational_store, &mut coordinators, command).await,
+                execute_workspace_command(
+                    &operational_store,
+                    &mut coordinators,
+                    &config.static_config.state_root,
+                    command,
+                )
+                .await,
                 None,
             ),
         };

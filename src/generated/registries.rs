@@ -889,6 +889,38 @@ pub const WORKSPACE_REGISTRY_LIFECYCLE_VALUES: &[RegistryEntry] = &[
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RegistryDomainEntry {
+pub domain: &'static str, pub version: &'static str,
+pub canonical_digest: &'static str, pub values: &'static [RegistryEntry],
+}
+
+pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
+    RegistryDomainEntry { domain: "EVIDENCE_CERTAINTY", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: EVIDENCE_CERTAINTY_VALUES },
+    RegistryDomainEntry { domain: "RESOLUTION_CLASS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: RESOLUTION_CLASS_VALUES },
+    RegistryDomainEntry { domain: "DIRECTNESS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: DIRECTNESS_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: COMPLETENESS_VALUES },
+    RegistryDomainEntry { domain: "OWNER_CAPABILITY_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: OWNER_CAPABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "PROVIDER_RUN_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: PROVIDER_RUN_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_EXECUTION_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: QUERY_EXECUTION_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_AVAILABILITY_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: QUERY_AVAILABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: COMPLETENESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "FRESHNESS_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: FRESHNESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "LIMIT_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: LIMIT_STATE_VALUES },
+    RegistryDomainEntry { domain: "DEPENDENCY_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: DEPENDENCY_STATE_VALUES },
+    RegistryDomainEntry { domain: "DURABLE_PUBLICATION_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: DURABLE_PUBLICATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SERVING_ACTIVATION_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: SERVING_ACTIVATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SOURCE_TRUST_STATE", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: SOURCE_TRUST_STATE_VALUES },
+    RegistryDomainEntry { domain: "EVENT_STREAM_HEALTH", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: EVENT_STREAM_HEALTH_VALUES },
+    RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: GIT_ACCELERATION_STATUS_VALUES },
+    RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: EFFECT_KIND_VALUES },
+    RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:7717487c3f2ba8c7d043ecce01b9bd6e33cb0998b64bda788bcd41a690ca75c7", values: RESOURCE_KIND_VALUES },
+    RegistryDomainEntry { domain: "WORKSPACE_LIFECYCLE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: WORKSPACE_LIFECYCLE_VALUES },
+    RegistryDomainEntry { domain: "UPDATE_WAVE_STATE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: UPDATE_WAVE_STATE_VALUES },
+    RegistryDomainEntry { domain: "ARTIFACT_STATE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: ARTIFACT_STATE_VALUES },
+    RegistryDomainEntry { domain: "WORKSPACE_REGISTRY_LIFECYCLE", version: "1.0", canonical_digest: "b3:59edb083a83b4e438dc0433d553dc2650a2e855f289d535682ad0bfb44c68679", values: WORKSPACE_REGISTRY_LIFECYCLE_VALUES },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StateTransitionEntry {
 pub from: &'static str, pub event: &'static str, pub guard: &'static str,
 pub to: &'static str, pub actions: &'static [&'static str],

@@ -40,7 +40,10 @@ pub enum MaterializationRole {
 pub struct TableSpec {
     pub table_code: i16,
     pub name: &'static str,
+    pub family: &'static str,
+    pub grain: &'static str,
     pub schema_version: &'static str,
+    pub schema_digest: String,
     pub arrow_schema: SchemaRef,
     pub primary_key: &'static [&'static str],
     pub partition_columns: &'static [&'static str],
@@ -70,8 +73,13 @@ impl TableSpec {
     ///
     /// Returns Arrow's conversion error when a physical type is not Delta-compatible.
     pub fn validate_delta_compatibility(&self) -> Result<(), arrow_schema::ArrowError> {
-        crate::fabric::validate_delta_schema(self.arrow_schema.clone())
+        crate::fabric::validate_delta_schema(&self.arrow_schema)
     }
+}
+
+fn schema_digest(schema: &SchemaRef) -> String {
+    crate::fabric::delta_schema_digest(schema)
+        .expect("generated TableSpec must have a canonical Delta schema identity")
 }
 
 #[derive(Clone, Copy)]
@@ -137,7 +145,9 @@ fn physical_type(logical: LogicalType) -> DataType {
             DataType::Timestamp(TimeUnit::Microsecond, Some(Arc::from("UTC")))
         }
         LogicalType::IdList => {
-            DataType::List(Arc::new(Field::new("item", DataType::Binary, false)))
+            // Delta's Arrow conversion canonicalizes list children to `element`.
+            // Emit that library-native name so the generated schema round-trips exactly.
+            DataType::List(Arc::new(Field::new("element", DataType::Binary, false)))
         }
         LogicalType::StringMap => DataType::Map(
             Arc::new(Field::new(
@@ -273,11 +283,15 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         .copied()
         .map(|column| field(column, contract.primary_key))
         .collect::<Vec<_>>();
+    let arrow_schema = Arc::new(Schema::new_with_metadata(fields, metadata));
     TableSpec {
         table_code: contract.table_code,
         name: contract.name,
+        family: contract.family,
+        grain: contract.grain,
         schema_version: contract.schema_version,
-        arrow_schema: Arc::new(Schema::new_with_metadata(fields, metadata)),
+        schema_digest: schema_digest(&arrow_schema),
+        arrow_schema,
         primary_key: contract.primary_key,
         partition_columns: contract.partition_columns,
         zorder_columns: contract.zorder_columns,
