@@ -67,17 +67,17 @@
     },
     {
       "artifact_id": "codefabric.schema.public-status.schema",
-      "canonical_digest": "b3:44175592c9815510b852bb456ff4e67fee2656921ecf2046d15e261261231793",
+      "canonical_digest": "b3:89837ab672401115a134a4593fbd17963e044cd6bad1e01563331f06cd60cfaf",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:9f8e9b241e90ee2b9579b299adac5b58beed629b98260dfae18246ee60e0a444",
+  "bundle_digest": "b3:22e6676a028896e6d8d9c5a14795e184b7236843319b8b828126ef64f9391e7d",
   "bundle_kind": "tool-contract",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:ba55878f0f68f94bb119012277f7a57b347cbb7cd6bd62a533433273d37ac917",
+  "canonical_digest": "b3:26cd191e4fb81c90c45e27e936106ac42f3dc5f53cbc4922d9fe510445a3e361",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0

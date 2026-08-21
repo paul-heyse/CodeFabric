@@ -1,7 +1,6 @@
 //! Generated-schema Delta fabric for the local workstation deployment profile.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -11,11 +10,7 @@ use arrow_array::{
     RecordBatch, StringArray, TimestampMicrosecondArray,
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
-use datafusion::catalog::{Session, TableProvider};
-use datafusion::common::Statistics;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
-use datafusion::physical_plan::ExecutionPlan;
+use datafusion::catalog::TableProvider;
 use datafusion::prelude::{SessionConfig, SessionContext, col};
 use deltalake::DeltaTable;
 use deltalake::kernel::engine::arrow_conversion::{TryIntoArrow as _, TryIntoKernel as _};
@@ -31,6 +26,8 @@ use crate::workspace_registry::WorkspaceRecord;
 mod mutation;
 mod overlay;
 mod publication;
+#[cfg(feature = "daemon")]
+mod serving;
 mod snapshot_catalog;
 pub use mutation::{
     MutationFaultPoint, MutationJournal, MutationPhase, MutationPhaseSpec, MutationResult,
@@ -43,7 +40,12 @@ pub use overlay::{
 pub use overlay::{OverlayRebaseFaultPoint, OverlayRebaseOutcome, OverlayRebaseRequest};
 pub use publication::{
     CurrentPublicationRecord, OwnerPublicationWrite, PublicationFaultPoint, PublicationOutcome,
-    PublicationPins, PublicationRequest, PublicationTableRecord,
+    PublicationPins, PublicationRequest, PublicationScope, PublicationTableRecord,
+};
+#[cfg(feature = "daemon")]
+pub use serving::{
+    QueryPlanArtifact, ServingQueryError, ServingQueryResult, ServingQuerySession,
+    ServingRuntimeConfig, ServingRuntimeEvidence,
 };
 pub use snapshot_catalog::{
     DeltaAccessProfile, DeltaHandleFactory, DeltaMaterializationPosture, EmptySnapshotOverlay,
@@ -214,57 +216,6 @@ impl WorkspaceNamespace {
     }
 }
 
-/// Exact-schema facade over the pinned Delta provider.
-struct ContractTableProvider {
-    inner: Arc<dyn TableProvider>,
-    schema: SchemaRef,
-}
-
-impl fmt::Debug for ContractTableProvider {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ContractTableProvider")
-            .field("schema", &self.schema)
-            .finish_non_exhaustive()
-    }
-}
-
-#[async_trait]
-impl TableProvider for ContractTableProvider {
-    fn schema(&self) -> SchemaRef {
-        Arc::clone(&self.schema)
-    }
-
-    fn constraints(&self) -> Option<&datafusion::common::Constraints> {
-        self.inner.constraints()
-    }
-
-    fn table_type(&self) -> TableType {
-        self.inner.table_type()
-    }
-
-    async fn scan(
-        &self,
-        state: &dyn Session,
-        projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        limit: Option<usize>,
-    ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
-        self.inner.scan(state, projection, filters, limit).await
-    }
-
-    fn supports_filters_pushdown(
-        &self,
-        filters: &[&Expr],
-    ) -> datafusion::error::Result<Vec<TableProviderFilterPushDown>> {
-        self.inner.supports_filters_pushdown(filters)
-    }
-
-    fn statistics(&self) -> Option<Statistics> {
-        self.inner.statistics()
-    }
-}
-
 /// One opened table bound to its immutable generated contract.
 pub struct FabricTable {
     pub table_code: i16,
@@ -280,7 +231,11 @@ impl FabricTable {
         self.delta.version()
     }
 
-    /// Exact generated schema exposed by the read-only provider facade.
+    /// Physical-query-compatible schema exposed by the validated Delta provider.
+    ///
+    /// Governed table metadata remains authoritative in the generated `TableSpec` and
+    /// mirrored Delta table properties. DataFusion requires this logical schema to equal
+    /// the physical scan schema, whose top-level metadata is intentionally empty.
     #[must_use]
     pub fn schema(&self) -> SchemaRef {
         self.provider.schema()
@@ -335,8 +290,8 @@ impl WorkspaceFabric {
                     detail: "generated table is absent from workspace fabric".into(),
                 })?;
         // Delta persists field metadata in its StructType but not Arrow's top-level
-        // schema metadata. That governed metadata is stored as table properties and
-        // restored by `ContractTableProvider`, so present Delta with its native schema.
+        // schema metadata. Governed table metadata remains stored as table properties,
+        // so present Delta with its native physical schema.
         let fields = batch.schema().fields().clone();
         let (_, columns, _) = batch.into_parts();
         let storage_batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)?;
@@ -671,33 +626,13 @@ pub(super) async fn exact_provider(
     let session = Arc::new(SessionContext::new_with_config(config).state());
     let inner = table.table_provider().with_session(session).await?;
     let provider_schema = inner.schema();
-    if provider_schema.fields().len() != spec.arrow_schema.fields().len()
-        || provider_schema
-            .fields()
-            .iter()
-            .zip(spec.arrow_schema.fields())
-            .any(|(actual, expected)| {
-                actual.name() != expected.name()
-                    || actual.data_type() != expected.data_type()
-                    || actual.is_nullable() != expected.is_nullable()
-            })
-    {
+    if provider_schema.fields() != spec.arrow_schema.fields() {
         return Err(FabricError::TableInvariant {
             table: spec.name.into(),
             detail: "DataFusion provider physical schema differs from generated TableSpec".into(),
         });
     }
-    let provider: Arc<dyn TableProvider> = Arc::new(ContractTableProvider {
-        inner,
-        schema: Arc::clone(&spec.arrow_schema),
-    });
-    if provider.schema() != spec.arrow_schema {
-        return Err(FabricError::TableInvariant {
-            table: spec.name.into(),
-            detail: "exact provider facade did not restore governed Arrow metadata".into(),
-        });
-    }
-    Ok(provider)
+    Ok(inner)
 }
 
 fn millis_to_micros(value: &str, field: &str) -> Result<i64, FabricError> {
@@ -981,7 +916,8 @@ mod tests {
         assert!(first.namespace.facts.is_dir());
         assert!(first.namespace.derived.is_dir());
         assert!(first.tables().all(|table| {
-            table.provider.schema() == table_spec(table.table_code).unwrap().arrow_schema
+            table.provider.schema().fields()
+                == table_spec(table.table_code).unwrap().arrow_schema.fields()
         }));
 
         let reopened = bootstrap_workspace(&root.0, &record(2)).await.unwrap();

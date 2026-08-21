@@ -400,7 +400,7 @@
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.schema.serving-snapshot.schema",
     "artifact_kind": "json-schema",
-    "canonical_digest": "b3:16aff940b877b4763e5c303cbe97cef931d801a3437c52c5cc05c767c54fbeed",
+    "canonical_digest": "b3:899e783d12dd5f8629e254a6bfa468b62b26f5af5ce2975ffec257e119278534",
     "compatible_suite_major": 1,
     "generator_revision": "codefabric-schema-contracts-v1",
     "status": "released",
@@ -423,8 +423,8 @@
   "x-codefabric-generated": {
     "generator_revision": "codefabric-schema-contracts-v1",
     "source_artifact_id": "codefabric.schema.contract-ir",
-    "source_canonical_digest": "b3:517b3ab5a19918b85846371397477575644f72aca97666897bcc58cc301759e5",
-    "source_digest": "b3:cee0b90c3ad3ea1235aa5b17412d3a6649a31f88733f0930f7d1c7ddf6d0f401"
+    "source_canonical_digest": "b3:188db6bfbfaabae78ce4935fb00b69fde44b6fd0ff8a1c95244f1d8c1acab206",
+    "source_digest": "b3:b5be492e889c8dc2d19a9313dbd20f847544da46e41c536c439f623882e1f356"
   },
   "x-codefabric-identity": {
     "excluded_from_body": [

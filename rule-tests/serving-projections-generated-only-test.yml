@@ -1,0 +1,23 @@
+id: serving-projections-generated-only
+valid:
+  - |
+      fn install() {
+          for projection in serving_projection_specs() {
+              install_projection(projection);
+          }
+      }
+  - |
+      fn capture() {
+          for projection in control_projection_specs() {
+              capture_projection(projection);
+          }
+      }
+invalid:
+  - |
+      const CONTROL_TABLES: [&str; 2] = ["worktree_state", "update_wave"];
+  - |
+      fn install() {
+          for (table_code, view_name) in [(100, "entities"), (110, "relations")] {
+              install_projection(table_code, view_name);
+          }
+      }

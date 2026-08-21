@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir b3:517b3ab5a19918b85846371397477575644f72aca97666897bcc58cc301759e5; codefabric-schema-contracts-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir b3:188db6bfbfaabae78ce4935fb00b69fde44b6fd0ff8a1c95244f1d8c1acab206; codefabric-schema-contracts-v1; do not edit.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE workspace_registration (

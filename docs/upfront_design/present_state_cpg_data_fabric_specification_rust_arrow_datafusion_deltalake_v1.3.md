@@ -798,6 +798,24 @@ and `NOT_PUBLISHED` tables are excluded. `required_for_publication` means a
 table participates in the durable publication protocol, not that every such
 table is recursively listed in its own manifest.
 
+The same Contract IR SHALL own four closed serving records in addition to physical schema:
+
+1. `table_scopes`: typed workspace, analysis-context, context-set, source-generation, and
+   owner selectors by table code;
+2. `serving_projections`: stable view name, source table code, availability wave, and
+   projection role;
+3. `control_projections`: stable view name, source operational table, explicit derived
+   columns where applicable, availability wave, and closed projection role; and
+4. `serving_resource_profile`: batch, result, control-capture, and bounded candidate-
+   validation row/byte/batch limits.
+
+Scope columns are type checked against the table contract. Workspace, analysis-context,
+context-set, and owner selectors are non-null `id16`; source generation is non-null `int64`.
+Operational parent joins SHALL have compatible SQLite affinities and the selected parent
+workspace column SHALL be a non-null `BLOB`. Every workspace-scoped operational source has
+exactly one generated control projection. These records, not runtime literals, are the sole
+projection and resource authority.
+
 The registry SHALL generate or validate:
 
 - Arrow `SchemaRef`;
@@ -820,8 +838,14 @@ Arrow Schema
   → open Delta table
   → DataFusion TableProvider schema
   → Arrow Schema
-  → exact contract comparison
+  → exact field-contract comparison
 ```
+
+Arrow field definitions and field metadata SHALL compare exactly. Top-level governed schema
+metadata SHALL be validated against the generated `TableSpec` and mirrored Delta table
+properties, but SHALL NOT be injected into the DataFusion provider schema when the pinned
+Delta physical plan omits it. The logical provider schema must equal the physical execution
+schema so aggregates and projection-free scans remain valid without a custom plan wrapper.
 
 ---
 
@@ -1224,6 +1248,20 @@ result_artifact_lease
 ```
 
 Lifecycle owns their state transitions and retention. The fabric owns their Arrow schemas and consistent read-only DataFusion projection. They SHALL not be written through ordinary query SQL.
+
+The schema Contract IR SHALL declare a closed `workspace_scope` for every operational
+table projected into a workspace query session. A scope is either a direct workspace
+column or a typed parent-table join naming the child key, parent key, and parent workspace
+column. The generated Arrow projection SHALL consume that model; table-name-specific
+workspace filtering is not an independent authority.
+
+One query session captures these operational rows in one SQLite deferred read transaction
+at snapshot-lease acquisition. The capture is point-in-time coherent within SQLite but is
+`operationally-current-not-snapshot-pinned`: it is not part of `snapshot_id`, and it can
+describe lifecycle progress later than the immutable fact snapshot. Cross-store joins are
+therefore limited to control/status interpretation and SHALL NOT be used to claim fact-row
+snapshot consistency. An `active_serving_snapshot` projection SHALL carry the leased
+snapshot/publication/source/overlay identities and this consistency classification.
 
 # Part IV — Universal Graph Tables
 
@@ -2592,11 +2630,19 @@ preventing a self-referential manifest or a pointer-version cycle.
 1. create publication row in `STAGING` for one `workspace_id`;
 2. pin source generation, inventory digest, context set, Git/inclusion fingerprints, and all bundle/toolchain versions;
 3. write affected owner replacements to Delta tables;
-4. record exact table versions/checksums;
+4. select every pinned table through its generated `table_scopes` predicate and record the
+   exact selected row count, owner count, primary-key digest, and content checksum once;
 5. run schema, referential, capability, and checksum validation;
 6. transition through `VALIDATING` → `VALIDATED` → `COMMITTING` → `COMPLETE`;
 7. compare-and-swap `current_publication[workspace_id]` last;
 8. on failure mark `FAILED` or `ABANDONED`; never expose intermediate table versions through serving views.
+
+The publication request carries the sorted unique analysis-context membership as well as its
+derived context-set identity. Every validated owner batch retains its closed fact scope;
+mutation and publication reject workspace, context, source-generation, or owner mismatches
+before a Delta write. The context-set ID SHALL equal the CBEF identity derived from the
+publication workspace and exact member set. A publication manifest describes the selected
+rows at its exact Delta versions, not every row that may coexist in those versions.
 
 The generated durable-publication state machine SHALL therefore treat
 `COMMITTING` as preparation of a pointer-eligible complete manifest. It SHALL
@@ -3128,6 +3174,19 @@ workspace/context/source-generation filters
 schema and enum bundle fingerprints
 ```
 
+The scope predicate is constructed from generated `table_scopes` and installed as an
+immutable provider-level `ViewTable` after overlay composition and before `cpg_base`
+registration. It is therefore below every user-controllable view or SQL predicate. Candidate
+activation independently compares workspace, context-set membership, source generation, and
+the generated scope record against the frozen provider census.
+
+Exact version plus the publication's persisted schema/count/primary-key/content evidence is
+sufficient for a generation-zero candidate; candidate construction SHALL NOT rescan those
+fact tables. If an overlay changes a table, effective evidence MAY require one validation
+scan, but that scan SHALL use `execute_stream`, the generated candidate row/byte/batch limits,
+a named DataFusion memory reservation, and one pass only. A second validation collection or
+an unbounded default `SessionContext` is prohibited.
+
 For owner-scoped tables:
 
 ```text
@@ -3177,6 +3236,17 @@ cpg_serving.unknowns
 cpg_serving.metrics
 cpg_serving.callable_summaries
 ```
+
+This is a staged conformance list. At the Wave-3 foundation exit the catalog SHALL expose
+`entities`, `relations`, `properties`, and `evidence`, while registering `cpg_python`,
+`cpg_rust`, and `cpg_derived` as empty immutable namespaces. Later roadmap waves add the
+remaining views as their typed facts become available; the absence of not-yet-owned views
+does not authorize placeholder schemas or generic rows.
+
+The staged list is compiled into generated serving projection records. Runtime code iterates
+those records and derives hidden-column exclusion and enum joins from generated field
+metadata; it SHALL NOT own table-code/view-name tuples. Operational source and derived
+`cpg_control` projections are likewise generated from the closed control-projection records.
 
 Views SHALL:
 
@@ -3353,6 +3423,21 @@ metadata/file/statistics cache  enabled
 Parquet pruning                 enabled
 repartition joins/aggregates    enabled where beneficial
 ```
+
+Service sessions SHALL use a tracked `FairSpillPool`: arbitrary read-only SQL can contain
+multiple spillable operators, so fair allocation is preferred over first-come greedy
+allocation. The generated resource profile caps returned rows, retained Arrow bytes, returned
+batches, operational-capture rows/bytes/batches, and any overlay-validation stream. Query
+output is consumed through `execute_stream`; checksums are updated incrementally in stream
+order and no arbitrary result is concatenated. Dropping or timing out a stream cancels the
+query and releases reservations.
+
+SQLite operational rows are appended directly to bounded Arrow builders. Each retained
+control or result batch grows a named `MemoryConsumer` reservation before retention; the
+reservation lives exactly as long as its captured catalog or returned result. Exceeding a
+contract limit fails closed with a stable resource class. DataFusion's pool does not account
+for every Arrow allocation, so these explicit result/capture limits remain mandatory even
+when spill is configured.
 
 Custom graph operators SHALL use the same `RuntimeEnv`, memory pool, disk manager, and object-store registry as normal DataFusion execution.
 
@@ -3690,6 +3775,11 @@ row count
 result checksum
 ```
 
+Plan artifacts capture normalized unoptimized, optimized, and physical plans under the exact
+DataFusion/Arrow pins. Operator metrics are taken from the executed physical plan, including
+row flow and spill counts/bytes when exposed. Exact timing values are excluded from normative
+snapshots; `EXPLAIN ANALYZE` remains a bounded diagnostic oracle rather than a semantic input.
+
 Plan artifacts are operational diagnostics, not CPG facts.
 
 ---
@@ -3786,6 +3876,16 @@ Telemetry contracts SHALL NOT depend on private upstream enum or type names. Ups
 - custom graph operator golden results;
 - memory/spill limits;
 - cancellation.
+- production local-Delta publication → exact-version provider → candidate → lease → serving
+  session, with normalized logical/physical snapshots;
+- two workspaces, two contexts, and two source generations, including rejection of every
+  manifest/row-scope mismatch and isolation of raw `cpg_base` as well as serving views;
+- generation-zero candidate construction performs zero fact scans; overlay validation, when
+  needed, performs one bounded streamed scan;
+- result and control row/byte/batch limits, retained-memory reservation release, low-memory
+  spill or stable rejection, streaming backpressure, and drop cancellation;
+- projected Delta scan width, filter/residual placement, exact version, provider reuse, and
+  `MetricsSet`/bounded `EXPLAIN ANALYZE` evidence.
 
 ### 112.5 Integrity tests
 

@@ -1,0 +1,18 @@
+id: serving-leased-providers-only
+language: Rust
+severity: error
+message: Serving sessions must consume providers retained by their SnapshotLeaseGuard.
+note: Provider opening, construction, and active-pointer lookup belong before lease acquisition.
+files:
+  - src/fabric/serving.rs
+rule:
+  all:
+    - any:
+        - pattern: SnapshotProviderCatalog::build($$$ARGS)
+        - pattern: DeltaHandleFactory::open($$$ARGS)
+        - pattern: exact_provider($$$ARGS)
+        - pattern: LocalProviderFactory::$METHOD($$$ARGS)
+    - not:
+        inside:
+          pattern: "mod tests { $$$BODY }"
+          stopBy: end

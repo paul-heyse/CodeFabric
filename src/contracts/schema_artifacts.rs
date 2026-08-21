@@ -14,7 +14,8 @@ use super::catalog::{CompiledCatalog, DerivationOutputKind};
 use super::compiler::compile_artifact_for_generation;
 use super::jcs::{canonicalize_value, checksum, decode_strict};
 use super::schema_models::{
-    LogicalType, PublicSchemaContract, PublicSchemaKind, SchemaContractIr, SqliteType,
+    ControlProjectionRole, LogicalType, PublicSchemaContract, PublicSchemaKind, SchemaContractIr,
+    ServingProjectionRole, SqliteType,
 };
 
 pub(super) const SCHEMA_DERIVATION_ID: &str = "codefabric.derivation.schema-contracts";
@@ -534,6 +535,15 @@ fn rust_logical_type(logical: LogicalType) -> &'static str {
     }
 }
 
+fn rust_sqlite_type(sqlite: super::schema_models::SqliteType) -> &'static str {
+    match sqlite {
+        super::schema_models::SqliteType::Integer => "Integer",
+        super::schema_models::SqliteType::Real => "Real",
+        super::schema_models::SqliteType::Text => "Text",
+        super::schema_models::SqliteType::Blob => "Blob",
+    }
+}
+
 fn rust_strings(values: &[String]) -> String {
     format!(
         "&[{}]",
@@ -543,6 +553,86 @@ fn rust_strings(values: &[String]) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+fn rust_usize_literal(value: usize) -> String {
+    let digits = value.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            grouped.push('_');
+        }
+        grouped.push(digit);
+    }
+    grouped.chars().rev().collect()
+}
+
+const fn rust_serving_projection_role(value: ServingProjectionRole) -> &'static str {
+    match value {
+        ServingProjectionRole::EffectiveFact => "EffectiveFact",
+    }
+}
+
+const fn rust_control_projection_role(value: ControlProjectionRole) -> &'static str {
+    match value {
+        ControlProjectionRole::OperationalSource => "OperationalSource",
+        ControlProjectionRole::DerivedOperational => "DerivedOperational",
+        ControlProjectionRole::ActiveServingSnapshot => "ActiveServingSnapshot",
+    }
+}
+
+fn render_resource_profile(
+    output: &mut String,
+    resources: super::schema_models::ServingResourceProfileContract,
+) {
+    writeln!(
+        output,
+        "];\n\nconst GENERATED_SERVING_RESOURCE_PROFILE: ServingResourceProfile = ServingResourceProfile {{ batch_size: {}, max_output_rows: {}, max_output_bytes: {}, max_output_batches: {}, max_control_rows: {}, max_control_bytes: {}, max_control_batches: {}, max_snapshot_validation_rows: {}, max_snapshot_validation_bytes: {}, max_snapshot_validation_batches: {} }};",
+        rust_usize_literal(resources.batch_size),
+        rust_usize_literal(resources.max_output_rows),
+        rust_usize_literal(resources.max_output_bytes),
+        rust_usize_literal(resources.max_output_batches),
+        rust_usize_literal(resources.max_control_rows),
+        rust_usize_literal(resources.max_control_bytes),
+        rust_usize_literal(resources.max_control_batches),
+        rust_usize_literal(resources.max_snapshot_validation_rows),
+        rust_usize_literal(resources.max_snapshot_validation_bytes),
+        rust_usize_literal(resources.max_snapshot_validation_batches),
+    )
+    .unwrap();
+}
+
+fn render_projection_specs(output: &mut String, ir: &SchemaContractIr) {
+    output.push_str(
+        "];\n\nconst GENERATED_SERVING_PROJECTION_SPECS: &[ServingProjectionSpec] = &[\n",
+    );
+    for projection in &ir.serving_projections {
+        writeln!(
+            output,
+            "    ServingProjectionSpec {{ view_name: {:?}, source_table_code: {}, availability_wave: {}, projection_role: ServingProjectionRole::{} }},",
+            projection.view_name,
+            projection.source_table_code,
+            projection.availability_wave,
+            rust_serving_projection_role(projection.projection_role),
+        )
+        .unwrap();
+    }
+    output.push_str(
+        "];\n\nconst GENERATED_CONTROL_PROJECTION_SPECS: &[ControlProjectionSpec] = &[\n",
+    );
+    for projection in &ir.control_projections {
+        writeln!(
+            output,
+            "    ControlProjectionSpec {{ view_name: {:?}, availability_wave: {}, projection_role: ControlProjectionRole::{}, source_table: {:?}, columns: {} }},",
+            projection.view_name,
+            projection.availability_wave,
+            rust_control_projection_role(projection.projection_role),
+            projection.source_table.as_deref(),
+            rust_strings(&projection.columns),
+        )
+        .unwrap();
+    }
+    render_resource_profile(output, ir.serving_resource_profile);
 }
 
 fn render_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
@@ -579,8 +669,67 @@ fn render_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
         .unwrap();
         writeln!(output, "    }},").unwrap();
     }
-    output.push_str("];\n");
+    output.push_str(
+        "];\n\nconst GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[\n",
+    );
+    for table in &ir.operational_tables {
+        writeln!(output, "    GeneratedOperationalTableSpec {{").unwrap();
+        writeln!(output, "        name: {:?},", table.name).unwrap();
+        writeln!(output, "        columns: &[").unwrap();
+        for column in &table.columns {
+            writeln!(output, "            GeneratedOperationalColumn {{ name: {:?}, sqlite_type: OperationalSqliteType::{}, nullable: {} }},", column.name, rust_sqlite_type(column.sqlite_type), column.nullable).unwrap();
+        }
+        writeln!(output, "        ],").unwrap();
+        writeln!(
+            output,
+            "        primary_key: {},",
+            rust_strings(&table.primary_key)
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "        workspace_scope: {},",
+            rust_operational_scope(table.workspace_scope.as_ref())
+        )
+        .unwrap();
+        writeln!(output, "    }},").unwrap();
+    }
+    output.push_str("];\n\nconst GENERATED_TABLE_SCOPE_SPECS: &[TableScopeSpec] = &[\n");
+    for scope in &ir.table_scopes {
+        writeln!(
+            output,
+            "    TableScopeSpec {{ table_code: {}, workspace_column: {:?}, analysis_context_column: {:?}, source_generation_column: {:?}, analysis_context_set_column: {:?}, owner_column: {:?} }},",
+            scope.table_code,
+            scope.workspace_column.as_deref(),
+            scope.analysis_context_column.as_deref(),
+            scope.source_generation_column.as_deref(),
+            scope.analysis_context_set_column.as_deref(),
+            scope.owner_column.as_deref(),
+        )
+        .unwrap();
+    }
+    render_projection_specs(&mut output, ir);
     output.into_bytes()
+}
+
+fn rust_operational_scope(
+    scope: Option<&crate::contracts::schema_models::OperationalWorkspaceScopeContract>,
+) -> String {
+    use crate::contracts::schema_models::OperationalWorkspaceScopeContract;
+    match scope {
+        None => "None".into(),
+        Some(OperationalWorkspaceScopeContract::Direct { workspace_column }) => format!(
+            "Some(OperationalWorkspaceScope::Direct {{ workspace_column: {workspace_column:?} }})"
+        ),
+        Some(OperationalWorkspaceScopeContract::ViaParent {
+            parent_table,
+            child_column,
+            parent_column,
+            workspace_column,
+        }) => format!(
+            "Some(OperationalWorkspaceScope::ViaParent {{ parent_table: {parent_table:?}, child_column: {child_column:?}, parent_column: {parent_column:?}, workspace_column: {workspace_column:?} }})"
+        ),
+    }
 }
 
 fn format_rust(path: &Path, source: &[u8]) -> Result<Vec<u8>, ContractArtifactError> {
@@ -653,7 +802,7 @@ fn render_manifest(
     source_canonical_digest: &str,
     source_digest: &str,
 ) -> Result<Vec<u8>, ContractArtifactError> {
-    canonicalize_value(&json!({"_generated":{"generator_revision":GENERATOR_REVISION,"profile":"codefabric-schema-contract-v1","source_artifact_id":SCHEMA_IR_ARTIFACT_ID,"source_canonical_digest":source_canonical_digest,"source_digest":source_digest},"owner_bucket_count":ir.owner_bucket_count,"tables":ir.tables,"operational_tables":ir.operational_tables,"public_schemas":ir.public_schemas})).map_err(|source| ContractArtifactError::Canonical { path: PathBuf::from("contracts/schema/arrow-delta/table-specs.json"), source })
+    canonicalize_value(&json!({"_generated":{"generator_revision":GENERATOR_REVISION,"profile":"codefabric-schema-contract-v1","source_artifact_id":SCHEMA_IR_ARTIFACT_ID,"source_canonical_digest":source_canonical_digest,"source_digest":source_digest},"owner_bucket_count":ir.owner_bucket_count,"tables":ir.tables,"table_scopes":ir.table_scopes,"operational_tables":ir.operational_tables,"serving_projections":ir.serving_projections,"control_projections":ir.control_projections,"serving_resource_profile":ir.serving_resource_profile,"public_schemas":ir.public_schemas})).map_err(|source| ContractArtifactError::Canonical { path: PathBuf::from("contracts/schema/arrow-delta/table-specs.json"), source })
 }
 
 pub(super) fn render_schema_outputs(
@@ -741,6 +890,7 @@ pub(super) fn render_schema_outputs(
 mod tests {
     use super::*;
     use crate::contracts::catalog::ContractCatalog;
+    use crate::contracts::schema_models::ServingProjectionContract;
 
     const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -779,5 +929,40 @@ mod tests {
             assert!(ddl.contains(&format!("CREATE TABLE {table}")));
         }
         assert!(ddl.contains("CREATE VIEW workspace_update_state"));
+    }
+
+    #[test]
+    fn projection_generation_discovers_additive_model_entries() {
+        let mut ir: SchemaContractIr = serde_json::from_str(include_str!(
+            "../../contracts/schema/schema-contract-ir.json"
+        ))
+        .unwrap();
+        let mut table = ir
+            .tables
+            .iter()
+            .find(|table| table.table_code == 100)
+            .unwrap()
+            .clone();
+        table.table_code = 131;
+        table.name = "synthetic_entity".into();
+        ir.tables.push(table);
+        let mut scope = ir
+            .table_scopes
+            .iter()
+            .find(|scope| scope.table_code == 100)
+            .unwrap()
+            .clone();
+        scope.table_code = 131;
+        ir.table_scopes.push(scope);
+        ir.serving_projections.push(ServingProjectionContract {
+            view_name: "synthetic_entities".into(),
+            source_table_code: 131,
+            availability_wave: 3,
+            projection_role: ServingProjectionRole::EffectiveFact,
+        });
+        ir.validate().unwrap();
+        let rendered = String::from_utf8(render_rust(&ir, "b3:test")).unwrap();
+        assert!(rendered.contains("view_name: \"synthetic_entities\""));
+        assert!(rendered.contains("source_table_code: 131"));
     }
 }

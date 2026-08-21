@@ -5,21 +5,35 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::{
-    FabricError, LocalProviderFactory, LocalProviderRequest, PublicationOutcome, exact_provider,
-    validate_open_table,
+    FabricError, LocalProviderFactory, LocalProviderRequest, PublicationOutcome, PublicationScope,
+    exact_provider, validate_open_table,
 };
+#[cfg(test)]
 use crate::fabric::batch_checksum;
-use crate::schema_registry::{PublicationPinRole, TableSpec, table_spec, table_specs};
+use crate::fabric::publication::scope_filter;
+use crate::schema_registry::{
+    PublicationPinRole, TableSpec, table_scope_spec, table_spec, table_specs,
+};
 use crate::snapshot::SnapshotOverlayTable;
-use arrow_array::{Array as _, BinaryArray, RecordBatch};
+#[cfg(test)]
+use arrow_array::RecordBatch;
+use arrow_array::{Array as _, BinaryArray};
+use arrow_row::{RowConverter, SortField};
+#[cfg(test)]
 use arrow_select::concat::concat_batches;
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, Session, TableProvider};
 use datafusion::common::{DataFusionError, Statistics};
+use datafusion::datasource::{ViewTable, provider_as_source};
+use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, TrackConsumersPool};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
-use datafusion::physical_plan::ExecutionPlan;
-use datafusion::prelude::SessionContext;
+use datafusion::physical_plan::{ExecutionPlan, execute_stream};
+use datafusion::prelude::{SessionConfig, SessionContext};
 use deltalake::{DeltaTable, DeltaTableBuilder};
+use futures::StreamExt as _;
+use std::num::NonZeroUsize;
 
 const CATALOG_SCHEMA: &str = "cpg_base";
 
@@ -277,6 +291,7 @@ pub struct SnapshotConstructionMetrics {
     pub provider_count: usize,
     pub exact_version_count: usize,
     pub overlay_generation: u64,
+    pub validation_scan_count: usize,
 }
 
 /// Exact immutable identity and provider for one pinned table.
@@ -288,6 +303,8 @@ pub struct SnapshotProviderRecord {
     pub primary_key_digest: [u8; 32],
     /// Digest of the effective immutable table contents served by this provider.
     pub effective_content_digest: [u8; 32],
+    pub effective_row_count: i64,
+    pub effective_owner_count: i64,
     provider: Arc<dyn TableProvider>,
 }
 
@@ -299,6 +316,8 @@ impl fmt::Debug for SnapshotProviderRecord {
             .field("access_profile", &self.access_profile)
             .field("primary_key_digest", &self.primary_key_digest)
             .field("effective_content_digest", &self.effective_content_digest)
+            .field("effective_row_count", &self.effective_row_count)
+            .field("effective_owner_count", &self.effective_owner_count)
             .finish_non_exhaustive()
     }
 }
@@ -389,6 +408,7 @@ impl CatalogProvider for FrozenCatalogProvider {
 #[derive(Debug)]
 pub struct SnapshotProviderCatalog {
     publication_id: [u8; 16],
+    scope: PublicationScope,
     overlay_generation: u64,
     overlay_checksum: [u8; 32],
     overlay_memory_bytes: u64,
@@ -405,12 +425,14 @@ impl SnapshotProviderCatalog {
         publication_id: [u8; 16],
         overlay_generation: u64,
         overlay_checksum: [u8; 32],
+        scope: PublicationScope,
     ) -> Self {
         let schema = Arc::new(FrozenSchemaProvider {
             tables: BTreeMap::new(),
         });
         Self {
             publication_id,
+            scope,
             overlay_generation,
             overlay_checksum,
             overlay_memory_bytes: 0,
@@ -428,6 +450,7 @@ impl SnapshotProviderCatalog {
                 provider_count: 0,
                 exact_version_count: 0,
                 overlay_generation,
+                validation_scan_count: 0,
             },
         }
     }
@@ -438,41 +461,84 @@ impl SnapshotProviderCatalog {
         workspace_id: [u8; 16],
         table_code: i16,
         overlay_checksum: [u8; 32],
+        source_generation: i64,
+        analysis_context_ids: Vec<[u8; 16]>,
     ) -> Self {
         let spec = snapshot_table_spec(table_code).expect("generated test table");
         let batch = RecordBatch::new_empty(Arc::clone(&spec.arrow_schema));
-        let provider: Arc<dyn TableProvider> = Arc::new(
-            datafusion::datasource::MemTable::try_new(
-                Arc::clone(&spec.arrow_schema),
-                vec![vec![batch.clone()]],
-            )
-            .expect("valid generated test schema"),
-        );
-        let record = SnapshotProviderRecord {
-            manifest: super::PublicationTableRecord {
-                publication_id,
-                workspace_id,
-                table_code,
-                table_uri: format!("file:///snapshot-test/{}", spec.name),
-                delta_version: 1,
-                schema_fingerprint: schema_fingerprint(spec).expect("generated schema digest"),
-                row_count: 0,
-                owner_count: 0,
-                table_checksum: batch_checksum(&batch).expect("empty batch checksum"),
-                required: spec.required_for_publication,
-                validated: true,
-            },
-            access_profile: DeltaAccessProfile::QueryServing,
-            primary_key_digest: primary_key_digest(&batch, spec).expect("primary-key digest"),
-            effective_content_digest: batch_checksum(&batch).expect("empty batch checksum"),
-            provider: Arc::clone(&provider),
-        };
-        let providers = BTreeMap::from([(table_code, record)]);
-        let schema = Arc::new(FrozenSchemaProvider {
-            tables: BTreeMap::from([(spec.name.to_owned(), provider)]),
-        });
+        Self::from_batches_for_snapshot_tests(
+            publication_id,
+            workspace_id,
+            vec![(table_code, batch)],
+            overlay_checksum,
+            source_generation,
+            analysis_context_ids,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_batches_for_snapshot_tests(
+        publication_id: [u8; 16],
+        workspace_id: [u8; 16],
+        batches: Vec<(i16, RecordBatch)>,
+        overlay_checksum: [u8; 32],
+        source_generation: i64,
+        analysis_context_ids: Vec<[u8; 16]>,
+    ) -> Self {
+        let mut providers = BTreeMap::new();
+        let mut tables = BTreeMap::new();
+        for (table_code, batch) in batches {
+            let spec = snapshot_table_spec(table_code).expect("generated test table");
+            assert_eq!(batch.schema(), spec.arrow_schema);
+            let provider: Arc<dyn TableProvider> = Arc::new(
+                datafusion::datasource::MemTable::try_new(
+                    Arc::clone(&spec.arrow_schema),
+                    vec![vec![batch.clone()]],
+                )
+                .expect("valid generated test schema"),
+            );
+            let checksum = batch_checksum(&batch).expect("test batch checksum");
+            let record = SnapshotProviderRecord {
+                manifest: super::PublicationTableRecord {
+                    publication_id,
+                    workspace_id,
+                    table_code,
+                    table_uri: format!("file:///snapshot-test/{}", spec.name),
+                    delta_version: 1,
+                    schema_fingerprint: schema_fingerprint(spec).expect("generated schema digest"),
+                    row_count: i64::try_from(batch.num_rows()).expect("test row count"),
+                    owner_count: 0,
+                    table_checksum: checksum,
+                    primary_key_digest: primary_key_digest(&batch, spec)
+                        .expect("primary-key digest"),
+                    required: spec.required_for_publication,
+                    validated: true,
+                },
+                access_profile: DeltaAccessProfile::QueryServing,
+                primary_key_digest: primary_key_digest(&batch, spec).expect("primary-key digest"),
+                effective_content_digest: checksum,
+                effective_row_count: i64::try_from(batch.num_rows()).expect("test row count"),
+                effective_owner_count: owner_count(&batch).expect("test owner count"),
+                provider: Arc::clone(&provider),
+            };
+            providers.insert(table_code, record);
+            tables.insert(spec.name.to_owned(), provider);
+        }
+        let provider_count = providers.len();
+        let schema = Arc::new(FrozenSchemaProvider { tables });
         Self {
             publication_id,
+            scope: PublicationScope {
+                workspace_id,
+                source_generation,
+                analysis_context_set_id: crate::identity::context_set_identity(
+                    workspace_id,
+                    &analysis_context_ids,
+                )
+                .expect("test context-set identity")
+                .id,
+                analysis_context_ids,
+            },
             overlay_generation: 0,
             overlay_checksum,
             overlay_memory_bytes: 0,
@@ -487,9 +553,10 @@ impl SnapshotProviderCatalog {
                 SnapshotConstructionStage::Freeze,
             ],
             metrics: SnapshotConstructionMetrics {
-                provider_count: 1,
-                exact_version_count: 1,
+                provider_count,
+                exact_version_count: provider_count,
                 overlay_generation: 0,
+                validation_scan_count: 0,
             },
         }
     }
@@ -526,12 +593,29 @@ impl SnapshotProviderCatalog {
         for (table_code, (manifest, provider)) in opened {
             let spec = snapshot_table_spec(table_code)?;
             let provider = overlay.wrap(spec, provider)?;
-            let batch = provider_batch(Arc::clone(&provider), spec).await?;
+            let provider = scoped_provider(spec, &publication.scope, provider)?;
+            let evidence = if overlay.generation() == 0 {
+                None
+            } else {
+                Some(stream_provider_evidence(Arc::clone(&provider), spec).await?)
+            };
             wrapped.insert(
                 table_code,
                 SnapshotProviderRecord {
-                    primary_key_digest: primary_key_digest(&batch, spec)?,
-                    effective_content_digest: batch_checksum(&batch)?,
+                    primary_key_digest: evidence
+                        .as_ref()
+                        .map_or(manifest.primary_key_digest, |value| {
+                            value.primary_key_digest
+                        }),
+                    effective_content_digest: evidence
+                        .as_ref()
+                        .map_or(manifest.table_checksum, |value| value.content_digest),
+                    effective_row_count: evidence
+                        .as_ref()
+                        .map_or(manifest.row_count, |value| value.row_count),
+                    effective_owner_count: evidence
+                        .as_ref()
+                        .map_or(manifest.owner_count, |value| value.owner_count),
                     manifest,
                     access_profile: DeltaAccessProfile::QueryServing,
                     provider,
@@ -541,7 +625,7 @@ impl SnapshotProviderCatalog {
 
         trace.push(SnapshotConstructionStage::Validate);
         for record in wrapped.values() {
-            validate_provider_record(record).await?;
+            validate_provider_record(record, overlay.generation())?;
         }
         let table_map = wrapped
             .iter()
@@ -556,6 +640,7 @@ impl SnapshotProviderCatalog {
         let provider_count = wrapped.len();
         Ok(Self {
             publication_id: publication.publication_id,
+            scope: publication.scope.clone(),
             overlay_generation: overlay.generation(),
             overlay_checksum: overlay.checksum(),
             overlay_memory_bytes: overlay.memory_bytes(),
@@ -567,6 +652,11 @@ impl SnapshotProviderCatalog {
                 provider_count,
                 exact_version_count: provider_count,
                 overlay_generation: overlay.generation(),
+                validation_scan_count: if overlay.generation() == 0 {
+                    0
+                } else {
+                    provider_count
+                },
             },
         })
     }
@@ -574,6 +664,11 @@ impl SnapshotProviderCatalog {
     #[must_use]
     pub const fn publication_id(&self) -> [u8; 16] {
         self.publication_id
+    }
+
+    #[must_use]
+    pub const fn scope(&self) -> &PublicationScope {
+        &self.scope
     }
 
     #[must_use]
@@ -649,10 +744,44 @@ fn snapshot_table_spec(table_code: i16) -> Result<&'static TableSpec, FabricErro
     })
 }
 
+fn scoped_provider(
+    spec: &TableSpec,
+    scope: &PublicationScope,
+    provider: Arc<dyn TableProvider>,
+) -> Result<Arc<dyn TableProvider>, FabricError> {
+    let Some(filter) =
+        table_scope_spec(spec.table_code).and_then(|selectors| scope_filter(selectors, scope))
+    else {
+        return Ok(provider);
+    };
+    let plan = LogicalPlanBuilder::scan(spec.name, provider_as_source(provider), None)?
+        .filter(filter)?
+        .build()?;
+    Ok(Arc::new(ViewTable::new(plan, None)))
+}
+
 fn validate_publication_census(publication: &PublicationOutcome) -> Result<(), FabricError> {
     if publication.pointer.publication_id != publication.publication_id {
         return Err(FabricError::SnapshotProviderIntegrity(
             "publication outcome and current pointer identities differ".into(),
+        ));
+    }
+    if publication.scope.workspace_id != publication.pointer.workspace_id
+        || publication.scope.analysis_context_ids.is_empty()
+        || !publication
+            .scope
+            .analysis_context_ids
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        || crate::identity::context_set_identity(
+            publication.scope.workspace_id,
+            &publication.scope.analysis_context_ids,
+        )
+        .map_err(|error| FabricError::SnapshotProviderIntegrity(error.to_string()))?
+        .id != publication.scope.analysis_context_set_id
+    {
+        return Err(FabricError::SnapshotProviderIntegrity(
+            "publication scope identity is invalid".into(),
         ));
     }
     let expected = table_specs()
@@ -668,7 +797,7 @@ fn validate_publication_census(publication: &PublicationOutcome) -> Result<(), F
     for (&table_code, record) in &publication.tables {
         let spec = table_spec(table_code).expect("generated table code");
         if record.publication_id != publication.publication_id
-            || record.workspace_id != publication.pointer.workspace_id
+            || record.workspace_id != publication.scope.workspace_id
             || record.table_code != table_code
             || record.required != spec.required_for_publication
             || !record.validated
@@ -682,6 +811,7 @@ fn validate_publication_census(publication: &PublicationOutcome) -> Result<(), F
     Ok(())
 }
 
+#[cfg(test)]
 async fn provider_batch(
     provider: Arc<dyn TableProvider>,
     spec: &TableSpec,
@@ -691,6 +821,127 @@ async fn provider_batch(
         .collect()
         .await?;
     Ok(concat_batches(&spec.arrow_schema, &batches)?)
+}
+
+struct ProviderEvidence {
+    primary_key_digest: [u8; 32],
+    content_digest: [u8; 32],
+    row_count: i64,
+    owner_count: i64,
+}
+
+async fn stream_provider_evidence(
+    provider: Arc<dyn TableProvider>,
+    spec: &TableSpec,
+) -> Result<ProviderEvidence, FabricError> {
+    let limits = crate::schema_registry::serving_resource_profile();
+    let pool = Arc::new(TrackConsumersPool::new(
+        FairSpillPool::new(limits.max_snapshot_validation_bytes),
+        NonZeroUsize::new(5).expect("positive tracked-consumer count"),
+    ));
+    let runtime = Arc::new(RuntimeEnvBuilder::new().with_memory_pool(pool).build()?);
+    let context = SessionContext::new_with_config_rt(
+        SessionConfig::new().with_batch_size(limits.batch_size),
+        runtime,
+    );
+    let plan = context
+        .state()
+        .create_physical_plan(&context.read_table(provider)?.into_optimized_plan()?)
+        .await?;
+    let mut stream = execute_stream(plan, context.task_ctx())?;
+    let full_converter = RowConverter::new(
+        spec.arrow_schema
+            .fields()
+            .iter()
+            .map(|field| SortField::new(field.data_type().clone()))
+            .collect(),
+    )?;
+    let primary_indices = spec
+        .primary_key
+        .iter()
+        .map(|name| spec.arrow_schema.index_of(name))
+        .collect::<Result<Vec<_>, _>>()?;
+    let primary_schema = Arc::new(spec.arrow_schema.project(&primary_indices)?);
+    let primary_converter = RowConverter::new(
+        primary_schema
+            .fields()
+            .iter()
+            .map(|field| SortField::new(field.data_type().clone()))
+            .collect(),
+    )?;
+    let owner_index = spec.arrow_schema.index_of("owner_id").ok();
+    let reservation = MemoryConsumer::new("snapshot-provider-validation")
+        .register(&context.runtime_env().memory_pool);
+    let mut rows = Vec::<Vec<u8>>::new();
+    let mut primary_rows = Vec::<Vec<u8>>::new();
+    let mut owners = BTreeSet::new();
+    let mut bytes = 0_usize;
+    let mut batches = 0_usize;
+    while let Some(batch) = stream.next().await.transpose()? {
+        batches += 1;
+        if rows.len() + batch.num_rows() > limits.max_snapshot_validation_rows
+            || batches > limits.max_snapshot_validation_batches
+        {
+            return Err(FabricError::SnapshotProviderIntegrity(format!(
+                "{} validation exceeds generated row/batch budget",
+                spec.name
+            )));
+        }
+        let encoded = full_converter.convert_columns(batch.columns())?;
+        let primary_columns = primary_indices
+            .iter()
+            .map(|&index| Arc::clone(batch.column(index)))
+            .collect::<Vec<_>>();
+        let encoded_primary = primary_converter.convert_columns(&primary_columns)?;
+        for row in &encoded {
+            bytes = bytes.saturating_add(row.data().len());
+            rows.push(row.data().to_vec());
+        }
+        for row in &encoded_primary {
+            bytes = bytes.saturating_add(row.data().len());
+            primary_rows.push(row.data().to_vec());
+        }
+        if bytes > limits.max_snapshot_validation_bytes {
+            return Err(FabricError::SnapshotProviderIntegrity(format!(
+                "{} validation exceeds generated byte budget",
+                spec.name
+            )));
+        }
+        reservation.try_resize(bytes)?;
+        if let Some(index) = owner_index {
+            let values = batch
+                .column(index)
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("generated owner_id is Binary");
+            owners.extend(values.iter().flatten().map(<[u8]>::to_vec));
+        }
+    }
+    let row_count = i64::try_from(rows.len())
+        .map_err(|_| FabricError::SnapshotProviderIntegrity("row count exceeds i64".into()))?;
+    let owner_count = i64::try_from(owners.len())
+        .map_err(|_| FabricError::SnapshotProviderIntegrity("owner count exceeds i64".into()))?;
+    Ok(ProviderEvidence {
+        content_digest: encoded_rows_checksum(&spec.arrow_schema, &mut rows),
+        primary_key_digest: encoded_rows_checksum(&primary_schema, &mut primary_rows),
+        row_count,
+        owner_count,
+    })
+}
+
+fn encoded_rows_checksum(schema: &arrow_schema::Schema, rows: &mut [Vec<u8>]) -> [u8; 32] {
+    rows.sort_unstable();
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric-arrow-batch-v1\0");
+    if let Some(digest) = schema.metadata().get("com.codefabric.cpg.schema_digest") {
+        hasher.update(digest.as_bytes());
+    }
+    hasher.update(&(rows.len() as u64).to_be_bytes());
+    for row in rows {
+        hasher.update(&(row.len() as u64).to_be_bytes());
+        hasher.update(row);
+    }
+    *hasher.finalize().as_bytes()
 }
 
 fn schema_fingerprint(spec: &TableSpec) -> Result<[u8; 32], FabricError> {
@@ -716,6 +967,7 @@ fn schema_fingerprint(spec: &TableSpec) -> Result<[u8; 32], FabricError> {
     Ok(digest)
 }
 
+#[cfg(test)]
 fn owner_count(batch: &RecordBatch) -> Result<i64, FabricError> {
     let Ok(index) = batch.schema().index_of("owner_id") else {
         return Ok(0);
@@ -736,6 +988,7 @@ fn owner_count(batch: &RecordBatch) -> Result<i64, FabricError> {
     .map_err(|_| FabricError::SnapshotProviderIntegrity("owner count exceeds i64".into()))
 }
 
+#[cfg(test)]
 fn primary_key_digest(batch: &RecordBatch, spec: &TableSpec) -> Result<[u8; 32], FabricError> {
     let indices = spec
         .primary_key
@@ -750,11 +1003,14 @@ fn primary_key_digest(batch: &RecordBatch, spec: &TableSpec) -> Result<[u8; 32],
     batch_checksum(&RecordBatch::try_new(schema, columns)?)
 }
 
-async fn validate_provider_record(record: &SnapshotProviderRecord) -> Result<(), FabricError> {
+fn validate_provider_record(
+    record: &SnapshotProviderRecord,
+    overlay_generation: u64,
+) -> Result<(), FabricError> {
     let spec = table_spec(record.manifest.table_code).expect("validated generated table code");
     if record.access_profile != DeltaAccessProfile::QueryServing
         || record.access_profile.skip_stats()
-        || record.provider.schema() != spec.arrow_schema
+        || record.provider.schema().fields() != spec.arrow_schema.fields()
         || record.manifest.schema_fingerprint != schema_fingerprint(spec)?
     {
         return Err(FabricError::SnapshotProviderIntegrity(format!(
@@ -762,14 +1018,13 @@ async fn validate_provider_record(record: &SnapshotProviderRecord) -> Result<(),
             spec.name
         )));
     }
-    let batch = provider_batch(record.provider(), spec).await?;
-    let rows = i64::try_from(batch.num_rows())
-        .map_err(|_| FabricError::SnapshotProviderIntegrity("row count exceeds i64".into()))?;
-    if rows != record.manifest.row_count
-        || owner_count(&batch)? != record.manifest.owner_count
-        || batch_checksum(&batch)? != record.manifest.table_checksum
-        || record.effective_content_digest != record.manifest.table_checksum
-        || primary_key_digest(&batch, spec)? != record.primary_key_digest
+    if record.effective_row_count < 0
+        || record.effective_owner_count < 0
+        || (overlay_generation == 0
+            && (record.effective_content_digest != record.manifest.table_checksum
+                || record.primary_key_digest != record.manifest.primary_key_digest
+                || record.effective_row_count != record.manifest.row_count
+                || record.effective_owner_count != record.manifest.owner_count))
     {
         return Err(FabricError::SnapshotProviderIntegrity(format!(
             "{} row, owner, or checksum evidence differs",
@@ -836,6 +1091,7 @@ mod tests {
                     row_count: i64::try_from(batch.num_rows()).unwrap(),
                     owner_count: owner_count(&batch).unwrap(),
                     table_checksum: batch_checksum(&batch).unwrap(),
+                    primary_key_digest: primary_key_digest(&batch, spec).unwrap(),
                     required: spec.required_for_publication,
                     validated: true,
                 },
@@ -843,6 +1099,14 @@ mod tests {
         }
         PublicationOutcome {
             publication_id,
+            scope: PublicationScope {
+                workspace_id: [1; 16],
+                source_generation: 1,
+                analysis_context_set_id: crate::identity::context_set_identity([1; 16], &[[2; 16]])
+                    .unwrap()
+                    .id,
+                analysis_context_ids: vec![[2; 16]],
+            },
             pointer: CurrentPublicationRecord {
                 workspace_id: [1; 16],
                 publication_id,
@@ -859,6 +1123,35 @@ mod tests {
             .unwrap();
         let publication = publication(&fabric).await;
         (fabric, publication)
+    }
+
+    #[derive(Debug)]
+    struct ChangedIdentityOverlay;
+
+    impl SnapshotOverlayProviderFactory for ChangedIdentityOverlay {
+        fn generation(&self) -> u64 {
+            1
+        }
+
+        fn checksum(&self) -> [u8; 32] {
+            [0x51; 32]
+        }
+
+        fn memory_bytes(&self) -> u64 {
+            0
+        }
+
+        fn table_manifests(&self) -> Vec<SnapshotOverlayTable> {
+            Vec::new()
+        }
+
+        fn wrap(
+            &self,
+            _spec: &TableSpec,
+            base: Arc<dyn TableProvider>,
+        ) -> Result<Arc<dyn TableProvider>, FabricError> {
+            Ok(base)
+        }
     }
 
     #[tokio::test]
@@ -886,8 +1179,8 @@ mod tests {
             assert_eq!(record.access_profile, DeltaAccessProfile::QueryServing);
             assert!(!record.access_profile.skip_stats());
             assert_eq!(
-                record.provider().schema(),
-                table_spec(table_code).unwrap().arrow_schema
+                record.provider().schema().fields(),
+                table_spec(table_code).unwrap().arrow_schema.fields()
             );
         }
     }
@@ -959,12 +1252,24 @@ mod tests {
             Err(FabricError::SnapshotProviderIntegrity(_))
         ));
 
-        let mut wrong_checksum = publication.clone();
-        wrong_checksum.tables.get_mut(&1).unwrap().table_checksum = [88; 32];
-        assert!(matches!(
-            SnapshotProviderCatalog::build(&wrong_checksum, &EmptySnapshotOverlay).await,
-            Err(FabricError::SnapshotProviderIntegrity(_))
-        ));
+        let mut corrected_evidence = publication.clone();
+        corrected_evidence
+            .tables
+            .get_mut(&1)
+            .unwrap()
+            .table_checksum = [88; 32];
+        let evidence_bound =
+            SnapshotProviderCatalog::build(&corrected_evidence, &EmptySnapshotOverlay)
+                .await
+                .unwrap();
+        assert_eq!(
+            evidence_bound
+                .provider_record(1)
+                .unwrap()
+                .effective_content_digest,
+            [88; 32]
+        );
+        assert_eq!(evidence_bound.metrics().validation_scan_count, 0);
 
         let candidate = SnapshotProviderCatalog::build(&publication, &EmptySnapshotOverlay)
             .await
@@ -994,6 +1299,15 @@ mod tests {
         assert_eq!(metrics.provider_count, publication.tables.len());
         assert_eq!(metrics.exact_version_count, publication.tables.len());
         assert_eq!(metrics.overlay_generation, 0);
+        assert_eq!(metrics.validation_scan_count, 0);
         assert_eq!(candidate.catalog().schema_names(), [CATALOG_SCHEMA]);
+
+        let changed = SnapshotProviderCatalog::build(&publication, &ChangedIdentityOverlay)
+            .await
+            .unwrap();
+        assert_eq!(
+            changed.metrics().validation_scan_count,
+            publication.tables.len()
+        );
     }
 }

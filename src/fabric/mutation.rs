@@ -15,7 +15,7 @@ use deltalake::protocol::SaveMode;
 use serde_json::Value;
 
 use super::{DeltaAccessProfile, DeltaHandleFactory, FabricError, WorkspaceFabric, exact_provider};
-use crate::fact_ingest::ValidatedFactBatch;
+use crate::fact_ingest::{FactBatchScope, ValidatedFactBatch};
 use crate::identity::{IdentityDomain, encode_public_id};
 use crate::schema_registry::{DurableMutationClass, TableSpec, table_spec, table_specs};
 
@@ -128,7 +128,7 @@ pub trait MutationJournal {
 /// One owner replacement request; the validated batch is passed separately.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OwnerMutationRequest {
-    pub workspace_id: [u8; 16],
+    pub scope: FactBatchScope,
     pub publication_id: [u8; 16],
     pub operation_id: [u8; 16],
     pub table_code: i16,
@@ -212,6 +212,29 @@ pub fn batch_checksum(batch: &RecordBatch) -> Result<[u8; 32], FabricError> {
     Ok(*hasher.finalize().as_bytes())
 }
 
+/// Stable checksum of the generated primary-key projection for one table batch.
+///
+/// # Errors
+///
+/// Returns an Arrow/schema error when the batch does not implement the generated
+/// primary-key contract.
+pub(super) fn primary_key_checksum(
+    batch: &RecordBatch,
+    spec: &TableSpec,
+) -> Result<[u8; 32], FabricError> {
+    let indices = spec
+        .primary_key
+        .iter()
+        .map(|name| batch.schema().index_of(name))
+        .collect::<Result<Vec<_>, _>>()?;
+    let schema = Arc::new(batch.schema().project(&indices)?);
+    let columns = indices
+        .into_iter()
+        .map(|index| Arc::clone(batch.column(index)))
+        .collect();
+    batch_checksum(&RecordBatch::try_new(schema, columns)?)
+}
+
 pub(super) fn application_id(
     workspace_id: [u8; 16],
     table_code: i16,
@@ -279,12 +302,18 @@ pub(super) fn commit_properties(prepared: &PreparedMutation) -> CommitProperties
         ))
 }
 
-fn owner_predicate(owners: &[[u8; 16]]) -> Expr {
-    owners
+fn owner_predicate(scope: FactBatchScope, owners: &[[u8; 16]]) -> Expr {
+    let owner = owners
         .iter()
         .map(|owner| col("owner_id").eq(lit(ScalarValue::Binary(Some(owner.to_vec())))))
         .reduce(Expr::or)
-        .expect("validated non-empty owner set")
+        .expect("validated non-empty owner set");
+    col("workspace_id")
+        .eq(lit(ScalarValue::Binary(Some(scope.workspace_id.to_vec()))))
+        .and(col("analysis_context_id").eq(lit(ScalarValue::Binary(Some(
+            scope.analysis_context_id.to_vec(),
+        )))))
+        .and(owner)
 }
 
 fn validate_request(
@@ -320,9 +349,12 @@ fn validate_request(
     }
     let owners = owners.into_iter().collect::<Vec<_>>();
     if let Some(batch) = batch {
-        if batch.table_code() != request.table_code || batch.batch().schema() != spec.arrow_schema {
+        if batch.table_code() != request.table_code
+            || batch.batch().schema() != spec.arrow_schema
+            || batch.scope().batch_scope() != request.scope
+        {
             return Err(FabricError::MutationConflict(
-                "validated batch/table mismatch".into(),
+                "validated batch/table/scope mismatch".into(),
             ));
         }
         let owner_index = spec
@@ -350,7 +382,7 @@ fn validate_request(
         }) || batch_workspaces
             .iter()
             .flatten()
-            .any(|workspace| workspace != request.workspace_id)
+            .any(|workspace| workspace != request.scope.workspace_id)
         {
             return Err(FabricError::MutationConflict(
                 "batch contains an undeclared owner or workspace".into(),
@@ -373,7 +405,7 @@ pub(super) fn phase_spec(
         publication_id: request.publication_id,
         table_code: request.table_code,
         phase,
-        application_id: application_id(request.workspace_id, request.table_code, phase)?,
+        application_id: application_id(request.scope.workspace_id, request.table_code, phase)?,
         owner_set_fingerprint: owner_fingerprint(owners),
         input_checksum,
         expected_output_checksum,
@@ -478,11 +510,12 @@ pub(super) async fn reconcile_prepared<J: MutationJournal>(
 async fn owner_batch(
     table: &super::FabricTable,
     spec: &TableSpec,
+    scope: FactBatchScope,
     owners: &[[u8; 16]],
 ) -> Result<RecordBatch, FabricError> {
     let batches = SessionContext::new()
         .read_table(Arc::clone(&table.provider))?
-        .filter(owner_predicate(owners))?
+        .filter(owner_predicate(scope, owners))?
         .collect()
         .await?;
     Ok(concat_batches(&spec.arrow_schema, &batches)?)
@@ -501,6 +534,7 @@ async fn delete_phase<J: MutationJournal>(
     table: &mut super::FabricTable,
     journal: &mut J,
     spec: MutationPhaseSpec,
+    scope: FactBatchScope,
     owners: &[[u8; 16]],
 ) -> Result<(Option<u64>, Option<usize>, bool), FabricError> {
     let prepared = journal
@@ -518,7 +552,7 @@ async fn delete_phase<J: MutationJournal>(
         .delta
         .clone()
         .delete()
-        .with_predicate(owner_predicate(owners))
+        .with_predicate(owner_predicate(scope, owners))
         .with_commit_properties(commit_properties(&prepared))
         .await?;
     table.delta = delta;
@@ -621,10 +655,10 @@ impl WorkspaceFabric {
             request.expected_predecessor,
         )?;
         let (delete_version, deleted_rows, delete_replayed) =
-            delete_phase(table, journal, delete, &owners).await?;
+            delete_phase(table, journal, delete, request.scope, &owners).await?;
         reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
         if !delete_replayed {
-            let deleted_batch = owner_batch(table, spec, &owners).await?;
+            let deleted_batch = owner_batch(table, spec, request.scope, &owners).await?;
             if deleted_batch.num_rows() != 0 || batch_checksum(&deleted_batch)? != empty_checksum {
                 return Err(FabricError::MutationConflict(
                     "owner delete read-back is not empty".into(),
@@ -655,7 +689,7 @@ impl WorkspaceFabric {
         }
         let append_version = append_phase(table, journal, append, batch.batch()).await?;
         reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
-        let final_batch = owner_batch(table, spec, &owners).await?;
+        let final_batch = owner_batch(table, spec, request.scope, &owners).await?;
         let final_checksum = batch_checksum(&final_batch)?;
         if final_batch.num_rows() != batch.num_rows() || final_checksum != input_checksum {
             return Err(FabricError::MutationConflict(
@@ -681,7 +715,7 @@ impl WorkspaceFabric {
     pub async fn remove_owners<J: MutationJournal>(
         &mut self,
         journal: &mut J,
-        workspace_id: [u8; 16],
+        scope: FactBatchScope,
         publication_id: [u8; 16],
         operation_id: [u8; 16],
         owner_ids: Vec<[u8; 16]>,
@@ -718,12 +752,12 @@ impl WorkspaceFabric {
                         detail: "bootstrapped owner table is absent".into(),
                     })?;
             reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
-            let existing = owner_batch(table, spec, &owners).await?;
+            let existing = owner_batch(table, spec, scope, &owners).await?;
             let input_checksum = batch_checksum(&existing)?;
             let empty_checksum =
                 batch_checksum(&RecordBatch::new_empty(Arc::clone(&spec.arrow_schema)))?;
             let request = OwnerMutationRequest {
-                workspace_id,
+                scope,
                 publication_id,
                 operation_id,
                 table_code,
@@ -739,9 +773,9 @@ impl WorkspaceFabric {
                 request.expected_predecessor,
             )?;
             let (delete_version, deleted_rows, _) =
-                delete_phase(table, journal, delete, &owners).await?;
+                delete_phase(table, journal, delete, scope, &owners).await?;
             reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
-            let final_batch = owner_batch(table, spec, &owners).await?;
+            let final_batch = owner_batch(table, spec, scope, &owners).await?;
             if final_batch.num_rows() != 0 || batch_checksum(&final_batch)? != empty_checksum {
                 return Err(FabricError::MutationConflict(format!(
                     "owner removal read-back differs for {}",
@@ -830,7 +864,7 @@ mod tests {
 
     fn request(operation: u8, predecessor: Option<u64>, table_code: i16) -> OwnerMutationRequest {
         OwnerMutationRequest {
-            workspace_id: [1; 16],
+            scope: scope().batch_scope(),
             publication_id: [9; 16],
             operation_id: [operation; 16],
             table_code,
@@ -958,7 +992,13 @@ mod tests {
         assert_eq!(recovery.final_row_count, 1);
 
         let removed = fabric
-            .remove_owners(&mut journal, [1; 16], [9; 16], [13; 16], vec![[3; 16]])
+            .remove_owners(
+                &mut journal,
+                scope().batch_scope(),
+                [9; 16],
+                [13; 16],
+                vec![[3; 16]],
+            )
             .await
             .unwrap();
         assert!(removed.contains_key(&100));

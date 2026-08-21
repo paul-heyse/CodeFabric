@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:517b3ab5a19918b85846371397477575644f72aca97666897bcc58cc301759e5; codefabric-schema-contracts-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:188db6bfbfaabae78ce4935fb00b69fde44b6fd0ff8a1c95244f1d8c1acab206; codefabric-schema-contracts-v1; do not edit.
 
 const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
     GeneratedTableSpec {
@@ -603,6 +603,14 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 hidden_operational: false,
             },
             GeneratedColumn {
+                name: "primary_key_digest",
+                logical_type: LogicalType::Hash32,
+                nullable: false,
+                semantic_type: Some("hash32"),
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
                 name: "required",
                 logical_type: LogicalType::Boolean,
                 nullable: false,
@@ -732,7 +740,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "owner_kind_code",
@@ -870,7 +878,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "capability_code",
@@ -1169,7 +1177,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "language",
@@ -1273,7 +1281,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
         ],
         primary_key: &["workspace_id", "analysis_context_id", "entity_id"],
@@ -1339,7 +1347,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "language",
@@ -1387,7 +1395,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "target_bucket",
@@ -1395,7 +1403,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "ordinal",
@@ -1499,7 +1507,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
         ],
         primary_key: &["workspace_id", "analysis_context_id", "fact_id"],
@@ -1570,7 +1578,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "subject_entity_id",
@@ -1730,7 +1738,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
         ],
         primary_key: &["workspace_id", "analysis_context_id", "fact_id"],
@@ -1817,7 +1825,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "provider_code",
@@ -1987,7 +1995,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 nullable: false,
                 semantic_type: None,
                 foreign_key: None,
-                hidden_operational: false,
+                hidden_operational: true,
             },
             GeneratedColumn {
                 name: "reason_code",
@@ -2116,3 +2124,1652 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
         required_for_publication: false,
     },
 ];
+
+const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
+    GeneratedOperationalTableSpec {
+        name: "workspace_registration",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_registration_nonce",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "registration_revision",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "administrative_key",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "root_path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "root_path_display",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "root_directory_file_identity",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "platform_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "case_sensitivity_mode",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "authorization_revision",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "allowed_source_disclosure_rules",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "repository_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "authorization_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "context_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "status_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "updated_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+        ],
+        primary_key: &["workspace_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "workspace_generation",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "admitted_event_sequence",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "reconciled_event_sequence",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "durable_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "active_pointer_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "updated_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+        ],
+        primary_key: &["workspace_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "nested_root_exclusion",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "parent_workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "child_workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "relative_path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "relative_path_display",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "authorization_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+        ],
+        primary_key: &["parent_workspace_id", "child_workspace_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "credential_metadata",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "credential_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "agent_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "credential_hash",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "operations_mask",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "issued_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "expires_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "revoked_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "revocation_reason_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+        ],
+        primary_key: &["credential_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "audit_event",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "event_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "event_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "actor_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "occurred_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "details_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "diagnostic_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["event_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "repository_registration",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "repository_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "repository_registration_nonce",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+        ],
+        primary_key: &["repository_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "worktree_registration",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "worktree_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "repository_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_registration_nonce",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_kind",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "administrative_key",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "removed_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+        ],
+        primary_key: &["worktree_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "common_repository_state",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "repository_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "common_dir_path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "common_dir_path_display",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "object_format_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "gix_version",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "trust_policy_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_count",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "git_health_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "updated_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "last_diagnostic_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["repository_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::ViaParent {
+            parent_table: "worktree_state",
+            child_column: "repository_id",
+            parent_column: "repository_id",
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "worktree_state",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "repository_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "work_dir_path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "work_dir_path_display",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "git_dir_path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "git_dir_path_display",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "lifecycle_state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_trust_state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "event_stream_health_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "git_acceleration_status_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "active_snapshot_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "analysis_context_set_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "event_watermark",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "newest_dirty_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "durable_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "reconcile_required",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "updated_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "last_diagnostic_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "inventory_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["workspace_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "source_inventory",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "path_display",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "comparison_key_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "file_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "content_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "byte_length",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "file_kind_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "language_code",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "inventory_classification_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "inclusion_state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "git_repo_path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "git_blob_oid",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "current_file_owner",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["workspace_id", "source_generation", "path_bytes"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "source_blob",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "blob_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "byte_length",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "line_index_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "encoding_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "newline_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+        ],
+        primary_key: &["blob_digest"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "source_blob_lease",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "lease_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "holder_kind_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "holder_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "expires_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "orphaned_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+        ],
+        primary_key: &["lease_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "source_blob_lease_member",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "lease_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "blob_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+        ],
+        primary_key: &["lease_id", "blob_digest"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "git_state_vector",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "repository_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "head_kind_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "head_target",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "head_tree",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "index_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "index_entry_count",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "has_conflict_stages",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "repository_state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "inclusion_policy_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "attributes_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_inventory_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "captured_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+        ],
+        primary_key: &["workspace_id", "source_generation"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "update_wave",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "wave_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "event_watermark",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "candidate_strategy_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "input_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "candidate_count",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "started_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "terminal_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "diagnostic_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["wave_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "update_wave_item",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "wave_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "item_ordinal",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "path_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "path_display",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "path_encoding_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "input_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "output_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "diagnostic_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["wave_id", "item_ordinal"],
+        workspace_scope: Some(OperationalWorkspaceScope::ViaParent {
+            parent_table: "update_wave",
+            child_column: "wave_id",
+            parent_column: "wave_id",
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "provider_run",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "provider_run_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "analysis_context_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "wave_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "provider_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "owner_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "build_unit_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "input_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "output_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "accepted_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "terminal_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "diagnostic_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["provider_run_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "git_operation_run",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "git_operation_run_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "baseline_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "result_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "candidate_count",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "verified_count",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "started_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "terminal_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "diagnostic_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["git_operation_run_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "table_mutation_operation",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "operation_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "table_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "mutation_phase",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "application_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "application_version",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "publication_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "owner_set_fingerprint",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "input_checksum",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "expected_output_checksum",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "expected_predecessor",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "delta_version",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "completed_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+        ],
+        primary_key: &["operation_id", "table_code", "mutation_phase"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "hot_overlay_manifest",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "snapshot_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "base_publication_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "overlay_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "analysis_context_set_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "overlay_checksum",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "table_manifest_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+        ],
+        primary_key: &["workspace_id", "overlay_generation"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "snapshot_lease",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "lease_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "lease_kind_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "snapshot_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "base_publication_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "required_delta_versions_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "requires_overlay",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "agent_instance_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "last_heartbeat_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "expires_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "process_instance_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "orphaned_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "artifact_expires_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "source_blob_lease_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+        ],
+        primary_key: &["lease_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "result_artifact_lease",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "lease_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "artifact_uri",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "checksum",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "expires_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+        ],
+        primary_key: &["lease_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::ViaParent {
+            parent_table: "snapshot_lease",
+            child_column: "lease_id",
+            parent_column: "lease_id",
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "serving_snapshot_manifest",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "snapshot_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "publication_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "state_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "manifest_body_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "manifest_json_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "manifest_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "activated_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "retired_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: true,
+            },
+        ],
+        primary_key: &["snapshot_id"],
+        workspace_scope: None,
+    },
+    GeneratedOperationalTableSpec {
+        name: "active_snapshot",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "snapshot_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "activated_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "observed_durable_pointer_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "active_pointer_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "lease_count",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+        ],
+        primary_key: &["workspace_id"],
+        workspace_scope: None,
+    },
+];
+
+const GENERATED_TABLE_SCOPE_SPECS: &[TableScopeSpec] = &[
+    TableScopeSpec {
+        table_code: 1,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: None,
+        source_generation_column: None,
+        analysis_context_set_column: None,
+        owner_column: None,
+    },
+    TableScopeSpec {
+        table_code: 3,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: None,
+        analysis_context_set_column: None,
+        owner_column: None,
+    },
+    TableScopeSpec {
+        table_code: 4,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: None,
+        source_generation_column: None,
+        analysis_context_set_column: Some("analysis_context_set_id"),
+        owner_column: None,
+    },
+    TableScopeSpec {
+        table_code: 5,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: None,
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: Some("analysis_context_set_id"),
+        owner_column: None,
+    },
+    TableScopeSpec {
+        table_code: 6,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: None,
+        source_generation_column: None,
+        analysis_context_set_column: None,
+        owner_column: None,
+    },
+    TableScopeSpec {
+        table_code: 7,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: None,
+        source_generation_column: None,
+        analysis_context_set_column: None,
+        owner_column: None,
+    },
+    TableScopeSpec {
+        table_code: 8,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: Some("owner_id"),
+    },
+    TableScopeSpec {
+        table_code: 9,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: Some("owner_id"),
+    },
+    TableScopeSpec {
+        table_code: 10,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: None,
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: None,
+    },
+    TableScopeSpec {
+        table_code: 100,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: Some("owner_id"),
+    },
+    TableScopeSpec {
+        table_code: 110,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: Some("owner_id"),
+    },
+    TableScopeSpec {
+        table_code: 120,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: Some("owner_id"),
+    },
+    TableScopeSpec {
+        table_code: 130,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: Some("owner_id"),
+    },
+    TableScopeSpec {
+        table_code: 900,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: Some("owner_id"),
+    },
+    TableScopeSpec {
+        table_code: 901,
+        workspace_column: Some("workspace_id"),
+        analysis_context_column: Some("analysis_context_id"),
+        source_generation_column: Some("source_generation"),
+        analysis_context_set_column: None,
+        owner_column: None,
+    },
+];
+
+const GENERATED_SERVING_PROJECTION_SPECS: &[ServingProjectionSpec] = &[
+    ServingProjectionSpec {
+        view_name: "entities",
+        source_table_code: 100,
+        availability_wave: 3,
+        projection_role: ServingProjectionRole::EffectiveFact,
+    },
+    ServingProjectionSpec {
+        view_name: "relations",
+        source_table_code: 110,
+        availability_wave: 3,
+        projection_role: ServingProjectionRole::EffectiveFact,
+    },
+    ServingProjectionSpec {
+        view_name: "properties",
+        source_table_code: 120,
+        availability_wave: 3,
+        projection_role: ServingProjectionRole::EffectiveFact,
+    },
+    ServingProjectionSpec {
+        view_name: "evidence",
+        source_table_code: 130,
+        availability_wave: 3,
+        projection_role: ServingProjectionRole::EffectiveFact,
+    },
+];
+
+const GENERATED_CONTROL_PROJECTION_SPECS: &[ControlProjectionSpec] = &[
+    ControlProjectionSpec {
+        view_name: "common_repository_state",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("common_repository_state"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "worktree_state",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("worktree_state"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "update_wave",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("update_wave"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "update_wave_item",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("update_wave_item"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "provider_run",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("provider_run"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "git_operation_run",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("git_operation_run"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "hot_overlay_manifest",
+        availability_wave: 3,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("hot_overlay_manifest"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "snapshot_lease",
+        availability_wave: 3,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("snapshot_lease"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "result_artifact_lease",
+        availability_wave: 3,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("result_artifact_lease"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "workspace_update_state",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::DerivedOperational,
+        source_table: Some("worktree_state"),
+        columns: &[
+            "workspace_id",
+            "lifecycle_state_code",
+            "source_generation",
+            "event_watermark",
+            "newest_dirty_generation",
+            "durable_generation",
+            "reconcile_required",
+            "updated_at",
+        ],
+    },
+    ControlProjectionSpec {
+        view_name: "source_trust_state",
+        availability_wave: 2,
+        projection_role: ControlProjectionRole::DerivedOperational,
+        source_table: Some("worktree_state"),
+        columns: &[
+            "workspace_id",
+            "source_trust_state_code",
+            "event_stream_health_code",
+            "git_acceleration_status_code",
+            "last_diagnostic_id",
+            "updated_at",
+        ],
+    },
+    ControlProjectionSpec {
+        view_name: "active_serving_snapshot",
+        availability_wave: 3,
+        projection_role: ControlProjectionRole::ActiveServingSnapshot,
+        source_table: None,
+        columns: &[],
+    },
+];
+
+const GENERATED_SERVING_RESOURCE_PROFILE: ServingResourceProfile = ServingResourceProfile {
+    batch_size: 65_536,
+    max_output_rows: 100_000,
+    max_output_bytes: 67_108_864,
+    max_output_batches: 1_024,
+    max_control_rows: 100_000,
+    max_control_bytes: 67_108_864,
+    max_control_batches: 1_024,
+    max_snapshot_validation_rows: 1_000_000,
+    max_snapshot_validation_bytes: 268_435_456,
+    max_snapshot_validation_batches: 4_096,
+};

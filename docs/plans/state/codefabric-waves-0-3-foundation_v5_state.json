@@ -657,9 +657,14 @@
       "blockers": []
     },
     "WP25": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        {
+          "kind": "accepted_review_remediation",
+          "summary": "The user reopened WP25 to close implementation-review findings IR-001 through IR-005. Scope now includes manifest-to-row scope binding, bounded streaming/capture execution, generated serving and control projections, production Delta plan/runtime evidence, and terminal proof before packet and milestone certification."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -1086,6 +1091,6 @@
       "disposition": "review_closed_and_ubuntu_blocker_superseded_by_v5"
     }
   ],
-  "next_action": "Execute WP25: build the leased-snapshot-only DataFusion serving session, private catalogs and generated views, read-only statement policy, bounded execution resources, and pinned-query snapshot barrier.",
-  "updated_at": "2026-08-21T17:37:37Z"
+  "next_action": "Remediate WP25 IR-001 through IR-005, then run packet and M04 proof, commit the coherent packet, and record its proving commit.",
+  "updated_at": "2026-08-21T19:47:17Z"
 }

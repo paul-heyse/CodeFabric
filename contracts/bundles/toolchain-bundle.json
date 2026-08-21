@@ -4,17 +4,17 @@
   "artifacts": [
     {
       "artifact_id": "codefabric.toolchain.identity",
-      "canonical_digest": "b3:336e9cda40d0711fb34b84caf5a1483d30fa8ee427d0539180557fede65d9f3b",
+      "canonical_digest": "b3:7d03ec9e1e4ef12e2bad0d6271af87c088587256371e46afc8cb499f8dc8c566",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:65cef37dc58690005c2d0851dbeea6f21f91621a22946174b25951d179d68416",
+  "bundle_digest": "b3:eca3905ec61170d0c10f7e11510571f3c40dd057b3bb52b982542bf5ea5e587f",
   "bundle_kind": "toolchain",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:9490f07dbc7ea1c9a902961aca87624b3c94b4fb0b44d52fefb7dd283f73ef75",
+  "canonical_digest": "b3:5d80fad5002d024ddd36cbd8c2508a2b16af19a913ddf5c4a3b2858362ed0641",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0

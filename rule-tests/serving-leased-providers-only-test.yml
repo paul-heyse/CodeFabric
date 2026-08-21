@@ -1,0 +1,26 @@
+id: serving-leased-providers-only
+valid:
+  - |
+      fn session(lease: SnapshotLeaseGuard) {
+          let providers = lease.snapshot().providers();
+      }
+  - |
+      #[cfg(test)]
+      mod tests {
+          async fn production_fixture(publication: &PublicationOutcome, overlay: &Overlay) {
+              SnapshotProviderCatalog::build(publication, overlay).await;
+          }
+      }
+invalid:
+  - |
+      async fn session(publication: &PublicationOutcome, overlay: &Overlay) {
+          let providers = SnapshotProviderCatalog::build(publication, overlay).await;
+      }
+  - |
+      async fn session(path: &str) {
+          let handle = DeltaHandleFactory::open(path, Some(1), DeltaAccessProfile::QueryServing).await;
+      }
+  - |
+      async fn session(table: &DeltaTable, spec: &TableSpec) {
+          let provider = exact_provider(table, spec, DeltaAccessProfile::QueryServing).await;
+      }

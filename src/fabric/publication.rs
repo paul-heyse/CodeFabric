@@ -10,13 +10,13 @@ use arrow_array::{
 use arrow_row::{RowConverter, SortField};
 use arrow_select::concat::concat_batches;
 use datafusion::common::ScalarValue;
-use datafusion::logical_expr::{col, lit};
+use datafusion::logical_expr::{Expr, col, lit};
 use datafusion::prelude::SessionContext;
 use deltalake::protocol::SaveMode;
 
 use super::mutation::{
     DurableWriteKind, append_phase, application_id, commit_properties, enforce_write_kind,
-    reconcile_prepared, reload_table, storage_batch,
+    primary_key_checksum, reconcile_prepared, reload_table, storage_batch,
 };
 use super::{
     DeltaAccessProfile, FabricError, LocalProviderFactory, WorkspaceFabric, exact_provider,
@@ -25,11 +25,23 @@ use crate::fabric::{
     MutationJournal, MutationPhase, MutationPhaseSpec, OwnerMutationRequest, batch_checksum,
 };
 use crate::fact_ingest::ValidatedFactBatch;
+use crate::identity::context_set_identity;
 use crate::registries::{
     DURABLE_PUBLICATION_STATE_TRANSITIONS, DURABLE_PUBLICATION_STATE_VALUES,
     DurablePublicationState, generated_transition, registry_state_name,
 };
-use crate::schema_registry::{PublicationPinRole, TableSpec, table_spec, table_specs};
+use crate::schema_registry::{
+    PublicationPinRole, TableScopeSpec, TableSpec, table_scope_spec, table_spec, table_specs,
+};
+
+/// Closed row selection bound to one publication and every derived serving snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicationScope {
+    pub workspace_id: [u8; 16],
+    pub source_generation: i64,
+    pub analysis_context_set_id: [u8; 16],
+    pub analysis_context_ids: Vec<[u8; 16]>,
+}
 
 /// Immutable identity and environment pins for one durable publication attempt.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,6 +53,7 @@ pub struct PublicationPins {
     pub source_generation: i64,
     pub source_inventory_digest: [u8; 32],
     pub analysis_context_set_id: [u8; 16],
+    pub analysis_context_ids: Vec<[u8; 16]>,
     pub git_state_fingerprint: Option<[u8; 32]>,
     pub inclusion_policy_fingerprint: [u8; 32],
     pub base_fact_digest: [u8; 32],
@@ -83,6 +96,7 @@ pub struct PublicationTableRecord {
     pub row_count: i64,
     pub owner_count: i64,
     pub table_checksum: [u8; 32],
+    pub primary_key_digest: [u8; 32],
     pub required: bool,
     pub validated: bool,
 }
@@ -100,8 +114,40 @@ pub struct CurrentPublicationRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublicationOutcome {
     pub publication_id: [u8; 16],
+    pub scope: PublicationScope,
     pub pointer: CurrentPublicationRecord,
     pub tables: BTreeMap<i16, PublicationTableRecord>,
+}
+
+impl PublicationPins {
+    fn scope(&self) -> Result<PublicationScope, FabricError> {
+        if self.analysis_context_ids.is_empty() {
+            return Err(FabricError::PublicationIntegrity(
+                "publication context membership is empty".into(),
+            ));
+        }
+        let mut normalized = self.analysis_context_ids.clone();
+        normalized.sort_unstable();
+        normalized.dedup();
+        if normalized != self.analysis_context_ids {
+            return Err(FabricError::PublicationIntegrity(
+                "publication context membership is not sorted and unique".into(),
+            ));
+        }
+        let derived = context_set_identity(self.workspace_id, &normalized)
+            .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+        if derived.id != self.analysis_context_set_id {
+            return Err(FabricError::PublicationIntegrity(
+                "publication context-set identity does not match its members".into(),
+            ));
+        }
+        Ok(PublicationScope {
+            workspace_id: self.workspace_id,
+            source_generation: self.source_generation,
+            analysis_context_set_id: self.analysis_context_set_id,
+            analysis_context_ids: normalized,
+        })
+    }
 }
 
 /// Registered deterministic crash seams in the durable publication protocol.
@@ -267,6 +313,10 @@ fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordB
         .iter()
         .map(|record| Some(record.table_checksum.as_slice()))
         .collect::<Vec<_>>();
+    let primary_key_digests = records
+        .iter()
+        .map(|record| Some(record.primary_key_digest.as_slice()))
+        .collect::<Vec<_>>();
     let columns: Vec<ArrayRef> = vec![
         Arc::new(BinaryArray::from(publication_ids)),
         Arc::new(BinaryArray::from(workspace_ids)),
@@ -300,6 +350,7 @@ fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordB
                 .collect::<Vec<_>>(),
         )),
         Arc::new(BinaryArray::from(checksums)),
+        Arc::new(BinaryArray::from(primary_key_digests)),
         Arc::new(BooleanArray::from(
             records
                 .iter()
@@ -364,12 +415,45 @@ fn phase(
 async fn collect_table(
     table: &super::FabricTable,
     spec: &TableSpec,
+    filter: Option<Expr>,
 ) -> Result<RecordBatch, FabricError> {
-    let batches = SessionContext::new()
-        .read_table(Arc::clone(&table.provider))?
-        .collect()
-        .await?;
+    let frame = SessionContext::new().read_table(Arc::clone(&table.provider))?;
+    let frame = if let Some(filter) = filter {
+        frame.filter(filter)?
+    } else {
+        frame
+    };
+    let batches = frame.collect().await?;
     Ok(concat_batches(&spec.arrow_schema, &batches)?)
+}
+
+pub(super) fn scope_filter(spec: &TableScopeSpec, scope: &PublicationScope) -> Option<Expr> {
+    let mut predicates = Vec::new();
+    if let Some(column) = spec.workspace_column {
+        predicates
+            .push(col(column).eq(lit(ScalarValue::Binary(Some(scope.workspace_id.to_vec())))));
+    }
+    if let Some(column) = spec.source_generation_column {
+        predicates.push(col(column).eq(lit(scope.source_generation)));
+    }
+    if let Some(column) = spec.analysis_context_set_column {
+        predicates.push(col(column).eq(lit(ScalarValue::Binary(Some(
+            scope.analysis_context_set_id.to_vec(),
+        )))));
+    }
+    if let Some(column) = spec.analysis_context_column {
+        let contexts = scope
+            .analysis_context_ids
+            .iter()
+            .fold(None, |combined, context| {
+                let predicate = col(column).eq(lit(ScalarValue::Binary(Some(context.to_vec()))));
+                Some(combined.map_or(predicate.clone(), |prior: Expr| prior.or(predicate)))
+            });
+        if let Some(contexts) = contexts {
+            predicates.push(contexts);
+        }
+    }
+    predicates.into_iter().reduce(Expr::and)
 }
 
 fn distinct_binary(batch: &RecordBatch, column: &str) -> Result<i64, FabricError> {
@@ -399,6 +483,7 @@ async fn manifest_records(
     ),
     FabricError,
 > {
+    let scope = request.pins.scope()?;
     let mut records = BTreeMap::new();
     let mut batches = BTreeMap::new();
     for spec in table_specs()
@@ -414,7 +499,12 @@ async fn manifest_records(
         let delta_version = table.version().ok_or_else(|| {
             FabricError::PublicationIntegrity(format!("{} has no Delta version", spec.name))
         })?;
-        let batch = collect_table(table, spec).await?;
+        let batch = collect_table(
+            table,
+            spec,
+            table_scope_spec(spec.table_code).and_then(|selectors| scope_filter(selectors, &scope)),
+        )
+        .await?;
         let row_count = i64::try_from(batch.num_rows())
             .map_err(|_| FabricError::PublicationIntegrity("row count exceeds i64".into()))?;
         let owner_count = if spec.arrow_schema.index_of("owner_id").is_ok() {
@@ -433,6 +523,7 @@ async fn manifest_records(
             row_count,
             owner_count,
             table_checksum: batch_checksum(&batch)?,
+            primary_key_digest: primary_key_checksum(&batch, spec)?,
             required: spec.required_for_publication,
             validated: false,
         };
@@ -777,7 +868,7 @@ async fn mark_manifest_validated<J: MutationJournal>(
 async fn read_current_pointer(
     table: &super::FabricTable,
 ) -> Result<Option<CurrentPublicationRecord>, FabricError> {
-    let batch = collect_table(table, table_spec(7).unwrap()).await?;
+    let batch = collect_table(table, table_spec(7).unwrap(), None).await?;
     if batch.num_rows() == 0 {
         return Ok(None);
     }
@@ -959,8 +1050,14 @@ async fn apply_owner_publication_writes<J: MutationJournal>(
     fault: Option<PublicationFaultPoint>,
 ) -> Result<(), FabricError> {
     for write in writes {
+        let publication_scope = request.pins.scope()?;
         if write.request.publication_id != request.pins.publication_id
-            || write.request.workspace_id != request.pins.workspace_id
+            || write.request.scope.workspace_id != publication_scope.workspace_id
+            || write.request.scope.source_generation != publication_scope.source_generation
+            || !publication_scope
+                .analysis_context_ids
+                .contains(&write.request.scope.analysis_context_id)
+            || write.batch.scope().batch_scope() != write.request.scope
         {
             return Err(FabricError::PublicationIntegrity(
                 "owner write is outside publication identity".into(),
@@ -1170,6 +1267,7 @@ impl WorkspaceFabric {
         writes: &[OwnerPublicationWrite],
         fault: Option<PublicationFaultPoint>,
     ) -> Result<PublicationOutcome, FabricError> {
+        let scope = request.pins.scope()?;
         stage_publication(self, journal, request, fault).await?;
         apply_owner_publication_writes(self, journal, request, writes, fault).await?;
         let (mut records, batches) =
@@ -1178,6 +1276,7 @@ impl WorkspaceFabric {
         let pointer = complete_publication(self, journal, request, fault).await?;
         Ok(PublicationOutcome {
             publication_id: request.pins.publication_id,
+            scope,
             pointer,
             tables: records,
         })
@@ -1312,7 +1411,7 @@ mod tests {
     ) -> OwnerPublicationWrite {
         OwnerPublicationWrite {
             request: OwnerMutationRequest {
-                workspace_id: [1; 16],
+                scope: scope().batch_scope(),
                 publication_id: [publication; 16],
                 operation_id: operation_id(publication, table_code),
                 table_code,
@@ -1331,6 +1430,10 @@ mod tests {
     }
 
     async fn request(fabric: &WorkspaceFabric, publication: u8) -> PublicationRequest {
+        let analysis_context_ids = vec![[2; 16]];
+        let analysis_context_set_id = context_set_identity([1; 16], &analysis_context_ids)
+            .unwrap()
+            .id;
         PublicationRequest {
             operation_id: [publication.wrapping_add(100); 16],
             pins: PublicationPins {
@@ -1340,7 +1443,8 @@ mod tests {
                 worktree_id: None,
                 source_generation: 7,
                 source_inventory_digest: [10; 32],
-                analysis_context_set_id: [11; 16],
+                analysis_context_set_id,
+                analysis_context_ids,
                 git_state_fingerprint: None,
                 inclusion_policy_fingerprint: [12; 32],
                 base_fact_digest: [13; 32],
@@ -1364,7 +1468,7 @@ mod tests {
         fabric: &WorkspaceFabric,
         publication_id: [u8; 16],
     ) -> (i16, i64) {
-        let batch = collect_table(fabric.table(5).unwrap(), table_spec(5).unwrap())
+        let batch = collect_table(fabric.table(5).unwrap(), table_spec(5).unwrap(), None)
             .await
             .unwrap();
         let ids = batch
@@ -1392,7 +1496,7 @@ mod tests {
         fabric: &WorkspaceFabric,
         publication_id: [u8; 16],
     ) -> (i32, Option<i64>) {
-        let batch = collect_table(fabric.table(5).unwrap(), table_spec(5).unwrap())
+        let batch = collect_table(fabric.table(5).unwrap(), table_spec(5).unwrap(), None)
             .await
             .unwrap();
         let ids = batch
@@ -1465,6 +1569,17 @@ mod tests {
         let mut missing_batch = batches;
         missing_batch.pop_first();
         assert!(validate_candidate(&records, &missing_batch).is_err());
+        let mut other_scope = request.clone();
+        other_scope.pins.source_generation = 8;
+        other_scope.pins.analysis_context_ids = vec![[9; 16]];
+        other_scope.pins.analysis_context_set_id = context_set_identity(
+            other_scope.pins.workspace_id,
+            &other_scope.pins.analysis_context_ids,
+        )
+        .unwrap()
+        .id;
+        let (other_records, _) = manifest_records(&fabric, &other_scope).await.unwrap();
+        assert_eq!(other_records[&100].row_count, 0);
         let duplicate = fabric
             .publish(&mut journal, &request, &writes)
             .await
@@ -1529,6 +1644,27 @@ mod tests {
             state_and_diagnostics(&invalid_fabric, [30; 16]).await,
             (state_code(DurablePublicationState::Failed), 1)
         );
+
+        let scope_root = tempfile::tempdir().unwrap();
+        let (mut scope_fabric, mut scope_journal) = fixture(scope_root.path()).await;
+        let mut scope_request = request(&scope_fabric, 33).await;
+        scope_request.pins.analysis_context_set_id = [0xff; 16];
+        assert!(matches!(
+            scope_fabric
+                .publish(&mut scope_journal, &scope_request, &[])
+                .await,
+            Err(FabricError::PublicationIntegrity(_))
+        ));
+
+        let scope_request = request(&scope_fabric, 34).await;
+        let mut scope_writes = valid_writes(&scope_fabric, 34);
+        scope_writes[0].request.scope.source_generation = 99;
+        assert!(matches!(
+            scope_fabric
+                .publish(&mut scope_journal, &scope_request, &scope_writes)
+                .await,
+            Err(FabricError::PublicationIntegrity(_))
+        ));
 
         let intermediate_root = tempfile::tempdir().unwrap();
         let (mut intermediate, mut journal) = fixture(intermediate_root.path()).await;

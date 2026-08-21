@@ -49,6 +49,25 @@ pub struct FactScope {
     pub owner_id: [u8; 16],
 }
 
+/// Scope shared by every owner batch in one publication selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FactBatchScope {
+    pub workspace_id: [u8; 16],
+    pub analysis_context_id: [u8; 16],
+    pub source_generation: i64,
+}
+
+impl FactScope {
+    #[must_use]
+    pub const fn batch_scope(self) -> FactBatchScope {
+        FactBatchScope {
+            workspace_id: self.workspace_id,
+            analysis_context_id: self.analysis_context_id,
+            source_generation: self.source_generation,
+        }
+    }
+}
+
 /// One canonical `entity` row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntityRow {
@@ -1142,6 +1161,7 @@ pub struct CanonicalIngestOutput {
 #[derive(Clone, Debug)]
 pub struct ValidatedFactBatch {
     table_code: i16,
+    scope: FactScope,
     batch: RecordBatch,
 }
 
@@ -1157,13 +1177,23 @@ impl ValidatedFactBatch {
         scope: FactScope,
     ) -> Result<Self, FactIngestError> {
         validate_fact_batch(&batch, table_code, scope)?;
-        Ok(Self { table_code, batch })
+        Ok(Self {
+            table_code,
+            scope,
+            batch,
+        })
     }
 
     /// Generated table code this batch exactly satisfies.
     #[must_use]
     pub const fn table_code(&self) -> i16 {
         self.table_code
+    }
+
+    /// Exact scope proved at batch admission.
+    #[must_use]
+    pub const fn scope(&self) -> FactScope {
+        self.scope
     }
 
     /// Read-only access for queries, checksums, and the policy-enforcing writer.

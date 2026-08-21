@@ -11,7 +11,7 @@
     },
     {
       "artifact_id": "codefabric.query.planspec.schema",
-      "canonical_digest": "b3:97c59e0ec15b79ca257c3f3913b22caf7ea5a23f75f469f9d80b7ab5e7466cfe",
+      "canonical_digest": "b3:94a57ccf105dd480e04637b23421f75af8af8b9b9b679894d2d7c15e73242654",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -39,24 +39,24 @@
     },
     {
       "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
-      "canonical_digest": "b3:c3336c1750d388c60bc000a36e51c417e5e53e0314704fb96379e66c6fc633a6",
+      "canonical_digest": "b3:ecbb1821c4870579f291721c72e1dc76fa0f84cb641e6bcc06f2145fd8b6e9e3",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     },
     {
       "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
-      "canonical_digest": "b3:702e8462f3ac601fbc874dffca9d7e9dcf477a1241604266212e40f192a35270",
+      "canonical_digest": "b3:85a4390cbef6b451d1a666c0c48642c43adb8252d0169710df0529d935741ebd",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:9315dc883a9be275ac28ca31d23fecf189be1aa1af91bc8e39763c7e7d9fad46",
+  "bundle_digest": "b3:da4f2ce53b1a823f3263b478498e2f387ee094d2a589603e7761d296f70f509d",
   "bundle_kind": "query-language",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:d775b6405ede2a6761673f90843820f029fe53e9d422cee934b6d57c936f3fa1",
+  "canonical_digest": "b3:beb1ccbe016320b717dcced9ade81e5ef52d680e96713355d3be1f9eb3560509",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0

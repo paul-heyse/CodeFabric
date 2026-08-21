@@ -65,6 +65,97 @@ pub struct TableSpec {
     pub required_for_publication: bool,
 }
 
+/// Generated row-scope selectors applied at publication and provider construction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TableScopeSpec {
+    pub table_code: i16,
+    pub workspace_column: Option<&'static str>,
+    pub analysis_context_column: Option<&'static str>,
+    pub source_generation_column: Option<&'static str>,
+    pub analysis_context_set_column: Option<&'static str>,
+    pub owner_column: Option<&'static str>,
+}
+
+/// Closed role of one generated serving projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ServingProjectionRole {
+    EffectiveFact,
+}
+
+/// One generated `cpg_serving` projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ServingProjectionSpec {
+    pub view_name: &'static str,
+    pub source_table_code: i16,
+    pub availability_wave: u16,
+    pub projection_role: ServingProjectionRole,
+}
+
+/// Closed implementation role for one generated control projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlProjectionRole {
+    OperationalSource,
+    DerivedOperational,
+    ActiveServingSnapshot,
+}
+
+/// One generated `cpg_control` projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ControlProjectionSpec {
+    pub view_name: &'static str,
+    pub availability_wave: u16,
+    pub projection_role: ControlProjectionRole,
+    pub source_table: Option<&'static str>,
+    pub columns: &'static [&'static str],
+}
+
+/// Generated non-timing resource limits for serving and candidate construction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ServingResourceProfile {
+    pub batch_size: usize,
+    pub max_output_rows: usize,
+    pub max_output_bytes: usize,
+    pub max_output_batches: usize,
+    pub max_control_rows: usize,
+    pub max_control_bytes: usize,
+    pub max_control_batches: usize,
+    pub max_snapshot_validation_rows: usize,
+    pub max_snapshot_validation_bytes: usize,
+    pub max_snapshot_validation_batches: usize,
+}
+
+/// `SQLite` affinity mapped to one query-visible Arrow physical type.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationalSqliteType {
+    Integer,
+    Real,
+    Text,
+    Blob,
+}
+
+/// One generated read-only operational projection schema.
+#[derive(Clone, Debug)]
+pub struct OperationalTableSpec {
+    pub name: &'static str,
+    pub arrow_schema: SchemaRef,
+    pub primary_key: &'static [&'static str],
+    pub workspace_scope: Option<OperationalWorkspaceScope>,
+}
+
+/// Generated route from an operational row to its owning workspace.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationalWorkspaceScope {
+    Direct {
+        workspace_column: &'static str,
+    },
+    ViaParent {
+        parent_table: &'static str,
+        child_column: &'static str,
+        parent_column: &'static str,
+        workspace_column: &'static str,
+    },
+}
+
 impl TableSpec {
     /// Construct the DataFusion planning schema without changing field identity.
     ///
@@ -139,6 +230,21 @@ struct GeneratedTableSpec {
     publication_pin_role: PublicationPinRole,
     dependencies: &'static [i16],
     required_for_publication: bool,
+}
+
+#[derive(Clone, Copy)]
+struct GeneratedOperationalColumn {
+    name: &'static str,
+    sqlite_type: OperationalSqliteType,
+    nullable: bool,
+}
+
+#[derive(Clone, Copy)]
+struct GeneratedOperationalTableSpec {
+    name: &'static str,
+    columns: &'static [GeneratedOperationalColumn],
+    primary_key: &'static [&'static str],
+    workspace_scope: Option<OperationalWorkspaceScope>,
 }
 
 include!("generated/table_specs.rs");
@@ -341,6 +447,75 @@ pub fn table_spec(table_code: i16) -> Option<&'static TableSpec> {
     table_specs()
         .iter()
         .find(|table| table.table_code == table_code)
+}
+
+/// Resolve generated row-scope selectors by table code.
+#[must_use]
+pub fn table_scope_spec(table_code: i16) -> Option<&'static TableScopeSpec> {
+    GENERATED_TABLE_SCOPE_SPECS
+        .iter()
+        .find(|scope| scope.table_code == table_code)
+}
+
+/// Return every generated Wave-owned serving projection.
+#[must_use]
+pub const fn serving_projection_specs() -> &'static [ServingProjectionSpec] {
+    GENERATED_SERVING_PROJECTION_SPECS
+}
+
+/// Return every generated control projection.
+#[must_use]
+pub const fn control_projection_specs() -> &'static [ControlProjectionSpec] {
+    GENERATED_CONTROL_PROJECTION_SPECS
+}
+
+/// Return the generated serving resource profile.
+#[must_use]
+pub const fn serving_resource_profile() -> ServingResourceProfile {
+    GENERATED_SERVING_RESOURCE_PROFILE
+}
+
+fn build_operational(contract: GeneratedOperationalTableSpec) -> OperationalTableSpec {
+    let fields = contract
+        .columns
+        .iter()
+        .map(|column| {
+            let data_type = match column.sqlite_type {
+                OperationalSqliteType::Integer => DataType::Int64,
+                OperationalSqliteType::Real => DataType::Float64,
+                OperationalSqliteType::Text => DataType::Utf8,
+                OperationalSqliteType::Blob => DataType::Binary,
+            };
+            Field::new(column.name, data_type, column.nullable)
+        })
+        .collect::<Vec<_>>();
+    OperationalTableSpec {
+        name: contract.name,
+        arrow_schema: Arc::new(Schema::new(fields)),
+        primary_key: contract.primary_key,
+        workspace_scope: contract.workspace_scope,
+    }
+}
+
+/// Return every generated operational-store projection in source order.
+#[must_use]
+pub fn operational_table_specs() -> &'static [OperationalTableSpec] {
+    static OPERATIONAL_SPECS: OnceLock<Vec<OperationalTableSpec>> = OnceLock::new();
+    OPERATIONAL_SPECS.get_or_init(|| {
+        GENERATED_OPERATIONAL_TABLE_SPECS
+            .iter()
+            .copied()
+            .map(build_operational)
+            .collect()
+    })
+}
+
+/// Resolve one generated operational-store projection by table name.
+#[must_use]
+pub fn operational_table_spec(name: &str) -> Option<&'static OperationalTableSpec> {
+    operational_table_specs()
+        .iter()
+        .find(|table| table.name == name)
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::identity::{
     CbefField, CbefRecord, CbefValue, IdentityDomain, IdentityError, StringNormalization,
-    decode_public_id, derive_identity, encode_public_id, encode_record,
+    context_set_identity, decode_public_id, derive_identity, encode_public_id, encode_record,
 };
 
 const MANIFEST_DOMAIN: &[u8] = b"codefabric-serving-snapshot-manifest-v1";
@@ -224,6 +224,15 @@ impl ServingSnapshotManifest {
     pub fn raw_manifest_digest(&self) -> Result<[u8; 32], SnapshotManifestError> {
         decode_digest(&self.manifest_digest, "manifest_digest")
     }
+
+    /// Decode and validate the ordered context membership bound by the context-set ID.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty, unsorted, duplicate, malformed, or identity-inconsistent set.
+    pub fn raw_analysis_context_ids(&self) -> Result<Vec<[u8; 16]>, SnapshotManifestError> {
+        self.body.validated_context_ids()
+    }
 }
 
 fn text(value: &str) -> CbefValue {
@@ -370,6 +379,58 @@ fn overlay_table(table: &SnapshotOverlayTable) -> Result<CbefValue, SnapshotMani
 }
 
 impl ServingSnapshotManifestBody {
+    fn validated_context_ids(&self) -> Result<Vec<[u8; 16]>, SnapshotManifestError> {
+        let workspace_id = decode_public_id(IdentityDomain::Workspace, None, &self.workspace_id)
+            .map_err(|_| SnapshotManifestError::InvalidField("workspace_id"))?;
+        let context_set_id = decode_public_id(
+            IdentityDomain::ContextSet,
+            None,
+            &self.contexts.context_set_id,
+        )
+        .map_err(|_| SnapshotManifestError::InvalidField("contexts.context_set_id"))?;
+        let ids = self
+            .contexts
+            .records
+            .iter()
+            .map(|record| {
+                decode_public_id(
+                    IdentityDomain::AnalysisContext,
+                    None,
+                    &record.analysis_context_id,
+                )
+                .map_err(|_| {
+                    SnapshotManifestError::InvalidField("contexts.records.analysis_context_id")
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if ids.is_empty() || !ids.windows(2).all(|pair| pair[0] < pair[1]) {
+            return Err(SnapshotManifestError::InvalidField(
+                "contexts.records membership order",
+            ));
+        }
+        if context_set_identity(workspace_id, &ids)?.id != context_set_id {
+            return Err(SnapshotManifestError::InvalidField(
+                "contexts.context_set_id membership",
+            ));
+        }
+        for default in [
+            self.contexts.default_python_context_id.as_deref(),
+            self.contexts.default_rust_context_id.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let id = decode_public_id(IdentityDomain::AnalysisContext, None, default)
+                .map_err(|_| SnapshotManifestError::InvalidField("contexts.default_context"))?;
+            if !ids.contains(&id) {
+                return Err(SnapshotManifestError::InvalidField(
+                    "contexts.default_context membership",
+                ));
+            }
+        }
+        Ok(ids)
+    }
+
     /// Encode the exact immutable manifest body in the AC-G-19 field order.
     ///
     /// # Errors
@@ -380,6 +441,7 @@ impl ServingSnapshotManifestBody {
         if self.manifest_version != "1.0" {
             return Err(SnapshotManifestError::InvalidField("manifest_version"));
         }
+        self.validated_context_ids()?;
         let source = map(vec![
             ("source_generation", unsigned(self.source.source_generation)),
             (
@@ -689,6 +751,13 @@ mod tests {
 
     fn body() -> ServingSnapshotManifestBody {
         let id = |prefix: &str, byte: u8| format!("{prefix}:{}", hex(&[byte; 16]));
+        let context_ids = [[5; 16]];
+        let context_set_id = encode_public_id(
+            IdentityDomain::ContextSet,
+            None,
+            context_set_identity([1; 16], &context_ids).unwrap().id,
+        )
+        .unwrap();
         ServingSnapshotManifestBody {
             manifest_version: "1.0".to_owned(),
             workspace_id: id("workspace", 1),
@@ -709,7 +778,7 @@ mod tests {
                 git_state_fingerprint: Some(digest_value(4)),
             },
             contexts: SnapshotContexts {
-                context_set_id: id("context-set", 4),
+                context_set_id,
                 default_python_context_id: Some(id("context", 5)),
                 default_rust_context_id: None,
                 records: vec![SnapshotContextRecord {

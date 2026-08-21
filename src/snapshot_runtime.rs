@@ -9,7 +9,9 @@ use rusqlite::{OptionalExtension as _, params};
 use thiserror::Error;
 
 use crate::fabric::SnapshotProviderCatalog;
-use crate::identity::{IdentityDomain, encode_public_id, random_registration_nonce};
+use crate::identity::{
+    IdentityDomain, decode_public_id, encode_public_id, random_registration_nonce,
+};
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::registries::{
     ServingActivationState, SnapshotLeaseKind, SnapshotLeaseState, WorkspaceRegistryLifecycle,
@@ -106,7 +108,7 @@ impl ServingSnapshotCandidate {
                     table_uri: record.manifest.table_uri.clone(),
                     delta_version: record.manifest.delta_version,
                     schema_digest: framed_digest(record.manifest.schema_fingerprint),
-                    row_count: u64::try_from(record.manifest.row_count).map_err(|_| {
+                    row_count: u64::try_from(record.effective_row_count).map_err(|_| {
                         SnapshotRuntimeError::Candidate("negative row count".into())
                     })?,
                     primary_key_digest: framed_digest(record.primary_key_digest),
@@ -148,6 +150,24 @@ impl ServingSnapshotCandidate {
             ));
         }
         let workspace_id = manifest.raw_workspace_id()?;
+        let context_ids = manifest.raw_analysis_context_ids()?;
+        let provider_scope = providers.scope();
+        let manifest_generation = i64::try_from(manifest.body.source.source_generation)
+            .map_err(|_| SnapshotRuntimeError::Candidate("source generation exceeds i64".into()))?;
+        let manifest_context_set = decode_public_id(
+            IdentityDomain::ContextSet,
+            None,
+            &manifest.body.contexts.context_set_id,
+        )?;
+        if provider_scope.workspace_id != workspace_id
+            || provider_scope.source_generation != manifest_generation
+            || provider_scope.analysis_context_set_id != manifest_context_set
+            || provider_scope.analysis_context_ids != context_ids
+        {
+            return Err(SnapshotRuntimeError::Candidate(
+                "manifest row scope differs from frozen provider scope".into(),
+            ));
+        }
         if manifest.body.base_publication.tables.len() != providers.provider_records().len() {
             return Err(SnapshotRuntimeError::Candidate(
                 "manifest table census differs from frozen catalog".into(),
@@ -159,7 +179,7 @@ impl ServingSnapshotCandidate {
             let record = providers.provider_record(table_code).ok_or_else(|| {
                 SnapshotRuntimeError::Candidate(format!("unknown table code {table_code}"))
             })?;
-            let row_count = u64::try_from(record.manifest.row_count)
+            let row_count = u64::try_from(record.effective_row_count)
                 .map_err(|_| SnapshotRuntimeError::Candidate("negative row count".into()))?;
             if record.manifest.workspace_id != workspace_id
                 || table.table_uri != record.manifest.table_uri
@@ -1052,7 +1072,8 @@ mod tests {
     use super::*;
     use crate::fabric::SnapshotProviderCatalog;
     use crate::snapshot::{
-        SnapshotBundles, SnapshotContexts, SnapshotIndexes, SnapshotOverlay, SnapshotSource,
+        SnapshotBundles, SnapshotContextRecord, SnapshotContexts, SnapshotIndexes, SnapshotOverlay,
+        SnapshotSource,
     };
     use rusqlite::params;
     use tempfile::tempdir;
@@ -1060,6 +1081,22 @@ mod tests {
     const WORKSPACE: [u8; 16] = [0x11; 16];
     const PUBLICATION: [u8; 16] = [0x22; 16];
     const OVERLAY: [u8; 32] = [0x33; 32];
+    const CONTEXT: [u8; 16] = [0x44; 16];
+
+    fn publication_scope(source_generation: u64) -> crate::fabric::PublicationScope {
+        let analysis_context_ids = vec![CONTEXT];
+        crate::fabric::PublicationScope {
+            workspace_id: WORKSPACE,
+            source_generation: i64::try_from(source_generation).unwrap(),
+            analysis_context_set_id: crate::identity::context_set_identity(
+                WORKSPACE,
+                &analysis_context_ids,
+            )
+            .unwrap()
+            .id,
+            analysis_context_ids,
+        }
+    }
 
     fn digest(byte: u8) -> String {
         framed_digest([byte; 32])
@@ -1086,11 +1123,24 @@ mod tests {
                 git_state_fingerprint: Some(digest(4)),
             },
             contexts: SnapshotContexts {
-                context_set_id: encode_public_id(IdentityDomain::ContextSet, None, [0x44; 16])
-                    .unwrap(),
+                context_set_id: encode_public_id(
+                    IdentityDomain::ContextSet,
+                    None,
+                    publication_scope(source_generation).analysis_context_set_id,
+                )
+                .unwrap(),
                 default_python_context_id: None,
                 default_rust_context_id: None,
-                records: Vec::new(),
+                records: vec![SnapshotContextRecord {
+                    analysis_context_id: encode_public_id(
+                        IdentityDomain::AnalysisContext,
+                        None,
+                        CONTEXT,
+                    )
+                    .unwrap(),
+                    context_manifest_digest: digest(9),
+                    capability_partition_digest: digest(10),
+                }],
             },
             base_publication: SnapshotBasePublication {
                 publication_id: String::new(),
@@ -1125,6 +1175,7 @@ mod tests {
             PUBLICATION,
             0,
             OVERLAY,
+            publication_scope(source_generation),
         ));
         Arc::new(ServingSnapshotCandidate::build(body(source_generation), catalog, &[]).unwrap())
     }
@@ -1135,6 +1186,8 @@ mod tests {
             WORKSPACE,
             100,
             OVERLAY,
+            1,
+            vec![CONTEXT],
         ));
         Arc::new(ServingSnapshotCandidate::build(body(1), catalog, &[]).unwrap())
     }
@@ -1205,10 +1258,55 @@ mod tests {
                 .is_err()
         );
         let manifest = candidate.manifest().clone();
+        let mut wrong_generation = manifest.body.clone();
+        wrong_generation.source.source_generation += 1;
+        assert!(
+            ServingSnapshotCandidate::validate_and_bind(
+                wrong_generation.derive().unwrap(),
+                candidate.providers(),
+                &[],
+            )
+            .is_err()
+        );
+        let mut wrong_context = manifest.body.clone();
+        let replacement = [0x45; 16];
+        wrong_context.contexts.records[0].analysis_context_id =
+            encode_public_id(IdentityDomain::AnalysisContext, None, replacement).unwrap();
+        wrong_context.contexts.context_set_id = encode_public_id(
+            IdentityDomain::ContextSet,
+            None,
+            crate::identity::context_set_identity(WORKSPACE, &[replacement])
+                .unwrap()
+                .id,
+        )
+        .unwrap();
+        assert!(
+            ServingSnapshotCandidate::validate_and_bind(
+                wrong_context.derive().unwrap(),
+                candidate.providers(),
+                &[],
+            )
+            .is_err()
+        );
         for catalog in [
-            SnapshotProviderCatalog::empty_for_snapshot_tests([0x23; 16], 0, OVERLAY),
-            SnapshotProviderCatalog::empty_for_snapshot_tests(PUBLICATION, 1, OVERLAY),
-            SnapshotProviderCatalog::empty_for_snapshot_tests(PUBLICATION, 0, [0x34; 32]),
+            SnapshotProviderCatalog::empty_for_snapshot_tests(
+                [0x23; 16],
+                0,
+                OVERLAY,
+                publication_scope(1),
+            ),
+            SnapshotProviderCatalog::empty_for_snapshot_tests(
+                PUBLICATION,
+                1,
+                OVERLAY,
+                publication_scope(1),
+            ),
+            SnapshotProviderCatalog::empty_for_snapshot_tests(
+                PUBLICATION,
+                0,
+                [0x34; 32],
+                publication_scope(1),
+            ),
         ] {
             assert!(
                 ServingSnapshotCandidate::validate_and_bind(
@@ -1248,6 +1346,8 @@ mod tests {
             [0x12; 16],
             100,
             OVERLAY,
+            1,
+            vec![CONTEXT],
         ));
         assert!(ServingSnapshotCandidate::build(body(1), wrong_workspace, &[]).is_err());
     }

@@ -127,6 +127,7 @@ url = { version = "2", optional = true }
 
 [dev-dependencies]
 hyper-util = { version = "=0.1.20", features = ["tokio"] }
+insta = "=1.48.0"
 tokio-stream = { version = "=0.1.18", features = ["net"] }
 tower = { version = "=0.5.3", features = ["util"] }
 

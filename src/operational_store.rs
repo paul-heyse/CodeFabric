@@ -751,6 +751,15 @@ impl OperationalReader {
     ) -> rusqlite::Result<T> {
         operation(&self.connection)
     }
+
+    /// Execute one read-only callback whose domain error carries more context than `SQLite`.
+    #[cfg(feature = "daemon")]
+    pub(crate) fn with_connection_result<T, E>(
+        &self,
+        operation: impl FnOnce(&Connection) -> Result<T, E>,
+    ) -> Result<T, E> {
+        operation(&self.connection)
+    }
 }
 
 /// Digest of the exact generated DDL bytes compiled into the daemon.
