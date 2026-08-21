@@ -12,8 +12,7 @@ predecessor_plan_path: docs/plans/codefabric_waves_0-3_foundation_implementation
 remediation_plan_path: docs/plans/codefabric_model_based_foundation_remediation_implementation_plan_v1_2026-08-20.md
 status_review_path: docs/reviews/implementation_status_codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20_2026-08-20_v1.md
 implementation_review_path: docs/reviews/implementation_review_codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20_2026-08-20_v2.md
-baseline_commit: cdad126b8af7c25f09e9b25b9cb51e1fdf9b822a
-working_tree_digest: 7855ea6e91c272e75cb0bf8285913bd62a8d54713a37fb1937bfe50be734d771
+baseline_commit: ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e
 state_path: docs/plans/state/codefabric-waves-0-3-foundation_v5_state.json
 cutover: true
 ---
@@ -38,8 +37,9 @@ does not contain the Wave-1 production contracts or the Wave-2/3 product runtime
 WP07 resumes, WP00 reconciles the execution-state/proving-commit contract and WP06a
 introduces a first-class typed compilation/derivation-unit graph so generated outputs are
 attributed to their complete source set rather than to an arbitrary single artifact.
-Ubuntu clean-checkout evidence and the review finding concerning already-committed build
-outputs are explicitly user-deferred assurance/maintenance items, not packet blockers.
+Ubuntu clean-checkout evidence is explicitly user-deferred assurance, not a packet blocker.
+IR-010's tracked auxiliary build outputs have been removed from the current tree and
+reachable branch history; WP00 makes that zero state a permanent repository gate.
 
 ---
 
@@ -82,7 +82,7 @@ The following current facts govern continuation:
 - WP12–WP26 product outcomes are not started.
 - just contracts-verify-released currently reports 49 draft warnings; M02 remains open.
 - Ubuntu clean-checkout evidence is user-deferred and is not a blocker.
-- IR-010, concerning already-committed build outputs, is user-deferred and outside v5.
+- IR-010 is resolved at the current baseline; WP00/DB06 prevent reintroduction.
 - License selection/evaluation remains outside active scope by prior user direction.
 
 ### 1.3 Non-goals
@@ -97,7 +97,6 @@ The following current facts govern continuation:
 - Generated fixtures approving or overwriting their own normative expected values.
 - Clean-build timing, stored benchmark results in execution state, or performance claims
   without a stable workload and controlled comparison.
-- Resolving or rewriting already-committed auxiliary build outputs.
 
 ---
 
@@ -111,10 +110,10 @@ accepted reviews provide the v5 corrections.
 |---|---|
 | docs/plans/codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20.md | 598b4971574c245cfd4f3f560ad52e2838eef884d21ea4c77c9233c70ad3d3db |
 | docs/plans/codefabric_model_based_foundation_remediation_implementation_plan_v1_2026-08-20.md | 94ef42472e513676f4818908414bd4b4c7d38dac506ccbf6150dda3e968f0adf |
-| docs/reviews/implementation_status_codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20_2026-08-20_v1.md | 3769594de691dcafb873d33531aa10caded142825a391b049c06014b32688b9d |
-| docs/reviews/implementation_review_codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20_2026-08-20_v2.md | 66e507191443379b0d1c74e3aff4bdcf4e703069d8cf46e8f50aa18f81cb2054 |
-| docs/plans/state/codefabric-waves-0-3-foundation_v4_state.json | 7350dc713c3fcb7629789d549f61ab992e5fbd522dd032405be253a1fad9fbfe |
-| docs/plans/state/codefabric-model-based-foundation-remediation_v1_state.json | eb95bf3ee8482435326f87500b9962859ff6e4dd7c6691e80d580bcb0fc15e2a |
+| docs/reviews/implementation_status_codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20_2026-08-20_v1.md | 52e11573eb89ebc947318014f56d443074f449b8e7348f3620e089994425d483 |
+| docs/reviews/implementation_review_codefabric_waves_0-3_foundation_implementation_plan_v4_2026-08-20_2026-08-20_v2.md | c9ec7f3642d77a5495783d82f8c5fe8612deb769e9d3c5b73a63ae99c1662e68 |
+| docs/plans/state/codefabric-waves-0-3-foundation_v4_state.json | e57909b1227fda8b339271e8c2d53d8a6099e3c7ca6057c4a1daf9e0bdfe1906 |
+| docs/plans/state/codefabric-model-based-foundation-remediation_v1_state.json | 3c0c8c1d0fca9877903cb585f4e92e590d94c74ab381d008d3ea10a2f1c72e53 |
 | docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md | 087408e86b6dfde7ebb66624cafa58793f26860288861addbf9a0124f7647a78 |
 | docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md | a90cea42b5f13092000e06326513f40f8365a2e1b44eec091aca47a413ce51f8 |
 | docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md | a8ba008a94c72c55b48b91fd8967eafe6f46419f0fe5f65d1bcb3a874d79adab |
@@ -143,8 +142,8 @@ pinned-library behavior remain higher authority than illustrative implementation
 
 ## 3. Baseline and implementation disposition
 
-Baseline HEAD is cdad126b8af7c25f09e9b25b9cb51e1fdf9b822a. The recorded working-tree
-digest identifies the two accepted review inputs before v5 was written. just ci-fast
+Baseline HEAD is ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e. The tree is clean, and the
+two accepted reviews and this plan are committed at that baseline. just ci-fast
 passed at this baseline: 37 root tests plus doctests, 3 extractor tests, 2 sidecar tests,
 68 adapter tests, and the current governance/contract/proto proof surface.
 
@@ -218,7 +217,9 @@ schema-2 state at the path in frontmatter.
   judgment only.
 - I-26: every generated artifact, pass, mutation, snapshot, and failure has inspectable
   provenance and stable diagnostics.
-- I-27: Ubuntu clean-checkout and IR-010 are user-deferred and are not packet blockers.
+- I-27: Ubuntu clean-checkout is user-deferred and is not a packet blocker; tracked Cargo
+  build output is absent from the current tree and reachable branch history and remains
+  prohibited by an executable zero-state gate.
 - I-28: aggregate command optimization preserves proof coverage; performance claims require
   a controlled representative benchmark and are not stored as execution-state facts.
 
@@ -265,7 +266,8 @@ Packet completion requires every acceptance check at its proving commit and at H
 - D-12: Use one staged typed Contract IR, not byte searches or shared generic values.
 - D-13: Keep canonical, source, and bundle identity projections distinct.
 - D-14: Use closed derivation units as the sole generated-output ownership model.
-- D-15: Package one canonical artifact index and eliminate language-neutral mirrors.
+- D-15: Package one canonical artifact index and one copy of each canonical machine-data
+  resource; eliminate sibling mirrors and re-declared authorities.
 - D-16: Compile Protobuf once to one FDS; Python generation and Rust compile_fds consume
   that single compiled descriptor path.
 - D-17: Generate strict Pydantic models, both schema modes, cached adapters, and FastMCP
@@ -276,7 +278,8 @@ Packet completion requires every acceptance check at its proving commit and at H
   structure and plan-status derives freshness/trust.
 - D-21: Proof coverage is programmatic; benchmark only a stable claim and never store
   derived measurements in execution state.
-- D-22: Ubuntu and IR-010 are user-deferred and do not block local packet execution.
+- D-22: Ubuntu is user-deferred and does not block local packet execution; IR-010 is
+  resolved and guarded against reintroduction.
 
 ### 5.2 Library decisions
 
@@ -321,8 +324,9 @@ No library decision authorizes a new crate or a second semantic implementation.
 
 ## 6. Review integration and legacy disposition
 
-- IR-010: deferred by direct user instruction; no history rewrite or target-artifact work
-  is included in v5.
+- IR-010: resolved before final v5 planning by rewriting the affected unpublished history,
+  adding nested Cargo-root ignore coverage, and proving zero tracked/reachable target
+  objects. WP00 and DB06 preserve the zero state.
 - IR-011: closed by v5 replacing stale mechanics and absent recipe names.
 - IR-012: resolved by WP00 and the schema-2 state contract.
 - IR-013: resolved by WP06a, DB05, and the WP10 migration.
@@ -353,8 +357,10 @@ Legacy dispositions:
 
 The v5 schema-2 execution state exists; the v4 and remediation schema-1 states are
 migrated without derived facts; the accepted remediation disposition, current baseline,
-Ubuntu deferral, IR-010 deferral, and every trusted completed packet have an explicit
-ancestor proving commit. No product packet is considered complete from recorded prose.
+Ubuntu deferral, resolved IR-010 zero state, and every trusted completed packet have an
+explicit ancestor proving commit. No product packet is considered complete from recorded
+prose. A permanent gate rejects nested Cargo build outputs in both the index and reachable
+HEAD history.
 
 #### Dependencies
 
@@ -374,15 +380,17 @@ Implementation-status review, implementation review IR-012, artifact-schemas §3
 
 ~~~bash
 jq '{schema_version,status,current_packet,packets,milestones,decommission_batches}' docs/plans/state/codefabric-waves-0-3-foundation_v4_state.json docs/plans/state/codefabric-model-based-foundation-remediation_v1_state.json
-git cat-file -e cdad126b8af7c25f09e9b25b9cb51e1fdf9b822a
-git merge-base --is-ancestor cdad126b8af7c25f09e9b25b9cb51e1fdf9b822a HEAD
+git cat-file -e ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e
+git merge-base --is-ancestor ca7ce57c12bfcf2a3208875230bc9f5ecc6ddb2e HEAD
 rg -n 'proving_commit|current_head|check_results|changed_files|evidence' docs/plans/state
+test -z "$(git ls-files | rg '(^|/)target/' || true)"
+test -z "$(git rev-list --objects HEAD | rg ' (pyrefly-sidecar|rustc-extractor)/target/' || true)"
 ~~~
 
 ##### Known Touch (verified this session)
 
 The two schema-1 state files, the new v5 state path, artifact-schema validation tooling,
-and the justfile gate registry.
+`.gitignore`, a tracked-target zero-state checker, and the justfile gate registry.
 
 #### Required Changes
 
@@ -391,7 +399,9 @@ retaining decisions, deviations, failed approaches, blockers, and packet judgmen
 dropping digests, changed-file inventories, check output, current-head caches, and other
 derivable facts. Record current proving commits only after re-running each packet's named
 checks. Record the remediation plan as user-accepted/executed despite its historical draft
-frontmatter. Record Ubuntu and IR-010 as user-deferred, not blockers.
+frontmatter. Record Ubuntu as user-deferred and IR-010 as resolved baseline evidence. Add
+`tracked-target-zero-state-check`: it asserts nested Cargo-root target paths are ignored,
+the Git index contains none, and reachable HEAD history contains none.
 
 #### Legacy Disposition and Decommission
 
@@ -402,23 +412,34 @@ make a null proving commit equivalent to completion.
 
 ##### Behavioral
 
+Executable oracle: `wp00_behavioral_acceptance` in the packet's focused test target.
+
 state_schema_v2_round_trips_judgment_only and packet_trust_requires_ancestor_commit pass.
 
 ##### Structural
 
+Executable oracle: `wp00_structural_acceptance` in the packet's focused test target.
+
 New just artifacts-check validates plan/review/state schemas, paths, IDs, and declared
 inputs. New just plan-status derives freshness, commit existence/ancestry, and named-check
-trust without storing those facts.
+trust without storing those facts. New just tracked-target-zero-state-check validates
+nested-root ignore coverage, the current index, and reachable HEAD history.
 
 ##### Negative / Zero-State
 
+Executable oracle: `wp00_negative_zero_state` in the packet's focused test target.
+
 artifacts-check rejects schema-2 state containing null proving commits or derived-fact
-fields; plan-status reports a missing/non-ancestor proving commit as untrusted.
+fields; plan-status reports a missing/non-ancestor proving commit as untrusted. A temporary
+Git-repository fixture proves tracked-target-zero-state-check rejects both a currently
+tracked nested target path and one present only in reachable history.
 
 ##### Operational
 
-just artifacts-check, just plan-status, and just ci-fast exit 0 at the proving commit and
-HEAD.
+Executable oracle: `wp00_operational_acceptance` in the packet's focused test target.
+
+just artifacts-check, just plan-status, just tracked-target-zero-state-check, and just
+ci-fast exit 0 at the proving commit and HEAD.
 
 #### Edit-Local Gates
 
@@ -426,7 +447,7 @@ jq parse checks, changed-file Typos, and git diff --check.
 
 #### Packet-Local Gates
 
-just artifacts-check; just plan-status; just ci-fast.
+just artifacts-check; just plan-status; just tracked-target-zero-state-check; just ci-fast.
 
 #### Integration Milestone
 
@@ -439,7 +460,8 @@ is not in current ancestry; or schema-2 validation needs facts forbidden by the 
 
 #### Rollback or Recovery
 
-Revert only the new schema-2 artifacts; retain schema-1 files unchanged as history.
+Revert only the new schema-2 artifacts; retain schema-1 files unchanged as history. Never
+revert the completed IR-010 cleanup or nested-root ignore coverage.
 
 #### Design-Bearing Contracts and Exemplars
 
@@ -552,12 +574,16 @@ Executes L-01–L-04 (see §6).
 #### Acceptance Checks
 ##### Behavioral
 
+Executable oracle: `wp01_behavioral_acceptance` in the packet's focused test target.
+
 `cargo check --all-targets` and `cargo clippy --all-targets
   -- -D warnings` pass for default and `--no-default-features`; `cargo nextest
   run` passes the compatibility tests. A provider/session/schema, application-
   transaction, gix algorithm, live-WAL backup, and descriptor-relative open
   smoke compiles against the exact selected APIs.
 ##### Structural
+
+Executable oracle: `wp01_structural_acceptance` in the packet's focused test target.
 
 an actual-graph metadata validator proves one approved
   Arrow/Parquet/DataFusion/object_store/kernel family, the exact delta/gix/
@@ -568,11 +594,15 @@ an actual-graph metadata validator proves one approved
   retained at M01.
 ##### Negative / Zero-State
 
+Executable oracle: `wp01_negative_zero_state` in the packet's focused test target.
+
 preflight `rg` sweep returns zero live-code hits
   for `pyo3|maturin|_native|python/codefabric` (declared scope: whole repo
   minus `.git`, `docs/`, `.claude/` annotations); `cargo tree -i pyo3` errors
   (not in graph).
 ##### Operational
+
+Executable oracle: `wp01_operational_acceptance` in the packet's focused test target.
 
 scripted assertion: `./scripts/bootstrap.sh` output and
   `just --list` contain zero matches for
@@ -668,19 +698,27 @@ None.
 #### Acceptance Checks
 ##### Behavioral
 
+Executable oracle: `wp02_behavioral_acceptance` in the packet's focused test target.
+
 `cd rustc-extractor && cargo check && cargo test` on the
   pinned nightly; `--identity` prints toolchain + commit hash to STDERR;
   STDOUT is empty in all invocations.
 ##### Structural
+
+Executable oracle: `wp02_structural_acceptance` in the packet's focused test target.
 
 `rust-toolchain.toml` pins the dated nightly + components;
   own `Cargo.lock` committed; the `rustc_public` link smoke compiles and
   runs in the default build.
 ##### Negative / Zero-State
 
+Executable oracle: `wp02_negative_zero_state` in the packet's focused test target.
+
 root `rust-toolchain.toml` unchanged (stable); root
   `Cargo.lock` has no extractor entries; extractor is not a workspace member.
 ##### Operational
+
+Executable oracle: `wp02_operational_acceptance` in the packet's focused test target.
 
 clean-checkout build documented in CI (WP05 wires it).
 #### Edit-Local Gates
@@ -752,19 +790,31 @@ Public API surface: none (bin-only). An `ast-grep` governance rule (D-03)
 asserts no `pub` item references a `pyrefly::` type. Updates to the Pyrefly
 rev follow the D-09 managed procedure.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp03_behavioral_acceptance` in the packet's focused test target.
 
 domain `cargo check/test`; `--identity` on STDERR; STDOUT
   empty.
 ##### Structural
 
+Executable oracle: `wp03_structural_acceptance` in the packet's focused test target.
+
 independent `Cargo.lock`; root lockfile untouched.
 ##### Negative / Zero-State
+
+Executable oracle: `wp03_negative_zero_state` in the packet's focused test target.
 
 governance rule zero-hit for exposed Pyrefly types; root
   `cargo tree -i pyrefly` errors.
 ##### Operational
+
+Executable oracle: `wp03_operational_acceptance` in the packet's focused test target.
 
 domain deny policy passes (git source allowed only here if a
   git pin is required).
@@ -851,8 +901,14 @@ test for STDOUT isolation. Add a Pyrefly coverage sentinel test that injects a
 known type error into a configured source path and proves the recipe fails,
 then proves the clean project passes. `attrs`/`cattrs` are not adopted.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp04_behavioral_acceptance` in the packet's focused test target.
 
 STDIO test — spawn the locked command with required env vars,
   assert startup, clean shutdown, and zero stray STDOUT (Serving §68.6);
@@ -860,13 +916,19 @@ STDIO test — spawn the locked command with required env vars,
   initialize/ping/list-tools passes through the protocol pipeline.
 ##### Structural
 
+Executable oracle: `wp04_structural_acceptance` in the packet's focused test target.
+
 `uv.lock` carries the three exact pins; no `pydantic-core`
   pin; `requires-python >=3.12`; interpreter 3.14.7 recorded.
 ##### Negative / Zero-State
 
+Executable oracle: `wp04_negative_zero_state` in the packet's focused test target.
+
 no Arrow/DataFusion/Maturin/PyO3 dependency in the adapter
   graph (`uv tree` scoped check); no dotenv source in settings.
 ##### Operational
+
+Executable oracle: `wp04_operational_acceptance` in the packet's focused test target.
 
 ruff + pyrefly pass on the new project; the Pyrefly inclusion
   sentinel's fail/pass pair proves source coverage.
@@ -978,7 +1040,9 @@ re-run the UDS peer-identity/interoperability probe and
    telemetry only.
 7. Generated-tree hygiene (D-04, audit Q2): `.gitattributes`
    `linguist-generated` for every generated source/binding directory declared by a
-   compilation unit; no language-neutral `contracts/generated/` mirror exists. Those
+   compilation unit. The current `contracts/generated/registry/` tree is the single
+   canonical machine-data resource set, not a sibling authority; WP06a migrates its output
+   ownership to derivation units. Generated source/binding
    paths are excluded from `cargo fmt --check`, typos,
    `ast-grep scan`, and machete surfaces; generator output asserted
    rustfmt-stable (format-then-diff test).
@@ -991,8 +1055,14 @@ re-run the UDS peer-identity/interoperability probe and
    typed platform skip only for the different-UID setup, never for missing
    credential or pre-dispatch enforcement.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp05_behavioral_acceptance` in the packet's focused test target.
 
 local four-domain gates are green; configured CI is structurally
   validated, while Ubuntu execution remains deferred; proto
@@ -1000,27 +1070,26 @@ local four-domain gates are green; configured CI is structurally
   Python; peer-credential and size-limit behavior tests pass.
 ##### Structural
 
+Executable oracle: `wp05_structural_acceptance` in the packet's focused test target.
+
 `just --list` shows the domain groups; deny config carries
   the family bans.
 ##### Negative / Zero-State
+
+Executable oracle: `wp05_negative_zero_state` in the packet's focused test target.
 
 the committed duplicate-family fixture fails `cargo deny
   check` on every CI run (expected-failure test); a stub/byte drift in
   committed generated placeholders fails `proto-check`.
 ##### Operational
 
+Executable oracle: `wp05_operational_acceptance` in the packet's focused test target.
+
 `just doctor` covers all four domains; two-clean-root
   generation records matching output digests and generator identities.
 #### Edit-Local Gates
 
-Run the smallest changed-module lint and targeted test slice.
-
-#### Packet-Local Gates
-
 Recipe-by-recipe smoke runs.
-#### Edit-Local Gates
-
-Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
@@ -1105,6 +1174,8 @@ single-artifact output graph.
 
 ##### Behavioral
 
+Executable oracle: `wp06_behavioral_acceptance` in the packet's focused test target.
+
 normative_projection_vectors_have_exact_blake3_identities,
 governed_sources_fit_their_named_resource_profiles,
 bundle_projection_uses_the_closed_sorted_model_and_retains_member_identity, and the shared
@@ -1112,16 +1183,22 @@ Rust/Python JCS corpus pass.
 
 ##### Structural
 
+Executable oracle: `wp06_structural_acceptance` in the packet's focused test target.
+
 just contracts-verify, just schema-check, and just fixture-check pass over the catalog
 census.
 
 ##### Negative / Zero-State
+
+Executable oracle: `wp06_negative_zero_state` in the packet's focused test target.
 
 Duplicate JSON keys, unsafe/non-finite numbers, YAML anchors/aliases/tags/merges, malformed
 EBNF, unknown fields, budget overflow, digest mutation, and generator-writing-normative-KAT
 fixtures fail with bounded path-aware diagnostics.
 
 ##### Operational
+
+Executable oracle: `wp06_operational_acceptance` in the packet's focused test target.
 
 just contracts-repro-check proves two isolated generations are byte-identical and catalog
 record reordering changes only source identity.
@@ -1279,6 +1356,8 @@ Wave-0 probe source/bindings/tests after WP10.
 
 ##### Behavioral
 
+Executable oracle: `wp06a_behavioral_acceptance` in the packet's focused test target.
+
 compilation_unit_derives_many_inputs_and_outputs,
 proto_staging_uses_source_and_compiled_semantic_views,
 registry_and_adapter_outputs_are_graph_complete,
@@ -1297,11 +1376,15 @@ High-value metamorphic oracles pass:
 
 ##### Structural
 
+Executable oracle: `wp06a_structural_acceptance` in the packet's focused test target.
+
 just compilation-units-check proves the suite self descriptor owns no outputs, every
 released generated surface is reachable from exactly one unit, every output has one owner,
 and every unit input/reference resolves.
 
 ##### Negative / Zero-State
+
+Executable oracle: `wp06a_negative_zero_state` in the packet's focused test target.
 
 Fixtures reject duplicate/unknown derivation IDs, missing input/output refs, invalid
 input views, invalid output cardinality, invalid primary sets, authority/output path
@@ -1309,6 +1392,8 @@ conflict, cycles, duplicate claims, and unknown fields. DB05 repository searches
 zero outside plans/reviews and negative fixtures.
 
 ##### Operational
+
+Executable oracle: `wp06a_operational_acceptance` in the packet's focused test target.
 
 just contracts-repro-check, just proto-repro-check, and just
 adapter-contracts-repro-check remain byte-identical across isolated roots. Installed-wheel
@@ -1414,10 +1499,9 @@ Fabric §7.1–7.3.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` identity + path modules; `contracts/identity/`
-  recipe sources; `contracts/fixtures/identity/`; adapter
-  `contracts/types.py` public-ID validators + KAT runner; extend `fuzz/` with
-  CBEF/public-ID/path decode targets seeded from KAT/negative corpora.
+`contracts/identity/{cbef-v1,path-canonicalization-v1,type-algebra-v1}.yaml` are current
+draft authorities. No production Rust identity/path module, adapter public-ID view,
+identity KAT directory, or CBEF/path fuzz target exists yet.
 ##### Preflight Query
 
 macOS case-sensitivity probe API (`pathconf`/`getattrlist`
@@ -1431,8 +1515,14 @@ post-normalization payload length, canonical domain order, and 1-based field
 tags from recipe declaration order. AC-G-18 owns platform codes. Record owner
 acceptance of the generated initial contract before implementing the encoder.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp07_behavioral_acceptance` in the packet's focused test target.
 
 KAT vectors green in both languages — identity domains,
   paths, **and type algebra** (roadmap §6 exit names identity, path, type,
@@ -1441,14 +1531,20 @@ KAT vectors green in both languages — identity domains,
   component encoding reversible; type interning idempotent).
 ##### Structural
 
+Executable oracle: `wp07_structural_acceptance` in the packet's focused test target.
+
 every domain recipe file validates against the recipe schema;
   field tags unique and ascending.
 ##### Negative / Zero-State
+
+Executable oracle: `wp07_negative_zero_state` in the packet's focused test target.
 
 decoder rejects wrong prefix/width/case, non-hex, unknown
   domain, out-of-order fields; collision injection test yields
   `ID_COLLISION` and blocks.
 ##### Operational
+
+Executable oracle: `wp07_operational_acceptance` in the packet's focused test target.
 
 independent owner-reviewed vectors are immutable to production
   generation; derived/property corpora reproduce byte-identically. Bounded CBEF/ID/path
@@ -1459,8 +1555,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + adapter pytest identity subset + `just fixture-check`
-  + `just contracts-repro-check`.
+just ci-fast; just adapter-contracts-check; just fixture-check; just
+contracts-repro-check.
 #### Integration Milestone
 
 M02.
@@ -1549,11 +1645,11 @@ Fact Gen §85, AC-G-36.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-`contracts/registry/**` sources; generator modules;
-  generated Rust (`src/generated/registries.rs` or equivalent) and Python
-  (adapter `contracts/` generated module); `contracts/fixtures/registries/`;
-  extend `fuzz/` with production registry-YAML/canonical-registry decode
-  targets seeded from positive and negative fixtures.
+`contracts/registry/*.yaml` and the current draft canonical registry projections under
+`contracts/generated/registry/` are present. Production registry content, generated
+Rust/Python static views, registry fixtures, and registry fuzz targets do not yet exist;
+WP08 preserves one canonical resource set while WP06a replaces artifact-level output
+ownership and prohibits sibling mirrors.
 ##### Preflight Query
 
 none external (the phrase-harvest checklist moved to WP08b).
@@ -1574,6 +1670,8 @@ allocation. Normative registry fixtures remain under independent fixture governa
 #### Acceptance Checks
 ##### Behavioral
 
+Executable oracle: `wp08_behavioral_acceptance` in the packet's focused test target.
+
 generated Rust and Python compile and expose code↔name
   lookups; **enum and flag KAT vectors pass in both languages** (fixed
   code→name→slug triples per §62 table, flag-word round-trips); distinct
@@ -1581,14 +1679,20 @@ generated Rust and Python compile and expose code↔name
   share an enum type).
 ##### Structural
 
+Executable oracle: `wp08_structural_acceptance` in the packet's focused test target.
+
 verifier enforces the eight AC-G-70 invariants + §62.10
   append-only rule; duplicate-authority check (same slug in two registries →
   error).
 ##### Negative / Zero-State
 
+Executable oracle: `wp08_negative_zero_state` in the packet's focused test target.
+
 evaluative deny-list test — registry sources containing
   `SAFE_TO_REFACTOR`-class kinds are rejected (I-15).
 ##### Operational
+
+Executable oracle: `wp08_operational_acceptance` in the packet's focused test target.
 
 byte-identical regeneration; state-machine artifacts pass
   reachability check.
@@ -1654,11 +1758,9 @@ The executor re-runs the packet-specific discovery below before editing; listed 
 ##### Known Touch (verified this session)
 
 `contracts/registry/phrase-registry.yaml`,
-  `contracts/query/english-controlled-v1.ebnf`,
-  `contracts/registry/model-pack.schema.json`; generator + verifier
-  section-count rule; `contracts/fixtures/registries/` phrase fixtures;
-  extend `fuzz/` with the production EBNF/phrase parser target seeded from
-  the phrase catalog and ambiguity/unrecognized negatives.
+`contracts/query/english-controlled-v1.ebnf`, and
+`contracts/registry/model-pack.schema.json` are current draft authorities. Phrase fixtures
+and a production EBNF/phrase fuzz target do not yet exist.
 ##### Preflight Query
 
 enumerate the Query §50–§94 section list (spec-outline) as
@@ -1680,20 +1782,28 @@ fixture governance.
 #### Acceptance Checks
 ##### Behavioral
 
+Executable oracle: `wp08b_behavioral_acceptance` in the packet's focused test target.
+
 generated phrase lookups compile in Rust and Python; the
   EBNF artifact parses (grammar-lint step); the model-pack schema validates
   its committed negative fixture.
 ##### Structural
+
+Executable oracle: `wp08b_structural_acceptance` in the packet's focused test target.
 
 the verifier's section count equals the §50–§94 list
   exactly; every phrase entry names its owning section and carries a
   schema-valid executable mapping; zero placeholders exist.
 ##### Negative / Zero-State
 
+Executable oracle: `wp08b_negative_zero_state` in the packet's focused test target.
+
 an entry citing a §95–§102 example section fails the count
   rule; evaluative phrases, missing/ill-typed slots, unknown PlanSpec nodes,
   and `deferred-mapping` are rejected (I-15).
 ##### Operational
+
+Executable oracle: `wp08b_operational_acceptance` in the packet's focused test target.
 
 byte-identical regeneration.
 #### Edit-Local Gates
@@ -1782,10 +1892,10 @@ is contract-tested, never relied on through plan operators).
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-`contracts/schema/**` + `contracts/adapter/**` +
-  `contracts/query/planspec.schema.json`; generator; generated Rust
-  TableSpec module; adapter contracts modules + `resources/*.schema.json`;
-  `contracts/fixtures/schemas/`.
+`contracts/schema/**`, `contracts/adapter/adapter-model-ir.json`,
+`contracts/query/planspec.schema.json`, and the landed adapter Contract-IR/Pydantic outputs
+are current. Production TableSpecs, SQLite DDL, snapshot/state/public schema content, and
+schema fixtures remain incomplete.
 ##### Preflight Query
 
 Arrow schema snapshot tests harness; confirm `Binary` (not
@@ -1807,10 +1917,14 @@ model duplication, and request-hot-loop model/schema construction.
 #### Acceptance Checks
 ##### Behavioral
 
+Executable oracle: `wp09_behavioral_acceptance` in the packet's focused test target.
+
 every released fixture validates against its schema; Arrow
   schema snapshot tests; `just adapter-contracts-check` is green; validation and
   serialization schemas carry the required dialect and stable `$id`.
 ##### Structural
+
+Executable oracle: `wp09_structural_acceptance` in the packet's focused test target.
 
 every `TableSpec` declares one value on each applicable axis;
   the generated validity matrix rejects illegal cross-products; durable-only
@@ -1821,11 +1935,15 @@ every `TableSpec` declares one value on each applicable axis;
   `adapter/` filenames present (verifier layout check).
 ##### Negative / Zero-State
 
+Executable oracle: `wp09_negative_zero_state` in the packet's focused test target.
+
 a committed drift fixture (schema changed, version unchanged)
   under `contracts/fixtures/negative/` fails the fingerprint check on every
   run; JSON-blob/EAV shapes rejected by generator tests (§5.1 prohibitions);
   `Utf8View` rejected per §65.2 (audit C-9).
 ##### Operational
+
+Executable oracle: `wp09_operational_acceptance` in the packet's focused test target.
 
 `just adapter-contracts-repro-check` and `just contracts-repro-check`
   are byte-identical across isolated roots.
@@ -1903,11 +2021,10 @@ AC-G-30/31/32/33; roadmap §6 WP6; LD-10.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-`contracts/rpc/*.proto` + `feature-registry.yaml`;
-  the WP06a production compilation unit; committed FDS/census/compatibility/toolchain
-  outputs; generated Rust, extractor, sidecar, and adapter bindings; round-trip suites;
-  extend `fuzz/` with bounded decode targets for each production Protobuf
-  package, seeded from round-trip and negative frames.
+`contracts/rpc/*.proto` and `feature-registry.yaml` are current drafts; the committed Wave-0
+FDS/census/compatibility/toolchain outputs and bindings prove the one-FDS substrate only.
+The WP06a production units, complete four-domain bindings, round-trip suites, and bounded
+production decode targets do not yet exist.
 ##### Preflight Query
 
 run `just proto-repro-check`; inspect the compiled descriptor census and
@@ -1931,20 +2048,28 @@ per-domain source interpretation, suite-self ownership, and hard-coded Wave-0 fi
 #### Acceptance Checks
 ##### Behavioral
 
+Executable oracle: `wp10_behavioral_acceptance` in the packet's focused test target.
+
 encode→decode round-trip fixtures pass in Rust and Python for
   representative messages of all four packages; a loopback UDS echo test for
   `CpgQueryService.Handshake` between a stub Rust server and the Python
   client (transport probe only — no daemon semantics).
 ##### Structural
 
+Executable oracle: `wp10_structural_acceptance` in the packet's focused test target.
+
 `QueryEvent` oneof is closed with exactly the five variants;
   sequence fields u64; freshness enum matches the canonical request enum.
 ##### Negative / Zero-State
+
+Executable oracle: `wp10_negative_zero_state` in the packet's focused test target.
 
 the superseded Serving §9 seven-RPC form does not appear
   (`ExecuteQuery` absent — grep gate); unknown required feature bits fail the
   handshake fixture.
 ##### Operational
+
+Executable oracle: `wp10_operational_acceptance` in the packet's focused test target.
 
 `just proto-check` and `just proto-repro-check` prove current committed
   outputs and two-root byte identity; descriptor/DescriptorPool assertions prove semantic
@@ -2026,10 +2151,10 @@ digest fields (context bundle inputs).
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-`contracts/manifests/**`, `contracts/bundles/**`,
-  `contracts/deployment/local-workstation-v1.yaml`, generator trace module,
-  CI traceability step; `contracts/fixtures/negative/` (broken-trace-edge
-  fixture).
+`contracts/manifests/**`, eight closed-but-empty draft bundles,
+`contracts/deployment/local-workstation-v1.yaml`, and current negative fixtures are
+present. Populated members, release/deployment completion, CF-ID closure, and the final
+traceability oracle remain incomplete.
 ##### Preflight Query
 
 none external.
@@ -2051,18 +2176,26 @@ prohibited.
 #### Acceptance Checks
 ##### Behavioral
 
+Executable oracle: `wp11_behavioral_acceptance` in the packet's focused test target.
+
 `codefabric-contracts verify --profile full` green and
   `--profile released` warning-free: registry invariants, schema digests,
   KAT vectors, proto round-trips, bundle digests, trace zero-orphan.
 ##### Structural
 
+Executable oracle: `wp11_structural_acceptance` in the packet's focused test target.
+
 every bundle pinned by digest; profile instance validates
   against `deployment-profile.schema.json`.
 ##### Negative / Zero-State
 
+Executable oracle: `wp11_negative_zero_state` in the packet's focused test target.
+
 the committed broken-trace-edge fixture fails verify on every
   run.
 ##### Operational
+
+Executable oracle: `wp11_operational_acceptance` in the packet's focused test target.
 
 `just contracts-repro-check` remains byte-identical; Gate A is the
   released-profile verifier itself, not a hand-produced evidence bundle.
@@ -2128,9 +2261,9 @@ AC-G-62; roadmap §7 WP1. LD-05, LD-09.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` daemon modules + `src/bin/codefabricd.rs`;
-  config schema source in `contracts/` (deployment profile consumption);
-  justfile `daemon-*` recipes.
+`src/rpc.rs`, the Wave-0 generated transport probe, adapter daemon-channel substrate,
+`contracts/schema/public-status.schema.json`, and the deployment profile are current.
+Daemon lifecycle modules, `codefabricd`, and daemon recipes do not yet exist.
 ##### Preflight Query
 
 none material — state/runtime/config roots are fixed by
@@ -2145,8 +2278,14 @@ none material — state/runtime/config roots are fixed by
 
 Implement the named daemon lifecycle, configuration tiers, lease/discovery protocol, administrative status/stop/drain path, joined shutdown, private permissions, and metrics from generated contracts. Consume catalog-generated configuration/status/error types; do not add an alternate configuration schema or network listener.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp12_behavioral_acceptance` in the packet's focused test target.
 
 second daemon start against the same state root fails the
   lease; `check-config` validates and rejects tier violations; clean shutdown
@@ -2155,14 +2294,20 @@ second daemon start against the same state root fails the
   drain rejects new ingress, checkpoints, and meets the deadline.
 ##### Structural
 
+Executable oracle: `wp12_structural_acceptance` in the packet's focused test target.
+
 config fields map 1:1 to the generated profile schema.
 ##### Negative / Zero-State
+
+Executable oracle: `wp12_negative_zero_state` in the packet's focused test target.
 
 `daemon.json` contains no token/root-path/secret fields (test
   asserts the exact field set); no network listener sockets opened; the
   daemon refuses group/world-writable state, runtime, or config roots and
   creates them `0700` with private files `0600` (AC-G-08).
 ##### Operational
+
+Executable oracle: `wp12_operational_acceptance` in the packet's focused test target.
 
 startup/shutdown traced via `tracing` with the §151 step
   names.
@@ -2172,7 +2317,7 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + daemon integration tests (nextest).
+just ci-fast; just wave2-integration-check.
 #### Integration Milestone
 
 M03.
@@ -2217,7 +2362,8 @@ WP2. LD-08.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` store module; migration files; generated DDL.
+`src/compatibility.rs` contains the current `rusqlite` backup/WAL feasibility probe.
+No operational store module, migration set, or generated production DDL exists yet.
 ##### Preflight Query
 
 confirm the exact WP01-selected rusqlite with
@@ -2229,8 +2375,14 @@ confirm the exact WP01-selected rusqlite with
 
 Generate and consume SQLite DDL from WP09, implement exact pragmas, transactional forward migrations with backup, sole-writer ownership, read connections, retention, recovery, and registered fault points. No handwritten schema may diverge from the generated DDL.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp13_behavioral_acceptance` in the packet's focused test target.
 
 migration up from empty; reopen after crash mid-transaction
   recovers; newer-schema refusal test; retention cleanup preserves the §131
@@ -2239,14 +2391,20 @@ migration up from empty; reopen after crash mid-transaction
   source and restored logical state coherent.
 ##### Structural
 
+Executable oracle: `wp13_structural_acceptance` in the packet's focused test target.
+
 pragma assertions read back at open; table shapes match
   generated DDL digests.
 ##### Negative / Zero-State
+
+Executable oracle: `wp13_negative_zero_state` in the packet's focused test target.
 
 a second writer connection attempt is rejected by the store
   API (structural discipline, not SQLite enforcement — asserted in code);
   high-volume payload classes (source bytes, Arrow rows) have no tables.
 ##### Operational
+
+Executable oracle: `wp13_operational_acceptance` in the packet's focused test target.
 
 backup file produced before each migration; store fault
   points (crash mid-transaction, crash mid-migration) registered per §4.1.
@@ -2257,7 +2415,7 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + store nextest suite.
+just ci-fast; just wave2-integration-check.
 #### Integration Milestone
 
 M03.
@@ -2310,8 +2468,9 @@ WP3.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` registry + admin modules; `src/bin/codefabric.rs`
-  (admin CLI); store tables from WP13.
+The draft registry/state-machine authorities under `contracts/registry/` and identity
+contracts under `contracts/identity/` are current. No workspace registry, admin module,
+admin CLI, or WP13 production store table exists yet.
 ##### Preflight Query
 
 admin IPC mechanics (UDS with peer-uid check) — reuse the
@@ -2321,8 +2480,14 @@ admin IPC mechanics (UDS with peer-uid check) — reuse the
 
 Implement the generated registry/lifecycle machines, admin IPC/CLI, persisted identities/revisions, nested-root exclusions, audit rows, and all legal/illegal transitions. All IDs and statuses come from WP07/WP08 contracts.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp14_behavioral_acceptance` in the packet's focused test target.
 
 full state-machine walk
   REGISTERING→DISABLED→OPENING→BOOTSTRAPPING→DISABLING→DISABLED→
@@ -2332,17 +2497,23 @@ full state-machine walk
   can move BOOTSTRAPPING→READY, but Wave-2 runtime never emits that event.
 ##### Structural
 
+Executable oracle: `wp14_structural_acceptance` in the packet's focused test target.
+
 IDs equal the CBEF KAT-derivations for fixed nonces; two
   linked worktrees of one repo yield distinct `workspace_id`s sharing
   `repository_id`; non-Git root has null Git identities (no synthetic
   repository).
 ##### Negative / Zero-State
 
+Executable oracle: `wp14_negative_zero_state` in the packet's focused test target.
+
 re-registering a removed workspace mints a new ID; duplicate
   active administrative keys rejected; illegal transitions raise
   `STATE_TRANSITION_VIOLATION`; the query surface exposes no admin verbs
   (structural: admin service bound to a separate socket).
 ##### Operational
+
+Executable oracle: `wp14_operational_acceptance` in the packet's focused test target.
 
 every admin mutation writes an audit row.
 #### Edit-Local Gates
@@ -2351,8 +2522,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + registry nextest suite + focused mutation campaign on
-transition guards/errors (survivors classified with coverage).
+just ci-fast; just wave2-integration-check; just mutants-file for the changed generated
+transition module.
 #### Integration Milestone
 
 M03.
@@ -2395,9 +2566,9 @@ AC-G-12/18; roadmap §7 WP4–5; LD-16.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` path/secure-open modules; adversarial fixture
-  corpus under `tests/integration/` + fixture trees generated at test time;
-  boundary governance rules covering direct path-based open/read APIs.
+`src/compatibility.rs` contains the current descriptor-relative `rustix` open probe;
+identity/path contracts and the security-corpus manifest are current. No production
+secure-open/path module or adversarial runtime corpus exists yet.
 ##### Preflight Query
 
 `openat2` availability probing (CI Linux kernel) with fallback
@@ -2407,8 +2578,14 @@ root `src/` path/secure-open modules; adversarial fixture
 
 Implement the safe descriptor-relative authorization boundary with generated path types, root revalidation, collision blocking, platform-specific no-follow behavior, and complete adversarial fixtures. All authoritative byte reads route through this port.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp15_behavioral_acceptance` in the packet's focused test target.
 
 authorized files open and read byte-exact through the secure
   path using safe `rustix` descriptor-relative operations returning
@@ -2416,6 +2593,8 @@ authorized files open and read byte-exact through the secure
   comparison-key identity. Linux uses `NO_XDEV`; fallback platforms compare
   device and descriptor identity before and after reads.
 ##### Structural
+
+Executable oracle: `wp15_structural_acceptance` in the packet's focused test target.
 
 every **authoritative source-byte** read routes through the
   secure-open module. AST positive/negative fixtures cover direct
@@ -2425,6 +2604,8 @@ every **authoritative source-byte** read routes through the
   revalidated before authority use.
 ##### Negative / Zero-State
 
+Executable oracle: `wp15_negative_zero_state` in the packet's focused test target.
+
 on local macOS, escaped symlink, mid-path
   symlink swap, `..` and absolute injections, NUL bytes, device/drive
   prefixes, nested-mount escape, root-identity swap, comparison-key collision
@@ -2433,6 +2614,8 @@ on local macOS, escaped symlink, mid-path
   path identity).
 ##### Operational
 
+Executable oracle: `wp15_operational_acceptance` in the packet's focused test target.
+
 rejections emit diagnostics with stable codes.
 #### Edit-Local Gates
 
@@ -2440,8 +2623,9 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates plus the adversarial suite on local macOS. Equivalent supported-Linux
-evidence remains deferred until the user reprioritizes external Linux assurance.
+just ci-fast; just wave2-integration-check. The latter includes the adversarial suite on
+local macOS. Equivalent supported-Linux evidence remains deferred until the user
+reprioritizes external Linux assurance.
 #### Integration Milestone
 
 M03.
@@ -2497,9 +2681,9 @@ AC-G-33; Fact Gen §8–§9; roadmap §7 WP6–7.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` source-image + inventory modules; blob-store root
-  under the daemon state directory; source-blob/source-artifact/holder lease
-  and GC-cursor store tables;
+The deployment profile, security-corpus manifest, and fault-point registry are current
+contract touch points. No source-image, inventory, blob-store, lease, or GC production
+module/table exists yet. The packet will also update
   `contracts/deployment/local-workstation-v1.yaml` overrides section (walker
   bound defaults — a contract edit, so regeneration +
   `just contracts-verify` join this packet's gates per §4.1 item 7);
@@ -2519,8 +2703,14 @@ concurrent-mutation harness design (a writer process
 
 Implement bounded stable capture, immutable content-addressed blobs, line indexes, inventory/generation fences, holder leases, restart orphaning, and idempotent bounded GC. Register budgets, security corpus entries, and fault points through the catalog.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp16_behavioral_acceptance` in the packet's focused test target.
 
 byte-exact capture round-trip; retry/defer on mutation; line
   index correct on LF/CRLF/mixed/empty/no-trailing-newline files; walker
@@ -2529,9 +2719,13 @@ byte-exact capture round-trip; retry/defer on mutation; line
   orphans holders until grace expiry.
 ##### Structural
 
+Executable oracle: `wp16_structural_acceptance` in the packet's focused test target.
+
 blob paths are digests; blobs immutable (mode assertions);
   inventory rows carry all §34 fields.
 ##### Negative / Zero-State
+
+Executable oracle: `wp16_negative_zero_state` in the packet's focused test target.
 
 **concurrent mutation during capture never yields a falsely
   stable image** (fuzz-style harness, the Wave 2 exit's hardest clause);
@@ -2539,6 +2733,8 @@ blob paths are digests; blobs immutable (mode assertions);
   never inventoried as source; concurrent release/GC cannot delete a live
   blob and repeated cleanup is idempotent.
 ##### Operational
+
+Executable oracle: `wp16_operational_acceptance` in the packet's focused test target.
 
 capture/walk/lease/GC metrics (files, bytes, retries,
   duration, live/orphan holders, reclaimed blobs/bytes).
@@ -2548,7 +2744,7 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + source suite incl. the concurrency harness.
+just ci-fast; just wave2-integration-check.
 #### Integration Milestone
 
 M03.
@@ -2612,8 +2808,9 @@ roadmap §7 WP7. LD-06 (all caveats).
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` git_state module; governance rule "no `gix::`
-  outside git_state" active in `rules/`; CI resolved-feature assertion.
+`src/git_state.rs` is the current isolated gix compatibility boundary; its focused
+integration test and the gix boundary governance rule are current. Production topology,
+state capture, inventory, and interruption behavior do not yet exist.
 ##### Preflight Query
 
   1. **Linked-worktree exact-path open**: probe `gix::open` on a linked
@@ -2642,8 +2839,14 @@ root `src/` git_state module; governance rule "no `gix::`
 
 Implement GitStateAdapter only at the gix boundary, run all five compatibility probes, return detached DTOs, apply the strict trust policy, and fall back to the generic walker without weakening authoritative-byte rules.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp17_behavioral_acceptance` in the packet's focused test target.
 
 fixture repos (bare, main worktree, two linked worktrees,
   merge-in-progress, detached HEAD, unborn branch, submodule pointer,
@@ -2651,15 +2854,21 @@ fixture repos (bare, main worktree, two linked worktrees,
   interruption cancels a long inventory.
 ##### Structural
 
+Executable oracle: `wp17_structural_acceptance` in the packet's focused test target.
+
 governance rule zero-hit outside the boundary;
   `GitStateVector` fields populated per §50 with fingerprints from WP16/WP07.
 ##### Negative / Zero-State
+
+Executable oracle: `wp17_negative_zero_state` in the packet's focused test target.
 
 repository byte-identical after all read operations (probe 3
   as a repeatable test); mutation API usage absent (`ast-grep` rule for
   `edit_reference|write_object|checkout` symbols); external command execution
   disabled (trust-policy assertion + no `command` invocation paths).
 ##### Operational
+
+Executable oracle: `wp17_operational_acceptance` in the packet's focused test target.
 
 gix job metrics (queue depth, duration, interruptions).
 #### Edit-Local Gates
@@ -2668,8 +2877,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + git fixture suite (uses `codefabric-git-testkit`-style
-fixtures as a test-support module, not a crate).
+just ci-fast; just wave2-integration-check. Its Git fixtures remain a test-support module,
+not a crate.
 #### Integration Milestone
 
 M03.
@@ -2723,10 +2932,9 @@ AC-G-28; roadmap §7 WP1/WP8.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` coordinator + bootstrap + readiness modules;
-  admin CLI status verbs; store rows from WP13/WP14;
-  `contracts/faults/fault-point-registry.yaml` (bootstrap/readiness fault
-  points per §4.1).
+`src/rpc.rs`, the adapter channel substrate, public-status schema, deployment profile, and
+fault-point registry are current. Coordinator, bootstrap/readiness modules, admin status
+verbs, and WP13/WP14 production rows do not yet exist.
 ##### Preflight Query
 
 none beyond WP17's resolved probes.
@@ -2735,8 +2943,14 @@ none beyond WP17's resolved probes.
 
 Implement one coordinator mutator per workspace, generated lifecycle/trust/health transitions, bootstrap fences, restart recovery, bounded queues/jobs, and the pre-ready health surface. READY remains impossible until WP24 activates a valid frozen snapshot.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp18_behavioral_acceptance` in the packet's focused test target.
 
 register→enable→bootstrap→BOOTSTRAPPING with source-control-
   plane health for (a) non-Git root, (b) main worktree, (c) two linked
@@ -2745,17 +2959,23 @@ register→enable→bootstrap→BOOTSTRAPPING with source-control-
   reconcile-before-ready.
 ##### Structural
 
+Executable oracle: `wp18_structural_acceptance` in the packet's focused test target.
+
 exactly one mutator task per workspace (deterministic
   assertion test on the command-channel discipline: all mutations flow
   through the single coordinator receiver; no loom dependency is added);
   startup states follow the AC-G-28 vocabulary.
 ##### Negative / Zero-State
 
+Executable oracle: `wp18_negative_zero_state` in the packet's focused test target.
+
 no strict-current claim while trust ≠ CURRENT; restart never
   fabricates an active snapshot or reports `READY`; the invariant
   `READY => active frozen snapshot exists` is model-checked; second
   coordinator for the same workspace cannot spawn.
 ##### Operational
+
+Executable oracle: `wp18_operational_acceptance` in the packet's focused test target.
 
 health endpoint fields (§150 subset) exposed via admin CLI.
 #### Edit-Local Gates
@@ -2764,8 +2984,7 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + coordinator integration suite → **Wave 2 exit
-evidence assembled here** (M03).
+just ci-fast; just wave2-integration-check. WP18 assembles the Wave-2 exit evidence.
 #### Integration Milestone
 
 M03 (closes Wave 2).
@@ -2818,8 +3037,9 @@ Data Fabric §6, §8, §10–§13, §67, §102,
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` fabric modules (schema-registry runtime, delta
-  namespace, table creation); replace WP01 compatibility-only calls with the
+`src/fabric.rs` and `src/compatibility.rs` contain only the current DataFusion/Delta
+feasibility seams; draft schema contracts are current. WP19 replaces those
+compatibility-only calls with the
   first production use of LD-01/02/03/04; confirm the WP01 `deny.toml`
   exact-rev delta-rs exception remains no broader than the locked source;
   toolchain bundle update per §4.1 item 6. The §2.1 `deltalake` dependency
@@ -2850,8 +3070,14 @@ compile probe for `CreateBuilder` configuration keys
 
 Load generated TableSpecs, validate exact schema digests, create constrained local Delta tables and control-plane tables, build exact-version providers, and enforce the local-only storage profile. Manual schema constants or provider rebinding after freeze are prohibited.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp19_behavioral_acceptance` in the packet's focused test target.
 
 bootstrap creates the full namespace on a fresh workspace;
   reopen validates digests; round-trip gate green per table; enable →
@@ -2859,14 +3085,20 @@ bootstrap creates the full namespace on a fresh workspace;
   the operational registry's current revision (D-08).
 ##### Structural
 
+Executable oracle: `wp19_structural_acceptance` in the packet's focused test target.
+
 every table's Delta metadata carries the §10 keys; partition
   specs match §95; constraints present (verified via table metadata).
 ##### Negative / Zero-State
+
+Executable oracle: `wp19_negative_zero_state` in the packet's focused test target.
 
 opening a table whose schema digest differs fails closed;
   column-mapping ≠ none fails an invariant check at open; local profile input
   cannot construct or register a cloud provider.
 ##### Operational
+
+Executable oracle: `wp19_operational_acceptance` in the packet's focused test target.
 
 creation is idempotent (re-run bootstrap = no-op commits).
 #### Edit-Local Gates
@@ -2875,8 +3107,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + refreshed advisory-registry gate + fabric suite
-(tempdir-based Delta roots).
+just ci-fast; just advisory-policy-check; just contracts-verify; just
+wave3-integration-check.
 #### Integration Milestone
 
 M04.
@@ -2938,9 +3170,9 @@ custom validators are the mechanism).
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` fabric encoder/validator/ingest modules;
-  `contracts/fixtures/synthetic/` (fixture corpus authored here against the
-  WP09 observation schemas); fabric test suites.
+Current touch points are the draft schema/registry authorities and compatibility-only
+Arrow/DataFusion seams. No fact encoder, batch validator, observation ingress, synthetic
+fixture family, or production fabric test suite exists yet.
 ##### Preflight Query
 
 validator kernel composition benchmark at the §64 batch sizes
@@ -2950,8 +3182,14 @@ validator kernel composition benchmark at the §64 batch sizes
 
 Generate Arrow encoders from TableSpecs; implement the bounded observation boundary, all eleven batch checks, application-owned validation diagnostics, and the production-shaped synthetic reconciliation adapter with evidence/conflict outputs.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp20_behavioral_acceptance` in the packet's focused test target.
 
 synthetic fixture families ingest to exact expected rows;
   the conflicting-observation family materializes `fact_evidence` +
@@ -2959,14 +3197,20 @@ synthetic fixture families ingest to exact expected rows;
   lengths, invalid ID length, duplicate PK, malformed spans).
 ##### Structural
 
+Executable oracle: `wp20_structural_acceptance` in the packet's focused test target.
+
 exactly one populated value representation per
   `value_kind_code` (validator test); every fact row carries the §9 metadata.
 ##### Negative / Zero-State
+
+Executable oracle: `wp20_negative_zero_state` in the packet's focused test target.
 
 a batch bypassing the ingest boundary cannot reach a writer
   (module privacy + governance rule); cross-context/cross-workspace rows
   rejected; stale generation rejected.
 ##### Operational
+
+Executable oracle: `wp20_operational_acceptance` in the packet's focused test target.
 
 ingest metrics (§111 subset: rows received/encoded,
   validation failures).
@@ -2976,8 +3220,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + fabric suite + focused mutation campaign on batch
-validation/canonical-ingress decisions (survivors classified with coverage).
+just ci-fast; just wave3-integration-check; just mutants-file for the changed batch
+validation or canonical-ingress module.
 #### Integration Milestone
 
 M04.
@@ -3027,21 +3271,29 @@ WP4. LD-04.
 
 ##### Preflight Query
 
-Known current touch: root `src/` writer-layer
-modules; fabric suites. The durable-mutation axis is owned by WP09's
-`TableSpec`; this packet cannot inspect the overlay or materialization axes.
-If enforcement reveals an incorrect class, the fix is an owner-reviewed
-contracts edit + regeneration under §4.1 item 7, not an inline override.
 Exact-revision compile/behavior probes cover commit metadata, application
 transactions, `Snapshot::transaction_version`, and delete-metrics `Option`
 semantics (None = unknown, never zero).
+
+##### Known Touch (verified this session)
+
+`src/fabric.rs` and `src/compatibility.rs` contain the current application-transaction
+compatibility seam; no production writer layer exists. WP09's generated `TableSpec` is the
+durable-mutation authority. If enforcement finds an incorrect class, correct and regenerate
+that owner rather than adding an inline override.
 
 #### Required Changes
 
 Implement each generated durable mutation class, owner replacement/removal, native application transactions, retries, operation records, and deterministic conflict recovery. No table writer may bypass the generated policy.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp21_behavioral_acceptance` in the packet's focused test target.
 
 replace/remove/re-add owner cycles converge; §112.3 retry
   idempotency test (kill between delete and append; retry completes without
@@ -3050,15 +3302,21 @@ replace/remove/re-add owner cycles converge; §112.3 retry
   persistence all pass against the pinned revision.
 ##### Structural
 
+Executable oracle: `wp21_structural_acceptance` in the packet's focused test target.
+
 every table has exactly one durable mutation class (from the
   registry); application transaction, commit metadata, and operation record
   carry the §70 key set;
   write-boundary fault points registered per §4.1.
 ##### Negative / Zero-State
 
+Executable oracle: `wp21_negative_zero_state` in the packet's focused test target.
+
 concurrent second writer to the same table yields a detected
   conflict, never silent duplication; blind-retry API path does not exist.
 ##### Operational
+
+Executable oracle: `wp21_operational_acceptance` in the packet's focused test target.
 
 owner-replacement latency metric.
 #### Edit-Local Gates
@@ -3067,9 +3325,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + fabric suite + focused mutation campaign on
-application-transaction/outcome reconciliation (survivors classified with
-coverage).
+just ci-fast; just wave3-integration-check; just mutants-file for the changed
+application-transaction or outcome-reconciliation module.
 #### Integration Milestone
 
 M04.
@@ -3127,25 +3384,43 @@ Concurrency probe: two processes racing the
 pointer commit → exactly one wins, loser gets a typed conflict; crash
 injection between delete/append/pointer steps.
 
+##### Known Touch (verified this session)
+
+`src/fabric.rs` and `src/compatibility.rs` are the only current Delta transaction seams; no
+production publication/current-pointer implementation exists. The executor records exact
+new module and test paths after the concurrency preflight.
+
 #### Required Changes
 
 Implement staged multi-table publication, predecessor-pinned OCC, completion validation, conditioned current-pointer advance, idempotent retry, crash recovery, and registered fault points without claiming unsupported cross-table atomicity.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp22_behavioral_acceptance` in the packet's focused test target.
 
 publish → pointer advance → reopen shows the new base;
   validation failure marks FAILED/ABANDONED with pointer untouched.
 ##### Structural
 
+Executable oracle: `wp22_structural_acceptance` in the packet's focused test target.
+
 `publication_table` rows pin exact versions + checksums;
   states follow `DurablePublicationState` exactly.
 ##### Negative / Zero-State
+
+Executable oracle: `wp22_negative_zero_state` in the packet's focused test target.
 
 intermediate table versions invisible through serving reads;
   racing pointer writers → one `CURRENT_POINTER_CONFLICT`; crash at each step
   (fault points injected) recovers to a coherent state on restart.
 ##### Operational
+
+Executable oracle: `wp22_operational_acceptance` in the packet's focused test target.
 
 publication latency + diagnostics recorded.
 #### Edit-Local Gates
@@ -3154,8 +3429,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + fabric crash/concurrency suite + focused mutation
-campaign on predecessor/conflict/retry decisions.
+just ci-fast; just wave3-integration-check; just mutants-file for the changed
+predecessor/conflict/retry module.
 #### Integration Milestone
 
 M04.
@@ -3206,31 +3481,53 @@ roadmap §8 snapshot-provider ordering; LD-01/LD-04.
 
 #### Change Surface
 
-The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest. Root `src/` snapshot-provider, access-profile, and private
-catalog modules; fabric tests. This packet owns provider construction and
-private catalog freezing. WP25 owns only view registration/query sessions.
+##### Preflight Query
+
+~~~bash
+rg -n 'Snapshot|CatalogProvider|SchemaProvider|DeltaTableProvider|AccessProfile' src tests contracts -g '!**/target/**'
+ast-grep outline src --items structure --view signatures
+~~~
+
+##### Known Touch (verified this session)
+
+`src/compatibility.rs` currently proves only `MemTable` registration and
+`src/fabric.rs` contains the Delta boundary. Snapshot-provider, access-profile, and private
+catalog production modules do not yet exist. WP26 owns their construction and freezing;
+WP25 later owns only views and sessions.
 
 #### Required Changes
 
 Implement the access-profile factory, exact-version provider resolution, overlay wrapping, schema/constraint validation, private catalog construction, and freeze-before-activation boundary. Provider construction is snapshot-owned and never lazy after activation.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp26_behavioral_acceptance` in the packet's focused test target.
 
 deterministic construction trace proves `resolve versions →
   construct providers → wrap → validate → freeze`; exact-version providers
   retain the expected schemas/checksums and query statistics.
 ##### Structural
 
+Executable oracle: `wp26_structural_acceptance` in the packet's focused test target.
+
 handle construction requires an access-profile enum; provider
   instances stored in the candidate snapshot are pointer-identical across
   leases; no mutable global/current-pointer read occurs inside a provider.
 ##### Negative / Zero-State
 
+Executable oracle: `wp26_negative_zero_state` in the packet's focused test target.
+
 unresolved version, schema/checksum mismatch, missing access
   profile, `QUERY_SERVING` with `skip_stats=true`, or post-freeze rebind blocks
   candidate creation before activation.
 ##### Operational
+
+Executable oracle: `wp26_operational_acceptance` in the packet's focused test target.
 
 construction duration and provider-count metrics are emitted.
 
@@ -3240,7 +3537,7 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + provider/catalog substrate suite.
+just ci-fast; just wave3-integration-check.
 #### Integration Milestone
 
 M04.
@@ -3294,13 +3591,12 @@ Lifecycle §101–§107 (overlay rationale); roadmap §8 WP5–6.
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` overlay modules (representation, tombstone
-  indexes, consolidation, rebase); fabric suites;
-  `contracts/comparison/comparison-ignore-registry.yaml` (the
-  overlay-vs-durable canonical-comparison rules — operational columns and
-  file-layout fields excluded there, never inline);
-  `contracts/faults/fault-point-registry.yaml` (rebase-boundary fault
-  points).
+`contracts/comparison/comparison-ignore-registry.yaml` and the fault-point registry are
+current. No overlay representation, tombstone index, consolidation/rebase module, or
+production fabric suite exists yet. The packet updates the comparison registry with the
+overlay-versus-durable rules—excluding operational columns and file-layout fields there,
+never inline—and registers rebase-boundary fault points in
+`contracts/faults/fault-point-registry.yaml`.
 ##### Preflight Query
 
 none beyond WP22's probes (rebase reuses its CAS).
@@ -3309,8 +3605,14 @@ none beyond WP22's probes (rebase reuses its CAS).
 
 Implement typed replacement/tombstone overlay batches, generated policy enforcement, memory reservation, deterministic consolidation, durable rebase, retry recovery, and canonical overlay-versus-durable equality.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp23_behavioral_acceptance` in the packet's focused test target.
 
 property-based consolidation tests over generated mutation
   sequences: consolidate(merge(a,b)) ≡ consolidate(consolidate(a)+b);
@@ -3318,17 +3620,23 @@ property-based consolidation tests over generated mutation
   comparison).
 ##### Structural
 
+Executable oracle: `wp23_structural_acceptance` in the packet's focused test target.
+
 overlay rows validate against the exact base schema digest;
   tombstones use the verbatim schemas; every overlay table's policy comes
   from the `overlay_mutation` axis of `TableSpec`; this packet cannot branch
   on durable mutation or materialization role.
 ##### Negative / Zero-State
 
+Executable oracle: `wp23_negative_zero_state` in the packet's focused test target.
+
 equal-generation conflicting payloads →
   `OVERLAY_GENERATION_CONFLICT` blocks activation; memory reservation breach
   fails before activation; no query ever observes a chain of mutable
   overlays (activation swaps one consolidated overlay).
 ##### Operational
+
+Executable oracle: `wp23_operational_acceptance` in the packet's focused test target.
 
 overlay memory accounting metric.
 #### Edit-Local Gates
@@ -3337,7 +3645,7 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + overlay property suite.
+just ci-fast; just wave3-integration-check.
 #### Integration Milestone
 
 M04.
@@ -3403,9 +3711,8 @@ leg), §101; roadmap §8 WP6–7. LD-04 (vacuum APIs confirmed), LD-09
 The executor re-runs the packet-specific discovery below before editing; listed files are verified current touch points, not a frozen manifest.
 ##### Known Touch (verified this session)
 
-root `src/` snapshot/lease/vacuum modules; SQLite manifest +
-  lease tables (WP13 store); `contracts/faults/fault-point-registry.yaml`
-  (activation/pointer/lease fault points).
+The serving-snapshot schema and fault-point registry are current. Snapshot/lease/vacuum
+modules and WP13 manifest/lease tables do not yet exist.
 ##### Preflight Query
 
 validate the `effective_content_digest`/
@@ -3419,8 +3726,14 @@ validate the `effective_content_digest`/
 
 Implement the immutable ServingSnapshot manifest, candidate validation, atomic activation, leases/heartbeats, source-blob coupling, retention/vacuum protection, crash recovery, and the sole first transition to READY after provider freeze.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp24_behavioral_acceptance` in the packet's focused test target.
 
 build→validate→activate cycle; lease/heartbeat/expiry state
   walk; crash between SQLite commit and memory swap → restart converges to
@@ -3431,10 +3744,14 @@ build→validate→activate cycle; lease/heartbeat/expiry state
   expiry/orphan grace never makes a live source artifact collectible.
 ##### Structural
 
+Executable oracle: `wp24_structural_acceptance` in the packet's focused test target.
+
 `snapshot_id` KAT vector (fixed manifest → expected ID);
   manifest excludes activation-record fields; the activation function accepts
   only WP26's frozen-candidate type and cannot construct/rebind providers.
 ##### Negative / Zero-State
+
+Executable oracle: `wp24_negative_zero_state` in the packet's focused test target.
 
 activation with a failed digest verification is impossible;
   vacuum dry-run never lists a pinned file (test over a pinned+leased
@@ -3443,6 +3760,8 @@ activation with a failed digest verification is impossible;
   are observable before provider/catalog freeze.
 ##### Operational
 
+Executable oracle: `wp24_operational_acceptance` in the packet's focused test target.
+
 lease table exposed read-only; orphan sweep idempotent.
 #### Edit-Local Gates
 
@@ -3450,8 +3769,8 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + snapshot/lease suite with crash injection + focused
-mutation campaign on validation/freeze/durable-commit/swap ordering.
+just ci-fast; just wave3-integration-check; just mutants-file for the changed
+validation/freeze/durable-commit/swap module.
 #### Integration Milestone
 
 M04.
@@ -3516,12 +3835,24 @@ probe was resolved in WP19's preflight (audit Q7) — this packet consumes
 its outcome (programmatic view or thin-provider fallback). Remaining
 preflight: `MemTable::try_new` partition shape (`Vec<Vec<RecordBatch>>`).
 
+##### Known Touch (verified this session)
+
+`src/compatibility.rs` contains the current `MemTable`/`SessionContext` feasibility seam;
+no production serving-view or query-session implementation exists. WP26's future private
+catalog is the only permitted provider source.
+
 #### Required Changes
 
 Implement snapshot-owned serving views, read-only bounded DataFusion sessions, immutable private catalogs, plan allowlisting, source-consistency projections, and the pinned-query proof with no hidden mutation or provider rebinding.
 
+#### Legacy Disposition and Decommission
+
+No packet-local compatibility authority is retained. Any predecessor probe or scaffold is removed once the production path and its named zero-state check are green; cross-packet exits remain governed by §12.
+
 #### Acceptance Checks
 ##### Behavioral
+
+Executable oracle: `wp25_behavioral_acceptance` in the packet's focused test target.
 
 SQL over `cpg_serving.entities`/`relations` returns effective
   rows across all overlay policies; §112.4 subset (catalog opens exact pinned
@@ -3530,6 +3861,8 @@ SQL over `cpg_serving.entities`/`relations` returns effective
   synchronized test).
 ##### Structural
 
+Executable oracle: `wp25_structural_acceptance` in the packet's focused test target.
+
 every catalog is constructed from one leased snapshot object;
   every lease observes pointer-identical providers; no mutable global pointer
   read inside providers and no provider construction/rebind symbol appears in
@@ -3537,12 +3870,16 @@ every catalog is constructed from one leased snapshot object;
   `materialization_role`; overlay composition follows only `overlay_mutation`.
 ##### Negative / Zero-State
 
+Executable oracle: `wp25_negative_zero_state` in the packet's focused test target.
+
 DDL, DML, `SET`/`SHOW`/`RESET`-class statements, direct-file
   references, and unauthorized providers/functions are rejected before
   execution; hidden operational
   columns absent from view schemas; a table with an unspecified overlay
   policy fails view registration (schema error per §91).
 ##### Operational
+
+Executable oracle: `wp25_operational_acceptance` in the packet's focused test target.
 
 memory-pool limit + spill configuration observable; plan
   artifacts (§110 subset) emitted for the conformance queries.
@@ -3552,8 +3889,7 @@ Run the smallest changed-module lint and targeted test slice.
 
 #### Packet-Local Gates
 
-Root gates + catalog suite → **Wave 3 exit evidence assembled
-here** (M04).
+just ci-fast; just wave3-integration-check. WP25 assembles the Wave-3 exit evidence.
 #### Integration Milestone
 
 M04 (closes Wave 3).
@@ -3574,11 +3910,13 @@ Catalog additive.
 
 ### M00 — Current-state evidence contract
 
-Packets: WP00.
+Packets: WP00. Decommission batch: DB06.
 
 Required evidence: schema-2 state validation; accepted remediation and user deferrals
 recorded; every packet marked complete has a non-null ancestor proving commit; no derived
-facts are stored. Gates: just artifacts-check and just plan-status.
+facts are stored; tracked Cargo outputs remain absent from the index and reachable HEAD
+history. Gates: just artifacts-check, just plan-status, and just
+tracked-target-zero-state-check.
 
 ### M01 — Wave 0 exit: four isolated build domains
 
@@ -3586,9 +3924,11 @@ Packets: WP01–WP05.
 
 Required evidence: all four local domains build/test; exact identities are emitted on
 STDERR; STDOUT protocol silence holds; the stable graph and local/S3 activation boundary
-match policy; one Proto descriptor compiler path is reproducible; DB01 is green. Gates:
+match policy; one Proto descriptor compiler path is reproducible; DB01 and DB06 are green.
+Gates:
 just ci-fast, just stable-graph-check, just features-each, just proto-repro-check, and
-just seed-zero-state-check. Ubuntu clean-checkout is deferred and not required.
+just seed-zero-state-check, and just tracked-target-zero-state-check. Ubuntu
+clean-checkout is deferred and not required.
 
 ### M02 — Wave 1 exit: Readiness Gate A
 
@@ -3659,7 +3999,14 @@ SOURCE_RELATIVE/RUST_OUTPUT/wave0_probe constants, descriptor-census semantic au
 custom aggregate source-set SHA-256, and all Wave-0 probe source/binding/test residue are
 absent outside history and negative fixtures.
 
-No decommission batch addresses IR-010; that finding is user-deferred and outside v5.
+### DB06 — Tracked Cargo build-output zero state
+
+Prerequisites: completed baseline cleanup and WP00. just
+tracked-target-zero-state-check proves nested Cargo-root target paths are ignored, absent
+from the Git index, and absent from reachable HEAD history. Its temporary-repository
+negative fixtures prove the checker fails for both current-tree and historical-only target
+objects. This batch preserves the already-completed IR-010 cleanup; it performs no history
+rewrite during v5 execution.
 
 ---
 
@@ -3682,7 +4029,8 @@ No decommission batch addresses IR-010; that finding is user-deferred and outsid
 - A-07: local-workstation-v1 remains no-network and local-filesystem only.
 - A-08: Ubuntu clean-checkout evidence is deferred. Local macOS evidence remains required;
   unsupported platform claims are not inferred from it.
-- A-09: IR-010 is deferred by direct user instruction and does not block v5.
+- A-09: IR-010 is resolved at the current baseline. DB06 is a reintroduction guard, not
+  authorization for another history rewrite.
 - A-10: License selection and license-policy expansion are outside scope.
 - A-11: DO-01, the production DaemonClient, stays assigned to Wave 17; DO-02, the real
   four-tool FastMCP handlers, stays assigned to Wave 18.
@@ -3699,14 +4047,16 @@ identity, security, lifecycle, or storage semantics change.
 
 ## 14. Final gate matrix
 
-The final matrix is recipe names only. WP00 and WP06a add the two recipes marked new;
-Wave-2 and Wave-3 integration recipes are added by the first packet that needs them.
+The final matrix is recipe names only. WP00 proposes the first three absent recipes;
+WP06a proposes compilation-units-check; Wave-2 and Wave-3 integration recipes are added by
+the first packet that needs them.
 Ubuntu clean-checkout is not in this matrix under the user's assurance deferral.
 
 Routine and cross-domain gates:
 
-- just artifacts-check — new in WP00
-- just plan-status — new in WP00
+- just artifacts-check
+- just plan-status
+- just tracked-target-zero-state-check
 - just ci-fast
 - just ci-pr
 - just root-check
@@ -3733,7 +4083,7 @@ Contract, schema, Proto, adapter, and release gates:
 - just contracts-repro-check
 - just schema-check
 - just fixture-check
-- just compilation-units-check — new in WP06a
+- just compilation-units-check
 - just proto-check
 - just proto-repro-check
 - just adapter-contracts-check
@@ -3743,17 +4093,13 @@ Contract, schema, Proto, adapter, and release gates:
 
 Wave integration gates:
 
-- just wave2-integration-check — new by WP12, complete by WP18
-- just wave3-integration-check — new by WP19, complete by WP25
+- just wave2-integration-check
+- just wave3-integration-check
 
 Risk-triggered parser/protocol evidence, once the named targets exist:
 
-- just fuzz contract_ingress 60
-- just fuzz cbef_decode 60
-- just fuzz query_grammar 60
-- just fuzz proto_boundary 60
-- just mutants-file with the packet's changed canonicalization, state-machine, publication,
-  or pointer module
+- just fuzz
+- just mutants-file
 
 The fuzz and mutation recipes are packet/milestone obligations for their named risky
 surfaces, not blanket per-commit gates. A performance recipe becomes a completion gate only
@@ -3769,10 +4115,10 @@ WP26-before-WP24-before-WP23 correction.
 
 ~~~text
 Reconciliation
-  WP00 -> M00
+  WP00 -> DB06 -> M00
 
 Wave 0
-  WP00 -> WP01 -> {WP02 || WP03 || WP04} -> WP05 -> M01
+  M00 -> WP01 -> {WP02 || WP03 || WP04} -> WP05 -> M01
 
 Wave 1
   M01 -> WP06 -> WP06a -> WP07 -> WP08
@@ -3814,6 +4160,7 @@ No later-wave prework may be reported as completion of an earlier packet.
 ## 16. Completion checklist
 
 - [ ] WP00 — schema-2 state/proving-commit reconciliation
+- [ ] DB06 — tracked Cargo build-output zero state remains green
 - [ ] M00 — state contract green
 - [ ] WP01–WP05 — Wave-0 outcomes re-proved on the current v5 baseline
 - [ ] M01 — four local domains and standing zero states green
@@ -3836,7 +4183,8 @@ No later-wave prework may be reported as completion of an earlier packet.
 - [ ] M04 — Wave-3 end-to-end and final gate matrix green
 - [ ] DO-01 remains explicitly assigned to Wave 17
 - [ ] DO-02 remains explicitly assigned to Wave 18
-- [ ] Ubuntu and IR-010 remain recorded as user-deferred, not silently closed
+- [ ] Ubuntu remains recorded as user-deferred; IR-010 remains recorded as resolved and
+  guarded by DB06
 
 ---
 
@@ -3871,8 +4219,9 @@ No later-wave prework may be reported as completion of an earlier packet.
   checks exist.
 - R-10: generated-output migration could create temporary dual authority. Mitigation:
   WP06a is one dependency-closed cutover and DB05 forbids aliases or dual ownership.
-- R-11: already-committed build outputs remain outside scope by direct user instruction.
-  This is an accepted maintenance deferral, not a completion claim.
+- R-11: nested Cargo build outputs could be reintroduced by a future sub-root or ignore
+  regression. Mitigation: DB06 checks both the index and reachable HEAD history and proves
+  failure against temporary-repository negative fixtures.
 - R-12: performance optimization may erase proof. Mitigation: proof-coverage-check is
   authoritative; benchmark only stable claims and never replace independent intent gates.
 
