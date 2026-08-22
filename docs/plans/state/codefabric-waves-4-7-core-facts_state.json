@@ -3,47 +3,47 @@
   "plan_path": "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v2_2026-08-21.md",
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "63c1e9625f6c852ab918467b03cf16ee69660ab7",
-  "status": "executing",
+  "status": "invalidated",
   "current_packet": null,
   "packets": {
-    "WP27": {"status": "ready", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP28": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP29": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP30": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP31": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP32": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP33": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP34": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP35": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP36": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP37": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP38": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP39": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP40": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP41": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP42": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP43": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP44": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP45": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP46": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP47": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP48": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP49": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP50": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP51": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP52": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP53": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+    "WP27": {"status": "invalidated", "proving_commit": null, "deviations": ["The preflight's contracts/bundles/toolchain path is stale; the sole current authority is contracts/toolchain/toolchain-identity.json plus contracts/bundles/toolchain-bundle.json."], "failed_approaches": ["Adding the plan-required Ruff 0.0.7 train under the accepted Rust 1.94.1 floor fails before compilation because every selected Ruff crate declares rust-version 1.95."], "blockers": ["FAB §2.1 and the toolchain identity fix Rust 1.94.1, while LD-23 and WP27 require six Ruff 0.0.7 crates whose declared minimum is Rust 1.95. The target design must choose a compatible Rust floor or a different Ruff train."]},
+    "WP28": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends on invalidated WP27."]},
+    "WP29": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends transitively on invalidated WP27."]},
+    "WP30": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends transitively on invalidated WP27."]},
+    "WP31": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends transitively on invalidated WP27."]},
+    "WP32": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends transitively on invalidated WP27."]},
+    "WP33": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends transitively on invalidated WP27."]},
+    "WP34": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M05 cannot be reached while WP27 is invalidated."]},
+    "WP35": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends on the invalidated Wave-4 foundation."]},
+    "WP36": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends on the invalidated Wave-4 foundation."]},
+    "WP37": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends on the invalidated Wave-4 foundation."]},
+    "WP38": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends on the invalidated Wave-4 foundation."]},
+    "WP39": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Depends on the invalidated Wave-4 foundation."]},
+    "WP40": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Gate B cannot be reached while WP27 is invalidated."]},
+    "WP41": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M06 cannot be reached while WP27 is invalidated."]},
+    "WP42": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M06 cannot be reached while WP27 is invalidated."]},
+    "WP43": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M06 cannot be reached while WP27 is invalidated."]},
+    "WP44": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M06 cannot be reached while WP27 is invalidated."]},
+    "WP45": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M06 cannot be reached while WP27 is invalidated."]},
+    "WP46": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M06 cannot be reached while WP27 is invalidated."]},
+    "WP47": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M06 cannot be reached while WP27 is invalidated."]},
+    "WP48": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M07 cannot be reached while WP27 is invalidated."]},
+    "WP49": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M07 cannot be reached while WP27 is invalidated."]},
+    "WP50": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M07 cannot be reached while WP27 is invalidated."]},
+    "WP51": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M07 cannot be reached while WP27 is invalidated."]},
+    "WP52": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M07 cannot be reached while WP27 is invalidated."]},
+    "WP53": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["M08 cannot be reached while WP27 is invalidated."]}
   },
   "milestones": {
-    "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "M06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "M07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "M08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+    "M05": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["WP27 target design is invalidated."]},
+    "M06": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["WP27 target design is invalidated."]},
+    "M07": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["WP27 target design is invalidated."]},
+    "M08": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["WP27 target design is invalidated."]}
   },
   "decommission_batches": {
-    "DB07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "DB08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "DB09": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+    "DB07": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Its prerequisite chain depends on invalidated WP27."]},
+    "DB08": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Its prerequisite chain depends on invalidated WP27."]},
+    "DB09": {"status": "invalidated", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": ["Its prerequisite chain depends on invalidated WP27."]}
   },
   "baseline_failures": [
     {
@@ -52,7 +52,15 @@
       "disposition": "resolved by the v2 active-plan adoption prerequisite"
     }
   ],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    {
+      "packet": "WP27",
+      "kind": "design_reopening_required",
+      "summary": "The exact Ruff 0.0.7 dependency train declares rust-version 1.95, contradicting the accepted FAB §2.1/Cargo/toolchain Rust 1.94.1 compatibility floor.",
+      "validation_command": "CARGO_TARGET_DIR=target/msrv-wp27 cargo +1.94.1 check --locked --no-default-features --features fact-generation --test integration",
+      "recommended_resolution": "Raise the normative stable Rust floor and toolchain identity to at least 1.95.0, then issue a successor plan or accepted execution overlay; retaining the exact Ruff train is preferred over downgrading the provider design."
+    }
+  ],
   "plan_deviations": [
     {
       "kind": "explicit_user_approval",
@@ -67,6 +75,6 @@
       "summary": "Ubuntu clean-checkout evidence remains user-deferred and is not a packet or milestone blocker."
     }
   ],
-  "next_action": "Complete the v2 active-plan adoption gate, commit its proving infrastructure, then mark WP27 in progress.",
-  "updated_at": "2026-08-22T04:04:39Z"
+  "next_action": "Obtain a design decision on the Rust compatibility floor versus the exact Ruff 0.0.7 train. Preferred: correct FAB §2.1 and toolchain identity to Rust 1.95.0 or newer, integrate that into a successor plan, then resume WP27.",
+  "updated_at": "2026-08-22T04:15:28Z"
 }

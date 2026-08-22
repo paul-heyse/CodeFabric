@@ -101,7 +101,7 @@ def test_wp00_behavioral_acceptance() -> None:
     assert (
         state["current_packet"] is None or state["current_packet"] in state["packets"]
     )
-    assert state["packets"]["WP27"]["status"] == "ready"
+    assert set(state["packets"]) == {f"WP{number}" for number in range(27, 54)}
     assert commit_trust(ROOT, state["baseline_commit"])["ancestor"]
 
 
