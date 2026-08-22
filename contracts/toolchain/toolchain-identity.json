@@ -13,7 +13,7 @@
   "arrow_version": "58.4.0",
   "artifact_id": "codefabric.toolchain.identity",
   "artifact_kind": "manifest",
-  "canonical_digest": "b3:72974dcfcce368d48ecece393d0642aaa7c944e386d19c2a956c1121cfd18dd2",
+  "canonical_digest": "b3:bab0da97993c4e1cb094b27d9e499462f87b072f5c3701d1315f4740c4dafd0e",
   "cargo_lock_digest": "b3:9b19f0310684f0f9001323e4c6b42bbe38b06f4828287dd44d0c4a2fef52ff47",
   "compatible_suite_major": 1,
   "datafusion_version": "54.1.0",
@@ -27,7 +27,7 @@
     "grpcio_tools": "1.83.0",
     "libprotoc": "35.1",
     "prost": "0.14.4",
-    "source_digest": "b3:137a20cb062d6459af60ec89ced192e5d43c0c83199e46cab500f19e32f0056e",
+    "source_digest": "b3:db32ba234c18b2e9e5d4bcbb75ed276d772c647a45f5144a7973d6669650728c",
     "tonic": "0.14.6"
   },
   "pyrefly": {

@@ -48,6 +48,7 @@ def production_messages() -> dict[str, Message]:
             workspace_id="ws:test",
             analysis_context_id="context:source",
             source_generation=7,
+            resource_profile_id="in-process-syntax-standard",
         ),
         "pyrefly_hello": pyrefly.Hello(
             protocol_major=1,
@@ -133,6 +134,18 @@ def test_wp10_structural_acceptance_is_closed_and_registry_aligned() -> None:
     assert provider.PROVIDER_RUN_STATE_PROTOCOL_ERROR == 100
     assert provider.CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS == 4
     assert provider.CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB == 16
+    resource_profile_id = provider.ProviderJobSpec.DESCRIPTOR.fields_by_name["resource_profile_id"]
+    assert resource_profile_id.number == 15
+    assert resource_profile_id.type == resource_profile_id.TYPE_STRING
+
+
+def test_pre_profile_provider_job_wire_remains_decodable() -> None:
+    pre_profile_wire = bytes.fromhex(
+        "0a0872756e3a74657374120777733a746573741a0e636f6e746578743a736f757263652007"
+    )
+    decoded = provider.ProviderJobSpec.FromString(pre_profile_wire)
+    assert decoded.provider_run_id == "run:test"
+    assert decoded.resource_profile_id == ""
 
 
 def test_python_binary_round_trip_preserves_unknown_fields() -> None:

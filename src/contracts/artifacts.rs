@@ -1070,6 +1070,39 @@ fn render_rust_registry_bindings(
         .unwrap();
     }
     writeln!(output, "];\n").unwrap();
+    let feature_registry =
+        registry_value(repository_root, catalog, "codefabric.rpc.feature-registry")?;
+    let feature_records = feature_registry["records"]
+        .as_array()
+        .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from("feature-registry")))?;
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderEventMappingEntry {\n\
+             pub wire_event: &'static str, pub application_event: &'static str,\n\
+             pub mapping_version: &'static str,\n\
+         }\n\n\
+         pub const PROVIDER_EVENT_MAPPINGS: &[ProviderEventMappingEntry] = &[\n",
+    );
+    for record in feature_records
+        .iter()
+        .filter(|record| record["domain"].as_str() == Some("PROVIDER_EVENT"))
+    {
+        let wire_event = record["wire_event"].as_str().ok_or_else(|| {
+            ContractArtifactError::Metadata(PathBuf::from("feature-registry wire_event"))
+        })?;
+        let application_event = record["application_event"].as_str().ok_or_else(|| {
+            ContractArtifactError::Metadata(PathBuf::from("feature-registry application_event"))
+        })?;
+        let mapping_version = record["mapping_version"].as_str().ok_or_else(|| {
+            ContractArtifactError::Metadata(PathBuf::from("feature-registry mapping_version"))
+        })?;
+        writeln!(
+            output,
+            "    ProviderEventMappingEntry {{ wire_event: {wire_event:?}, application_event: {application_event:?}, mapping_version: {mapping_version:?} }},"
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
     output.push_str(
         "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct OntologyCodeEntry {\n\

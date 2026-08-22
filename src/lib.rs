@@ -20,6 +20,8 @@ pub mod identity;
 pub mod inventory;
 #[cfg(feature = "data-fabric")]
 pub mod operational_store;
+#[cfg(feature = "daemon")]
+pub mod provider_runtime;
 /// Generated categorical and lifecycle registry types.
 pub mod registries;
 #[cfg(feature = "rpc")]

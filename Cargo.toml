@@ -156,14 +156,13 @@ tower = { version = "=0.5.3", features = ["util"] }
 
 [package.metadata.cargo-shear]
 # `tonic-prost` is referenced by committed generated code, which D-04 keeps outside
-# heuristic scanner authority. The fact-generation crates are intentionally activated
-# and compile-probed by WP27 before production adapters land; WP29 removes the
-# Rayon entry and WP31 removes the Ruff entries as those adapters begin using them.
+# heuristic scanner authority. The remaining fact-generation crates are intentionally
+# activated and compile-probed by WP27 before production adapters land; WP31 removes the
+# Ruff entries as those adapters begin using them.
 # WP28's library-native raw-catalog derivation now consumes the Tree-sitter crates.
 # This bounded transition is required because WP27 explicitly lands no production
 # parser code.
 ignored = [
-    "rayon",
     "ruff_python_ast",
     "ruff_python_index",
     "ruff_python_parser",

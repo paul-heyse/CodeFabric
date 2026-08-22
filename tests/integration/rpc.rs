@@ -542,8 +542,13 @@ fn wp10_operational_acceptance() {
         workspace_id: "ws:test".to_owned(),
         analysis_context_id: "context:source".to_owned(),
         source_generation: 7,
+        resource_profile_id: "in-process-syntax-standard".to_owned(),
         ..ProviderJobSpec::default()
     });
+
+    let pre_profile_wire = b"\x0a\x08run:test\x12\x07ws:test\x1a\x0econtext:source\x20\x07";
+    let decoded = ProviderJobSpec::decode(pre_profile_wire.as_slice()).expect("old wire");
+    assert!(decoded.resource_profile_id.is_empty());
     round_trip(&Hello {
         protocol_major: 1,
         maximum_arrow_chunk_bytes: 1_048_576,

@@ -1,4 +1,4 @@
-# @generated from catalog primary semantic identity b3:502dfd819e70a154db899bd6bdbe580d01bb56f1654790d5adb241199d43b434,b3:76fc832df6769913a0fdad1b08509082dffb0183b89fba8cc4cafe0d60216315,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from catalog primary semantic identity b3:502dfd819e70a154db899bd6bdbe580d01bb56f1654790d5adb241199d43b434,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -172,7 +172,7 @@ class ResourceEstimate(_message.Message):
     def __init__(self, input_bytes: _Optional[int] = ..., expected_output_bytes: _Optional[int] = ..., cpu_weight: _Optional[int] = ..., memory_mib: _Optional[int] = ...) -> None: ...
 
 class ProviderJobSpec(_message.Message):
-    __slots__ = ("provider_run_id", "workspace_id", "analysis_context_id", "source_generation", "source_snapshot_lease", "requested_capability_codes", "scopes", "priority_class", "resource_estimate", "deadline_unix_ms", "supersession_key", "required_bundle_digests", "required_schema_digests", "idempotency_key")
+    __slots__ = ("provider_run_id", "workspace_id", "analysis_context_id", "source_generation", "source_snapshot_lease", "requested_capability_codes", "scopes", "priority_class", "resource_estimate", "deadline_unix_ms", "supersession_key", "required_bundle_digests", "required_schema_digests", "idempotency_key", "resource_profile_id")
     PROVIDER_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     ANALYSIS_CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -187,6 +187,7 @@ class ProviderJobSpec(_message.Message):
     REQUIRED_BUNDLE_DIGESTS_FIELD_NUMBER: _ClassVar[int]
     REQUIRED_SCHEMA_DIGESTS_FIELD_NUMBER: _ClassVar[int]
     IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_PROFILE_ID_FIELD_NUMBER: _ClassVar[int]
     provider_run_id: str
     workspace_id: str
     analysis_context_id: str
@@ -201,7 +202,8 @@ class ProviderJobSpec(_message.Message):
     required_bundle_digests: _containers.RepeatedScalarFieldContainer[str]
     required_schema_digests: _containers.RepeatedScalarFieldContainer[str]
     idempotency_key: str
-    def __init__(self, provider_run_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., source_snapshot_lease: _Optional[_Union[SourceSnapshotLease, _Mapping]] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., scopes: _Optional[_Iterable[_Union[ProviderScope, _Mapping]]] = ..., priority_class: _Optional[_Union[ProviderPriorityClass, str]] = ..., resource_estimate: _Optional[_Union[ResourceEstimate, _Mapping]] = ..., deadline_unix_ms: _Optional[int] = ..., supersession_key: _Optional[str] = ..., required_bundle_digests: _Optional[_Iterable[str]] = ..., required_schema_digests: _Optional[_Iterable[str]] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
+    resource_profile_id: str
+    def __init__(self, provider_run_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., source_snapshot_lease: _Optional[_Union[SourceSnapshotLease, _Mapping]] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., scopes: _Optional[_Iterable[_Union[ProviderScope, _Mapping]]] = ..., priority_class: _Optional[_Union[ProviderPriorityClass, str]] = ..., resource_estimate: _Optional[_Union[ResourceEstimate, _Mapping]] = ..., deadline_unix_ms: _Optional[int] = ..., supersession_key: _Optional[str] = ..., required_bundle_digests: _Optional[_Iterable[str]] = ..., required_schema_digests: _Optional[_Iterable[str]] = ..., idempotency_key: _Optional[str] = ..., resource_profile_id: _Optional[str] = ...) -> None: ...
 
 class AcceptedProviderJob(_message.Message):
     __slots__ = ("provider_run_id", "accepted_generation", "state", "accepted_at_unix_ms", "event_resume_token")

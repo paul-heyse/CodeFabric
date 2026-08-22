@@ -1,0 +1,13 @@
+id: provider-observation-boundary-only
+valid:
+  - |
+      fn emit(sink: &ProviderEventSink, batch: ObservationMessage) {
+          sink.send_observation(batch).unwrap();
+      }
+invalid:
+  - |
+      use crate::fabric::{OverlayMutation, WorkspaceFabric};
+  - |
+      fn bypass(writer: &mut Writer, request: Request) {
+          writer.replace_owner_rows(request).unwrap();
+      }

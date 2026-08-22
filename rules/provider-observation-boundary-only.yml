@@ -1,0 +1,16 @@
+id: provider-observation-boundary-only
+language: Rust
+severity: error
+message: provider execution may emit only bounded observation streams, never mutate fabric state.
+note: Route provider output through ProviderEventSink and fact_ingest observation channels.
+files:
+  - src/provider_runtime.rs
+  - src/providers/**/*.rs
+rule:
+  any:
+    - all:
+        - kind: use_declaration
+        - regex: "crate::fabric(::|\\{)"
+    - all:
+        - kind: call_expression
+        - regex: "(replace_owner_rows|execute_rebase|publish|activate)\\s*\\("

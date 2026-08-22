@@ -1815,6 +1815,22 @@ pub const PROVIDER_RESOURCE_PROFILES: &[ProviderResourceProfileEntry] = &[
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderEventMappingEntry {
+pub wire_event: &'static str, pub application_event: &'static str,
+pub mapping_version: &'static str,
+}
+
+pub const PROVIDER_EVENT_MAPPINGS: &[ProviderEventMappingEntry] = &[
+    ProviderEventMappingEntry { wire_event: "ACCEPTED", application_event: "ACCEPTED", mapping_version: "1.0" },
+    ProviderEventMappingEntry { wire_event: "PROGRESS", application_event: "PROGRESS", mapping_version: "1.0" },
+    ProviderEventMappingEntry { wire_event: "SCOPE_BEGIN", application_event: "SCOPE_BEGIN", mapping_version: "1.0" },
+    ProviderEventMappingEntry { wire_event: "OBSERVATION_CHUNK", application_event: "OBSERVATION_CHUNK", mapping_version: "1.0" },
+    ProviderEventMappingEntry { wire_event: "SCOPE_END", application_event: "SCOPE_END", mapping_version: "1.0" },
+    ProviderEventMappingEntry { wire_event: "TERMINAL", application_event: "TERMINAL", mapping_version: "1.0" },
+    ProviderEventMappingEntry { wire_event: "CANCEL_ACKNOWLEDGED", application_event: "CANCEL_ACKNOWLEDGED", mapping_version: "1.0" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OntologyCodeEntry {
 pub code: i32, pub family_code: i16,
 }

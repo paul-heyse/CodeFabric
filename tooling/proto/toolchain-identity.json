@@ -1,7 +1,7 @@
 {
   "authority": "single grpc_tools.protoc invocation -> descriptor + Python; Rust compile_fds",
-  "descriptor_sha256": "feacad4e38b0712d486caa9b13d23b3273fb840d43abdb6aaa16458b81e2ba39",
-  "generated_sha256": "48d55ba7ea9cd26148aff9470648f24dd6adb8ea19ae53f2ec8c70b5996a775f",
+  "descriptor_sha256": "318ab83ef6f6195e67ccd98cf24e48dcf46ab35d1421fd83532c64693bb6e529",
+  "generated_sha256": "8e3e3bf8e4eeb85fb7d38e40093ff88ae9d000e9372c6e461bb7c22a437b7282",
   "python": {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -25,7 +25,7 @@
   "schema": 3,
   "sources": {
     "contracts/rpc/cpg_query_service.proto": "b3:eba80a4b95280db5d635d2a3a6d8bbd45f9ee2841ce67b1a9cc49867543fa83b",
-    "contracts/rpc/provider_control.proto": "b3:551c806998a74dd44370fff37328d971acc1042cd402319e332d127be79c4318",
+    "contracts/rpc/provider_control.proto": "b3:88e322e42cc6475bfa810a4a3b4479a1620bef22e3156b3b82469abc4fd36e38",
     "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
     "contracts/rpc/rustc_extractor.proto": "b3:2d3a327183e2d56b83078fb77ed0b810e6bc0382b7e856e0e0028ee713114d4e"
   }

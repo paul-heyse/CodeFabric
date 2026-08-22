@@ -4382,6 +4382,19 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 15,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.provider.v1.ProviderJobSpec",

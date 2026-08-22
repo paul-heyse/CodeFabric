@@ -426,6 +426,13 @@ snapshots-review:
 mutants-file path:
     cargo mutants -f {{path}}
 
+[doc("Mutation-test WP29 provider admission, supersession, and cancellation")]
+[group('quality')]
+mutants-wp29:
+    cargo mutants -f src/provider_runtime.rs \
+      -F 'ProviderRuntime::(validate_job|supersession_key|transition|acquire|acquire_all|finish_requested|finish_adapter_result)|ProviderExecutor' \
+      -- --lib provider_runtime::tests
+
 # Nightly is the extractor's production toolchain and remains isolated from this root.
 # Miri explores executions; it never proves soundness (spec section 24.2). Record
 # toolchain, seed range, and exclusions with any finding.

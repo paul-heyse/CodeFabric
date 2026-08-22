@@ -3,7 +3,7 @@
 // version: 1.0
 // compatible_suite_major: 1
 // status: released
-// canonical_digest: b3:76fc832df6769913a0fdad1b08509082dffb0183b89fba8cc4cafe0d60216315
+// canonical_digest: b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f
 // digest_projection: proto-descriptor-v1
 syntax = "proto3";
 
@@ -131,6 +131,7 @@ message ProviderJobSpec {
   repeated string required_bundle_digests = 12;
   repeated string required_schema_digests = 13;
   string idempotency_key = 14;
+  string resource_profile_id = 15;
 }
 
 message AcceptedProviderJob {

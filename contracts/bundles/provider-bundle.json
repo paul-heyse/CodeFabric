@@ -39,7 +39,7 @@
     },
     {
       "artifact_id": "codefabric.rpc.provider-control",
-      "canonical_digest": "b3:76fc832df6769913a0fdad1b08509082dffb0183b89fba8cc4cafe0d60216315",
+      "canonical_digest": "b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -59,11 +59,11 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:7699aec04cef8eae1f4be1b12724fdb6ee5ae50d9319f26259dc8a0b1efd9237",
+  "bundle_digest": "b3:ffae125a6ee138060e06bf9d13af57a2eac98522e6b2f860fdaa13003d764465",
   "bundle_kind": "provider",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:fbb7d304cbc96d3b1c2a22b0908dcea5368f9fb8fbdaf04bd820f3258aa6e66b",
+  "canonical_digest": "b3:de82aa3e9efa6605d3bcb0735d0eb595a88ce7f30de7d295ae8de2cdac6b4b06",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0

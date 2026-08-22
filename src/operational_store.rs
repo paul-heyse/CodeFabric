@@ -57,6 +57,25 @@ pub struct RetentionReport {
     pub audit_events: usize,
 }
 
+/// One bounded provider-run lifecycle projection for the generated `provider_run` table.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderRunRecord {
+    pub provider_run_id: Vec<u8>,
+    pub workspace_id: Vec<u8>,
+    pub analysis_context_id: Vec<u8>,
+    pub wave_id: Vec<u8>,
+    pub provider_code: i64,
+    pub owner_id: Option<Vec<u8>>,
+    pub build_unit_id: Option<Vec<u8>>,
+    pub source_generation: i64,
+    pub input_fingerprint: Vec<u8>,
+    pub output_fingerprint: Option<Vec<u8>>,
+    pub state_code: i64,
+    pub accepted_at: String,
+    pub terminal_at: Option<String>,
+    pub diagnostic_id: Option<Vec<u8>>,
+}
+
 /// Stable operational-store failures.
 #[derive(Debug, Error)]
 pub enum OperationalStoreError {
@@ -78,6 +97,8 @@ pub enum OperationalStoreError {
     InjectedFault(StoreFaultPoint),
     #[error("table mutation operation record conflict: {0}")]
     MutationRecord(String),
+    #[error("provider run record conflict: {0}")]
+    ProviderRunRecord(String),
 }
 
 #[derive(Debug)]
@@ -287,6 +308,64 @@ impl OperationalStore {
                 git_operation_runs,
                 audit_events,
             })
+        })
+    }
+
+    /// Insert or advance one provider run without allowing immutable identity drift.
+    ///
+    /// # Errors
+    ///
+    /// Returns a transaction error or `ProviderRunRecord` when an existing run ID is
+    /// reused with different immutable inputs.
+    pub fn record_provider_run(
+        &mut self,
+        record: &ProviderRunRecord,
+    ) -> Result<(), OperationalStoreError> {
+        self.write_transaction(|transaction| {
+            let changed = transaction.execute(
+                "INSERT INTO provider_run (
+                   provider_run_id, workspace_id, analysis_context_id, wave_id,
+                   provider_code, owner_id, build_unit_id, source_generation,
+                   input_fingerprint, output_fingerprint, state_code, accepted_at,
+                   terminal_at, diagnostic_id
+                 ) VALUES (
+                   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+                 )
+                 ON CONFLICT(provider_run_id) DO UPDATE SET
+                   output_fingerprint = excluded.output_fingerprint,
+                   state_code = excluded.state_code,
+                   terminal_at = excluded.terminal_at,
+                   diagnostic_id = excluded.diagnostic_id
+                 WHERE provider_run.workspace_id = excluded.workspace_id
+                   AND provider_run.analysis_context_id = excluded.analysis_context_id
+                   AND provider_run.wave_id = excluded.wave_id
+                   AND provider_run.provider_code = excluded.provider_code
+                   AND provider_run.source_generation = excluded.source_generation
+                   AND provider_run.input_fingerprint = excluded.input_fingerprint
+                   AND provider_run.accepted_at = excluded.accepted_at",
+                rusqlite::params![
+                    record.provider_run_id,
+                    record.workspace_id,
+                    record.analysis_context_id,
+                    record.wave_id,
+                    record.provider_code,
+                    record.owner_id,
+                    record.build_unit_id,
+                    record.source_generation,
+                    record.input_fingerprint,
+                    record.output_fingerprint,
+                    record.state_code,
+                    record.accepted_at,
+                    record.terminal_at,
+                    record.diagnostic_id,
+                ],
+            )?;
+            if changed != 1 {
+                return Err(OperationalStoreError::ProviderRunRecord(
+                    String::from_utf8_lossy(&record.provider_run_id).into_owned(),
+                ));
+            }
+            Ok(())
         })
     }
 

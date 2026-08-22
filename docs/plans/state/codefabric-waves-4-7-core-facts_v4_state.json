@@ -1,0 +1,62 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v4_2026-08-22.md",
+  "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+  "baseline_commit": "b3cb347e6e7fdc4bca13851ee8775385f11630d6",
+  "status": "executing",
+  "current_packet": "WP29",
+  "packets": {
+    "WP27": {"status": "complete", "proving_commit": "7d82ec80b8b3e0812e97b668058315da1aa73030", "deviations": ["The plan preflight path contracts/bundles/toolchain is stale; the sole toolchain source authority is contracts/toolchain/toolchain-identity.json and its bundle is contracts/bundles/toolchain-bundle.json.", "Because WP27 intentionally lands no production parser code, cargo-shear ignores the ten provider dependencies until their production adapters land; WP29 owns Tree-sitter/Rayon removal and WP31 owns Ruff removal."], "failed_approaches": ["The v2 attempt proved Ruff 0.0.7 cannot compile under Rust 1.94.1; v3 raises the accepted floor to 1.95.0.", "The first structural probe treated Ruff LineIndex as zero-indexed; its public line identity is one-indexed."], "blockers": []},
+    "WP28": {"status": "complete", "proving_commit": "fed2917249b1e791346b289e4195c658bb40a8d1", "deviations": [], "failed_approaches": ["A generic Arrow ListArray fixture constructor silently changed the child-field nullability; constructing ListArray from the generated child FieldRef preserved the exact Contract-IR schema.", "The existing serving test fixture and source-table-version assertion manually enumerated the Wave-3 provider census; both were replaced with generated serving-projection/provider iterators after the new tables exposed the drift.", "The first generated profile binding emitted long Rust integer literals without readability separators and failed pedantic Clippy; the generator now renders canonical grouped integer literals."], "blockers": []},
+    "WP29": {"status": "in_progress", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP30": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP31": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP32": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP33": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP34": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP35": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP36": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP37": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP38": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP39": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP40": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP41": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP42": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP43": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP44": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP45": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP46": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP47": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP48": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP49": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP50": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP51": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP52": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP53": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "milestones": {
+    "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "decommission_batches": {
+    "DB07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB09": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "baseline_failures": [],
+  "discovered_obligations": [
+    {"owner": "WP28", "summary": "The first D-45 profile authority omitted the accepted design's work/deadline/depth/parser-worker/retained-tree/hard-stop/retry fields; extend the typed model and generated runtime bindings before WP29 admission."},
+    {"owner": "WP29", "summary": "The released provider.v1 ProviderJobSpec lacked the resource_profile_id required by GEN §90, GEN AC-G-32, and WP29; v4 D-49 owns the approved additive field-15 correction through the single-FDS compilation unit."}
+  ],
+  "plan_deviations": [
+    {"kind": "explicit_user_approval", "summary": "The user approved raising the normative stable Rust floor from 1.94.1 to 1.95.0 while retaining the exact Ruff 0.0.7 train."},
+    {"kind": "successor_plan", "summary": "V3 preserves all v2 packet outcomes and proof obligations while incorporating the approved D-48 compatibility correction; the invalidated v2 state remains immutable history."},
+    {"kind": "successor_plan", "summary": "V4 imports the proven WP27/WP28 judgments and adds D-49 so WP29 can realize the already-normative resource_profile_id contract without a second profile authority."},
+    {"kind": "explicit_user_approval", "summary": "The user approved the additive provider.v1 ProviderJobSpec.resource_profile_id field-15 design correction."},
+    {"kind": "accepted_assurance_deferral", "summary": "Ubuntu clean-checkout evidence remains user-deferred and is not a packet or milestone blocker."}
+  ],
+  "next_action": "Add ProviderJobSpec.resource_profile_id as field 15 through the single-FDS compiler, prove compatibility and profile-ingress rejection, then implement the WP29 provider runtime.",
+  "updated_at": "2026-08-22T08:00:00Z"
+}
