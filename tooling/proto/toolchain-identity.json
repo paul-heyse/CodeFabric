@@ -20,7 +20,7 @@
       "tonic-prost": "0.14.6",
       "tonic-prost-build": "0.14.6"
     },
-    "toolchain_policy": "stable root; declared MSRV 1.94.1"
+    "toolchain_policy": "stable root; declared MSRV 1.95.0"
   },
   "schema": 3,
   "sources": {

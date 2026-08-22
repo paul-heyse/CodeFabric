@@ -272,7 +272,7 @@ dated-nightly extractor boundary. Compiled capability is not provider authority.
 | root toolchain | `stable` | stable daemon/data-plane boundary |
 | components | `rustfmt`, `clippy`, `rust-analyzer`, `rust-src`, `llvm-tools-preview` | `llvm-tools-preview` is the substrate for coverage, binutils and fuzz-coverage (tooling-ref §8); `rust-src` gives semantic tools stdlib source (§7) |
 | extractor toolchain | `nightly-2026-08-18` in its own root | owns `rustc-dev`; it never contaminates the stable root |
-| `rust-version` | `1.94.1` | floor imposed by pinned delta-rs and verified with `cargo msrv verify` |
+| `rust-version` | `1.95.0` | floor imposed by the Ruff 0.0.7 provider train (above delta-rs's 1.94.1 floor) and verified with `cargo msrv verify` |
 | `license` | **not declared** | no license chosen yet; `publish = false` stops Cargo warning. `deny.toml` sets `licenses.private.ignore = true` so our own crate is not reported "Unlicensed" |
 | lints | `unsafe_code = "deny"`, clippy `all` + `pedantic` = warn | there is no first-party `unsafe`; preserving that is a useful default (§33) |
 | `clippy.toml` | five `doc-valid-idents` words + the `..` defaults marker | `pedantic` enables `doc_markdown`, which wants backticks around proper nouns in prose. The list names known-good words — it does **not** disable the lint (§9.1) |

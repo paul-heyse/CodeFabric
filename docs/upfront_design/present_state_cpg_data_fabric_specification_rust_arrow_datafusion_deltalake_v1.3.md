@@ -283,12 +283,12 @@ This specification is grounded in the attached references and uses their termino
 | Tree-sitter provider set | `tree-sitter 0.26.12`, `tree-sitter-python 0.25.0`, `tree-sitter-rust 0.24.2` (grammar ABI 15) | Incremental Python/Rust CST and generated provider raw-kind inventories |
 | Ruff analysis set | `ruff_python_parser`, `ruff_python_ast`, `ruff_python_trivia`, `ruff_python_index`, `ruff_source_file`, `ruff_text_size` all `0.0.7` | Python tokens, typed AST, trivia/indexes, and coordinates |
 | Rayon | `1.12.0` | Dedicated bounded in-process provider pools; never an implicit global-pool contract |
-| Rust toolchain | `1.94.1` for the pinned delta-rs baseline | Workspace compatibility floor |
+| Rust toolchain | `1.95.0` for the Ruff 0.0.7 provider train | Workspace compatibility floor |
 | Delta kernel | `buoyant_kernel` and `buoyant_kernel_engine` on the released `0.25.x` line | Selected **transitively** by the pinned delta-rs revision; not independently pinned by CodeFabric |
 
 The delta-rs `1.0.0` target is a pinned pre-release revision rather than a tagged stable release: the upstream workspace declares crate version `1.0.0`, but no `rust-v1.0.0` tag exists and the upstream changelog still begins at `rust-v0.32.3`. All code generated from this specification SHALL be compile-tested against that exact revision before adoption.
 
-The Rust floor of `1.94.1` is set by the pinned revision itself, which raised its MSRV from `1.91.1` after upstream AWS crates increased theirs. It is a build-tooling obligation, not a CodeFabric language-feature requirement.
+The Rust floor of `1.95.0` is set by the Ruff 0.0.7 provider train. This remains compatible with the pinned delta-rs revision, whose own minimum is `1.94.1`. It is a build-tooling obligation, not a CodeFabric language-feature requirement.
 
 The storage-substrate contracts in sections 2, 12.5–12.9, 67.3, 98.1–98.3, 100.1, 101.1, 103.4, 111.1 and 112.6 were integrated from `docs/codefabric_delta_rs_9f922319_design_change_recommendations_2026-08-20.md`, which assessed the move from delta-rs `35cfed45…` to `9f922319…`. That assessment found no required change to the ontology, semantic query model, hot-overlay model, multi-table publication model, or `ServingSnapshot` consistency semantics; the changes are confined to the implementation baseline, the provider lifecycle, and the conformance suite.
 
@@ -302,7 +302,7 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.94.1"
+rust-version = "1.95.0"
 
 [workspace.dependencies]
 datafusion = "=54.1.0"

@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v3_2026-08-22.md",
+  "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+  "baseline_commit": "1d1207c3f8fc0ed25a02fae31cc253bb1a35c5bf",
+  "status": "executing",
+  "current_packet": "WP27",
+  "packets": {
+    "WP27": {"status": "in_progress", "proving_commit": null, "deviations": ["The plan preflight path contracts/bundles/toolchain is stale; the sole toolchain source authority is contracts/toolchain/toolchain-identity.json and its bundle is contracts/bundles/toolchain-bundle.json."], "failed_approaches": ["The v2 attempt proved Ruff 0.0.7 cannot compile under Rust 1.94.1; v3 raises the accepted floor to 1.95.0."], "blockers": []},
+    "WP28": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP29": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP30": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP31": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP32": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP33": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP34": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP35": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP36": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP37": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP38": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP39": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP40": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP41": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP42": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP43": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP44": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP45": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP46": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP47": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP48": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP49": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP50": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP51": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP52": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP53": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "milestones": {
+    "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "decommission_batches": {
+    "DB07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB09": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "baseline_failures": [],
+  "discovered_obligations": [],
+  "plan_deviations": [
+    {"kind": "explicit_user_approval", "summary": "The user approved raising the normative stable Rust floor from 1.94.1 to 1.95.0 while retaining the exact Ruff 0.0.7 train."},
+    {"kind": "successor_plan", "summary": "V3 preserves all v2 packet outcomes and proof obligations while incorporating the approved D-48 compatibility correction; the invalidated v2 state remains immutable history."},
+    {"kind": "accepted_assurance_deferral", "summary": "Ubuntu clean-checkout evidence remains user-deferred and is not a packet or milestone blocker."}
+  ],
+  "next_action": "Complete the WP27 Rust-floor correction, exact provider pins, feature-boundary governance, provider probes, and packet-local gates.",
+  "updated_at": "2026-08-22T00:00:00Z"
+}

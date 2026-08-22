@@ -639,7 +639,7 @@ def identity(files: dict[str, Path], versions: dict[str, str]) -> dict[str, Any]
         "rust": {
             "packages": cargo_package_versions(),
             "descriptor_api": "tonic_prost_build::Builder::compile_fds",
-            "toolchain_policy": "stable root; declared MSRV 1.94.1",
+            "toolchain_policy": "stable root; declared MSRV 1.95.0",
         },
         "python": {
             **versions,

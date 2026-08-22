@@ -740,7 +740,7 @@ fn validate_toolchain_identity(
     document: &ToolchainIdentityDocument,
 ) -> Result<(), ContractCompileError> {
     let fixed = [
-        (&document.rust_version, "1.94.1"),
+        (&document.rust_version, "1.95.0"),
         (&document.arrow_version, "58.4.0"),
         (&document.parquet_version, "58.4.0"),
         (&document.datafusion_version, "54.1.0"),

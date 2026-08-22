@@ -27,7 +27,7 @@ agent
            └─ pyrefly-sidecar/   pinned Pyrefly semantic subprocess
 ```
 
-The root package is one rlib crate, edition 2024 with Rust 1.94.1 as its verified
+The root package is one rlib crate, edition 2024 with Rust 1.95.0 as its verified
 compatibility floor. It has no native-extension build surface or root Python package. Its default
 `local-workstation` accepts only local filesystem storage and excludes the Delta S3
 implementation and AWS SDK; `s3-storage` enables them explicitly. The pinned Delta
@@ -43,7 +43,7 @@ dependency isolation are build-domain requirements, not semantic source organiza
 
 | Surface | Baseline |
 |---|---|
-| Stable daemon/data plane | Linux and macOS; Rust 1.94.1 or newer |
+| Stable daemon/data plane | Linux and macOS; Rust 1.95.0 or newer |
 | rustc extractor | `nightly-2026-08-18`; exact compiler identity recorded |
 | Pyrefly sidecar | Pyrefly 1.2.0 at an immutable source revision |
 | FastMCP adapter | Python 3.14.7 development pin; package floor 3.12 |

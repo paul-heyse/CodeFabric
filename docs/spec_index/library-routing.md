@@ -302,7 +302,7 @@ too — it is a decision still open.
 | DataFusion | `=54.1.0` | `FAB §2` |
 | `deltalake` / delta-rs | `1.0.0` at git rev `9f9223197469897ef05ae4369eb4fd1390174e65` — **a pinned pre-release revision, not a tagged stable release**; `default-features=false`, features `["rustls","datafusion"]`. Object-store backends are feature-gated, not default | `FAB §2` · `FAB §2.1` |
 | `object_store` | `=0.13.2` | `FAB §2.1` |
-| Rust toolchain | `rust-version = "1.94.1"`, `edition = "2024"`, `resolver = "3"` — floor set by the pinned delta-rs revision | `FAB §2` · `FAB §2.1` |
+| Rust toolchain | `rust-version = "1.95.0"`, `edition = "2024"`, `resolver = "3"` — floor set by the Ruff 0.0.7 provider train above delta-rs's 1.94.1 minimum | `FAB §2` · `FAB §2.1` |
 | Delta kernel | `buoyant_kernel` + `buoyant_kernel_engine` `0.25.x`, **selected transitively**; CodeFabric does not pin it | `FAB §2` · `FAB §2.2` |
 | tree-sitter | `0.26.12`; `tree-sitter-python 0.25.0` | `GEN §2` |
 | Ruff | `0.16.1`; component crates `0.0.7` | `GEN §2` |

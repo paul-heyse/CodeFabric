@@ -89,7 +89,7 @@ root_shape="$(printf '%s' "$metadata" | jq -c --arg root "$root" '
 ')"
 printf '%s' "$root_shape" | jq -e '
   .edition == "2024"
-  and .rust_version == "1.94.1"
+  and .rust_version == "1.95.0"
   and .crate_types == ["rlib"]
   and .features == {
     "canonical-json": [

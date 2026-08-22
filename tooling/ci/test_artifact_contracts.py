@@ -94,7 +94,7 @@ def test_packet_trust_requires_ancestor_commit(tmp_path: Path) -> None:
 def test_wp00_behavioral_acceptance() -> None:
     assert active_plan_path(ROOT) == DEFAULT_PLAN
     assert DEFAULT_PLAN.name == (
-        "codefabric_waves_4-7_core_facts_implementation_plan_v2_2026-08-21.md"
+        "codefabric_waves_4-7_core_facts_implementation_plan_v3_2026-08-22.md"
     )
     state = validate_state(ROOT, STATE)
     assert state["schema_version"] == 2
@@ -108,7 +108,7 @@ def test_wp00_behavioral_acceptance() -> None:
 def test_wp00_structural_acceptance() -> None:
     report = validate_artifacts(ROOT, DEFAULT_PLAN)
     assert report["packet_count"] == 27
-    assert report["declared_input_count"] == 14
+    assert report["declared_input_count"] == 15
 
 
 def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:

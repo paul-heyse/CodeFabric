@@ -13,7 +13,7 @@
   "arrow_version": "58.4.0",
   "artifact_id": "codefabric.toolchain.identity",
   "artifact_kind": "manifest",
-  "canonical_digest": "b3:7d03ec9e1e4ef12e2bad0d6271af87c088587256371e46afc8cb499f8dc8c566",
+  "canonical_digest": "b3:e7b06ce65d574c518ca32057ee5817f42758dc4a0e66d1015a8b0957190a9fa4",
   "cargo_lock_digest": "b3:c140aea21b546f4aad22f09a067ac08d1b88010ae784b6ddc9c1439b7150379e",
   "compatible_suite_major": 1,
   "datafusion_version": "54.1.0",
@@ -27,7 +27,7 @@
     "grpcio_tools": "1.83.0",
     "libprotoc": "35.1",
     "prost": "0.14.4",
-    "source_digest": "b3:4dcdc7830bbf217cea85a3c57b4ff012f4d8945d255d6880e7097634ac6fbb1a",
+    "source_digest": "b3:137a20cb062d6459af60ec89ced192e5d43c0c83199e46cab500f19e32f0056e",
     "tonic": "0.14.6"
   },
   "pyrefly": {
@@ -43,7 +43,7 @@
     "tree_sitter": "0.26.12",
     "tree_sitter_python": "0.25.0"
   },
-  "rust_version": "1.94.1",
+  "rust_version": "1.95.0",
   "rustc_extractor": {
     "rustc_commit_hash": "8fa1c96cfd489e4c27654c144ae871ce2c4db6c6",
     "rustc_release": "1.100.0-nightly",
