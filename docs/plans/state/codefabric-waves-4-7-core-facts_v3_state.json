@@ -4,11 +4,11 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "1d1207c3f8fc0ed25a02fae31cc253bb1a35c5bf",
   "status": "executing",
-  "current_packet": "WP29",
+  "current_packet": "WP28",
   "packets": {
     "WP27": {"status": "complete", "proving_commit": "7d82ec80b8b3e0812e97b668058315da1aa73030", "deviations": ["The plan preflight path contracts/bundles/toolchain is stale; the sole toolchain source authority is contracts/toolchain/toolchain-identity.json and its bundle is contracts/bundles/toolchain-bundle.json.", "Because WP27 intentionally lands no production parser code, cargo-shear ignores the ten provider dependencies until their production adapters land; WP29 owns Tree-sitter/Rayon removal and WP31 owns Ruff removal."], "failed_approaches": ["The v2 attempt proved Ruff 0.0.7 cannot compile under Rust 1.94.1; v3 raises the accepted floor to 1.95.0.", "The first structural probe treated Ruff LineIndex as zero-indexed; its public line identity is one-indexed."], "blockers": []},
-    "WP28": {"status": "complete", "proving_commit": "fe068cdd7d98db8dc3a743ae41156eadbf53dd89", "deviations": [], "failed_approaches": ["A generic Arrow ListArray fixture constructor silently changed the child-field nullability; constructing ListArray from the generated child FieldRef preserved the exact Contract-IR schema.", "The existing serving test fixture and source-table-version assertion manually enumerated the Wave-3 provider census; both were replaced with generated serving-projection/provider iterators after the new tables exposed the drift."], "blockers": []},
-    "WP29": {"status": "in_progress", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP28": {"status": "in_progress", "proving_commit": null, "deviations": [], "failed_approaches": ["A generic Arrow ListArray fixture constructor silently changed the child-field nullability; constructing ListArray from the generated child FieldRef preserved the exact Contract-IR schema.", "The existing serving test fixture and source-table-version assertion manually enumerated the Wave-3 provider census; both were replaced with generated serving-projection/provider iterators after the new tables exposed the drift."], "blockers": []},
+    "WP29": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP30": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP31": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP32": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
@@ -46,12 +46,15 @@
     "DB09": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
   },
   "baseline_failures": [],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    {"owner": "WP28", "summary": "The first D-45 profile authority omitted the accepted design's work/deadline/depth/parser-worker/retained-tree/hard-stop/retry fields; extend the typed model and generated runtime bindings before WP29 admission."},
+    {"owner": "WP29", "summary": "The generated provider.v1 ProviderJobSpec lacks the provider_id and resource_profile_id required by GEN AC-G-32 and v3 WP29; resolve the packet's explicit protocol-shape replan trigger before executor admission is implemented."}
+  ],
   "plan_deviations": [
     {"kind": "explicit_user_approval", "summary": "The user approved raising the normative stable Rust floor from 1.94.1 to 1.95.0 while retaining the exact Ruff 0.0.7 train."},
     {"kind": "successor_plan", "summary": "V3 preserves all v2 packet outcomes and proof obligations while incorporating the approved D-48 compatibility correction; the invalidated v2 state remains immutable history."},
     {"kind": "accepted_assurance_deferral", "summary": "Ubuntu clean-checkout evidence remains user-deferred and is not a packet or milestone blocker."}
   ],
-  "next_action": "Implement WP29 ProviderExecutor admission, supersession, cancellation, generated provider_run transitions, bounded observation streaming, and provider storage-boundary governance.",
+  "next_action": "Complete the reopened WP28 D-45 resource-profile model and generated runtime bindings, then resolve WP29's ProviderJobSpec protocol-shape replan trigger.",
   "updated_at": "2026-08-22T07:09:57Z"
 }
