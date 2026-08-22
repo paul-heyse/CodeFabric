@@ -4,6 +4,8 @@
 //! arrives in later packets; [`compatibility`] is the executable contract that keeps
 //! the selected library APIs and feature graph honest until those modules replace it.
 
+#[cfg(feature = "canonical-json")]
+pub mod analysis_context;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
 #[cfg(any(feature = "canonical-json", feature = "contracts-tooling"))]

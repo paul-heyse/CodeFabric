@@ -203,7 +203,7 @@ impl WorkspaceNamespace {
     fn table_path(&self, spec: &TableSpec) -> Result<PathBuf, FabricError> {
         let parent = match spec.family {
             "control" | "bundle" => &self.control,
-            "universal-fact" => &self.facts,
+            "universal-fact" | "source" | "lexical" | "syntax" => &self.facts,
             "overlay-control" => &self.derived,
             family => {
                 return Err(FabricError::TableInvariant {
@@ -828,7 +828,18 @@ fn enum_catalog_batch() -> Result<RecordBatch, FabricError> {
 
 /// Validate that one application-owned Arrow schema has an exact Delta Kernel mapping.
 pub(crate) fn validate_delta_schema(schema: &SchemaRef) -> Result<(), ArrowError> {
-    let _: deltalake::kernel::StructType = schema.as_ref().try_into_kernel()?;
+    let kernel: deltalake::kernel::StructType = schema.as_ref().try_into_kernel()?;
+    let reopened: Schema = (&kernel).try_into_arrow()?;
+    if reopened.fields() != schema.fields() {
+        return Err(ArrowError::SchemaError(
+            "Delta StructType round trip changed Arrow fields".into(),
+        ));
+    }
+    datafusion::common::DFSchema::try_from(Arc::new(reopened)).map_err(|error| {
+        ArrowError::SchemaError(format!(
+            "DataFusion rejected Delta-round-tripped schema: {error}"
+        ))
+    })?;
     Ok(())
 }
 
@@ -954,6 +965,30 @@ mod tests {
             for name in constraints_for(spec).keys() {
                 assert!(configuration.contains_key(&format!("delta.constraints.{name}")));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn wp28_wave4_tables_bootstrap_and_reopen() {
+        let root = TestRoot::new("wp28-wave4-tables");
+        let first = bootstrap_workspace(&root.0, &record(1)).await.unwrap();
+        for code in [140, 150, 160, 170] {
+            let table = first.table(code).unwrap();
+            let spec = table_spec(code).unwrap();
+            assert_eq!(table.provider.schema().fields(), spec.arrow_schema.fields());
+            assert_eq!(
+                table
+                    .delta
+                    .snapshot()
+                    .unwrap()
+                    .metadata()
+                    .partition_columns(),
+                &["owner_bucket"]
+            );
+        }
+        let reopened = bootstrap_workspace(&root.0, &record(2)).await.unwrap();
+        for code in [140, 150, 160, 170] {
+            assert!(reopened.table(code).is_some());
         }
     }
 

@@ -227,6 +227,71 @@ class ResourceKind(IntEnum):
     UNKNOWN_RESOURCE = 100
 
 
+class TokenKind(IntEnum):
+    IDENTIFIER = 10
+    KEYWORD = 20
+    OPERATOR = 30
+    PUNCTUATION = 40
+    LITERAL = 50
+    STRING = 60
+    NUMBER = 70
+    UNKNOWN = 80
+
+
+class AnnotationKind(IntEnum):
+    COMMENT = 10
+    DOCUMENTATION = 20
+    PRAGMA_OR_DIRECTIVE = 30
+    PARSE_ERROR = 40
+
+
+class SyntaxKind(IntEnum):
+    SYNTAX_NODE = 10
+    STATEMENT = 20
+    EXPRESSION = 30
+    PATTERN = 40
+    DECLARATION_SYNTAX = 50
+    TYPE_SYNTAX = 60
+    PARAMETER_SYNTAX = 70
+    ARGUMENT_SYNTAX = 80
+    BLOCK = 90
+    LITERAL = 100
+    OPERATION = 110
+    ATTRIBUTE_ACCESS = 120
+    MEMBER_ACCESS = 130
+    SUBSCRIPT_ACCESS = 140
+    INDEX_ACCESS = 150
+    CALL_EXPRESSION = 160
+    ASSIGNMENT = 170
+    BRANCH = 180
+    LOOP = 190
+    RETURN = 200
+    YIELD = 210
+    AWAIT = 220
+    RAISE_OR_PANIC_SYNTAX = 230
+    IMPORT_OR_USE_SYNTAX = 240
+
+
+class SyntaxFieldRole(IntEnum):
+    NAME = 10
+    PARAMETERS = 20
+    DECORATOR = 30
+    RETURNS = 40
+    BODY = 50
+    CONDITION = 60
+    TARGET = 70
+    VALUE = 80
+    RECEIVER = 90
+    CALLEE = 100
+    ARGUMENT = 110
+    KEYWORD_ARGUMENT = 120
+    ITERABLE = 130
+    GUARD = 140
+    PATTERN = 150
+    HANDLER = 160
+    FINALLY_BODY = 170
+
+
 class WorkspaceLifecycle(IntEnum):
     BOOTSTRAPPING = 10
     READY = 20
@@ -1119,6 +1184,279 @@ ENUM_TRIPLES = MappingProxyType(
                 100,
                 "UNKNOWN_RESOURCE",
                 "unknown-resource",
+            ),
+        ),
+        "TOKEN_KIND": (
+            (
+                10,
+                "IDENTIFIER",
+                "identifier",
+            ),
+            (
+                20,
+                "KEYWORD",
+                "keyword",
+            ),
+            (
+                30,
+                "OPERATOR",
+                "operator",
+            ),
+            (
+                40,
+                "PUNCTUATION",
+                "punctuation",
+            ),
+            (
+                50,
+                "LITERAL",
+                "literal",
+            ),
+            (
+                60,
+                "STRING",
+                "string",
+            ),
+            (
+                70,
+                "NUMBER",
+                "number",
+            ),
+            (
+                80,
+                "UNKNOWN",
+                "unknown",
+            ),
+        ),
+        "ANNOTATION_KIND": (
+            (
+                10,
+                "COMMENT",
+                "comment",
+            ),
+            (
+                20,
+                "DOCUMENTATION",
+                "documentation",
+            ),
+            (
+                30,
+                "PRAGMA_OR_DIRECTIVE",
+                "pragma-or-directive",
+            ),
+            (
+                40,
+                "PARSE_ERROR",
+                "parse-error",
+            ),
+        ),
+        "SYNTAX_KIND": (
+            (
+                10,
+                "SYNTAX_NODE",
+                "syntax-node",
+            ),
+            (
+                20,
+                "STATEMENT",
+                "statement",
+            ),
+            (
+                30,
+                "EXPRESSION",
+                "expression",
+            ),
+            (
+                40,
+                "PATTERN",
+                "pattern",
+            ),
+            (
+                50,
+                "DECLARATION_SYNTAX",
+                "declaration-syntax",
+            ),
+            (
+                60,
+                "TYPE_SYNTAX",
+                "type-syntax",
+            ),
+            (
+                70,
+                "PARAMETER_SYNTAX",
+                "parameter-syntax",
+            ),
+            (
+                80,
+                "ARGUMENT_SYNTAX",
+                "argument-syntax",
+            ),
+            (
+                90,
+                "BLOCK",
+                "block",
+            ),
+            (
+                100,
+                "LITERAL",
+                "literal",
+            ),
+            (
+                110,
+                "OPERATION",
+                "operation",
+            ),
+            (
+                120,
+                "ATTRIBUTE_ACCESS",
+                "attribute-access",
+            ),
+            (
+                130,
+                "MEMBER_ACCESS",
+                "member-access",
+            ),
+            (
+                140,
+                "SUBSCRIPT_ACCESS",
+                "subscript-access",
+            ),
+            (
+                150,
+                "INDEX_ACCESS",
+                "index-access",
+            ),
+            (
+                160,
+                "CALL_EXPRESSION",
+                "call-expression",
+            ),
+            (
+                170,
+                "ASSIGNMENT",
+                "assignment",
+            ),
+            (
+                180,
+                "BRANCH",
+                "branch",
+            ),
+            (
+                190,
+                "LOOP",
+                "loop",
+            ),
+            (
+                200,
+                "RETURN",
+                "return",
+            ),
+            (
+                210,
+                "YIELD",
+                "yield",
+            ),
+            (
+                220,
+                "AWAIT",
+                "await",
+            ),
+            (
+                230,
+                "RAISE_OR_PANIC_SYNTAX",
+                "raise-or-panic-syntax",
+            ),
+            (
+                240,
+                "IMPORT_OR_USE_SYNTAX",
+                "import-or-use-syntax",
+            ),
+        ),
+        "SYNTAX_FIELD_ROLE": (
+            (
+                10,
+                "NAME",
+                "name",
+            ),
+            (
+                20,
+                "PARAMETERS",
+                "parameters",
+            ),
+            (
+                30,
+                "DECORATOR",
+                "decorator",
+            ),
+            (
+                40,
+                "RETURNS",
+                "returns",
+            ),
+            (
+                50,
+                "BODY",
+                "body",
+            ),
+            (
+                60,
+                "CONDITION",
+                "condition",
+            ),
+            (
+                70,
+                "TARGET",
+                "target",
+            ),
+            (
+                80,
+                "VALUE",
+                "value",
+            ),
+            (
+                90,
+                "RECEIVER",
+                "receiver",
+            ),
+            (
+                100,
+                "CALLEE",
+                "callee",
+            ),
+            (
+                110,
+                "ARGUMENT",
+                "argument",
+            ),
+            (
+                120,
+                "KEYWORD_ARGUMENT",
+                "keyword-argument",
+            ),
+            (
+                130,
+                "ITERABLE",
+                "iterable",
+            ),
+            (
+                140,
+                "GUARD",
+                "guard",
+            ),
+            (
+                150,
+                "PATTERN",
+                "pattern",
+            ),
+            (
+                160,
+                "HANDLER",
+                "handler",
+            ),
+            (
+                170,
+                "FINALLY_BODY",
+                "finally-body",
             ),
         ),
     }
@@ -2719,6 +3057,40 @@ REGISTRY_IDS = MappingProxyType(
             "UNKNOWN",
             "ARTIFACT",
             "SNAPSHOT",
+            "IDENTIFIER_TOKEN",
+            "KEYWORD_TOKEN",
+            "OPERATOR_TOKEN",
+            "PUNCTUATION_TOKEN",
+            "LITERAL_TOKEN",
+            "STRING_TOKEN",
+            "NUMBER_TOKEN",
+            "COMMENT",
+            "DOCUMENTATION",
+            "PRAGMA_OR_DIRECTIVE",
+            "MISSING_SYNTAX",
+            "STATEMENT",
+            "EXPRESSION",
+            "PATTERN",
+            "DECLARATION_SYNTAX",
+            "TYPE_SYNTAX",
+            "PARAMETER_SYNTAX",
+            "ARGUMENT_SYNTAX",
+            "BLOCK",
+            "LITERAL",
+            "OPERATION",
+            "ATTRIBUTE_ACCESS",
+            "MEMBER_ACCESS",
+            "SUBSCRIPT_ACCESS",
+            "INDEX_ACCESS",
+            "CALL_EXPRESSION",
+            "ASSIGNMENT",
+            "BRANCH",
+            "LOOP",
+            "RETURN",
+            "YIELD",
+            "AWAIT",
+            "RAISE_OR_PANIC_SYNTAX",
+            "IMPORT_OR_USE_SYNTAX",
         ),
         "relation_kinds": (
             "CONTAINS",
@@ -2734,6 +3106,11 @@ REGISTRY_IDS = MappingProxyType(
             "USES_RESOURCE",
             "PROGRAM_ORDER_BEFORE",
             "SYNCHRONIZES_WITH_EXACT",
+            "CONTAINS_SPAN",
+            "TOKEN_OF",
+            "LEXICALLY_PRECEDES",
+            "DOCUMENTS",
+            "DIRECTIVE_APPLIES_TO",
         ),
         "property_kinds": (
             "NAME",
@@ -2826,6 +3203,16 @@ REGISTRY_IDS = MappingProxyType(
             "rustc-mir",
             "codefabric-derivation",
             "source-substrate",
+        ),
+        "provider_normalizations": (
+            "tree-sitter-python-syntax-v1",
+            "tree-sitter-rust-syntax-v1",
+            "ruff-python-syntax-v1",
+        ),
+        "provider_resource_profiles": (
+            "in-process-syntax-standard",
+            "sidecar-semantic-standard",
+            "derivation-standard",
         ),
         "public_errors": (
             "INCOMPATIBLE_MAJOR",

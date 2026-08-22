@@ -25,6 +25,7 @@ pub enum LogicalType {
     Binary,
     TimestampUtc,
     IdList,
+    Int64List,
     StringMap,
 }
 

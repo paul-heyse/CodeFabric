@@ -14,6 +14,7 @@ pub const CATALOG_PATH: &str = "contracts/manifests/suite-manifest.json";
 /// Stable derivation IDs used by maintained generators.
 pub const ARTIFACT_INDEX_DERIVATION_ID: &str = "codefabric.derivation.artifact-index";
 pub const REGISTRY_DERIVATION_ID: &str = "codefabric.derivation.canonical-registries";
+pub const PROVIDER_RAW_DERIVATION_ID: &str = "codefabric.derivation.provider-raw-catalogs";
 pub const PRODUCTION_PROTO_PYTHON_DERIVATION_ID: &str =
     "codefabric.derivation.production-proto-descriptor-python";
 pub const PRODUCTION_PROTO_RUST_DERIVATION_ID: &str = "codefabric.derivation.production-proto-rust";
@@ -285,6 +286,8 @@ pub enum DerivationOutputKind {
     RustTableSpecBindings,
     /// `SQLite` operational-store DDL compiled from the schema Contract IR.
     OperationalStoreDdl,
+    /// Complete provider-native kind inventory with one normalization disposition per key.
+    ProviderRawKindCatalog,
 }
 
 /// Closed model-level derivation operation.
@@ -303,6 +306,8 @@ pub enum DerivationKind {
     AdapterModelCompilation,
     /// Compile `TableSpec` records, public schemas, and operational DDL from schema Contract IR.
     SchemaContractCompilation,
+    /// Inventory pinned provider-native kinds and expand authored normalization policy.
+    ProviderRawCatalogSet,
 }
 
 /// View of a governed artifact consumed by a derivation.
@@ -744,6 +749,16 @@ pub fn generator_identity(kind: DerivationKind) -> GeneratorIdentity {
                 "serde=1".to_owned(),
                 "serde-json-canonicalizer=0.3.2".to_owned(),
                 "arrow-schema=58.4.0".to_owned(),
+            ],
+        },
+        DerivationKind::ProviderRawCatalogSet => GeneratorIdentity {
+            generator_id: "codefabric-provider-raw-catalogs".to_owned(),
+            generator_revision: "provider-raw-catalogs-v1".to_owned(),
+            toolchain: vec![
+                "tree-sitter=0.26.12".to_owned(),
+                "tree-sitter-python=0.25.0".to_owned(),
+                "tree-sitter-rust=0.24.2".to_owned(),
+                "grammar-abi=15".to_owned(),
             ],
         },
     }
@@ -1330,6 +1345,20 @@ fn validate_derivation_shape(
                 || count(DerivationOutputKind::OperationalStoreDdl) != 1
                 || count(DerivationOutputKind::PublicJsonSchema) != 8
                 || derivation.outputs.len() != 11
+        }
+        DerivationKind::ProviderRawCatalogSet => {
+            derivation.inputs.len() != 3
+                || derivation.inputs.iter().any(|input| {
+                    !matches!(
+                        input,
+                        DerivationInput::Artifact {
+                            view: ArtifactInputView::CompiledSemantic,
+                            ..
+                        }
+                    )
+                })
+                || count(DerivationOutputKind::ProviderRawKindCatalog) != 2
+                || derivation.outputs.len() != 2
         }
     };
     if invalid {

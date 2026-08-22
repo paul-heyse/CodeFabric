@@ -1,0 +1,82 @@
+artifact_id: codefabric.registry.provider-normalization-registry
+artifact_kind: registry
+version: "1.0"
+compatible_suite_major: 1
+status: released
+canonical_digest: "b3:017a268bd77d713d7ffe1dd35fe7232c4a52b1843e22e37077d0da694a48d1f0"
+records:
+  - mapping_id: tree-sitter-python-syntax-v1
+    raw_catalog_id: tree-sitter-python-0-25-0
+    provider_id: tree-sitter
+    provider_version: "tree-sitter=0.26.12;tree-sitter-python=0.25.0;abi=15"
+    language: python
+    canonical_kind_names:
+      module: SYNTAX_NODE
+      function_definition: DECLARATION_SYNTAX
+      class_definition: DECLARATION_SYNTAX
+      expression_statement: STATEMENT
+      call: CALL_EXPRESSION
+      assignment: ASSIGNMENT
+      if_statement: BRANCH
+      for_statement: LOOP
+      while_statement: LOOP
+      return_statement: RETURN
+      yield: YIELD
+      await: AWAIT
+      raise_statement: RAISE_OR_PANIC_SYNTAX
+      import_statement: IMPORT_OR_USE_SYNTAX
+      import_from_statement: IMPORT_OR_USE_SYNTAX
+    ignored_raw_keys: [comment]
+    default_disposition: UNSUPPORTED
+    introduced: "1.3"
+  - mapping_id: tree-sitter-rust-syntax-v1
+    raw_catalog_id: tree-sitter-rust-0-24-2
+    provider_id: tree-sitter
+    provider_version: "tree-sitter=0.26.12;tree-sitter-rust=0.24.2;abi=15"
+    language: rust
+    canonical_kind_names:
+      source_file: SYNTAX_NODE
+      function_item: DECLARATION_SYNTAX
+      struct_item: DECLARATION_SYNTAX
+      enum_item: DECLARATION_SYNTAX
+      trait_item: DECLARATION_SYNTAX
+      call_expression: CALL_EXPRESSION
+      assignment_expression: ASSIGNMENT
+      if_expression: BRANCH
+      loop_expression: LOOP
+      while_expression: LOOP
+      for_expression: LOOP
+      return_expression: RETURN
+      await_expression: AWAIT
+      use_declaration: IMPORT_OR_USE_SYNTAX
+      macro_invocation: OPERATION
+    ignored_raw_keys: [line_comment, block_comment]
+    default_disposition: UNSUPPORTED
+    introduced: "1.3"
+  - mapping_id: ruff-python-syntax-v1
+    raw_catalog_id: ruff-python-0-0-7
+    provider_id: ruff-python
+    provider_version: "ruff-python-ast=0.0.7;ruff-python-parser=0.0.7"
+    language: python
+    canonical_kind_names:
+      StmtFunctionDef: DECLARATION_SYNTAX
+      StmtClassDef: DECLARATION_SYNTAX
+      StmtAssign: ASSIGNMENT
+      StmtIf: BRANCH
+      StmtFor: LOOP
+      StmtWhile: LOOP
+      StmtReturn: RETURN
+      StmtRaise: RAISE_OR_PANIC_SYNTAX
+      StmtImport: IMPORT_OR_USE_SYNTAX
+      StmtImportFrom: IMPORT_OR_USE_SYNTAX
+      ExprCall: CALL_EXPRESSION
+      ExprAwait: AWAIT
+      ExprYield: YIELD
+    ignored_raw_keys: []
+    default_disposition: UNSUPPORTED
+    introduced: "1.3"
+owner_acceptance:
+  approver: fact-generation-owner
+  accepted_at: "2026-08-22"
+  construction_rule: GEN AC-G-32 authored normalization policy with total generated fallback
+  source_digest: "b3:422ae93ff960a5ecffcec6a7e72003371688b523b65a837997158b22e5ddb6b6"

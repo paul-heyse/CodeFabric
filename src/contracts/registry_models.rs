@@ -336,6 +336,52 @@ pub struct Provider {
     pub toolchain_or_bundle_digest_fields: Vec<String>,
     pub capability_codes: Vec<String>,
     pub event_mapping_version: String,
+    pub resource_profile_id: String,
+    #[serde(default)]
+    pub raw_catalog_ids: BTreeSet<String>,
+    #[serde(flatten)]
+    pub lifecycle: VersionLifecycle,
+}
+
+/// Closed execution budget selected by every provider job before admission.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderResourceProfile {
+    pub profile_id: String,
+    pub provider_ids: BTreeSet<String>,
+    pub max_parallel_jobs_global: u16,
+    pub max_parallel_jobs_per_workspace: u16,
+    pub max_parallel_jobs_per_context: u16,
+    pub max_input_bytes: u64,
+    pub max_output_records: u64,
+    pub max_output_bytes: u64,
+    pub max_diagnostics: u16,
+    pub cancellation_ack_millis: u16,
+    #[serde(flatten)]
+    pub lifecycle: VersionLifecycle,
+}
+
+/// Fallback applied to a provider-native kind not present in an authored mapping.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RawKindDisposition {
+    Ignore,
+    Unsupported,
+}
+
+/// Authored normalization policy expanded against one generated raw-kind inventory.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderNormalization {
+    pub mapping_id: String,
+    pub raw_catalog_id: String,
+    pub provider_id: String,
+    pub provider_version: String,
+    pub language: String,
+    pub canonical_kind_names: BTreeMap<String, String>,
+    #[serde(default)]
+    pub ignored_raw_keys: BTreeSet<String>,
+    pub default_disposition: RawKindDisposition,
     #[serde(flatten)]
     pub lifecycle: VersionLifecycle,
 }
@@ -996,6 +1042,79 @@ pub fn validate_enum_domains(records: &[EnumDomain]) -> Result<(), String> {
                 "UNKNOWN_RESOURCE",
             ],
         ),
+        (
+            "TOKEN_KIND",
+            &[
+                "IDENTIFIER",
+                "KEYWORD",
+                "OPERATOR",
+                "PUNCTUATION",
+                "LITERAL",
+                "STRING",
+                "NUMBER",
+                "UNKNOWN",
+            ],
+        ),
+        (
+            "ANNOTATION_KIND",
+            &[
+                "COMMENT",
+                "DOCUMENTATION",
+                "PRAGMA_OR_DIRECTIVE",
+                "PARSE_ERROR",
+            ],
+        ),
+        (
+            "SYNTAX_KIND",
+            &[
+                "SYNTAX_NODE",
+                "STATEMENT",
+                "EXPRESSION",
+                "PATTERN",
+                "DECLARATION_SYNTAX",
+                "TYPE_SYNTAX",
+                "PARAMETER_SYNTAX",
+                "ARGUMENT_SYNTAX",
+                "BLOCK",
+                "LITERAL",
+                "OPERATION",
+                "ATTRIBUTE_ACCESS",
+                "MEMBER_ACCESS",
+                "SUBSCRIPT_ACCESS",
+                "INDEX_ACCESS",
+                "CALL_EXPRESSION",
+                "ASSIGNMENT",
+                "BRANCH",
+                "LOOP",
+                "RETURN",
+                "YIELD",
+                "AWAIT",
+                "RAISE_OR_PANIC_SYNTAX",
+                "IMPORT_OR_USE_SYNTAX",
+            ],
+        ),
+        (
+            "SYNTAX_FIELD_ROLE",
+            &[
+                "NAME",
+                "PARAMETERS",
+                "DECORATOR",
+                "RETURNS",
+                "BODY",
+                "CONDITION",
+                "TARGET",
+                "VALUE",
+                "RECEIVER",
+                "CALLEE",
+                "ARGUMENT",
+                "KEYWORD_ARGUMENT",
+                "ITERABLE",
+                "GUARD",
+                "PATTERN",
+                "HANDLER",
+                "FINALLY_BODY",
+            ],
+        ),
     ];
     if records.len() != EXPECTED.len() {
         return Err("enum registry must contain every §62, effect, and resource domain".into());
@@ -1399,12 +1518,71 @@ pub fn validate_provider_records(records: &[Provider]) -> Result<(), String> {
                 "IN_PROCESS" | "SIDECAR" | "COMPILER_GROUP"
             )
             || remote != (record.protocol_package.is_some() && record.protocol_service.is_some())
+            || record.resource_profile_id.is_empty()
             || record
                 .capability_codes
                 .iter()
                 .any(|code| !capabilities.contains(code.as_str()))
         {
             return Err(format!("provider {} violates AC-G-36", record.provider_id));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_provider_resource_profiles(
+    records: &[ProviderResourceProfile],
+) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    for record in records {
+        if !kebab(&record.profile_id)
+            || !ids.insert(&record.profile_id)
+            || record.provider_ids.is_empty()
+            || record.max_parallel_jobs_global == 0
+            || record.max_parallel_jobs_per_workspace == 0
+            || record.max_parallel_jobs_per_context == 0
+            || record.max_parallel_jobs_per_context > record.max_parallel_jobs_per_workspace
+            || record.max_parallel_jobs_per_workspace > record.max_parallel_jobs_global
+            || record.max_input_bytes == 0
+            || record.max_output_records == 0
+            || record.max_output_bytes == 0
+            || record.max_diagnostics == 0
+            || record.cancellation_ack_millis == 0
+        {
+            return Err(format!(
+                "provider resource profile {} is not closed and bounded",
+                record.profile_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_provider_normalizations(records: &[ProviderNormalization]) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    let mut catalogs = BTreeSet::new();
+    for record in records {
+        if !kebab(&record.mapping_id)
+            || !kebab(&record.raw_catalog_id)
+            || !ids.insert(&record.mapping_id)
+            || !catalogs.insert(&record.raw_catalog_id)
+            || record.provider_id.is_empty()
+            || record.provider_version.is_empty()
+            || !matches!(record.language.as_str(), "python" | "rust")
+            || record.canonical_kind_names.is_empty()
+            || record
+                .canonical_kind_names
+                .keys()
+                .any(|key| record.ignored_raw_keys.contains(key))
+            || record
+                .canonical_kind_names
+                .values()
+                .any(|name| !upper_snake(name))
+        {
+            return Err(format!(
+                "provider normalization {} is incomplete or ambiguous",
+                record.mapping_id
+            ));
         }
     }
     Ok(())

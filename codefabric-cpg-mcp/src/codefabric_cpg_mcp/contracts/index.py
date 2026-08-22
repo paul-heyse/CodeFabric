@@ -86,6 +86,7 @@ type DerivationOutputKind = Literal[
     "table-spec-manifest",
     "rust-table-spec-bindings",
     "operational-store-ddl",
+    "provider-raw-kind-catalog",
 ]
 type DerivationKind = Literal[
     "artifact-index",
@@ -94,6 +95,7 @@ type DerivationKind = Literal[
     "protobuf-rust-from-descriptor",
     "adapter-model-compilation",
     "schema-contract-compilation",
+    "provider-raw-catalog-set",
 ]
 type ArtifactInputView = Literal["source-bytes", "compiled-semantic"]
 type ProvenanceRequirement = Literal[

@@ -27,13 +27,14 @@ use super::models::{
 use super::registry_models::{
     AcceptedRegistry, Capability, ComparisonIgnoreRecord, DerivationDefinition, EntityKind,
     EnumDomain, FactKind, FaultPointRecord, FlagDomain, PhraseRecord, Projection, PropertyKind,
-    Provider, PublicError, RelationKind, StateMachine, SummaryProfile, UnknownKind,
-    contains_evaluative_kind, validate_capability_records, validate_comparison_ignores,
-    validate_entity_records, validate_enum_domains, validate_error_records, validate_fact_records,
-    validate_fault_points, validate_flag_domains, validate_phrase_records,
-    validate_projection_records, validate_property_records, validate_provider_records,
-    validate_relation_records, validate_state_machines, validate_summary_records,
-    validate_unknown_records,
+    Provider, ProviderNormalization, ProviderResourceProfile, PublicError, RelationKind,
+    StateMachine, SummaryProfile, UnknownKind, contains_evaluative_kind,
+    validate_capability_records, validate_comparison_ignores, validate_entity_records,
+    validate_enum_domains, validate_error_records, validate_fact_records, validate_fault_points,
+    validate_flag_domains, validate_phrase_records, validate_projection_records,
+    validate_property_records, validate_provider_normalizations, validate_provider_records,
+    validate_provider_resource_profiles, validate_relation_records, validate_state_machines,
+    validate_summary_records, validate_unknown_records,
 };
 
 const MAX_DIAGNOSTIC_BYTES: usize = 512;
@@ -1711,6 +1712,12 @@ fn canonical_yaml(
                     }
                     "codefabric.registry.provider-registry" => {
                         accepted!(Provider, validate_provider_records)
+                    }
+                    "codefabric.registry.provider-resource-profile-registry" => {
+                        accepted!(ProviderResourceProfile, validate_provider_resource_profiles)
+                    }
+                    "codefabric.registry.provider-normalization-registry" => {
+                        accepted!(ProviderNormalization, validate_provider_normalizations)
                     }
                     "codefabric.registry.error-registry" => {
                         accepted!(PublicError, validate_error_records)

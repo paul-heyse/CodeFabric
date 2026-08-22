@@ -806,6 +806,225 @@ pub const RESOURCE_KIND_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
+pub enum TokenKind {
+    Identifier = 10,
+    Keyword = 20,
+    Operator = 30,
+    Punctuation = 40,
+    Literal = 50,
+    String = 60,
+    Number = 70,
+    Unknown = 80,
+}
+impl TryFrom<u16> for TokenKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Identifier),
+            20 => Ok(Self::Keyword),
+            30 => Ok(Self::Operator),
+            40 => Ok(Self::Punctuation),
+            50 => Ok(Self::Literal),
+            60 => Ok(Self::String),
+            70 => Ok(Self::Number),
+            80 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode { domain: "TOKEN_KIND", code }),
+        }
+    }
+}
+pub const TOKEN_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "IDENTIFIER", slug: "identifier" },
+    RegistryEntry { code: 20, name: "KEYWORD", slug: "keyword" },
+    RegistryEntry { code: 30, name: "OPERATOR", slug: "operator" },
+    RegistryEntry { code: 40, name: "PUNCTUATION", slug: "punctuation" },
+    RegistryEntry { code: 50, name: "LITERAL", slug: "literal" },
+    RegistryEntry { code: 60, name: "STRING", slug: "string" },
+    RegistryEntry { code: 70, name: "NUMBER", slug: "number" },
+    RegistryEntry { code: 80, name: "UNKNOWN", slug: "unknown" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum AnnotationKind {
+    Comment = 10,
+    Documentation = 20,
+    PragmaOrDirective = 30,
+    ParseError = 40,
+}
+impl TryFrom<u16> for AnnotationKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Comment),
+            20 => Ok(Self::Documentation),
+            30 => Ok(Self::PragmaOrDirective),
+            40 => Ok(Self::ParseError),
+            _ => Err(UnknownRegistryCode { domain: "ANNOTATION_KIND", code }),
+        }
+    }
+}
+pub const ANNOTATION_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "COMMENT", slug: "comment" },
+    RegistryEntry { code: 20, name: "DOCUMENTATION", slug: "documentation" },
+    RegistryEntry { code: 30, name: "PRAGMA_OR_DIRECTIVE", slug: "pragma-or-directive" },
+    RegistryEntry { code: 40, name: "PARSE_ERROR", slug: "parse-error" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum SyntaxKind {
+    SyntaxNode = 10,
+    Statement = 20,
+    Expression = 30,
+    Pattern = 40,
+    DeclarationSyntax = 50,
+    TypeSyntax = 60,
+    ParameterSyntax = 70,
+    ArgumentSyntax = 80,
+    Block = 90,
+    Literal = 100,
+    Operation = 110,
+    AttributeAccess = 120,
+    MemberAccess = 130,
+    SubscriptAccess = 140,
+    IndexAccess = 150,
+    CallExpression = 160,
+    Assignment = 170,
+    Branch = 180,
+    Loop = 190,
+    Return = 200,
+    Yield = 210,
+    Await = 220,
+    RaiseOrPanicSyntax = 230,
+    ImportOrUseSyntax = 240,
+}
+impl TryFrom<u16> for SyntaxKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::SyntaxNode),
+            20 => Ok(Self::Statement),
+            30 => Ok(Self::Expression),
+            40 => Ok(Self::Pattern),
+            50 => Ok(Self::DeclarationSyntax),
+            60 => Ok(Self::TypeSyntax),
+            70 => Ok(Self::ParameterSyntax),
+            80 => Ok(Self::ArgumentSyntax),
+            90 => Ok(Self::Block),
+            100 => Ok(Self::Literal),
+            110 => Ok(Self::Operation),
+            120 => Ok(Self::AttributeAccess),
+            130 => Ok(Self::MemberAccess),
+            140 => Ok(Self::SubscriptAccess),
+            150 => Ok(Self::IndexAccess),
+            160 => Ok(Self::CallExpression),
+            170 => Ok(Self::Assignment),
+            180 => Ok(Self::Branch),
+            190 => Ok(Self::Loop),
+            200 => Ok(Self::Return),
+            210 => Ok(Self::Yield),
+            220 => Ok(Self::Await),
+            230 => Ok(Self::RaiseOrPanicSyntax),
+            240 => Ok(Self::ImportOrUseSyntax),
+            _ => Err(UnknownRegistryCode { domain: "SYNTAX_KIND", code }),
+        }
+    }
+}
+pub const SYNTAX_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "SYNTAX_NODE", slug: "syntax-node" },
+    RegistryEntry { code: 20, name: "STATEMENT", slug: "statement" },
+    RegistryEntry { code: 30, name: "EXPRESSION", slug: "expression" },
+    RegistryEntry { code: 40, name: "PATTERN", slug: "pattern" },
+    RegistryEntry { code: 50, name: "DECLARATION_SYNTAX", slug: "declaration-syntax" },
+    RegistryEntry { code: 60, name: "TYPE_SYNTAX", slug: "type-syntax" },
+    RegistryEntry { code: 70, name: "PARAMETER_SYNTAX", slug: "parameter-syntax" },
+    RegistryEntry { code: 80, name: "ARGUMENT_SYNTAX", slug: "argument-syntax" },
+    RegistryEntry { code: 90, name: "BLOCK", slug: "block" },
+    RegistryEntry { code: 100, name: "LITERAL", slug: "literal" },
+    RegistryEntry { code: 110, name: "OPERATION", slug: "operation" },
+    RegistryEntry { code: 120, name: "ATTRIBUTE_ACCESS", slug: "attribute-access" },
+    RegistryEntry { code: 130, name: "MEMBER_ACCESS", slug: "member-access" },
+    RegistryEntry { code: 140, name: "SUBSCRIPT_ACCESS", slug: "subscript-access" },
+    RegistryEntry { code: 150, name: "INDEX_ACCESS", slug: "index-access" },
+    RegistryEntry { code: 160, name: "CALL_EXPRESSION", slug: "call-expression" },
+    RegistryEntry { code: 170, name: "ASSIGNMENT", slug: "assignment" },
+    RegistryEntry { code: 180, name: "BRANCH", slug: "branch" },
+    RegistryEntry { code: 190, name: "LOOP", slug: "loop" },
+    RegistryEntry { code: 200, name: "RETURN", slug: "return" },
+    RegistryEntry { code: 210, name: "YIELD", slug: "yield" },
+    RegistryEntry { code: 220, name: "AWAIT", slug: "await" },
+    RegistryEntry { code: 230, name: "RAISE_OR_PANIC_SYNTAX", slug: "raise-or-panic-syntax" },
+    RegistryEntry { code: 240, name: "IMPORT_OR_USE_SYNTAX", slug: "import-or-use-syntax" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum SyntaxFieldRole {
+    Name = 10,
+    Parameters = 20,
+    Decorator = 30,
+    Returns = 40,
+    Body = 50,
+    Condition = 60,
+    Target = 70,
+    Value = 80,
+    Receiver = 90,
+    Callee = 100,
+    Argument = 110,
+    KeywordArgument = 120,
+    Iterable = 130,
+    Guard = 140,
+    Pattern = 150,
+    Handler = 160,
+    FinallyBody = 170,
+}
+impl TryFrom<u16> for SyntaxFieldRole {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Name),
+            20 => Ok(Self::Parameters),
+            30 => Ok(Self::Decorator),
+            40 => Ok(Self::Returns),
+            50 => Ok(Self::Body),
+            60 => Ok(Self::Condition),
+            70 => Ok(Self::Target),
+            80 => Ok(Self::Value),
+            90 => Ok(Self::Receiver),
+            100 => Ok(Self::Callee),
+            110 => Ok(Self::Argument),
+            120 => Ok(Self::KeywordArgument),
+            130 => Ok(Self::Iterable),
+            140 => Ok(Self::Guard),
+            150 => Ok(Self::Pattern),
+            160 => Ok(Self::Handler),
+            170 => Ok(Self::FinallyBody),
+            _ => Err(UnknownRegistryCode { domain: "SYNTAX_FIELD_ROLE", code }),
+        }
+    }
+}
+pub const SYNTAX_FIELD_ROLE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "NAME", slug: "name" },
+    RegistryEntry { code: 20, name: "PARAMETERS", slug: "parameters" },
+    RegistryEntry { code: 30, name: "DECORATOR", slug: "decorator" },
+    RegistryEntry { code: 40, name: "RETURNS", slug: "returns" },
+    RegistryEntry { code: 50, name: "BODY", slug: "body" },
+    RegistryEntry { code: 60, name: "CONDITION", slug: "condition" },
+    RegistryEntry { code: 70, name: "TARGET", slug: "target" },
+    RegistryEntry { code: 80, name: "VALUE", slug: "value" },
+    RegistryEntry { code: 90, name: "RECEIVER", slug: "receiver" },
+    RegistryEntry { code: 100, name: "CALLEE", slug: "callee" },
+    RegistryEntry { code: 110, name: "ARGUMENT", slug: "argument" },
+    RegistryEntry { code: 120, name: "KEYWORD_ARGUMENT", slug: "keyword-argument" },
+    RegistryEntry { code: 130, name: "ITERABLE", slug: "iterable" },
+    RegistryEntry { code: 140, name: "GUARD", slug: "guard" },
+    RegistryEntry { code: 150, name: "PATTERN", slug: "pattern" },
+    RegistryEntry { code: 160, name: "HANDLER", slug: "handler" },
+    RegistryEntry { code: 170, name: "FINALLY_BODY", slug: "finally-body" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
 pub enum WorkspaceLifecycle {
     Bootstrapping = 10,
     Ready = 20,
@@ -952,27 +1171,31 @@ pub canonical_digest: &'static str, pub values: &'static [RegistryEntry],
 }
 
 pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
-    RegistryDomainEntry { domain: "EVIDENCE_CERTAINTY", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: EVIDENCE_CERTAINTY_VALUES },
-    RegistryDomainEntry { domain: "RESOLUTION_CLASS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: RESOLUTION_CLASS_VALUES },
-    RegistryDomainEntry { domain: "DIRECTNESS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: DIRECTNESS_VALUES },
-    RegistryDomainEntry { domain: "COMPLETENESS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: COMPLETENESS_VALUES },
-    RegistryDomainEntry { domain: "OWNER_CAPABILITY_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: OWNER_CAPABILITY_STATE_VALUES },
-    RegistryDomainEntry { domain: "PROVIDER_RUN_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: PROVIDER_RUN_STATE_VALUES },
-    RegistryDomainEntry { domain: "QUERY_EXECUTION_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: QUERY_EXECUTION_STATE_VALUES },
-    RegistryDomainEntry { domain: "QUERY_AVAILABILITY_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: QUERY_AVAILABILITY_STATE_VALUES },
-    RegistryDomainEntry { domain: "COMPLETENESS_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: COMPLETENESS_STATE_VALUES },
-    RegistryDomainEntry { domain: "FRESHNESS_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: FRESHNESS_STATE_VALUES },
-    RegistryDomainEntry { domain: "LIMIT_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: LIMIT_STATE_VALUES },
-    RegistryDomainEntry { domain: "DEPENDENCY_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: DEPENDENCY_STATE_VALUES },
-    RegistryDomainEntry { domain: "DURABLE_PUBLICATION_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: DURABLE_PUBLICATION_STATE_VALUES },
-    RegistryDomainEntry { domain: "SERVING_ACTIVATION_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SERVING_ACTIVATION_STATE_VALUES },
-    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_KIND", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SNAPSHOT_LEASE_KIND_VALUES },
-    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SNAPSHOT_LEASE_STATE_VALUES },
-    RegistryDomainEntry { domain: "SOURCE_TRUST_STATE", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: SOURCE_TRUST_STATE_VALUES },
-    RegistryDomainEntry { domain: "EVENT_STREAM_HEALTH", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: EVENT_STREAM_HEALTH_VALUES },
-    RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: GIT_ACCELERATION_STATUS_VALUES },
-    RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: EFFECT_KIND_VALUES },
-    RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:568ca8ae2cd445aa7a3776b8e10082d7dae12315c4e1b14b4f5c1462a7567c59", values: RESOURCE_KIND_VALUES },
+    RegistryDomainEntry { domain: "EVIDENCE_CERTAINTY", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: EVIDENCE_CERTAINTY_VALUES },
+    RegistryDomainEntry { domain: "RESOLUTION_CLASS", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: RESOLUTION_CLASS_VALUES },
+    RegistryDomainEntry { domain: "DIRECTNESS", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: DIRECTNESS_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: COMPLETENESS_VALUES },
+    RegistryDomainEntry { domain: "OWNER_CAPABILITY_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: OWNER_CAPABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "PROVIDER_RUN_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: PROVIDER_RUN_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_EXECUTION_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: QUERY_EXECUTION_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_AVAILABILITY_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: QUERY_AVAILABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: COMPLETENESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "FRESHNESS_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: FRESHNESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "LIMIT_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: LIMIT_STATE_VALUES },
+    RegistryDomainEntry { domain: "DEPENDENCY_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: DEPENDENCY_STATE_VALUES },
+    RegistryDomainEntry { domain: "DURABLE_PUBLICATION_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: DURABLE_PUBLICATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SERVING_ACTIVATION_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: SERVING_ACTIVATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_KIND", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: SNAPSHOT_LEASE_KIND_VALUES },
+    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: SNAPSHOT_LEASE_STATE_VALUES },
+    RegistryDomainEntry { domain: "SOURCE_TRUST_STATE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: SOURCE_TRUST_STATE_VALUES },
+    RegistryDomainEntry { domain: "EVENT_STREAM_HEALTH", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: EVENT_STREAM_HEALTH_VALUES },
+    RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: GIT_ACCELERATION_STATUS_VALUES },
+    RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: EFFECT_KIND_VALUES },
+    RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: RESOURCE_KIND_VALUES },
+    RegistryDomainEntry { domain: "TOKEN_KIND", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: TOKEN_KIND_VALUES },
+    RegistryDomainEntry { domain: "ANNOTATION_KIND", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: ANNOTATION_KIND_VALUES },
+    RegistryDomainEntry { domain: "SYNTAX_KIND", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: SYNTAX_KIND_VALUES },
+    RegistryDomainEntry { domain: "SYNTAX_FIELD_ROLE", version: "1.0", canonical_digest: "b3:ec6b607e0c5b05b8312cc88f082f52802dda5285bcb9fbd4544aeb28944955f3", values: SYNTAX_FIELD_ROLE_VALUES },
     RegistryDomainEntry { domain: "WORKSPACE_LIFECYCLE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: WORKSPACE_LIFECYCLE_VALUES },
     RegistryDomainEntry { domain: "UPDATE_WAVE_STATE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: UPDATE_WAVE_STATE_VALUES },
     RegistryDomainEntry { domain: "ARTIFACT_STATE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: ARTIFACT_STATE_VALUES },
@@ -1235,6 +1458,40 @@ pub const ENTITY_KIND_IDS: &[&str] = &[
     "UNKNOWN",
     "ARTIFACT",
     "SNAPSHOT",
+    "IDENTIFIER_TOKEN",
+    "KEYWORD_TOKEN",
+    "OPERATOR_TOKEN",
+    "PUNCTUATION_TOKEN",
+    "LITERAL_TOKEN",
+    "STRING_TOKEN",
+    "NUMBER_TOKEN",
+    "COMMENT",
+    "DOCUMENTATION",
+    "PRAGMA_OR_DIRECTIVE",
+    "MISSING_SYNTAX",
+    "STATEMENT",
+    "EXPRESSION",
+    "PATTERN",
+    "DECLARATION_SYNTAX",
+    "TYPE_SYNTAX",
+    "PARAMETER_SYNTAX",
+    "ARGUMENT_SYNTAX",
+    "BLOCK",
+    "LITERAL",
+    "OPERATION",
+    "ATTRIBUTE_ACCESS",
+    "MEMBER_ACCESS",
+    "SUBSCRIPT_ACCESS",
+    "INDEX_ACCESS",
+    "CALL_EXPRESSION",
+    "ASSIGNMENT",
+    "BRANCH",
+    "LOOP",
+    "RETURN",
+    "YIELD",
+    "AWAIT",
+    "RAISE_OR_PANIC_SYNTAX",
+    "IMPORT_OR_USE_SYNTAX",
 ];
 
 pub const RELATION_KIND_IDS: &[&str] = &[
@@ -1251,6 +1508,11 @@ pub const RELATION_KIND_IDS: &[&str] = &[
     "USES_RESOURCE",
     "PROGRAM_ORDER_BEFORE",
     "SYNCHRONIZES_WITH_EXACT",
+    "CONTAINS_SPAN",
+    "TOKEN_OF",
+    "LEXICALLY_PRECEDES",
+    "DOCUMENTS",
+    "DIRECTIVE_APPLIES_TO",
 ];
 
 pub const PROPERTY_KIND_IDS: &[&str] = &[
@@ -1352,6 +1614,18 @@ pub const PROVIDER_IDS: &[&str] = &[
     "rustc-mir",
     "codefabric-derivation",
     "source-substrate",
+];
+
+pub const PROVIDER_NORMALIZATION_IDS: &[&str] = &[
+    "tree-sitter-python-syntax-v1",
+    "tree-sitter-rust-syntax-v1",
+    "ruff-python-syntax-v1",
+];
+
+pub const PROVIDER_RESOURCE_PROFILE_IDS: &[&str] = &[
+    "in-process-syntax-standard",
+    "sidecar-semantic-standard",
+    "derivation-standard",
 ];
 
 pub const PUBLIC_ERROR_IDS: &[&str] = &[
@@ -1499,6 +1773,40 @@ pub const ENTITY_KIND_CODES: &[OntologyCodeEntry] = &[
     OntologyCodeEntry { code: 220, family_code: 14 },
     OntologyCodeEntry { code: 230, family_code: 15 },
     OntologyCodeEntry { code: 240, family_code: 15 },
+    OntologyCodeEntry { code: 250, family_code: 3 },
+    OntologyCodeEntry { code: 260, family_code: 3 },
+    OntologyCodeEntry { code: 270, family_code: 3 },
+    OntologyCodeEntry { code: 280, family_code: 3 },
+    OntologyCodeEntry { code: 290, family_code: 3 },
+    OntologyCodeEntry { code: 300, family_code: 3 },
+    OntologyCodeEntry { code: 310, family_code: 3 },
+    OntologyCodeEntry { code: 320, family_code: 3 },
+    OntologyCodeEntry { code: 330, family_code: 3 },
+    OntologyCodeEntry { code: 340, family_code: 3 },
+    OntologyCodeEntry { code: 350, family_code: 3 },
+    OntologyCodeEntry { code: 360, family_code: 3 },
+    OntologyCodeEntry { code: 370, family_code: 3 },
+    OntologyCodeEntry { code: 380, family_code: 3 },
+    OntologyCodeEntry { code: 390, family_code: 3 },
+    OntologyCodeEntry { code: 400, family_code: 3 },
+    OntologyCodeEntry { code: 410, family_code: 3 },
+    OntologyCodeEntry { code: 420, family_code: 3 },
+    OntologyCodeEntry { code: 430, family_code: 3 },
+    OntologyCodeEntry { code: 440, family_code: 3 },
+    OntologyCodeEntry { code: 450, family_code: 3 },
+    OntologyCodeEntry { code: 460, family_code: 3 },
+    OntologyCodeEntry { code: 470, family_code: 3 },
+    OntologyCodeEntry { code: 480, family_code: 3 },
+    OntologyCodeEntry { code: 490, family_code: 3 },
+    OntologyCodeEntry { code: 500, family_code: 3 },
+    OntologyCodeEntry { code: 510, family_code: 3 },
+    OntologyCodeEntry { code: 520, family_code: 3 },
+    OntologyCodeEntry { code: 530, family_code: 3 },
+    OntologyCodeEntry { code: 540, family_code: 3 },
+    OntologyCodeEntry { code: 550, family_code: 3 },
+    OntologyCodeEntry { code: 560, family_code: 3 },
+    OntologyCodeEntry { code: 570, family_code: 3 },
+    OntologyCodeEntry { code: 580, family_code: 3 },
 ];
 
 pub const RELATION_KIND_CODES: &[OntologyCodeEntry] = &[
@@ -1515,6 +1823,11 @@ pub const RELATION_KIND_CODES: &[OntologyCodeEntry] = &[
     OntologyCodeEntry { code: 110, family_code: 13 },
     OntologyCodeEntry { code: 120, family_code: 12 },
     OntologyCodeEntry { code: 130, family_code: 12 },
+    OntologyCodeEntry { code: 140, family_code: 2 },
+    OntologyCodeEntry { code: 150, family_code: 3 },
+    OntologyCodeEntry { code: 160, family_code: 3 },
+    OntologyCodeEntry { code: 170, family_code: 3 },
+    OntologyCodeEntry { code: 180, family_code: 3 },
 ];
 
 pub const PROPERTY_KIND_CODES: &[OntologyCodeEntry] = &[

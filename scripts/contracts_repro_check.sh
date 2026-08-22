@@ -7,7 +7,7 @@ temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/codefabric-contracts-repro.XXXXXX")
 trap 'rm -rf "$temporary_root"' EXIT
 
 cargo build --locked --manifest-path "${repository_root}/Cargo.toml" \
-  --no-default-features --features contracts-tooling --bin codefabric-contracts
+  --no-default-features --features contracts-tooling,fact-generation --bin codefabric-contracts
 
 for isolated in "$temporary_root/first" "$temporary_root/second" "$temporary_root/reordered"; do
   mkdir -p "$isolated"
@@ -56,7 +56,7 @@ while IFS= read -r output_path; do
   cmp "$temporary_root/first/$output_path" "$temporary_root/second/$output_path"
 done < <(
   jq -r '.derivations[] |
-    select(.derivation_kind == "artifact-index" or .derivation_kind == "canonical-registry-set" or .derivation_kind == "schema-contract-compilation") |
+    select(.derivation_kind == "artifact-index" or .derivation_kind == "canonical-registry-set" or .derivation_kind == "schema-contract-compilation" or .derivation_kind == "provider-raw-catalog-set") |
     .outputs[].path' \
     "$repository_root/contracts/manifests/suite-manifest.json"
 )
@@ -65,7 +65,7 @@ while IFS= read -r output_path; do
   cmp "$temporary_root/first/$output_path" "$temporary_root/reordered/$output_path"
 done < <(
   jq -r '.derivations[] |
-    select(.derivation_kind == "canonical-registry-set" or .derivation_kind == "schema-contract-compilation") |
+    select(.derivation_kind == "canonical-registry-set" or .derivation_kind == "schema-contract-compilation" or .derivation_kind == "provider-raw-catalog-set") |
     .outputs[].path' \
     "$repository_root/contracts/manifests/suite-manifest.json"
 )

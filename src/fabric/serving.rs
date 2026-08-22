@@ -617,7 +617,7 @@ fn build_serving_schema(
         let table_code = projection.source_table_code;
         let provider = providers.provider(table_code).ok_or_else(|| {
             ServingQueryError::Configuration(format!(
-                "snapshot lacks required Wave-3 table {table_code}"
+                "snapshot lacks required serving table {table_code}"
             ))
         })?;
         let spec = table_spec(table_code).ok_or_else(|| {
@@ -1224,9 +1224,10 @@ mod tests {
 
     use arrow_array::builder::BinaryBuilder;
     use arrow_array::{
-        BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array, StringArray,
+        BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array, ListArray, StringArray,
         TimestampMicrosecondArray, UInt64Array, new_null_array,
     };
+    use arrow_buffer::OffsetBuffer;
     use arrow_schema::TimeUnit;
     use rusqlite::params;
     use tempfile::{TempDir, tempdir};
@@ -1383,6 +1384,14 @@ mod tests {
                 Arc::new(Int64Array::from(vec![source_generation; rows]))
             }
             DataType::Int64 => Arc::new(Int64Array::from(vec![1_i64; rows])),
+            DataType::List(element) if element.data_type() == &DataType::Int64 => {
+                Arc::new(ListArray::new(
+                    Arc::clone(element),
+                    OffsetBuffer::from_lengths(std::iter::repeat_n(1, rows)),
+                    Arc::new(Int64Array::from(vec![0_i64; rows])),
+                    None,
+                ))
+            }
             DataType::Float64 => Arc::new(Float64Array::from(vec![1.0_f64; rows])),
             DataType::Boolean => Arc::new(BooleanArray::from(vec![true; rows])),
             DataType::Utf8 => {
@@ -1407,19 +1416,26 @@ mod tests {
         entity_rows: usize,
     ) -> Arc<ServingSnapshotCandidate> {
         let row_generation = i64::try_from(source_generation).unwrap();
+        let batches = std::iter::once(11)
+            .chain(
+                serving_projection_specs()
+                    .iter()
+                    .map(|projection| projection.source_table_code),
+            )
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|table_code| {
+                let rows = if table_code == 100 { entity_rows } else { 1 };
+                (
+                    table_code,
+                    generated_batch_at_generation(table_code, rows, row_generation),
+                )
+            })
+            .collect();
         let catalog = Arc::new(SnapshotProviderCatalog::from_batches_for_snapshot_tests(
             publication,
             WORKSPACE,
-            vec![
-                (11, generated_batch(11, 1)),
-                (
-                    100,
-                    generated_batch_at_generation(100, entity_rows, row_generation),
-                ),
-                (110, generated_batch_at_generation(110, 1, row_generation)),
-                (120, generated_batch_at_generation(120, 1, row_generation)),
-                (130, generated_batch_at_generation(130, 1, row_generation)),
-            ],
+            batches,
             OVERLAY,
             row_generation,
             vec![CONTEXT],
@@ -1857,7 +1873,10 @@ mod tests {
         );
         assert!(result.artifact.logical_plan.contains("Filter"));
         assert!(result.artifact.physical_plan.contains("Projection"));
-        assert_eq!(result.artifact.source_table_versions.len(), 5);
+        assert_eq!(
+            result.artifact.source_table_versions.len(),
+            first.providers().provider_records().len()
+        );
         assert!(
             result.artifact.execution_metrics["operator_output_rows"]
                 > result.artifact.output_row_count as u64

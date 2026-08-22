@@ -531,6 +531,7 @@ fn rust_logical_type(logical: LogicalType) -> &'static str {
         LogicalType::Binary => "Binary",
         LogicalType::TimestampUtc => "TimestampUtc",
         LogicalType::IdList => "IdList",
+        LogicalType::Int64List => "Int64List",
         LogicalType::StringMap => "StringMap",
     }
 }

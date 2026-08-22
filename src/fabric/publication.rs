@@ -1607,7 +1607,8 @@ mod tests {
             }] += 1;
             counts
         });
-        assert_eq!(counts, [12, 2, 1, 2]);
+        assert_eq!(&counts[1..], [2, 1, 2]);
+        assert_eq!(counts[0], table_specs().len() - 5);
         assert_eq!(PublicationFaultPoint::ALL.len(), 5);
         assert!(
             DURABLE_PUBLICATION_STATE_TRANSITIONS

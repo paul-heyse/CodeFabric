@@ -10,6 +10,7 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::analysis_context::{AnalysisContext, AnalysisContextError, AnalysisContextKind};
 use crate::identity::{
     CaseSensitivityMode, IdentityDomain, IdentityError, RootAuthorizationInput, SOURCE_CONTEXT_ID,
     context_set_identity, encode_public_id, probe_case_sensitivity, random_registration_nonce,
@@ -188,6 +189,8 @@ pub enum WorkspaceRegistryError {
     #[error(transparent)]
     Identity(#[from] IdentityError),
     #[error(transparent)]
+    AnalysisContext(#[from] AnalysisContextError),
+    #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
     #[error("workspace root is invalid: {0}")]
     Root(String),
@@ -321,7 +324,16 @@ impl<'store> WorkspaceRegistry<'store> {
             };
         let authorization_fingerprint = authorization_fingerprint(workspace.id, &authorized, 1)?;
         let context_set_id = context_set_identity(workspace.id, &[SOURCE_CONTEXT_ID])?.id;
-        let context_fingerprint = [0_u8; 32];
+        let workspace_public_id = encode_public_id(IdentityDomain::Workspace, None, workspace.id)?;
+        let context_fingerprint = AnalysisContext::new(
+            &workspace_public_id,
+            AnalysisContextKind::Source,
+            "1.0",
+            "source",
+            None,
+            true,
+        )?
+        .fingerprint_bytes()?;
         let now = timestamp()?;
         let disclosure_bytes = serde_json::to_vec(&authorized.disclosure_rules)
             .map_err(|error| WorkspaceRegistryError::Persisted(error.to_string()))?;

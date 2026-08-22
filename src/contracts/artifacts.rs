@@ -13,6 +13,8 @@ use serde_json::Value;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
+#[cfg(feature = "fact-generation")]
+use super::catalog::PROVIDER_RAW_DERIVATION_ID;
 use super::catalog::{
     ARTIFACT_INDEX_DERIVATION_ID, BundleKind, CatalogError, CompiledCatalog, ContractCatalog,
     DerivationInput, DerivationOutputKind, REGISTRY_DERIVATION_ID, ResolvedDerivationInvocation,
@@ -34,6 +36,8 @@ use super::registry_models::{
     PropertyKind, PublicError, RelationKind, StateMachine, UnknownKind,
     validate_duplicate_authorities,
 };
+#[cfg(feature = "fact-generation")]
+use super::registry_models::{ProviderNormalization, RawKindDisposition};
 use super::schema_artifacts::render_schema_outputs;
 use super::schema_models::SchemaContractIr;
 
@@ -265,6 +269,220 @@ fn render_registry_outputs(
             .expect("compiled primary artifact must exist");
         let compiled = compile_artifact(repository_root, catalog, artifact)?;
         outputs.insert(output_path.to_owned(), compiled.canonical_bytes);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "fact-generation")]
+#[derive(Serialize)]
+struct ProviderRawInputIdentity {
+    artifact_id: String,
+    canonical_digest: String,
+    source_digest: String,
+}
+
+#[cfg(feature = "fact-generation")]
+#[derive(Serialize)]
+struct ProviderRawKind {
+    raw_key: String,
+    raw_kind_id: u16,
+    raw_name: String,
+    named: bool,
+    visible: bool,
+    supertype: bool,
+    subtypes: Vec<String>,
+    disposition: &'static str,
+    canonical_kind_name: Option<String>,
+}
+
+#[cfg(feature = "fact-generation")]
+#[allow(clippy::too_many_lines)] // One pass keeps grammar inventory and disposition expansion atomic.
+fn render_provider_raw_catalog(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+    catalog_id: &str,
+    provider_version: &str,
+    language_name: &str,
+    language: &tree_sitter::Language,
+    node_types_source: &str,
+) -> Result<Vec<u8>, ContractArtifactError> {
+    if language.node_kind_count() > usize::from(u16::MAX)
+        || language.field_count() > usize::from(u16::MAX)
+    {
+        return Err(ContractArtifactError::Metadata(PathBuf::from(format!(
+            "{catalog_id} grammar inventory exceeds the Tree-sitter u16 identifier contract"
+        ))));
+    }
+    let normalization_value = registry_value(
+        repository_root,
+        catalog,
+        "codefabric.registry.provider-normalization-registry",
+    )?;
+    let normalizations: Vec<ProviderNormalization> =
+        serde_json::from_value(normalization_value["records"].clone())
+            .map_err(|_| ContractArtifactError::Metadata(PathBuf::from(catalog_id)))?;
+    let normalization = normalizations
+        .into_iter()
+        .find(|record| record.raw_catalog_id == catalog_id)
+        .ok_or_else(|| ContractArtifactError::Missing(PathBuf::from(catalog_id)))?;
+
+    let available_names = (0..language.node_kind_count())
+        .filter_map(|raw_kind_id| {
+            language
+                .node_kind_for_id(u16::try_from(raw_kind_id).expect("count was bounded"))
+                .map(str::to_owned)
+        })
+        .collect::<BTreeSet<_>>();
+    if normalization
+        .canonical_kind_names
+        .keys()
+        .chain(&normalization.ignored_raw_keys)
+        .any(|raw_name| !available_names.contains(raw_name))
+    {
+        return Err(ContractArtifactError::Metadata(PathBuf::from(format!(
+            "{catalog_id} normalization references an absent raw kind"
+        ))));
+    }
+
+    let supertype_ids = language
+        .supertypes()
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut raw_kinds = Vec::with_capacity(language.node_kind_count());
+    for raw_kind_id in 0..language.node_kind_count() {
+        let raw_kind_id = u16::try_from(raw_kind_id).expect("count was bounded");
+        let Some(raw_name) = language.node_kind_for_id(raw_kind_id) else {
+            continue;
+        };
+        let canonical_kind_name = normalization.canonical_kind_names.get(raw_name).cloned();
+        let disposition = if canonical_kind_name.is_some() {
+            "normalize"
+        } else if normalization.ignored_raw_keys.contains(raw_name) {
+            "ignore"
+        } else {
+            match normalization.default_disposition {
+                RawKindDisposition::Ignore => "ignore",
+                RawKindDisposition::Unsupported => "unsupported",
+            }
+        };
+        let subtypes = if supertype_ids.contains(&raw_kind_id) {
+            language
+                .subtypes_for_supertype(raw_kind_id)
+                .iter()
+                .filter_map(|id| language.node_kind_for_id(*id))
+                .map(str::to_owned)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        raw_kinds.push(ProviderRawKind {
+            raw_key: format!(
+                "{raw_kind_id}:{raw_name}:{}",
+                language.node_kind_is_named(raw_kind_id)
+            ),
+            raw_kind_id,
+            raw_name: raw_name.to_owned(),
+            named: language.node_kind_is_named(raw_kind_id),
+            visible: language.node_kind_is_visible(raw_kind_id),
+            supertype: language.node_kind_is_supertype(raw_kind_id),
+            subtypes,
+            disposition,
+            canonical_kind_name,
+        });
+    }
+    let fields = (1..=language.field_count())
+        .filter_map(|field_id| {
+            language
+                .field_name_for_id(u16::try_from(field_id).expect("count was bounded"))
+                .map(|name| serde_json::json!({"field_id": field_id, "field_name": name}))
+        })
+        .collect::<Vec<_>>();
+    let runtime_inventory = serde_json::json!({"raw_kinds": raw_kinds, "fields": fields});
+    let runtime_bytes = canonicalize_value(&runtime_inventory).map_err(|source| {
+        ContractArtifactError::Canonical {
+            path: PathBuf::from(catalog_id),
+            source,
+        }
+    })?;
+    let node_types: Value = serde_json::from_str(node_types_source)
+        .map_err(|_| ContractArtifactError::Metadata(PathBuf::from(catalog_id)))?;
+
+    let derivation = catalog
+        .derivation(PROVIDER_RAW_DERIVATION_ID)
+        .expect("validated provider raw derivation exists");
+    let mut input_identities = Vec::new();
+    for input in &derivation.inputs {
+        let DerivationInput::Artifact { artifact_id, .. } = input else {
+            return Err(ContractArtifactError::Metadata(PathBuf::from(
+                PROVIDER_RAW_DERIVATION_ID,
+            )));
+        };
+        let artifact = catalog
+            .artifact(artifact_id)
+            .expect("validated provider raw input exists");
+        let compiled = compile_artifact(repository_root, catalog, artifact)?;
+        input_identities.push(ProviderRawInputIdentity {
+            artifact_id: artifact_id.clone(),
+            canonical_digest: compiled.canonical_digest,
+            source_digest: compiled.source_digest,
+        });
+    }
+    let output = serde_json::json!({
+        "catalog_id": catalog_id,
+        "provider_id": normalization.provider_id,
+        "provider_version": provider_version,
+        "language": language_name,
+        "grammar_abi": language.abi_version(),
+        "node_types_digest": checksum(node_types_source.as_bytes()),
+        "runtime_inventory_fingerprint": checksum(&runtime_bytes),
+        "query_bundle_digest": checksum(b"{\"queries\":[]}"),
+        "input_identities": input_identities,
+        "node_types": node_types,
+        "runtime_inventory": runtime_inventory,
+    });
+    canonicalize_value(&output).map_err(|source| ContractArtifactError::Canonical {
+        path: PathBuf::from(catalog_id),
+        source,
+    })
+}
+
+#[cfg(feature = "fact-generation")]
+fn render_provider_raw_outputs(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+    outputs: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<(), ContractArtifactError> {
+    for (path, _) in catalog.outputs_of_kind(
+        PROVIDER_RAW_DERIVATION_ID,
+        DerivationOutputKind::ProviderRawKindCatalog,
+    ) {
+        let catalog_id = path
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .ok_or_else(|| ContractArtifactError::Metadata(path.to_owned()))?;
+        let bytes = match catalog_id {
+            "tree-sitter-python-0-25-0" => render_provider_raw_catalog(
+                repository_root,
+                catalog,
+                catalog_id,
+                "tree-sitter=0.26.12;tree-sitter-python=0.25.0",
+                "python",
+                &tree_sitter::Language::from(tree_sitter_python::LANGUAGE),
+                tree_sitter_python::NODE_TYPES,
+            )?,
+            "tree-sitter-rust-0-24-2" => render_provider_raw_catalog(
+                repository_root,
+                catalog,
+                catalog_id,
+                "tree-sitter=0.26.12;tree-sitter-rust=0.24.2",
+                "rust",
+                &tree_sitter::Language::from(tree_sitter_rust::LANGUAGE),
+                tree_sitter_rust::NODE_TYPES,
+            )?,
+            _ => return Err(ContractArtifactError::Metadata(path.to_owned())),
+        };
+        outputs.insert(path.to_owned(), bytes);
     }
     Ok(())
 }
@@ -681,6 +899,16 @@ fn render_rust_registry_bindings(
             "provider_id",
         ),
         (
+            "PROVIDER_NORMALIZATION_IDS",
+            "codefabric.registry.provider-normalization-registry",
+            "mapping_id",
+        ),
+        (
+            "PROVIDER_RESOURCE_PROFILE_IDS",
+            "codefabric.registry.provider-resource-profile-registry",
+            "profile_id",
+        ),
+        (
             "PUBLIC_ERROR_IDS",
             "codefabric.registry.error-registry",
             "name",
@@ -984,6 +1212,16 @@ fn render_python_registry_bindings(
             "provider_id",
         ),
         (
+            "provider_normalizations",
+            "codefabric.registry.provider-normalization-registry",
+            "mapping_id",
+        ),
+        (
+            "provider_resource_profiles",
+            "codefabric.registry.provider-resource-profile-registry",
+            "profile_id",
+        ),
+        (
             "public_errors",
             "codefabric.registry.error-registry",
             "name",
@@ -1064,6 +1302,8 @@ fn render_outputs(
     let catalog = ContractCatalog::load(repository_root)?;
     let mut outputs = BTreeMap::new();
     outputs.extend(render_schema_outputs(repository_root, &catalog)?);
+    #[cfg(feature = "fact-generation")]
+    render_provider_raw_outputs(repository_root, &catalog, &mut outputs)?;
     let artifact_records = collect_artifact_records(repository_root, &catalog)?;
     let derivation_records = collect_derivation_records(&catalog);
     render_registry_outputs(repository_root, &catalog, &mut outputs)?;
@@ -2316,6 +2556,11 @@ pub const fn identity() -> ContractToolIdentity<'static> {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "fact-generation")]
+    fn repository_root() -> &'static Path {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+    }
+
     #[test]
     fn verifier_profiles_parse_strictly() {
         assert_eq!(
@@ -2323,5 +2568,128 @@ mod tests {
             VerificationProfile::Full
         );
         assert!(VerificationProfile::parse("Full").is_err());
+    }
+
+    #[cfg(feature = "fact-generation")]
+    #[test]
+    fn wp28_structural_acceptance() {
+        let provider_bundle = decode_strict(
+            &read(&repository_root().join("contracts/bundles/provider-bundle.json")).unwrap(),
+        )
+        .unwrap();
+        let bundled_digests = provider_bundle["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|member| {
+                (
+                    member["artifact_id"].as_str().unwrap(),
+                    member["canonical_digest"].as_str().unwrap(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        for path in [
+            "contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json",
+            "contracts/generated/provider-raw-kinds/tree-sitter-rust-0-24-2.json",
+        ] {
+            let value = decode_strict(&read(&repository_root().join(path)).unwrap()).unwrap();
+            let raw_kinds = value["runtime_inventory"]["raw_kinds"].as_array().unwrap();
+            assert!(!raw_kinds.is_empty());
+            let keys = raw_kinds
+                .iter()
+                .map(|entry| entry["raw_key"].as_str().unwrap())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(keys.len(), raw_kinds.len());
+            assert!(raw_kinds.iter().all(|entry| {
+                matches!(
+                    entry["disposition"].as_str(),
+                    Some("normalize" | "ignore" | "unsupported")
+                ) && entry.get("canonical_kind_code").is_none()
+                    && (entry["disposition"] == "normalize")
+                        == entry["canonical_kind_name"].is_string()
+            }));
+            let runtime_bytes = canonicalize_value(&value["runtime_inventory"]).unwrap();
+            assert_eq!(
+                value["runtime_inventory_fingerprint"].as_str().unwrap(),
+                checksum(&runtime_bytes)
+            );
+            let input_identities = value["input_identities"].as_array().unwrap();
+            assert_eq!(input_identities.len(), 3);
+            assert!(input_identities.iter().all(|identity| {
+                bundled_digests
+                    .get(identity["artifact_id"].as_str().unwrap())
+                    .copied()
+                    == identity["canonical_digest"].as_str()
+            }));
+        }
+
+        let entities = registry_value(
+            repository_root(),
+            &ContractCatalog::load(repository_root()).unwrap(),
+            "codefabric.registry.ontology-entity-registry",
+        )
+        .unwrap();
+        assert!(
+            entities["records"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|record| {
+                    record["kind_code"].as_u64().unwrap() <= 240
+                        || record["kind_code"].as_u64().unwrap() >= 250
+                })
+        );
+        let relations = registry_value(
+            repository_root(),
+            &ContractCatalog::load(repository_root()).unwrap(),
+            "codefabric.registry.ontology-relation-registry",
+        )
+        .unwrap();
+        assert!(
+            relations["records"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|record| {
+                    record["relation_code"].as_u64().unwrap() <= 130
+                        || record["relation_code"].as_u64().unwrap() >= 140
+                })
+        );
+    }
+
+    #[cfg(feature = "fact-generation")]
+    #[test]
+    fn wp28_negative_zero_state() {
+        let outputs = render_outputs(repository_root()).unwrap();
+        for path in [
+            Path::new("contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json"),
+            Path::new("contracts/generated/provider-raw-kinds/tree-sitter-rust-0-24-2.json"),
+        ] {
+            assert_eq!(
+                outputs.get(path).unwrap(),
+                &read(&repository_root().join(path)).unwrap()
+            );
+        }
+        let serving_ir = decode_strict(
+            &read(&repository_root().join("contracts/schema/schema-contract-ir.json")).unwrap(),
+        )
+        .unwrap();
+        let views = serving_ir["serving_projections"].as_array().unwrap();
+        assert!(views.iter().any(|view| view["view_name"] == "files"));
+        assert!(views.iter().any(|view| view["view_name"] == "syntax"));
+        assert!(!views.iter().any(|view| {
+            matches!(
+                view["view_name"].as_str(),
+                Some("tokens" | "annotations" | "python" | "rust" | "derived")
+            )
+        }));
+    }
+
+    #[cfg(feature = "fact-generation")]
+    #[test]
+    fn wp28_operational_acceptance() {
+        let report = verify(repository_root(), VerificationProfile::Released).unwrap();
+        assert_eq!(report.warning_count, 0);
+        assert!(report.artifact_count >= 64);
     }
 }

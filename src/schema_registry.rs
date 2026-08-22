@@ -200,6 +200,7 @@ enum LogicalType {
     Binary,
     TimestampUtc,
     IdList,
+    Int64List,
     StringMap,
 }
 
@@ -265,6 +266,9 @@ fn physical_type(logical: LogicalType) -> DataType {
             // Delta's Arrow conversion canonicalizes list children to `element`.
             // Emit that library-native name so the generated schema round-trips exactly.
             DataType::List(Arc::new(Field::new("element", DataType::Binary, false)))
+        }
+        LogicalType::Int64List => {
+            DataType::List(Arc::new(Field::new("element", DataType::Int64, false)))
         }
         LogicalType::StringMap => DataType::Map(
             Arc::new(Field::new(
@@ -522,10 +526,48 @@ pub fn operational_table_spec(name: &str) -> Option<&'static OperationalTableSpe
 mod tests {
     use super::*;
 
+    fn synthetic_wave4_batch(table: &TableSpec) -> arrow::record_batch::RecordBatch {
+        use arrow::array::{
+            ArrayRef, BinaryArray, BooleanArray, Int16Array, Int32Array, Int64Array, Int64Builder,
+            ListBuilder, StringArray,
+        };
+
+        const BYTES: [u8; 32] = [7; 32];
+        let columns = table
+            .arrow_schema
+            .fields()
+            .iter()
+            .map(|field| -> ArrayRef {
+                match field.data_type() {
+                    DataType::Binary => Arc::new(BinaryArray::from(vec![Some(BYTES.as_slice())])),
+                    DataType::Int16 => Arc::new(Int16Array::from(vec![0])),
+                    DataType::Int32 => Arc::new(Int32Array::from(vec![0])),
+                    DataType::Int64 => Arc::new(Int64Array::from(vec![0])),
+                    DataType::Boolean => Arc::new(BooleanArray::from(vec![false])),
+                    DataType::Utf8 => Arc::new(StringArray::from(vec!["value"])),
+                    DataType::List(element) if element.data_type() == &DataType::Int64 => {
+                        let mut values =
+                            ListBuilder::new(Int64Builder::new()).with_field(Arc::clone(element));
+                        values.values().append_value(0);
+                        values.append(true);
+                        Arc::new(values.finish())
+                    }
+                    other => panic!("unhandled Wave-4 synthetic type {other:?}"),
+                }
+            })
+            .collect();
+        arrow::record_batch::RecordBatch::try_new(table.arrow_schema.clone(), columns).unwrap()
+    }
+
     #[test]
     fn wp09_structural_acceptance() {
         let tables = table_specs();
-        assert_eq!(tables.len(), 17);
+        assert!(tables.len() >= 17);
+        for code in [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 100, 110, 120, 130, 900, 901,
+        ] {
+            assert!(table_spec(code).is_some(), "base table code {code} drifted");
+        }
         let entity = table_spec(100).unwrap();
         assert_eq!(
             entity.partition_columns,
@@ -612,6 +654,79 @@ mod tests {
             assert_eq!(datafusion.fields().len(), table.arrow_schema.fields().len());
             table.validate_delta_compatibility().unwrap();
         }
+    }
+
+    #[test]
+    fn wp28_behavioral_acceptance() {
+        for code in [140, 150, 160, 170] {
+            let table = table_spec(code).unwrap();
+            let batch = synthetic_wave4_batch(table);
+            assert_eq!(batch.num_rows(), 1);
+            assert_eq!(batch.schema().fields(), table.arrow_schema.fields());
+            table.validate_delta_compatibility().unwrap();
+            assert_eq!(
+                table.datafusion_schema().unwrap().fields().len(),
+                table.arrow_schema.fields().len()
+            );
+            datafusion::datasource::MemTable::try_new(
+                table.arrow_schema.clone(),
+                vec![vec![batch]],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            table_spec(140)
+                .unwrap()
+                .arrow_schema
+                .field_with_name("line_start_offsets")
+                .unwrap()
+                .data_type(),
+            &DataType::List(Arc::new(Field::new("element", DataType::Int64, false)))
+        );
+    }
+
+    #[test]
+    fn wp28_structural_acceptance() {
+        for (code, name, primary_key) in [
+            (140, "source_file", &["workspace_id", "file_id"][..]),
+            (150, "source_token", &["token_id"][..]),
+            (160, "source_annotation", &["annotation_id"][..]),
+            (170, "syntax_detail", &["entity_id"][..]),
+        ] {
+            let table = table_spec(code).unwrap();
+            assert_eq!(table.name, name);
+            assert_eq!(table.primary_key, primary_key);
+            assert_eq!(table.partition_columns, ["owner_bucket"]);
+            assert_eq!(
+                table.durable_mutation,
+                DurableMutationClass::OwnerReplacedFact
+            );
+            assert_eq!(table.overlay_mutation, OverlayMutationPolicy::OwnerReplace);
+            assert_eq!(
+                table.materialization_role,
+                MaterializationRole::DurableEffective
+            );
+            assert_eq!(table.publication_pin_role, PublicationPinRole::PinnedData);
+        }
+    }
+
+    #[test]
+    fn wp28_negative_zero_state() {
+        let views = serving_projection_specs();
+        assert!(
+            views
+                .iter()
+                .any(|view| view.view_name == "files" && view.source_table_code == 140)
+        );
+        assert!(
+            views
+                .iter()
+                .any(|view| view.view_name == "syntax" && view.source_table_code == 170)
+        );
+        assert!(!views.iter().any(|view| matches!(
+            view.view_name,
+            "tokens" | "annotations" | "python" | "rust" | "derived"
+        )));
     }
 
     #[cfg(feature = "repository-state")]

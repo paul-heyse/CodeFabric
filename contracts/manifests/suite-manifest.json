@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "released",
-  "canonical_digest": "b3:52380a1322c2281b3880d1b8b4b73d0b5b832217257ad6dcd1eb52eae41b6b3f",
+  "canonical_digest": "b3:0dc99880e33851d5a695a7d838cafe3142034e144a713bcce0f65592b94d7f57",
   "digest_projection": "json-jcs-v1",
   "catalog_schema_version": 2,
   "resource_budget_profiles": [
@@ -73,6 +73,17 @@
       "max_records_or_edges": 1,
       "max_aliases": 0,
       "max_diagnostics": 8
+    },
+    {
+      "profile_id": "provider-raw-catalog",
+      "max_bytes": 4194304,
+      "max_depth": 64,
+      "max_nodes": 500000,
+      "max_collection_items": 100000,
+      "max_string_bytes": 1048576,
+      "max_records_or_edges": 100000,
+      "max_aliases": 0,
+      "max_diagnostics": 16
     },
     {
       "profile_id": "proto-descriptor-census",
@@ -1451,6 +1462,24 @@
       ]
     },
     {
+      "artifact_id": "codefabric.registry.provider-normalization-registry",
+      "authority_path": "contracts/registry/provider-normalization-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "provider",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "consumers": ["contract-tooling", "governance", "python-adapter", "rust-core"],
+      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "semantic_projection_source": {"source_kind": "native"},
+      "bundle_membership": ["provider"]
+    },
+    {
       "artifact_id": "codefabric.registry.provider-registry",
       "authority_path": "contracts/registry/provider-registry.yaml",
       "artifact_kind": "registry",
@@ -1481,6 +1510,24 @@
       "bundle_membership": [
         "provider"
       ]
+    },
+    {
+      "artifact_id": "codefabric.registry.provider-resource-profile-registry",
+      "authority_path": "contracts/registry/provider-resource-profile-registry.yaml",
+      "artifact_kind": "registry",
+      "native_format": "yaml",
+      "owner": "fact-generation",
+      "version": "1.0",
+      "compatible_suite_major": 1,
+      "status": "released",
+      "digest_projection": "yaml-ac-g-53-v1",
+      "compatibility_family": "provider",
+      "resource_budget_profile": "yaml-standard",
+      "parser_schema_authority": "yaml-1.1-ac-g-53",
+      "consumers": ["contract-tooling", "governance", "python-adapter", "rust-core"],
+      "provenance_requirements": ["canonical-digest", "generator-revision", "native-validation", "source-digest"],
+      "semantic_projection_source": {"source_kind": "native"},
+      "bundle_membership": ["provider"]
     },
     {
       "artifact_id": "codefabric.registry.summary-registry",
@@ -2463,7 +2510,17 @@
         },
         {
           "input_kind": "artifact",
+          "artifact_id": "codefabric.registry.provider-normalization-registry",
+          "view": "compiled-semantic"
+        },
+        {
+          "input_kind": "artifact",
           "artifact_id": "codefabric.registry.provider-registry",
+          "view": "compiled-semantic"
+        },
+        {
+          "input_kind": "artifact",
+          "artifact_id": "codefabric.registry.provider-resource-profile-registry",
           "view": "compiled-semantic"
         },
         {
@@ -2638,6 +2695,12 @@
           ]
         },
         {
+          "path": "contracts/generated/registry/provider-normalization-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": ["contract-tooling", "governance", "packaging", "python-adapter", "rust-core"],
+          "primary_artifact_ids": ["codefabric.registry.provider-normalization-registry"]
+        },
+        {
           "path": "contracts/generated/registry/provider-registry.json",
           "output_kind": "canonical-registry",
           "consumers": [
@@ -2650,6 +2713,12 @@
           "primary_artifact_ids": [
             "codefabric.registry.provider-registry"
           ]
+        },
+        {
+          "path": "contracts/generated/registry/provider-resource-profile-registry.json",
+          "output_kind": "canonical-registry",
+          "consumers": ["contract-tooling", "governance", "packaging", "python-adapter", "rust-core"],
+          "primary_artifact_ids": ["codefabric.registry.provider-resource-profile-registry"]
         },
         {
           "path": "contracts/generated/registry/summary-registry.json",
@@ -2712,7 +2781,9 @@
             "codefabric.registry.ontology-relation-registry",
             "codefabric.registry.phrase-registry",
             "codefabric.registry.projection-registry",
+            "codefabric.registry.provider-normalization-registry",
             "codefabric.registry.provider-registry",
+            "codefabric.registry.provider-resource-profile-registry",
             "codefabric.registry.state-machine-registry",
             "codefabric.registry.summary-registry",
             "codefabric.registry.unknown-registry"
@@ -2737,7 +2808,9 @@
             "codefabric.registry.ontology-relation-registry",
             "codefabric.registry.phrase-registry",
             "codefabric.registry.projection-registry",
+            "codefabric.registry.provider-normalization-registry",
             "codefabric.registry.provider-registry",
+            "codefabric.registry.provider-resource-profile-registry",
             "codefabric.registry.state-machine-registry",
             "codefabric.registry.summary-registry",
             "codefabric.registry.unknown-registry"
@@ -2745,6 +2818,32 @@
         }
       ],
       "resource_budget_profile": "yaml-standard"
+    },
+    {
+      "derivation_id": "codefabric.derivation.provider-raw-catalogs",
+      "derivation_kind": "provider-raw-catalog-set",
+      "inputs": [
+        {"input_kind":"artifact","artifact_id":"codefabric.registry.provider-normalization-registry","view":"compiled-semantic"},
+        {"input_kind":"artifact","artifact_id":"codefabric.registry.provider-registry","view":"compiled-semantic"},
+        {"input_kind":"artifact","artifact_id":"codefabric.registry.provider-resource-profile-registry","view":"compiled-semantic"}
+      ],
+      "outputs": [
+        {
+          "path": "contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json",
+          "output_kind": "provider-raw-kind-catalog",
+          "resource_budget_profile": "provider-raw-catalog",
+          "consumers": ["contract-tooling", "governance", "rust-core"],
+          "primary_artifact_ids": ["codefabric.registry.provider-normalization-registry", "codefabric.registry.provider-registry", "codefabric.registry.provider-resource-profile-registry"]
+        },
+        {
+          "path": "contracts/generated/provider-raw-kinds/tree-sitter-rust-0-24-2.json",
+          "output_kind": "provider-raw-kind-catalog",
+          "resource_budget_profile": "provider-raw-catalog",
+          "consumers": ["contract-tooling", "governance", "rust-core"],
+          "primary_artifact_ids": ["codefabric.registry.provider-normalization-registry", "codefabric.registry.provider-registry", "codefabric.registry.provider-resource-profile-registry"]
+        }
+      ],
+      "resource_budget_profile": "provider-raw-catalog"
     },
     {
       "derivation_id": "codefabric.derivation.production-proto-descriptor-python",

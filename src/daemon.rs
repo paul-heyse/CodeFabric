@@ -757,6 +757,7 @@ const fn workspace_error_code(error: &WorkspaceRegistryError) -> &'static str {
         WorkspaceRegistryError::PurgeConfirmation => "INVALID_REQUEST_SCHEMA",
         WorkspaceRegistryError::Store(_)
         | WorkspaceRegistryError::Identity(_)
+        | WorkspaceRegistryError::AnalysisContext(_)
         | WorkspaceRegistryError::Sqlite(_)
         | WorkspaceRegistryError::Persisted(_) => "INTERNAL",
     }
