@@ -18,6 +18,7 @@ use crate::identity::{
     source_file_identity,
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
+pub use crate::provider_types::ProviderText;
 use crate::secure_path::{
     PlatformPath, SecurePathError, StableFileMetadata, StableFileRead, StableReadError,
     open_workspace_root,
@@ -75,13 +76,6 @@ pub enum NewlineKind {
     CrLf = 30,
     Cr = 40,
     Mixed = 50,
-}
-
-/// Provider-compatible text plus a boundary map back to original byte offsets.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProviderText {
-    pub text: Arc<str>,
-    pub original_byte_offsets: Arc<[u64]>,
 }
 
 /// Little-endian `u64` line-start artifact and its content identity.

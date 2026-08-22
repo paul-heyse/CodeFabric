@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "released",
-  "canonical_digest": "b3:b74e0db4f4b3a73e95d417fd823d77f6c1b6d7f2b7c5238fece81557dc9c6e8e",
+  "canonical_digest": "b3:50770214c9ddb37a5cafd6bf1927d89f3c669a5aaa1d9a0a6c9be35235e6f18b",
   "records": [
     {"path":"contracts/fixtures/identity/cbef-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed CBEF framing and BLAKE3 known answers for all domains and core type codes","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
     {"path":"contracts/fixtures/identity/path-canonicalization-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed percent, base64url, NFD, and full-casefold known answers","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
@@ -39,6 +39,7 @@
     {"path":"fuzz/corpus/jcs_decode_canonicalize/negative-unsafe-integer.json","oracle_class":"property","origin":"Output-free unsafe-integer replay seed for the bounded JCS fuzz target","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-full-fuzz-corpus-governance"},
     {"path":"fuzz/corpus/jcs_decode_canonicalize/positive-order.json","oracle_class":"property","origin":"Output-free object-order replay seed for the bounded JCS fuzz target","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-full-fuzz-corpus-governance"},
     {"path":"fuzz/corpus/jcs_decode_canonicalize/positive-unicode.json","oracle_class":"property","origin":"Output-free Unicode replay seed for the bounded JCS fuzz target","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-full-fuzz-corpus-governance"},
+    {"path":"contracts/fixtures/tree-sitter/adapter-cases-v1.json","oracle_class":"normative-kat","origin":"Owner-reviewed exact complete-CST fact-projection digests, roots, counts, recovery outcomes, raw-kind presence, and incremental edit cases for the pinned Python and Rust grammars","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-22-tree-sitter-adapter-corpus"},
     {"path":"tooling/proto/compatibility-baseline.json","oracle_class":"normative-kat","origin":"Owner-reviewed first-release descriptor compatibility baseline","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
     {"path":"tooling/proto/descriptor-census.json","oracle_class":"generated-example","origin":"Generated normalized view of the single committed descriptor IR","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
     {"path":"tooling/proto/toolchain-identity.json","oracle_class":"generated-example","origin":"Generated compiler/runtime/source identity record","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},

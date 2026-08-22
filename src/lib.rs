@@ -20,8 +20,12 @@ pub mod identity;
 pub mod inventory;
 #[cfg(feature = "data-fabric")]
 pub mod operational_store;
+#[cfg(feature = "fact-generation")]
+pub mod provider_raw_kinds;
 #[cfg(feature = "daemon")]
 pub mod provider_runtime;
+#[cfg(feature = "fact-generation")]
+pub mod provider_types;
 /// Generated categorical and lifecycle registry types.
 pub mod registries;
 #[cfg(feature = "rpc")]
@@ -45,3 +49,5 @@ pub mod fabric;
 pub mod fact_ingest;
 #[cfg(feature = "repository-state")]
 pub mod git_state;
+#[cfg(feature = "fact-generation")]
+pub mod tree_sitter_adapter;

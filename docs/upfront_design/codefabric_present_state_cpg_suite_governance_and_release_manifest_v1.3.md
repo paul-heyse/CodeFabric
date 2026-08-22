@@ -465,6 +465,7 @@ ProtobufDescriptorAndPython
 ProtobufRustFromDescriptor
 AdapterModelCompilation
 SchemaContractCompilation
+ProviderRawCatalogSet
 ```
 
 A derivation input is exactly one of:
@@ -504,6 +505,14 @@ dependency columns, illegal mutation/materialization combinations, opaque JSON/E
 columns, `Utf8View`, incomplete public-schema censuses, and any generated public schema
 whose descriptor does not point back to that exact output. Adapter public schemas remain
 owned by `AdapterModelCompilation` and are generated from its strict Pydantic models.
+
+`ProviderRawCatalogSet` consumes the closed provider, provider-normalization, and
+provider-resource-profile registries. It emits the provider/version-specific canonical
+JSON review catalogs and one generated Rust binding from the same typed values. The Rust
+binding is the runtime lookup authority: production adapters SHALL NOT parse the JSON
+review projection or maintain a sibling raw-kind table on their hot path. Its generated
+inventory carries the exact grammar ABI, node-type identity, runtime kind/field
+fingerprint, and governed query-bundle identity used by startup validation.
 
 The suite manifest's first logical artifact descriptor SHALL describe the manifest
 itself, including authority path, projection, owner, compatibility family, and budget.

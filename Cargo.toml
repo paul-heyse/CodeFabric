@@ -60,6 +60,7 @@ data-fabric = [
     "dep:url",
 ]
 fact-generation = [
+    "dep:blake3",
     "dep:rayon",
     "dep:ruff_python_ast",
     "dep:ruff_python_index",
@@ -70,6 +71,7 @@ fact-generation = [
     "dep:tree-sitter",
     "dep:tree-sitter-python",
     "dep:tree-sitter-rust",
+    "dep:thiserror",
 ]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = [
@@ -151,6 +153,7 @@ url = { version = "2", optional = true }
 [dev-dependencies]
 hyper-util = { version = "=0.1.20", features = ["tokio"] }
 insta = "=1.48.0"
+serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
 tokio-stream = { version = "=0.1.18", features = ["net"] }
 tower = { version = "=0.5.3", features = ["util"] }
 

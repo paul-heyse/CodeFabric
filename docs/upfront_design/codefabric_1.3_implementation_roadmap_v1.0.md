@@ -304,6 +304,9 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 9. **Generated-data and conformance discipline**
    - emit language-neutral index and schema data once as canonical resources, while
      reserving generated Rust/Python source for statically useful types and behavior;
+   - derive provider/version raw-kind JSON review catalogs and the Rust hot-path lookup
+     binding together from one closed typed derivation; adapters validate that exact
+     grammar/query identity at startup and never parse review JSON per source file;
    - emit peer artifact/derivation index records so every generated output has one owner
      and consumers can inspect its complete resolved lineage without creating a second
      digest authority;

@@ -1,0 +1,21 @@
+id: tree-sitter-boundary-only
+valid:
+  - |
+      fn emit(fact: RawSyntaxFact) -> RawSyntaxFact {
+          fact
+      }
+  - |
+      struct TreeSitterSnapshot {
+          facts: Vec<RawSyntaxFact>,
+      }
+invalid:
+  - |
+      use tree_sitter::{Node, Tree};
+  - |
+      fn leak(node: tree_sitter::Node<'_>) -> usize {
+          node.start_byte()
+      }
+  - |
+      fn language() {
+          let _language = tree_sitter_python::LANGUAGE;
+      }

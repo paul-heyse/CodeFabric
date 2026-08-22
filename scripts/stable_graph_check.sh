@@ -161,6 +161,7 @@ printf '%s' "$root_shape" | jq -e '
     ],
     "default": ["local-workstation"],
     "fact-generation": [
+      "dep:blake3",
       "dep:rayon",
       "dep:ruff_python_ast",
       "dep:ruff_python_index",
@@ -170,7 +171,8 @@ printf '%s' "$root_shape" | jq -e '
       "dep:ruff_text_size",
       "dep:tree-sitter",
       "dep:tree-sitter-python",
-      "dep:tree-sitter-rust"
+      "dep:tree-sitter-rust",
+      "dep:thiserror"
     ],
     "local-workstation": ["daemon", "compatibility-probes"],
     "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
@@ -184,7 +186,7 @@ rg -q '^resolver = "3"$' Cargo.toml || fail 'Cargo resolver 3 is not declared'
 declared_features() {
   printf '%s' "$metadata" | jq -c --arg root "$root" --arg name "$1" '
     .packages[] | select(.id == $root)
-    | .dependencies[] | select(.name == $name)
+    | .dependencies[] | select(.name == $name and .kind == null)
     | .features | sort
   '
 }
@@ -271,7 +273,7 @@ assert_graph_omits featureless "$featureless_tree"
 assert_graph_omits canonical-json "$canonical_tree"
 assert_graph_omits contracts-tooling "$contracts_tree"
 assert_graph_omits proto-tooling "$proto_tree"
-for required in rayon tree-sitter tree-sitter-python tree-sitter-rust ruff_python_ast ruff_python_index ruff_python_parser ruff_python_trivia ruff_source_file ruff_text_size; do
+for required in blake3 thiserror rayon tree-sitter tree-sitter-python tree-sitter-rust ruff_python_ast ruff_python_index ruff_python_parser ruff_python_trivia ruff_source_file ruff_text_size; do
   printf '%s\n' "$fact_generation_tree" | rg -q "^${required} " || \
     fail "fact-generation graph omits required package $required"
 done

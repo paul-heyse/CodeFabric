@@ -136,5 +136,13 @@ def test_packaged_index_has_the_exact_source_census_and_bytes() -> None:
         "rust-table-spec-bindings",
         "table-spec-manifest",
     }
+    provider_raw_units = [
+        unit for unit in index.derivations if unit.derivation_kind == "provider-raw-catalog-set"
+    ]
+    assert len(provider_raw_units) == 1
+    assert {output.output_kind for output in provider_raw_units[0].outputs} == {
+        "provider-raw-kind-catalog",
+        "rust-provider-raw-kind-bindings",
+    }
     for artifact in index.artifacts:
         validate_checksum(artifact.canonical_digest)

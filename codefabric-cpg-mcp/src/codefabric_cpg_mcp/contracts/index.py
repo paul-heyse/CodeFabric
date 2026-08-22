@@ -87,6 +87,7 @@ type DerivationOutputKind = Literal[
     "rust-table-spec-bindings",
     "operational-store-ddl",
     "provider-raw-kind-catalog",
+    "rust-provider-raw-kind-bindings",
 ]
 type DerivationKind = Literal[
     "artifact-index",

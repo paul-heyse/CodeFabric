@@ -1,0 +1,21 @@
+id: tree-sitter-boundary-only
+language: Rust
+severity: error
+message: Tree-sitter runtime types belong only in the complete-CST adapter boundary.
+note: Convert parser-owned nodes, trees, queries, edits, and ranges to application-owned records before returning.
+files:
+  - src/**/*.rs
+ignores:
+  - src/tree_sitter_adapter.rs
+  - src/contracts/artifacts.rs
+rule:
+  any:
+    - all:
+        - kind: scoped_identifier
+        - regex: "^(tree_sitter|tree_sitter_python|tree_sitter_rust)::"
+    - all:
+        - kind: scoped_type_identifier
+        - regex: "^(tree_sitter|tree_sitter_python|tree_sitter_rust)::"
+    - all:
+        - kind: use_declaration
+        - regex: "(^|\\s)(tree_sitter|tree_sitter_python|tree_sitter_rust)::"

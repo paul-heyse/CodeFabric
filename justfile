@@ -433,6 +433,14 @@ mutants-wp29:
       -F 'ProviderRuntime::(validate_job|supersession_key|transition|acquire|acquire_all|finish_requested|finish_adapter_result)|ProviderExecutor' \
       -- --lib provider_runtime::tests
 
+[doc("Mutation-test WP30 Tree-sitter inventory, bounds, edits, and atomic publication")]
+[group('quality')]
+mutants-wp30:
+    cargo mutants --output target/wp30-mutants -f src/tree_sitter_adapter.rs \
+      --no-default-features --features fact-generation \
+      -F 'TreeSitterAdapter::(parse_candidate|reject)|BoundaryMap::(new|original)|progress_abort_reason|exceeds_limit|deadline_exceeded|cancellation_due|runtime_node_matches|validate_runtime_inventory|walk_tree|run_recovery_query|validate_edit|edit_geometry_valid|edit_boundaries_valid|edit_unchanged_regions_match|point_at' \
+      -- --lib tree_sitter_adapter::tests
+
 # Nightly is the extractor's production toolchain and remains isolated from this root.
 # Miri explores executions; it never proves soundness (spec section 24.2). Record
 # toolchain, seed range, and exclusions with any finding.

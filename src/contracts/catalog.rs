@@ -288,6 +288,8 @@ pub enum DerivationOutputKind {
     OperationalStoreDdl,
     /// Complete provider-native kind inventory with one normalization disposition per key.
     ProviderRawKindCatalog,
+    /// Statically typed Rust hot-path bindings for the provider-native kind inventories.
+    RustProviderRawKindBindings,
 }
 
 /// Closed model-level derivation operation.
@@ -1358,7 +1360,8 @@ fn validate_derivation_shape(
                     )
                 })
                 || count(DerivationOutputKind::ProviderRawKindCatalog) != 2
-                || derivation.outputs.len() != 2
+                || count(DerivationOutputKind::RustProviderRawKindBindings) != 1
+                || derivation.outputs.len() != 3
         }
     };
     if invalid {

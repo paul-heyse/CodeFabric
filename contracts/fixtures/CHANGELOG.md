@@ -1,5 +1,11 @@
 # Fixture oracle change record
 
+## 2026-08-22 Tree-sitter adapter corpus
+
+- Added exact framed fact-stream digests plus valid-root/count/anonymous-kind
+  observations, recovery cases, malformed UTF-8-compatible inputs, and
+  incremental/full-equivalence edits for both governed Tree-sitter grammars.
+
 ## 2026-08-21 synthetic canonical ingest
 
 - Added an owner-reviewed two-provider conflict known answer covering deterministic

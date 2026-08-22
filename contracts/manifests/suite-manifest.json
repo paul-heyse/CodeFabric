@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "released",
-  "canonical_digest": "b3:0dc99880e33851d5a695a7d838cafe3142034e144a713bcce0f65592b94d7f57",
+  "canonical_digest": "b3:c290c4a2aa0204019baca9da430599937823ae034144e7e44a0f88251622e36c",
   "digest_projection": "json-jcs-v1",
   "catalog_schema_version": 2,
   "resource_budget_profiles": [
@@ -2840,6 +2840,13 @@
           "output_kind": "provider-raw-kind-catalog",
           "resource_budget_profile": "provider-raw-catalog",
           "consumers": ["contract-tooling", "governance", "rust-core"],
+          "primary_artifact_ids": ["codefabric.registry.provider-normalization-registry", "codefabric.registry.provider-registry", "codefabric.registry.provider-resource-profile-registry"]
+        },
+        {
+          "path": "src/generated/provider_raw_kinds.rs",
+          "output_kind": "rust-provider-raw-kind-bindings",
+          "resource_budget_profile": "provider-raw-catalog",
+          "consumers": ["rust-core"],
           "primary_artifact_ids": ["codefabric.registry.provider-normalization-registry", "codefabric.registry.provider-registry", "codefabric.registry.provider-resource-profile-registry"]
         }
       ],

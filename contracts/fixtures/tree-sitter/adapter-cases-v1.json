@@ -1,0 +1,72 @@
+{
+  "version": "1.0",
+  "fact_projection": "codefabric:tree-sitter-raw-syntax-facts:v1",
+  "cases": [
+    {
+      "case_id": "python-valid",
+      "language": "python",
+      "source": "def answer(value):\n    return value + 1\n",
+      "expected_root": {"raw_kind_id": 108, "raw_kind": "module", "start_byte": 0, "end_byte": 40},
+      "expected_fact_count": 16,
+      "expected_fact_digest": "b3:c357566eae20d6d192868f6ccf9ace346c7d26ea4ac8ab6230d6da077dd00cf3",
+      "expected_recovery": false,
+      "required_raw_kinds": ["def", "identifier", "(", ")", ":", "return", "+", "integer"]
+    },
+    {
+      "case_id": "python-partially-invalid",
+      "language": "python",
+      "source": "def broken(:\n  return 1\n",
+      "expected_fact_digest": "b3:534714749e8bb7e3475a19f0000bcddb2b553f2eca967d282a7fb43ca4d05c57",
+      "expected_recovery": true
+    },
+    {
+      "case_id": "rust-valid",
+      "language": "rust",
+      "source": "fn answer(value: i32) -> i32 { value + 1 }\n",
+      "expected_root": {"raw_kind_id": 157, "raw_kind": "source_file", "start_byte": 0, "end_byte": 43},
+      "expected_fact_count": 20,
+      "expected_fact_digest": "b3:099b00be37dd83f93659b4ab520f775e85323c2ded346987a96bfce170176dac",
+      "expected_recovery": false,
+      "required_raw_kinds": ["fn", "identifier", "(", ")", "->", "{", "+", "integer_literal", "}"]
+    },
+    {
+      "case_id": "rust-partially-invalid",
+      "language": "rust",
+      "source": "fn broken( { let value = ;\n",
+      "expected_fact_digest": "b3:6b74b9a2865254d56041c306db0c57f321aeef805545434430aef49a369f3956",
+      "expected_recovery": true
+    },
+    {
+      "case_id": "python-malformed-nul",
+      "language": "python",
+      "source": "value = \u0000\n",
+      "expected_fact_digest": "b3:9d7e120d7ebf10aae6506811da7b458fad449559e40fe4aa4526c7e1549b1652",
+      "expected_recovery": true
+    },
+    {
+      "case_id": "rust-malformed-nul",
+      "language": "rust",
+      "source": "fn \u0000() {}\n",
+      "expected_fact_digest": "b3:d31303de4bef8f0296982a994021ebc44c14b8dcea9d05d1e7104b48926845f5",
+      "expected_recovery": true
+    }
+  ],
+  "edits": [
+    {
+      "case_id": "python-expression-shape",
+      "language": "python",
+      "old_source": "def answer(value):\n    return value + 1\n",
+      "new_source": "def answer(value):\n    return call(value)\n",
+      "old_fragment": "value + 1",
+      "new_fragment": "call(value)"
+    },
+    {
+      "case_id": "rust-expression-shape",
+      "language": "rust",
+      "old_source": "fn answer(value: i32) -> i32 { value + 1 }\n",
+      "new_source": "fn answer(value: i32) -> i32 { call(value) }\n",
+      "old_fragment": "value + 1",
+      "new_fragment": "call(value)"
+    }
+  ]
+}
