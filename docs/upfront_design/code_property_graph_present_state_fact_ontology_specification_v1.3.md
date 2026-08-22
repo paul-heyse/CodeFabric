@@ -3009,7 +3009,7 @@ CompletenessState:
   COMPLETE | PARTIAL | INDETERMINATE | UNAVAILABLE | NOT_APPLICABLE
 
 FreshnessState:
-  CURRENT | POTENTIALLY_STALE | UNAVAILABLE
+  AWAITING_CURRENT | CURRENT | POTENTIALLY_STALE | UNAVAILABLE
 
 LimitState:
   NOT_APPLIED | EXPLICIT_LIMIT_REACHED | HARD_LIMIT_REJECTED
@@ -4050,7 +4050,31 @@ Registry invariants:
 - every concrete ontology kind maps to at least one capability and storage table;
 - every query-visible kind has at least one canonical phrase or is intentionally ID-only;
 - deprecated kinds remain readable and map to migration rules; they are not emitted by new snapshots unless compatibility encoding requests them;
-- provider-native raw kinds remain in separate provider registries and do not consume canonical ontology codes.
+- provider-native raw kinds remain in separate provider registries and do not consume canonical ontology codes;
+- Tree-sitter raw-kind catalogs are generated from each pinned grammar package's
+  `NODE_TYPES` constant and `Language` ABI/inventory, never maintained as copied YAML;
+- Ruff raw-kind catalogs are generated through exhaustive matches over the pinned AST,
+  token, trivia, and semantic enum surfaces, so adding an upstream variant fails the
+  generator build until it is classified;
+- authored provider normalization records map generated raw-provider keys to canonical
+  ontology kinds, projection rules, explicit ignores, or version-bound unsupported
+  outcomes; an unmapped generated key is a release failure.
+
+Each generated provider raw-kind catalog records at least:
+
+```text
+provider_id and exact provider/package version
+language and grammar ABI where applicable
+raw_kind_key and upstream spelling
+named/visible/supertype flags and field-role inventory where applicable
+provider source fingerprint
+generation-unit identity and input semantic/source digests
+```
+
+Generated raw catalogs live under `contracts/generated/provider-raw-kinds/`; authored
+normalization mappings live under `contracts/registry/provider-normalization/`. The
+catalog compiler owns the join and generates exhaustive Rust lookups. Fixtures exercise
+the generated inventory but are never an authority for its contents.
 
 The ontology bundle contains canonical JSON forms of all registries and generated Rust/Python/Protobuf/Arrow lookup artifacts.
 ## AC-G-71 — Property schema, value types, cardinality, null, and storage mapping

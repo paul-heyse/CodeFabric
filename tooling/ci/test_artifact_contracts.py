@@ -14,16 +14,18 @@ from tooling.ci.artifact_contracts import (
     ROOT,
     ArtifactContractError,
     _accepted_input_evolution_paths,
+    active_plan_path,
     check_tracked_target_zero_state,
     commit_trust,
     derive_plan_status,
     load_state,
+    parse_frontmatter,
     validate_artifacts,
     validate_state,
 )
 from tooling.ci.proof_coverage import load_just_recipes
 
-STATE = ROOT / "docs/plans/state/codefabric-waves-0-3-foundation_v5_state.json"
+STATE = ROOT / str(parse_frontmatter(DEFAULT_PLAN)["state_path"])
 
 
 def _git(root: Path, *args: str) -> str:
@@ -90,19 +92,23 @@ def test_packet_trust_requires_ancestor_commit(tmp_path: Path) -> None:
 
 
 def test_wp00_behavioral_acceptance() -> None:
+    assert active_plan_path(ROOT) == DEFAULT_PLAN
+    assert DEFAULT_PLAN.name == (
+        "codefabric_waves_4-7_core_facts_implementation_plan_v2_2026-08-21.md"
+    )
     state = validate_state(ROOT, STATE)
     assert state["schema_version"] == 2
     assert (
         state["current_packet"] is None or state["current_packet"] in state["packets"]
     )
-    assert state["packets"]["WP00"]["status"] in {"in_progress", "complete"}
+    assert state["packets"]["WP27"]["status"] == "ready"
     assert commit_trust(ROOT, state["baseline_commit"])["ancestor"]
 
 
 def test_wp00_structural_acceptance() -> None:
     report = validate_artifacts(ROOT, DEFAULT_PLAN)
-    assert report["packet_count"] == 29
-    assert report["declared_input_count"] == 18
+    assert report["packet_count"] == 27
+    assert report["declared_input_count"] == 14
 
 
 def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
@@ -134,15 +140,15 @@ def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
 def test_wp00_negative_zero_state(tmp_path: Path) -> None:
     state = load_state(STATE)
     derived = deepcopy(state)
-    derived["packets"]["WP00"]["checks"] = ["invented"]
+    derived["packets"]["WP27"]["checks"] = ["invented"]
     derived_path = tmp_path / "derived.json"
     _write_state(derived_path, derived)
     with pytest.raises(ArtifactContractError, match="expected keys|derived"):
         validate_state(ROOT, derived_path)
 
     unproved = deepcopy(state)
-    unproved["packets"]["WP00"]["status"] = "complete"
-    unproved["packets"]["WP00"]["proving_commit"] = None
+    unproved["packets"]["WP27"]["status"] = "complete"
+    unproved["packets"]["WP27"]["proving_commit"] = None
     unproved_path = tmp_path / "unproved.json"
     _write_state(unproved_path, unproved)
     with pytest.raises(ArtifactContractError, match="requires a proving commit"):

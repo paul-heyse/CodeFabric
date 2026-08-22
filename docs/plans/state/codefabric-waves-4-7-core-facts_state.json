@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v2_2026-08-21.md",
+  "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+  "baseline_commit": "63c1e9625f6c852ab918467b03cf16ee69660ab7",
+  "status": "executing",
+  "current_packet": null,
+  "packets": {
+    "WP27": {"status": "ready", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP28": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP29": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP30": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP31": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP32": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP33": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP34": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP35": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP36": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP37": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP38": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP39": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP40": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP41": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP42": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP43": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP44": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP45": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP46": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP47": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP48": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP49": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP50": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP51": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP52": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP53": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "milestones": {
+    "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "decommission_batches": {
+    "DB07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB09": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "baseline_failures": [
+    {
+      "command": "just ci-fast",
+      "fingerprint": "artifact-contracts defaulted to the predecessor plan after accepted Waves 4-7 design edits",
+      "disposition": "resolved by the v2 active-plan adoption prerequisite"
+    }
+  ],
+  "discovered_obligations": [],
+  "plan_deviations": [
+    {
+      "kind": "explicit_user_approval",
+      "summary": "The user explicitly approved full execution of v2; the plan was marked approved before execution state initialization."
+    },
+    {
+      "kind": "adoption_baseline_drift",
+      "summary": "The v2 plan, integrated audit corrections, normative design corrections, and authority-derived indexes were uncommitted at the recorded predecessor baseline. They are adopted together before WP27; the immutable declared-input digests identify the accepted current design bytes."
+    },
+    {
+      "kind": "accepted_assurance_deferral",
+      "summary": "Ubuntu clean-checkout evidence remains user-deferred and is not a packet or milestone blocker."
+    }
+  ],
+  "next_action": "Complete the v2 active-plan adoption gate, commit its proving infrastructure, then mark WP27 in progress.",
+  "updated_at": "2026-08-22T04:04:39Z"
+}

@@ -271,7 +271,7 @@ This specification is grounded in the following attached references.
 
 | Reference | Version anchor | Role in this specification |
 |---|---:|---|
-| `tree_sitter_rust_python.md` | `tree-sitter 0.26.12`; `tree-sitter-python 0.25.0` | Incremental concrete syntax, raw node kinds, fields, ranges, parse recovery, queries, changed ranges, and source/CST reconciliation |
+| `tree_sitter_rust_python.md` | `tree-sitter 0.26.12`; `tree-sitter-python 0.25.0`; `tree-sitter-rust 0.24.2`; grammar ABI 15 | Incremental concrete syntax, raw node kinds, fields, ranges, parse recovery, queries, changed ranges, and source/CST reconciliation |
 | `ruff_python_crates_advanced_reference_2026-08-18.md` | Ruff `0.16.1`; component crates `0.0.7` | Python source coordinates, tokens, typed AST, comments/trivia, omitted lexical facts, local scopes/bindings/references/import semantics |
 | `pyrefly_rust_cpg_advanced_reference_1.2.0_2026-08-19.md` | Pyrefly `1.2.0` | Python project-aware types, computed/declared/expected types, call targets, members, imports, declarations/xrefs, subtype and MRO-aware semantics |
 | `rust_mir_cpg_continuous_reference_2026-08-18.md` | nightly `2026-08-18`; `rustc_public 1.100.0-nightly` | Rust semantic definitions, types, MIR bodies, CFG, places, rvalues, calls, instances, moves, borrows, drop, unwind, generated code, and compiler provenance |
@@ -675,6 +675,15 @@ The conversion layer SHALL:
 
 Every provider-native kind that may matter later SHALL remain representable through raw-kind registries and cold evidence payloads. Canonical observations additionally use normalized ontology kinds.
 
+Tree-sitter raw node and field catalogs are generated from the exact grammar crate's
+`NODE_TYPES` plus runtime `Language` introspection. The generated catalog records the
+package version, runtime ABI, node-types digest, complete named/anonymous node-kind
+inventory, complete field inventory, and grammar fingerprint. Only the mapping from
+provider-native kinds to application-owned normalized kinds is owner-authored. Ruff
+raw-kind mappings generate exhaustive enum matches so a pinned-provider upgrade cannot
+introduce an unmapped variant silently. Provider fixture discovery is validation, not
+raw-kind authority.
+
 ```text
 provider-native observation
     → normalized observation record
@@ -753,7 +762,7 @@ SourceSnapshot
 
 | Ontology fact | Provider | Generation rule | Additional processing |
 |---|---|---|---|
-| `SOURCE_FILE` | Source store | One node per current `.py`, `.pyi`, or supported notebook source unit | Normalize path; compute digest and line index |
+| `SOURCE_FILE` | Source store | One node per current `.py` or `.pyi`; notebook containers are unsupported in the 1.x core-source profile | Normalize path; compute digest and line index; inventory a notebook with explicit `UNSUPPORTED` capability evidence rather than parsing cells implicitly |
 | `SOURCE_SPAN` | All providers | Convert every range to canonical bytes | Validate boundaries against current source |
 | `TOKEN` | Ruff parser tokens | Emit every parser token with raw kind and span | Normalize token class; assign ordinal |
 | `IDENTIFIER_TOKEN` | Ruff tokens/AST | Token kind or identifier AST range | Link to identifier occurrence |
@@ -865,6 +874,22 @@ RUFF_AST_NODE --CORRESPONDS_TO--> TREE_SITTER_CST_NODE
 ```
 
 Unmatched nodes remain valid; no one-to-one relationship is assumed.
+
+### 16.5 Parse recovery representation
+
+One provider recovery condition has one normalized application observation. Its
+canonical projection produces all applicable surfaces together:
+
+```text
+PARSE_ERROR or MISSING_SYNTAX entity
+syntax_detail.error or syntax_detail.missing flag
+source_annotation diagnostic row
+```
+
+Overlapping Ruff and Tree-sitter parse errors reconcile to one canonical parse-error
+entity while retaining both provider evidence records. `MISSING_SYNTAX` originates
+only from a Tree-sitter missing node and is never inferred from Ruff absence. These
+surfaces are projections of one observation, not independently authored facts.
 
 ---
 
@@ -4231,12 +4256,25 @@ One sidecar process MAY host multiple read-only contexts if its negotiated memor
 ## AC-G-31 — rustc extractor protocol
 ### Decision
 
-The Rust extractor communicates over a dedicated inherited file descriptor or private Unix socket. It never writes extraction data to rustc stdout or stderr. The protocol is compilation-unit and owner-manifest based.
+The Rust extractor communicates over a dedicated inherited file descriptor or private Unix socket. It never writes extraction data to rustc stdout or stderr. The protocol is compilation-unit and owner-manifest based. The daemon is the long-lived transport server; the compiler wrapper is a short-lived client for one Cargo-selected compilation unit.
 
 The corresponding Protobuf package is `codefabric.rustc.v1` and the service
-name is `RustcExtractor`; aliases or wrapper-local package names are prohibited.
+name is `RustcExtractor`; aliases or wrapper-local package names are prohibited. The
+service name identifies the protocol domain, not the hosting process. Its bidirectional
+`Observe` method receives extractor events and returns daemon control/credit messages.
+The pre-production client-streaming `Extract` shape is replaced rather than retained as
+a second authority.
 
 ### Contract
+
+The daemon constructs the immutable `ProviderWorkspaceView`, then launches the pinned
+Cargo command with `RUSTC_WORKSPACE_WRAPPER` set to the CodeFabric extractor wrapper.
+Cargo supplies the real rustc executable as wrapper argument zero and preserves the
+complete compiler argument vector after it. `RUSTC_WRAPPER` remains available for the
+repository's ordinary build cache; provider analysis explicitly disables that outer
+wrapper and uses a sandbox-private target directory so a compiler-cache hit cannot skip
+the required extraction callback. Provider observation reuse is owned by CodeFabric's
+content-addressed provider cache, not by sccache.
 
 Cargo launches the compiler wrapper with:
 
@@ -4247,7 +4285,16 @@ CODEFABRIC_WORKSPACE_ID
 CODEFABRIC_ANALYSIS_CONTEXT_ID
 CODEFABRIC_SOURCE_GENERATION
 CODEFABRIC_CONTEXT_MANIFEST_DIGEST
+CODEFABRIC_PROVIDER_RESOURCE_PROFILE_ID
 ```
+
+The wrapper passes probe/version invocations through unchanged. For an analysis
+invocation it calls the real compiler through the pinned `rustc_public` callback,
+preserves the compiler's current directory, arguments, stdout, stderr, and exit status,
+and sends only owned DTOs to the daemon-hosted endpoint. The daemon sends
+`CompilationAccepted`, chunk acknowledgements/rejections, cancellation, and terminal
+protocol decisions on the reverse stream. The wrapper sends `CompilationBegin`, owner
+events, observation chunks, diagnostics, and `CompilationEnd` on the event stream.
 
 The event sequence is:
 
@@ -4292,6 +4339,9 @@ Acceptance rules:
 7. Cargo/rustc stdout and stderr semantics remain unchanged; extraction diagnostics go to the dedicated channel and daemon trace.
 8. Backpressure is provided by bounded socket buffers and explicit `ChunkAccepted`/`ChunkRejected` acknowledgements. The daemon grants at most four outstanding chunks and 16 MiB of unacknowledged payload per compilation. The wrapper SHALL not send beyond available credit; a blocked channel cooperatively yields, and exceeding the provider deadline terminates the compiler process group.
 9. Cargo/rustc current directory, manifest paths, module files, and registered configuration paths SHALL resolve inside the immutable `ProviderWorkspaceView`; `CARGO_HOME`, target/output directories, and temporary directories are sandbox-private, offline, and quota-bounded.
+10. The wrapper refuses extraction unless the daemon supplies an accepted resource
+    profile and the effective trust profile authorizes compiler execution. A transport
+    connection alone is never authorization.
 
 `compilation_unit_id` is canonical over workspace, Rust context, package, target, crate type, and compiler invocation profile. Session-local `CrateNum` and `DefId` never become persistent IDs.
 ## AC-G-32 — Common asynchronous provider execution interface
@@ -4318,7 +4368,7 @@ struct AcceptedProviderJob {
 }
 ```
 
-`ProviderJobSpec` includes workspace/context/source IDs, source snapshot lease, requested capabilities, owner/module/build-unit scope, priority class, resource estimate, deadline, supersession key, and required bundle/schema digests.
+`ProviderJobSpec` includes workspace/context/source IDs, source snapshot lease, requested capabilities, owner/module/build-unit scope, priority class, resource estimate, deadline, supersession key, required bundle/schema digests, and a required `resource_profile_id` resolved through the provider registry.
 
 Placement policy:
 
@@ -4329,6 +4379,29 @@ Placement policy:
 | Pyrefly | sandboxed sidecar process |
 | rustc/MIR | sandboxed compiler process group |
 | DataFusion derivation | DataFusion execution pools with daemon cancellation token |
+
+Each provider resource profile is a closed registry record containing:
+
+```text
+resource_profile_id
+provider_id and supported capability set
+maximum source bytes
+maximum parse/query work and wall time
+maximum visited nodes and traversal depth
+maximum emitted rows and bytes
+maximum diagnostics
+maximum parser workers
+maximum simultaneously retained incremental tree revisions
+cancellation check interval and hard-stop policy
+retry policy and bounded retry budget
+```
+
+The daemon resolves the profile before admission, validates the request estimate against
+it, and passes the exact profile ID to the provider. Tree-sitter parses use progress
+callbacks/timeouts and parser reset; queries use match limits and bounded captures;
+Ruff traversals check the shared cancellation token at the registered interval. Rayon
+pools have an explicit fixed width and are not the global pool. A limit outcome emits a
+typed terminal capability state and bounded diagnostic rather than partial unframed rows.
 
 Admission occurs before `RUNNING`. Each provider has global, workspace, and context permits. Submission returns an accepted handle before waiting for permits or freshness-dependent execution.
 
@@ -4501,6 +4574,14 @@ Build scripts and proc macros may execute only in the sandbox. External Git filt
 `TRUSTED_LOCAL` relaxes sandbox availability requirements but still removes credentials and network by default; enabling network requires a separate future profile.
 
 Sandbox profile digest and trust profile are pinned in provider runs and snapshots. A trust downgrade invalidates affected contexts.
+
+Activation is deliberately staged. The Wave-5 compiler extractor may execute only the
+committed golden Rust fixture, only under an explicit `TRUSTED_LOCAL` operator grant, and
+only with network and credential access removed and the Wave-5 resource profile pinned.
+Arbitrary registered repositories and `UNTRUSTED_SANDBOXED` compiler execution remain
+fail-closed until the Wave-10 sandbox packet proves the platform containment contract
+above. The Wave-5 exception is test-corpus scoped and cannot be selected by an ordinary
+workspace registration.
 ## AC-G-36 — Provider capability granularity and aggregation
 ### Decision
 
@@ -4531,6 +4612,7 @@ protocol_package: optional
 protocol_service: optional
 toolchain_or_bundle_digest_fields: ordered
 capability_codes: ordered unique
+resource_profile_id
 event_mapping_version
 introduced/deprecated/replacement versions
 ```

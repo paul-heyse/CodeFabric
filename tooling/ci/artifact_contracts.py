@@ -21,10 +21,7 @@ from typing import Any
 from tooling.ci.proof_coverage import load_just_recipes
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PLAN = (
-    ROOT
-    / "docs/plans/codefabric_waves_0-3_foundation_implementation_plan_v5_2026-08-20.md"
-)
+ACTIVE_PLAN_POINTER = Path("docs/plans/active-plan.json")
 
 PLAN_REQUIRED_KEYS = {
     "artifact",
@@ -135,6 +132,42 @@ JUST_RECIPE = re.compile(r"\bjust\s+([a-z][a-z0-9-]*)")
 
 class ArtifactContractError(ValueError):
     """An artifact or a derived trust assertion is invalid."""
+
+
+def active_plan_path(root: Path = ROOT) -> Path:
+    """Resolve the repository's one reviewable active-plan pointer."""
+    pointer_path = root / ACTIVE_PLAN_POINTER
+    try:
+        pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ArtifactContractError(
+            f"{ACTIVE_PLAN_POINTER.as_posix()}: invalid active-plan pointer"
+        ) from error
+    if not isinstance(pointer, dict) or set(pointer) != {
+        "schema_version",
+        "plan_path",
+    }:
+        raise ArtifactContractError(
+            f"{ACTIVE_PLAN_POINTER.as_posix()}: expected schema_version and plan_path"
+        )
+    if pointer["schema_version"] != 1 or not isinstance(pointer["plan_path"], str):
+        raise ArtifactContractError(
+            f"{ACTIVE_PLAN_POINTER.as_posix()}: unsupported active-plan pointer"
+        )
+    relative = Path(pointer["plan_path"])
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ArtifactContractError(
+            f"{ACTIVE_PLAN_POINTER.as_posix()}: plan_path must be repository-relative"
+        )
+    resolved = root / relative
+    if not resolved.is_file():
+        raise ArtifactContractError(
+            f"{ACTIVE_PLAN_POINTER.as_posix()}: active plan does not exist"
+        )
+    return resolved
+
+
+DEFAULT_PLAN = active_plan_path()
 
 
 @dataclass(frozen=True)

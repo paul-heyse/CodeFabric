@@ -314,6 +314,8 @@ The default supported gix release is exactly:
 
 ```toml
 gix = "=0.86.0"
+notify-debouncer-full = "=0.7.0"
+notify = "=8.2.0"
 ```
 
 `gix <= 0.85.0` is below the required security floor for Windows-capable deployments because of the published incremental-checkout symlink/reparse-point issue. Although CodeFabric does not perform checkout, the dependency floor SHALL still be enforced.
@@ -1002,6 +1004,8 @@ index fingerprint
 repository operation state
 watcher event watermark
 dirty-path set
+inclusion-policy fingerprint
+attributes fingerprint
 ```
 
 Tree diff and status are candidate accelerators; current bytes remain authoritative.
@@ -1567,6 +1571,30 @@ CANCELLED
 FAILED
 ```
 
+The registry migration from the pre-production coarse machine is append-only and
+explicit. Exact-name states retain their existing codes: `COLLECTING = 10`,
+`SNAPSHOTTING = 20`, `FAILED = 60`, and `SUPERSEDED = 70`. The coarse states
+`RUNNING = 30`, `PUBLISHING = 40`, and `COMPLETE = 50` remain decode-only deprecated
+values with no transition target and are never emitted by the new scheduler. New states
+append as follows:
+
+```text
+80 GIT_CANDIDATE_BUILDING       90 GIT_BASELINE_VERIFYING
+100 CLASSIFYING                 110 FAST_ANALYZING
+120 FAST_VALIDATING             130 FAST_PUBLISHED
+140 SEMANTIC_ANALYZING          150 DERIVING
+160 VALIDATING                  170 HOT_PUBLISHED
+180 DURABLE_FLUSHING            190 DURABLE_PUBLISHED
+200 CANCELLED
+```
+
+Before activation, migration inventories persisted rows. Terminal historical coarse
+`COMPLETE` rows may remain readable as historical evidence. Any persisted nonterminal
+`RUNNING` or `PUBLISHING` row is rejected with a migration diagnostic and a new
+generation starts from `COLLECTING`; no ambiguous mid-wave continuation is inferred.
+Generated transition code, writers, fixtures, and SQL constraints prove zero new
+emission of deprecated codes.
+
 A wave is immutable after `HOT_PUBLISHED`.
 
 A Git-accelerated wave cannot advance beyond `GIT_BASELINE_VERIFYING` if its relevant `GitStateVector` changed.
@@ -1848,6 +1876,8 @@ When the queue is full:
 
 - individual event details may be discarded;
 - the worktree enters `RECONCILE_REQUESTED`;
+- `RECONCILE_REQUESTED` is a coordinator-owned boolean/reason flag, not a
+  `WorkspaceLifecycle`, `EventStreamHealth`, or `UpdateWaveState` value;
 - the next reconcile uses gix status/index candidate reduction when healthy;
 - candidate uncertainty or gix failure broadens to Git-aware or generic full inventory.
 
@@ -2047,12 +2077,12 @@ ordinary owner/fact-family invalidation and publication
 
 gix improves discovery, topology, inclusion fidelity, and work avoidance. It never supersedes current-byte verification.
 
-## 37. New `codefabric-git-state` subsystem
+## 37. `git_state` module boundary
 
-The Rust workspace SHOULD add:
+The single stable CodeFabric package SHOULD add an application-owned module boundary:
 
 ```text
-codefabric-git-state
+git_state
   repository discovery and trust
   repository/common/worktree layout
   worktree identity
@@ -2072,7 +2102,7 @@ The rest of CodeFabric SHALL consume application-owned records, not gix types.
 ### 37.1 Responsibility boundary
 
 ```text
-codefabric-git-state
+git_state
   says:
     which Git worktree this is
     what Git considers tracked/untracked/ignored/conflicted
@@ -2125,13 +2155,13 @@ hook execution
 
 gix mutation APIs may exist in the dependency but SHALL not be exposed through CodeFabric lifecycle interfaces.
 
-A compile-time crate split MAY enforce this:
+A private module split enforces this inside the single package:
 
 ```text
-codefabric-git-read
+git_state::read
   contains gix dependency and read-only adapter
 
-codefabric-git-admin
+git_state::admin
   absent from default product
 ```
 
@@ -2670,14 +2700,20 @@ The exact mapping depends on gix's released status representation.
 
 This avoids hashing every unchanged tracked file on every reconcile.
 
-### 55.1 Periodic audit
+### 55.1 Periodic and post-bulk audit
 
-Because status may rely on filesystem stat optimizations and because CodeFabric's CPG currentness has stricter semantics, a periodic or post-bulk audit SHOULD compare:
+Because status may rely on filesystem stat optimizations and because CodeFabric's CPG
+currentness has stricter semantics, the coordinator SHALL run this audit after every
+bulk transition and after a configurable idle/quiescence interval. It compares:
 
 - source inventory count;
 - selected file digests;
 - Git-state vector;
 - optional full Merkle root.
+
+Any divergence triggers an authoritative inventory rescan, marks Git acceleration
+`GIT_DEGRADED`, and prevents strict-current completion until generic current-byte
+inventory and the Git-state vector reconverge. A passing audit restores `GIT_READY`.
 
 ---
 
@@ -2864,6 +2900,9 @@ A bulk wave is eligible for full semantic/durable publication when:
 - source reads were generation-consistent;
 - all required candidate paths were reconciled.
 
+The tuple additionally includes the inclusion-policy and attributes fingerprints from
+the captured `GitStateVector`; either changing invalidates the candidate baseline.
+
 The fast syntax lane MAY publish earlier with pending semantic capability metadata.
 
 ---
@@ -3038,7 +3077,7 @@ Tokio coordinator
 blocking Git adapter job
     ↓
 gix status/tree/index/ODB work
-    ↓ detached GitStateDelta DTO
+    ↓ detached GitCandidateDelta DTO
 Tokio coordinator
 ```
 
@@ -3209,7 +3248,7 @@ If a future virtual-tree mode materializes worktree-equivalent bytes from Git ob
 
 The daemon remains read-only and therefore should not invoke checkout. Nonetheless:
 
-- pin `gix >= 0.86.0`;
+- pin `gix =0.86.0` exactly (the security floor is also the accepted release pin);
 - test symlink and Windows reparse-point behavior;
 - never follow source symlinks outside authorized roots;
 - do not expose arbitrary checkout destinations;
@@ -3524,9 +3563,9 @@ Cargo metadata / target mapping
 A rustc extraction run SHALL emit:
 
 ```text
-BEGIN invocation
-OWNER_COMPLETE owner...
-END invocation with source/build digest and owner manifest
+CompilationBegin
+OwnerBegin / owner observation chunks / OwnerEnd ...
+CompilationEnd with source/build digest and owner manifest
 ```
 
 No owner facts are publishable without a valid manifest policy.
@@ -5292,62 +5331,65 @@ A worktree is `READY` only after:
 
 A common-repository service is ready when its topology registry and shared immutable resources are initialized; this does not imply every linked worktree is ready.
 
-# Part XVI — Rust Workspace Architecture
+# Part XVI — Rust Package Architecture
 
-## 155. Recommended crates
+## 155. Recommended private module boundaries
+
+These are application-owned module responsibilities inside CodeFabric's one stable
+Cargo package. They do not imply packages, workspace members, or public crate boundaries.
 
 ```text
-codefabric-protocol
+protocol
   daemon RPC, MCP-facing request/response DTOs, freshness contract
 
-codefabric-watch
+watch
   notify-debouncer wrapper, source/Git metadata event facade, watcher health
 
-codefabric-git-state
+git_state
   read-only gix adapter, repository/worktree discovery, paths, inclusion,
   HEAD/index/status/tree diff, operation state, submodules, DTOs
 
-codefabric-git-worker
+git_worker
   bounded blocking gix execution, interruption, object/diff caches
 
-codefabric-git-testkit
+git_testkit
   adversarial repositories, linked worktrees, conflict stages, Git CLI parity
 
-codefabric-source
+source
   inventory, source images, BLAKE3 hashing, path/symlink policy, Merkle digest
 
-codefabric-coordinator
+coordinator
   common-repository registry, worktree actors, dirty registry, waves, lifecycle state
 
-codefabric-invalidation
+invalidation
   update classification, owner discovery, dependency propagation
 
-codefabric-python-update
+python_update
   Tree-sitter/Ruff/Pyrefly orchestration
 
-codefabric-rust-update
+rust_update
   Cargo/rustc/MIR orchestration and compiler manifest handling
 
-codefabric-derived-update
+derived_update
   owner-local and interprocedural incremental analyses
 
-codefabric-hot-snapshot
+hot_snapshot
   immutable overlay, tombstones, snapshot providers, pointer swap
 
-codefabric-durable-publisher
+durable_publisher
   Delta owner replacement, publication manifest, idempotent recovery
 
-codefabric-query
+query
   snapshot-pinned DataFusion query service
 
-codefabric-daemon
+daemon
   Tokio runtime, IPC server, repository/worktree registry, health, shutdown
 
-codefabric-fastmcp
+fastmcp_boundary
   Python coordination layer; one STDIO process per agent
 ```
 
-No public crate outside `codefabric-git-state` SHOULD expose gix types.
+No public module outside `git_state` SHOULD expose gix types.
 
 ## 156. Core interfaces
 
@@ -6160,7 +6202,7 @@ diagnostics:
     source_range:
       start_line: 97
       end_line: 97
-  - producer: codefabric-git-state
+  - producer: git_state
     code: GIT_CONFLICTED
     message: path has non-zero index conflict stages
 
@@ -6228,19 +6270,24 @@ Implementation notes:
 - the application policy forbids command, credential, network, checkout, ref-write, and index-write behavior even if a transitive crate exposes the underlying capability;
 - the broad default gix bundle SHOULD be avoided for the lifecycle daemon.
 
-The dependency shall be isolated inside `codefabric-git-state`.
+The dependency shall be isolated inside the application-owned `git_state` module.
 
 # Appendix F — Core Git-State DTOs
 
 ```rust
 pub struct GitRepoPath {
-    pub raw: Vec<u8>,
+    pub raw: std::sync::Arc<[u8]>,
     pub display: String,
+    pub display_is_lossy: bool,
 }
 
 pub struct PlatformPath {
     pub native: std::ffi::OsString,
+    pub workspace_relative_bytes: std::sync::Arc<[u8]>,
+    pub comparison_key: std::sync::Arc<[u8]>,
+    pub encoding_code: PathEncodingCode,
     pub display: String,
+    pub display_is_lossy: bool,
 }
 
 pub struct GitObjectId {

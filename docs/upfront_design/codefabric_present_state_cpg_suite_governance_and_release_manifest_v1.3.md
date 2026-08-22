@@ -375,10 +375,14 @@ contracts/
     capability-registry.yaml
     error-registry.yaml
     provider-registry.yaml
+    provider-resource-profile-registry.yaml
+    provider-normalization/
     derivation-registry.yaml
     state-machine-registry.yaml
     phrase-registry.yaml
     model-pack.schema.json
+  generated/
+    provider-raw-kinds/
   identity/
     cbef-v1.yaml
     type-algebra-v1.yaml
@@ -675,7 +679,7 @@ adapter: python, fastmcp, pydantic, pydantic-settings, grpcio, protobuf, jsonsch
 protobuf: grpcio-tools, libprotoc, prost, tonic, toolchain-identity digest
 rustc_extractor: toolchain, release, commit hash, identity digest
 pyrefly: version, commit, locked source, identity digest
-recorded_provider_pins: tree-sitter, tree-sitter-python, Ruff components, petgraph
+recorded_provider_pins: tree-sitter, tree-sitter-python, tree-sitter-rust, Ruff components, rayon, petgraph
 ```
 
 `delta_rs_git_rev` is required because the pinned `deltalake` dependency is an untagged pre-release revision; a declared crate version alone does not identify it. Changing any of these values changes the toolchain bundle digest and therefore the canonical build/deployment bundle digest.
@@ -898,6 +902,28 @@ expected/
   diagnostics/
   rebuild_comparison/
 ```
+
+The corpus manifest is a closed typed document with:
+
+```text
+corpus_id and corpus_version
+corpus_status: CANDIDATE | RELEASED
+coverage_profiles[]
+accepted_profile_digests[]
+source/archive/context/bundle identities
+```
+
+Each coverage profile names its exact fixture members, expected-output members, owned
+requirements, and canonical digest. The Wave-5 `gate-b-v1` profile covers the committed
+parser/extractor fixtures needed for Gate B and MAY be accepted while the overall corpus
+remains `CANDIDATE`. Acceptance makes that profile's exact inputs and expected bytes
+immutable. Later waves append new profiles and members; they do not rewrite an accepted
+profile. A correction to accepted bytes requires a new profile ID/version and an explicit
+compatibility record.
+
+The corpus becomes `RELEASED` only when every AC-G-78 coverage group and expected-output
+plane is populated and verified. A candidate corpus or an accepted partial profile SHALL
+not be described as the released complete `codefabric-golden-v1` corpus.
 
 #### 78.1 Required Python coverage
 
@@ -2121,10 +2147,13 @@ contracts/registry/summary-registry.yaml
 contracts/registry/capability-registry.yaml
 contracts/registry/error-registry.yaml
 contracts/registry/provider-registry.yaml
+contracts/registry/provider-resource-profile-registry.yaml
+contracts/registry/provider-normalization/*.yaml
 contracts/registry/derivation-registry.yaml
 contracts/registry/state-machine-registry.yaml
 contracts/registry/phrase-registry.yaml
 contracts/registry/model-pack.schema.json
+contracts/generated/provider-raw-kinds/*.json
 contracts/identity/cbef-v1.yaml
 contracts/identity/type-algebra-v1.yaml
 contracts/identity/path-canonicalization-v1.yaml

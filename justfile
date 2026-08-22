@@ -315,7 +315,7 @@ adapter-contracts-bench:
 [doc("Validate active plan, review, and schema-2 execution-state contracts")]
 [group('gate')]
 artifacts-check: contracts-tooling-lint
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_artifact_contracts.py tooling/ci/test_wave0_reconciliation.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_artifact_contracts.py
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py artifacts-check
 
 [doc("Derive active-plan input freshness and proving-commit trust")]

@@ -280,6 +280,9 @@ This specification is grounded in the attached references and uses their termino
 | `deltalake` / delta-rs | `1.0.0` at git rev `9f9223197469897ef05ae4369eb4fd1390174e65` | Transactional Delta tables, table schemas, DataFusion providers, writes, DML, constraints, optimize, vacuum |
 | Parquet Rust | `58.4.0` | Physical data-file format beneath Delta Lake |
 | `object_store` | `0.13.2` | Local and object-store I/O used by DataFusion and delta-rs |
+| Tree-sitter provider set | `tree-sitter 0.26.12`, `tree-sitter-python 0.25.0`, `tree-sitter-rust 0.24.2` (grammar ABI 15) | Incremental Python/Rust CST and generated provider raw-kind inventories |
+| Ruff analysis set | `ruff_python_parser`, `ruff_python_ast`, `ruff_python_trivia`, `ruff_python_index`, `ruff_source_file`, `ruff_text_size` all `0.0.7` | Python tokens, typed AST, trivia/indexes, and coordinates |
+| Rayon | `1.12.0` | Dedicated bounded in-process provider pools; never an implicit global-pool contract |
 | Rust toolchain | `1.94.1` for the pinned delta-rs baseline | Workspace compatibility floor |
 | Delta kernel | `buoyant_kernel` and `buoyant_kernel_engine` on the released `0.25.x` line | Selected **transitively** by the pinned delta-rs revision; not independently pinned by CodeFabric |
 
@@ -331,6 +334,16 @@ tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 blake3 = "1"
+rayon = "=1.12.0"
+tree-sitter = "=0.26.12"
+tree-sitter-python = "=0.25.0"
+tree-sitter-rust = "=0.24.2"
+ruff_python_parser = "=0.0.7"
+ruff_python_ast = "=0.0.7"
+ruff_python_trivia = "=0.0.7"
+ruff_python_index = "=0.0.7"
+ruff_source_file = "=0.0.7"
+ruff_text_size = "=0.0.7"
 ```
 
 Utility crates such as `blake3`, `serde`, `tokio`, and `futures` MAY be used inside the Rust implementation. The storage, batch, query, and relational-computation engines SHALL remain Arrow, DataFusion, and Delta Lake.
@@ -366,8 +379,15 @@ repository-state = [
   "dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix", "dep:thiserror",
   "dep:url",
 ]
+fact-generation = [
+  "canonical-json", "dep:arrow", "dep:arrow-array", "dep:arrow-schema",
+  "dep:rayon", "dep:ruff_python_ast", "dep:ruff_python_index",
+  "dep:ruff_python_parser", "dep:ruff_python_trivia", "dep:ruff_source_file",
+  "dep:ruff_text_size", "dep:thiserror", "dep:tree-sitter",
+  "dep:tree-sitter-python", "dep:tree-sitter-rust",
+]
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
-daemon = ["contracts-tooling", "data-fabric", "repository-state", "rpc", "dep:toml", "dep:tracing"]
+daemon = ["contracts-tooling", "data-fabric", "fact-generation", "repository-state", "rpc", "dep:toml", "dep:tracing"]
 local-workstation = ["daemon", "compatibility-probes"]
 proto-tooling = ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"]
 s3-storage = ["data-fabric", "deltalake/s3"]
@@ -1431,6 +1451,8 @@ cold_payload optional
 
 **Grain:** one lexical token.
 
+**Primary key:** `token_id`.
+
 | Column | Type | Null |
 |---|---|---:|
 | `token_id` | `id16` | no |
@@ -1452,6 +1474,8 @@ Token text SHALL normally be recovered from `source_file` to avoid duplication.
 
 **Grain:** one comment, documentation item, directive, pragma, parse error, or missing-syntax record.
 
+**Primary key:** `annotation_id`.
+
 | Column | Type | Null |
 |---|---|---:|
 | `annotation_id` | `id16` | no |
@@ -1471,6 +1495,13 @@ Token text SHALL normally be recovered from `source_file` to avoid duplication.
 ## 20. `syntax_detail`
 
 **Grain:** one syntax entity extension keyed by `entity_id`.
+
+Tree-sitter error and missing nodes use one canonical entity as the occurrence anchor.
+That entity's `syntax_detail` row carries the provider raw/normalized kind and
+error/missing flags; `source_annotation` carries the bounded diagnostic/provenance
+projection and points back through `target_entity_id`. Overlapping provider error nodes
+remain distinct evidence occurrences. This is one modeled observation projected into
+coherent tables, not duplicate independent facts.
 
 | Column | Type | Null |
 |---|---|---:|

@@ -551,7 +551,7 @@ Prove the complete architectural path with deliberately narrow functionality bef
 
 2. **Thin rustc extractor slice**
    - real pinned compiler invocation;
-   - `BEGIN`/`OWNER_COMPLETE`/`END` manifest;
+   - `CompilationBegin`/`OwnerBegin`/`OwnerEnd`/`CompilationEnd` manifest;
    - one body, basic blocks, and a minimal call/CFG fact set.
 
 3. **Minimal canonical reconciliation**
@@ -1516,6 +1516,8 @@ Security responsibilities progress with the architecture:
 
 ```text
 Wave 2   roots, paths, file opens, configuration/state permissions
+Wave 5   committed golden Rust fixture only under explicit TRUSTED_LOCAL grant;
+         network and credentials removed; arbitrary repositories fail closed
 Wave 7   Git trust, path semantics, symlinks, no mutation/external commands
 Waves 9–11 provider sandboxing and untrusted compiler/type-checker inputs
 Wave 14  model-pack trust and external semantic evidence
@@ -1555,14 +1557,15 @@ The next planning pass for any wave should produce a separate document with this
 
 A detailed plan SHALL not introduce a new high-level design decision. A discovered ambiguity is returned to the owning 1.3 specification as a design issue rather than resolved ad hoc inside implementation code.
 
-An integrated program plan MAY cover Waves 0-3 because they form the initial
-contract/build/source/storage foundation, but execution remains wave-segmented:
-only the current wave and its accepted predecessor interfaces are loaded as
-active context, each milestone restamps design and plan digests, and parallel
-packets have disjoint write sets. Shared generator, bootstrap, CI, or generated
-output files require an explicit serialized integration edge. This exception
-does not relax the normal four-to-eight-packet sizing target for the
-executable slice of any one wave.
+An integrated program plan MAY cover consecutive waves when explicitly authorized by
+the design owner/user and when one cross-wave graph materially improves dependency and
+cutover safety. Execution remains wave-segmented: only the current wave and its accepted
+predecessor interfaces are loaded as active context, each milestone restamps design and
+plan digests, and parallel packets have disjoint write sets. Shared generator,
+bootstrap, CI, catalog, or generated-output files require an explicit serialized
+integration edge. The integrated form does not relax the normal four-to-eight-packet
+sizing target for the executable slice of any one wave and does not permit a later wave
+to certify an incomplete predecessor gate.
 
 ---
 
