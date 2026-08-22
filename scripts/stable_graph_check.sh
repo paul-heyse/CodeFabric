@@ -54,6 +54,16 @@ require_one_version thiserror 2.0.20
 require_one_version toml 1.1.4+spec-1.1.0
 require_one_version unicode-casefold 0.2.0
 require_one_version unicode-normalization 0.1.25
+require_one_version rayon 1.12.0
+require_one_version tree-sitter 0.26.12
+require_one_version tree-sitter-python 0.25.0
+require_one_version tree-sitter-rust 0.24.2
+require_one_version ruff_python_ast 0.0.7
+require_one_version ruff_python_index 0.0.7
+require_one_version ruff_python_parser 0.0.7
+require_one_version ruff_python_trivia 0.0.7
+require_one_version ruff_source_file 0.0.7
+require_one_version ruff_text_size 0.0.7
 
 delta_sources="$(printf '%s' "$metadata" | jq -r \
   '.packages[] | select(.name | test("^deltalake($|-)")) | .source' | sort -u)"
@@ -143,12 +153,25 @@ printf '%s' "$root_shape" | jq -e '
       "dep:arc-swap",
       "contracts-tooling",
       "data-fabric",
+      "fact-generation",
       "repository-state",
       "rpc",
       "dep:toml",
       "dep:tracing"
     ],
     "default": ["local-workstation"],
+    "fact-generation": [
+      "dep:rayon",
+      "dep:ruff_python_ast",
+      "dep:ruff_python_index",
+      "dep:ruff_python_parser",
+      "dep:ruff_python_trivia",
+      "dep:ruff_source_file",
+      "dep:ruff_text_size",
+      "dep:tree-sitter",
+      "dep:tree-sitter-python",
+      "dep:tree-sitter-rust"
+    ],
     "local-workstation": ["daemon", "compatibility-probes"],
     "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
     "repository-state": ["dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix", "dep:thiserror", "dep:url"],
@@ -214,7 +237,7 @@ for required in aws azure gcp http cloud quick-xml; do
 done
 
 default_tree="$(cargo tree --locked --edges normal --prefix none)"
-for required in datafusion deltalake gix toml tonic serde_json_canonicalizer; do
+for required in datafusion deltalake gix toml tonic serde_json_canonicalizer rayon tree-sitter tree-sitter-python tree-sitter-rust ruff_python_parser; do
   printf '%s\n' "$default_tree" | rg -q "^${required} " || \
     fail "default local-workstation graph omits required package $required"
 done
@@ -233,7 +256,7 @@ printf '%s\n' "$s3_tree" | rg -q '^(aws-config|aws-sdk-s3) ' || \
 
 assert_graph_omits() {
   local label="$1" tree="$2" forbidden
-  forbidden='^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |gix |rusqlite |tonic |tonic-prost )'
+  forbidden='^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |gix |rusqlite |tonic |tonic-prost |rayon |tree-sitter($|-)|ruff_python_|ruff_source_file |ruff_text_size )'
   if printf '%s\n' "$tree" | rg -q "$forbidden"; then
     fail "$label graph contains an unrelated heavyweight production family"
   fi
@@ -243,10 +266,19 @@ featureless_tree="$(cargo tree --locked --edges normal --no-default-features --p
 canonical_tree="$(cargo tree --locked --edges normal --no-default-features --features canonical-json --prefix none)"
 contracts_tree="$(cargo tree --locked --edges normal --no-default-features --features contracts-tooling --prefix none)"
 proto_tree="$(cargo tree --locked --edges normal --no-default-features --features proto-tooling --prefix none)"
+fact_generation_tree="$(cargo tree --locked --edges normal --no-default-features --features fact-generation --prefix none)"
 assert_graph_omits featureless "$featureless_tree"
 assert_graph_omits canonical-json "$canonical_tree"
 assert_graph_omits contracts-tooling "$contracts_tree"
 assert_graph_omits proto-tooling "$proto_tree"
+for required in rayon tree-sitter tree-sitter-python tree-sitter-rust ruff_python_ast ruff_python_index ruff_python_parser ruff_python_trivia ruff_source_file ruff_text_size; do
+  printf '%s\n' "$fact_generation_tree" | rg -q "^${required} " || \
+    fail "fact-generation graph omits required package $required"
+done
+if printf '%s\n' "$fact_generation_tree" | rg -q \
+  '^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |gix |rusqlite |tonic |tonic-prost |ruff_python_(formatter|codegen|semantic) )'; then
+  fail 'fact-generation graph contains an unrelated production family or forbidden Ruff layer'
+fi
 printf '%s\n' "$canonical_tree" | rg -q '^serde_json_canonicalizer ' || \
   fail 'canonical-json does not activate the approved JCS serializer'
 printf '%s\n' "$contracts_tree" | rg -q '^serde_yaml_ng ' || \

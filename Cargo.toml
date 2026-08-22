@@ -59,6 +59,18 @@ data-fabric = [
     "dep:tokio",
     "dep:url",
 ]
+fact-generation = [
+    "dep:rayon",
+    "dep:ruff_python_ast",
+    "dep:ruff_python_index",
+    "dep:ruff_python_parser",
+    "dep:ruff_python_trivia",
+    "dep:ruff_source_file",
+    "dep:ruff_text_size",
+    "dep:tree-sitter",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-rust",
+]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = [
     "dep:blake3",
@@ -73,6 +85,7 @@ daemon = [
     "dep:arc-swap",
     "contracts-tooling",
     "data-fabric",
+    "fact-generation",
     "repository-state",
     "rpc",
     "dep:toml",
@@ -106,6 +119,13 @@ object_store = { version = "=0.13.2", optional = true }
 parquet = { version = "=58.4.0", features = ["arrow", "async", "object_store"], optional = true }
 prost = { version = "=0.14.4", optional = true }
 prost-types = { version = "=0.14.4", optional = true }
+rayon = { version = "=1.12.0", optional = true }
+ruff_python_ast = { version = "=0.0.7", optional = true }
+ruff_python_index = { version = "=0.0.7", optional = true }
+ruff_python_parser = { version = "=0.0.7", optional = true }
+ruff_python_trivia = { version = "=0.0.7", optional = true }
+ruff_source_file = { version = "=0.0.7", optional = true }
+ruff_text_size = { version = "=0.0.7", optional = true }
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "backup"], optional = true }
 rustix = { version = "=1.1.4", features = ["fs"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
@@ -123,6 +143,9 @@ tonic = { version = "=0.14.6", features = ["transport"], optional = true }
 tonic-prost = { version = "=0.14.6", optional = true }
 tonic-prost-build = { version = "=0.14.6", optional = true }
 tracing = { version = "0.1", optional = true }
+tree-sitter = { version = "=0.26.12", optional = true }
+tree-sitter-python = { version = "=0.25.0", optional = true }
+tree-sitter-rust = { version = "=0.24.2", optional = true }
 url = { version = "2", optional = true }
 
 [dev-dependencies]
@@ -132,10 +155,25 @@ tokio-stream = { version = "=0.1.18", features = ["net"] }
 tower = { version = "=0.5.3", features = ["util"] }
 
 [package.metadata.cargo-shear]
-# These runtime crates are referenced by committed generated code, which D-04 keeps
-# outside heuristic scanner authority. Owner: WP05; next review: WP10 contract RPC
-# generation replaces or adopts the Wave 0 probe.
-ignored = ["tonic-prost"]
+# `tonic-prost` is referenced by committed generated code, which D-04 keeps outside
+# heuristic scanner authority. The fact-generation crates are intentionally activated
+# and compile-probed by WP27 before production adapters land; WP29 removes the
+# Tree-sitter/Rayon entries and WP31 removes the Ruff entries as those adapters begin
+# using them. This bounded transition is required because WP27 explicitly lands no
+# production parser code.
+ignored = [
+    "rayon",
+    "ruff_python_ast",
+    "ruff_python_index",
+    "ruff_python_parser",
+    "ruff_python_trivia",
+    "ruff_source_file",
+    "ruff_text_size",
+    "tonic-prost",
+    "tree-sitter",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+]
 
 [[bin]]
 name = "codefabric-proto-gen"

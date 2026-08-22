@@ -193,8 +193,10 @@ pub struct PyreflyToolchainIdentity {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderPinSet {
+    pub rayon: String,
     pub tree_sitter: String,
     pub tree_sitter_python: String,
+    pub tree_sitter_rust: String,
     pub ruff: String,
     pub ruff_component_crates: String,
     pub petgraph: String,

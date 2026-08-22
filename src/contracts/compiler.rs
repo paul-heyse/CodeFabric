@@ -778,11 +778,13 @@ fn validate_toolchain_identity(
             &document.pyrefly.locked_source_blake3,
             "1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e",
         ),
+        (&document.recorded_provider_pins.rayon, "1.12.0"),
         (&document.recorded_provider_pins.tree_sitter, "0.26.12"),
         (
             &document.recorded_provider_pins.tree_sitter_python,
             "0.25.0",
         ),
+        (&document.recorded_provider_pins.tree_sitter_rust, "0.24.2"),
         (&document.recorded_provider_pins.ruff, "0.16.1"),
         (
             &document.recorded_provider_pins.ruff_component_crates,

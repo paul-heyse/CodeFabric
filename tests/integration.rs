@@ -9,6 +9,8 @@ mod integration {
     mod coordinator;
     #[cfg(feature = "daemon")]
     mod daemon;
+    #[cfg(feature = "fact-generation")]
+    mod fact_generation_build;
     #[cfg(feature = "daemon")]
     mod git_state;
     #[cfg(feature = "rpc")]
