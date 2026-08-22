@@ -353,12 +353,42 @@ pub struct ProviderResourceProfile {
     pub max_parallel_jobs_per_workspace: u16,
     pub max_parallel_jobs_per_context: u16,
     pub max_input_bytes: u64,
+    pub max_work_units: u64,
+    pub max_wall_millis: u64,
+    pub max_visited_nodes: u64,
+    pub max_traversal_depth: u16,
     pub max_output_records: u64,
     pub max_output_bytes: u64,
     pub max_diagnostics: u16,
+    pub max_parser_workers: u16,
+    pub max_retained_tree_revisions: u16,
+    pub max_cpu_weight: u32,
+    pub max_memory_mib: u32,
+    pub cancellation_check_interval: u32,
     pub cancellation_ack_millis: u16,
+    pub hard_stop_policy: ProviderHardStopPolicy,
+    pub retry_policy: ProviderRetryPolicy,
+    pub max_retries: u16,
     #[serde(flatten)]
     pub lifecycle: VersionLifecycle,
+}
+
+/// Closed action after cooperative provider cancellation exceeds its acknowledgement bound.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderHardStopPolicy {
+    CooperativeDiscard,
+    ProcessGroupTerminate,
+    CancellableTaskAbort,
+}
+
+/// Closed bounded-retry behavior for one provider class.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderRetryPolicy {
+    NoRetry,
+    TransientOnly,
+    IdempotentOnly,
 }
 
 /// Fallback applied to a provider-native kind not present in an authored mapping.
@@ -1043,6 +1073,17 @@ pub fn validate_enum_domains(records: &[EnumDomain]) -> Result<(), String> {
             ],
         ),
         (
+            "PROVIDER_CODE",
+            &[
+                "TREE_SITTER",
+                "RUFF_PYTHON",
+                "PYREFLY_PYTHON",
+                "RUSTC_MIR",
+                "CODEFABRIC_DERIVATION",
+                "SOURCE_SUBSTRATE",
+            ],
+        ),
+        (
             "TOKEN_KIND",
             &[
                 "IDENTIFIER",
@@ -1544,10 +1585,21 @@ pub fn validate_provider_resource_profiles(
             || record.max_parallel_jobs_per_context > record.max_parallel_jobs_per_workspace
             || record.max_parallel_jobs_per_workspace > record.max_parallel_jobs_global
             || record.max_input_bytes == 0
+            || record.max_work_units == 0
+            || record.max_wall_millis == 0
+            || record.max_visited_nodes == 0
+            || record.max_traversal_depth == 0
             || record.max_output_records == 0
             || record.max_output_bytes == 0
             || record.max_diagnostics == 0
+            || record.max_parser_workers == 0
+            || record.max_retained_tree_revisions == 0
+            || record.max_cpu_weight == 0
+            || record.max_memory_mib == 0
+            || record.cancellation_check_interval == 0
             || record.cancellation_ack_millis == 0
+            || matches!(record.retry_policy, ProviderRetryPolicy::NoRetry)
+                != (record.max_retries == 0)
         {
             return Err(format!(
                 "provider resource profile {} is not closed and bounded",

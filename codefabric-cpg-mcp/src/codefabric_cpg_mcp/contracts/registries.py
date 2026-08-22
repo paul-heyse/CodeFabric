@@ -227,6 +227,15 @@ class ResourceKind(IntEnum):
     UNKNOWN_RESOURCE = 100
 
 
+class ProviderCode(IntEnum):
+    TREE_SITTER = 10
+    RUFF_PYTHON = 20
+    PYREFLY_PYTHON = 30
+    RUSTC_MIR = 40
+    CODEFABRIC_DERIVATION = 50
+    SOURCE_SUBSTRATE = 60
+
+
 class TokenKind(IntEnum):
     IDENTIFIER = 10
     KEYWORD = 20
@@ -1184,6 +1193,38 @@ ENUM_TRIPLES = MappingProxyType(
                 100,
                 "UNKNOWN_RESOURCE",
                 "unknown-resource",
+            ),
+        ),
+        "PROVIDER_CODE": (
+            (
+                10,
+                "TREE_SITTER",
+                "tree-sitter",
+            ),
+            (
+                20,
+                "RUFF_PYTHON",
+                "ruff-python",
+            ),
+            (
+                30,
+                "PYREFLY_PYTHON",
+                "pyrefly-python",
+            ),
+            (
+                40,
+                "RUSTC_MIR",
+                "rustc-mir",
+            ),
+            (
+                50,
+                "CODEFABRIC_DERIVATION",
+                "codefabric-derivation",
+            ),
+            (
+                60,
+                "SOURCE_SUBSTRATE",
+                "source-substrate",
             ),
         ),
         "TOKEN_KIND": (

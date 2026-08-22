@@ -33,8 +33,8 @@ use super::jcs::{
 use super::models::{BrokenTraceEdgeFixture, RequirementRecord, TraceSelector, TraceabilityRecord};
 use super::registry_models::{
     AcceptedRegistry, Capability, EntityKind, EnumDomain, FactKind, FlagDomain, PhraseRecord,
-    PropertyKind, PublicError, RelationKind, StateMachine, UnknownKind,
-    validate_duplicate_authorities,
+    PropertyKind, Provider, ProviderHardStopPolicy, ProviderResourceProfile, ProviderRetryPolicy,
+    PublicError, RelationKind, StateMachine, UnknownKind, validate_duplicate_authorities,
 };
 #[cfg(feature = "fact-generation")]
 use super::registry_models::{ProviderNormalization, RawKindDisposition};
@@ -550,6 +550,18 @@ fn screaming_snake_from_pascal(value: &str) -> String {
         .to_owned()
 }
 
+fn rust_integer(value: u64) -> String {
+    let digits = value.to_string();
+    let mut rendered = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            rendered.push('_');
+        }
+        rendered.push(character);
+    }
+    rendered
+}
+
 fn emit_rust_enum(output: &mut String, name: &str, values: &[super::registry_models::EnumValue]) {
     let type_name = pascal_case(name);
     writeln!(output, "#[derive(Clone, Copy, Debug, Eq, PartialEq)]").unwrap();
@@ -938,6 +950,126 @@ fn render_rust_registry_bindings(
         }
         writeln!(output, "];\n").unwrap();
     }
+    let providers: Vec<Provider> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.provider-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("provider-registry")))?;
+    let provider_codes = enums
+        .iter()
+        .find(|domain| domain.domain == "PROVIDER_CODE")
+        .ok_or_else(|| ContractArtifactError::Metadata(PathBuf::from("PROVIDER_CODE enum domain")))?
+        .values
+        .iter()
+        .map(|value| (value.slug.as_str(), value.code))
+        .collect::<BTreeMap<_, _>>();
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderEntry {\n\
+             pub provider_code: i16, pub provider_id: &'static str,\n\
+             pub placement: &'static str, pub capability_codes: &'static [&'static str],\n\
+             pub resource_profile_id: &'static str, pub event_mapping_version: &'static str,\n\
+         }\n\n\
+         pub const PROVIDER_ENTRIES: &[ProviderEntry] = &[\n",
+    );
+    for provider in &providers {
+        let code = provider_codes
+            .get(provider.provider_id.as_str())
+            .copied()
+            .ok_or_else(|| {
+                ContractArtifactError::Metadata(PathBuf::from(format!(
+                    "provider code for {}",
+                    provider.provider_id
+                )))
+            })?;
+        let code = i16::try_from(code).map_err(|_| {
+            ContractArtifactError::Metadata(PathBuf::from("provider code exceeds i16"))
+        })?;
+        writeln!(
+            output,
+            "    ProviderEntry {{ provider_code: {code}, provider_id: {:?}, placement: {:?}, capability_codes: &{:?}, resource_profile_id: {:?}, event_mapping_version: {:?} }},",
+            provider.provider_id,
+            provider.placement,
+            provider.capability_codes,
+            provider.resource_profile_id,
+            provider.event_mapping_version,
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+
+    let profiles: Vec<ProviderResourceProfile> = serde_json::from_value(
+        registry_value(
+            repository_root,
+            catalog,
+            "codefabric.registry.provider-resource-profile-registry",
+        )?["records"]
+            .clone(),
+    )
+    .map_err(|_| {
+        ContractArtifactError::Metadata(PathBuf::from("provider-resource-profile-registry"))
+    })?;
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderResourceProfileEntry {\n\
+             pub profile_id: &'static str, pub provider_ids: &'static [&'static str],\n\
+             pub max_parallel_jobs_global: u16, pub max_parallel_jobs_per_workspace: u16,\n\
+             pub max_parallel_jobs_per_context: u16, pub max_input_bytes: u64,\n\
+             pub max_work_units: u64, pub max_wall_millis: u64,\n\
+             pub max_visited_nodes: u64, pub max_traversal_depth: u16,\n\
+             pub max_output_records: u64, pub max_output_bytes: u64,\n\
+             pub max_diagnostics: u16, pub max_parser_workers: u16,\n\
+             pub max_retained_tree_revisions: u16, pub max_cpu_weight: u32,\n\
+             pub max_memory_mib: u32, pub cancellation_check_interval: u32,\n\
+             pub cancellation_ack_millis: u16, pub hard_stop_policy: &'static str,\n\
+             pub retry_policy: &'static str, pub max_retries: u16,\n\
+         }\n\n\
+         pub const PROVIDER_RESOURCE_PROFILES: &[ProviderResourceProfileEntry] = &[\n",
+    );
+    for profile in &profiles {
+        let hard_stop_policy = match profile.hard_stop_policy {
+            ProviderHardStopPolicy::CooperativeDiscard => "COOPERATIVE_DISCARD",
+            ProviderHardStopPolicy::ProcessGroupTerminate => "PROCESS_GROUP_TERMINATE",
+            ProviderHardStopPolicy::CancellableTaskAbort => "CANCELLABLE_TASK_ABORT",
+        };
+        let retry_policy = match profile.retry_policy {
+            ProviderRetryPolicy::NoRetry => "NO_RETRY",
+            ProviderRetryPolicy::TransientOnly => "TRANSIENT_ONLY",
+            ProviderRetryPolicy::IdempotentOnly => "IDEMPOTENT_ONLY",
+        };
+        let provider_ids = profile.provider_ids.iter().collect::<Vec<_>>();
+        let max_input_bytes = rust_integer(profile.max_input_bytes);
+        let max_work_units = rust_integer(profile.max_work_units);
+        let max_wall_millis = rust_integer(profile.max_wall_millis);
+        let max_visited_nodes = rust_integer(profile.max_visited_nodes);
+        let max_output_records = rust_integer(profile.max_output_records);
+        let max_output_bytes = rust_integer(profile.max_output_bytes);
+        let cancellation_check_interval =
+            rust_integer(u64::from(profile.cancellation_check_interval));
+        writeln!(
+            output,
+            "    ProviderResourceProfileEntry {{ profile_id: {:?}, provider_ids: &{:?}, max_parallel_jobs_global: {}, max_parallel_jobs_per_workspace: {}, max_parallel_jobs_per_context: {}, max_input_bytes: {max_input_bytes}, max_work_units: {max_work_units}, max_wall_millis: {max_wall_millis}, max_visited_nodes: {max_visited_nodes}, max_traversal_depth: {}, max_output_records: {max_output_records}, max_output_bytes: {max_output_bytes}, max_diagnostics: {}, max_parser_workers: {}, max_retained_tree_revisions: {}, max_cpu_weight: {}, max_memory_mib: {}, cancellation_check_interval: {cancellation_check_interval}, cancellation_ack_millis: {}, hard_stop_policy: {hard_stop_policy:?}, retry_policy: {retry_policy:?}, max_retries: {} }},",
+            profile.profile_id,
+            provider_ids,
+            profile.max_parallel_jobs_global,
+            profile.max_parallel_jobs_per_workspace,
+            profile.max_parallel_jobs_per_context,
+            profile.max_traversal_depth,
+            profile.max_diagnostics,
+            profile.max_parser_workers,
+            profile.max_retained_tree_revisions,
+            profile.max_cpu_weight,
+            profile.max_memory_mib,
+            profile.cancellation_ack_millis,
+            profile.max_retries,
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
     output.push_str(
         "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct OntologyCodeEntry {\n\
@@ -2561,6 +2693,41 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
     }
 
+    #[cfg(feature = "fact-generation")]
+    fn assert_provider_profile_bindings() {
+        let profiles = crate::registries::PROVIDER_RESOURCE_PROFILES;
+        assert_eq!(profiles.len(), 3);
+        assert!(profiles.iter().all(|profile| {
+            profile.max_parallel_jobs_global > 0
+                && profile.max_parallel_jobs_per_workspace > 0
+                && profile.max_parallel_jobs_per_context > 0
+                && profile.max_input_bytes > 0
+                && profile.max_work_units > 0
+                && profile.max_wall_millis > 0
+                && profile.max_visited_nodes > 0
+                && profile.max_traversal_depth > 0
+                && profile.max_output_records > 0
+                && profile.max_output_bytes > 0
+                && profile.max_diagnostics > 0
+                && profile.max_parser_workers > 0
+                && profile.max_retained_tree_revisions > 0
+                && profile.max_cpu_weight > 0
+                && profile.max_memory_mib > 0
+                && profile.cancellation_check_interval > 0
+                && profile.cancellation_ack_millis > 0
+                && (profile.retry_policy == "NO_RETRY") == (profile.max_retries == 0)
+        }));
+        let mut provider_codes = BTreeSet::new();
+        for provider in crate::registries::PROVIDER_ENTRIES {
+            assert!(provider_codes.insert(provider.provider_code));
+            let profile = profiles
+                .iter()
+                .find(|profile| profile.profile_id == provider.resource_profile_id)
+                .unwrap();
+            assert!(profile.provider_ids.contains(&provider.provider_id));
+        }
+    }
+
     #[test]
     fn verifier_profiles_parse_strictly() {
         assert_eq!(
@@ -2655,6 +2822,8 @@ mod tests {
                         || record["relation_code"].as_u64().unwrap() >= 140
                 })
         );
+
+        assert_provider_profile_bindings();
     }
 
     #[cfg(feature = "fact-generation")]

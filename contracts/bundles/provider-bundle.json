@@ -25,7 +25,7 @@
     },
     {
       "artifact_id": "codefabric.registry.provider-resource-profile-registry",
-      "canonical_digest": "b3:51501a15afc25019385b02623786e14bcc596ca31a409cfb8b07b805dbaca3b7",
+      "canonical_digest": "b3:a8e3d25b71d2767b3ecfe80d40f0e3bcc4fa16a779c895a7861f8a3b8f737bcf",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -59,11 +59,11 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:28792cd47629583dd9aa3d18211ca7c8ac23fc207879c9671216854e746f6047",
+  "bundle_digest": "b3:7699aec04cef8eae1f4be1b12724fdb6ee5ae50d9319f26259dc8a0b1efd9237",
   "bundle_kind": "provider",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:89efe2bf0081726429cd35d8e3b96a8ba8f00210c2f82ac6801336e3a707e055",
+  "canonical_digest": "b3:fbb7d304cbc96d3b1c2a22b0908dcea5368f9fb8fbdaf04bd820f3258aa6e66b",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
