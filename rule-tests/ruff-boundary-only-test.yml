@@ -1,0 +1,21 @@
+id: ruff-boundary-only
+valid:
+  - |
+      fn emit(fact: RuffAstFact) -> RuffAstFact {
+          fact
+      }
+  - |
+      struct RuffSnapshot {
+          facts: Vec<RuffTokenFact>,
+      }
+invalid:
+  - |
+      use ruff_python_parser::Parsed;
+  - |
+      fn leak(node: ruff_python_ast::AnyNodeRef<'_>) -> usize {
+          node.range().len().to_usize()
+      }
+  - |
+      fn index(tokens: &ruff_python_ast::token::Tokens, source: &str) {
+          let _index = ruff_python_index::Indexer::from_tokens(tokens, source);
+      }

@@ -1,0 +1,22 @@
+id: ruff-boundary-only
+language: Rust
+severity: error
+message: Ruff parser, AST, token, trivia, index, and coordinate types belong only in the Ruff adapter boundary.
+note: Convert Ruff-owned values to application-owned records before returning them.
+files:
+  - src/**/*.rs
+ignores:
+  - src/ruff_adapter.rs
+  - src/contracts/artifacts.rs
+  - src/generated/provider_raw_kinds.rs
+rule:
+  any:
+    - all:
+        - kind: scoped_identifier
+        - regex: "^(ruff_python_ast|ruff_python_parser|ruff_python_trivia|ruff_python_index|ruff_source_file|ruff_text_size)::"
+    - all:
+        - kind: scoped_type_identifier
+        - regex: "^(ruff_python_ast|ruff_python_parser|ruff_python_trivia|ruff_python_index|ruff_source_file|ruff_text_size)::"
+    - all:
+        - kind: use_declaration
+        - regex: "(^|\\s)(ruff_python_ast|ruff_python_parser|ruff_python_trivia|ruff_python_index|ruff_source_file|ruff_text_size)::"

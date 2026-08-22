@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "released",
-  "canonical_digest": "b3:c290c4a2aa0204019baca9da430599937823ae034144e7e44a0f88251622e36c",
+  "canonical_digest": "b3:b8da7c8be60381ccde3e7299f9e27c36191caed80be10f6c06e0e245631053c3",
   "digest_projection": "json-jcs-v1",
   "catalog_schema_version": 2,
   "resource_budget_profiles": [
@@ -2828,6 +2828,13 @@
         {"input_kind":"artifact","artifact_id":"codefabric.registry.provider-resource-profile-registry","view":"compiled-semantic"}
       ],
       "outputs": [
+        {
+          "path": "contracts/generated/provider-raw-kinds/ruff-python-0-0-7.json",
+          "output_kind": "provider-raw-kind-catalog",
+          "resource_budget_profile": "provider-raw-catalog",
+          "consumers": ["contract-tooling", "governance", "rust-core"],
+          "primary_artifact_ids": ["codefabric.registry.provider-normalization-registry", "codefabric.registry.provider-registry", "codefabric.registry.provider-resource-profile-registry"]
+        },
         {
           "path": "contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json",
           "output_kind": "provider-raw-kind-catalog",

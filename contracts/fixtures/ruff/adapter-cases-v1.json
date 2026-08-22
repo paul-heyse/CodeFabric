@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "projection": "codefabric:ruff-python-frontend-projection:v1",
+  "cases": [
+    {
+      "case_id": "python-rich-lexical-and-typed-ast",
+      "revision": 1,
+      "source": "\"\"\"module docs\"\"\"\n# block one\n# block two\n@decorate(flag())\ndef render(x: int = default()) -> str:\n    \"\"\"function docs\"\"\"\n    total = (x + 1)\n    text = f\"value {total}\"  # noqa: F401\n    # fmt: off\n    legacy = total  # type: int\n    # fmt: on\n    if total:\n        return text\n    return \"\"  # type: ignore[return-value]\nresult[index()] = render(1) \\\n    + \"!\"\n",
+      "expected_token_count": 87,
+      "expected_ast_count": 60,
+      "expected_recovery": false,
+      "expected_projection_digest": "b3:15968ac62dfa5959160881bdde15aa766e3674e522d414c2307cfe7922766644"
+    },
+    {
+      "case_id": "python-overlapping-recovery",
+      "revision": 1,
+      "source": "def broken(:\n    pass\n",
+      "expected_token_count": 9,
+      "expected_ast_count": 5,
+      "expected_recovery": true,
+      "expected_projection_digest": "b3:130fcd4dd0db552055e5cd6ef06e194e2511080e3f5084256c677228e1a7c9e1"
+    },
+    {
+      "case_id": "python-pattern-and-type-parameters",
+      "revision": 1,
+      "source": "type Alias[T] = list[T]\ndef classify[T](value: T):\n    match value:\n        case {\"x\": x} if x:\n            return x\n",
+      "expected_token_count": 46,
+      "expected_ast_count": 30,
+      "expected_recovery": false,
+      "expected_projection_digest": "b3:775c01a74de20c41e5a417845a8ea4ecd561f511535c68e8e4d62c9e7e073df6"
+    }
+  ]
+}

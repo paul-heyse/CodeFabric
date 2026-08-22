@@ -1,5 +1,11 @@
 # Fixture oracle change record
 
+## 2026-08-22 Ruff frontend adapter corpus
+
+- Added exact framed projections for the pinned Ruff 0.0.7 token stream, source-order
+  typed AST, independent evaluation order, trivia indexes, directives, docstrings,
+  recovery overlap, and smallest-compatible Tree-sitter correspondence.
+
 ## 2026-08-22 Tree-sitter adapter corpus
 
 - Added exact framed fact-stream digests plus valid-root/count/anonymous-kind

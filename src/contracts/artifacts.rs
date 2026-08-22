@@ -14,6 +14,9 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 #[cfg(feature = "fact-generation")]
+use ruff_python_ast::{NodeKind, token::TokenKind};
+
+#[cfg(feature = "fact-generation")]
 use super::catalog::PROVIDER_RAW_DERIVATION_ID;
 use super::catalog::{
     ARTIFACT_INDEX_DERIVATION_ID, BundleKind, CatalogError, CompiledCatalog, ContractCatalog,
@@ -296,7 +299,269 @@ struct ProviderRawKind {
 }
 
 #[cfg(feature = "fact-generation")]
+fn provider_raw_input_identities(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<Vec<ProviderRawInputIdentity>, ContractArtifactError> {
+    let derivation = catalog
+        .derivation(PROVIDER_RAW_DERIVATION_ID)
+        .expect("validated provider raw derivation exists");
+    derivation
+        .inputs
+        .iter()
+        .map(|input| {
+            let DerivationInput::Artifact { artifact_id, .. } = input else {
+                return Err(ContractArtifactError::Metadata(PathBuf::from(
+                    PROVIDER_RAW_DERIVATION_ID,
+                )));
+            };
+            let artifact = catalog
+                .artifact(artifact_id)
+                .expect("validated provider raw input exists");
+            let compiled = compile_artifact(repository_root, catalog, artifact)?;
+            Ok(ProviderRawInputIdentity {
+                artifact_id: artifact_id.clone(),
+                canonical_digest: compiled.canonical_digest,
+                source_digest: compiled.source_digest,
+            })
+        })
+        .collect()
+}
+
+#[cfg(feature = "fact-generation")]
 const TREE_SITTER_RECOVERY_QUERY: &str = "(ERROR) @error\n(MISSING) @missing\n";
+
+#[cfg(feature = "fact-generation")]
+macro_rules! define_ruff_inventory {
+    ($kind:ident, $all:ident, $name:ident, [$($variant:ident),+ $(,)?]) => {
+        const $all: &[$kind] = &[$($kind::$variant),+];
+
+        const fn $name(value: $kind) -> &'static str {
+            match value {
+                $($kind::$variant => stringify!($variant)),+
+            }
+        }
+    };
+}
+
+#[cfg(feature = "fact-generation")]
+define_ruff_inventory!(
+    NodeKind,
+    RUFF_NODE_KINDS,
+    ruff_node_kind_name,
+    [
+        ModModule,
+        ModExpression,
+        StmtFunctionDef,
+        StmtClassDef,
+        StmtReturn,
+        StmtDelete,
+        StmtTypeAlias,
+        StmtAssign,
+        StmtAugAssign,
+        StmtAnnAssign,
+        StmtFor,
+        StmtWhile,
+        StmtIf,
+        StmtWith,
+        StmtMatch,
+        StmtRaise,
+        StmtTry,
+        StmtAssert,
+        StmtImport,
+        StmtImportFrom,
+        StmtGlobal,
+        StmtNonlocal,
+        StmtExpr,
+        StmtPass,
+        StmtBreak,
+        StmtContinue,
+        StmtIpyEscapeCommand,
+        ExprBoolOp,
+        ExprNamed,
+        ExprBinOp,
+        ExprUnaryOp,
+        ExprLambda,
+        ExprIf,
+        ExprDict,
+        ExprSet,
+        ExprListComp,
+        ExprSetComp,
+        ExprDictComp,
+        ExprGenerator,
+        ExprAwait,
+        ExprYield,
+        ExprYieldFrom,
+        ExprCompare,
+        ExprCall,
+        ExprFString,
+        ExprTString,
+        ExprStringLiteral,
+        ExprBytesLiteral,
+        ExprNumberLiteral,
+        ExprBooleanLiteral,
+        ExprNoneLiteral,
+        ExprEllipsisLiteral,
+        ExprAttribute,
+        ExprSubscript,
+        ExprStarred,
+        ExprName,
+        ExprList,
+        ExprTuple,
+        ExprSlice,
+        ExprIpyEscapeCommand,
+        ExceptHandlerExceptHandler,
+        InterpolatedElement,
+        InterpolatedStringLiteralElement,
+        PatternMatchValue,
+        PatternMatchSingleton,
+        PatternMatchSequence,
+        PatternMatchMapping,
+        PatternMatchClass,
+        PatternMatchStar,
+        PatternMatchAs,
+        PatternMatchOr,
+        TypeParamTypeVar,
+        TypeParamTypeVarTuple,
+        TypeParamParamSpec,
+        InterpolatedStringFormatSpec,
+        PatternArguments,
+        PatternKeyword,
+        Comprehension,
+        Arguments,
+        Parameters,
+        Parameter,
+        ParameterWithDefault,
+        Keyword,
+        Alias,
+        WithItem,
+        MatchCase,
+        Decorator,
+        ElifElseClause,
+        TypeParams,
+        FString,
+        TString,
+        StringLiteral,
+        BytesLiteral,
+        Identifier,
+    ]
+);
+
+#[cfg(feature = "fact-generation")]
+define_ruff_inventory!(
+    TokenKind,
+    RUFF_TOKEN_KINDS,
+    ruff_token_kind_name,
+    [
+        Name,
+        Int,
+        Float,
+        Complex,
+        String,
+        FStringStart,
+        FStringMiddle,
+        FStringEnd,
+        TStringStart,
+        TStringMiddle,
+        TStringEnd,
+        IpyEscapeCommand,
+        Comment,
+        Newline,
+        NonLogicalNewline,
+        Indent,
+        Dedent,
+        EndOfFile,
+        Question,
+        Exclamation,
+        Lpar,
+        Rpar,
+        Lsqb,
+        Rsqb,
+        Colon,
+        Comma,
+        Semi,
+        Plus,
+        Minus,
+        Star,
+        Slash,
+        Vbar,
+        Amper,
+        Less,
+        Greater,
+        Equal,
+        Dot,
+        Percent,
+        Lbrace,
+        Rbrace,
+        EqEqual,
+        NotEqual,
+        LessEqual,
+        GreaterEqual,
+        Tilde,
+        CircumFlex,
+        LeftShift,
+        RightShift,
+        DoubleStar,
+        DoubleStarEqual,
+        PlusEqual,
+        MinusEqual,
+        StarEqual,
+        SlashEqual,
+        PercentEqual,
+        AmperEqual,
+        VbarEqual,
+        CircumflexEqual,
+        LeftShiftEqual,
+        RightShiftEqual,
+        DoubleSlash,
+        DoubleSlashEqual,
+        ColonEqual,
+        At,
+        AtEqual,
+        Rarrow,
+        Ellipsis,
+        And,
+        As,
+        Assert,
+        Async,
+        Await,
+        Break,
+        Class,
+        Continue,
+        Def,
+        Del,
+        Elif,
+        Else,
+        Except,
+        False,
+        Finally,
+        For,
+        From,
+        Global,
+        If,
+        Import,
+        In,
+        Is,
+        Lambda,
+        None,
+        Nonlocal,
+        Not,
+        Or,
+        Pass,
+        Raise,
+        Return,
+        True,
+        Try,
+        While,
+        With,
+        Yield,
+        Case,
+        Lazy,
+        Match,
+        Type,
+        Unknown,
+    ]
+);
 
 #[cfg(feature = "fact-generation")]
 #[allow(clippy::too_many_lines)] // One pass keeps grammar inventory and disposition expansion atomic.
@@ -411,26 +676,7 @@ fn render_provider_raw_catalog(
     let node_types: Value = serde_json::from_str(node_types_source)
         .map_err(|_| ContractArtifactError::Metadata(PathBuf::from(catalog_id)))?;
 
-    let derivation = catalog
-        .derivation(PROVIDER_RAW_DERIVATION_ID)
-        .expect("validated provider raw derivation exists");
-    let mut input_identities = Vec::new();
-    for input in &derivation.inputs {
-        let DerivationInput::Artifact { artifact_id, .. } = input else {
-            return Err(ContractArtifactError::Metadata(PathBuf::from(
-                PROVIDER_RAW_DERIVATION_ID,
-            )));
-        };
-        let artifact = catalog
-            .artifact(artifact_id)
-            .expect("validated provider raw input exists");
-        let compiled = compile_artifact(repository_root, catalog, artifact)?;
-        input_identities.push(ProviderRawInputIdentity {
-            artifact_id: artifact_id.clone(),
-            canonical_digest: compiled.canonical_digest,
-            source_digest: compiled.source_digest,
-        });
-    }
+    let input_identities = provider_raw_input_identities(repository_root, catalog)?;
     let output = serde_json::json!({
         "catalog_id": catalog_id,
         "provider_id": normalization.provider_id,
@@ -450,6 +696,161 @@ fn render_provider_raw_catalog(
         "runtime_inventory": runtime_inventory,
     });
     canonicalize_value(&output).map_err(|source| ContractArtifactError::Canonical {
+        path: PathBuf::from(catalog_id),
+        source,
+    })
+}
+
+#[cfg(feature = "fact-generation")]
+#[derive(Serialize)]
+struct RuffRawNodeKind {
+    raw_kind_id: u16,
+    raw_name: &'static str,
+    disposition: &'static str,
+    canonical_kind_name: Option<String>,
+}
+
+#[cfg(feature = "fact-generation")]
+#[derive(Serialize)]
+struct RuffRawTokenKind {
+    raw_kind_id: u16,
+    raw_name: &'static str,
+}
+
+#[cfg(feature = "fact-generation")]
+fn ruff_normalization(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<ProviderNormalization, ContractArtifactError> {
+    let value = registry_value(
+        repository_root,
+        catalog,
+        "codefabric.registry.provider-normalization-registry",
+    )?;
+    serde_json::from_value::<Vec<ProviderNormalization>>(value["records"].clone())
+        .map_err(|_| ContractArtifactError::Metadata(PathBuf::from("ruff-python-0-0-7")))?
+        .into_iter()
+        .find(|record| record.raw_catalog_id == "ruff-python-0-0-7")
+        .ok_or_else(|| ContractArtifactError::Missing(PathBuf::from("ruff-python-0-0-7")))
+}
+
+#[cfg(feature = "fact-generation")]
+fn canonical_kind_for_raw_name(
+    normalization: &ProviderNormalization,
+    raw_name: &str,
+) -> Result<Option<String>, ContractArtifactError> {
+    if let Some(name) = normalization.canonical_kind_names.get(raw_name) {
+        return Ok(Some(name.clone()));
+    }
+    if normalization.ignored_raw_keys.contains(raw_name) {
+        return Ok(None);
+    }
+    let mut prefix_matches = normalization
+        .canonical_kind_prefixes
+        .iter()
+        .filter(|(prefix, _)| raw_name.starts_with(prefix.as_str()));
+    let prefix_match = prefix_matches.next().map(|(_, name)| name.clone());
+    if prefix_matches.next().is_some() {
+        return Err(ContractArtifactError::Metadata(PathBuf::from(format!(
+            "{} has ambiguous prefix normalization for {raw_name}",
+            normalization.mapping_id
+        ))));
+    }
+    Ok(prefix_match.or_else(|| normalization.default_canonical_kind_name.clone()))
+}
+
+#[cfg(feature = "fact-generation")]
+fn render_ruff_provider_raw_catalog(
+    repository_root: &Path,
+    catalog: &CompiledCatalog,
+) -> Result<Vec<u8>, ContractArtifactError> {
+    let catalog_id = "ruff-python-0-0-7";
+    let normalization = ruff_normalization(repository_root, catalog)?;
+    let available_names = RUFF_NODE_KINDS
+        .iter()
+        .copied()
+        .map(ruff_node_kind_name)
+        .collect::<BTreeSet<_>>();
+    if normalization
+        .canonical_kind_names
+        .keys()
+        .chain(&normalization.ignored_raw_keys)
+        .any(|raw_name| !available_names.contains(raw_name.as_str()))
+        || normalization.canonical_kind_prefixes.keys().any(|prefix| {
+            !available_names
+                .iter()
+                .any(|raw_name| raw_name.starts_with(prefix))
+        })
+    {
+        return Err(ContractArtifactError::Metadata(PathBuf::from(
+            "ruff normalization references an absent NodeKind",
+        )));
+    }
+    let node_kinds = RUFF_NODE_KINDS
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(raw_kind_id, kind)| {
+            let raw_name = ruff_node_kind_name(kind);
+            let canonical_kind_name = canonical_kind_for_raw_name(&normalization, raw_name)?;
+            let disposition = if canonical_kind_name.is_some() {
+                "normalize"
+            } else if normalization.ignored_raw_keys.contains(raw_name) {
+                "ignore"
+            } else {
+                match normalization.default_disposition {
+                    RawKindDisposition::Ignore => "ignore",
+                    RawKindDisposition::Unsupported => "unsupported",
+                }
+            };
+            Ok(RuffRawNodeKind {
+                raw_kind_id: u16::try_from(raw_kind_id).map_err(|_| {
+                    ContractArtifactError::Metadata(PathBuf::from(
+                        "Ruff NodeKind inventory exceeds u16",
+                    ))
+                })?,
+                raw_name,
+                disposition,
+                canonical_kind_name,
+            })
+        })
+        .collect::<Result<Vec<_>, ContractArtifactError>>()?;
+    let token_kinds = RUFF_TOKEN_KINDS
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(raw_kind_id, kind)| {
+            Ok(RuffRawTokenKind {
+                raw_kind_id: u16::try_from(raw_kind_id).map_err(|_| {
+                    ContractArtifactError::Metadata(PathBuf::from(
+                        "Ruff TokenKind inventory exceeds u16",
+                    ))
+                })?,
+                raw_name: ruff_token_kind_name(kind),
+            })
+        })
+        .collect::<Result<Vec<_>, ContractArtifactError>>()?;
+    let runtime_inventory = serde_json::json!({
+        "node_kinds": node_kinds,
+        "token_kinds": token_kinds,
+    });
+    let runtime_bytes = canonicalize_value(&runtime_inventory).map_err(|source| {
+        ContractArtifactError::Canonical {
+            path: PathBuf::from(catalog_id),
+            source,
+        }
+    })?;
+    canonicalize_value(&serde_json::json!({
+        "catalog_id": catalog_id,
+        "catalog_kind": "ruff-python-frontend",
+        "provider_id": normalization.provider_id,
+        "provider_version": normalization.provider_version,
+        "language": normalization.language,
+        "runtime_inventory_fingerprint": checksum(&runtime_bytes),
+        "input_identities": provider_raw_input_identities(repository_root, catalog)?,
+        "runtime_inventory": runtime_inventory,
+    }))
+    .map_err(|source| ContractArtifactError::Canonical {
         path: PathBuf::from(catalog_id),
         source,
     })
@@ -488,6 +889,7 @@ fn render_provider_raw_outputs(
                 &tree_sitter::Language::from(tree_sitter_rust::LANGUAGE),
                 tree_sitter_rust::NODE_TYPES,
             )?,
+            "ruff-python-0-0-7" => render_ruff_provider_raw_catalog(repository_root, catalog)?,
             _ => return Err(ContractArtifactError::Metadata(path.to_owned())),
         };
         outputs.insert(path.to_owned(), bytes);
@@ -573,6 +975,23 @@ fn render_rust_provider_raw_kind_bindings(
              pub query_bundle_canonical_json: &'static [u8],\n\
              pub raw_kinds: &'static [ProviderRawKindEntry],\n\
              pub fields: &'static [ProviderRawFieldEntry],\n\
+         }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RuffNodeKindEntry {\n\
+             pub raw_kind_id: u16, pub raw_name: &'static str,\n\
+             pub disposition: ProviderRawKindDisposition,\n\
+             pub normalized_kind_code: u16,\n\
+         }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RuffTokenKindEntry {\n\
+             pub raw_kind_id: u16, pub raw_name: &'static str,\n\
+         }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RuffPythonInventory {\n\
+             pub catalog_id: &'static str, pub provider_version: &'static str,\n\
+             pub runtime_inventory_fingerprint: &'static str,\n\
+             pub node_kinds: &'static [RuffNodeKindEntry],\n\
+             pub token_kinds: &'static [RuffTokenKindEntry],\n\
          }\n\n",
     );
     writeln!(
@@ -663,6 +1082,102 @@ fn render_rust_provider_raw_kind_bindings(
         )
         .unwrap();
     }
+    let ruff_document = decode_strict(&render_ruff_provider_raw_catalog(repository_root, catalog)?)
+        .map_err(|source| ContractArtifactError::Canonical {
+            path: PathBuf::from("ruff-python-0-0-7"),
+            source,
+        })?;
+    writeln!(
+        output,
+        "pub const RUFF_PYTHON_NODE_KINDS: &[RuffNodeKindEntry] = &["
+    )
+    .unwrap();
+    for entry in ruff_document["runtime_inventory"]["node_kinds"]
+        .as_array()
+        .expect("generated Ruff node kinds are an array")
+    {
+        let canonical_name = entry["canonical_kind_name"].as_str();
+        let normalized_kind_code = canonical_name
+            .and_then(|name| syntax_kind_codes.get(name))
+            .copied()
+            .unwrap_or(fallback_code);
+        let disposition = match entry["disposition"].as_str() {
+            Some("normalize") => "ProviderRawKindDisposition::Normalize",
+            Some("ignore") => "ProviderRawKindDisposition::Ignore",
+            Some("unsupported") => "ProviderRawKindDisposition::Unsupported",
+            _ => {
+                return Err(ContractArtifactError::Metadata(PathBuf::from(
+                    "ruff-python-0-0-7",
+                )));
+            }
+        };
+        writeln!(
+            output,
+            "    RuffNodeKindEntry {{ raw_kind_id: {}, raw_name: {:?}, disposition: {disposition}, normalized_kind_code: {normalized_kind_code} }},",
+            entry["raw_kind_id"].as_u64().expect("generated u16"),
+            entry["raw_name"].as_str().expect("generated raw name"),
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    writeln!(
+        output,
+        "pub const RUFF_PYTHON_TOKEN_KINDS: &[RuffTokenKindEntry] = &["
+    )
+    .unwrap();
+    for entry in ruff_document["runtime_inventory"]["token_kinds"]
+        .as_array()
+        .expect("generated Ruff token kinds are an array")
+    {
+        writeln!(
+            output,
+            "    RuffTokenKindEntry {{ raw_kind_id: {}, raw_name: {:?} }},",
+            entry["raw_kind_id"].as_u64().expect("generated u16"),
+            entry["raw_name"].as_str().expect("generated raw name"),
+        )
+        .unwrap();
+    }
+    writeln!(output, "];\n").unwrap();
+    writeln!(
+        output,
+        "#[must_use]\npub const fn ruff_python_node_kind_entry(kind: ruff_python_ast::NodeKind) -> &'static RuffNodeKindEntry {{\n    match kind {{"
+    )
+    .unwrap();
+    for (index, kind) in RUFF_NODE_KINDS.iter().copied().enumerate() {
+        writeln!(
+            output,
+            "        ruff_python_ast::NodeKind::{} => &RUFF_PYTHON_NODE_KINDS[{index}],",
+            ruff_node_kind_name(kind),
+        )
+        .unwrap();
+    }
+    writeln!(output, "    }}\n}}\n").unwrap();
+    writeln!(
+        output,
+        "#[must_use]\n#[allow(clippy::too_many_lines)]\npub const fn ruff_python_token_kind_entry(kind: ruff_python_ast::token::TokenKind) -> &'static RuffTokenKindEntry {{\n    match kind {{"
+    )
+    .unwrap();
+    for (index, kind) in RUFF_TOKEN_KINDS.iter().copied().enumerate() {
+        writeln!(
+            output,
+            "        ruff_python_ast::token::TokenKind::{} => &RUFF_PYTHON_TOKEN_KINDS[{index}],",
+            ruff_token_kind_name(kind),
+        )
+        .unwrap();
+    }
+    writeln!(output, "    }}\n}}\n").unwrap();
+    writeln!(
+        output,
+        "pub const RUFF_PYTHON_FRONTEND: RuffPythonInventory = RuffPythonInventory {{ catalog_id: {:?}, provider_version: {:?}, runtime_inventory_fingerprint: {:?}, node_kinds: RUFF_PYTHON_NODE_KINDS, token_kinds: RUFF_PYTHON_TOKEN_KINDS }};\n",
+        ruff_document["catalog_id"].as_str().expect("generated catalog ID"),
+        ruff_document["provider_version"]
+            .as_str()
+            .expect("generated provider version"),
+        ruff_document["runtime_inventory_fingerprint"]
+            .as_str()
+            .expect("generated fingerprint"),
+    )
+    .unwrap();
     output.push_str(
         "pub const PROVIDER_GRAMMAR_INVENTORIES: &[ProviderGrammarInventory] = &[\n\
              TREE_SITTER_PYTHON_GRAMMAR,\n\
@@ -2946,6 +3461,36 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "fact-generation")]
+    fn assert_ruff_catalog() {
+        let ruff_catalog = decode_strict(
+            &read(
+                &repository_root()
+                    .join("contracts/generated/provider-raw-kinds/ruff-python-0-0-7.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let ruff_nodes = ruff_catalog["runtime_inventory"]["node_kinds"]
+            .as_array()
+            .unwrap();
+        let ruff_tokens = ruff_catalog["runtime_inventory"]["token_kinds"]
+            .as_array()
+            .unwrap();
+        assert_eq!(ruff_nodes.len(), RUFF_NODE_KINDS.len());
+        assert_eq!(ruff_tokens.len(), RUFF_TOKEN_KINDS.len());
+        assert!(ruff_nodes.iter().all(|entry| {
+            entry["disposition"] == "normalize" && entry["canonical_kind_name"].is_string()
+        }));
+        let runtime_bytes = canonicalize_value(&ruff_catalog["runtime_inventory"]).unwrap();
+        assert_eq!(
+            ruff_catalog["runtime_inventory_fingerprint"]
+                .as_str()
+                .unwrap(),
+            checksum(&runtime_bytes)
+        );
+    }
+
     #[test]
     fn verifier_profiles_parse_strictly() {
         assert_eq!(
@@ -3007,6 +3552,7 @@ mod tests {
                     == identity["canonical_digest"].as_str()
             }));
         }
+        assert_ruff_catalog();
 
         let entities = registry_value(
             repository_root(),
@@ -3049,6 +3595,7 @@ mod tests {
     fn wp28_negative_zero_state() {
         let outputs = render_outputs(repository_root()).unwrap();
         for path in [
+            Path::new("contracts/generated/provider-raw-kinds/ruff-python-0-0-7.json"),
             Path::new("contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json"),
             Path::new("contracts/generated/provider-raw-kinds/tree-sitter-rust-0-24-2.json"),
             Path::new("src/generated/provider_raw_kinds.rs"),

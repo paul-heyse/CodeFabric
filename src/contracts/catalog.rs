@@ -1359,9 +1359,9 @@ fn validate_derivation_shape(
                         }
                     )
                 })
-                || count(DerivationOutputKind::ProviderRawKindCatalog) != 2
+                || count(DerivationOutputKind::ProviderRawKindCatalog) != 3
                 || count(DerivationOutputKind::RustProviderRawKindBindings) != 1
-                || derivation.outputs.len() != 3
+                || derivation.outputs.len() != 4
         }
     };
     if invalid {

@@ -438,8 +438,16 @@ mutants-wp29:
 mutants-wp30:
     cargo mutants --output target/wp30-mutants -f src/tree_sitter_adapter.rs \
       --no-default-features --features fact-generation \
-      -F 'TreeSitterAdapter::(parse_candidate|reject)|BoundaryMap::(new|original)|progress_abort_reason|exceeds_limit|deadline_exceeded|cancellation_due|runtime_node_matches|validate_runtime_inventory|walk_tree|run_recovery_query|validate_edit|edit_geometry_valid|edit_boundaries_valid|edit_unchanged_regions_match|point_at' \
+      -F 'TreeSitterAdapter::(parse_candidate|reject)|ProviderBoundaryMap::(new|original)|progress_abort_reason|exceeds_limit|deadline_exceeded|cancellation_due|runtime_node_matches|validate_runtime_inventory|walk_tree|run_recovery_query|validate_edit|edit_geometry_valid|edit_boundaries_valid|edit_unchanged_regions_match|point_at' \
       -- --lib tree_sitter_adapter::tests
+
+[doc("Mutation-test WP31 Ruff inventory, retained indexes, projection, bounds, and atomic publication")]
+[group('quality')]
+mutants-wp31:
+    cargo mutants --iterate --output target/wp31-mutants -f src/ruff_adapter.rs -f src/provider_types.rs \
+      --no-default-features --features fact-generation \
+      -F 'RuffAdapter::(parse|check_progress|reject)|ProviderText::provider_image_fingerprint|ProviderBoundaryMap::(new|original)|RuffAstCategory::from_registry_code|validate_runtime_inventory|project_tokens|token_spelling|link_tokens_to_ast|token_ast_compatible|token_class|node_key|evaluation_ordinals|AstProjectionVisitor::(finish|fail)|child_role|same_node|is_(target|condition|callee|annotation|iterable|value)_child|project_comments|project_directives|directive_target|project_strings|string_syntax_id|project_docstrings|project_diagnostics|diagnostic|project_correspondences|tree_field_compatible|ranges_overlap|sum_lengths|estimate_output_bytes|deadline_exceeded|elapsed_exceeds_deadline' \
+      -- --lib ruff_adapter::tests
 
 # Nightly is the extractor's production toolchain and remains isolated from this root.
 # Miri explores executions; it never proves soundness (spec section 24.2). Record

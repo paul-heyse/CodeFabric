@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:017a268bd77d713d7ffe1dd35fe7232c4a52b1843e22e37077d0da694a48d1f0"
+canonical_digest: "b3:79e12dbe7adbe5407041c5b464132c58c563653e802a5f0825c2ac1c08888beb"
 records:
   - mapping_id: tree-sitter-python-syntax-v1
     raw_catalog_id: tree-sitter-python-0-25-0
@@ -56,7 +56,7 @@ records:
   - mapping_id: ruff-python-syntax-v1
     raw_catalog_id: ruff-python-0-0-7
     provider_id: ruff-python
-    provider_version: "ruff-python-ast=0.0.7;ruff-python-parser=0.0.7"
+    provider_version: "ruff-python-ast=0.0.7;ruff-python-parser=0.0.7;python-target=3.14"
     language: python
     canonical_kind_names:
       StmtFunctionDef: DECLARATION_SYNTAX
@@ -72,7 +72,48 @@ records:
       ExprCall: CALL_EXPRESSION
       ExprAwait: AWAIT
       ExprYield: YIELD
+      StmtTypeAlias: DECLARATION_SYNTAX
+      StmtAugAssign: ASSIGNMENT
+      StmtAnnAssign: ASSIGNMENT
+      StmtMatch: BRANCH
+      ExprIf: BRANCH
+      MatchCase: BRANCH
+      Comprehension: LOOP
+      Alias: IMPORT_OR_USE_SYNTAX
+      ExprYieldFrom: YIELD
+      ExprAttribute: ATTRIBUTE_ACCESS
+      ExprSubscript: SUBSCRIPT_ACCESS
+      ExprBoolOp: OPERATION
+      ExprNamed: OPERATION
+      ExprBinOp: OPERATION
+      ExprUnaryOp: OPERATION
+      ExprCompare: OPERATION
+      ExprFString: LITERAL
+      ExprTString: LITERAL
+      ExprStringLiteral: LITERAL
+      ExprBytesLiteral: LITERAL
+      ExprNumberLiteral: LITERAL
+      ExprBooleanLiteral: LITERAL
+      ExprNoneLiteral: LITERAL
+      ExprEllipsisLiteral: LITERAL
+      FString: LITERAL
+      TString: LITERAL
+      StringLiteral: LITERAL
+      BytesLiteral: LITERAL
+      Parameters: PARAMETER_SYNTAX
+      Parameter: PARAMETER_SYNTAX
+      ParameterWithDefault: PARAMETER_SYNTAX
+      Arguments: ARGUMENT_SYNTAX
+      Keyword: ARGUMENT_SYNTAX
+      TypeParams: TYPE_SYNTAX
+    canonical_kind_prefixes:
+      Mod: BLOCK
+      Stmt: STATEMENT
+      Expr: EXPRESSION
+      Pattern: PATTERN
+      TypeParam: TYPE_SYNTAX
     ignored_raw_keys: []
+    default_canonical_kind_name: SYNTAX_NODE
     default_disposition: UNSUPPORTED
     introduced: "1.3"
 owner_acceptance:

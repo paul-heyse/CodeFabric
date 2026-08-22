@@ -679,8 +679,13 @@ Tree-sitter raw node and field catalogs are generated from the exact grammar cra
 `NODE_TYPES` plus runtime `Language` introspection. The generated catalog records the
 package version, runtime ABI, node-types digest, complete named/anonymous node-kind
 inventory, complete field inventory, and grammar fingerprint. Only the mapping from
-provider-native kinds to application-owned normalized kinds is owner-authored. Ruff
-raw-kind mappings generate exhaustive enum matches so a pinned-provider upgrade cannot
+provider-native kinds to application-owned normalized kinds is owner-authored. A typed
+normalization record may define exact raw-name overrides, non-overlapping raw-name prefix
+families, and an optional canonical default, in that precedence order; ignores remain
+exact raw keys. The contract compiler resolves those authored rules over the complete
+generated inventory and rejects ambiguous prefixes or any raw kind without an explicit
+normalize, ignore, or version-bound unsupported outcome. Ruff raw-kind mappings generate
+exhaustive enum matches from that resolved table so a pinned-provider upgrade cannot
 introduce an unmapped variant silently. Provider fixture discovery is validation, not
 raw-kind authority.
 

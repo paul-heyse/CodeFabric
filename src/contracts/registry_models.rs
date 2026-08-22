@@ -410,7 +410,11 @@ pub struct ProviderNormalization {
     pub language: String,
     pub canonical_kind_names: BTreeMap<String, String>,
     #[serde(default)]
+    pub canonical_kind_prefixes: BTreeMap<String, String>,
+    #[serde(default)]
     pub ignored_raw_keys: BTreeSet<String>,
+    #[serde(default)]
+    pub default_canonical_kind_name: Option<String>,
     pub default_disposition: RawKindDisposition,
     #[serde(flatten)]
     pub lifecycle: VersionLifecycle,
@@ -1630,6 +1634,20 @@ pub fn validate_provider_normalizations(records: &[ProviderNormalization]) -> Re
                 .canonical_kind_names
                 .values()
                 .any(|name| !upper_snake(name))
+            || record
+                .canonical_kind_prefixes
+                .iter()
+                .any(|(prefix, name)| prefix.is_empty() || !upper_snake(name))
+            || record.canonical_kind_prefixes.keys().any(|prefix| {
+                record
+                    .canonical_kind_prefixes
+                    .keys()
+                    .any(|other| prefix != other && prefix.starts_with(other))
+            })
+            || record
+                .default_canonical_kind_name
+                .as_deref()
+                .is_some_and(|name| !upper_snake(name))
         {
             return Err(format!(
                 "provider normalization {} is incomplete or ambiguous",

@@ -19,7 +19,7 @@ use crate::provider_raw_kinds::{
     ProviderGrammarInventory, ProviderRawKindDisposition, TREE_SITTER_PYTHON_GRAMMAR,
     TREE_SITTER_RECOVERY_QUERY, TREE_SITTER_RUST_GRAMMAR,
 };
-use crate::provider_types::ProviderText;
+use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, ProviderText};
 use crate::registries::{PROVIDER_RESOURCE_PROFILES, ProviderResourceProfileEntry};
 
 /// Closed language selection for the two Wave-4 complete-CST adapters.
@@ -125,6 +125,7 @@ pub struct TreeSitterAdapterMetrics {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TreeSitterSnapshot {
     pub revision: u64,
+    pub provider_image_fingerprint: String,
     pub catalog_id: &'static str,
     pub grammar_fingerprint: &'static str,
     pub facts: Arc<[RawSyntaxFact]>,
@@ -202,6 +203,15 @@ pub enum TreeSitterAdapterError {
     StaleRevision,
 }
 
+impl From<ProviderBoundaryError> for TreeSitterAdapterError {
+    fn from(error: ProviderBoundaryError) -> Self {
+        match error {
+            ProviderBoundaryError::InvalidMap(message) => Self::InvalidBoundaryMap(message),
+            ProviderBoundaryError::InvalidOffset(_) => Self::InvalidSpan,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct TreeSitterLimits {
     max_input_bytes: u64,
@@ -230,51 +240,6 @@ impl TreeSitterLimits {
             max_retained_tree_revisions: profile.max_retained_tree_revisions,
             cancellation_check_interval: profile.cancellation_check_interval,
         }
-    }
-}
-
-#[derive(Clone)]
-struct BoundaryMap {
-    provider_offsets: Arc<[usize]>,
-    original_offsets: Arc<[u64]>,
-}
-
-impl BoundaryMap {
-    fn new(text: &ProviderText) -> Result<Self, TreeSitterAdapterError> {
-        let provider_offsets = text
-            .text
-            .char_indices()
-            .map(|(offset, _)| offset)
-            .chain(std::iter::once(text.text.len()))
-            .collect::<Vec<_>>();
-        if provider_offsets.len() != text.original_byte_offsets.len() {
-            return Err(TreeSitterAdapterError::InvalidBoundaryMap(format!(
-                "{} provider boundaries but {} original boundaries",
-                provider_offsets.len(),
-                text.original_byte_offsets.len()
-            )));
-        }
-        if text
-            .original_byte_offsets
-            .windows(2)
-            .any(|window| window[0] > window[1])
-        {
-            return Err(TreeSitterAdapterError::InvalidBoundaryMap(
-                "original offsets are not monotonic".into(),
-            ));
-        }
-        Ok(Self {
-            provider_offsets: provider_offsets.into(),
-            original_offsets: Arc::clone(&text.original_byte_offsets),
-        })
-    }
-
-    fn original(&self, provider_offset: usize) -> Result<u64, TreeSitterAdapterError> {
-        self.provider_offsets
-            .binary_search(&provider_offset)
-            .ok()
-            .and_then(|index| self.original_offsets.get(index).copied())
-            .ok_or(TreeSitterAdapterError::InvalidSpan)
     }
 }
 
@@ -493,9 +458,9 @@ impl TreeSitterAdapter {
         if u64::try_from(text.text.len()).unwrap_or(u64::MAX) > self.limits.max_input_bytes {
             return self.reject(TreeSitterAdapterError::InputLimit);
         }
-        let boundaries = match BoundaryMap::new(&text) {
+        let boundaries = match ProviderBoundaryMap::new(&text) {
             Ok(boundaries) => boundaries,
-            Err(error) => return self.reject(error),
+            Err(error) => return self.reject(error.into()),
         };
         if cancellation.is_cancelled() {
             self.parser.reset();
@@ -606,6 +571,7 @@ impl TreeSitterAdapter {
         metrics.changed_ranges = u64::try_from(changed_ranges.len()).unwrap_or(u64::MAX);
         let snapshot = TreeSitterSnapshot {
             revision,
+            provider_image_fingerprint: text.provider_image_fingerprint(),
             catalog_id: self.inventory.catalog_id,
             grammar_fingerprint: self.inventory.runtime_inventory_fingerprint,
             facts: facts.into(),
@@ -688,7 +654,7 @@ type RecoveryNode = (usize, usize, bool, bool, u16);
 fn walk_tree(
     tree: &Tree,
     inventory: &ProviderGrammarInventory,
-    boundaries: &BoundaryMap,
+    boundaries: &ProviderBoundaryMap,
     limits: TreeSitterLimits,
     cancellation: &impl TreeSitterCancellation,
     started: Instant,
@@ -1242,23 +1208,23 @@ mod tests {
             original_byte_offsets: Arc::from([0]),
         };
         assert!(matches!(
-            BoundaryMap::new(&bad_lengths),
-            Err(TreeSitterAdapterError::InvalidBoundaryMap(_))
+            ProviderBoundaryMap::new(&bad_lengths),
+            Err(ProviderBoundaryError::InvalidMap(_))
         ));
         let bad_order = ProviderText {
             text: Arc::from("ab"),
             original_byte_offsets: Arc::from([0, 2, 1]),
         };
         assert!(matches!(
-            BoundaryMap::new(&bad_order),
-            Err(TreeSitterAdapterError::InvalidBoundaryMap(_))
+            ProviderBoundaryMap::new(&bad_order),
+            Err(ProviderBoundaryError::InvalidMap(_))
         ));
-        let unicode = BoundaryMap::new(&provider_text("é")).unwrap();
+        let unicode = ProviderBoundaryMap::new(&provider_text("é")).unwrap();
         assert_eq!(unicode.original(0), Ok(0));
         assert_eq!(unicode.original(2), Ok(2));
         assert_eq!(
             unicode.original(1),
-            Err(TreeSitterAdapterError::InvalidSpan)
+            Err(ProviderBoundaryError::InvalidOffset(1))
         );
 
         let valid_edit = TreeSitterEdit {

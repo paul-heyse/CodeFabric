@@ -4057,8 +4057,10 @@ Registry invariants:
   token, trivia, and semantic enum surfaces, so adding an upstream variant fails the
   generator build until it is classified;
 - authored provider normalization records map generated raw-provider keys to canonical
-  ontology kinds, projection rules, explicit ignores, or version-bound unsupported
-  outcomes; an unmapped generated key is a release failure.
+  ontology kinds through exact overrides, non-overlapping prefix families, then an
+  optional canonical default; exact ignores and version-bound unsupported outcomes are
+  also explicit. The compiler resolves this precedence over the complete inventory;
+  ambiguous prefixes or an unmapped generated key are release failures.
 
 Each generated provider raw-kind catalog records at least:
 

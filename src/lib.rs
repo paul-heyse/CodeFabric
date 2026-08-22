@@ -30,6 +30,8 @@ pub mod provider_types;
 pub mod registries;
 #[cfg(feature = "rpc")]
 pub mod rpc;
+#[cfg(feature = "fact-generation")]
+pub mod ruff_adapter;
 #[cfg(feature = "data-fabric")]
 pub mod schema_registry;
 #[cfg(feature = "daemon")]
