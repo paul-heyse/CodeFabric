@@ -236,12 +236,13 @@ tools and assurance:
 [features]
 default = ["local-workstation"]
 canonical-json = ["dep:base64", "dep:blake3", "dep:serde", "dep:serde_json", "..."]
-contracts-tooling = ["canonical-json", "dep:serde_yaml_ng", "dep:tempfile"]
+contract-models = ["canonical-json", "dep:serde_yaml_ng"]
+model-compiler = ["dep:gix", "dep:petgraph", "dep:rustix", "..."]
 data-fabric = ["dep:arrow", "...", "dep:datafusion", "dep:deltalake", "..."]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
-local-workstation = ["contracts-tooling", "compatibility-probes"]
+local-workstation = ["daemon", "compatibility-probes"]
 s3-storage = ["data-fabric", "deltalake/s3"]
 ```
 
@@ -250,7 +251,8 @@ s3-storage = ["data-fabric", "deltalake/s3"]
 | local workstation | `cargo check --all-targets` | local provider authority; no `deltalake-aws` or AWS SDK |
 | featureless substrate | `cargo check --all-targets --no-default-features` | dependency-free root substrate |
 | canonical JSON | `cargo check --no-default-features --features canonical-json` | strict JSON/JCS only; no data fabric, repository, or RPC |
-| contract tooling | `cargo check --no-default-features --features contracts-tooling` | canonical JSON plus artifact generation/verification |
+| contract models | `cargo check --no-default-features --features contract-models` | runtime wire models only; no compiler or generated-output closure |
+| model compiler | `cargo check --no-default-features --features model-compiler --bin codefabric-model` | handwritten repository model, drivers, assurance, and reconciler |
 | Protobuf tooling | `cargo check --no-default-features --features proto-tooling --bin codefabric-proto-gen` | generator-only graph |
 | S3 deployment | `cargo check --all-targets --features s3-storage` | explicit delta-rs S3 graph |
 
@@ -403,7 +405,7 @@ compatibility tests; each later packet adds behavioral proof at the boundary it 
 | Do documented examples still work? | `cargo test --doc` | `just root-doctest` |
 | Does the exact stable graph match the design? | resolved metadata/tree validator | `just stable-graph-check` |
 | Do structural boundaries hold? | tested ast-grep rules | `just governance-scan` |
-| Are generated Protobuf outputs reproducible? | dual isolated generation | `just proto-repro-check` |
+| Is the complete DesiredTree reproducible? | dual isolated model generation | `just model-repro-check` |
 | Do all four domains pass their routine gates? | aggregate command | `just ci-fast` |
 | Which Rust regions executed? | cargo-llvm-cov | `just coverage` |
 | Do assertions detect plausible faults? | cargo-mutants | `just mutants-file <path>` |

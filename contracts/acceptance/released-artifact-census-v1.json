@@ -273,7 +273,7 @@
   "accepted_tombstones": [],
   "owner_acceptance": {
     "owner_identity": "codefabric-repository-owner",
-    "acceptance_provenance": "Explicitly authorized by the CodeFabric repository owner in the implementation-plan execution thread on 2026-08-22 after review of the deterministic 66-ID candidate and exact parity with the prior released-ID census.",
+    "acceptance_provenance": "Explicitly authorized by the CodeFabric repository owner in the implementation-plan execution thread on 2026-08-23 after review of the deterministic 66-ID candidate and exact parity with the prior released-ID census.",
     "candidate_digest": "b3:6cbdbf8aa134c8ff9f71cb6ba44dbe1588ce877bff59d5f4ec8c1c9cef85a75e"
   }
 }

@@ -1,273 +1,110 @@
-"""Typed, cached access to the canonical packaged contract artifact index."""
+"""Typed, cached access to the canonical model-derived artifact index."""
+
+from __future__ import annotations
 
 from functools import lru_cache
 from importlib.resources import files
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
 
-from .json import PROFILE, canonicalize_json, checksum
+from .json import canonicalize_json, checksum
 
 type Checksum = Annotated[str, StringConstraints(pattern=r"^b3:[0-9a-f]{64}$")]
-type ArtifactKind = Literal[
-    "bundle-manifest",
-    "ebnf-grammar",
-    "json-lines",
-    "json-schema",
-    "manifest",
-    "normative-document",
-    "protobuf-schema",
-    "registry",
-    "yaml-contract",
-]
-type ArtifactStatus = Literal["draft", "released", "deprecated"]
-type CompatibilityFamily = Literal[
-    "adapter",
-    "bundle",
-    "conformance",
-    "deployment",
-    "identity",
-    "lifecycle",
-    "model-pack",
-    "ontology",
-    "provider",
-    "query",
-    "rpc",
-    "schema",
-    "suite",
-    "toolchain",
-    "traceability",
-]
-type ConsumerDomain = Literal[
-    "rust-core",
-    "python-adapter",
-    "rustc-extractor",
-    "pyrefly-sidecar",
-    "contract-tooling",
-    "packaging",
-    "governance",
-]
-type ContractOwner = Literal[
-    "suite",
-    "ontology",
-    "fact-generation",
-    "data-fabric",
-    "semantic-query",
-    "lifecycle",
-    "serving",
-    "roadmap",
-]
-type DigestProjection = Literal[
-    "bundle-ac-g-07-v1",
-    "ebnf-source-v1",
-    "json-jcs-v1",
-    "jsonl-jcs-v1",
-    "prose-utf8-v1",
-    "proto-descriptor-v1",
-    "yaml-ac-g-53-v1",
-]
-type DerivationOutputKind = Literal[
-    "artifact-index",
-    "canonical-registry",
-    "python-registry-bindings",
-    "proto-descriptor-set",
-    "proto-descriptor-census",
-    "proto-toolchain-identity",
-    "rust-proto-bindings",
-    "rust-registry-bindings",
-    "python-proto-bindings",
-    "python-proto-stub",
-    "python-grpc-bindings",
-    "python-adapter-models",
-    "adapter-schema-manifest",
-    "adapter-fingerprint-manifest",
-    "adapter-public-schema",
-    "public-json-schema",
-    "table-spec-manifest",
-    "rust-table-spec-bindings",
-    "operational-store-ddl",
-    "provider-raw-kind-catalog",
-    "rust-provider-raw-kind-bindings",
-]
-type DerivationKind = Literal[
-    "artifact-index",
-    "canonical-registry-set",
-    "protobuf-descriptor-and-python",
-    "protobuf-rust-from-descriptor",
-    "adapter-model-compilation",
-    "schema-contract-compilation",
-    "provider-raw-catalog-set",
-]
-type ArtifactInputView = Literal["source-bytes", "compiled-semantic"]
-type ProvenanceRequirement = Literal[
-    "source-digest",
-    "canonical-digest",
-    "generator-revision",
-    "owner-acceptance",
-    "native-validation",
-]
+type SourceRole = Literal["acceptance", "authority", "derived", "evidence-authority"]
+type ReleaseStatus = Literal["released", "unreleased"]
 
 
 class _ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
-class ArtifactIndexGeneration(_ClosedModel):
-    """Generator provenance for the canonical index resource."""
+class NamedResourceProfile(_ClosedModel):
+    """A model-family resource policy selected by stable profile name."""
 
-    catalog_artifact_id: str
-    artifact_count: int = Field(ge=0)
-    derivation_count: int = Field(ge=0)
-    generator_revision: str
-    profile: Literal["codefabric-jcs-v1"]
+    profile: str = Field(min_length=1)
 
 
-class OutputRef(_ClosedModel):
-    """Stable reference to one derivation output."""
+class ExternalDriverBudget(_ClosedModel):
+    """Closed bounded external-driver budget embedded in the model index."""
 
-    derivation_id: str
-    path: str
-
-
-class NativeSemanticProjection(_ClosedModel):
-    """A semantic projection compiled from native authority bytes."""
-
-    source_kind: Literal["native"]
+    max_source_bytes: int = Field(gt=0)
+    max_output_bytes: int = Field(gt=0)
+    max_outputs: int = Field(gt=0)
 
 
-class DerivedSemanticProjection(_ClosedModel):
-    """A semantic projection compiled from a derivation output."""
-
-    source_kind: Literal["derivation-output"]
-    output: OutputRef
+type ResourceProfile = NamedResourceProfile | ExternalDriverBudget
 
 
-type SemanticProjectionSource = Annotated[
-    NativeSemanticProjection | DerivedSemanticProjection,
-    Field(discriminator="source_kind"),
-]
+class ModelArtifactRecord(_ClosedModel):
+    """One model-discovered authority, acceptance, evidence, or derived resource."""
 
-
-class ArtifactDerivationInput(_ClosedModel):
-    """One governed artifact input."""
-
-    input_kind: Literal["artifact"]
-    artifact_id: str
-    view: ArtifactInputView
-
-
-class OutputDerivationInput(_ClosedModel):
-    """One upstream derivation-output input."""
-
-    input_kind: Literal["output"]
-    output: OutputRef
-
-
-class AllCompiledArtifactsInput(_ClosedModel):
-    """The closed set of all compiled governed artifacts."""
-
-    input_kind: Literal["all-compiled-artifacts"]
-
-
-type DerivationInput = Annotated[
-    ArtifactDerivationInput | OutputDerivationInput | AllCompiledArtifactsInput,
-    Field(discriminator="input_kind"),
-]
-
-
-class ArtifactIndexOutput(_ClosedModel):
-    """One derivation-owned generated output edge."""
-
-    path: str
-    output_kind: DerivationOutputKind
-    primary_artifact_ids: tuple[str, ...]
-    consumers: tuple[ConsumerDomain, ...]
-    resource_budget_profile: str | None
-
-
-class GeneratorIdentity(_ClosedModel):
-    """Maintained generator identity derived from a closed unit kind."""
-
-    generator_id: str
-    generator_revision: str
-    toolchain: tuple[str, ...]
-
-
-class ArtifactIndexRecord(_ClosedModel):
-    """One fully compiled governed-source identity and consumer view."""
-
-    artifact_id: str
-    authority_path: str
-    artifact_kind: ArtifactKind
-    owner: ContractOwner
-    version: str
-    compatible_suite_major: int = Field(ge=0)
-    status: ArtifactStatus
-    digest_projection: DigestProjection
-    semantic_projection_source: SemanticProjectionSource
+    artifact_id: str = Field(min_length=1)
+    artifact_kind: str = Field(min_length=1)
+    authority_path: str = Field(min_length=1)
     canonical_digest: Checksum
+    compatible_suite_major: Literal[1]
+    compilation_unit: str = Field(min_length=1)
+    consumers: tuple[str, ...] = Field(min_length=1)
+    owner: str = Field(min_length=1)
+    projection_profile: str = Field(min_length=1)
+    provenance: tuple[str, ...] = Field(min_length=1)
+    release_status: ReleaseStatus
+    resource_profile: ResourceProfile
     source_digest: Checksum
-    bundle_digest: Checksum | None
-    compatibility_family: CompatibilityFamily
-    provenance_requirements: tuple[ProvenanceRequirement, ...]
-    consumers: tuple[ConsumerDomain, ...]
+    source_role: SourceRole
+    status: str = Field(min_length=1)
+    version: str = Field(min_length=1)
 
 
-class DerivationIndexRecord(_ClosedModel):
-    """One peer derivation record and its transitive governed lineage."""
+class ModelArtifactIndex(_ClosedModel):
+    """Canonical packaged projection of the compiled RepositoryModel."""
 
-    derivation_id: str
-    derivation_kind: DerivationKind
-    inputs: tuple[DerivationInput, ...]
-    outputs: tuple[ArtifactIndexOutput, ...]
-    lineage_artifact_ids: tuple[str, ...]
-    resource_budget_profile: str
-    generator: GeneratorIdentity
+    schema_version: Literal[1]
+    source: Literal["RepositoryModel + accepted release census"]
+    artifacts: tuple[ModelArtifactRecord, ...]
 
 
-class ArtifactIndex(_ClosedModel):
-    """The one canonical shared artifact-index document."""
-
-    generated: ArtifactIndexGeneration = Field(alias="_generated")
-    artifacts: tuple[ArtifactIndexRecord, ...]
-    derivations: tuple[DerivationIndexRecord, ...]
+_MODEL_INDEX_ADAPTER = TypeAdapter(ModelArtifactIndex)
 
 
-_ARTIFACT_INDEX_ADAPTER = TypeAdapter(ArtifactIndex)
+def _safe_relative_path(value: str) -> bool:
+    path = PurePosixPath(value)
+    return (
+        not path.is_absolute()
+        and ".." not in path.parts
+        and "\\" not in value
+        and all(part not in {"", "."} for part in path.parts)
+    )
 
 
 @lru_cache(maxsize=1)
-def artifact_index_bytes() -> bytes:
+def model_artifact_index_bytes() -> bytes:
     """Read the exact package resource bytes once."""
 
-    return files(__package__).joinpath("artifact-index.json").read_bytes()
+    return files(__package__).joinpath("model_artifact_index.json").read_bytes()
 
 
 @lru_cache(maxsize=1)
-def artifact_index() -> ArtifactIndex:
+def model_artifact_index() -> ModelArtifactIndex:
     """Validate canonical bytes and decode the closed model once."""
 
-    resource = artifact_index_bytes()
+    resource = model_artifact_index_bytes()
     if canonicalize_json(resource) != resource:
-        raise ValueError("artifact index resource is not canonical JSON")
-    index = _ARTIFACT_INDEX_ADAPTER.validate_json(resource, strict=True)
-    if index.generated.profile != PROFILE:
-        raise ValueError("artifact index canonicalization profile drifted")
-    if index.generated.artifact_count != len(index.artifacts):
-        raise ValueError("artifact index count disagrees with its records")
+        raise ValueError("model artifact index resource is not canonical JSON")
+    index = _MODEL_INDEX_ADAPTER.validate_json(resource, strict=True)
     artifact_ids = tuple(record.artifact_id for record in index.artifacts)
     if artifact_ids != tuple(sorted(set(artifact_ids))):
-        raise ValueError("artifact index IDs are not unique and strictly sorted")
-    if index.generated.derivation_count != len(index.derivations):
-        raise ValueError("artifact index derivation count disagrees with its records")
-    derivation_ids = tuple(record.derivation_id for record in index.derivations)
-    if derivation_ids != tuple(sorted(set(derivation_ids))):
-        raise ValueError("artifact index derivation IDs are not unique and sorted")
+        raise ValueError("model artifact index IDs are not unique and strictly sorted")
+    paths = tuple(record.authority_path for record in index.artifacts)
+    if any(not _safe_relative_path(path) for path in paths):
+        raise ValueError("model artifact index contains an unsafe authority path")
     return index
 
 
 @lru_cache(maxsize=1)
-def artifact_index_digest() -> str:
+def model_artifact_index_digest() -> str:
     """Return the BLAKE3 identity of the exact package resource bytes."""
 
-    return checksum(artifact_index_bytes())
+    return checksum(model_artifact_index_bytes())

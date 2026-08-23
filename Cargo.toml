@@ -28,13 +28,9 @@ canonical-json = [
     "dep:unicode-casefold",
     "dep:unicode-normalization",
 ]
-contracts-tooling = [
+contract-models = [
     "canonical-json",
-    "dep:prost",
-    "dep:prost-types",
-    "dep:serde_path_to_error",
     "dep:serde_yaml_ng",
-    "dep:tempfile",
 ]
 model-compiler = [
     "dep:blake3",
@@ -49,9 +45,17 @@ model-compiler = [
     "dep:tempfile",
     "dep:thiserror",
 ]
+provider-inventory-tooling = [
+    "dep:ruff_python_ast",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:tree-sitter",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-rust",
+]
 data-fabric = [
     "canonical-json",
-    "contracts-tooling",
+    "contract-models",
     "repository-state",
     "dep:async-trait",
     "dep:arrow",
@@ -98,7 +102,7 @@ repository-state = [
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
 daemon = [
     "dep:arc-swap",
-    "contracts-tooling",
+    "contract-models",
     "data-fabric",
     "fact-generation",
     "repository-state",
@@ -170,6 +174,7 @@ hyper-util = { version = "=0.1.20", features = ["tokio"] }
 insta = "=1.48.0"
 proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
 serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
+tempfile = "=3.27.0"
 tokio-stream = { version = "=0.1.18", features = ["net"] }
 tower = { version = "=0.5.3", features = ["util"] }
 
@@ -187,14 +192,14 @@ path = "tooling/proto/generate.rs"
 required-features = ["proto-tooling"]
 
 [[bin]]
-name = "codefabric-contracts"
-path = "src/bin/codefabric-contracts.rs"
-required-features = ["contracts-tooling"]
-
-[[bin]]
 name = "codefabric-model"
 path = "src/bin/codefabric_model/main.rs"
 required-features = ["model-compiler"]
+
+[[bin]]
+name = "codefabric-provider-inventory"
+path = "tooling/model/provider_inventory.rs"
+required-features = ["provider-inventory-tooling"]
 
 [[bin]]
 name = "codefabric-model-schema-consumer"

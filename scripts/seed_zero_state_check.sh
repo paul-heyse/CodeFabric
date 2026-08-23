@@ -26,8 +26,8 @@ done
 legacy_backend='ma''turin'
 legacy_native_package='codefabric.''_native'
 legacy_stub='_native.''pyi'
-legacy_python_tree='python/''codefabric'
-legacy_test_tree='python_''tests'
+legacy_python_tree='python/''codefabric/'
+legacy_test_tree='python_''tests/'
 legacy_packaging_hits="$({
   rg -n --hidden \
     -g '!.git/**' \

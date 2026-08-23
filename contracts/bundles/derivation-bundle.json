@@ -24,20 +24,20 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:826f2f92b932bd3f926bfd4c9823cfe7430bacf35d5e8b9c2f688f1c19a8231d",
+  "bundle_digest": "b3:a93f1f2275141808100999b2f6531c93c4d1ca80ebbaabc7c363267e90364f55",
   "bundle_kind": "derivation",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:925d58922477b7b9d6f7f15086c84313f4a71db2f80608e223673fd8d23f3db6",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
   },
   "compatible_suite_major": 1,
   "created_by": {
-    "generator_id": "codefabric-contracts",
+    "generator_id": "codefabric-model",
     "generator_version": "1.0"
   },
+  "signature": null,
   "status": "released",
   "version": "1.0"
 }

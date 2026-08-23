@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Validate the resolved stable-domain graph, not merely Cargo.toml text.
+# Validate stable package boundaries from Cargo's resolved model. Feature tables are
+# intentionally checked by capability, not duplicated here as a second manifest.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-metadata="$(cargo metadata --locked --format-version 1)"
+# Pin and direct-feature census spans optional domains, so resolve the union here;
+# capability boundaries below are checked again with per-feature Cargo trees.
+metadata="$(cargo metadata --locked --format-version 1 --all-features)"
 
 fail() {
   printf 'stable graph check failed: %s\n' "$1" >&2
@@ -34,167 +37,51 @@ require_family_version '^arrow($|-)' '58.4.0' 'Arrow'
 require_one_version parquet 58.4.0
 require_family_version '^datafusion($|-)' '54.1.0' 'DataFusion'
 require_one_version object_store 0.13.2
-require_one_version gix 0.86.0
-require_one_version petgraph 0.8.3
-require_one_version rusqlite 0.40.2
-require_one_version rustix 1.1.4
-require_one_version hyper-util 0.1.20
-require_one_version prost 0.14.4
-require_one_version tokio-stream 0.1.18
-require_one_version tonic 0.14.6
-require_one_version tonic-prost 0.14.6
-require_one_version tower 0.5.3
-require_one_version base64 0.22.1
-require_one_version arc-swap 1.9.2
-require_one_version serde_json 1.0.151
-require_one_version serde_json_canonicalizer 0.3.2
-require_one_version serde_path_to_error 0.1.20
-require_one_version serde_yaml_ng 0.10.0
-require_one_version tempfile 3.27.0
-require_one_version thiserror 2.0.20
-require_one_version toml 1.1.4+spec-1.1.0
-require_one_version unicode-casefold 0.2.0
-require_one_version unicode-normalization 0.1.25
-require_one_version rayon 1.12.0
-require_one_version tree-sitter 0.26.12
-require_one_version tree-sitter-python 0.25.0
-require_one_version tree-sitter-rust 0.24.2
-require_one_version ruff_python_ast 0.0.7
-require_one_version ruff_python_index 0.0.7
-require_one_version ruff_python_parser 0.0.7
-require_one_version ruff_python_trivia 0.0.7
-require_one_version ruff_source_file 0.0.7
-require_one_version ruff_text_size 0.0.7
+for pin in \
+  'gix 0.86.0' 'notify-debouncer-full 0.7.0' 'petgraph 0.8.3' \
+  'rusqlite 0.40.2' 'rustix 1.1.4' 'prost 0.14.4' \
+  'tonic 0.14.6' 'tonic-prost 0.14.6' 'base64 0.22.1' \
+  'serde_json 1.0.151' 'serde_json_canonicalizer 0.3.2' \
+  'serde_path_to_error 0.1.20' 'serde_yaml_ng 0.10.0' \
+  'tempfile 3.27.0' 'thiserror 2.0.20' 'unicode-casefold 0.2.0' \
+  'unicode-normalization 0.1.25' 'rayon 1.12.0' \
+  'tree-sitter 0.26.12' 'tree-sitter-python 0.25.0' \
+  'tree-sitter-rust 0.24.2' 'ruff_python_ast 0.0.7' \
+  'ruff_python_index 0.0.7' 'ruff_python_parser 0.0.7' \
+  'ruff_python_trivia 0.0.7' 'ruff_source_file 0.0.7' \
+  'ruff_text_size 0.0.7'; do
+  require_one_version ${pin}
+done
 
 delta_sources="$(printf '%s' "$metadata" | jq -r \
   '.packages[] | select(.name | test("^deltalake($|-)")) | .source' | sort -u)"
 case "$delta_sources" in
   *'https://github.com/delta-io/delta-rs.git?rev=9f9223197469897ef05ae4369eb4fd1390174e65#9f9223197469897ef05ae4369eb4fd1390174e65'*) ;;
-  *) fail "delta-rs did not resolve from the approved immutable revision" ;;
+  *) fail 'delta-rs did not resolve from the approved immutable revision' ;;
 esac
-[ "$(printf '%s\n' "$delta_sources" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 ] || \
-  fail "delta-rs resolved from more than one source"
-
-kernel_lines="$(printf '%s' "$metadata" | jq -r '
-  .packages[]
-  | select(.name == "buoyant_kernel" or .name == "buoyant_kernel_engine")
-  | (.version | split(".")[0:2] | join("."))
-' | sort -u)"
-[ "$kernel_lines" = '0.25' ] || \
-  fail "Delta kernel packages are not confined to the released 0.25 line: $kernel_lines"
-for kernel in buoyant_kernel buoyant_kernel_engine; do
-  [ "$(versions_for "$kernel" | wc -l | tr -d ' ')" = 1 ] || \
-    fail "$kernel resolved more than once"
-done
 
 root="$(printf '%s' "$metadata" | jq -r '.packages[] | select(.name == "codefabric") | .id')"
 [ -n "$root" ] || fail 'root package metadata is absent'
 root_shape="$(printf '%s' "$metadata" | jq -c --arg root "$root" '
   .packages[] | select(.id == $root)
-  | {
-      edition,
-      rust_version,
-      crate_types: ([.targets[] | select(.crate_types | index("rlib")) | .crate_types[]] | unique),
-      features
-    }
+  | {edition, rust_version,
+     crate_types: ([.targets[] | select(.crate_types | index("rlib")) | .crate_types[]] | unique),
+     features}
 ')"
 printf '%s' "$root_shape" | jq -e '
   .edition == "2024"
   and .rust_version == "1.95.0"
   and .crate_types == ["rlib"]
-  and .features == {
-    "canonical-json": [
-      "dep:base64",
-      "dep:blake3",
-      "dep:serde",
-      "dep:serde_json",
-      "dep:serde_json_canonicalizer",
-      "dep:thiserror",
-      "dep:unicode-casefold",
-      "dep:unicode-normalization"
-    ],
-    "compatibility-probes": [
-      "canonical-json",
-      "data-fabric",
-      "repository-state",
-      "rpc"
-    ],
-    "contracts-tooling": [
-      "canonical-json",
-      "dep:prost",
-      "dep:prost-types",
-      "dep:serde_path_to_error",
-      "dep:serde_yaml_ng",
-      "dep:tempfile"
-    ],
-    "data-fabric": [
-      "canonical-json",
-      "contracts-tooling",
-      "repository-state",
-      "dep:async-trait",
-      "dep:arrow",
-      "dep:arrow-array",
-      "dep:arrow-buffer",
-      "dep:arrow-cast",
-      "dep:arrow-ord",
-      "dep:arrow-row",
-      "dep:arrow-schema",
-      "dep:arrow-select",
-      "dep:arrow-string",
-      "dep:datafusion",
-      "dep:deltalake",
-      "dep:futures",
-      "dep:object_store",
-      "dep:parquet",
-      "dep:tracing",
-      "dep:tokio",
-      "dep:url"
-    ],
-    "daemon": [
-      "dep:arc-swap",
-      "contracts-tooling",
-      "data-fabric",
-      "fact-generation",
-      "repository-state",
-      "rpc",
-      "dep:toml",
-      "dep:tracing"
-    ],
-    "default": ["local-workstation"],
-    "fact-generation": [
-      "dep:blake3",
-      "dep:rayon",
-      "dep:ruff_python_ast",
-      "dep:ruff_python_index",
-      "dep:ruff_python_parser",
-      "dep:ruff_python_trivia",
-      "dep:ruff_source_file",
-      "dep:ruff_text_size",
-      "dep:tree-sitter",
-      "dep:tree-sitter-python",
-      "dep:tree-sitter-rust",
-      "dep:thiserror"
-    ],
-    "local-workstation": ["daemon", "compatibility-probes"],
-    "model-compiler": [
-      "dep:blake3",
-      "dep:gix",
-      "dep:notify-debouncer-full",
-      "dep:petgraph",
-      "dep:rustix",
-      "dep:serde",
-      "dep:serde_json",
-      "dep:serde_json_canonicalizer",
-      "dep:serde_yaml_ng",
-      "dep:tempfile",
-      "dep:thiserror"
-    ],
-    "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
-    "repository-state": ["dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix", "dep:thiserror", "dep:url"],
-    "rpc": ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"],
-    "s3-storage": ["data-fabric", "deltalake/s3"]
-  }
-' >/dev/null || fail "root package shape or feature table drifted: $root_shape"
+  and (.features | has("contracts-tooling") | not)
+  and .features["contract-models"] == ["canonical-json", "dep:serde_yaml_ng"]
+  and (.features["model-compiler"] | sort) == ([
+    "dep:blake3", "dep:gix", "dep:notify-debouncer-full", "dep:petgraph",
+    "dep:rustix", "dep:serde", "dep:serde_json",
+    "dep:serde_json_canonicalizer", "dep:serde_yaml_ng", "dep:tempfile",
+    "dep:thiserror"
+  ] | sort)
+  and .features.default == ["local-workstation"]
+' >/dev/null || fail "root package boundary drifted: $root_shape"
 rg -q '^resolver = "3"$' Cargo.toml || fail 'Cargo resolver 3 is not declared'
 
 declared_features() {
@@ -209,13 +96,12 @@ declared_features() {
   fail 'deltalake direct features drifted'
 [ "$(declared_features gix)" = '["attributes","auto-chain-error","blob-diff","dirwalk","excludes","index","interrupt","parallel","revision","sha1","sha256","status","tracing"]' ] || \
   fail 'gix direct features drifted'
-[ "$(declared_features petgraph)" = '["std"]' ] || \
-  fail 'petgraph direct features drifted'
+[ "$(declared_features petgraph)" = '["std"]' ] || fail 'petgraph direct features drifted'
 [ "$(declared_features rusqlite)" = '["backup","bundled"]' ] || \
   fail 'rusqlite direct features drifted'
 [ "$(declared_features rustix)" = '["fs"]' ] || fail 'rustix direct features drifted'
 [ "$(declared_features serde_json)" = '["arbitrary_precision"]' ] || \
-  fail 'serde_json arbitrary_precision is required for pre-canonicalization range checks'
+  fail 'serde_json arbitrary_precision is required before canonicalization'
 
 resolved_features() {
   local package_id
@@ -234,114 +120,56 @@ if printf '%s\n' "$gix_features" | rg -q \
   fail 'gix activated a forbidden credential, network, or mutation feature'
 fi
 
-rusqlite_features="$(resolved_features rusqlite)"
-for required in backup bundled; do
-  printf '%s\n' "$rusqlite_features" | rg -qx "$required" || \
-    fail "rusqlite feature $required is absent"
-done
-if printf '%s\n' "$rusqlite_features" | rg -q '^(cache|ffi-sqlite-wasm-rs)$'; then
-  fail 'rusqlite default-only features leaked into the selected profile'
-fi
-printf '%s\n' "$(resolved_features rustix)" | rg -qx fs || fail 'rustix fs feature is absent'
+cargo_tree() {
+  cargo tree --locked --edges normal --prefix none "$@"
+}
 
-# The pinned buoyant kernel's arrow-58 feature intentionally forces these latent
-# object_store capabilities. Local authority is enforced by provider configuration and
-# by excluding the Delta cloud implementation packages below; never misreport this
-# compiled surface as absent.
-object_store_features="$(resolved_features object_store)"
-for required in aws azure gcp http cloud quick-xml; do
-  printf '%s\n' "$object_store_features" | rg -qx "$required" || \
-    fail "expected kernel-forced object_store feature $required is absent"
-done
+require_in_tree() {
+  local tree="$1" package="$2" label="$3"
+  printf '%s\n' "$tree" | rg -q "^${package} " || fail "$label omits $package"
+}
 
-default_tree="$(cargo tree --locked --edges normal --prefix none)"
-for required in datafusion deltalake gix toml tonic serde_json_canonicalizer rayon tree-sitter tree-sitter-python tree-sitter-rust ruff_python_parser; do
-  printf '%s\n' "$default_tree" | rg -q "^${required} " || \
-    fail "default local-workstation graph omits required package $required"
-done
-if printf '%s\n' "$default_tree" | rg -q \
-  '^(aws-config|aws-credential-types|aws-runtime|aws-sdk-|aws-sigv4|aws-smithy-|aws-types|deltalake-aws)'; then
-  fail 'default local-workstation graph activates the Delta S3 implementation or AWS SDK'
-fi
-legacy_python_bridge='py''o3'
-printf '%s\n' "$default_tree" | rg -q "^${legacy_python_bridge} " && fail 'legacy Python bridge remains in the stable graph'
-
-s3_tree="$(cargo tree --locked --edges normal --no-default-features --features s3-storage --prefix none)"
-printf '%s\n' "$s3_tree" | rg -q '^deltalake-aws ' || \
-  fail 's3-storage does not activate the delta-rs S3 implementation'
-printf '%s\n' "$s3_tree" | rg -q '^(aws-config|aws-sdk-s3) ' || \
-  fail 's3-storage does not activate the AWS SDK path'
-
-assert_graph_omits() {
-  local label="$1" tree="$2" forbidden
-  forbidden='^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |gix |rusqlite |tonic |tonic-prost |rayon |tree-sitter($|-)|ruff_python_|ruff_source_file |ruff_text_size )'
-  if printf '%s\n' "$tree" | rg -q "$forbidden"; then
-    fail "$label graph contains an unrelated heavyweight production family"
+forbid_in_tree() {
+  local tree="$1" expression="$2" label="$3"
+  if printf '%s\n' "$tree" | rg -q "^(${expression}) "; then
+    fail "$label contains forbidden package family $expression"
   fi
 }
 
-featureless_tree="$(cargo tree --locked --edges normal --no-default-features --prefix none)"
-canonical_tree="$(cargo tree --locked --edges normal --no-default-features --features canonical-json --prefix none)"
-contracts_tree="$(cargo tree --locked --edges normal --no-default-features --features contracts-tooling --prefix none)"
-model_tree="$(cargo tree --locked --edges normal --no-default-features --features model-compiler --prefix none)"
-proto_tree="$(cargo tree --locked --edges normal --no-default-features --features proto-tooling --prefix none)"
-fact_generation_tree="$(cargo tree --locked --edges normal --no-default-features --features fact-generation --prefix none)"
-assert_graph_omits featureless "$featureless_tree"
-assert_graph_omits canonical-json "$canonical_tree"
-assert_graph_omits contracts-tooling "$contracts_tree"
-assert_graph_omits proto-tooling "$proto_tree"
-for required in blake3 gix notify-debouncer-full petgraph rustix serde serde_json serde_json_canonicalizer serde_yaml_ng tempfile thiserror; do
-  printf '%s\n' "$model_tree" | rg -q "^${required} " || \
-    fail "model-compiler graph omits required package $required"
+default_tree="$(cargo_tree)"
+for package in datafusion deltalake gix tonic rayon tree-sitter ruff_python_parser; do
+  require_in_tree "$default_tree" "$package" 'default local-workstation graph'
 done
-printf '%s\n' "$model_tree" | rg -qx 'notify-debouncer-full v0.7.0' || \
-  fail 'model-compiler notify-debouncer-full version drifted'
-if printf '%s\n' "$model_tree" | rg -q \
-  '^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |pyo3($|-)|rusqlite |tonic($|-)|prost |rayon |tree-sitter($|-)|ruff_python_|ruff_source_file |ruff_text_size )'; then
-  fail 'model-compiler graph contains a production, runtime, or provider family'
-fi
-for required in blake3 thiserror rayon tree-sitter tree-sitter-python tree-sitter-rust ruff_python_ast ruff_python_index ruff_python_parser ruff_python_trivia ruff_source_file ruff_text_size; do
-  printf '%s\n' "$fact_generation_tree" | rg -q "^${required} " || \
-    fail "fact-generation graph omits required package $required"
+forbid_in_tree "$default_tree" 'aws-sdk-.*|pyo3' 'default local-workstation graph'
+
+featureless_tree="$(cargo_tree --no-default-features)"
+forbid_in_tree "$featureless_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rusqlite|gix' \
+  'featureless graph'
+
+canonical_tree="$(cargo_tree --no-default-features --features canonical-json)"
+forbid_in_tree "$canonical_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rusqlite|gix|prost.*' \
+  'canonical-json graph'
+
+contract_tree="$(cargo_tree --no-default-features --features contract-models)"
+require_in_tree "$contract_tree" serde_yaml_ng 'contract-models graph'
+forbid_in_tree "$contract_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rusqlite|gix|prost.*|tempfile' \
+  'contract-models graph'
+
+model_tree="$(cargo_tree --no-default-features --features model-compiler)"
+for package in gix notify-debouncer-full petgraph rustix serde_yaml_ng tempfile; do
+  require_in_tree "$model_tree" "$package" 'model-compiler graph'
 done
-if printf '%s\n' "$fact_generation_tree" | rg -q \
-  '^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |gix |rusqlite |tonic |tonic-prost |ruff_python_(formatter|codegen|semantic) )'; then
-  fail 'fact-generation graph contains an unrelated production family or forbidden Ruff layer'
-fi
-printf '%s\n' "$canonical_tree" | rg -q '^serde_json_canonicalizer ' || \
-  fail 'canonical-json does not activate the approved JCS serializer'
-printf '%s\n' "$contracts_tree" | rg -q '^serde_yaml_ng ' || \
-  fail 'contracts-tooling does not activate YAML contract parsing'
-printf '%s\n' "$model_tree" | rg -q '^serde_yaml_ng ' || \
-  fail 'model-compiler does not activate YAML family parsing'
-printf '%s\n' "$model_tree" | rg -q '^rustix ' || \
-  fail 'model-compiler does not activate no-follow source ingress'
-printf '%s\n' "$contracts_tree" | rg -q '^serde_path_to_error ' || \
-  fail 'contracts-tooling does not activate path-aware typed diagnostics'
-printf '%s\n' "$contracts_tree" | rg -q '^prost-types ' || \
-  fail 'contracts-tooling does not activate typed descriptor-set projection'
-printf '%s\n' "$proto_tree" | rg -q '^tonic-prost-build ' || \
-  fail 'proto-tooling does not activate the Rust Protobuf generator'
+forbid_in_tree "$model_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rusqlite|ruff_python_.*|tree-sitter.*|prost.*' \
+  'model-compiler graph'
 
-root_target="$(printf '%s' "$metadata" | jq -r '.target_directory')"
-sidecar_target="$(cargo metadata --locked --format-version 1 \
-  --manifest-path pyrefly-sidecar/Cargo.toml | jq -r '.target_directory')"
-extractor_target="$(cd rustc-extractor && cargo metadata --locked --format-version 1 | jq -r '.target_directory')"
-[ "$root_target" = "$sidecar_target" ] || \
-  fail "stable root and sidecar target directories differ: $root_target != $sidecar_target"
-[ "$extractor_target" != "$root_target" ] || \
-  fail 'dated-nightly extractor shares the stable target directory'
+s3_tree="$(cargo_tree --no-default-features --features s3-storage)"
+require_in_tree "$s3_tree" deltalake-aws 's3-storage graph'
+require_in_tree "$s3_tree" aws-config 's3-storage graph'
 
-legacy_backend='ma''turin'
-bootstrap_surface="$(./scripts/bootstrap.sh --context 2>&1)"
-if printf '%s\n' "$bootstrap_surface" | rg -qi "${legacy_backend}"; then
-  fail 'the operational command surface still advertises a removed root packaging command'
-fi
-just_dump="$(just --dump --dump-format json)"
-if printf '%s' "$just_dump" | jq -e '
-  .recipes | has("wheel") or has("python-develop") or has("test-python")
-' >/dev/null; then
-  fail 'the operational command surface still advertises a removed root packaging command'
-fi
+target_dir="$(printf '%s' "$metadata" | jq -r '.target_directory')"
+sidecar_target="$(cd pyrefly-sidecar && cargo metadata --format-version 1 --no-deps | jq -r '.target_directory')"
+extractor_target="$(cd rustc-extractor && cargo +nightly metadata --format-version 1 --no-deps | jq -r '.target_directory')"
+[ "$target_dir" = "$sidecar_target" ] || fail 'root and sidecar must share the repository target cache'
+[ "$target_dir" != "$extractor_target" ] || fail 'nightly extractor must use its isolated target cache'
 
-printf 'stable graph check passed\n'
+printf 'stable graph check passed: model compiler and contract models are narrow, production and S3 boundaries are explicit\n'

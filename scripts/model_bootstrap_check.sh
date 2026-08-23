@@ -26,15 +26,18 @@ fail() {
 
 copy_current_tree() {
   while IFS= read -r -d '' path; do
+    [ -e "$repo_root/$path" ] || [ -L "$repo_root/$path" ] || continue
     mkdir -p "$sandbox_root/$(dirname "$path")"
     cp -Pp "$repo_root/$path" "$sandbox_root/$path"
   done < <(git -C "$repo_root" ls-files -co --exclude-standard -z)
 }
 
 omit_generated_outputs() {
-  local catalog="$repo_root/contracts/manifests/suite-manifest.json"
+  local plan
   local output
-  [ -f "$catalog" ] || fail 'the shadow catalog needed to enumerate legacy outputs is absent'
+  plan="$("$repo_root/scripts/model_exec.sh" plan "$repo_root")"
+  jq -e '.output_count == (.output_paths | length)' <<<"$plan" >/dev/null \
+    || fail 'model plan did not provide its exact output census'
   while IFS= read -r output; do
     case "$output" in
       ''|/*|../*|*/../*|*/..)
@@ -42,11 +45,7 @@ omit_generated_outputs() {
         ;;
     esac
     rm -f -- "$sandbox_root/$output"
-  done < <(jq -r '.derivations[]?.outputs[]?.path // empty' "$catalog")
-
-  # The current suite manifest is the temporary parity oracle used to find the old
-  # outputs. It is itself a future generated view and cannot be a bootstrap input.
-  rm -f -- "$sandbox_root/contracts/manifests/suite-manifest.json"
+  done < <(jq -r '.output_paths[]' <<<"$plan")
 }
 
 model_bootstrap_has_no_generated_or_production_library_edge() {

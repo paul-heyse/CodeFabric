@@ -1,268 +1,188 @@
-//! Typed, cached access to the one packaged contract artifact-index resource.
+//! Typed, cached access to the model-derived packaged artifact index.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::catalog::{
-    ArtifactKind, ArtifactStatus, CompatibilityFamily, ConsumerDomain, ContractOwner,
-    DerivationInput, DerivationKind, DerivationOutputKind, DigestProjection, GeneratorIdentity,
-    ProvenanceRequirement, SemanticProjectionSource,
-};
 use super::jcs::{canonicalize_slice, checksum, validate_checksum};
 
-/// Exact bytes compiled into Rust and packaged unchanged by the Python adapter.
-pub static ARTIFACT_INDEX_BYTES: &[u8] = include_bytes!(concat!(
+/// Exact model-derived bytes compiled into Rust and packaged unchanged by the adapter.
+pub static MODEL_ARTIFACT_INDEX_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json"
+    "/codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json"
 ));
 
-static INDEX: OnceLock<Result<ArtifactIndex, ArtifactIndexError>> = OnceLock::new();
+static INDEX: OnceLock<Result<ModelArtifactIndex, ModelArtifactIndexError>> = OnceLock::new();
 static INDEX_DIGEST: OnceLock<String> = OnceLock::new();
 
-/// Generator provenance for the canonical index resource.
+/// Bounded family or aggregate resource profile retained with provenance.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ArtifactIndexGeneration {
-    /// Source catalog identity.
-    pub catalog_artifact_id: String,
-    /// Number of source records encoded below.
-    pub artifact_count: usize,
-    /// Number of derivation records encoded below.
-    pub derivation_count: usize,
-    /// Generator implementation revision.
-    pub generator_revision: String,
-    /// Canonical JSON profile used for these exact bytes.
-    pub profile: String,
+pub struct ArtifactResourceProfile {
+    /// Named aggregate profile when the family has no external driver.
+    pub profile: Option<String>,
+    /// Maximum source bytes read by one family action.
+    pub max_source_bytes: Option<u64>,
+    /// Maximum bytes emitted by one family action.
+    pub max_output_bytes: Option<u64>,
+    /// Maximum output count emitted by one family action.
+    pub max_outputs: Option<u64>,
 }
 
-/// One catalog-declared derivation output edge.
+/// One detached source identity and its model-derived provenance.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ArtifactIndexOutput {
-    /// Repository-relative output path.
-    pub path: PathBuf,
-    /// Closed output representation.
-    pub output_kind: DerivationOutputKind,
-    /// Artifacts whose semantic identity drives generated provenance.
-    pub primary_artifact_ids: Vec<String>,
-    /// Domains which consume or package the output.
-    pub consumers: Vec<ConsumerDomain>,
-    /// Optional output-level resource budget override.
-    pub resource_budget_profile: Option<String>,
-}
-
-/// One fully compiled governed-source identity and consumer view.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ArtifactIndexRecord {
-    /// Stable catalog identity.
+pub struct ModelArtifactIndexRecord {
+    /// Stable public identity.
     pub artifact_id: String,
-    /// Repository-relative native authority.
+    /// Closed family-native artifact kind.
+    pub artifact_kind: String,
+    /// Current repository-relative source path.
     pub authority_path: PathBuf,
-    /// Native source kind.
-    pub artifact_kind: ArtifactKind,
-    /// Permanent contract owner.
-    pub owner: ContractOwner,
+    /// Claiming model family.
+    pub owner: String,
     /// Public artifact version.
     pub version: String,
     /// Compatible suite major.
-    pub compatible_suite_major: u16,
-    /// Release state.
-    pub status: ArtifactStatus,
-    /// Named semantic projection.
-    pub digest_projection: DigestProjection,
-    /// Native or derivation-owned source of the semantic projection.
-    pub semantic_projection_source: SemanticProjectionSource,
-    /// Compiled semantic identity.
+    pub compatible_suite_major: u64,
+    /// Family-native lifecycle status.
+    pub status: String,
+    /// Detached semantic identity.
     pub canonical_digest: String,
-    /// Exact checked-in source identity.
+    /// Exact current-byte identity.
     pub source_digest: String,
-    /// Distinct AC-G-07 identity for bundle artifacts.
-    pub bundle_digest: Option<String>,
-    /// Independently negotiated compatibility family.
-    pub compatibility_family: CompatibilityFamily,
-    /// Required provenance views.
-    pub provenance_requirements: Vec<ProvenanceRequirement>,
-    /// Direct source consumers.
-    pub consumers: Vec<ConsumerDomain>,
+    /// Named semantic projection.
+    pub projection_profile: String,
+    /// Owner-accepted release-census status.
+    pub release_status: String,
+    /// Owning model action.
+    pub compilation_unit: String,
+    /// Authority, evidence, acceptance, or derived role.
+    pub source_role: String,
+    /// Model-declared consumer capabilities.
+    pub consumers: BTreeSet<String>,
+    /// Family resource bounds.
+    pub resource_profile: ArtifactResourceProfile,
+    /// Detached provenance claims.
+    pub provenance: BTreeSet<String>,
 }
 
-/// One peer derivation record with resolved lineage and generator identity.
+/// Canonical model-derived packaged index.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DerivationIndexRecord {
-    /// Stable derivation identity.
-    pub derivation_id: String,
-    /// Closed model-level operation.
-    pub derivation_kind: DerivationKind,
-    /// Typed normalized inputs.
-    pub inputs: Vec<DerivationInput>,
-    /// Typed normalized outputs.
-    pub outputs: Vec<ArtifactIndexOutput>,
-    /// Sorted transitive governed-artifact lineage.
-    pub lineage_artifact_ids: Vec<String>,
-    /// Unit-level resource budget.
-    pub resource_budget_profile: String,
-    /// Derived maintained generator identity.
-    pub generator: GeneratorIdentity,
-}
-
-/// Canonical shared artifact-index document.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ArtifactIndex {
-    /// Generator provenance.
-    #[serde(rename = "_generated")]
-    pub generated: ArtifactIndexGeneration,
+pub struct ModelArtifactIndex {
+    /// Wire schema version.
+    pub schema_version: u64,
+    /// Human-readable derivation authority.
+    pub source: String,
     /// Records sorted by stable artifact identity.
-    pub artifacts: Vec<ArtifactIndexRecord>,
-    /// Peer records sorted by stable derivation identity.
-    pub derivations: Vec<DerivationIndexRecord>,
+    pub artifacts: Vec<ModelArtifactIndexRecord>,
 }
 
-/// Packaged artifact-index validation failure.
+/// Packaged model-index validation failure.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum ArtifactIndexError {
+pub enum ModelArtifactIndexError {
     /// Resource bytes were not strict canonical JSON.
-    #[error("artifact index is not canonical JSON: {0}")]
+    #[error("model artifact index is not canonical JSON: {0}")]
     Canonical(String),
     /// Resource bytes did not decode into the closed model.
-    #[error("artifact index typed decode failed: {0}")]
+    #[error("model artifact index typed decode failed: {0}")]
     Decode(String),
-    /// A record carried a malformed or duplicate identity.
-    #[error("artifact index invariant failed: {0}")]
+    /// A record carried malformed, duplicate, or incomplete provenance.
+    #[error("model artifact index invariant failed: {0}")]
     Invariant(String),
 }
 
-#[allow(clippy::too_many_lines)] // Decode and all closed peer-index invariants form one cache seam.
-fn decode_index() -> Result<ArtifactIndex, ArtifactIndexError> {
-    let canonical = canonicalize_slice(ARTIFACT_INDEX_BYTES)
-        .map_err(|error| ArtifactIndexError::Canonical(error.to_string()))?;
-    if canonical != ARTIFACT_INDEX_BYTES {
-        return Err(ArtifactIndexError::Canonical(
+fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
+    let canonical = canonicalize_slice(MODEL_ARTIFACT_INDEX_BYTES)
+        .map_err(|error| ModelArtifactIndexError::Canonical(error.to_string()))?;
+    if canonical != MODEL_ARTIFACT_INDEX_BYTES {
+        return Err(ModelArtifactIndexError::Canonical(
             "resource bytes differ from RFC 8785 emission".to_owned(),
         ));
     }
-    let index: ArtifactIndex = serde_json::from_slice(ARTIFACT_INDEX_BYTES)
-        .map_err(|error| ArtifactIndexError::Decode(error.to_string()))?;
-    if index.generated.artifact_count != index.artifacts.len() {
-        return Err(ArtifactIndexError::Invariant(
-            "generated artifact_count disagrees with records".to_owned(),
-        ));
-    }
-    if index.generated.derivation_count != index.derivations.len() {
-        return Err(ArtifactIndexError::Invariant(
-            "generated derivation_count disagrees with records".to_owned(),
+    let index: ModelArtifactIndex = serde_json::from_slice(MODEL_ARTIFACT_INDEX_BYTES)
+        .map_err(|error| ModelArtifactIndexError::Decode(error.to_string()))?;
+    if index.schema_version != 1
+        || index.source != "RepositoryModel + accepted release census"
+        || index.artifacts.is_empty()
+    {
+        return Err(ModelArtifactIndexError::Invariant(
+            "index header is unsupported or empty".to_owned(),
         ));
     }
     let mut previous = None;
     for record in &index.artifacts {
         if previous.is_some_and(|value: &str| value >= record.artifact_id.as_str()) {
-            return Err(ArtifactIndexError::Invariant(
+            return Err(ModelArtifactIndexError::Invariant(
                 "artifact IDs are not unique and strictly sorted".to_owned(),
             ));
         }
         validate_checksum(&record.canonical_digest)
-            .map_err(|error| ArtifactIndexError::Invariant(error.to_string()))?;
+            .map_err(|error| ModelArtifactIndexError::Invariant(error.to_string()))?;
         validate_checksum(&record.source_digest)
-            .map_err(|error| ArtifactIndexError::Invariant(error.to_string()))?;
-        if let Some(digest) = &record.bundle_digest {
-            validate_checksum(digest)
-                .map_err(|error| ArtifactIndexError::Invariant(error.to_string()))?;
+            .map_err(|error| ModelArtifactIndexError::Invariant(error.to_string()))?;
+        if record.compatible_suite_major != 1
+            || record.artifact_kind.is_empty()
+            || record.authority_path.as_os_str().is_empty()
+            || record.owner.is_empty()
+            || record.version.is_empty()
+            || record.projection_profile.is_empty()
+            || record.compilation_unit.is_empty()
+            || record.provenance.is_empty()
+            || !matches!(record.release_status.as_str(), "released" | "unreleased")
+            || !matches!(
+                record.source_role.as_str(),
+                "authority" | "evidence-authority" | "acceptance" | "derived"
+            )
+        {
+            return Err(ModelArtifactIndexError::Invariant(format!(
+                "artifact {} has incomplete model provenance",
+                record.artifact_id
+            )));
         }
         previous = Some(record.artifact_id.as_str());
-    }
-    let mut previous_derivation = None;
-    let artifact_ids = index
-        .artifacts
-        .iter()
-        .map(|record| record.artifact_id.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut output_paths = std::collections::BTreeSet::new();
-    for record in &index.derivations {
-        if previous_derivation.is_some_and(|value: &str| value >= record.derivation_id.as_str()) {
-            return Err(ArtifactIndexError::Invariant(
-                "derivation IDs are not unique and strictly sorted".to_owned(),
-            ));
-        }
-        if record.inputs.windows(2).any(|pair| pair[0] >= pair[1]) {
-            return Err(ArtifactIndexError::Invariant(format!(
-                "derivation {} inputs are not unique and sorted",
-                record.derivation_id
-            )));
-        }
-        if record
-            .outputs
-            .windows(2)
-            .any(|pair| pair[0].path >= pair[1].path)
-        {
-            return Err(ArtifactIndexError::Invariant(format!(
-                "derivation {} outputs are not unique and sorted",
-                record.derivation_id
-            )));
-        }
-        if record
-            .lineage_artifact_ids
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-            || record
-                .lineage_artifact_ids
-                .iter()
-                .any(|artifact_id| !artifact_ids.contains(artifact_id.as_str()))
-        {
-            return Err(ArtifactIndexError::Invariant(format!(
-                "derivation {} lineage is not a closed sorted artifact set",
-                record.derivation_id
-            )));
-        }
-        if record.generator.generator_id.is_empty()
-            || record.generator.generator_revision.is_empty()
-            || record.generator.toolchain.is_empty()
-        {
-            return Err(ArtifactIndexError::Invariant(format!(
-                "derivation {} generator identity is incomplete",
-                record.derivation_id
-            )));
-        }
-        for output in &record.outputs {
-            if !output_paths.insert(&output.path)
-                || output.primary_artifact_ids.is_empty()
-                || output
-                    .primary_artifact_ids
-                    .iter()
-                    .any(|artifact_id| !artifact_ids.contains(artifact_id.as_str()))
-            {
-                return Err(ArtifactIndexError::Invariant(format!(
-                    "derivation {} output provenance is invalid",
-                    record.derivation_id
-                )));
-            }
-        }
-        previous_derivation = Some(record.derivation_id.as_str());
     }
     Ok(index)
 }
 
-/// Decode and validate the packaged index exactly once.
+/// Return the once-decoded model artifact index.
 ///
 /// # Errors
 ///
-/// Returns a stable owned error when the compiled resource is non-canonical or violates the
-/// closed index model.
-pub fn artifact_index() -> Result<&'static ArtifactIndex, ArtifactIndexError> {
-    match INDEX.get_or_init(decode_index) {
-        Ok(index) => Ok(index),
-        Err(error) => Err(error.clone()),
-    }
+/// Returns a stable typed failure when the packaged bytes are non-canonical or violate the model.
+pub fn model_artifact_index() -> Result<&'static ModelArtifactIndex, ModelArtifactIndexError> {
+    INDEX
+        .get_or_init(decode_index)
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
-/// BLAKE3 identity of the exact packaged index bytes, computed once.
+/// Digest of the exact packaged model-index bytes.
 #[must_use]
-pub fn artifact_index_digest() -> &'static str {
+pub fn model_artifact_index_digest() -> &'static str {
     INDEX_DIGEST
-        .get_or_init(|| checksum(ARTIFACT_INDEX_BYTES))
+        .get_or_init(|| checksum(MODEL_ARTIFACT_INDEX_BYTES))
         .as_str()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packaged_model_index_is_typed_canonical_and_sorted() {
+        let index = model_artifact_index().unwrap();
+        assert!(index.artifacts.len() > 100);
+        assert!(
+            index
+                .artifacts
+                .windows(2)
+                .all(|pair| pair[0].artifact_id < pair[1].artifact_id)
+        );
+        validate_checksum(model_artifact_index_digest()).unwrap();
+    }
 }

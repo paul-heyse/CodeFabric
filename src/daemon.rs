@@ -15,8 +15,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, Buf
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 
-use crate::contracts::catalog::ArtifactKind;
-use crate::contracts::index::artifact_index;
+use crate::contracts::index::model_artifact_index;
 use crate::contracts::models::DeploymentProfileDocument;
 use crate::coordinator::{
     CoordinatorError, WorkspaceCoordinatorManager, WorkspaceHealthStatus,
@@ -460,11 +459,11 @@ fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
             .as_encoded_bytes(),
     );
     let daemon_instance_id = identity.finalize().to_hex()[..32].to_owned();
-    let public_bundle_versions = artifact_index()
+    let public_bundle_versions = model_artifact_index()
         .map_err(|error| DaemonError::Admin(format!("artifact index: {error}")))?
         .artifacts
         .iter()
-        .filter(|artifact| artifact.artifact_kind == ArtifactKind::BundleManifest)
+        .filter(|artifact| artifact.artifact_kind == "bundle-manifest")
         .map(|artifact| (artifact.artifact_id.clone(), artifact.version.clone()))
         .collect();
     Ok(DaemonDiscovery {
@@ -998,7 +997,9 @@ mod tests {
                 config_root: root.join("config"),
                 socket_endpoint: root.join("runtime/admin.sock"),
                 operational_database: PathBuf::from("operational.sqlite3"),
-                bundle_index: PathBuf::from("contracts/generated/artifact-index.json"),
+                bundle_index: PathBuf::from(
+                    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
+                ),
                 toolchain_identity: PathBuf::from("contracts/toolchain/toolchain-identity.json"),
                 sandbox_policy: "required-for-untrusted".to_owned(),
                 hard_limit_profile: "daemon-default-v1".to_owned(),
@@ -1024,7 +1025,7 @@ runtime_root = {runtime:?}
 config_root = {config:?}
 socket_endpoint = {socket:?}
 operational_database = "operational.sqlite3"
-bundle_index = "contracts/generated/artifact-index.json"
+bundle_index = "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json"
 toolchain_identity = "contracts/toolchain/toolchain-identity.json"
 sandbox_policy = "required-for-untrusted"
 hard_limit_profile = "daemon-default-v1"

@@ -8,9 +8,9 @@ import pytest
 from blake3 import blake3
 
 from codefabric_cpg_mcp.contracts.index import (
-    artifact_index,
-    artifact_index_bytes,
-    artifact_index_digest,
+    model_artifact_index,
+    model_artifact_index_bytes,
+    model_artifact_index_digest,
 )
 from codefabric_cpg_mcp.contracts.json import (
     CanonicalJsonError,
@@ -113,36 +113,21 @@ def test_utf8_bom_is_rejected() -> None:
         canonicalize_json(b"\xef\xbb\xbf{}")
 
 
-def test_packaged_index_has_the_exact_source_census_and_bytes() -> None:
-    catalog = json.loads(
+def test_packaged_model_index_has_the_exact_compiled_census_and_bytes() -> None:
+    compiled_manifest = json.loads(
         (ROOT / "contracts/manifests/suite-manifest.json").read_text(encoding="utf-8")
     )
     repository_resource = (
-        ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json"
+        ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json"
     ).read_bytes()
-    index = artifact_index()
+    index = model_artifact_index()
 
-    assert artifact_index_bytes() == repository_resource
-    assert len(index.artifacts) == len(catalog["artifacts"])
-    assert artifact_index_digest() == checksum(repository_resource)
-    validate_checksum(artifact_index_digest())
-    schema_units = [
-        unit for unit in index.derivations if unit.derivation_kind == "schema-contract-compilation"
+    assert model_artifact_index_bytes() == repository_resource
+    assert [artifact.artifact_id for artifact in index.artifacts] == [
+        artifact["artifact_id"] for artifact in compiled_manifest["artifacts"]
     ]
-    assert len(schema_units) == 1
-    assert {output.output_kind for output in schema_units[0].outputs} == {
-        "operational-store-ddl",
-        "public-json-schema",
-        "rust-table-spec-bindings",
-        "table-spec-manifest",
-    }
-    provider_raw_units = [
-        unit for unit in index.derivations if unit.derivation_kind == "provider-raw-catalog-set"
-    ]
-    assert len(provider_raw_units) == 1
-    assert {output.output_kind for output in provider_raw_units[0].outputs} == {
-        "provider-raw-kind-catalog",
-        "rust-provider-raw-kind-bindings",
-    }
+    assert model_artifact_index_digest() == checksum(repository_resource)
+    validate_checksum(model_artifact_index_digest())
     for artifact in index.artifacts:
         validate_checksum(artifact.canonical_digest)
+        validate_checksum(artifact.source_digest)

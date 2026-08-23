@@ -4,7 +4,7 @@
 **Artifact kind:** Normative document
 **Compatible suite major:** 1
 **Release date:** 2026-08-20
-**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`
+**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json`
 
 **Status:** Released normative implementation specification
 **Synchronized suite version:** 1.3
@@ -35,7 +35,7 @@ status: released
 canonical_digest: external
 ```
 
-The canonical digest and exact source digest are recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
+The canonical digest and exact source digest are recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
 
 ### 0.2 Permanent ownership and precedence
 
@@ -363,9 +363,11 @@ canonical-json = [
   "dep:serde_json_canonicalizer", "dep:thiserror", "dep:unicode-casefold",
   "dep:unicode-normalization",
 ]
-contracts-tooling = [
-  "canonical-json", "dep:prost", "dep:prost-types", "dep:serde_path_to_error",
-  "dep:serde_yaml_ng", "dep:tempfile",
+contract-models = ["canonical-json", "dep:serde_yaml_ng"]
+model-compiler = [
+  "dep:blake3", "dep:gix", "dep:notify-debouncer-full", "dep:petgraph",
+  "dep:rustix", "dep:serde", "dep:serde_json", "dep:serde_json_canonicalizer",
+  "dep:serde_yaml_ng", "dep:tempfile", "dep:thiserror",
 ]
 data-fabric = [
   "canonical-json", "dep:async-trait",
@@ -387,7 +389,7 @@ fact-generation = [
   "dep:tree-sitter-python", "dep:tree-sitter-rust",
 ]
 compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
-daemon = ["contracts-tooling", "data-fabric", "fact-generation", "repository-state", "rpc", "dep:toml", "dep:tracing"]
+daemon = ["contract-models", "data-fabric", "fact-generation", "repository-state", "rpc", "dep:toml", "dep:tracing"]
 local-workstation = ["daemon", "compatibility-probes"]
 proto-tooling = ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"]
 s3-storage = ["data-fabric", "deltalake/s3"]

@@ -198,7 +198,7 @@ _model-profile-changed: _model-profile-edit model-family-check model-incremental
 
 _model-profile-tier-a: _model-profile-changed
 
-_model-profile-release: _model-profile-tier-a model-bootstrap-check model-inventory-check model-release-census-check model-repro-check model-transaction-check adapter-wheel-test features-each policy seed-zero-state-check
+_model-profile-release: _model-profile-tier-a model-bootstrap-check model-inventory-check model-release-census-check model-repro-check model-transaction-check model-zero-state-check adapter-wheel-test features-each policy seed-zero-state-check
 
 [doc("Validate the read-only desired tree under a model assurance profile")]
 [group('gate')]
@@ -345,51 +345,17 @@ adapter-wheel-test:
 [group('adapter')]
 adapter-ci-fast: adapter-lint adapter-type adapter-test
 
-# -------------------------------------------------------- contracts / governance
+# -------------------------------------------------------- model governance
 
-[doc("Check formatting and lint for shared contract tooling")]
-[group('contracts')]
-contracts-tooling-lint:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/contracts tooling/ci
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/contracts tooling/ci
-
-[doc("Validate every catalog JSON Schema against the hermetic Draft 2020-12 metaschema")]
-[group('contracts')]
-schema-check: contracts-tooling-lint
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/contracts/test_json_schema_check.py
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/json_schema_check.py
-
-[doc("Verify fixture oracle classification and immutable normative-KAT boundaries")]
-[group('contracts')]
-fixture-check: contracts-tooling-lint
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/contracts/test_fixture_candidates.py
-    ./scripts/fixture_governance_check.sh
-
-[doc("Verify adapter Contract-IR generation and structural governance")]
-[group('contracts')]
-adapter-contracts-governance: contracts-tooling-lint
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py check
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/contracts/test_generate_adapter_models.py
-    ./scripts/adapter_contract_governance_check.sh
-
-[doc("Verify generated adapter contracts including FastMCP runtime equivalence")]
-[group('contracts')]
-adapter-contracts-check: adapter-contracts-governance
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_adapter_contracts.py
-
-[doc("Generate adapter Contract-IR outputs twice and compare exact bytes")]
-[group('contracts')]
-adapter-contracts-repro-check:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py repro-check
-
-[doc("Benchmark adapter model import, schema build, validation, and serialization")]
-[group('perf')]
-adapter-contracts-bench:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/benchmark_adapter_contracts.py
+[doc("Check formatting and lint for the model compiler and plan-governance helpers")]
+[group('gate')]
+model-tooling-lint:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/model tooling/ci
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/model tooling/ci
 
 [doc("Validate active plan, review, and schema-2 execution-state contracts")]
 [group('gate')]
-artifacts-check: contracts-tooling-lint
+artifacts-check: model-tooling-lint
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_artifact_contracts.py
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py artifacts-check
 
@@ -409,50 +375,6 @@ plan-status:
 tracked-target-zero-state-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py tracked-target-zero-state-check
 
-[doc("Validate catalog-v2 derivation units, resolved invocations, and legacy zero-state")]
-[group('contracts')]
-compilation-units-check:
-    ./scripts/compilation_units_check.sh
-    cargo nextest run --locked --no-default-features --features contracts-tooling -E 'test(wp06a)' --no-tests=fail
-
-[doc("Prove Tier-A command coverage and materialize the exact current graph")]
-[group('gate')]
-proof-coverage-check: contracts-tooling-lint
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_proof_coverage.py
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/proof_coverage.py
-
-[doc("Verify committed Protobuf outputs and generator identity")]
-[group('contracts')]
-proto-check:
-    ./scripts/proto_dependency_check.sh
-    cargo check --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen
-    cargo clippy --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen -- -D warnings
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/proto/generate.py tooling/proto/test_generate.py
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/proto/generate.py tooling/proto/test_generate.py
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/proto/test_generate.py codefabric-cpg-mcp/tests/test_proto.py
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py check
-
-[doc("Generate twice in isolated roots and compare byte digests")]
-[group('contracts')]
-proto-repro-check: proto-check
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py repro-check
-
-[doc("Verify the AC-G-05 tree, JCS corpus, generated bytes, and negative fixtures")]
-[group('contracts')]
-contracts-verify: schema-check fixture-check
-    cargo run --locked --no-default-features --features contracts-tooling,fact-generation --bin codefabric-contracts -- verify --profile full
-    ./scripts/contracts_negative_check.sh
-
-[doc("Require every contract artifact to be released with zero warnings")]
-[group('contracts')]
-contracts-verify-released:
-    cargo run --locked --no-default-features --features contracts-tooling,fact-generation --bin codefabric-contracts -- verify --profile released
-
-[doc("Generate contracts twice in isolated roots and compare exact bytes")]
-[group('contracts')]
-contracts-repro-check:
-    ./scripts/contracts_repro_check.sh
-
 [doc("Prove family duplicate policy and its expected-failure fixture")]
 [group('gate')]
 duplicate-family-check:
@@ -463,9 +385,24 @@ duplicate-family-check:
 seed-zero-state-check:
     ./scripts/seed_zero_state_check.sh
 
-[doc("Run structural, artifact, graph-policy, and generated-output governance")]
+[doc("Prove superseded catalog, writer, proof-manifest, and packet-mutation surfaces stay absent")]
 [group('gate')]
-governance: governance-scan artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
+model-zero-state-check:
+    ./scripts/model_zero_state_check.sh
+
+[doc("Run the exhaustive read-only model release certification")]
+[group('gate')]
+model-release-check:
+    ./scripts/model_release_check.sh
+
+[doc("Validate the sealed inactive Waves successor without changing the active pointer")]
+[group('gate')]
+model-handoff-check:
+    ./scripts/model_handoff_check.sh
+
+[doc("Run model-derived structural, artifact, provenance, and zero-state governance")]
+[group('gate')]
+governance: governance-scan model-design-contract-check model-assurance-check model-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
@@ -473,16 +410,16 @@ ci-fast: root-ci-fast extractor-ci-fast sidecar-ci-fast adapter-ci-fast governan
 
 [doc("ci-fast plus policy, the ci nextest profile, and snapshot review state")]
 [group('gate')]
-ci-pr: ci-fast policy sidecar-policy proto-repro-check
+ci-pr: ci-fast policy sidecar-policy
     cargo nextest run -P ci
     cargo test --doc
     cargo insta pending-snapshots
 
 # ------------------------------------------------------- coverage / test quality
 
-# Coverage answers what executed, not whether assertions constrain behavior; pair it with
-# mutation testing (spec sections 21 and 62.4). No percentage threshold is configured --
-# section 21.1 warns against adopting one merely because the tool supports it.
+# Coverage answers what executed, not whether assertions constrain behavior. No percentage
+# threshold is configured; section 21.1 warns against adopting one merely because a tool
+# supports it.
 
 [doc("Rust line coverage to target/coverage/lcov.info")]
 [group('quality')]
@@ -498,37 +435,10 @@ coverage:
 snapshots-review:
     cargo insta review
 
-# A surviving mutant is not automatically a bug (spec section 22). Triage it against
-# coverage: uncovered plus surviving means establish reachability first; covered plus
-# surviving means strengthen the assertion.
-
 [doc("Mutation-test one changed file")]
 [group('quality')]
 mutants-file path:
     cargo mutants -f {{path}}
-
-[doc("Mutation-test WP29 provider admission, supersession, and cancellation")]
-[group('quality')]
-mutants-wp29:
-    cargo mutants -f src/provider_runtime.rs \
-      -F 'ProviderRuntime::(validate_job|supersession_key|transition|acquire|acquire_all|finish_requested|finish_adapter_result)|ProviderExecutor' \
-      -- --lib provider_runtime::tests
-
-[doc("Mutation-test WP30 Tree-sitter inventory, bounds, edits, and atomic publication")]
-[group('quality')]
-mutants-wp30:
-    cargo mutants --output target/wp30-mutants -f src/tree_sitter_adapter.rs \
-      --no-default-features --features fact-generation \
-      -F 'TreeSitterAdapter::(parse_candidate|reject)|ProviderBoundaryMap::(new|original)|progress_abort_reason|exceeds_limit|deadline_exceeded|cancellation_due|runtime_node_matches|validate_runtime_inventory|walk_tree|run_recovery_query|validate_edit|edit_geometry_valid|edit_boundaries_valid|edit_unchanged_regions_match|point_at' \
-      -- --lib tree_sitter_adapter::tests
-
-[doc("Mutation-test WP31 Ruff inventory, retained indexes, projection, bounds, and atomic publication")]
-[group('quality')]
-mutants-wp31:
-    cargo mutants --iterate --output target/wp31-mutants -f src/ruff_adapter.rs -f src/provider_types.rs \
-      --no-default-features --features fact-generation \
-      -F 'RuffAdapter::(parse|check_progress|reject)|ProviderText::provider_image_fingerprint|ProviderBoundaryMap::(new|original)|RuffAstCategory::from_registry_code|validate_runtime_inventory|project_tokens|token_spelling|link_tokens_to_ast|token_ast_compatible|token_class|node_key|evaluation_ordinals|AstProjectionVisitor::(finish|fail)|child_role|same_node|is_(target|condition|callee|annotation|iterable|value)_child|project_comments|project_directives|directive_target|project_strings|string_syntax_id|project_docstrings|project_diagnostics|diagnostic|project_correspondences|tree_field_compatible|ranges_overlap|sum_lengths|estimate_output_bytes|deadline_exceeded|elapsed_exceeds_deadline' \
-      -- --lib ruff_adapter::tests
 
 # Nightly is the extractor's production toolchain and remains isolated from this root.
 # Miri explores executions; it never proves soundness (spec section 24.2). Record
@@ -655,27 +565,6 @@ profile-build:
 root-fmt-write:
     cargo fmt --all
 
-[doc("LEGACY ALIAS: delegate all generated reconciliation to model-sync")]
-[group('mutating')]
-proto-gen:
-    just model-sync
-
-[confirm("Accept the current production descriptor census as the compatibility baseline. Continue?")]
-[doc("MUTATES: accept a reviewed Protobuf compatibility baseline and regenerate outputs")]
-[group('mutating')]
-proto-baseline-accept:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py accept-baseline
-
-[doc("LEGACY ALIAS: delegate all generated reconciliation to model-sync")]
-[group('mutating')]
-contracts-gen:
-    just model-sync
-
-[doc("LEGACY ALIAS: delegate all generated reconciliation to model-sync")]
-[group('mutating')]
-adapter-contracts-gen:
-    just model-sync
-
 [confirm("Reconcile every model-owned Derived output transactionally. Continue?")]
 [doc("MUTATES: apply the complete validated model DesiredTree through the sole writer")]
 [group('mutating')]
@@ -685,7 +574,7 @@ model-sync:
 [doc("MUTATES: emit fixture candidates to an isolated review directory")]
 [group('mutating')]
 fixture-candidates output_dir="target/fixture-candidates":
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/fixture_candidates.py --output-dir "{{output_dir}}"
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/model/fixture_candidates.py --output-dir "{{output_dir}}"
 
 [doc("MUTATES DISPOSABLE STATE: emit the released-artifact census review candidate under target/")]
 [group('mutating')]

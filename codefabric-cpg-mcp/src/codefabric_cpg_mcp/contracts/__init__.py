@@ -19,13 +19,13 @@ from .identity import (
     validate_workspace_paths,
 )
 from .index import (
-    ArtifactIndex,
-    ArtifactIndexGeneration,
-    ArtifactIndexOutput,
-    ArtifactIndexRecord,
-    artifact_index,
-    artifact_index_bytes,
-    artifact_index_digest,
+    ExternalDriverBudget,
+    ModelArtifactIndex,
+    ModelArtifactRecord,
+    NamedResourceProfile,
+    model_artifact_index,
+    model_artifact_index_bytes,
+    model_artifact_index_digest,
 )
 from .json import (
     PROFILE,
@@ -43,10 +43,10 @@ from .json import (
 
 __all__ = [
     "PROFILE",
-    "ArtifactIndex",
-    "ArtifactIndexGeneration",
-    "ArtifactIndexOutput",
-    "ArtifactIndexRecord",
+    "ExternalDriverBudget",
+    "ModelArtifactIndex",
+    "ModelArtifactRecord",
+    "NamedResourceProfile",
     "CbefField",
     "CbefRecord",
     "CbefValue",
@@ -57,9 +57,9 @@ __all__ = [
     "SOURCE_CONTEXT_ID",
     "TypeCode",
     "WorkspacePath",
-    "artifact_index",
-    "artifact_index_bytes",
-    "artifact_index_digest",
+    "model_artifact_index",
+    "model_artifact_index_bytes",
+    "model_artifact_index_digest",
     "canonicalize_json",
     "canonicalize_value",
     "canonical_type_term",

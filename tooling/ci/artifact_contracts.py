@@ -18,10 +18,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tooling.ci.proof_coverage import load_just_recipes
-
 ROOT = Path(__file__).resolve().parents[2]
 ACTIVE_PLAN_POINTER = Path("docs/plans/active-plan.json")
+
+
+def load_just_recipes(root: Path = ROOT) -> dict[str, Any]:
+    """Read the live recipe graph directly from Just's structured interface."""
+    completed = subprocess.run(
+        ("just", "--dump", "--dump-format", "json"),
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    dump = json.loads(completed.stdout)
+    recipes = dump.get("recipes")
+    if not isinstance(recipes, dict):
+        raise ArtifactContractError("just JSON did not contain a recipe map")
+    return recipes
+
 
 PLAN_REQUIRED_KEYS = {
     "artifact",

@@ -1,5 +1,12 @@
 # Fixture oracle change record
 
+## 2026-08-23 model-derived fixture census
+
+- Replaced the authored fixture membership manifest with a compatibility projection derived from
+  model-discovered evidence paths and fixed family classification/ownership rules.
+- Normative answers, negative cases, and owner acceptance remain outside routine renderer write
+  authority; only their sorted census view is generated.
+
 ## 2026-08-22 source/syntax canonicalization
 
 - Added exact Arrow IPC projection digests and row counts for the canonical

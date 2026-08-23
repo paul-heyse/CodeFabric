@@ -332,7 +332,7 @@ specs. Consult this before concluding that you have failed to find something.
 The suite governance and release manifest — cited by every spec's `§0` and previously missing —
 **is present**. `SUITE` Part II resolves all 84 `G-NN` owners, and `SUITE` Part V defines
 Readiness Gates A–G. The generated
-`codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json` is present and is
+`codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json` is present and is
 the single packaged value authority cited by every spec's `§0.1` and `SUITE AC-G-02`; its
 released profile must carry each governed artifact's semantic `canonical_digest` and
 exact-byte `source_digest`. Rust embeds these bytes directly and Python loads the same package

@@ -11,7 +11,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior};
 use thiserror::Error;
 
-use crate::contracts::index::artifact_index;
+use crate::contracts::index::model_artifact_index;
 use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
 
 const SCHEMA_VERSION: u32 = 6;
@@ -848,7 +848,7 @@ pub fn operational_ddl_digest() -> String {
 }
 
 fn verify_ddl_lineage() -> Result<(), OperationalStoreError> {
-    let index = artifact_index().map_err(|error| {
+    let index = model_artifact_index().map_err(|error| {
         OperationalStoreError::DdlLineage(format!("artifact index unavailable: {error}"))
     })?;
     let expected = index

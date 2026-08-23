@@ -19,13 +19,13 @@ from tooling.ci.artifact_contracts import (
     commit_trust,
     declared_inputs,
     derive_plan_status,
+    load_just_recipes,
     load_state,
     parse_frontmatter,
     plan_ids,
     validate_artifacts,
     validate_state,
 )
-from tooling.ci.proof_coverage import load_just_recipes
 
 STATE = ROOT / str(parse_frontmatter(DEFAULT_PLAN)["state_path"])
 

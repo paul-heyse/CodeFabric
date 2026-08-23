@@ -46,12 +46,37 @@ fn main() -> ExitCode {
         }
         Some("release-census-check") => release_census_check(&arguments.collect::<Vec<_>>()),
         Some("sync") => sync(&arguments.collect::<Vec<_>>()),
+        Some("reconcile-check") => reconcile_check(&arguments.collect::<Vec<_>>()),
         Some("watch") => watch(&arguments.collect::<Vec<_>>()),
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check <edit|changed|tier-a|release> [--root root] | assurance [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | sync --confirm [root] | watch [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check <edit|changed|tier-a|release> [--root root] | assurance [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | reconcile-check [root] | sync --confirm [root] | watch [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn reconcile_check(arguments: &[String]) -> ExitCode {
+    let root = match arguments {
+        [] => std::path::PathBuf::from("."),
+        [root] if root != "--root" => std::path::PathBuf::from(root),
+        [flag, root] if flag == "--root" => std::path::PathBuf::from(root),
+        _ => {
+            eprintln!("reconcile-check accepts one optional root path");
+            return ExitCode::FAILURE;
+        }
+    };
+    match transaction::check_current(&root).and_then(|report| {
+        serde_json::to_string(&report).map_err(transaction::TransactionError::Json)
+    }) {
+        Ok(report) => {
+            println!("{report}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::FAILURE
         }
     }
@@ -425,8 +450,7 @@ fn inventory(arguments: &[String]) -> ExitCode {
     )
     .and_then(|model| {
         let summary = model.summary()?;
-        let shadow = repository_model::compare_legacy_catalog(&root, &model).ok();
-        serde_json::to_string(&serde_json::json!({"summary": summary, "shadow": shadow}))
+        serde_json::to_string(&serde_json::json!({"summary": summary}))
             .map_err(repository_model::RepositoryModelError::Json)
     }) {
         Ok(output) => {
@@ -459,17 +483,7 @@ fn explain(arguments: &[String]) -> ExitCode {
         Ok((model, plan)) => {
             let explanations = model.explain(target);
             let plan_explanations = plan.explain(target);
-            let shadow = repository_model::compare_legacy_catalog(&root, &model)
-                .ok()
-                .map(|report| {
-                    report
-                        .mismatches
-                        .into_iter()
-                        .filter(|mismatch| mismatch.target == *target)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            if explanations.is_empty() && plan_explanations.is_empty() && shadow.is_empty() {
+            if explanations.is_empty() && plan_explanations.is_empty() {
                 eprintln!("no model node or path matches {target}");
                 ExitCode::FAILURE
             } else {
@@ -478,7 +492,6 @@ fn explain(arguments: &[String]) -> ExitCode {
                     serde_json::to_string(&serde_json::json!({
                         "model": explanations,
                         "plan": plan_explanations,
-                        "shadow": shadow,
                     }))
                     .expect("typed explanations serialize")
                 );

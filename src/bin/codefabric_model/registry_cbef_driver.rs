@@ -4,16 +4,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
     DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
-    rustfmt_source,
+    process_stage_root, rustfmt_source,
 };
 use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
@@ -25,10 +27,18 @@ const ENUM_PATH: &str = "contracts/registry/enum-registry.yaml";
 const FLAG_PATH: &str = "contracts/registry/flag-registry.yaml";
 const RUST_RECIPES_PATH: &str = "src/generated/model_identity_recipes.rs";
 const RUST_REGISTRIES_PATH: &str = "src/generated/model_registries.rs";
+const RUST_RUNTIME_REGISTRIES_PATH: &str = "src/generated/registries.rs";
 const PYTHON_REGISTRIES_PATH: &str =
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py";
 const PROJECTION_PATH: &str = "contracts/generated/model/registry-cbef.json";
+const PROVIDER_TOOL_PATH: &str = "tooling/model/provider_inventory.rs";
+const CARGO_MANIFEST_PATH: &str = "Cargo.toml";
+const CARGO_LOCK_PATH: &str = "Cargo.lock";
+const PROVIDER_RUST_PATH: &str = "src/generated/provider_raw_kinds.rs";
+const PROVIDER_CATALOG_ROOT: &str = "contracts/generated/provider-raw-kinds";
+const TREE_SITTER_RECOVERY_QUERY: &str = "(ERROR) @error\n(MISSING) @missing\n";
 const MAX_AUTHORITY_BYTES: usize = 8 * 1024 * 1024;
+const MAX_PROVIDER_PROBE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Compile one governed registry through the same closed family-native records used by runtime
 /// validation, returning its detached semantic identity. Unknown non-registry families return
@@ -412,14 +422,130 @@ pub struct RegistryCbefPlan {
     cbef: CbefAuthority,
     enums: EnumRegistry,
     flags: FlagRegistry,
+    registry_values: BTreeMap<String, Value>,
+    provider_probe: ProviderProbe,
+    provider_tool_identity: Value,
     source_fence: DriverSourceFence,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderProbe {
+    schema_version: u8,
+    tree_sitter: Vec<TreeSitterProbe>,
+    ruff: RuffProbe,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TreeSitterProbe {
+    catalog_id: String,
+    provider_version: String,
+    language: String,
+    grammar_abi: usize,
+    node_types_source: String,
+    raw_kinds: Vec<TreeSitterRawKind>,
+    fields: Vec<TreeSitterRawField>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TreeSitterRawKind {
+    raw_kind_id: u16,
+    raw_name: String,
+    named: bool,
+    visible: bool,
+    supertype: bool,
+    subtypes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TreeSitterRawField {
+    field_id: u16,
+    field_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuffProbe {
+    catalog_id: String,
+    provider_version: String,
+    language: String,
+    node_kinds: Vec<RuffRawKind>,
+    token_kinds: Vec<RuffRawKind>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RuffRawKind {
+    raw_kind_id: u16,
+    raw_name: String,
+}
+
 /// Registry/CBEF model driver.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct RegistryCbefDriver;
+#[derive(Clone, Debug)]
+pub struct RegistryCbefDriver {
+    repository_root: PathBuf,
+}
 
 impl RegistryCbefDriver {
+    #[must_use]
+    pub fn for_repository(repository_root: &Path) -> Self {
+        Self {
+            repository_root: repository_root.to_owned(),
+        }
+    }
+
+    fn source_paths(&self) -> Result<Vec<String>, DriverProtocolError> {
+        let registry_root = self.repository_root.join("contracts/registry");
+        let mut paths = vec![
+            CBEF_PATH.to_owned(),
+            "contracts/rpc/feature-registry.yaml".to_owned(),
+            CARGO_MANIFEST_PATH.to_owned(),
+            CARGO_LOCK_PATH.to_owned(),
+            PROVIDER_TOOL_PATH.to_owned(),
+        ];
+        for entry in fs::read_dir(&registry_root).map_err(|source| DriverProtocolError::Io {
+            path: registry_root.clone(),
+            source,
+        })? {
+            let entry = entry.map_err(|source| DriverProtocolError::Io {
+                path: registry_root.clone(),
+                source,
+            })?;
+            let file_type = entry
+                .file_type()
+                .map_err(|source| DriverProtocolError::Io {
+                    path: entry.path(),
+                    source,
+                })?;
+            if file_type.is_symlink() {
+                return Err(DriverProtocolError::InvalidAuthority(format!(
+                    "registry source is a symlink: {}",
+                    entry.path().display()
+                )));
+            }
+            if file_type.is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "yaml")
+            {
+                let relative = entry
+                    .path()
+                    .strip_prefix(&self.repository_root)
+                    .map_err(|_| DriverProtocolError::InvalidDescriptor)?
+                    .to_str()
+                    .ok_or(DriverProtocolError::InvalidDescriptor)?
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                paths.push(relative);
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
     fn output(
         id: &str,
         path: &str,
@@ -541,7 +667,8 @@ impl ModelDriver for RegistryCbefDriver {
             family: StableId::parse("family:registry-cbef".to_owned())
                 .map_err(|_| DriverProtocolError::InvalidDescriptor)?,
             rule_version: "registry-cbef-driver-v1".to_owned(),
-            sources: [CBEF_PATH, ENUM_PATH, FLAG_PATH]
+            sources: self
+                .source_paths()?
                 .into_iter()
                 .map(|path| {
                     SafeOutputPath::parse(path.as_bytes().to_vec())
@@ -561,6 +688,11 @@ impl ModelDriver for RegistryCbefDriver {
                     DriverOutputRole::RustBinding,
                 )?,
                 Self::output(
+                    "output:model-runtime-registries-rust",
+                    RUST_RUNTIME_REGISTRIES_PATH,
+                    DriverOutputRole::RustBinding,
+                )?,
+                Self::output(
                     "output:model-registries-python",
                     PYTHON_REGISTRIES_PATH,
                     DriverOutputRole::PythonBinding,
@@ -570,11 +702,31 @@ impl ModelDriver for RegistryCbefDriver {
                     PROJECTION_PATH,
                     DriverOutputRole::CanonicalProjection,
                 )?,
+                Self::output(
+                    "output:model-provider-raw-rust",
+                    PROVIDER_RUST_PATH,
+                    DriverOutputRole::RustBinding,
+                )?,
+                Self::output(
+                    "output:model-provider-tree-sitter-python",
+                    &format!("{PROVIDER_CATALOG_ROOT}/tree-sitter-python-0-25-0.json"),
+                    DriverOutputRole::CanonicalProjection,
+                )?,
+                Self::output(
+                    "output:model-provider-tree-sitter-rust",
+                    &format!("{PROVIDER_CATALOG_ROOT}/tree-sitter-rust-0-24-2.json"),
+                    DriverOutputRole::CanonicalProjection,
+                )?,
+                Self::output(
+                    "output:model-provider-ruff-python",
+                    &format!("{PROVIDER_CATALOG_ROOT}/ruff-python-0-0-7.json"),
+                    DriverOutputRole::CanonicalProjection,
+                )?,
             ],
             resource_profile: DriverResourceProfile {
                 max_source_bytes: MAX_AUTHORITY_BYTES,
                 max_output_bytes: 4 * 1024 * 1024,
-                max_outputs: 8,
+                max_outputs: 12,
             },
         };
         descriptor.validate()?;
@@ -589,11 +741,60 @@ impl ModelDriver for RegistryCbefDriver {
         let flags = parse_yaml::<FlagRegistry>(repository_root, FLAG_PATH)?;
         validate_authorities(&cbef, &enums, &flags)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let mut registry_values = BTreeMap::new();
+        for source in descriptor.sources.iter().filter(|source| {
+            source.display() != CBEF_PATH
+                && Path::new(&source.display())
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("yaml"))
+        }) {
+            let bytes = read_stable(&repository_root.join(source.display()), MAX_AUTHORITY_BYTES)?;
+            let yaml: serde_yaml_ng::Value =
+                serde_yaml_ng::from_slice(&bytes).map_err(|error| {
+                    DriverProtocolError::InvalidAuthority(format!("{}: {error}", source.display()))
+                })?;
+            let value = serde_json::to_value(yaml).map_err(|error| {
+                DriverProtocolError::InvalidAuthority(format!("{}: {error}", source.display()))
+            })?;
+            let artifact_id = value
+                .get("artifact_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    DriverProtocolError::InvalidAuthority(format!(
+                        "{} has no artifact_id",
+                        source.display()
+                    ))
+                })?
+                .to_owned();
+            if artifact_id != "codefabric.rpc.feature-registry"
+                && detached_registry_identity(&artifact_id, &bytes)
+                    .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?
+                    .is_none()
+            {
+                return Err(DriverProtocolError::InvalidAuthority(format!(
+                    "unclaimed registry authority {artifact_id}"
+                )));
+            }
+            if registry_values.insert(artifact_id.clone(), value).is_some() {
+                return Err(DriverProtocolError::InvalidAuthority(format!(
+                    "duplicate registry authority {artifact_id}"
+                )));
+            }
+        }
+        let (provider_probe, provider_tool_identity) = run_provider_probe(repository_root)
+            .map_err(|error| DriverProtocolError::ExternalTool {
+                tool: "codefabric-provider-inventory",
+                detail: error.to_string(),
+            })?;
+        source_fence.verify(repository_root)?;
         Ok(RegistryCbefPlan {
             descriptor,
             cbef,
             enums,
             flags,
+            registry_values,
+            provider_probe,
+            provider_tool_identity,
             source_fence,
         })
     }
@@ -603,24 +804,47 @@ impl ModelDriver for RegistryCbefDriver {
         plan: &Self::Plan,
         staging_root: &StagingRoot,
     ) -> Result<Vec<SafeOutputPath>, DriverProtocolError> {
-        let outputs = [
+        let provider_catalogs = render_provider_catalogs(plan)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let provider_rust = render_provider_rust(plan, &provider_catalogs)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let mut outputs: Vec<(String, Vec<u8>)> = vec![
             (
-                RUST_RECIPES_PATH,
+                RUST_RECIPES_PATH.to_owned(),
                 rustfmt_source(&render_rust_recipes(&plan.cbef))?,
             ),
             (
-                RUST_REGISTRIES_PATH,
+                RUST_REGISTRIES_PATH.to_owned(),
                 rustfmt_source(&render_rust_registries(&plan.enums, &plan.flags))?,
             ),
             (
-                PYTHON_REGISTRIES_PATH,
+                RUST_RUNTIME_REGISTRIES_PATH.to_owned(),
+                rustfmt_source(
+                    &render_rust_runtime_registries(
+                        &plan.registry_values,
+                        &plan.enums,
+                        &plan.flags,
+                    )
+                    .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?,
+                )?,
+            ),
+            (
+                PYTHON_REGISTRIES_PATH.to_owned(),
                 render_python_registries(&plan.enums, &plan.flags),
             ),
             (
-                PROJECTION_PATH,
+                PROJECTION_PATH.to_owned(),
                 render_projection(plan).map_err(|_| DriverProtocolError::InvalidDescriptor)?,
             ),
+            (
+                PROVIDER_RUST_PATH.to_owned(),
+                rustfmt_source(&provider_rust)?,
+            ),
         ];
+        for (catalog_id, bytes) in provider_catalogs {
+            outputs.push((format!("{PROVIDER_CATALOG_ROOT}/{catalog_id}.json"), bytes));
+        }
+        outputs.sort_by(|left, right| left.0.cmp(&right.0));
         let mut rendered = Vec::new();
         for (path, bytes) in outputs {
             let path = SafeOutputPath::parse(path.as_bytes().to_vec())
@@ -638,9 +862,9 @@ impl ModelDriver for RegistryCbefDriver {
 ///
 /// Returns a driver, authority, projection, or staging error.
 pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, RegistryCbefError> {
-    let driver = RegistryCbefDriver;
+    let driver = RegistryCbefDriver::for_repository(repository_root);
     let plan = driver.plan(repository_root)?;
-    let stage_path = repository_root.join("target/model-stage/registry-cbef-shadow");
+    let stage_path = process_stage_root(repository_root, "registry-cbef-shadow");
     if stage_path.exists() {
         fs::remove_dir_all(&stage_path).map_err(|source| RegistryCbefError::Io {
             path: stage_path.clone(),
@@ -658,7 +882,12 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
         &plan.descriptor,
         &plan.source_fence,
         &staging,
-        || executable_tool_identity("rustfmt", &["--version"]),
+        || {
+            Ok(json!({
+                "rustfmt": executable_tool_identity("rustfmt", &["--version"] )?,
+                "provider_inventory": plan.provider_tool_identity.clone(),
+            }))
+        },
         || driver.render(&plan, &staging),
     )?;
     plan.source_fence.verify(repository_root)?;
@@ -680,6 +909,7 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
         cache_lookup,
         stage_root: staging.path().to_string_lossy().into_owned(),
+        tool_identity: plan.provider_tool_identity.clone(),
     })
 }
 
@@ -696,6 +926,7 @@ pub struct RegistryCbefReport {
     pub rendered_outputs: Vec<String>,
     pub cache_lookup: CacheLookup,
     pub stage_root: String,
+    pub tool_identity: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -706,6 +937,663 @@ struct RegistryCbefProjection {
     cbef_domains: Vec<CbefDomainSpec>,
     enum_domains: Vec<EnumDomain>,
     flag_domains: Vec<FlagDomain>,
+}
+
+fn run_provider_probe(repository_root: &Path) -> Result<(ProviderProbe, Value), RegistryCbefError> {
+    let rustc = command_text(Command::new("rustc").args(["--version", "--verbose"]))?;
+    let mut material = Vec::new();
+    for path in [CARGO_MANIFEST_PATH, CARGO_LOCK_PATH, PROVIDER_TOOL_PATH] {
+        material.extend(read_stable(
+            &repository_root.join(path),
+            MAX_PROVIDER_PROBE_BYTES,
+        )?);
+    }
+    material.extend(rustc.as_bytes());
+    material.extend(b"provider-inventory-tooling|debug|host");
+    let action_key = blake3::hash(&material).to_hex().to_string();
+    let target = repository_root
+        .join("target/model-tools/provider-inventory")
+        .join(&action_key);
+    let status = Command::new("cargo")
+        .args([
+            "build",
+            "--offline",
+            "--locked",
+            "--no-default-features",
+            "--features",
+            "provider-inventory-tooling",
+            "--bin",
+            "codefabric-provider-inventory",
+            "--target-dir",
+        ])
+        .arg(&target)
+        .current_dir(repository_root)
+        .status()
+        .map_err(|source| RegistryCbefError::Io {
+            path: PathBuf::from("cargo"),
+            source,
+        })?;
+    if !status.success() {
+        return Err(RegistryCbefError::ProviderTool(
+            "provider inventory build failed".to_owned(),
+        ));
+    }
+    let executable = target.join("debug/codefabric-provider-inventory");
+    let stage_home = process_stage_root(repository_root, "provider-inventory-home");
+    fs::create_dir_all(&stage_home).map_err(|source| RegistryCbefError::Io {
+        path: stage_home.clone(),
+        source,
+    })?;
+    let output = Command::new(&executable)
+        .env_clear()
+        .env("HOME", &stage_home)
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("NO_PROXY", "*")
+        .env("no_proxy", "*")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|source| RegistryCbefError::Io {
+            path: executable.clone(),
+            source,
+        })?;
+    if !output.status.success() || output.stdout.len() > MAX_PROVIDER_PROBE_BYTES {
+        return Err(RegistryCbefError::ProviderTool(
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+    let probe: ProviderProbe = serde_json::from_slice(&output.stdout)?;
+    if probe.schema_version != 1 {
+        return Err(RegistryCbefError::ProviderTool(
+            "unsupported provider probe schema".to_owned(),
+        ));
+    }
+    let executable_bytes = read_stable(&executable, MAX_PROVIDER_PROBE_BYTES)?;
+    let identity = json!({
+        "action_key": format!("b3:{action_key}"),
+        "executable_digest": format!("b3:{}", blake3::hash(&executable_bytes).to_hex()),
+        "cargo_lock_digest": digest_file(repository_root, CARGO_LOCK_PATH)?,
+        "cargo_manifest_digest": digest_file(repository_root, CARGO_MANIFEST_PATH)?,
+        "source_digest": digest_file(repository_root, PROVIDER_TOOL_PATH)?,
+        "features": ["provider-inventory-tooling"],
+        "profile": "debug",
+        "rustc": rustc.trim(),
+        "protocol": "codefabric-provider-inventory-v1",
+    });
+    Ok((probe, identity))
+}
+
+fn command_text(command: &mut Command) -> Result<String, RegistryCbefError> {
+    let output = command.output().map_err(|source| RegistryCbefError::Io {
+        path: PathBuf::from("external-command"),
+        source,
+    })?;
+    if !output.status.success() {
+        return Err(RegistryCbefError::ProviderTool(
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn digest_file(repository_root: &Path, relative: &str) -> Result<String, RegistryCbefError> {
+    let bytes = read_stable(&repository_root.join(relative), MAX_PROVIDER_PROBE_BYTES)?;
+    Ok(format!("b3:{}", blake3::hash(&bytes).to_hex()))
+}
+
+fn provider_normalizations(
+    plan: &RegistryCbefPlan,
+) -> Result<BTreeMap<String, governed::ProviderNormalization>, RegistryCbefError> {
+    let value = plan
+        .registry_values
+        .get("codefabric.registry.provider-normalization-registry")
+        .ok_or_else(|| {
+            RegistryCbefError::RegistryModel("provider normalization is absent".to_owned())
+        })?;
+    let records: Vec<governed::ProviderNormalization> =
+        serde_json::from_value(value.get("records").cloned().ok_or_else(|| {
+            RegistryCbefError::RegistryModel("provider normalization records are absent".to_owned())
+        })?)?;
+    let mut result = BTreeMap::new();
+    for record in records {
+        let id = record.raw_catalog_id.clone();
+        if result.insert(id.clone(), record).is_some() {
+            return Err(RegistryCbefError::RegistryModel(format!(
+                "duplicate provider normalization for {id}"
+            )));
+        }
+    }
+    Ok(result)
+}
+
+fn provider_catalog_ids(plan: &RegistryCbefPlan) -> Result<BTreeSet<String>, RegistryCbefError> {
+    let value = plan
+        .registry_values
+        .get("codefabric.registry.provider-registry")
+        .ok_or_else(|| {
+            RegistryCbefError::RegistryModel("provider registry is absent".to_owned())
+        })?;
+    let records: Vec<governed::Provider> =
+        serde_json::from_value(value.get("records").cloned().ok_or_else(|| {
+            RegistryCbefError::RegistryModel("provider records are absent".to_owned())
+        })?)?;
+    Ok(records
+        .into_iter()
+        .flat_map(|provider| provider.raw_catalog_ids)
+        .collect())
+}
+
+fn provider_input_identities(plan: &RegistryCbefPlan) -> Result<Vec<Value>, RegistryCbefError> {
+    let required = BTreeSet::from([
+        "codefabric.registry.provider-normalization-registry",
+        "codefabric.registry.provider-registry",
+        "codefabric.registry.provider-resource-profile-registry",
+    ]);
+    required
+        .into_iter()
+        .map(|artifact_id| {
+            let value = plan.registry_values.get(artifact_id).ok_or_else(|| {
+                RegistryCbefError::RegistryModel(format!("provider input {artifact_id} is absent"))
+            })?;
+            let canonical_digest = value
+                .get("canonical_digest")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    RegistryCbefError::RegistryModel(format!(
+                        "provider input {artifact_id} has no canonical digest"
+                    ))
+                })?;
+            let source_digest = value
+                .pointer("/owner_acceptance/source_digest")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    RegistryCbefError::RegistryModel(format!(
+                        "provider input {artifact_id} has no accepted source digest"
+                    ))
+                })?;
+            Ok(json!({
+                "artifact_id": artifact_id,
+                "canonical_digest": canonical_digest,
+                "source_digest": source_digest,
+            }))
+        })
+        .collect()
+}
+
+fn resolve_raw_kind(
+    normalization: &governed::ProviderNormalization,
+    raw_name: &str,
+) -> Result<(String, Option<String>), RegistryCbefError> {
+    if let Some(name) = normalization.canonical_kind_names.get(raw_name) {
+        return Ok(("normalize".to_owned(), Some(name.clone())));
+    }
+    if normalization.ignored_raw_keys.contains(raw_name) {
+        return Ok(("ignore".to_owned(), None));
+    }
+    let matches = normalization
+        .canonical_kind_prefixes
+        .iter()
+        .filter(|(prefix, _)| raw_name.starts_with(prefix.as_str()))
+        .collect::<Vec<_>>();
+    if matches.len() > 1 {
+        return Err(RegistryCbefError::RegistryModel(format!(
+            "{} has ambiguous prefix normalization for {raw_name}",
+            normalization.mapping_id
+        )));
+    }
+    if let Some((_, name)) = matches.first() {
+        return Ok(("normalize".to_owned(), Some((*name).clone())));
+    }
+    if let Some(name) = &normalization.default_canonical_kind_name {
+        return Ok(("normalize".to_owned(), Some(name.clone())));
+    }
+    Ok((
+        match normalization.default_disposition {
+            governed::RawKindDisposition::Ignore => "ignore",
+            governed::RawKindDisposition::Unsupported => "unsupported",
+        }
+        .to_owned(),
+        None,
+    ))
+}
+
+fn validate_mapping_coverage(
+    normalization: &governed::ProviderNormalization,
+    available: &BTreeSet<String>,
+) -> Result<(), RegistryCbefError> {
+    if normalization
+        .canonical_kind_names
+        .keys()
+        .chain(&normalization.ignored_raw_keys)
+        .any(|name| !available.contains(name))
+        || normalization
+            .canonical_kind_prefixes
+            .keys()
+            .any(|prefix| !available.iter().any(|name| name.starts_with(prefix)))
+    {
+        return Err(RegistryCbefError::RegistryModel(format!(
+            "{} references an absent raw kind",
+            normalization.mapping_id
+        )));
+    }
+    Ok(())
+}
+
+fn canonical_bytes(value: &Value) -> Result<Vec<u8>, RegistryCbefError> {
+    serde_json_canonicalizer::to_vec(value).map_err(RegistryCbefError::Json)
+}
+
+#[allow(clippy::too_many_lines)] // One typed join proves the provider/catalog census atomically.
+fn render_provider_catalogs(
+    plan: &RegistryCbefPlan,
+) -> Result<BTreeMap<String, Vec<u8>>, RegistryCbefError> {
+    let normalizations = provider_normalizations(plan)?;
+    let expected = provider_catalog_ids(plan)?;
+    let observed = plan
+        .provider_probe
+        .tree_sitter
+        .iter()
+        .map(|probe| probe.catalog_id.clone())
+        .chain([plan.provider_probe.ruff.catalog_id.clone()])
+        .collect::<BTreeSet<_>>();
+    if observed != expected || normalizations.keys().cloned().collect::<BTreeSet<_>>() != expected {
+        return Err(RegistryCbefError::RegistryModel(format!(
+            "provider catalog census differs: expected {expected:?}, observed {observed:?}"
+        )));
+    }
+    let input_identities = provider_input_identities(plan)?;
+    let query_bundle = json!({
+        "queries": [{"query_id": "recovery", "source": TREE_SITTER_RECOVERY_QUERY}]
+    });
+    let query_bundle_digest = format!(
+        "b3:{}",
+        blake3::hash(&canonical_bytes(&query_bundle)?).to_hex()
+    );
+    let mut outputs = BTreeMap::new();
+    for probe in &plan.provider_probe.tree_sitter {
+        let normalization = normalizations.get(&probe.catalog_id).ok_or_else(|| {
+            RegistryCbefError::RegistryModel(format!(
+                "normalization for {} is absent",
+                probe.catalog_id
+            ))
+        })?;
+        if normalization.provider_version
+            != format!("{};abi={}", probe.provider_version, probe.grammar_abi)
+            || normalization.language != probe.language
+        {
+            return Err(RegistryCbefError::RegistryModel(format!(
+                "{} provider identity differs from the pinned runtime",
+                probe.catalog_id
+            )));
+        }
+        let available = probe
+            .raw_kinds
+            .iter()
+            .map(|kind| kind.raw_name.clone())
+            .collect::<BTreeSet<_>>();
+        validate_mapping_coverage(normalization, &available)?;
+        let mut raw_kinds = Vec::new();
+        for kind in &probe.raw_kinds {
+            let (disposition, canonical_kind_name) =
+                resolve_raw_kind(normalization, &kind.raw_name)?;
+            raw_kinds.push(json!({
+                "raw_key": format!("{}:{}:{}", kind.raw_kind_id, kind.raw_name, kind.named),
+                "raw_kind_id": kind.raw_kind_id,
+                "raw_name": kind.raw_name,
+                "named": kind.named,
+                "visible": kind.visible,
+                "supertype": kind.supertype,
+                "subtypes": kind.subtypes,
+                "disposition": disposition,
+                "canonical_kind_name": canonical_kind_name,
+            }));
+        }
+        let runtime_inventory = json!({"raw_kinds": raw_kinds, "fields": probe.fields});
+        let runtime_inventory_fingerprint = format!(
+            "b3:{}",
+            blake3::hash(&canonical_bytes(&runtime_inventory)?).to_hex()
+        );
+        let node_types_digest = format!(
+            "b3:{}",
+            blake3::hash(probe.node_types_source.as_bytes()).to_hex()
+        );
+        let node_types: Value = serde_json::from_str(&probe.node_types_source)?;
+        let document = json!({
+            "catalog_id": probe.catalog_id,
+            "provider_id": normalization.provider_id,
+            "provider_version": probe.provider_version,
+            "language": probe.language,
+            "grammar_abi": probe.grammar_abi,
+            "node_types_digest": node_types_digest,
+            "runtime_inventory_fingerprint": runtime_inventory_fingerprint,
+            "query_bundle_digest": query_bundle_digest.clone(),
+            "generation_unit_id": "driver:registry-cbef-v1/provider-raw-v1",
+            "input_identities": input_identities.clone(),
+            "node_types": node_types,
+            "runtime_inventory": runtime_inventory,
+        });
+        outputs.insert(probe.catalog_id.clone(), canonical_bytes(&document)?);
+    }
+    let ruff = &plan.provider_probe.ruff;
+    let normalization = normalizations.get(&ruff.catalog_id).ok_or_else(|| {
+        RegistryCbefError::RegistryModel("Ruff normalization is absent".to_owned())
+    })?;
+    if normalization.provider_version != ruff.provider_version
+        || normalization.language != ruff.language
+    {
+        return Err(RegistryCbefError::RegistryModel(
+            "Ruff provider identity differs from the pinned runtime".to_owned(),
+        ));
+    }
+    let available = ruff
+        .node_kinds
+        .iter()
+        .map(|kind| kind.raw_name.clone())
+        .collect::<BTreeSet<_>>();
+    validate_mapping_coverage(normalization, &available)?;
+    let node_kinds = ruff
+        .node_kinds
+        .iter()
+        .map(|kind| {
+            let (disposition, canonical_kind_name) =
+                resolve_raw_kind(normalization, &kind.raw_name)?;
+            Ok(json!({
+                "raw_kind_id": kind.raw_kind_id,
+                "raw_name": kind.raw_name,
+                "disposition": disposition,
+                "canonical_kind_name": canonical_kind_name,
+            }))
+        })
+        .collect::<Result<Vec<_>, RegistryCbefError>>()?;
+    let runtime_inventory = json!({
+        "node_kinds": node_kinds,
+        "token_kinds": ruff.token_kinds,
+    });
+    let runtime_inventory_fingerprint = format!(
+        "b3:{}",
+        blake3::hash(&canonical_bytes(&runtime_inventory)?).to_hex()
+    );
+    let document = json!({
+        "catalog_id": ruff.catalog_id,
+        "catalog_kind": "ruff-python-frontend",
+        "provider_id": normalization.provider_id,
+        "provider_version": ruff.provider_version,
+        "language": ruff.language,
+        "runtime_inventory_fingerprint": runtime_inventory_fingerprint,
+        "generation_unit_id": "driver:registry-cbef-v1/provider-raw-v1",
+        "input_identities": input_identities,
+        "runtime_inventory": runtime_inventory,
+    });
+    outputs.insert(ruff.catalog_id.clone(), canonical_bytes(&document)?);
+    Ok(outputs)
+}
+
+fn disposition_variant(value: &Value) -> Result<&'static str, RegistryCbefError> {
+    match value.as_str() {
+        Some("normalize") => Ok("ProviderRawKindDisposition::Normalize"),
+        Some("ignore") => Ok("ProviderRawKindDisposition::Ignore"),
+        Some("unsupported") => Ok("ProviderRawKindDisposition::Unsupported"),
+        _ => Err(RegistryCbefError::RegistryModel(
+            "unknown provider raw-kind disposition".to_owned(),
+        )),
+    }
+}
+
+fn provider_document<'a>(
+    documents: &'a BTreeMap<&str, Value>,
+    id: &str,
+) -> Result<&'a Value, RegistryCbefError> {
+    documents
+        .get(id)
+        .ok_or_else(|| RegistryCbefError::RegistryModel(format!("provider catalog {id} is absent")))
+}
+
+#[allow(clippy::too_many_lines)]
+fn render_provider_rust(
+    plan: &RegistryCbefPlan,
+    catalogs: &BTreeMap<String, Vec<u8>>,
+) -> Result<Vec<u8>, RegistryCbefError> {
+    let syntax_codes = plan
+        .enums
+        .records
+        .iter()
+        .find(|domain| domain.domain == "SYNTAX_KIND")
+        .ok_or(RegistryCbefError::AuthorityInvariant)?
+        .values
+        .iter()
+        .map(|value| (value.name.as_str(), value.code))
+        .collect::<BTreeMap<_, _>>();
+    let fallback = *syntax_codes
+        .get("SYNTAX_NODE")
+        .ok_or(RegistryCbefError::AuthorityInvariant)?;
+    let documents = catalogs
+        .iter()
+        .map(|(id, bytes)| Ok((id.as_str(), serde_json::from_slice::<Value>(bytes)?)))
+        .collect::<Result<BTreeMap<_, _>, RegistryCbefError>>()?;
+    let mut output = String::from(
+        "// @generated by codefabric-model; do not edit.\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub enum ProviderRawKindDisposition { Normalize, Ignore, Unsupported }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderRawKindEntry { pub raw_kind_id: u16, pub raw_name: &'static str, pub named: bool, pub visible: bool, pub supertype: bool, pub disposition: ProviderRawKindDisposition, pub normalized_kind_code: u16 }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderRawFieldEntry { pub field_id: u16, pub field_name: &'static str }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderGrammarInventory { pub catalog_id: &'static str, pub language: &'static str, pub provider_version: &'static str, pub grammar_abi: usize, pub node_types_digest: &'static str, pub runtime_inventory_fingerprint: &'static str, pub query_bundle_digest: &'static str, pub query_bundle_canonical_json: &'static [u8], pub raw_kinds: &'static [ProviderRawKindEntry], pub fields: &'static [ProviderRawFieldEntry] }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RuffNodeKindEntry { pub raw_kind_id: u16, pub raw_name: &'static str, pub disposition: ProviderRawKindDisposition, pub normalized_kind_code: u16 }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RuffTokenKindEntry { pub raw_kind_id: u16, pub raw_name: &'static str }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RuffPythonInventory { pub catalog_id: &'static str, pub provider_version: &'static str, pub runtime_inventory_fingerprint: &'static str, pub node_kinds: &'static [RuffNodeKindEntry], pub token_kinds: &'static [RuffTokenKindEntry] }\n\n",
+    );
+    writeln!(
+        output,
+        "pub const TREE_SITTER_RECOVERY_QUERY: &str = {TREE_SITTER_RECOVERY_QUERY:?};\n"
+    )
+    .expect("string writes do not fail");
+    for (constant, id) in [
+        ("TREE_SITTER_PYTHON_GRAMMAR", "tree-sitter-python-0-25-0"),
+        ("TREE_SITTER_RUST_GRAMMAR", "tree-sitter-rust-0-24-2"),
+    ] {
+        render_tree_sitter_rust_catalog(
+            &mut output,
+            constant,
+            id,
+            provider_document(&documents, id)?,
+            &syntax_codes,
+            fallback,
+        )?;
+    }
+    render_ruff_rust_catalog(
+        &mut output,
+        provider_document(&documents, "ruff-python-0-0-7")?,
+        &syntax_codes,
+        fallback,
+    )?;
+    output.push_str(
+        "pub const PROVIDER_GRAMMAR_INVENTORIES: &[ProviderGrammarInventory] = &[\n\
+             TREE_SITTER_PYTHON_GRAMMAR,\n\
+             TREE_SITTER_RUST_GRAMMAR,\n\
+         ];\n",
+    );
+    Ok(output.into_bytes())
+}
+
+fn render_tree_sitter_rust_catalog(
+    output: &mut String,
+    constant: &str,
+    id: &str,
+    document: &Value,
+    syntax_codes: &BTreeMap<&str, u16>,
+    fallback: u16,
+) -> Result<(), RegistryCbefError> {
+    let kinds = format!("{constant}_RAW_KINDS");
+    let fields = format!("{constant}_FIELDS");
+    writeln!(output, "pub const {kinds}: &[ProviderRawKindEntry] = &[")
+        .expect("string writes do not fail");
+    for entry in document["runtime_inventory"]["raw_kinds"]
+        .as_array()
+        .ok_or_else(|| RegistryCbefError::RegistryModel(format!("{id} raw kinds are absent")))?
+    {
+        let code = entry["canonical_kind_name"]
+            .as_str()
+            .and_then(|name| syntax_codes.get(name))
+            .copied()
+            .unwrap_or(fallback);
+        let disposition = disposition_variant(&entry["disposition"])?;
+        writeln!(
+            output,
+            "    ProviderRawKindEntry {{ raw_kind_id: {}, raw_name: {:?}, named: {}, visible: {}, supertype: {}, disposition: {disposition}, normalized_kind_code: {code} }},",
+            entry["raw_kind_id"].as_u64().ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+            entry["raw_name"].as_str().ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+            entry["named"].as_bool().ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+            entry["visible"].as_bool().ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+            entry["supertype"].as_bool().ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+        )
+        .expect("string writes do not fail");
+    }
+    writeln!(output, "];\n").expect("string writes do not fail");
+    writeln!(output, "pub const {fields}: &[ProviderRawFieldEntry] = &[")
+        .expect("string writes do not fail");
+    for entry in document["runtime_inventory"]["fields"]
+        .as_array()
+        .ok_or_else(|| RegistryCbefError::RegistryModel(format!("{id} fields are absent")))?
+    {
+        writeln!(
+            output,
+            "    ProviderRawFieldEntry {{ field_id: {}, field_name: {:?} }},",
+            entry["field_id"]
+                .as_u64()
+                .ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+            entry["field_name"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+        )
+        .expect("string writes do not fail");
+    }
+    writeln!(output, "];\n").expect("string writes do not fail");
+    let query_bundle = canonical_bytes(&json!({
+        "queries": [{"query_id": "recovery", "source": TREE_SITTER_RECOVERY_QUERY}]
+    }))?;
+    writeln!(
+        output,
+        "pub const {constant}: ProviderGrammarInventory = ProviderGrammarInventory {{ catalog_id: {id:?}, language: {:?}, provider_version: {:?}, grammar_abi: {}, node_types_digest: {:?}, runtime_inventory_fingerprint: {:?}, query_bundle_digest: {:?}, query_bundle_canonical_json: &{query_bundle:?}, raw_kinds: {kinds}, fields: {fields} }};\n",
+        string_field(document, "language", id)?,
+        string_field(document, "provider_version", id)?,
+        document["grammar_abi"].as_u64().ok_or_else(|| RegistryCbefError::RegistryModel(id.to_owned()))?,
+        string_field(document, "node_types_digest", id)?,
+        string_field(document, "runtime_inventory_fingerprint", id)?,
+        string_field(document, "query_bundle_digest", id)?,
+    )
+    .expect("string writes do not fail");
+    Ok(())
+}
+
+fn string_field<'a>(
+    document: &'a Value,
+    field: &str,
+    id: &str,
+) -> Result<&'a str, RegistryCbefError> {
+    document[field]
+        .as_str()
+        .ok_or_else(|| RegistryCbefError::RegistryModel(format!("{id} field {field} is absent")))
+}
+
+fn render_ruff_rust_catalog(
+    output: &mut String,
+    document: &Value,
+    syntax_codes: &BTreeMap<&str, u16>,
+    fallback: u16,
+) -> Result<(), RegistryCbefError> {
+    let node_entries = document["runtime_inventory"]["node_kinds"]
+        .as_array()
+        .ok_or_else(|| RegistryCbefError::RegistryModel("Ruff node kinds are absent".to_owned()))?;
+    let token_entries = document["runtime_inventory"]["token_kinds"]
+        .as_array()
+        .ok_or_else(|| {
+            RegistryCbefError::RegistryModel("Ruff token kinds are absent".to_owned())
+        })?;
+    writeln!(
+        output,
+        "pub const RUFF_PYTHON_NODE_KINDS: &[RuffNodeKindEntry] = &["
+    )
+    .expect("string writes do not fail");
+    for entry in node_entries {
+        let code = entry["canonical_kind_name"]
+            .as_str()
+            .and_then(|name| syntax_codes.get(name))
+            .copied()
+            .unwrap_or(fallback);
+        let disposition = disposition_variant(&entry["disposition"])?;
+        writeln!(
+            output,
+            "    RuffNodeKindEntry {{ raw_kind_id: {}, raw_name: {:?}, disposition: {disposition}, normalized_kind_code: {code} }},",
+            entry["raw_kind_id"].as_u64().ok_or_else(|| RegistryCbefError::RegistryModel("Ruff raw ID".to_owned()))?,
+            entry["raw_name"].as_str().ok_or_else(|| RegistryCbefError::RegistryModel("Ruff raw name".to_owned()))?,
+        )
+        .expect("string writes do not fail");
+    }
+    writeln!(output, "];\n").expect("string writes do not fail");
+    writeln!(
+        output,
+        "pub const RUFF_PYTHON_TOKEN_KINDS: &[RuffTokenKindEntry] = &["
+    )
+    .expect("string writes do not fail");
+    for entry in token_entries {
+        writeln!(
+            output,
+            "    RuffTokenKindEntry {{ raw_kind_id: {}, raw_name: {:?} }},",
+            entry["raw_kind_id"]
+                .as_u64()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("Ruff token ID".to_owned()))?,
+            entry["raw_name"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("Ruff token name".to_owned()))?,
+        )
+        .expect("string writes do not fail");
+    }
+    writeln!(output, "];\n").expect("string writes do not fail");
+    writeln!(
+        output,
+        "#[must_use]\npub const fn ruff_python_node_kind_entry(kind: ruff_python_ast::NodeKind) -> &'static RuffNodeKindEntry {{\n    match kind {{"
+    )
+    .expect("string writes do not fail");
+    for (index, entry) in node_entries.iter().enumerate() {
+        writeln!(
+            output,
+            "        ruff_python_ast::NodeKind::{} => &RUFF_PYTHON_NODE_KINDS[{index}],",
+            entry["raw_name"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("Ruff raw name".to_owned()))?,
+        )
+        .expect("string writes do not fail");
+    }
+    writeln!(output, "    }}\n}}\n").expect("string writes do not fail");
+    writeln!(
+        output,
+        "#[must_use]\n#[allow(clippy::too_many_lines)]\npub const fn ruff_python_token_kind_entry(kind: ruff_python_ast::token::TokenKind) -> &'static RuffTokenKindEntry {{\n    match kind {{"
+    )
+    .expect("string writes do not fail");
+    for (index, entry) in token_entries.iter().enumerate() {
+        writeln!(
+            output,
+            "        ruff_python_ast::token::TokenKind::{} => &RUFF_PYTHON_TOKEN_KINDS[{index}],",
+            entry["raw_name"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("Ruff token name".to_owned()))?,
+        )
+        .expect("string writes do not fail");
+    }
+    writeln!(output, "    }}\n}}\n").expect("string writes do not fail");
+    writeln!(
+        output,
+        "pub const RUFF_PYTHON_FRONTEND: RuffPythonInventory = RuffPythonInventory {{ catalog_id: {:?}, provider_version: {:?}, runtime_inventory_fingerprint: {:?}, node_kinds: RUFF_PYTHON_NODE_KINDS, token_kinds: RUFF_PYTHON_TOKEN_KINDS }};\n",
+        string_field(document, "catalog_id", "ruff-python-0-0-7")?,
+        string_field(document, "provider_version", "ruff-python-0-0-7")?,
+        string_field(document, "runtime_inventory_fingerprint", "ruff-python-0-0-7")?,
+    )
+    .expect("string writes do not fail");
+    Ok(())
 }
 
 fn parse_yaml<T: for<'de> Deserialize<'de>>(
@@ -1273,6 +2161,518 @@ fn render_rust_registries(enums: &EnumRegistry, flags: &FlagRegistry) -> Vec<u8>
     output.into_bytes()
 }
 
+fn registry_value<'a>(
+    values: &'a BTreeMap<String, Value>,
+    artifact_id: &str,
+) -> Result<&'a Value, RegistryCbefError> {
+    values.get(artifact_id).ok_or_else(|| {
+        RegistryCbefError::RegistryModel(format!("missing runtime registry {artifact_id}"))
+    })
+}
+
+fn registry_records<T: DeserializeOwned>(
+    values: &BTreeMap<String, Value>,
+    artifact_id: &str,
+) -> Result<Vec<T>, RegistryCbefError> {
+    serde_json::from_value(
+        registry_value(values, artifact_id)?
+            .get("records")
+            .cloned()
+            .ok_or_else(|| {
+                RegistryCbefError::RegistryModel(format!(
+                    "runtime registry {artifact_id} has no records"
+                ))
+            })?,
+    )
+    .map_err(RegistryCbefError::Json)
+}
+
+fn runtime_pascal(value: &str) -> String {
+    if !value.contains('_')
+        && value.chars().any(char::is_lowercase)
+        && value.chars().next().is_some_and(char::is_uppercase)
+    {
+        return value.to_owned();
+    }
+    pascal(value)
+}
+
+fn screaming_snake_from_pascal(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|character| {
+            if character.is_uppercase() {
+                vec!['_', character]
+            } else {
+                vec![character.to_ascii_uppercase()]
+            }
+        })
+        .collect::<String>()
+        .trim_start_matches('_')
+        .to_owned()
+}
+
+fn rust_integer(value: u64) -> String {
+    let digits = value.to_string();
+    let mut rendered = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            rendered.push('_');
+        }
+        rendered.push(character);
+    }
+    rendered
+}
+
+fn emit_runtime_enum(output: &mut String, name: &str, values: &[EnumValue]) {
+    let type_name = runtime_pascal(name);
+    writeln!(output, "#[derive(Clone, Copy, Debug, Eq, PartialEq)]").unwrap();
+    writeln!(output, "#[repr(u16)]").unwrap();
+    writeln!(output, "pub enum {type_name} {{").unwrap();
+    for value in values {
+        writeln!(
+            output,
+            "    {} = {},",
+            runtime_pascal(&value.name),
+            value.code
+        )
+        .unwrap();
+    }
+    writeln!(output, "}}").unwrap();
+    writeln!(output, "impl TryFrom<u16> for {type_name} {{").unwrap();
+    writeln!(output, "    type Error = UnknownRegistryCode;").unwrap();
+    writeln!(
+        output,
+        "    fn try_from(code: u16) -> Result<Self, Self::Error> {{"
+    )
+    .unwrap();
+    output.push_str("        match code {\n");
+    for value in values {
+        writeln!(
+            output,
+            "            {} => Ok(Self::{}),",
+            value.code,
+            runtime_pascal(&value.name)
+        )
+        .unwrap();
+    }
+    writeln!(
+        output,
+        "            _ => Err(UnknownRegistryCode {{ domain: {name:?}, code }}),"
+    )
+    .unwrap();
+    output.push_str("        }\n    }\n}\n");
+}
+
+#[allow(clippy::too_many_lines)] // One typed pass makes the complete runtime API exhaustive.
+fn render_rust_runtime_registries(
+    values: &BTreeMap<String, Value>,
+    enums: &EnumRegistry,
+    flags: &FlagRegistry,
+) -> Result<Vec<u8>, RegistryCbefError> {
+    let machines: Vec<governed::StateMachine> =
+        registry_records(values, "codefabric.registry.state-machine-registry")?;
+    let phrases: Vec<governed::PhraseRecord> =
+        registry_records(values, "codefabric.registry.phrase-registry")?;
+    let mut output = String::from(
+        "// @generated by codefabric-model; edit registry authorities instead.\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct UnknownRegistryCode { pub domain: &'static str, pub code: u16 }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RegistryEntry { pub code: u16, pub name: &'static str, pub slug: &'static str }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct FlagEntry { pub mask: u64, pub name: &'static str, pub slug: &'static str }\n\n",
+    );
+    for domain in &enums.records {
+        emit_runtime_enum(&mut output, &domain.domain, &domain.values);
+        writeln!(
+            output,
+            "pub const {}_VALUES: &[RegistryEntry] = &[",
+            domain.domain
+        )
+        .unwrap();
+        for value in &domain.values {
+            writeln!(
+                output,
+                "    RegistryEntry {{ code: {}, name: {:?}, slug: {:?} }},",
+                value.code, value.name, value.slug
+            )
+            .unwrap();
+        }
+        output.push_str("];\n\n");
+    }
+    let enum_type_names = enums
+        .records
+        .iter()
+        .map(|domain| runtime_pascal(&domain.domain))
+        .collect::<BTreeSet<_>>();
+    for machine in &machines {
+        if !enum_type_names.contains(&machine.machine_id) {
+            let states = machine
+                .states
+                .iter()
+                .map(|state| EnumValue {
+                    code: state.code,
+                    name: state.name.clone(),
+                    slug: state.slug.clone(),
+                    meaning: state.meaning.clone(),
+                    aliases: state.aliases.clone(),
+                })
+                .collect::<Vec<_>>();
+            emit_runtime_enum(&mut output, &machine.machine_id, &states);
+            let constant = screaming_snake_from_pascal(&machine.machine_id);
+            writeln!(output, "pub const {constant}_VALUES: &[RegistryEntry] = &[").unwrap();
+            for state in &states {
+                writeln!(
+                    output,
+                    "    RegistryEntry {{ code: {}, name: {:?}, slug: {:?} }},",
+                    state.code, state.name, state.slug
+                )
+                .unwrap();
+            }
+            output.push_str("];\n\n");
+        }
+    }
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct RegistryDomainEntry { pub domain: &'static str, pub version: &'static str, pub canonical_digest: &'static str, pub values: &'static [RegistryEntry] }\n\n\
+         pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[\n",
+    );
+    let enum_version = &enums.header.version;
+    let enum_digest = &enums.header.canonical_digest;
+    let state_value = registry_value(values, "codefabric.registry.state-machine-registry")?;
+    let state_version = state_value["version"]
+        .as_str()
+        .ok_or_else(|| RegistryCbefError::RegistryModel("state version is absent".to_owned()))?;
+    let state_digest = state_value["canonical_digest"]
+        .as_str()
+        .ok_or_else(|| RegistryCbefError::RegistryModel("state digest is absent".to_owned()))?;
+    let mut emitted_domains = BTreeSet::new();
+    for domain in &enums.records {
+        emitted_domains.insert(domain.domain.clone());
+        writeln!(
+            output,
+            "    RegistryDomainEntry {{ domain: {:?}, version: {:?}, canonical_digest: {:?}, values: {}_VALUES }},",
+            domain.domain, enum_version, enum_digest, domain.domain
+        )
+        .unwrap();
+    }
+    for machine in &machines {
+        let constant = screaming_snake_from_pascal(&machine.machine_id);
+        if emitted_domains.insert(constant.clone()) {
+            writeln!(
+                output,
+                "    RegistryDomainEntry {{ domain: {constant:?}, version: {state_version:?}, canonical_digest: {state_digest:?}, values: {constant}_VALUES }},"
+            )
+            .unwrap();
+        }
+    }
+    output.push_str("];\n\n");
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct StateTransitionEntry { pub from: &'static str, pub event: &'static str, pub guard: &'static str, pub to: &'static str, pub actions: &'static [&'static str], pub idempotency_key: &'static str, pub error_on_illegal: &'static str }\n\n",
+    );
+    for machine in &machines {
+        let constant = screaming_snake_from_pascal(&machine.machine_id);
+        writeln!(
+            output,
+            "pub const {constant}_TRANSITIONS: &[StateTransitionEntry] = &["
+        )
+        .unwrap();
+        for transition in &machine.transitions {
+            writeln!(
+                output,
+                "    StateTransitionEntry {{ from: {:?}, event: {:?}, guard: {:?}, to: {:?}, actions: &{:?}, idempotency_key: {:?}, error_on_illegal: {:?} }},",
+                transition.from,
+                transition.event,
+                transition.guard,
+                transition.to,
+                transition.actions,
+                transition.idempotency_key,
+                transition.error_on_illegal,
+            )
+            .unwrap();
+        }
+        output.push_str("];\n\n");
+    }
+    for domain in &flags.records {
+        writeln!(
+            output,
+            "pub const {}_FLAGS: &[FlagEntry] = &[",
+            domain.domain
+        )
+        .unwrap();
+        for value in &domain.values {
+            writeln!(
+                output,
+                "    FlagEntry {{ mask: 1_u64 << {}, name: {:?}, slug: {:?} }},",
+                value.bit, value.name, value.slug
+            )
+            .unwrap();
+        }
+        output.push_str("];\n\n");
+    }
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct PhraseEntry { pub phrase_id: &'static str, pub owner_section: u16, pub canonical_text: &'static str, pub accepted_aliases: &'static [&'static str], pub plan_node_kind: &'static str, pub output_role: &'static str }\n\n\
+         pub const PHRASE_ENTRIES: &[PhraseEntry] = &[\n",
+    );
+    for phrase in &phrases {
+        writeln!(
+            output,
+            "    PhraseEntry {{ phrase_id: {:?}, owner_section: {}, canonical_text: {:?}, accepted_aliases: &{:?}, plan_node_kind: {:?}, output_role: {:?} }},",
+            phrase.phrase_id,
+            phrase.owner_section,
+            phrase.canonical_text,
+            phrase.accepted_aliases,
+            phrase.planspec_mapping.node_kind.as_str(),
+            phrase.planspec_mapping.output_role.as_str(),
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\n");
+    for (constant, artifact_id, field) in [
+        (
+            "ENTITY_KIND_IDS",
+            "codefabric.registry.ontology-entity-registry",
+            "canonical_name",
+        ),
+        (
+            "RELATION_KIND_IDS",
+            "codefabric.registry.ontology-relation-registry",
+            "canonical_name",
+        ),
+        (
+            "PROPERTY_KIND_IDS",
+            "codefabric.registry.ontology-property-registry",
+            "canonical_name",
+        ),
+        (
+            "FACT_KIND_IDS",
+            "codefabric.registry.ontology-fact-registry",
+            "canonical_name",
+        ),
+        (
+            "UNKNOWN_IDS",
+            "codefabric.registry.unknown-registry",
+            "name",
+        ),
+        (
+            "PROJECTION_IDS",
+            "codefabric.registry.projection-registry",
+            "projection_id",
+        ),
+        (
+            "SUMMARY_PROFILE_IDS",
+            "codefabric.registry.summary-registry",
+            "summary_profile_id",
+        ),
+        (
+            "CAPABILITY_IDS",
+            "codefabric.registry.capability-registry",
+            "capability_code",
+        ),
+        (
+            "PROVIDER_IDS",
+            "codefabric.registry.provider-registry",
+            "provider_id",
+        ),
+        (
+            "PROVIDER_NORMALIZATION_IDS",
+            "codefabric.registry.provider-normalization-registry",
+            "mapping_id",
+        ),
+        (
+            "PROVIDER_RESOURCE_PROFILE_IDS",
+            "codefabric.registry.provider-resource-profile-registry",
+            "profile_id",
+        ),
+        (
+            "PUBLIC_ERROR_IDS",
+            "codefabric.registry.error-registry",
+            "name",
+        ),
+        (
+            "DERIVATION_IDS",
+            "codefabric.registry.derivation-registry",
+            "derivation_id",
+        ),
+        (
+            "PHRASE_IDS",
+            "codefabric.registry.phrase-registry",
+            "phrase_id",
+        ),
+    ] {
+        writeln!(output, "pub const {constant}: &[&str] = &[").unwrap();
+        let records = registry_value(values, artifact_id)?["records"]
+            .as_array()
+            .ok_or_else(|| RegistryCbefError::RegistryModel(format!("{artifact_id} records")))?;
+        for record in records {
+            let id = record[field].as_str().ok_or_else(|| {
+                RegistryCbefError::RegistryModel(format!("{artifact_id}.{field}"))
+            })?;
+            writeln!(output, "    {id:?},").unwrap();
+        }
+        output.push_str("];\n\n");
+    }
+    let providers: Vec<governed::Provider> =
+        registry_records(values, "codefabric.registry.provider-registry")?;
+    let provider_codes = enums
+        .records
+        .iter()
+        .find(|domain| domain.domain == "PROVIDER_CODE")
+        .ok_or_else(|| RegistryCbefError::RegistryModel("PROVIDER_CODE domain".to_owned()))?
+        .values
+        .iter()
+        .map(|value| (value.slug.as_str(), value.code))
+        .collect::<BTreeMap<_, _>>();
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderEntry { pub provider_code: i16, pub provider_id: &'static str, pub placement: &'static str, pub capability_codes: &'static [&'static str], pub resource_profile_id: &'static str, pub event_mapping_version: &'static str }\n\n\
+         pub const PROVIDER_ENTRIES: &[ProviderEntry] = &[\n",
+    );
+    for provider in &providers {
+        let code = i16::try_from(
+            *provider_codes
+                .get(provider.provider_id.as_str())
+                .ok_or_else(|| {
+                    RegistryCbefError::RegistryModel(format!(
+                        "provider code {}",
+                        provider.provider_id
+                    ))
+                })?,
+        )
+        .map_err(|_| RegistryCbefError::RegistryModel("provider code exceeds i16".to_owned()))?;
+        writeln!(
+            output,
+            "    ProviderEntry {{ provider_code: {code}, provider_id: {:?}, placement: {:?}, capability_codes: &{:?}, resource_profile_id: {:?}, event_mapping_version: {:?} }},",
+            provider.provider_id,
+            provider.placement,
+            provider.capability_codes,
+            provider.resource_profile_id,
+            provider.event_mapping_version,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\n");
+    let profiles: Vec<governed::ProviderResourceProfile> = registry_records(
+        values,
+        "codefabric.registry.provider-resource-profile-registry",
+    )?;
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderResourceProfileEntry { pub profile_id: &'static str, pub provider_ids: &'static [&'static str], pub max_parallel_jobs_global: u16, pub max_parallel_jobs_per_workspace: u16, pub max_parallel_jobs_per_context: u16, pub max_input_bytes: u64, pub max_work_units: u64, pub max_wall_millis: u64, pub max_visited_nodes: u64, pub max_traversal_depth: u16, pub max_output_records: u64, pub max_output_bytes: u64, pub max_diagnostics: u16, pub max_parser_workers: u16, pub max_retained_tree_revisions: u16, pub max_cpu_weight: u32, pub max_memory_mib: u32, pub cancellation_check_interval: u32, pub cancellation_ack_millis: u16, pub hard_stop_policy: &'static str, pub retry_policy: &'static str, pub max_retries: u16 }\n\n\
+         pub const PROVIDER_RESOURCE_PROFILES: &[ProviderResourceProfileEntry] = &[\n",
+    );
+    for profile in &profiles {
+        let hard_stop_policy = match profile.hard_stop_policy {
+            governed::ProviderHardStopPolicy::CooperativeDiscard => "COOPERATIVE_DISCARD",
+            governed::ProviderHardStopPolicy::ProcessGroupTerminate => "PROCESS_GROUP_TERMINATE",
+            governed::ProviderHardStopPolicy::CancellableTaskAbort => "CANCELLABLE_TASK_ABORT",
+        };
+        let retry_policy = match profile.retry_policy {
+            governed::ProviderRetryPolicy::NoRetry => "NO_RETRY",
+            governed::ProviderRetryPolicy::TransientOnly => "TRANSIENT_ONLY",
+            governed::ProviderRetryPolicy::IdempotentOnly => "IDEMPOTENT_ONLY",
+        };
+        let provider_ids = profile.provider_ids.iter().collect::<Vec<_>>();
+        writeln!(
+            output,
+            "    ProviderResourceProfileEntry {{ profile_id: {:?}, provider_ids: &{:?}, max_parallel_jobs_global: {}, max_parallel_jobs_per_workspace: {}, max_parallel_jobs_per_context: {}, max_input_bytes: {}, max_work_units: {}, max_wall_millis: {}, max_visited_nodes: {}, max_traversal_depth: {}, max_output_records: {}, max_output_bytes: {}, max_diagnostics: {}, max_parser_workers: {}, max_retained_tree_revisions: {}, max_cpu_weight: {}, max_memory_mib: {}, cancellation_check_interval: {}, cancellation_ack_millis: {}, hard_stop_policy: {hard_stop_policy:?}, retry_policy: {retry_policy:?}, max_retries: {} }},",
+            profile.profile_id,
+            provider_ids,
+            profile.max_parallel_jobs_global,
+            profile.max_parallel_jobs_per_workspace,
+            profile.max_parallel_jobs_per_context,
+            rust_integer(profile.max_input_bytes),
+            rust_integer(profile.max_work_units),
+            rust_integer(profile.max_wall_millis),
+            rust_integer(profile.max_visited_nodes),
+            profile.max_traversal_depth,
+            rust_integer(profile.max_output_records),
+            rust_integer(profile.max_output_bytes),
+            profile.max_diagnostics,
+            profile.max_parser_workers,
+            profile.max_retained_tree_revisions,
+            profile.max_cpu_weight,
+            profile.max_memory_mib,
+            rust_integer(u64::from(profile.cancellation_check_interval)),
+            profile.cancellation_ack_millis,
+            profile.max_retries,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\n");
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderEventMappingEntry { pub wire_event: &'static str, pub application_event: &'static str, pub mapping_version: &'static str }\n\n\
+         pub const PROVIDER_EVENT_MAPPINGS: &[ProviderEventMappingEntry] = &[\n",
+    );
+    let feature_records = registry_value(values, "codefabric.rpc.feature-registry")?["records"]
+        .as_array()
+        .ok_or_else(|| RegistryCbefError::RegistryModel("feature records".to_owned()))?;
+    for record in feature_records
+        .iter()
+        .filter(|record| record["domain"].as_str() == Some("PROVIDER_EVENT"))
+    {
+        writeln!(
+            output,
+            "    ProviderEventMappingEntry {{ wire_event: {:?}, application_event: {:?}, mapping_version: {:?} }},",
+            record["wire_event"].as_str().ok_or_else(|| RegistryCbefError::RegistryModel("wire_event".to_owned()))?,
+            record["application_event"].as_str().ok_or_else(|| RegistryCbefError::RegistryModel("application_event".to_owned()))?,
+            record["mapping_version"].as_str().ok_or_else(|| RegistryCbefError::RegistryModel("mapping_version".to_owned()))?,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\n#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub struct OntologyCodeEntry { pub code: i32, pub family_code: i16 }\n\n");
+    for (constant, artifact_id, code_field, family_field) in [
+        (
+            "ENTITY_KIND_CODES",
+            "codefabric.registry.ontology-entity-registry",
+            "kind_code",
+            Some("family_code"),
+        ),
+        (
+            "RELATION_KIND_CODES",
+            "codefabric.registry.ontology-relation-registry",
+            "relation_code",
+            Some("family_code"),
+        ),
+        (
+            "PROPERTY_KIND_CODES",
+            "codefabric.registry.ontology-property-registry",
+            "property_code",
+            None,
+        ),
+        (
+            "FACT_KIND_CODES",
+            "codefabric.registry.ontology-fact-registry",
+            "fact_code",
+            None,
+        ),
+    ] {
+        writeln!(output, "pub const {constant}: &[OntologyCodeEntry] = &[").unwrap();
+        let records = registry_value(values, artifact_id)?["records"]
+            .as_array()
+            .ok_or_else(|| RegistryCbefError::RegistryModel(format!("{artifact_id} records")))?;
+        for record in records {
+            let code = record[code_field].as_i64().ok_or_else(|| {
+                RegistryCbefError::RegistryModel(format!("{artifact_id}.{code_field}"))
+            })?;
+            let family_code = family_field
+                .and_then(|field| record[field].as_i64())
+                .unwrap_or_default();
+            writeln!(
+                output,
+                "    OntologyCodeEntry {{ code: {code}, family_code: {family_code} }},"
+            )
+            .unwrap();
+        }
+        output.push_str("];\n\n");
+    }
+    Ok(output.into_bytes())
+}
+
 fn rust_u64_literal(value: u64) -> String {
     let hex = format!("{value:016x}");
     format!(
@@ -1454,6 +2854,8 @@ pub enum RegistryCbefError {
     TransitionMismatch,
     #[error("governed registry model is invalid: {0}")]
     RegistryModel(String),
+    #[error("provider inventory tool failed: {0}")]
+    ProviderTool(String),
     #[error("registry/CBEF YAML failed: {0}")]
     Yaml(serde_yaml_ng::Error),
     #[error("registry/CBEF JSON failed: {0}")]
@@ -1470,8 +2872,12 @@ pub enum RegistryCbefError {
 mod tests {
     use super::*;
 
+    fn driver() -> RegistryCbefDriver {
+        RegistryCbefDriver::for_repository(Path::new("."))
+    }
+
     fn plan() -> RegistryCbefPlan {
-        RegistryCbefDriver.plan(Path::new(".")).unwrap()
+        driver().plan(Path::new(".")).unwrap()
     }
 
     #[test]
@@ -1479,7 +2885,7 @@ mod tests {
         let plan = plan();
         validate_all_recipes(&plan.cbef).unwrap();
         assert_eq!(plan.cbef.domains.len(), 17);
-        let entity = RegistryCbefDriver
+        let entity = driver()
             .build_entity(
                 &plan,
                 EntityOperands {
@@ -1541,7 +2947,7 @@ mod tests {
             build_named(&plan.cbef, "ENTITY", missing),
             Err(RegistryCbefError::ExtraOperand(_))
         ));
-        let mut record = RegistryCbefDriver
+        let mut record = driver()
             .build_entity(
                 &plan,
                 EntityOperands {
@@ -1578,7 +2984,7 @@ mod tests {
         let first = key.canonical_bytes().unwrap();
         let second = key.canonical_bytes().unwrap();
         assert_eq!(first, second);
-        let entity = RegistryCbefDriver
+        let entity = driver()
             .build_entity(
                 &plan,
                 EntityOperands {
@@ -1639,7 +3045,7 @@ mod tests {
         ] {
             assert!(SafeOutputPath::parse(path.as_bytes().to_vec()).is_err());
         }
-        let descriptor = RegistryCbefDriver.describe().unwrap();
+        let descriptor = driver().describe().unwrap();
         assert!(descriptor.outputs.iter().all(|output| {
             let path = output.path.display();
             !path.starts_with("contracts/acceptance/")
@@ -1661,6 +3067,56 @@ mod tests {
         assert!(registries.contains("pub struct ProviderNodeFlags"));
         assert!(python.contains("class OccurrenceFamily(IntEnum)"));
         assert!(python.contains("class ProviderNodeFlags(IntFlag)"));
+    }
+
+    #[test]
+    fn model_provider_inventory_is_library_derived_exhaustive_and_authority_resolved() {
+        let plan = plan();
+        let catalogs = render_provider_catalogs(&plan).unwrap();
+        assert_eq!(
+            catalogs.keys().cloned().collect::<BTreeSet<_>>(),
+            provider_catalog_ids(&plan).unwrap()
+        );
+        for probe in &plan.provider_probe.tree_sitter {
+            let document: Value = serde_json::from_slice(&catalogs[&probe.catalog_id]).unwrap();
+            assert_eq!(
+                document["runtime_inventory"]["raw_kinds"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                probe.raw_kinds.len()
+            );
+            assert_eq!(
+                document["runtime_inventory"]["fields"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                probe.fields.len()
+            );
+        }
+        let rust = String::from_utf8(render_provider_rust(&plan, &catalogs).unwrap()).unwrap();
+        assert!(rust.starts_with("// @generated by codefabric-model; do not edit."));
+        for kind in &plan.provider_probe.ruff.node_kinds {
+            assert!(rust.contains(&format!("ruff_python_ast::NodeKind::{} =>", kind.raw_name)));
+        }
+        for kind in &plan.provider_probe.ruff.token_kinds {
+            assert!(rust.contains(&format!(
+                "ruff_python_ast::token::TokenKind::{} =>",
+                kind.raw_name
+            )));
+        }
+
+        let mut normalization = provider_normalizations(&plan)
+            .unwrap()
+            .remove("ruff-python-0-0-7")
+            .unwrap();
+        normalization
+            .canonical_kind_prefixes
+            .insert("StmtD".to_owned(), "STATEMENT".to_owned());
+        assert!(matches!(
+            resolve_raw_kind(&normalization, "StmtDelete"),
+            Err(RegistryCbefError::RegistryModel(_))
+        ));
     }
 
     #[test]

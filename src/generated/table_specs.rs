@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:c91578c6397913f454105090d51ea091051f89e9a78ff7211071e0a2ab7c64e8; codefabric-schema-contracts-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:580695b40be192ec85d39efb57d465094ef8ad86de7b4a300e12a3940c56edd3; schema-contract-driver-v1; do not edit.
 
 const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
     GeneratedTableSpec {
@@ -2448,6 +2448,30 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
                 logical_type: LogicalType::Code32,
                 nullable: false,
                 semantic_type: None,
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "occurrence_family_code",
+                logical_type: LogicalType::Code16,
+                nullable: false,
+                semantic_type: Some("enum:occurrence_family"),
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "reconciliation_step_code",
+                logical_type: LogicalType::Code16,
+                nullable: false,
+                semantic_type: Some("enum:range_reconciliation_step"),
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "raw_kind_disposition_code",
+                logical_type: LogicalType::Code16,
+                nullable: false,
+                semantic_type: Some("enum:raw_kind_disposition"),
                 foreign_key: None,
                 hidden_operational: false,
             },

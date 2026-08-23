@@ -262,8 +262,8 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 1. **`contracts/` source tree**
    - manifests, registries, identity specifications, schemas, query grammar, Protobuf definitions, adapter schemas, bundles, deployment profile, fault registry, comparator rules, and security corpus manifest.
 
-2. **Contract compiler and verifier**
-   - implement the repository-owned `codefabric-contracts` generator/verifier;
+2. **Repository model compiler and verifier**
+   - implement the repository-owned `codefabric-model` compiler, assurance graph, and sole transactional reconciler;
    - discover self-identifying native sources, evidence, and acceptance through closed
      family roots and typed family declarations, compile them through staged typed
      ingress and cross-record validation, and derive every source/output census,
@@ -271,18 +271,14 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
    - emit `contracts/manifests/suite-manifest.json` as a compatibility/provenance view
      of the compiled repository model, never as compiler bootstrap or an authored
      membership list;
-   - use catalog schema v2: artifact descriptors catalog governed native or generated
-     authority identity while
-     closed typed derivation units own outputs, complete source sets, producer/tool
-     dispatch, resource budgets, consumers, and transitive lineage;
-   - permit only typed artifact source/semantic views, exact output references, and the
-     artifact-index-only `AllCompiledArtifacts` intrinsic; reject authored commands,
-     globs, platform predicates, scheduling/cache policy, duplicate ownership, and graph
-     cycles;
+   - derive typed artifact, dependency, output, consumer, resource, and provenance nodes
+     directly from family-native declarations and the owner-accepted release census;
+   - permit only typed source/semantic views and exact model edges; reject authored command
+     graphs, central member/path lists, duplicate ownership, and dependency cycles;
    - canonicalize semantic projections and separately fingerprint exact source bytes;
    - enforce catalog-selected byte, nesting, collection, token/alias, graph, and
      diagnostic budgets before and after parse as appropriate;
-   - expose a stable repository command equivalent to `codefabric-contracts verify --profile full`.
+   - expose the stable read-only repository command `just model-release-check`.
 
 3. **Ontology and categorical registries**
    - entity, relation, property, fact-kind, unknown, projection, summary, capability,

@@ -54,8 +54,13 @@ model_gix_failure_falls_back_without_semantic_drift() {
   local accelerated fallback
   accelerated="$(model inventory "$repo_root")"
   fallback="$(model inventory --no-gix "$repo_root")"
-  jq -e '.summary.topology.git_available and .summary.diagnostic_count == 0 and .shadow.missing_paths == []' \
-    <<<"$accelerated" >/dev/null || fail 'live accelerated model or shadow parity is invalid'
+  jq -e '
+    .summary.topology.git_available
+    and .summary.diagnostic_count == 0
+    and .summary.claim_count > 0
+    and .summary.artifact_count > 0
+    and (has("shadow") | not)
+  ' <<<"$accelerated" >/dev/null || fail 'live accelerated compiled model is invalid'
   [ "$(jq -r '.summary.semantic_digest' <<<"$accelerated")" = \
     "$(jq -r '.summary.semantic_digest' <<<"$fallback")" ] || \
     fail 'gix and filesystem fallback changed semantic model identity'

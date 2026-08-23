@@ -1,21 +1,14 @@
-//! Machine-contract canonicalization, generation, and verification.
+//! Shared typed contract models and model-derived runtime provenance.
 
-#[cfg(feature = "contracts-tooling")]
-pub mod artifacts;
-#[cfg(feature = "contracts-tooling")]
+#[cfg(feature = "contract-models")]
 pub mod catalog;
-#[cfg(feature = "contracts-tooling")]
-pub mod compiler;
-#[cfg(feature = "contracts-tooling")]
+#[cfg(feature = "contract-models")]
 pub mod index;
 pub mod jcs;
-#[cfg(feature = "contracts-tooling")]
+#[cfg(feature = "contract-models")]
 pub mod models;
-#[cfg(feature = "contracts-tooling")]
+#[cfg(feature = "contract-models")]
+#[allow(dead_code)] // The shared generated-registry ingress surface exceeds current runtime use.
 pub(crate) mod registry_models;
-#[cfg(feature = "contracts-tooling")]
-pub(crate) mod schema_artifacts;
-#[cfg(feature = "contracts-tooling")]
-pub(crate) mod schema_models;
-#[cfg(feature = "contracts-tooling")]
+#[cfg(feature = "contract-models")]
 pub use registry_models::replay_bounded_registry_ingress;

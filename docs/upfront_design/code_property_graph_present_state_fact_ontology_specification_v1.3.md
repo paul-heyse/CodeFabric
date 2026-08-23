@@ -4,7 +4,7 @@
 **Artifact kind:** Normative document
 **Compatible suite major:** 1
 **Release date:** 2026-08-20
-**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`
+**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json`
 
 **Status:** Released normative specification
 **Synchronized suite version:** 1.3
@@ -34,7 +34,7 @@ status: released
 canonical_digest: external
 ```
 
-The canonical digest and exact source digest are recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
+The canonical digest and exact source digest are recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json`. Versions are integer pairs, never floating-point values; `1.10` is newer than `1.9`.
 
 ### 0.2 Permanent ownership and precedence
 

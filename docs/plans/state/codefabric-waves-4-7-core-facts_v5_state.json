@@ -1,0 +1,64 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v5_2026-08-22.md",
+  "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+  "baseline_commit": "3830acade129b2a63a1927ac5e2f4d3ac284f38c",
+  "status": "not_started",
+  "current_packet": "WP32",
+  "packets": {
+    "WP27": {"status": "complete", "proving_commit": "7d82ec80b8b3e0812e97b668058315da1aa73030", "deviations": ["Historical v4 judgment preserved; current-head model-native feature, provider-inventory, and toolchain-provenance gates must remain green."], "failed_approaches": ["The v2 attempt proved Ruff 0.0.7 could not compile under Rust 1.94.1; the approved design raised the stable floor to 1.95.0."], "blockers": []},
+    "WP28": {"status": "complete", "proving_commit": "fed2917249b1e791346b289e4195c658bb40a8d1", "deviations": ["Historical v4 judgment preserved; current outputs are now owned by model-native schema, registry, CBEF, and provider-inventory drivers."], "failed_approaches": [], "blockers": []},
+    "WP29": {"status": "complete", "proving_commit": "0e440ac69ea2d684fbefc50b3508d523c304c4e1", "deviations": ["Historical v4 judgment preserved; packet-named mutation infrastructure is superseded by model assurance and removed."], "failed_approaches": [], "blockers": []},
+    "WP30": {"status": "complete", "proving_commit": "0b5cbdbba286bb465126caffe458963cc4d9dc38", "deviations": ["Provider raw catalogs and hot-path bindings now derive from pinned Tree-sitter introspection and typed normalization through the isolated model provider tool."], "failed_approaches": [], "blockers": []},
+    "WP31": {"status": "complete", "proving_commit": "74befce8d04cc1f5a53c9d2ae728e03f8a929457", "deviations": ["Ruff raw-kind completeness now uses one compiler-exhaustive declaration in the isolated provider tool; the typed normalization registry remains the classification authority."], "failed_approaches": [], "blockers": []},
+    "WP32": {"status": "in_progress", "proving_commit": null, "deviations": ["The model-control-plane remediation supplied recipe-aware CBEF construction, governed source-syntax allocations, corrected TableSpec projections, and model-generated provider catalogs, but did not prove the complete WP32 encoder/reconciliation/ingest outcome.", "Parenthesized, parse-error, and missing syntax are represented as syntax_detail/source_annotation data and must not become duplicate relation codes."], "failed_approaches": ["The pre-remediation implementation constructed ENTITY and RELATION_FACT positionally with field counts that diverged from the governed CBEF recipes and used raw occurrence/flag literals; those seams were replaced by generated APIs."], "blockers": []},
+    "WP33": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP34": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP35": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP36": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP37": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP38": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP39": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP40": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP41": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP42": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP43": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP44": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP45": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP46": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP47": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP48": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP49": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP50": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP51": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP52": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP53": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "milestones": {
+    "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "decommission_batches": {
+    "DB07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB09": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "baseline_failures": [],
+  "discovered_obligations": [
+    {"owner": "WP32", "summary": "Complete and prove canonical source/syntax encoders and reconciliation over the promoted model-generated CBEF, allocation, TableSpec, and provider-inventory substrate; do not infer completion from remediation tests."},
+    {"owner": "WP33", "summary": "Create the stable wave4-integration-check capability and prove every discovered provider raw kind has exactly one governed disposition."},
+    {"owner": "WP34/WP40", "summary": "Keep golden expected answers and Gate-B acceptance outside routine model-sync outputs and require explicit owner review for changes."}
+  ],
+  "plan_deviations": [
+    {"kind": "successor_plan", "summary": "V5 preserves v4 WP27-WP53 product outcomes and dependencies while replacing superseded catalog, generator, proof-manifest, and packet-mutation mechanics with the accepted model-driven artifact and assurance control plane."},
+    {"kind": "historical_proof_import", "summary": "WP27-WP31 proving commits are trusted historical ancestors. WP32 remains incomplete with no proving commit; WP33-WP53 remain not started."},
+    {"kind": "accepted_gate_substitution", "summary": "A fully functional independently proven model-native governance measure supersedes its legacy counterpart; the legacy measure need not pass and must not be restored merely for greenness."},
+    {"kind": "explicit_user_approval", "summary": "The repository owner explicitly approved this successor in the implementation-plan execution thread on 2026-08-23; activation remains owned by the sealed remediation M05 handoff."},
+    {"kind": "accepted_assurance_deferral", "summary": "Ubuntu clean-host evidence remains user-deferred and is not a packet or milestone blocker."},
+    {"kind": "accepted_scope_deferral", "summary": "License considerations remain user-deferred and are outside this plan."}
+  ],
+  "next_action": "Await the sealed model-control-plane M05 handoff; then resume the still-incomplete WP32 without claiming remediation substrate as product completion.",
+  "updated_at": "2026-08-23T18:30:00Z"
+}

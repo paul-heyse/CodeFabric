@@ -23,7 +23,10 @@
     "src/generated/codefabric.rustc.v1.rs",
     "src/generated/model_identity_recipes.rs",
     "src/generated/model_registries.rs",
-    "src/generated/model_schema_tables.rs"
+    "src/generated/model_schema_tables.rs",
+    "src/generated/provider_raw_kinds.rs",
+    "src/generated/registries.rs",
+    "src/generated/table_specs.rs"
   ],
   "schema_version": 1
 }

@@ -1,0 +1,19 @@
+id: model-no-legacy-control-plane
+language: Rust
+severity: error
+message: Use the typed repository model and isolated driver protocol, not a legacy compiler path.
+note: The model compiler must bootstrap without generated indexes and feature-sensitive shared binaries.
+files:
+  - src/**/*.rs
+  - tests/**/*.rs
+rule:
+  any:
+    - all:
+        - kind: call_expression
+        - regex: 'Command::new\([^)]*target/debug/codefabric-contracts'
+    - all:
+        - kind: macro_invocation
+        - regex: 'include_bytes!\([^)]*artifact-index\.json'
+    - all:
+        - kind: use_declaration
+        - regex: 'contracts::(artifacts|compiler|schema_artifacts|schema_models)'

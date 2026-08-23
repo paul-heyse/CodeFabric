@@ -1,4 +1,4 @@
-"""Emit review-only KAT candidates without mutating normative fixture authority."""
+"""Emit model-derived review candidates without mutating normative KAT authority."""
 
 import argparse
 import json

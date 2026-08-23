@@ -38,13 +38,6 @@
       "version": "1.0"
     },
     {
-      "artifact_id": "codefabric.rpc.provider-control",
-      "canonical_digest": "b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f",
-      "feature_bits": [],
-      "required": true,
-      "version": "1.0"
-    },
-    {
       "artifact_id": "codefabric.rpc.pyrefly-sidecar",
       "canonical_digest": "b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973",
       "feature_bits": [],
@@ -59,20 +52,20 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:fd8d406886e466fd8ea3d68d224aa0119c2370c082e88b08974ac82a0f36704b",
+  "bundle_digest": "b3:532cc30ba383b2b76e008e37376b9e221b3dda18c823d2839f3e89cecfdbf054",
   "bundle_kind": "provider",
   "bundle_major": 1,
   "bundle_version": "1.0",
-  "canonical_digest": "b3:686e1dddb80d340c0d0b955d981f4e15a8b5eddedfd5fc91ae1e071beef162e1",
   "compatibility": {
     "maximum_consumer_minor": 0,
     "minimum_consumer_minor": 0
   },
   "compatible_suite_major": 1,
   "created_by": {
-    "generator_id": "codefabric-contracts",
+    "generator_id": "codefabric-model",
     "generator_version": "1.0"
   },
+  "signature": null,
   "status": "released",
   "version": "1.0"
 }

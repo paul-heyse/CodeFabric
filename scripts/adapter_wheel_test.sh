@@ -17,22 +17,22 @@ uv venv --python 3.14 "$temporary_root/venv"
 uv pip install --python "$temporary_root/venv/bin/python" "$wheel_path"
 "$temporary_root/venv/bin/python" - <<'PY'
 from codefabric_cpg_mcp.contracts import (
-    artifact_index,
-    artifact_index_bytes,
-    artifact_index_digest,
+    model_artifact_index,
+    model_artifact_index_bytes,
+    model_artifact_index_digest,
     validate_checksum,
 )
 from codefabric_cpg_mcp.contracts.schemas import schema_fingerprints, schema_manifest
 from codefabric_cpg_mcp.contracts.wire_models import StatusToolOutput
 
-resource = artifact_index_bytes()
-index = artifact_index()
-assert resource.startswith(b'{"_generated":')
-assert index.generated.artifact_count == len(index.artifacts)
+resource = model_artifact_index_bytes()
+index = model_artifact_index()
+assert resource.startswith(b'{"artifacts":')
+assert index.schema_version == 1
 assert index.artifacts
-validate_checksum(artifact_index_digest())
+validate_checksum(model_artifact_index_digest())
 assert "StatusToolOutput" in schema_manifest()["serialization"]
 assert schema_fingerprints()["serialization"]["StatusToolOutput"].startswith("b3:")
 assert StatusToolOutput.model_fields
-print(artifact_index_digest())
+print(model_artifact_index_digest())
 PY

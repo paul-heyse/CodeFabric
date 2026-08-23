@@ -226,6 +226,43 @@ pub fn sync(repository_root: &Path) -> Result<SyncReport, TransactionError> {
     apply_plan(&paths, plan, None)
 }
 
+/// Recover interrupted state, compile the complete desired tree, and report reconciliation work
+/// without applying it.
+///
+/// # Errors
+///
+/// Returns an error for the same topology, source, ownership, or durable-state failures as
+/// [`sync`]. A healthy zero-action check does not modify any repository file.
+pub fn check_current(repository_root: &Path) -> Result<SyncReport, TransactionError> {
+    let paths = transaction_paths(repository_root)?;
+    let _exclusive = acquire_write(&paths)?;
+    recover_locked(&paths)?;
+    let plan = compile_sync_plan(&paths)?;
+    let added = plan
+        .entries
+        .iter()
+        .filter(|entry| entry.old_bytes.is_none() && entry.new_bytes.is_some())
+        .count();
+    let replaced = plan
+        .entries
+        .iter()
+        .filter(|entry| entry.old_bytes.is_some() && entry.new_bytes.is_some())
+        .count();
+    let deleted_stale = plan
+        .entries
+        .iter()
+        .filter(|entry| entry.old_bytes.is_some() && entry.new_bytes.is_none())
+        .count();
+    Ok(SyncReport {
+        desired_tree_identity: plan.desired_tree_identity,
+        added,
+        replaced,
+        deleted_stale,
+        unchanged: plan.unchanged,
+        transaction_applied: false,
+    })
+}
+
 fn transaction_paths(repository_root: &Path) -> Result<TransactionPaths, TransactionError> {
     let repository_root =
         fs::canonicalize(repository_root).map_err(|source| io(repository_root, source))?;

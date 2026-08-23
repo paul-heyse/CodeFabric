@@ -8,7 +8,7 @@
 pub mod analysis_context;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
-#[cfg(any(feature = "canonical-json", feature = "contracts-tooling"))]
+#[cfg(any(feature = "canonical-json", feature = "contract-models"))]
 pub mod contracts;
 #[cfg(feature = "daemon")]
 pub mod coordinator;
@@ -32,7 +32,7 @@ pub mod provider_runtime;
 pub mod provider_types;
 /// Generated categorical and lifecycle registry types.
 #[cfg(any(
-    feature = "contracts-tooling",
+    feature = "contract-models",
     feature = "daemon",
     feature = "data-fabric",
     feature = "fact-generation",

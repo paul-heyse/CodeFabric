@@ -969,7 +969,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wp28_wave4_tables_bootstrap_and_reopen() {
+    async fn wp28_operational_acceptance() {
         let root = TestRoot::new("wp28-wave4-tables");
         let first = bootstrap_workspace(&root.0, &record(1)).await.unwrap();
         for code in [140, 150, 160, 170] {

@@ -11,19 +11,12 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-codefabric = { path = "..", default-features = false, features = ["contracts-tooling", "rpc"] }
+codefabric = { path = "..", default-features = false, features = ["contract-models", "rpc"] }
 prost = "=0.14.4"
 
 [[bin]]
 name = "jcs_decode_canonicalize"
 path = "fuzz_targets/jcs_decode_canonicalize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "contract_ingress"
-path = "fuzz_targets/contract_ingress.rs"
 test = false
 doc = false
 bench = false

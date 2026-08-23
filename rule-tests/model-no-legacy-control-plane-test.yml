@@ -1,0 +1,17 @@
+id: model-no-legacy-control-plane
+valid:
+  - |
+      fn launch(binary: &std::path::Path) {
+          std::process::Command::new(binary).spawn().unwrap();
+      }
+  - |
+      const INDEX: &[u8] = include_bytes!("generated/model_artifact_index.json");
+invalid:
+  - |
+      fn legacy() {
+          std::process::Command::new("target/debug/codefabric-contracts").spawn().unwrap();
+      }
+  - |
+      const INDEX: &[u8] = include_bytes!("artifact-index.json");
+  - |
+      use crate::contracts::compiler::compile;

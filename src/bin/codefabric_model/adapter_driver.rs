@@ -13,7 +13,7 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverEnvironment, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, process_stage_root,
 };
 use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
@@ -21,7 +21,7 @@ use super::repository_model::{RepositoryModelError, read_stable};
 
 const ADAPTER_IR_PATH: &str = "contracts/adapter/adapter-model-ir.json";
 const DRIVER_PATH: &str = "tooling/model/adapter_driver.py";
-const LEGACY_RENDERER_PATH: &str = "tooling/contracts/generate_adapter_models.py";
+const CONTRACT_IR_LIBRARY_PATH: &str = "tooling/model/adapter_contract_ir.py";
 const JSON_HELPER_PATH: &str = "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/json.py";
 const PYPROJECT_PATH: &str = "codefabric-cpg-mcp/pyproject.toml";
 const UV_LOCK_PATH: &str = "codefabric-cpg-mcp/uv.lock";
@@ -154,7 +154,7 @@ impl AdapterDriver {
         repository_root: &Path,
         request: &ExternalRequest<'_>,
     ) -> Result<T, AdapterDriverError> {
-        let protocol_root = repository_root.join("target/model-stage/adapter-external");
+        let protocol_root = process_stage_root(repository_root, "adapter-external");
         let home = protocol_root.join("home");
         let temporary = protocol_root.join("tmp");
         fs::create_dir_all(&home).map_err(|source| AdapterDriverError::Io {
@@ -258,7 +258,7 @@ impl ModelDriver for AdapterDriver {
             sources: [
                 ADAPTER_IR_PATH,
                 DRIVER_PATH,
-                LEGACY_RENDERER_PATH,
+                CONTRACT_IR_LIBRARY_PATH,
                 JSON_HELPER_PATH,
                 PYPROJECT_PATH,
                 UV_LOCK_PATH,
@@ -393,7 +393,7 @@ pub struct AdapterReport {
 pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriverError> {
     let driver = AdapterDriver::for_repository(repository_root);
     let plan = driver.plan(repository_root)?;
-    let stage_path = repository_root.join("target/model-stage/adapter-shadow");
+    let stage_path = process_stage_root(repository_root, "adapter-shadow");
     if stage_path.exists() {
         fs::remove_dir_all(&stage_path).map_err(|source| AdapterDriverError::Io {
             path: stage_path.clone(),

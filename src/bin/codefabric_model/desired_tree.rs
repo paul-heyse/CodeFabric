@@ -623,6 +623,7 @@ pub struct PlanReport {
     pub action_order: Vec<StableId>,
     pub action_keys: BTreeMap<StableId, String>,
     pub output_count: usize,
+    pub output_paths: Vec<String>,
     pub changes: Vec<TreeChange>,
     pub affected: Vec<StableId>,
 }
@@ -639,6 +640,12 @@ impl ModelPlan {
                 .map(|(id, action)| (id.clone(), action.action_key.clone()))
                 .collect(),
             output_count: self.desired_tree.entries.len(),
+            output_paths: self
+                .desired_tree
+                .entries
+                .keys()
+                .map(SafeOutputPath::display)
+                .collect(),
             changes: self.changes.clone(),
             affected: self.affected(changed),
         }

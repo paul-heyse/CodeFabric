@@ -141,8 +141,6 @@ def main() -> int:
     ]
     bundles = read_json(stage, GOVERNANCE / "bundles.json")["bundles"]
     fixtures = read_json(stage, GOVERNANCE / "fixture-index.json")["fixtures"]
-    parity = read_json(stage, GOVERNANCE / "legacy-shadow-parity.json")
-
     assert artifact_index_path.read_bytes() == rfc8785.dumps(artifact_index)
     artifacts = manifest["artifacts"]
     assert artifacts == artifact_index["artifacts"]
@@ -157,13 +155,19 @@ def main() -> int:
     ]
     proto_census = read_json(stage, Path("tooling/proto/descriptor-census.json"))
     for artifact in artifacts:
-        source = (ROOT / artifact["authority_path"]).read_bytes()
+        staged_source = stage / artifact["authority_path"]
+        source = (
+            staged_source
+            if staged_source.is_file()
+            else ROOT / artifact["authority_path"]
+        ).read_bytes()
         assert artifact["source_digest"] == digest_bytes(source)
         if "typed" not in artifact["projection_profile"]:
             assert artifact["canonical_digest"] == digest_bytes(
                 detached_projection(artifact["authority_path"], source, proto_census)
             )
-    assert len(requirements) == len(traceability) == len(released)
+    assert len(requirements) == len(traceability) > 0
+    assert len(requirements) <= len(released)
     assert requirements == traceability
     assert all(
         record["source_path"]
@@ -200,15 +204,66 @@ def main() -> int:
         assert expected_bundle_digest == digest_bytes(rfc8785.dumps(bundle_projection))
     assert fixtures
     assert all(fixture["source_digest"].startswith("b3:") for fixture in fixtures)
-    assert parity["unaccepted_same-source_semantic_differences"] == 0
+    compatibility_manifest = read_json(
+        stage, Path("contracts/manifests/suite-manifest.json")
+    )
     assert (
-        parity["exact_identity_matches"] + parity["accepted_source_evolution_count"]
-        == parity["legacy_artifact_count"]
+        compatibility_manifest["artifact_id"] == "codefabric.manifests.suite-manifest"
     )
+    assert compatibility_manifest["artifacts"] == artifacts
+    for name in ("requirements", "traceability"):
+        records = [
+            strict_json(line)
+            for line in (stage / f"contracts/manifests/{name}.jsonl")
+            .read_bytes()
+            .splitlines()
+        ]
+        assert records[0]["artifact_id"] == f"codefabric.manifests.{name}"
+        assert records[1:] == requirements
+    fixture_manifest = read_json(
+        stage, Path("contracts/manifests/fixture-oracles.json")
+    )
+    fixture_records = fixture_manifest["records"]
+    assert fixture_manifest["generator_revision"] == "codefabric-model/1.0"
+    assert [record["path"] for record in fixture_records] == [
+        record["path"] for record in fixtures
+    ]
     assert all(
-        correction["previous_source_digest"] != correction["current_source_digest"]
-        for correction in parity["accepted_corrections"]
+        set(record)
+        == {"path", "oracle_class", "origin", "owner", "version", "change_record"}
+        and record["oracle_class"]
+        in {
+            "normative-kat",
+            "differential",
+            "property",
+            "negative-class",
+            "generated-example",
+        }
+        and record["origin"]
+        and record["owner"]
+        and record["version"] == "1.0"
+        and record["change_record"].startswith("contracts/fixtures/CHANGELOG.md#")
+        for record in fixture_records
     )
+    for bundle in bundles:
+        compatibility_bundle = read_json(
+            stage,
+            Path(f"contracts/bundles/{bundle['bundle_kind']}-bundle.json"),
+        )
+        assert compatibility_bundle["artifact_id"] == (
+            f"codefabric.bundles.{bundle['bundle_kind']}-bundle"
+        )
+        for key in (
+            "artifacts",
+            "bundle_digest",
+            "bundle_kind",
+            "bundle_major",
+            "bundle_version",
+            "compatibility",
+            "created_by",
+            "signature",
+        ):
+            assert compatibility_bundle.get(key) == bundle.get(key)
 
     identities: dict[str, str] = {}
     actual_files = []

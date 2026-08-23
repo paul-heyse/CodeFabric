@@ -14,6 +14,7 @@ use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverEnvironment, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
     DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
+    process_stage_root,
 };
 use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
@@ -21,7 +22,7 @@ use super::repository_model::{RepositoryModelError, read_stable};
 
 const PROTOCOL_VERSION: &str = "codefabric-external-proto-driver-v1";
 const DRIVER_PATH: &str = "tooling/model/proto_driver.py";
-const GENERATOR_LIBRARY_PATH: &str = "tooling/proto/generate.py";
+const PROTO_CONTRACT_LIBRARY_PATH: &str = "tooling/model/proto_contract.py";
 const RUST_GENERATOR_PATH: &str = "tooling/proto/generate.rs";
 const BASELINE_PATH: &str = "tooling/proto/compatibility-baseline.json";
 const PYPROJECT_PATH: &str = "codefabric-cpg-mcp/pyproject.toml";
@@ -91,6 +92,20 @@ impl ProtoPythonToolIdentity {
             return Err(ProtoDriverError::ToolIdentity);
         }
         Ok(())
+    }
+
+    fn portable(&self) -> Value {
+        json!({
+            "python_digest": self.python_digest,
+            "python_version": self.python_version,
+            "script_digest": self.script_digest,
+            "lock_digest": self.lock_digest,
+            "project_digest": self.project_digest,
+            "grpcio": self.grpcio,
+            "grpcio-tools": self.grpcio_tools,
+            "protobuf": self.protobuf,
+            "protoc": self.protoc,
+        })
     }
 }
 
@@ -200,9 +215,7 @@ impl ProtoDriver {
         &self,
         request: &ExternalRequest<'_>,
     ) -> Result<T, ProtoDriverError> {
-        let protocol_root = self
-            .repository_root
-            .join("target/model-stage/proto-external");
+        let protocol_root = process_stage_root(&self.repository_root, "proto-external");
         let home = protocol_root.join("home");
         let temporary = protocol_root.join("tmp");
         fs::create_dir_all(&home).map_err(|source| ProtoDriverError::Io {
@@ -299,7 +312,7 @@ impl ModelDriver for ProtoDriver {
     fn describe(&self) -> Result<DriverDescriptor, DriverProtocolError> {
         let mut sources = [
             DRIVER_PATH,
-            GENERATOR_LIBRARY_PATH,
+            PROTO_CONTRACT_LIBRARY_PATH,
             RUST_GENERATOR_PATH,
             BASELINE_PATH,
             PYPROJECT_PATH,
@@ -452,7 +465,7 @@ fn render_plan(
         "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
         "sources": sources,
         "descriptor_sha256": response.descriptor_sha256,
-        "python": plan.python_identity,
+        "python": plan.python_identity.portable(),
         "rust": rust_identity,
     });
     staging.write(&identity_path, &encoded_json(&identity)?)?;
@@ -475,9 +488,7 @@ fn generate_rust(
     let executable = &generator.executable;
     let rustc = &generator.rustc;
     let action_key = &generator.action_key;
-    let generated = plan
-        .repository_root
-        .join("target/model-stage/proto-rust-output");
+    let generated = process_stage_root(&plan.repository_root, "proto-rust-output");
     if generated.exists() {
         fs::remove_dir_all(&generated).map_err(|source| ProtoDriverError::Io {
             path: generated.clone(),
@@ -545,7 +556,6 @@ fn generate_rust(
         .unwrap_or("unknown");
     Ok(json!({
         "action_key": format!("b3:{action_key}"),
-        "binary_path": executable,
         "binary_digest": digest_file(executable)?,
         "cargo_lock_digest": digest_file(&plan.repository_root.join(CARGO_LOCK_PATH))?,
         "cargo_manifest_digest": digest_file(&plan.repository_root.join(CARGO_MANIFEST_PATH))?,
@@ -617,7 +627,7 @@ fn build_rust_generator(plan: &ProtoPlan) -> Result<RustGenerator, ProtoDriverEr
 fn cache_tool_identity(plan: &ProtoPlan) -> Result<Value, ProtoDriverError> {
     let generator = build_rust_generator(plan)?;
     Ok(json!({
-        "python": plan.python_identity,
+        "python": plan.python_identity.portable(),
         "rust_generator": {
             "action_key": format!("b3:{}", generator.action_key),
             "executable_digest": digest_file(&generator.executable)?,
@@ -716,7 +726,7 @@ pub struct ProtoReport {
 pub fn check_family(repository_root: &Path) -> Result<ProtoReport, ProtoDriverError> {
     let driver = ProtoDriver::for_repository(repository_root);
     let plan = driver.plan(repository_root)?;
-    let stage = repository_root.join("target/model-stage/proto-shadow");
+    let stage = process_stage_root(repository_root, "proto-shadow");
     if stage.exists() {
         fs::remove_dir_all(&stage).map_err(|source| ProtoDriverError::Io {
             path: stage.clone(),
@@ -846,5 +856,28 @@ mod tests {
         let material_a = blake3::hash(b"proto-tooling|debug|host");
         let material_b = blake3::hash(b"rpc|debug|host");
         assert_ne!(material_a, material_b);
+    }
+
+    #[test]
+    fn model_proto_provenance_never_serializes_host_specific_executable_paths() {
+        let source = include_str!("proto_driver.rs");
+        assert!(!source.contains("\"binary_path\""));
+        assert!(source.contains("\"binary_digest\""));
+
+        let identity = ProtoPythonToolIdentity {
+            python_path: "/host-specific/venv/python".to_owned(),
+            python_digest: "b3:python".to_owned(),
+            python_version: "3.14.7".to_owned(),
+            script_digest: "b3:script".to_owned(),
+            lock_digest: "b3:lock".to_owned(),
+            project_digest: "b3:project".to_owned(),
+            grpcio: "1.83.0".to_owned(),
+            grpcio_tools: "1.83.0".to_owned(),
+            protobuf: "7.36.0".to_owned(),
+            protoc: "libprotoc 35.1".to_owned(),
+        };
+        let portable = identity.portable();
+        assert!(portable.get("python_path").is_none());
+        assert_eq!(portable["python_digest"], "b3:python");
     }
 }

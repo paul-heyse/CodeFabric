@@ -26,12 +26,12 @@
       "source_digest": "b3:b2da5982e450cfc1e06ccaa097e9083a89012247220ea92a3a2209f541783396"
     },
     {
-      "class": "property",
+      "class": "negative-class",
       "path": "contracts/fixtures/model-packs/invalid-executable-field.json",
       "source_digest": "b3:3030fd722996d428570f3a0907a435ae964ae96203481cbb71b5f71b37464daf"
     },
     {
-      "class": "property",
+      "class": "normative-kat",
       "path": "contracts/fixtures/model-packs/valid-minimal.json",
       "source_digest": "b3:05eb5b6939383d175d40bf2891c1c5a1f6690200a34758303a22a6a7eabebbb0"
     },
@@ -71,7 +71,7 @@
       "source_digest": "b3:f0d3fe83fdd54674ff9b431b74f4ab65fea076388da6279ed15fcff2b623fc48"
     },
     {
-      "class": "property",
+      "class": "normative-kat",
       "path": "contracts/fixtures/ruff/adapter-cases-v1.json",
       "source_digest": "b3:cf1b0bca98c78d9017db3a6f933704514a13cb16dfbf83d3c5ee46c5d69a7616"
     },
@@ -86,12 +86,12 @@
       "source_digest": "b3:0d511aba8c2749ded8813f907f2a1894401c79ca28df2d48391385331b0d21e0"
     },
     {
-      "class": "property",
+      "class": "normative-kat",
       "path": "contracts/fixtures/synthetic/source-syntax-canonicalization-v1.json",
       "source_digest": "b3:f65b4a08def70597884327e93c113412ca24495b4af81703f583ec40b787a8e4"
     },
     {
-      "class": "property",
+      "class": "normative-kat",
       "path": "contracts/fixtures/tree-sitter/adapter-cases-v1.json",
       "source_digest": "b3:fc9117dcca0d91c8ef72a62c78f6df5021d67461528d6033a3dd9118db479d62"
     },
@@ -124,6 +124,11 @@
       "class": "property",
       "path": "rule-tests/model-no-direct-authority-write-test.yml",
       "source_digest": "b3:ed84cfaf41d6c94c07e23ffdd1075d3e130ca9c6478375eb62d7707a3338825c"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/model-no-legacy-control-plane-test.yml",
+      "source_digest": "b3:a76b884139bac7a156001bad1a777e5f6510837eac2953cd1a44f30d64cba891"
     },
     {
       "class": "property",
@@ -199,6 +204,11 @@
       "class": "property",
       "path": "rules/model-no-direct-authority-write.yml",
       "source_digest": "b3:af558b633405e856d37fd29832ecafca6c9320b289ad64421f1c6b1ab9580688"
+    },
+    {
+      "class": "property",
+      "path": "rules/model-no-legacy-control-plane.yml",
+      "source_digest": "b3:85d0876bb77fad3b4fd927f11fd4b92bd5b7afe017129f6fad9311f3cdc26c0e"
     },
     {
       "class": "property",

@@ -15,7 +15,7 @@ from typing import Any, Never
 from blake3 import blake3
 from grpc_tools import protoc
 
-from tooling.proto.generate import (
+from tooling.model.proto_contract import (
     BASELINE,
     GRPC_TOOLS_PROTOC,
     assert_compatible,

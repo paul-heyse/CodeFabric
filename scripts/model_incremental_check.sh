@@ -28,8 +28,8 @@ for family in registry-cbef schemas adapter proto; do
     "$repo_root/scripts/model_exec.sh" family-check "$family" "$repo_root" >"$second"
   jq -e '.cache_lookup.status == "hit"' "$second" >/dev/null
   diff \
-    <(jq -S 'del(.cache_lookup, .compiler_invocations)' "$first") \
-    <(jq -S 'del(.cache_lookup, .compiler_invocations)' "$second")
+    <(jq -S 'del(.cache_lookup, .compiler_invocations, .stage_root)' "$first") \
+    <(jq -S 'del(.cache_lookup, .compiler_invocations, .stage_root)' "$second")
 done
 
 printf 'model incremental check passed; cache timing remains diagnostic only\n'

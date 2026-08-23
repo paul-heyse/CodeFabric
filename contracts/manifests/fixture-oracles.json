@@ -1,50 +1,421 @@
 {
   "artifact_id": "codefabric.manifests.fixture-oracles",
   "artifact_kind": "manifest",
-  "version": "1.0",
+  "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
   "compatible_suite_major": 1,
-  "status": "released",
-  "canonical_digest": "b3:8eab05f4b8414fb0fda8085b37797fe22fd1f4fa39eb4ff809ad5d9c7bd76fed",
+  "digest_projection": "json-jcs-v1",
+  "generator_revision": "codefabric-model/1.0",
   "records": [
-    {"path":"contracts/fixtures/identity/cbef-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed CBEF framing and BLAKE3 known answers for all domains and core type codes","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
-    {"path":"contracts/fixtures/identity/path-canonicalization-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed percent, base64url, NFD, and full-casefold known answers","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
-    {"path":"contracts/fixtures/identity/type-algebra-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed AC-G-15 constructor and type-identity known answers","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
-    {"path":"contracts/fixtures/jcs/differential-cases.json","oracle_class":"differential","origin":"Cross-language equivalence inputs with no stored output oracle","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"contracts/fixtures/jcs/vectors.json","oracle_class":"normative-kat","origin":"RFC 8785 edge cases plus owner-reviewed Query AC-G-53 profile answers","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"contracts/fixtures/negative/drifted-digest.json","oracle_class":"negative-class","origin":"Owner-reviewed digest-mismatch failure class","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"contracts/fixtures/negative/perturbed-artifact.json","oracle_class":"negative-class","origin":"Owner-reviewed perturbed-source failure class","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"contracts/fixtures/negative/broken-trace-edge.json","oracle_class":"negative-class","origin":"Owner-reviewed proof that a trace edge to an unallocated CF-ID is rejected","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-wave-1-release"},
-    {"path":"contracts/fixtures/negative/schema-version-drift.json","oracle_class":"negative-class","origin":"Owner-reviewed proof that semantic schema drift without a version advance fails fingerprint governance","owner":"data-fabric","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-schema-contract-generation"},
-    {"path":"contracts/fixtures/model-packs/invalid-executable-field.json","oracle_class":"negative-class","origin":"Owner-reviewed proof that executable fields are rejected by the closed AC-G-38 model-pack schema","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-controlled-language-and-model-packs"},
-    {"path":"contracts/fixtures/model-packs/valid-minimal.json","oracle_class":"normative-kat","origin":"Owner-reviewed minimal declarative AC-G-38 model-pack schema acceptance case","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-controlled-language-and-model-packs"},
-    {"path":"contracts/fixtures/projections/vectors.json","oracle_class":"normative-kat","origin":"Exact SUITE AC-G-02 worked vectors independently recomputed during M01 review","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"contracts/fixtures/proto/production_wire.json","oracle_class":"normative-kat","origin":"Owner-reviewed four-package Protocol Buffers binary wire-format known answers","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-production-protocol-cutover"},
-    {"path":"contracts/fixtures/security/source-capture-race-v1.json","oracle_class":"property","origin":"Seeded bounded concurrent-rewriter source-capture campaign with zero false-stable publications","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-source-capture-race"},
-    {"path":"contracts/fixtures/synthetic/conflicting-observations-v1.json","oracle_class":"normative-kat","origin":"Owner-reviewed canonical-ingest precedence, evidence, and conflict known answer","owner":"data-fabric","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-synthetic-canonical-ingest"},
-    {"path":"contracts/fixtures/registries/enum-flag-v1-vectors.json","oracle_class":"normative-kat","origin":"Independent owner-reviewed enum code/name/slug and 64-bit flag-word known answers","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-wave-1-registry-kats"},
-    {"path":"fuzz/corpus/contract_ingress/ebnf-seed","oracle_class":"property","origin":"Minimal valid shared EBNF ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"fuzz/corpus/contract_ingress/json-seed","oracle_class":"property","origin":"Minimal valid strict-JSON ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"fuzz/corpus/contract_ingress/jsonl-seed","oracle_class":"property","origin":"Minimal valid JSON Lines ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"fuzz/corpus/contract_ingress/prose-seed","oracle_class":"property","origin":"Minimal valid UTF-8 prose ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"fuzz/corpus/contract_ingress/proto-header-seed","oracle_class":"property","origin":"Minimal valid governed Proto header ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"fuzz/corpus/contract_ingress/yaml-seed","oracle_class":"property","origin":"Minimal valid bounded YAML-subset ingress seed","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"fuzz/corpus/identity/public-id-seed","oracle_class":"property","origin":"Reserved symbolic public-ID replay seed for the bounded identity fuzz target","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-wave-1-identity-kats"},
-    {"path":"fuzz/corpus/proto_decode/cpg-start-query","oracle_class":"property","origin":"Reviewed production CPG protocol decode seed","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-production-protocol-cutover"},
-    {"path":"fuzz/corpus/proto_decode/provider-job","oracle_class":"property","origin":"Reviewed common provider protocol decode seed","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-production-protocol-cutover"},
-    {"path":"fuzz/corpus/proto_decode/pyrefly-hello","oracle_class":"property","origin":"Reviewed Pyrefly sidecar protocol decode seed","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-production-protocol-cutover"},
-    {"path":"fuzz/corpus/proto_decode/rustc-accepted","oracle_class":"property","origin":"Reviewed rustc extractor protocol decode seed","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-production-protocol-cutover"},
-    {"path":"fuzz/corpus/registry/minimal-yaml-seed","oracle_class":"property","origin":"Output-free bounded registry YAML decode seed","owner":"ontology","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-wave-1-registry-kats"},
-    {"path":"fuzz/corpus/registry/phrase-yaml-seed","oracle_class":"property","origin":"Output-free typed phrase-registry ingress seed","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-controlled-language-and-model-packs"},
-    {"path":"fuzz/corpus/jcs_decode_canonicalize/negative-duplicate.json","oracle_class":"property","origin":"Output-free duplicate-member replay seed for the bounded JCS fuzz target","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-full-fuzz-corpus-governance"},
-    {"path":"fuzz/corpus/jcs_decode_canonicalize/negative-unsafe-integer.json","oracle_class":"property","origin":"Output-free unsafe-integer replay seed for the bounded JCS fuzz target","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-full-fuzz-corpus-governance"},
-    {"path":"fuzz/corpus/jcs_decode_canonicalize/positive-order.json","oracle_class":"property","origin":"Output-free object-order replay seed for the bounded JCS fuzz target","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-full-fuzz-corpus-governance"},
-    {"path":"fuzz/corpus/jcs_decode_canonicalize/positive-unicode.json","oracle_class":"property","origin":"Output-free Unicode replay seed for the bounded JCS fuzz target","owner":"semantic-query","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-full-fuzz-corpus-governance"},
-    {"path":"contracts/fixtures/tree-sitter/adapter-cases-v1.json","oracle_class":"normative-kat","origin":"Owner-reviewed exact complete-CST fact-projection digests, roots, counts, recovery outcomes, raw-kind presence, and incremental edit cases for the pinned Python and Rust grammars","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-22-tree-sitter-adapter-corpus"},
-    {"path":"contracts/fixtures/ruff/adapter-cases-v1.json","oracle_class":"normative-kat","origin":"Owner-reviewed exact Ruff token, typed-AST, trivia, directive, recovery-reconciliation, and correspondence projections over the pinned 0.0.7 frontend","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-22-ruff-frontend-adapter-corpus"},
-    {"path":"contracts/fixtures/synthetic/source-syntax-canonicalization-v1.json","oracle_class":"normative-kat","origin":"Owner-reviewed exact Arrow IPC projections for canonical source, token, annotation, syntax, entity, relation, property, and evidence rows plus all five range-reconciliation outcomes","owner":"fact-generation","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-22-source-syntax-canonicalization"},
-    {"path":"tooling/proto/compatibility-baseline.json","oracle_class":"normative-kat","origin":"Owner-reviewed first-release descriptor compatibility baseline","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"tooling/proto/descriptor-census.json","oracle_class":"generated-example","origin":"Generated normalized view of the single committed descriptor IR","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"tooling/proto/toolchain-identity.json","oracle_class":"generated-example","origin":"Generated compiler/runtime/source identity record","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-20-initial-oracle-classification"},
-    {"path":"tooling/proto/production-descriptor.pb","oracle_class":"generated-example","origin":"Generated single-compiler production FileDescriptorSet authority","owner":"suite","version":"1.0","change_record":"contracts/fixtures/CHANGELOG.md#2026-08-21-production-protocol-cutover"}
-  ]
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "ontology",
+      "path": "contracts/fixtures/identity/cbef-v1-vectors.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "ontology",
+      "path": "contracts/fixtures/identity/path-canonicalization-v1-vectors.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "ontology",
+      "path": "contracts/fixtures/identity/type-algebra-v1-vectors.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "differential",
+      "origin": "Model-discovered differential source bytes; answers remain outside routine renderer authority",
+      "owner": "semantic-query",
+      "path": "contracts/fixtures/jcs/differential-cases.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "semantic-query",
+      "path": "contracts/fixtures/jcs/vectors.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "negative-class",
+      "origin": "Model-discovered negative-class source bytes; answers remain outside routine renderer authority",
+      "owner": "ontology",
+      "path": "contracts/fixtures/model-packs/invalid-executable-field.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "ontology",
+      "path": "contracts/fixtures/model-packs/valid-minimal.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "negative-class",
+      "origin": "Model-discovered negative-class source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "contracts/fixtures/negative/broken-trace-edge.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "negative-class",
+      "origin": "Model-discovered negative-class source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "contracts/fixtures/negative/drifted-digest.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "negative-class",
+      "origin": "Model-discovered negative-class source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "contracts/fixtures/negative/perturbed-artifact.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "negative-class",
+      "origin": "Model-discovered negative-class source bytes; answers remain outside routine renderer authority",
+      "owner": "data-fabric",
+      "path": "contracts/fixtures/negative/schema-version-drift.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "semantic-query",
+      "path": "contracts/fixtures/projections/vectors.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "contracts/fixtures/proto/production_wire.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "ontology",
+      "path": "contracts/fixtures/registries/enum-flag-v1-vectors.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "fact-generation",
+      "path": "contracts/fixtures/ruff/adapter-cases-v1.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "fact-generation",
+      "path": "contracts/fixtures/security/source-capture-race-v1.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "data-fabric",
+      "path": "contracts/fixtures/synthetic/conflicting-observations-v1.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "fact-generation",
+      "path": "contracts/fixtures/synthetic/source-syntax-canonicalization-v1.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "normative-kat",
+      "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
+      "owner": "fact-generation",
+      "path": "contracts/fixtures/tree-sitter/adapter-cases-v1.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/authoritative-source-read-boundary-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/delta-handle-factory-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/deltalake-boundary-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/gix-boundary-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/gix-read-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/model-no-direct-authority-write-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/model-no-legacy-control-plane-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/model-no-positional-cbef-construction-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/model-no-raw-governed-code-or-flag-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/no-framework-internal-contract-imports-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/no-pyrefly-public-api-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/provider-observation-boundary-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ruff-boundary-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/serving-leased-providers-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/serving-projections-generated-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/tree-sitter-boundary-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/authoritative-source-read-boundary.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/delta-handle-factory-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/deltalake-boundary-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/gix-boundary-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/gix-read-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/model-no-direct-authority-write.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/model-no-legacy-control-plane.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/model-no-positional-cbef-construction.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/model-no-raw-governed-code-or-flag.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/no-framework-internal-contract-imports.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/no-pyrefly-public-api.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/provider-observation-boundary-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ruff-boundary-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/serving-leased-providers-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/serving-projections-generated-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/tree-sitter-boundary-only.yml",
+      "version": "1.0"
+    }
+  ],
+  "schema_version": 1,
+  "status": "released",
+  "version": "1.0"
 }

@@ -16,6 +16,18 @@ use super::repository_model::read_stable;
 
 const MAX_DRIVER_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 
+/// Return a process-isolated disposable staging path for a model operation.
+///
+/// Multiple read-only model checks may run concurrently. They must not share mutable
+/// staging directories even though none of them writes the governed repository tree.
+#[must_use]
+pub fn process_stage_root(repository_root: &Path, name: &str) -> PathBuf {
+    repository_root
+        .join("target/model-stage/processes")
+        .join(std::process::id().to_string())
+        .join(name)
+}
+
 /// Resource limits named by a family driver before it renders.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

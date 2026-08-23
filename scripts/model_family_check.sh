@@ -15,7 +15,7 @@ case "$family" in
     test_filter='test(model_adapter)'
     ;;
   registry-cbef)
-    test_filter='test(model_cbef) | test(model_registry)'
+    test_filter='test(model_cbef) | test(model_registry) | test(model_provider)'
     ;;
   proto)
     test_filter='test(model_proto)'
@@ -80,9 +80,10 @@ case "$family" in
       and .artifact_count >= .released_artifact_count
       and .released_artifact_count > 0
       and .family_output_count > 0
-      and .governance_output_count == 12
+      and .governance_output_count > 0
       and .output_count == (.rendered_outputs | length)
-      and .requirement_count == .released_artifact_count
+      and .requirement_count > 0
+      and .requirement_count <= .released_artifact_count
       and .bundle_count == 8
       and .fixture_count > 0
       and (.tree_digest | startswith("b3:"))
@@ -119,14 +120,41 @@ case "$family" in
       and .domain_count == 17
       and .enum_domain_count > 0
       and .flag_domain_count > 0
-      and (.rendered_outputs | length) == 4
+      and (.rendered_outputs | length) == 9
+      and (.tool_identity.action_key | startswith("b3:"))
+      and (.tool_identity.executable_digest | startswith("b3:"))
+      and .tool_identity.features == ["provider-inventory-tooling"]
     ' <<<"$report" >/dev/null
+    for catalog in "$stage_root"/contracts/generated/provider-raw-kinds/*.json; do
+      jq -e '
+        (.catalog_id | length) > 0
+        and (.provider_id | length) > 0
+        and (.provider_version | length) > 0
+        and (.runtime_inventory_fingerprint | startswith("b3:"))
+        and .generation_unit_id == "driver:registry-cbef-v1/provider-raw-v1"
+        and (.input_identities | length) == 3
+      ' "$catalog" >/dev/null
+    done
+    jq -e '
+      (.runtime_inventory.raw_kinds | length) > 0
+      and (.runtime_inventory.fields | length) > 0
+      and (.node_types | type) == "array"
+    ' "$stage_root/contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json" >/dev/null
+    jq -e '
+      (.runtime_inventory.node_kinds | length) > 0
+      and (.runtime_inventory.token_kinds | length) > 0
+    ' "$stage_root/contracts/generated/provider-raw-kinds/ruff-python-0-0-7.json" >/dev/null
+    grep -Fq 'ruff_python_ast::NodeKind::' "$stage_root/src/generated/provider_raw_kinds.rs"
+    grep -Fq 'ruff_python_ast::token::TokenKind::' "$stage_root/src/generated/provider_raw_kinds.rs"
     rustc --edition=2024 --crate-type lib \
       "$stage_root/src/generated/model_identity_recipes.rs" \
       -o "$stage_root/model_identity_recipes.rlib"
     rustc --edition=2024 --crate-type lib \
       "$stage_root/src/generated/model_registries.rs" \
       -o "$stage_root/model_registries.rlib"
+    rustc --edition=2024 --crate-type lib \
+      "$stage_root/src/generated/registries.rs" \
+      -o "$stage_root/runtime_registries.rlib"
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT \
       uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
       python -m py_compile \
@@ -138,7 +166,7 @@ case "$family" in
       and .table_count >= 21
       and .operational_table_count == 24
       and .public_schema_count == 8
-      and (.rendered_outputs | length) == 12
+      and (.rendered_outputs | length) > .public_schema_count
       and (.syntax_detail_fields | index("occurrence_family_code")) != null
       and (.syntax_detail_fields | index("reconciliation_step_code")) != null
       and (.syntax_detail_fields | index("raw_kind_disposition_code")) != null

@@ -119,7 +119,7 @@ jobs:
         run: just adapter-stdio-test
 
   contracts:
-    name: Protobuf generation and interoperability
+    name: Model-derived artifacts and interoperability
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -134,20 +134,24 @@ jobs:
           version: "0.12.5"
           python-version: "3.14.7"
           enable-cache: true
-      - name: Install command runner
-        run: cargo binstall --no-confirm just@1.58.0
+      - name: Install model gate tools
+        run: |
+          cargo binstall --no-confirm just@1.58.0
+          cargo binstall --no-confirm cargo-nextest@0.9.143
       - name: Locked adapter environment
         run: uv sync --frozen --project codefabric-cpg-mcp --python 3.14.7
-      - name: Two-root deterministic generation
-        run: just proto-repro-check
+      - name: Typed model families and staged consumers
+        run: just model-family-check aggregate
+      - name: Two-root deterministic DesiredTree
+        run: just model-repro-check
       - name: Cross-language Protobuf round trips
         run: |
           cargo test --locked --no-default-features --features rpc --test integration integration::rpc::rust_protobuf_matches_the_shared_wire_fixture
           uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py
-      - name: Canonical contract verification and reproducibility
+      - name: Model compiler bootstrap and released census
         run: |
-          just contracts-verify
-          just contracts-repro-check
+          just model-bootstrap-check
+          just model-release-census-check
       - name: sccache telemetry
         if: always()
         run: sccache --show-stats
@@ -168,6 +172,8 @@ jobs:
           cargo binstall --no-confirm ast-grep@0.45.1
       - name: Structural boundary rules
         run: just governance-scan
+      - name: Superseded governance zero state
+        run: just model-zero-state-check
       - name: Duplicate-family policy and negative fixture
         run: just duplicate-family-check
 

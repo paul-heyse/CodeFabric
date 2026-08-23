@@ -5,7 +5,7 @@
 **Status:** Released normative specification
 **Version:** 1.3
 **Compatible suite major:** 1
-**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json`
+**Canonical digest:** External; recorded in `codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json`
 **Release date:** 2026-08-20
 **Supersedes:** CodeFabric synchronized specification suite 1.2 plus the standalone architecture-completion override
 **Audit integration (2026-08-20):** Plan-audit F-001; clarified executable phrase mappings and owner approval of initial machine-contract allocations.
@@ -684,7 +684,7 @@ compatibility:
   minimum_consumer_minor: 0
   maximum_consumer_minor: 0
 created_by:
-  generator_id: codefabric-contracts
+  generator_id: codefabric-model
   generator_version: "1.0"
 bundle_digest: "b3:..."
 signature: optional
@@ -1327,20 +1327,20 @@ The golden corpus SHALL include one intentionally corrupted overlay and one inte
 ## AC-G-80 — Cross-document and machine-contract conformance harness
 ### Decision
 
-CodeFabric SHALL provide one repository-owned conformance executable that regenerates and validates every normative machine artifact, compiles all normative code fragments designated executable, verifies cross-document traceability, and runs layer-to-layer round trips. Human review of six prose documents is not a substitute for this harness.
+CodeFabric SHALL provide one repository-owned model compiler that discovers governed inputs, derives and validates every normative machine artifact in a staged `DesiredTree`, compiles designated executable fragments, verifies traceability, and runs layer-to-layer round trips. Human review of the prose corpus is not a substitute for this model-derived harness.
 
 ### Contract
 
 The canonical entrypoint is:
 
 ```bash
-codefabric-contracts verify --profile full
+codefabric-model check release --root .
 ```
 
 and the repository SHALL expose the equivalent stable command:
 
 ```bash
-just contracts-check
+just model-release-check
 ```
 
 #### 80.1 Required harness phases
@@ -2242,7 +2242,7 @@ Broad production implementation SHALL proceed through these gates:
 
 ### Gate A — Contract generation
 
-All registries, schemas, protocol definitions, identity vectors, manifests, and traceability files exist and pass `codefabric-contracts verify` without released-profile warnings.
+All registries, schemas, protocol definitions, identity vectors, manifests, and traceability views exist in the model `DesiredTree` and pass `just model-release-check` with zero planned repository actions.
 
 Initial numeric allocations, field tags, protocol package/message names, and
 registry record schemas are design-contract decisions. They MAY be instantiated

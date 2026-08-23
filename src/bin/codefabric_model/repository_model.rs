@@ -13,14 +13,13 @@ use std::os::unix::fs::MetadataExt as _;
 use std::path::PathBuf;
 use std::path::{Component, Path};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 use super::model_control::{
     ModelError, ModelGraph, NodeDeclaration, NodeKind, ResourceBounds, StableId,
 };
 
-const MAX_HEADER_BYTES: usize = 1_048_576;
 const MAX_DIAGNOSTIC_BYTES: usize = 512;
 
 /// Fixed model-discovery bounds.
@@ -646,157 +645,6 @@ pub struct RepositorySummary {
     pub topology: WorktreeTopology,
     pub classifications: BTreeMap<GitPathState, usize>,
     pub execution_order: Vec<String>,
-}
-
-/// Temporary comparison classes for the authored legacy catalog.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ShadowClass {
-    MatchedArtifact,
-    MatchedOutput,
-    LegacyTopologyPending,
-    MissingCurrentPath,
-    ModelOnlyPath,
-}
-
-/// Shadow parity report. It is never a model input.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ShadowReport {
-    pub classes: BTreeMap<ShadowClass, usize>,
-    pub missing_paths: Vec<String>,
-    pub mismatches: Vec<ShadowMismatch>,
-}
-
-/// One explainable temporary legacy-parity mismatch.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ShadowMismatch {
-    pub target: String,
-    pub class: ShadowClass,
-    pub detail: String,
-}
-
-impl ShadowReport {
-    /// Whether every legacy artifact/output path has current model coverage.
-    #[must_use]
-    pub fn path_parity(&self) -> bool {
-        self.missing_paths.is_empty()
-    }
-}
-
-/// Compare a completed model to the temporary authored catalog.
-///
-/// # Errors
-///
-/// Returns a bounded I/O or typed JSON error. The catalog is read only after model compilation.
-pub fn compare_legacy_catalog(
-    root: &Path,
-    model: &RepositoryModel,
-) -> Result<ShadowReport, RepositoryModelError> {
-    let catalog_path = root.join("contracts/manifests/suite-manifest.json");
-    let bytes = read_stable(&catalog_path, MAX_HEADER_BYTES * 8)?;
-    let catalog: LegacyCatalog =
-        serde_json::from_slice(&bytes).map_err(|error| RepositoryModelError::HeaderParse {
-            path: "contracts/manifests/suite-manifest.json".to_owned(),
-            message: bounded(error),
-        })?;
-    let mut classes = BTreeMap::new();
-    let mut expected = BTreeSet::new();
-    let mut missing_paths = Vec::new();
-    let mut mismatches = Vec::new();
-    for artifact in catalog.artifacts {
-        let path = artifact.authority_path.into_bytes();
-        expected.insert(path.clone());
-        let class = match model.claims.get(&path) {
-            Some(claim) if claim.role == ArtifactRole::Derived => ShadowClass::MatchedOutput,
-            Some(_) => ShadowClass::MatchedArtifact,
-            None => {
-                let display = String::from_utf8_lossy(&path).into_owned();
-                missing_paths.push(display.clone());
-                mismatches.push(ShadowMismatch {
-                    target: display.clone(),
-                    class: ShadowClass::MissingCurrentPath,
-                    detail: format!("legacy artifact path is absent from current model: {display}"),
-                });
-                ShadowClass::MissingCurrentPath
-            }
-        };
-        *classes.entry(class).or_insert(0) += 1;
-    }
-    for derivation in catalog.derivations {
-        mismatches.push(ShadowMismatch {
-            target: derivation.derivation_id.clone(),
-            class: ShadowClass::LegacyTopologyPending,
-            detail: format!(
-                "legacy derivation {} remains a parity oracle until its family driver describes typed inputs and outputs",
-                derivation.derivation_id
-            ),
-        });
-        *classes
-            .entry(ShadowClass::LegacyTopologyPending)
-            .or_insert(0) += 1;
-        for output in derivation.outputs {
-            let path = output.path.into_bytes();
-            expected.insert(path.clone());
-            let class = if model.claims.contains_key(&path) {
-                ShadowClass::MatchedOutput
-            } else {
-                let display = String::from_utf8_lossy(&path).into_owned();
-                missing_paths.push(display.clone());
-                mismatches.push(ShadowMismatch {
-                    target: display.clone(),
-                    class: ShadowClass::MissingCurrentPath,
-                    detail: format!("legacy output path is absent from current model: {display}"),
-                });
-                ShadowClass::MissingCurrentPath
-            };
-            *classes.entry(class).or_insert(0) += 1;
-        }
-    }
-    for (path, claim) in &model.claims {
-        if claim.role != ArtifactRole::Ignored && !expected.contains(path) {
-            *classes.entry(ShadowClass::ModelOnlyPath).or_insert(0) += 1;
-            mismatches.push(ShadowMismatch {
-                target: claim.path.display().to_owned(),
-                class: ShadowClass::ModelOnlyPath,
-                detail: format!(
-                    "current model path is not represented by the temporary legacy catalog: {}",
-                    claim.path.display()
-                ),
-            });
-        }
-    }
-    missing_paths.sort();
-    missing_paths.dedup();
-    mismatches.sort_by(|left, right| {
-        (&left.target, left.class, &left.detail).cmp(&(&right.target, right.class, &right.detail))
-    });
-    Ok(ShadowReport {
-        classes,
-        missing_paths,
-        mismatches,
-    })
-}
-
-#[derive(Deserialize)]
-struct LegacyCatalog {
-    artifacts: Vec<LegacyArtifact>,
-    derivations: Vec<LegacyDerivation>,
-}
-
-#[derive(Deserialize)]
-struct LegacyArtifact {
-    authority_path: String,
-}
-
-#[derive(Deserialize)]
-struct LegacyDerivation {
-    derivation_id: String,
-    outputs: Vec<LegacyOutput>,
-}
-
-#[derive(Deserialize)]
-struct LegacyOutput {
-    path: String,
 }
 
 pub(super) struct GitInventory {
@@ -1569,7 +1417,7 @@ mod tests {
         assert_eq!(
             role_for(
                 ClaimPolicy::ProtoTooling,
-                b"tooling/proto/generate.py",
+                b"tooling/model/proto_contract.py",
                 ".py"
             ),
             ArtifactRole::Ignored

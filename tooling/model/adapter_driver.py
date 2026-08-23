@@ -25,7 +25,7 @@ from codefabric_cpg_mcp.contracts.json import (
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-from tooling.contracts.generate_adapter_models import (
+from tooling.model.adapter_contract_ir import (
     DIALECT,
     AdapterModelIr,
     IrRecord,
@@ -196,8 +196,8 @@ class AdapterDriverIr(ClosedModel):
                 )
         return self
 
-    def legacy_model(self) -> AdapterModelIr:
-        """Project the semantic model graph into the existing pure source renderer."""
+    def contract_ir(self) -> AdapterModelIr:
+        """Project the closed driver document into its pure typed source model."""
 
         return AdapterModelIr.model_validate(
             {
@@ -350,7 +350,7 @@ def _generated(source_digest: str) -> dict[str, object]:
 
 
 def _model_source(ir: AdapterDriverIr, source_digest: str) -> bytes:
-    source = render_source(ir.legacy_model(), {"canonical_digest": source_digest})
+    source = render_source(ir.contract_ir(), {"canonical_digest": source_digest})
     lines = source.decode().splitlines()
     lines[0] = (
         "# @generated from codefabric.adapter.model-ir source "

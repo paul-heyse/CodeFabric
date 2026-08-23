@@ -888,7 +888,7 @@ mod tests {
     #[test]
     fn model_cache_wrong_feature_executable_is_an_explicit_miss() {
         let expected = action_identity("model-compiler");
-        let wrong = action_identity("contracts-tooling");
+        let wrong = action_identity("obsolete-feature-set");
         assert_ne!(expected.action_key().unwrap(), wrong.action_key().unwrap());
         let root = tempfile::tempdir().unwrap();
         let source = stage(root.path(), "feature-source");

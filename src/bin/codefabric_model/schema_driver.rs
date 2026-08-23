@@ -14,7 +14,7 @@ use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
     DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
-    rustfmt_source,
+    process_stage_root, rustfmt_source,
 };
 use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
@@ -24,6 +24,7 @@ const SCHEMA_IR_PATH: &str = "contracts/schema/schema-contract-ir.json";
 const TABLE_MANIFEST_PATH: &str = "contracts/generated/model/schema/table-specs.json";
 const DDL_PATH: &str = "contracts/generated/model/schema/operational-store.sql";
 const RUST_BINDINGS_PATH: &str = "src/generated/model_schema_tables.rs";
+const RUST_RUNTIME_BINDINGS_PATH: &str = "src/generated/table_specs.rs";
 const VALIDATION_PATH: &str = "contracts/generated/model/schema/schema-validation.json";
 const MAX_AUTHORITY_BYTES: usize = 16 * 1024 * 1024;
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -510,6 +511,10 @@ impl SchemaDriver {
                 safe(RUST_BINDINGS_PATH)?,
                 rustfmt_source(&render_rust(&plan.ir))?,
             ),
+            (
+                safe(RUST_RUNTIME_BINDINGS_PATH)?,
+                rustfmt_source(&render_runtime_rust(&plan.ir, &plan.source_digest))?,
+            ),
             (safe(VALIDATION_PATH)?, render_validation(plan)?),
         ];
         for schema in &plan.ir.public_schemas {
@@ -542,6 +547,11 @@ impl ModelDriver for SchemaDriver {
             Self::output(
                 "output:model-schema-rust",
                 RUST_BINDINGS_PATH,
+                DriverOutputRole::RustBinding,
+            )?,
+            Self::output(
+                "output:model-schema-runtime-rust",
+                RUST_RUNTIME_BINDINGS_PATH,
                 DriverOutputRole::RustBinding,
             )?,
             Self::output(
@@ -630,7 +640,7 @@ impl ModelDriver for SchemaDriver {
 pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriverError> {
     let driver = SchemaDriver;
     let plan = driver.plan(repository_root)?;
-    let stage_path = repository_root.join("target/model-stage/schemas-shadow");
+    let stage_path = process_stage_root(repository_root, "schemas-shadow");
     if stage_path.exists() {
         fs::remove_dir_all(&stage_path).map_err(|source| SchemaDriverError::Io {
             path: stage_path.clone(),
@@ -874,6 +884,191 @@ fn render_rust(ir: &SchemaContractIr) -> Vec<u8> {
     }
     output.push_str("];\n");
     output.into_bytes()
+}
+
+#[allow(clippy::too_many_lines)] // One linear pass keeps the complete runtime view tied to one IR.
+fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
+    let mut output = format!(
+        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\nconst GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[\n"
+    );
+    for table in &ir.tables {
+        writeln!(output, "    GeneratedTableSpec {{").unwrap();
+        writeln!(
+            output,
+            "        table_code: {}, name: {:?}, family: {:?}, grain: {:?}, schema_version: {:?},",
+            table.table_code, table.name, table.family, table.grain, table.schema_version
+        )
+        .unwrap();
+        output.push_str("        columns: &[\n");
+        for column in &table.columns {
+            writeln!(
+                output,
+                "            GeneratedColumn {{ name: {:?}, logical_type: LogicalType::{:?}, nullable: {}, semantic_type: {:?}, foreign_key: {:?}, hidden_operational: {} }},",
+                column.name,
+                column.logical_type,
+                column.nullable,
+                column.semantic_type.as_deref(),
+                column.foreign_key.as_deref(),
+                column.hidden_operational,
+            )
+            .unwrap();
+        }
+        output.push_str("        ],\n");
+        writeln!(
+            output,
+            "        primary_key: {}, partition_columns: {}, zorder_columns: {},",
+            rust_strings(&table.primary_key),
+            rust_strings(&table.partition_columns),
+            rust_strings(&table.zorder_columns),
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "        durable_mutation: DurableMutationClass::{:?}, overlay_mutation: OverlayMutationPolicy::{:?}, materialization_role: MaterializationRole::{:?}, publication_pin_role: PublicationPinRole::{:?},",
+            table.durable_mutation,
+            table.overlay_mutation,
+            table.materialization_role,
+            table.publication_pin_role,
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "        dependencies: &{:?}, required_for_publication: {},",
+            table.dependencies, table.required_for_publication
+        )
+        .unwrap();
+        output.push_str("    },\n");
+    }
+    output.push_str(
+        "];\n\nconst GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[\n",
+    );
+    for table in &ir.operational_tables {
+        writeln!(output, "    GeneratedOperationalTableSpec {{").unwrap();
+        writeln!(output, "        name: {:?},", table.name).unwrap();
+        output.push_str("        columns: &[\n");
+        for column in &table.columns {
+            writeln!(
+                output,
+                "            GeneratedOperationalColumn {{ name: {:?}, sqlite_type: OperationalSqliteType::{:?}, nullable: {} }},",
+                column.name, column.sqlite_type, column.nullable
+            )
+            .unwrap();
+        }
+        output.push_str("        ],\n");
+        writeln!(
+            output,
+            "        primary_key: {},",
+            rust_strings(&table.primary_key)
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "        workspace_scope: {},",
+            rust_operational_scope(table.workspace_scope.as_ref())
+        )
+        .unwrap();
+        output.push_str("    },\n");
+    }
+    output.push_str("];\n\nconst GENERATED_TABLE_SCOPE_SPECS: &[TableScopeSpec] = &[\n");
+    for scope in &ir.table_scopes {
+        writeln!(
+            output,
+            "    TableScopeSpec {{ table_code: {}, workspace_column: {:?}, analysis_context_column: {:?}, source_generation_column: {:?}, analysis_context_set_column: {:?}, owner_column: {:?} }},",
+            scope.table_code,
+            scope.workspace_column.as_deref(),
+            scope.analysis_context_column.as_deref(),
+            scope.source_generation_column.as_deref(),
+            scope.analysis_context_set_column.as_deref(),
+            scope.owner_column.as_deref(),
+        )
+        .unwrap();
+    }
+    output.push_str(
+        "];\n\nconst GENERATED_SERVING_PROJECTION_SPECS: &[ServingProjectionSpec] = &[\n",
+    );
+    for projection in &ir.serving_projections {
+        writeln!(
+            output,
+            "    ServingProjectionSpec {{ view_name: {:?}, source_table_code: {}, availability_wave: {}, projection_role: ServingProjectionRole::{:?} }},",
+            projection.view_name,
+            projection.source_table_code,
+            projection.availability_wave,
+            projection.projection_role,
+        )
+        .unwrap();
+    }
+    output.push_str(
+        "];\n\nconst GENERATED_CONTROL_PROJECTION_SPECS: &[ControlProjectionSpec] = &[\n",
+    );
+    for projection in &ir.control_projections {
+        writeln!(
+            output,
+            "    ControlProjectionSpec {{ view_name: {:?}, availability_wave: {}, projection_role: ControlProjectionRole::{:?}, source_table: {:?}, columns: {} }},",
+            projection.view_name,
+            projection.availability_wave,
+            projection.projection_role,
+            projection.source_table.as_deref(),
+            rust_strings(&projection.columns),
+        )
+        .unwrap();
+    }
+    let resources = ir.serving_resource_profile;
+    writeln!(
+        output,
+        "];\n\nconst GENERATED_SERVING_RESOURCE_PROFILE: ServingResourceProfile = ServingResourceProfile {{ batch_size: {}, max_output_rows: {}, max_output_bytes: {}, max_output_batches: {}, max_control_rows: {}, max_control_bytes: {}, max_control_batches: {}, max_snapshot_validation_rows: {}, max_snapshot_validation_bytes: {}, max_snapshot_validation_batches: {} }};",
+        rust_usize_literal(resources.batch_size),
+        rust_usize_literal(resources.max_output_rows),
+        rust_usize_literal(resources.max_output_bytes),
+        rust_usize_literal(resources.max_output_batches),
+        rust_usize_literal(resources.max_control_rows),
+        rust_usize_literal(resources.max_control_bytes),
+        rust_usize_literal(resources.max_control_batches),
+        rust_usize_literal(resources.max_snapshot_validation_rows),
+        rust_usize_literal(resources.max_snapshot_validation_bytes),
+        rust_usize_literal(resources.max_snapshot_validation_batches),
+    )
+    .unwrap();
+    output.into_bytes()
+}
+
+fn rust_strings(values: &[String]) -> String {
+    format!(
+        "&[{}]",
+        values
+            .iter()
+            .map(|value| format!("{value:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn rust_operational_scope(scope: Option<&OperationalWorkspaceScopeContract>) -> String {
+    match scope {
+        None => "None".to_owned(),
+        Some(OperationalWorkspaceScopeContract::Direct { workspace_column }) => format!(
+            "Some(OperationalWorkspaceScope::Direct {{ workspace_column: {workspace_column:?} }})"
+        ),
+        Some(OperationalWorkspaceScopeContract::ViaParent {
+            parent_table,
+            child_column,
+            parent_column,
+            workspace_column,
+        }) => format!(
+            "Some(OperationalWorkspaceScope::ViaParent {{ parent_table: {parent_table:?}, child_column: {child_column:?}, parent_column: {parent_column:?}, workspace_column: {workspace_column:?} }})"
+        ),
+    }
+}
+
+fn rust_usize_literal(value: usize) -> String {
+    let digits = value.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            grouped.push('_');
+        }
+        grouped.push(digit);
+    }
+    grouped.chars().rev().collect()
 }
 
 fn render_validation(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {

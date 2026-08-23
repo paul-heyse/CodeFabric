@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tooling.contracts.fixture_candidates import (
+from tooling.model.fixture_candidates import (
     NORMATIVE_FIXTURE_ROOT,
     _isolated_output_directory,
     emit_candidates,

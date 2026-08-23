@@ -1,64 +1,19 @@
-"""Compile adapter Contract IR into typed Pydantic source and canonical schema views."""
+"""Pure typed Contract-IR model and Pydantic source renderer used by the model driver."""
 
 from __future__ import annotations
 
-import argparse
-import copy
 import importlib.util
-import json
-import operator
-import os
-import shutil
-import subprocess
 import sys
 import tempfile
-from functools import reduce
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
 
-from codefabric_cpg_mcp.contracts.json import (
-    canonicalize_value,
-    checksum,
-)
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
-
-from tooling.contracts.derivation import resolve_derivation
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 GENERATOR_REVISION = "codefabric-adapter-model-compiler-v1"
 DIALECT = "https://json-schema.org/draft/2020-12/schema"
 IR_ARTIFACT_ID = "codefabric.adapter.model-ir"
-DERIVATION_ID = "codefabric.derivation.adapter-models"
-PUBLIC_SCHEMA_ARTIFACTS = {
-    "contracts/adapter/fastmcp-input.schema.json": (
-        "codefabric.adapter.fastmcp-input.schema",
-        "FastMCP tool input contracts",
-        (
-            "QueryToolInput",
-            "ValidateToolInput",
-            "StatusToolInput",
-            "ReferenceToolInput",
-        ),
-        "validation",
-    ),
-    "contracts/adapter/fastmcp-output.schema.json": (
-        "codefabric.adapter.fastmcp-output.schema",
-        "FastMCP tool output contracts",
-        (
-            "QueryToolOutput",
-            "ValidateQueryOutput",
-            "StatusToolOutput",
-            "ReferenceToolOutput",
-        ),
-        "serialization",
-    ),
-    "contracts/adapter/fastmcp-public-meta.schema.json": (
-        "codefabric.adapter.fastmcp-public-meta.schema",
-        "FastMCP public metadata contract",
-        ("PublicToolMeta",),
-        "serialization",
-    ),
-}
 
 type TypeKind = Literal[
     "boolean",
@@ -157,27 +112,6 @@ class AdapterModelIr(_IrModel):
             if any(member not in model_names for member in union.members):
                 raise ValueError(f"{union.name} references an unknown model")
         return self
-
-
-def _resolved_input_and_outputs(
-    root: Path,
-) -> tuple[dict[str, object], list[dict[str, object]]]:
-    invocation = resolve_derivation(root, DERIVATION_ID)
-    inputs = invocation["artifact_inputs"]
-    if not isinstance(inputs, list) or len(inputs) != 1:
-        raise TypeError("adapter derivation requires exactly one resolved artifact")
-    identity = inputs[0]
-    if not isinstance(identity, dict) or identity.get("artifact_id") != IR_ARTIFACT_ID:
-        raise TypeError("adapter derivation resolved the wrong primary artifact")
-    derivation = invocation["derivation"]
-    if not isinstance(derivation, dict) or not isinstance(
-        derivation.get("outputs"), list
-    ):
-        raise TypeError("adapter derivation output model is invalid")
-    outputs = derivation["outputs"]
-    if not all(isinstance(output, dict) for output in outputs):
-        raise TypeError("adapter derivation contains an invalid output")
-    return identity, outputs
 
 
 def _quoted_literal(values: tuple[str, ...]) -> str:
@@ -341,29 +275,6 @@ def render_source(ir: AdapterModelIr, identity: dict[str, object]) -> bytes:
     return "\n".join(lines).encode()
 
 
-def _format_source(source: bytes) -> bytes:
-    executable = shutil.which("ruff")
-    if executable is None:
-        raise RuntimeError("ruff is required to format generated adapter models")
-    result = subprocess.run(
-        [
-            executable,
-            "format",
-            "--line-length",
-            "100",
-            "--stdin-filename",
-            "wire_models.py",
-            "-",
-        ],
-        input=source,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.decode(errors="replace"))
-    return result.stdout
-
-
 def _load_candidate(source: bytes) -> ModuleType:
     with tempfile.TemporaryDirectory(prefix="codefabric-adapter-models.") as directory:
         path = Path(directory) / "wire_models.py"
@@ -389,199 +300,3 @@ def _schema_id(name: str, mode: str) -> str:
         for character in name
     ).lstrip("-")
     return f"https://codefabric.dev/schema/adapter/1.0/{slug}.{mode}.schema.json"
-
-
-def _public_schema(
-    module: ModuleType,
-    path: str,
-    artifact_id: str,
-    title: str,
-    model_names: tuple[str, ...],
-    mode: Literal["validation", "serialization"],
-    generated: dict[str, object],
-) -> bytes:
-    model_types = tuple(getattr(module, name) for name in model_names)
-    contract_type = (
-        model_types[0] if len(model_types) == 1 else reduce(operator.or_, model_types)
-    )
-    schema = TypeAdapter(contract_type).json_schema(mode=mode, by_alias=True)
-    schema["$schema"] = DIALECT
-    schema["$id"] = f"https://codefabric.dev/{path}"
-    schema["title"] = title
-    schema["x-codefabric-generated"] = generated
-    schema["x-codefabric-artifact"] = {
-        "artifact_id": artifact_id,
-        "artifact_kind": "json-schema",
-        "version": "1.0",
-        "compatible_suite_major": 1,
-        "status": "released",
-        "canonical_digest": "b3:" + "0" * 64,
-        "generator_revision": GENERATOR_REVISION,
-    }
-    projection = copy.deepcopy(schema)
-    del projection["x-codefabric-artifact"]["canonical_digest"]
-    schema["x-codefabric-artifact"]["canonical_digest"] = checksum(
-        canonicalize_value(projection)
-    )
-    return (json.dumps(schema, indent=2, sort_keys=True) + "\n").encode()
-
-
-def render_outputs(root: Path) -> dict[Path, bytes]:
-    identity, outputs = _resolved_input_and_outputs(root)
-    authority = root / str(identity["authority_path"])
-    ir_source = authority.read_bytes()
-    ir = AdapterModelIr.model_validate_json(ir_source, strict=True)
-    if (
-        ir.canonical_digest != identity["canonical_digest"]
-        or checksum(ir_source) != identity["source_digest"]
-    ):
-        raise ValueError(
-            "adapter Contract IR identities disagree with the verified artifact index"
-        )
-    source = _format_source(render_source(ir, identity))
-    module = _load_candidate(source)
-    schemas: dict[str, dict[str, object]] = {"validation": {}, "serialization": {}}
-    fingerprints: dict[str, dict[str, str]] = {"validation": {}, "serialization": {}}
-    for mode in ("validation", "serialization"):
-        for name, model in module.MODEL_BY_NAME.items():
-            schema = model.model_json_schema(mode=mode, by_alias=True)
-            schema["$schema"] = DIALECT
-            schema["$id"] = _schema_id(name, mode)
-            schemas[mode][name] = schema
-            fingerprints[mode][name] = checksum(canonicalize_value(schema))
-        for name, adapter in module.TYPE_ADAPTERS.items():
-            schema = adapter.json_schema(mode=mode, by_alias=True)
-            schema["$schema"] = DIALECT
-            schema["$id"] = _schema_id(name, mode)
-            schemas[mode][name] = schema
-            fingerprints[mode][name] = checksum(canonicalize_value(schema))
-
-    generated = {
-        "generator_revision": GENERATOR_REVISION,
-        "profile": "codefabric-jcs-v1",
-        "source_artifact_id": IR_ARTIFACT_ID,
-        "source_canonical_digest": identity["canonical_digest"],
-        "source_digest": identity["source_digest"],
-    }
-    schema_manifest = {"_generated": generated, **schemas}
-    fingerprint_manifest = {
-        "_generated": generated,
-        "profile": "codefabric-adapter-schema-fingerprints-v1",
-        **fingerprints,
-    }
-    output_by_kind = {
-        "python-adapter-models": source,
-        "adapter-schema-manifest": canonicalize_value(schema_manifest),
-        "adapter-fingerprint-manifest": canonicalize_value(fingerprint_manifest),
-    }
-    public_schemas = {
-        path: _public_schema(
-            module,
-            path,
-            artifact_id,
-            title,
-            model_names,
-            mode,
-            generated,
-        )
-        for path, (
-            artifact_id,
-            title,
-            model_names,
-            mode,
-        ) in PUBLIC_SCHEMA_ARTIFACTS.items()
-    }
-    rendered: dict[Path, bytes] = {}
-    for output in outputs:
-        path = str(output["path"])
-        kind = str(output["output_kind"])
-        if kind == "adapter-public-schema":
-            try:
-                rendered[Path(path)] = public_schemas[path]
-            except KeyError as error:
-                raise ValueError(
-                    f"unknown adapter public-schema output: {path}"
-                ) from error
-        else:
-            try:
-                rendered[Path(path)] = output_by_kind[kind]
-            except KeyError as error:
-                raise ValueError(f"unknown adapter output kind: {kind}") from error
-    if set(public_schemas) != {
-        path.as_posix()
-        for path in rendered
-        if path.as_posix().startswith("contracts/adapter/")
-    }:
-        raise ValueError("adapter public-schema output census is incomplete")
-    return rendered
-
-
-def _write_atomic(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
-        Path(temporary).replace(path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-
-
-def write(root: Path) -> None:
-    outputs = render_outputs(root)
-    for relative, data in outputs.items():
-        _write_atomic(root / relative, data)
-    print(f"generated {len(outputs)} adapter Contract-IR outputs")
-
-
-def check(root: Path) -> None:
-    for relative, expected in render_outputs(root).items():
-        if (root / relative).read_bytes() != expected:
-            raise SystemExit(f"generated adapter contract drifted: {relative}")
-    print("adapter Contract-IR outputs are current")
-
-
-def repro_check(root: Path) -> None:
-    identity, _ = _resolved_input_and_outputs(root)
-    catalog_path = Path("contracts/manifests/suite-manifest.json")
-    authority_path = Path(str(identity["authority_path"]))
-    with tempfile.TemporaryDirectory(prefix="codefabric-adapter-repro.") as directory:
-        generated_roots = []
-        for name in ("first", "second"):
-            generated_root = Path(directory) / name
-            for relative in (catalog_path, authority_path):
-                destination = generated_root / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(root / relative, destination)
-            write(generated_root)
-            generated_roots.append(generated_root)
-        for relative in render_outputs(generated_roots[0]):
-            if (generated_roots[0] / relative).read_bytes() != (
-                generated_roots[1] / relative
-            ).read_bytes():
-                raise SystemExit(
-                    f"adapter Contract-IR reproduction drifted: {relative}"
-                )
-    print("two isolated adapter Contract-IR generations are byte-identical")
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("write", "check", "repro-check"))
-    parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[2]
-    )
-    arguments = parser.parse_args()
-    root = arguments.root.resolve()
-    if arguments.mode == "write":
-        write(root)
-    elif arguments.mode == "check":
-        check(root)
-    else:
-        repro_check(root)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

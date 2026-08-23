@@ -15,7 +15,7 @@ use super::desired_tree::{
     DesiredTree, DesiredTreeEntry, PlannedConsumer, PlannedOutput, PlannedOutputProjection,
     PlannedOutputRole, PlannedValidator, SafeOutputPath,
 };
-use super::driver_protocol::rustfmt_source;
+use super::driver_protocol::{process_stage_root, rustfmt_source};
 use super::model_control::StableId;
 use super::proto_driver;
 use super::registry_cbef_driver;
@@ -28,8 +28,6 @@ use super::schema_driver;
 
 const CENSUS_PATH: &str = "contracts/acceptance/released-artifact-census-v1.json";
 const ADAPTER_VALIDATION_PATH: &str = "contracts/generated/model/adapter-validation.json";
-const LEGACY_INDEX_PATH: &str =
-    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json";
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -275,7 +273,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
             rule_version: registry.rule_version.clone(),
             resource_profile: registry.resource_profile.clone(),
             outputs: registry.rendered_outputs.clone(),
-            tool_identity: json!({"driver": "native-rust", "rule": "registry-cbef-v1"}),
+            tool_identity: portable_tool_identity(registry.tool_identity.clone()),
         },
         FamilyProjection {
             family: schemas.family.clone(),
@@ -289,14 +287,14 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
             rule_version: adapter.rule_version.clone(),
             resource_profile: adapter.resource_profile.clone(),
             outputs: adapter.rendered_outputs.clone(),
-            tool_identity: serde_json::to_value(&adapter.tool_identity)?,
+            tool_identity: portable_tool_identity(serde_json::to_value(&adapter.tool_identity)?),
         },
         FamilyProjection {
             family: proto.family.clone(),
             rule_version: proto.rule_version.clone(),
             resource_profile: proto.resource_profile.clone(),
             outputs: proto.rendered_outputs.clone(),
-            tool_identity: proto.tool_identity.clone(),
+            tool_identity: portable_tool_identity(proto.tool_identity.clone()),
         },
     ];
     let mut tree = AggregateTree::new();
@@ -340,6 +338,46 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         adapter_source_id.to_owned(),
         adapter_source_digest.to_owned(),
     );
+    for (path, bytes) in [
+        (
+            "contracts/generated/model/governance/toolchain-identity.json",
+            pretty_json(&json!({"schema_version": 1, "families": families}))?,
+        ),
+        (
+            "contracts/toolchain/toolchain-identity.json",
+            pretty_json(&json!({
+                "artifact_id": "codefabric.toolchain.identity",
+                "artifact_kind": "manifest",
+                "version": "1.0",
+                "compatible_suite_major": 1,
+                "status": "released",
+                "schema_version": 1,
+                "families": families,
+            }))?,
+        ),
+    ] {
+        tree.insert(path, "action:governance", bytes, false)?;
+    }
+    let bundle_inputs = model_artifacts(
+        repository_root,
+        &before_model,
+        &census,
+        &proto_census,
+        &family_identities,
+        &families,
+        &tree.desired,
+    )?;
+    let bundles = bundles(&bundle_inputs)?;
+    validate_bundles(&bundles)?;
+    for bundle in &bundles {
+        let path = format!("contracts/bundles/{}-bundle.json", bundle.bundle_kind);
+        tree.insert(
+            &path,
+            "action:governance",
+            bundle_document_bytes(bundle)?,
+            false,
+        )?;
+    }
     let artifacts = model_artifacts(
         repository_root,
         &before_model,
@@ -347,18 +385,16 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         &proto_census,
         &family_identities,
         &families,
+        &tree.desired,
     )?;
     let outputs = model_outputs(&tree, &families);
     let requirements = requirements(&artifacts, &families);
     validate_requirement_closure(&requirements)?;
-    let bundles = bundles(&artifacts)?;
-    validate_bundles(&bundles)?;
     let fixtures = fixture_index(&before_model);
+    let fixture_oracles = fixture_oracle_records(&before_model);
     let package_data = package_data(&tree);
     let aggregators = module_aggregators(&tree);
     let rust_aggregator = rustfmt_source(&rust_module_aggregator(&tree))?;
-    let shadow_parity = legacy_shadow_parity(repository_root, &artifacts)?;
-
     let manifest = json!({
         "artifact_id": "codefabric.generated.model-suite-manifest",
         "artifact_kind": "model-suite-manifest",
@@ -366,6 +402,21 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         "schema_version": 1,
         "compatible_suite_major": 1,
         "status": "draft",
+        "release_census": {
+            "owner_acceptance": census.owner_acceptance,
+            "released_artifact_count": census.released_artifacts.len(),
+        },
+        "artifacts": artifacts,
+        "outputs": outputs,
+        "families": families,
+    });
+    let compatibility_manifest = json!({
+        "artifact_id": "codefabric.manifests.suite-manifest",
+        "artifact_kind": "manifest",
+        "version": "1.0",
+        "schema_version": 1,
+        "compatible_suite_major": 1,
+        "status": "released",
         "release_census": {
             "owner_acceptance": census.owner_acceptance,
             "released_artifact_count": census.released_artifacts.len(),
@@ -413,16 +464,47 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
             pretty_json(&aggregators)?,
         ),
         ("src/generated/model.rs", rust_aggregator),
-        (
-            "contracts/generated/model/governance/toolchain-identity.json",
-            pretty_json(&json!({"schema_version": 1, "families": families}))?,
-        ),
-        (
-            "contracts/generated/model/governance/legacy-shadow-parity.json",
-            pretty_json(&shadow_parity)?,
-        ),
     ];
     for (path, bytes) in governance {
+        tree.insert(path, "action:governance", bytes, false)?;
+    }
+    for (path, bytes) in [
+        (
+            "contracts/manifests/suite-manifest.json",
+            pretty_json(&compatibility_manifest)?,
+        ),
+        (
+            "contracts/manifests/requirements.jsonl",
+            json_lines_with_header(
+                "codefabric.manifests.requirements",
+                "requirements",
+                &requirements,
+            )?,
+        ),
+        (
+            "contracts/manifests/traceability.jsonl",
+            json_lines_with_header(
+                "codefabric.manifests.traceability",
+                "traceability",
+                &requirements,
+            )?,
+        ),
+        (
+            "contracts/manifests/fixture-oracles.json",
+            pretty_json(&json!({
+                "artifact_id": "codefabric.manifests.fixture-oracles",
+                "artifact_kind": "manifest",
+                "version": "1.0",
+                "compatible_suite_major": 1,
+                "status": "released",
+                "schema_version": 1,
+                "canonical_digest": format!("b3:{}", "0".repeat(64)),
+                "digest_projection": "json-jcs-v1",
+                "generator_revision": "codefabric-model/1.0",
+                "records": fixture_oracles,
+            }))?,
+        ),
+    ] {
         tree.insert(path, "action:governance", bytes, false)?;
     }
     let validation = aggregate_validation(&tree, &artifacts, &requirements, &bundles, &fixtures)?;
@@ -433,7 +515,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         false,
     )?;
 
-    let stage_root = repository_root.join("target/model-stage/aggregate-shadow");
+    let stage_root = process_stage_root(repository_root, "aggregate-shadow");
     if stage_root.exists() {
         fs::remove_dir_all(&stage_root).map_err(|source| AggregateError::Io {
             path: stage_root.clone(),
@@ -500,6 +582,7 @@ fn model_artifacts(
     proto_census: &Value,
     family_identities: &BTreeMap<String, String>,
     families: &[FamilyProjection],
+    desired: &DesiredTree,
 ) -> Result<Vec<ModelArtifactRecord>, AggregateError> {
     let released = census
         .released_artifacts
@@ -518,12 +601,29 @@ fn model_artifacts(
             continue;
         };
         let id = header.artifact_id.as_str();
+        if is_aggregate_meta_projection(claim.path.display()) {
+            if released.contains(id) {
+                found.insert(id);
+            }
+            continue;
+        }
         if claim.role == ArtifactRole::Derived && !released.contains(id) {
             continue;
         }
         if released.contains(id) {
             found.insert(id);
         }
+        let current_bytes;
+        let bytes = if let Some(entry) = desired
+            .entries
+            .iter()
+            .find_map(|(path, entry)| (path.display() == claim.path.display()).then_some(entry))
+        {
+            entry.bytes.as_slice()
+        } else {
+            current_bytes = read_stable(&root.join(claim.path.display()), MAX_BYTES)?;
+            &current_bytes
+        };
         let record = ModelArtifactRecord {
             artifact_id: id.to_owned(),
             artifact_kind: header.artifact_kind.clone(),
@@ -532,8 +632,8 @@ fn model_artifacts(
             version: header.version.clone(),
             compatible_suite_major: header.compatible_suite_major,
             status: header.status.clone(),
-            canonical_digest: semantic_identity(root, claim, proto_census, family_identities)?,
-            source_digest: claim.source_digest.clone(),
+            canonical_digest: semantic_identity(claim, bytes, proto_census, family_identities)?,
+            source_digest: digest_bytes(bytes),
             projection_profile: projection_profile(claim).to_owned(),
             release_status: if released.contains(id) {
                 "released"
@@ -570,12 +670,11 @@ fn model_artifacts(
 }
 
 fn semantic_identity(
-    root: &Path,
     claim: &ClaimedPath,
+    bytes: &[u8],
     proto_census: &Value,
     family_identities: &BTreeMap<String, String>,
 ) -> Result<String, AggregateError> {
-    let bytes = read_stable(&root.join(claim.path.display()), MAX_BYTES)?;
     if let Some(header) = &claim.header
         && let Some(digest) = family_identities.get(header.artifact_id.as_str())
     {
@@ -584,7 +683,7 @@ fn semantic_identity(
     if claim.parser == NativeParser::Yaml
         && let Some(header) = &claim.header
         && let Some(digest) =
-            registry_cbef_driver::detached_registry_identity(header.artifact_id.as_str(), &bytes)?
+            registry_cbef_driver::detached_registry_identity(header.artifact_id.as_str(), bytes)?
     {
         return Ok(digest);
     }
@@ -593,51 +692,21 @@ fn semantic_identity(
         .as_ref()
         .is_some_and(|header| header.artifact_id.as_str() == "codefabric.schema.contract-ir")
     {
-        return Ok(schema_driver::detached_schema_identity(&bytes)?);
-    }
-    if let Some(header) = &claim.header {
-        match header.artifact_id.as_str() {
-            "codefabric.manifests.suite-manifest" => {
-                let source: super::catalog::ContractCatalog = serde_json::from_slice(&bytes)?;
-                let compiled = source.compile(root, true)?;
-                let mut value = serde_json::to_value(compiled.normalized_catalog())?;
-                remove_own_identity(&mut value, claim.path.display())?;
-                return Ok(digest_bytes(&canonical_json(&value)?));
-            }
-            "codefabric.manifests.fixture-oracles" => {
-                let mut document: super::models::FixtureOracleManifest =
-                    serde_json::from_slice(&bytes)?;
-                document
-                    .records
-                    .sort_by(|left, right| left.path.cmp(&right.path));
-                if document
-                    .records
-                    .windows(2)
-                    .any(|pair| pair[0].path == pair[1].path)
-                {
-                    return Err(projection_error(
-                        claim.path.display(),
-                        "duplicate fixture-oracle path",
-                    ));
-                }
-                let mut value = serde_json::to_value(document)?;
-                remove_own_identity(&mut value, claim.path.display())?;
-                return Ok(digest_bytes(&canonical_json(&value)?));
-            }
-            _ => {}
-        }
+        return Ok(schema_driver::detached_schema_identity(bytes)?);
     }
     let projection = match claim.parser {
-        NativeParser::Json => canonical_json_projection(claim.path.display(), &bytes)?,
-        NativeParser::Yaml => canonical_yaml_projection(claim.path.display(), &bytes)?,
-        NativeParser::JsonLines => canonical_jsonl_projection(claim.path.display(), &bytes)?,
+        NativeParser::Json => canonical_json_projection(claim.path.display(), bytes)?,
+        NativeParser::Yaml => canonical_yaml_projection(claim.path.display(), bytes)?,
+        NativeParser::JsonLines => canonical_jsonl_projection(claim.path.display(), bytes)?,
         NativeParser::CommentHeader if has_extension(claim.path.display(), "proto") => {
             canonical_proto_projection(claim.path.display(), proto_census)?
         }
         NativeParser::CommentHeader if has_extension(claim.path.display(), "ebnf") => {
-            canonical_ebnf_projection(claim.path.display(), &bytes)?
+            canonical_ebnf_projection(claim.path.display(), bytes)?
         }
-        NativeParser::MarkdownHeader | NativeParser::CommentHeader | NativeParser::Opaque => bytes,
+        NativeParser::MarkdownHeader | NativeParser::CommentHeader | NativeParser::Opaque => {
+            bytes.to_vec()
+        }
     };
     Ok(digest_bytes(&projection))
 }
@@ -925,6 +994,22 @@ fn resource_profile_for(family: &str, families: &[FamilyProjection]) -> Value {
         .unwrap_or_else(|| json!({"profile": "aggregate-governance-bounded-v1"}))
 }
 
+fn portable_tool_identity(value: Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .filter(|(key, _)| key != "binary_path" && !key.ends_with("_path"))
+                .map(|(key, value)| (key, portable_tool_identity(value)))
+                .collect(),
+        ),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(portable_tool_identity).collect())
+        }
+        other => other,
+    }
+}
+
 fn requirements(
     artifacts: &[ModelArtifactRecord],
     families: &[FamilyProjection],
@@ -986,7 +1071,7 @@ fn bundles(artifacts: &[ModelArtifactRecord]) -> Result<Vec<ModelBundleRecord>, 
         .iter()
         .filter(|artifact| artifact.release_status == "released")
     {
-        for kind in bundle_membership(&artifact.artifact_id) {
+        for kind in bundle_membership(artifact) {
             grouped
                 .entry(kind.to_owned())
                 .or_default()
@@ -1027,6 +1112,24 @@ fn bundles(artifacts: &[ModelArtifactRecord]) -> Result<Vec<ModelBundleRecord>, 
         .collect()
 }
 
+fn bundle_document_bytes(bundle: &ModelBundleRecord) -> Result<Vec<u8>, AggregateError> {
+    pretty_json(&json!({
+        "artifact_id": format!("codefabric.bundles.{}-bundle", bundle.bundle_kind),
+        "artifact_kind": "bundle-manifest",
+        "version": "1.0",
+        "compatible_suite_major": 1,
+        "status": "released",
+        "bundle_kind": bundle.bundle_kind,
+        "bundle_version": bundle.bundle_version,
+        "bundle_major": bundle.bundle_major,
+        "artifacts": bundle.artifacts,
+        "compatibility": bundle.compatibility,
+        "created_by": bundle.created_by,
+        "bundle_digest": bundle.bundle_digest,
+        "signature": bundle.signature,
+    }))
+}
+
 fn bundle_digest(bundle: &ModelBundleRecord) -> Result<String, AggregateError> {
     let mut value = serde_json::to_value(bundle)?;
     let object = value
@@ -1039,70 +1142,72 @@ fn bundle_digest(bundle: &ModelBundleRecord) -> Result<String, AggregateError> {
     Ok(digest_bytes(&canonical_json(&value)?))
 }
 
-fn bundle_membership(artifact_id: &str) -> BTreeSet<&'static str> {
+fn bundle_membership(artifact: &ModelArtifactRecord) -> BTreeSet<&'static str> {
+    let path = artifact.authority_path.as_str();
     let mut kinds = BTreeSet::new();
-    if artifact_id.starts_with("codefabric.identity.")
-        || artifact_id.starts_with("codefabric.registry.ontology-")
-        || matches!(
-            artifact_id,
-            "codefabric.registry.enum-registry"
-                | "codefabric.registry.flag-registry"
-                | "codefabric.registry.unknown-registry"
-        )
+    if artifact.artifact_kind == "bundle-manifest" || path.starts_with("contracts/bundles/") {
+        return kinds;
+    }
+    if path.starts_with("contracts/identity/")
+        || path.starts_with("contracts/registry/ontology-")
+        || path.ends_with("/enum-registry.yaml")
+        || path.ends_with("/flag-registry.yaml")
+        || path.ends_with("/unknown-registry.yaml")
     {
         kinds.insert("ontology");
     }
-    if artifact_id.starts_with("codefabric.schema.") {
+    if path.starts_with("contracts/schema/") {
         kinds.insert("schema");
     }
-    if artifact_id.starts_with("codefabric.registry.provider-")
-        || matches!(
-            artifact_id,
-            "codefabric.registry.capability-registry"
-                | "codefabric.rpc.feature-registry"
-                | "codefabric.rpc.provider-control"
-                | "codefabric.rpc.pyrefly-sidecar"
-                | "codefabric.rpc.rustc-extractor"
-        )
+    if path.starts_with("contracts/providers/")
+        || path.contains("/provider-")
+        || path.ends_with("/capability-registry.yaml")
+        || path.ends_with("/feature-registry.yaml")
+        || path.ends_with("/pyrefly_sidecar.proto")
+        || path.ends_with("/rustc_extractor.proto")
     {
         kinds.insert("provider");
     }
-    if artifact_id.starts_with("codefabric.query.")
-        || artifact_id == "codefabric.registry.phrase-registry"
-        || artifact_id == "codefabric.rpc.cpg-query-service"
-        || artifact_id == "codefabric.rpc.feature-registry"
-        || artifact_id.starts_with("codefabric.schema.cpg-semantic-query-")
+    if path.starts_with("contracts/query/")
+        || path.ends_with("/phrase-registry.yaml")
+        || path.ends_with("/cpg_query_service.proto")
+        || path.ends_with("/feature-registry.yaml")
+        || path.contains("/cpg-semantic-query-")
     {
         kinds.insert("query-language");
     }
-    if artifact_id.starts_with("codefabric.adapter.")
-        || matches!(
-            artifact_id,
-            "codefabric.registry.capability-registry"
-                | "codefabric.registry.error-registry"
-                | "codefabric.registry.state-machine-registry"
-                | "codefabric.rpc.cpg-query-service"
-                | "codefabric.rpc.feature-registry"
-                | "codefabric.schema.public-status.schema"
-        )
+    if path.starts_with("contracts/adapter/")
+        || path.ends_with("/capability-registry.yaml")
+        || path.ends_with("/error-registry.yaml")
+        || path.ends_with("/state-machine-registry.yaml")
+        || path.ends_with("/cpg_query_service.proto")
+        || path.ends_with("/feature-registry.yaml")
+        || path.ends_with("/public-status.schema.json")
     {
         kinds.insert("tool-contract");
     }
-    if matches!(
-        artifact_id,
-        "codefabric.registry.derivation-registry"
-            | "codefabric.registry.projection-registry"
-            | "codefabric.registry.summary-registry"
-    ) {
+    if path.ends_with("/derivation-registry.yaml")
+        || path.ends_with("/projection-registry.yaml")
+        || path.ends_with("/summary-registry.yaml")
+    {
         kinds.insert("derivation");
     }
-    if artifact_id == "codefabric.registry.model-pack.schema" {
+    if path.ends_with("/model-pack.schema.json") {
         kinds.insert("model-pack");
     }
-    if artifact_id == "codefabric.toolchain.identity" {
+    if path.starts_with("contracts/toolchain/") {
         kinds.insert("toolchain");
     }
     kinds
+}
+
+fn is_aggregate_meta_projection(path: &str) -> bool {
+    matches!(
+        path,
+        "contracts/manifests/suite-manifest.json"
+            | "contracts/manifests/requirements.jsonl"
+            | "contracts/manifests/traceability.jsonl"
+    )
 }
 
 fn validate_bundles(bundles: &[ModelBundleRecord]) -> Result<(), AggregateError> {
@@ -1151,21 +1256,71 @@ fn fixture_index(model: &RepositoryModel) -> Vec<Value> {
         .values()
         .filter(|claim| claim.role == ArtifactRole::EvidenceAuthority)
         .map(|claim| {
-            let class = if claim.path.display().contains("/negative/") {
-                "negative-class"
-            } else if claim.path.display().contains("differential") {
-                "differential"
-            } else if claim.path.display().contains("vectors")
-                || claim.path.display().contains("production_wire")
-            {
-                "normative-kat"
-            } else {
-                "property"
-            };
+            let class = fixture_class(claim.path.display());
             json!({
                 "path": claim.path.display(),
                 "class": class,
                 "source_digest": claim.source_digest,
+            })
+        })
+        .collect()
+}
+
+fn fixture_class(path: &str) -> &'static str {
+    if path.contains("/negative/") || path.contains("/invalid-") {
+        "negative-class"
+    } else if path.contains("differential") {
+        "differential"
+    } else if path.contains("vectors")
+        || path.contains("adapter-cases")
+        || path.contains("production_wire")
+        || path.contains("valid-minimal")
+        || path.contains("source-syntax-canonicalization")
+    {
+        "normative-kat"
+    } else {
+        "property"
+    }
+}
+
+fn fixture_owner(path: &str) -> &'static str {
+    if path.contains("/jcs/") || path.contains("/projections/") {
+        "semantic-query"
+    } else if path.contains("/identity/")
+        || path.contains("/registries/")
+        || path.contains("/model-packs/")
+    {
+        "ontology"
+    } else if path.contains("schema-version") || path.contains("conflicting-observations") {
+        "data-fabric"
+    } else if path.contains("/security/")
+        || path.contains("/tree-sitter/")
+        || path.contains("/ruff/")
+        || path.contains("source-syntax")
+    {
+        "fact-generation"
+    } else {
+        "suite"
+    }
+}
+
+fn fixture_oracle_records(model: &RepositoryModel) -> Vec<Value> {
+    model
+        .claims
+        .values()
+        .filter(|claim| claim.role == ArtifactRole::EvidenceAuthority)
+        .map(|claim| {
+            let path = claim.path.display();
+            let class = fixture_class(path);
+            json!({
+                "path": path,
+                "oracle_class": class,
+                "origin": format!(
+                    "Model-discovered {class} source bytes; answers remain outside routine renderer authority"
+                ),
+                "owner": fixture_owner(path),
+                "version": "1.0",
+                "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
             })
         })
         .collect()
@@ -1219,61 +1374,6 @@ fn rust_module_aggregator(tree: &AggregateTree) -> Vec<u8> {
             .expect("writing to String cannot fail");
     }
     output.into_bytes()
-}
-
-fn legacy_shadow_parity(
-    root: &Path,
-    artifacts: &[ModelArtifactRecord],
-) -> Result<Value, AggregateError> {
-    let legacy: Value =
-        serde_json::from_slice(&read_stable(&root.join(LEGACY_INDEX_PATH), MAX_BYTES)?)?;
-    let legacy = legacy["artifacts"]
-        .as_array()
-        .ok_or(AggregateError::LegacyParity)?;
-    let current = artifacts
-        .iter()
-        .map(|artifact| (artifact.artifact_id.as_str(), artifact))
-        .collect::<BTreeMap<_, _>>();
-    let mut matched = 0_usize;
-    let mut accepted_corrections = Vec::new();
-    for previous in legacy {
-        let artifact_id = previous["artifact_id"]
-            .as_str()
-            .ok_or(AggregateError::LegacyParity)?;
-        let current = current
-            .get(artifact_id)
-            .ok_or(AggregateError::LegacyParity)?;
-        let previous_source = previous["source_digest"]
-            .as_str()
-            .ok_or(AggregateError::LegacyParity)?;
-        let previous_canonical = previous["canonical_digest"]
-            .as_str()
-            .ok_or(AggregateError::LegacyParity)?;
-        if previous_source == current.source_digest {
-            if previous_canonical != current.canonical_digest {
-                return Err(AggregateError::LegacyParity);
-            }
-            matched += 1;
-        } else {
-            accepted_corrections.push(json!({
-                "artifact_id": artifact_id,
-                "disposition": "current-authority-evolution-admitted-by-active-model-plan",
-                "previous_source_digest": previous_source,
-                "current_source_digest": current.source_digest,
-                "previous_canonical_digest": previous_canonical,
-                "current_canonical_digest": current.canonical_digest,
-            }));
-        }
-    }
-    Ok(json!({
-        "schema_version": 1,
-        "oracle": LEGACY_INDEX_PATH,
-        "legacy_artifact_count": legacy.len(),
-        "exact_identity_matches": matched,
-        "accepted_source_evolution_count": accepted_corrections.len(),
-        "accepted_corrections": accepted_corrections,
-        "unaccepted_same-source_semantic_differences": 0,
-    }))
 }
 
 fn aggregate_validation(
@@ -1404,6 +1504,26 @@ fn json_lines(values: &[ModelRequirementRecord]) -> Result<Vec<u8>, AggregateErr
     Ok(bytes)
 }
 
+fn json_lines_with_header(
+    artifact_id: &str,
+    record_kind: &str,
+    values: &[ModelRequirementRecord],
+) -> Result<Vec<u8>, AggregateError> {
+    let header = json!({
+        "artifact_id": artifact_id,
+        "artifact_kind": "json-lines",
+        "version": "1.0",
+        "compatible_suite_major": 1,
+        "status": "released",
+        "record_kind": record_kind,
+        "schema_version": 1,
+    });
+    let mut bytes = canonical_json(&header)?;
+    bytes.push(b'\n');
+    bytes.extend(json_lines(values)?);
+    Ok(bytes)
+}
+
 fn canonical_digest(value: &impl Serialize) -> Result<String, AggregateError> {
     let value = serde_json::to_value(value)?;
     Ok(digest_bytes(&canonical_json(&value)?))
@@ -1431,8 +1551,6 @@ pub enum AggregateError {
     BundleClosure,
     #[error("aggregate source fence changed during rendering")]
     SourceFence,
-    #[error("legacy shadow parity has an unaccepted semantic difference")]
-    LegacyParity,
     #[error("detached semantic projection failed for {path}: {detail}")]
     Projection { path: String, detail: String },
     #[error("aggregate I/O failed at {path}: {source}")]
@@ -1453,8 +1571,6 @@ pub enum AggregateError {
     Driver(#[from] super::driver_protocol::DriverProtocolError),
     #[error(transparent)]
     Release(#[from] super::release_census::ReleaseCensusError),
-    #[error(transparent)]
-    Catalog(#[from] super::catalog::CatalogError),
     #[error(transparent)]
     Registry(#[from] registry_cbef_driver::RegistryCbefError),
     #[error(transparent)]
@@ -1604,6 +1720,30 @@ mod tests {
     }
 
     #[test]
+    fn model_bundle_outputs_never_become_members_of_their_own_or_other_bundles() {
+        let artifact = ModelArtifactRecord {
+            artifact_id: "codefabric.bundles.provider-bundle".to_owned(),
+            artifact_kind: "bundle-manifest".to_owned(),
+            authority_path: "contracts/bundles/provider-bundle.json".to_owned(),
+            owner: "contracts".to_owned(),
+            version: "1.0".to_owned(),
+            compatible_suite_major: 1,
+            status: "released".to_owned(),
+            canonical_digest: format!("b3:{}", "0".repeat(64)),
+            source_digest: format!("b3:{}", "1".repeat(64)),
+            projection_profile: "bundle-ac-g-07-v1".to_owned(),
+            release_status: "released".to_owned(),
+            compilation_unit: "governance".to_owned(),
+            source_role: ArtifactRole::Derived,
+            consumers: BTreeSet::from([PlannedConsumer::ContractVerifier]),
+            resource_profile: json!({"profile": "test"}),
+            provenance: BTreeSet::from(["test".to_owned()]),
+        };
+        assert!(bundle_membership(&artifact).is_empty());
+        assert!(bundles(&[artifact]).unwrap().is_empty());
+    }
+
+    #[test]
     fn model_generated_aggregates_have_no_manual_member_list_input() {
         let source = include_str!("aggregate_driver.rs");
         assert!(!source.contains(&["BUNDLE", "_MEMBERS"].concat()));
@@ -1611,15 +1751,19 @@ mod tests {
     }
 
     #[test]
-    fn model_promoted_consumers_and_desired_tree_compile_as_one_dependency_closed_state() {
-        let aggregator = include_str!("../../generated/model.rs");
-        let identity = include_str!("../../identity.rs");
-        let source_syntax = include_str!("../../source_syntax.rs");
+    fn model_module_aggregator_is_derived_from_the_desired_tree() {
+        let mut tree = AggregateTree::new();
+        for path in [
+            "src/generated/model_identity_recipes.rs",
+            "src/generated/model_registries.rs",
+            "src/generated/model_schema_tables.rs",
+        ] {
+            tree.insert(path, "action:test", Vec::new(), true).unwrap();
+        }
+        let aggregator = String::from_utf8(rust_module_aggregator(&tree)).unwrap();
         assert!(aggregator.contains("model_identity_recipes.rs"));
         assert!(aggregator.contains("model_registries.rs"));
         assert!(aggregator.contains("model_schema_tables.rs"));
-        assert!(identity.contains("model_generated::identity_recipes"));
-        assert!(source_syntax.contains("model_generated::registries"));
     }
 
     #[test]

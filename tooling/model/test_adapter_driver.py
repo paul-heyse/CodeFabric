@@ -16,7 +16,7 @@ from fastmcp import Client, FastMCP
 from mcp.types import Tool as MCPTool
 from pydantic import ValidationError
 
-from tooling.contracts.generate_adapter_models import _load_candidate
+from tooling.model.adapter_contract_ir import _load_candidate
 from tooling.model.adapter_driver import (
     PROTOCOL_VERSION,
     AdapterDriverIr,

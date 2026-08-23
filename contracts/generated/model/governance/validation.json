@@ -1,15 +1,15 @@
 {
-  "artifact_count": 117,
+  "artifact_count": 116,
   "bundle_count": 8,
   "family": "aggregate",
-  "fixture_count": 49,
+  "fixture_count": 51,
   "forbidden_write_roots": [
     "contracts/acceptance",
     "contracts/fixtures",
     "docs/upfront_design"
   ],
-  "output_count": 56,
-  "released_requirement_count": 66,
+  "output_count": 74,
+  "released_requirement_count": 63,
   "routine_write_roots": [
     "contracts/generated/model",
     "contracts/schema",
@@ -21,5 +21,5 @@
     "tooling/proto"
   ],
   "schema_version": 1,
-  "tree_digest": "b3:2a9e9ac76f3ff3b8e6c04e95c8caa8bafa9ef7be3fcf929f83d95e4a073cb169"
+  "tree_digest": "b3:d92d268086b260ef1bf0b9b0e76311cfd5a005995261ab2d0e94cf3afcb88dcd"
 }
