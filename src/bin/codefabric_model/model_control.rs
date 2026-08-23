@@ -511,6 +511,8 @@ fn component_min_id<'a>(
 /// Compiler build inputs that determine an isolated Cargo output root.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CompilerBuildIdentity {
+    /// BLAKE3 digest over the exact compiler source set and Cargo manifest.
+    pub compiler_source_digest: String,
     /// Exact `rustc -vV` identity.
     pub rustc_identity: String,
     /// Exact Cargo.lock digest.
@@ -600,6 +602,8 @@ mod tests {
 
     fn build_identity(rustc: &str, feature: &str) -> CompilerBuildIdentity {
         CompilerBuildIdentity {
+            compiler_source_digest:
+                "b3:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".to_owned(),
             rustc_identity: rustc.to_owned(),
             cargo_lock_digest:
                 "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
@@ -715,8 +719,12 @@ mod tests {
         let first = build_identity("rustc-a", "model-compiler");
         let feature_changed = build_identity("rustc-a", "model-compiler,canonical-json");
         let toolchain_changed = build_identity("rustc-b", "model-compiler");
+        let mut source_changed = first.clone();
+        source_changed.compiler_source_digest =
+            "b3:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_owned();
         assert_ne!(first.digest().unwrap(), feature_changed.digest().unwrap());
         assert_ne!(first.digest().unwrap(), toolchain_changed.digest().unwrap());
+        assert_ne!(first.digest().unwrap(), source_changed.digest().unwrap());
     }
 
     #[test]

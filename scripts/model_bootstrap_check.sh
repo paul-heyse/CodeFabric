@@ -64,11 +64,18 @@ model_bootstrap_has_no_generated_or_production_library_edge() {
 }
 
 model_bootstrap_builds_without_generated_outputs() {
-  local rustc_identity lock_identity target_triple build_key target_dir executable
+  local rustc_identity lock_identity source_identity target_triple build_key target_dir executable
   rustc_identity="$(rustc -vV)"
   lock_identity="$(shasum -a 256 "$repo_root/Cargo.lock" | awk '{print $1}')"
+  source_identity="$(
+    shasum -a 256 \
+      "$repo_root/Cargo.toml" \
+      "$repo_root/src/bin/codefabric_model/main.rs" \
+      "$repo_root/src/bin/codefabric_model/model_control.rs" \
+      | shasum -a 256 | awk '{print $1}'
+  )"
   target_triple="$(printf '%s\n' "$rustc_identity" | sed -n 's/^host: //p')"
-  build_key="$(printf '%s\n' "$rustc_identity" "$lock_identity" \
+  build_key="$(printf '%s\n' "$rustc_identity" "$lock_identity" "$source_identity" \
     'features=model-compiler' 'profile=dev' "target=$target_triple" | shasum -a 256 | awk '{print $1}')"
   target_dir="$repo_root/target/model-builds/$build_key"
 
