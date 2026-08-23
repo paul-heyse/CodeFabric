@@ -7,6 +7,7 @@ import hashlib
 import importlib.metadata
 import importlib.resources
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -14,15 +15,22 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from blake3 import blake3
 from google.protobuf import descriptor_pb2
 from grpc_tools import protoc
 
-from tooling.contracts.derivation import clean_environment, resolve_derivation
+from tooling.contracts.derivation import clean_environment
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / "tooling" / "proto" / "compatibility-baseline.json"
-DESCRIPTOR_DERIVATION_ID = "codefabric.derivation.production-proto-descriptor-python"
-RUST_DERIVATION_ID = "codefabric.derivation.production-proto-rust"
+PROTO_SOURCE_ROOT = ROOT / "contracts" / "rpc"
+PYTHON_OUTPUT_ROOT = (
+    ROOT / "codefabric-cpg-mcp" / "src" / "codefabric_cpg_mcp" / "daemon" / "generated"
+)
+RUST_OUTPUT_ROOT = ROOT / "src" / "generated"
+DESCRIPTOR_DESTINATION = ROOT / "tooling" / "proto" / "production-descriptor.pb"
+CENSUS_DESTINATION = ROOT / "tooling" / "proto" / "descriptor-census.json"
+IDENTITY_DESTINATION = ROOT / "tooling" / "proto" / "toolchain-identity.json"
 EXACT_PYTHON_PACKAGES = {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -31,28 +39,55 @@ EXACT_PYTHON_PACKAGES = {
 GRPC_TOOLS_PROTOC = "libprotoc 35.1"
 
 
-DESCRIPTOR_INVOCATION = resolve_derivation(ROOT, DESCRIPTOR_DERIVATION_ID)
-RUST_INVOCATION = resolve_derivation(ROOT, RUST_DERIVATION_ID)
-
-
 def proto_sources() -> tuple[tuple[Path, Path], ...]:
-    sources: list[tuple[Path, Path]] = []
-    for artifact in DESCRIPTOR_INVOCATION["artifact_inputs"]:
-        authority = Path(str(artifact["authority_path"]))
-        sources.append((authority, ROOT / authority))
-    return tuple(sorted(sources))
+    """Discover the complete governed source set without a member manifest."""
+    sources = tuple(
+        sorted(
+            (path.relative_to(ROOT), path)
+            for path in PROTO_SOURCE_ROOT.glob("*.proto")
+            if path.is_file() and not path.is_symlink()
+        )
+    )
+    if not sources:
+        raise RuntimeError("production Proto family has no governed sources")
+    return sources
+
+
+def proto_package(path: Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    matches = re.findall(r"(?m)^\s*package\s+([A-Za-z_][A-Za-z0-9_.]*)\s*;", source)
+    if len(matches) != 1:
+        raise RuntimeError(f"Proto source must declare exactly one package: {path}")
+    return matches[0]
 
 
 def output_destinations(output_kind: str) -> tuple[Path, ...]:
-    matches = sorted(
-        ROOT / output["path"]
-        for invocation in (DESCRIPTOR_INVOCATION, RUST_INVOCATION)
-        for output in invocation["derivation"]["outputs"]
-        if output["output_kind"] == output_kind
+    sources = proto_sources()
+    if output_kind == "proto-descriptor-set":
+        return (DESCRIPTOR_DESTINATION,)
+    if output_kind == "proto-descriptor-census":
+        return (CENSUS_DESTINATION,)
+    if output_kind == "proto-toolchain-identity":
+        return (IDENTITY_DESTINATION,)
+    if output_kind == "rust-proto-bindings":
+        return tuple(
+            sorted(
+                RUST_OUTPUT_ROOT / f"{proto_package(path)}.rs" for _, path in sources
+            )
+        )
+    suffixes = {
+        "python-proto-bindings": "_pb2.py",
+        "python-proto-stub": "_pb2.pyi",
+        "python-grpc-bindings": "_pb2_grpc.py",
+    }
+    suffix = suffixes.get(output_kind)
+    if suffix is None:
+        raise RuntimeError(f"unknown Proto output kind: {output_kind}")
+    return tuple(
+        sorted(
+            PYTHON_OUTPUT_ROOT / f"{relative.stem}{suffix}" for relative, _ in sources
+        )
     )
-    if not matches:
-        raise RuntimeError(f"catalog declares no {output_kind} proto outputs")
-    return tuple(matches)
 
 
 def one_output_destination(output_kind: str) -> Path:
@@ -65,9 +100,6 @@ def one_output_destination(output_kind: str) -> Path:
 
 
 COMPILER_SOURCES = proto_sources()
-DESCRIPTOR_DESTINATION = one_output_destination("proto-descriptor-set")
-CENSUS_DESTINATION = one_output_destination("proto-descriptor-census")
-IDENTITY_DESTINATION = one_output_destination("proto-toolchain-identity")
 RUST_DESTINATIONS = {
     destination.name: destination
     for destination in output_destinations("rust-proto-bindings")
@@ -85,20 +117,24 @@ def run(command: list[str]) -> None:
 
 def source_identities() -> dict[str, str]:
     return {
-        str(record["authority_path"]): str(record["source_digest"])
-        for record in DESCRIPTOR_INVOCATION["artifact_inputs"]
+        relative.as_posix(): f"b3:{blake3(path.read_bytes()).hexdigest()}"
+        for relative, path in COMPILER_SOURCES
     }
 
 
 def primary_semantic_identities() -> tuple[str, ...]:
-    identities = tuple(
-        str(record["canonical_digest"])
-        for record in DESCRIPTOR_INVOCATION["artifact_inputs"]
-        if record.get("canonical_digest") is not None
-    )
-    if len(identities) != len(COMPILER_SOURCES):
-        raise RuntimeError("every generated Proto source requires a semantic identity")
-    return identities
+    identities: list[str] = []
+    for relative, path in COMPILER_SOURCES:
+        matches = re.findall(
+            r"(?m)^//\s*canonical_digest:\s*(b3:[0-9a-f]{64})\s*$",
+            path.read_text(encoding="utf-8"),
+        )
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"every generated Proto source requires one semantic identity: {relative}"
+            )
+        identities.append(matches[0])
+    return tuple(identities)
 
 
 def generated_header(comment: str) -> bytes:

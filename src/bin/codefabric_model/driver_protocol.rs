@@ -37,6 +37,9 @@ pub struct DriverOutputSpec {
 pub enum DriverOutputRole {
     RustBinding,
     PythonBinding,
+    ProtoDescriptor,
+    DescriptorCensus,
+    ToolchainIdentity,
     CanonicalProjection,
     PublicJsonSchema,
     SqliteDdl,

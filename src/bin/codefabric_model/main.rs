@@ -7,6 +7,7 @@ pub mod desired_tree;
 pub mod driver_protocol;
 pub mod model_control;
 pub mod model_git_state;
+pub mod proto_driver;
 pub mod registry_cbef_driver;
 pub mod release_census;
 pub mod repository_model;
@@ -33,7 +34,7 @@ fn main() -> ExitCode {
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <registry-cbef|schemas|adapter> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <registry-cbef|schemas|adapter|proto> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
             ExitCode::FAILURE
         }
@@ -63,6 +64,11 @@ fn family_check(arguments: &[String]) -> ExitCode {
         "schemas" => schema_driver::check_family(&root)
             .and_then(|report| {
                 serde_json::to_string(&report).map_err(schema_driver::SchemaDriverError::Json)
+            })
+            .map_err(|error| error.to_string()),
+        "proto" => proto_driver::check_family(&root)
+            .and_then(|report| {
+                serde_json::to_string(&report).map_err(proto_driver::ProtoDriverError::Json)
             })
             .map_err(|error| error.to_string()),
         _ => Err(format!("unknown model family {family}")),

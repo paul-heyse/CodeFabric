@@ -12,6 +12,9 @@ case "$family" in
   registry-cbef)
     test_filter='test(model_cbef) | test(model_registry) | test(model_overlay)'
     ;;
+  proto)
+    test_filter='test(model_proto)'
+    ;;
   schemas)
     test_filter='test(model_tablespec) | test(model_row_encoder) | test(model_schema) | test(model_driver_cannot_generate_compatibility_acceptance)'
     ;;
@@ -27,7 +30,7 @@ esac
 
 before_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all | shasum -a 256 | awk '{print $1}')"
 
-if [ "$family" = adapter ]; then
+if [ "$family" = adapter ] || [ "$family" = proto ]; then
   env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT \
     uv sync --frozen --project "$repo_root/codefabric-cpg-mcp"
 fi
@@ -63,6 +66,28 @@ case "$family" in
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root:$repo_root/codefabric-cpg-mcp/src" \
       uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
       python "$repo_root/tooling/model/validate_staged_adapter.py" "$stage_root"
+    ;;
+  proto)
+    jq -e '
+      .family == "proto"
+      and .source_count > 0
+      and .descriptor_file_count == .source_count
+      and .package_count == .source_count
+      and .compiler_invocations == 1
+      and (.rendered_outputs | length) == (3 + (4 * .source_count))
+      and .tool_identity.schema == 4
+      and .tool_identity.python."grpcio-tools" == "1.83.0"
+      and .tool_identity.python.protobuf == "7.36.0"
+      and .tool_identity.rust.descriptor_api == "tonic_prost_build::Builder::compile_fds"
+      and (.tool_identity.rust.action_key | startswith("b3:"))
+      and (.tool_identity.rust.binary_digest | startswith("b3:"))
+    ' <<<"$report" >/dev/null
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root" \
+      uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
+      pytest "$repo_root/tooling/model/test_proto_driver.py"
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root" \
+      uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
+      python "$repo_root/tooling/model/validate_staged_proto.py" "$stage_root"
     ;;
   registry-cbef)
     jq -e '
