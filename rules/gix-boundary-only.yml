@@ -7,6 +7,7 @@ files:
   - src/**/*.rs
 ignores:
   - src/git_state.rs
+  - src/bin/codefabric_model/model_git_state.rs
 rule:
   any:
     - all:

@@ -180,9 +180,11 @@ printf '%s' "$root_shape" | jq -e '
       "dep:blake3",
       "dep:gix",
       "dep:petgraph",
+      "dep:rustix",
       "dep:serde",
       "dep:serde_json",
       "dep:serde_json_canonicalizer",
+      "dep:serde_yaml_ng",
       "dep:thiserror"
     ],
     "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
@@ -286,7 +288,7 @@ assert_graph_omits featureless "$featureless_tree"
 assert_graph_omits canonical-json "$canonical_tree"
 assert_graph_omits contracts-tooling "$contracts_tree"
 assert_graph_omits proto-tooling "$proto_tree"
-for required in blake3 gix petgraph serde serde_json serde_json_canonicalizer thiserror; do
+for required in blake3 gix petgraph rustix serde serde_json serde_json_canonicalizer serde_yaml_ng thiserror; do
   printf '%s\n' "$model_tree" | rg -q "^${required} " || \
     fail "model-compiler graph omits required package $required"
 done
@@ -306,6 +308,10 @@ printf '%s\n' "$canonical_tree" | rg -q '^serde_json_canonicalizer ' || \
   fail 'canonical-json does not activate the approved JCS serializer'
 printf '%s\n' "$contracts_tree" | rg -q '^serde_yaml_ng ' || \
   fail 'contracts-tooling does not activate YAML contract parsing'
+printf '%s\n' "$model_tree" | rg -q '^serde_yaml_ng ' || \
+  fail 'model-compiler does not activate YAML family parsing'
+printf '%s\n' "$model_tree" | rg -q '^rustix ' || \
+  fail 'model-compiler does not activate no-follow source ingress'
 printf '%s\n' "$contracts_tree" | rg -q '^serde_path_to_error ' || \
   fail 'contracts-tooling does not activate path-aware typed diagnostics'
 printf '%s\n' "$contracts_tree" | rg -q '^prost-types ' || \

@@ -170,6 +170,16 @@ stable-graph-check:
 model-bootstrap-check:
     ./scripts/model_bootstrap_check.sh
 
+[doc("Compile the repository model and exercise Git/fallback/current-byte inventory semantics")]
+[group('gate')]
+model-inventory-check:
+    ./scripts/model_inventory_check.sh
+
+[doc("Explain a model artifact ID or repository path")]
+[group('environment')]
+model-explain target:
+    ./scripts/model_exec.sh explain "{{target}}" .
+
 [doc("Run repository structural governance rules")]
 [group('gate')]
 governance-scan:

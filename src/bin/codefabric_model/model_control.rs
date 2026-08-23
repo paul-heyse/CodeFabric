@@ -86,6 +86,12 @@ pub enum EdgeKind {
     Verifies,
     /// A package or runtime consumes an output.
     Consumes,
+    /// One output packages another output.
+    Packages,
+    /// One source or output participates in a bundle output.
+    Bundles,
+    /// A prerequisite change invalidates dependent work.
+    Invalidates,
 }
 
 impl EdgeKind {
@@ -99,6 +105,9 @@ impl EdgeKind {
             Self::Implements => "implements",
             Self::Verifies => "verifies",
             Self::Consumes => "consumes",
+            Self::Packages => "packages",
+            Self::Bundles => "bundles",
+            Self::Invalidates => "invalidates",
         }
     }
 }
@@ -135,6 +144,8 @@ pub enum DiagnosticClass {
     UnknownEndpoint,
     /// One typed edge is repeated.
     DuplicateEdge,
+    /// An edge is illegal for its endpoint node kinds.
+    IllegalEdge,
     /// The prerequisite graph is cyclic.
     DependencyCycle,
     /// Canonical action identity could not be serialized.
@@ -151,6 +162,7 @@ impl DiagnosticClass {
             Self::DuplicateNode => "MODEL_DUPLICATE_NODE",
             Self::UnknownEndpoint => "MODEL_UNKNOWN_ENDPOINT",
             Self::DuplicateEdge => "MODEL_DUPLICATE_EDGE",
+            Self::IllegalEdge => "MODEL_ILLEGAL_EDGE",
             Self::DependencyCycle => "MODEL_DEPENDENCY_CYCLE",
             Self::IdentityEncoding => "MODEL_IDENTITY_ENCODING",
         }
@@ -274,6 +286,16 @@ pub enum ModelError {
         /// Edge kind.
         kind: &'static str,
     },
+    /// Edge endpoint kinds violate the closed graph schema.
+    #[error("illegal {kind} edge from {prerequisite_kind:?} to {dependent_kind:?}")]
+    IllegalEdge {
+        /// Prerequisite node kind.
+        prerequisite_kind: NodeKind,
+        /// Dependent node kind.
+        dependent_kind: NodeKind,
+        /// Edge kind.
+        kind: &'static str,
+    },
     /// Dependency cycle with bounded typed witness.
     #[error("model dependency cycle")]
     DependencyCycle(CycleWitness),
@@ -292,6 +314,7 @@ impl ModelError {
             Self::DuplicateNode(_) => DiagnosticClass::DuplicateNode,
             Self::UnknownEndpoint { .. } => DiagnosticClass::UnknownEndpoint,
             Self::DuplicateEdge { .. } => DiagnosticClass::DuplicateEdge,
+            Self::IllegalEdge { .. } => DiagnosticClass::IllegalEdge,
             Self::DependencyCycle(_) => DiagnosticClass::DependencyCycle,
             Self::IdentityEncoding(_) => DiagnosticClass::IdentityEncoding,
         }
@@ -360,6 +383,15 @@ impl ModelGraph {
                     kind: edge.kind.code(),
                 }
             })?;
+            let prerequisite_kind = graph[prerequisite].kind;
+            let dependent_kind = graph[dependent].kind;
+            if !legal_edge(prerequisite_kind, dependent_kind, edge.kind) {
+                return Err(ModelError::IllegalEdge {
+                    prerequisite_kind,
+                    dependent_kind,
+                    kind: edge.kind.code(),
+                });
+            }
             graph.add_edge(prerequisite, dependent, edge.kind);
         }
 
@@ -386,7 +418,23 @@ impl ModelGraph {
     /// Return the direct affected closure, including the changed node.
     #[must_use]
     pub fn affected_closure(&self, changed: &StableId) -> Vec<StableId> {
-        let Some(start) = self.indices.get(changed).copied() else {
+        self.closure(changed, Direction::Outgoing)
+    }
+
+    /// Return the prerequisite closure, including the selected node.
+    #[must_use]
+    pub fn prerequisite_closure(&self, dependent: &StableId) -> Vec<StableId> {
+        self.closure(dependent, Direction::Incoming)
+    }
+
+    /// Whether the compiled graph contains a stable node.
+    #[must_use]
+    pub fn contains(&self, id: &StableId) -> bool {
+        self.indices.contains_key(id)
+    }
+
+    fn closure(&self, selected: &StableId, direction: Direction) -> Vec<StableId> {
+        let Some(start) = self.indices.get(selected).copied() else {
             return Vec::new();
         };
         let mut pending = vec![start];
@@ -395,14 +443,48 @@ impl ModelGraph {
             if !visited.insert(self.graph[node].id.clone()) {
                 continue;
             }
-            let mut dependents: Vec<_> = self
-                .graph
-                .neighbors_directed(node, Direction::Outgoing)
-                .collect();
-            dependents.sort_by(|left, right| self.graph[*right].id.cmp(&self.graph[*left].id));
-            pending.extend(dependents);
+            let mut adjacent: Vec<_> = self.graph.neighbors_directed(node, direction).collect();
+            adjacent.sort_by(|left, right| self.graph[*right].id.cmp(&self.graph[*left].id));
+            pending.extend(adjacent);
         }
         visited.into_iter().collect()
+    }
+}
+
+const fn legal_edge(prerequisite: NodeKind, dependent: NodeKind, edge: EdgeKind) -> bool {
+    match edge {
+        EdgeKind::ReadsExactBytes | EdgeKind::ReadsSemanticValue => {
+            matches!(
+                prerequisite,
+                NodeKind::Source | NodeKind::Evidence | NodeKind::Acceptance | NodeKind::Output
+            ) && matches!(dependent, NodeKind::Action | NodeKind::Oracle)
+        }
+        EdgeKind::Produces => {
+            matches!(prerequisite, NodeKind::Action) && matches!(dependent, NodeKind::Output)
+        }
+        EdgeKind::Implements => {
+            matches!(prerequisite, NodeKind::Source | NodeKind::Output)
+                && matches!(dependent, NodeKind::Requirement)
+        }
+        EdgeKind::Verifies => {
+            matches!(prerequisite, NodeKind::Requirement | NodeKind::Output)
+                && matches!(dependent, NodeKind::Oracle)
+        }
+        EdgeKind::Consumes => {
+            matches!(prerequisite, NodeKind::Source | NodeKind::Output)
+                && matches!(dependent, NodeKind::Action | NodeKind::Oracle)
+        }
+        EdgeKind::Packages => {
+            matches!(prerequisite, NodeKind::Output) && matches!(dependent, NodeKind::Output)
+        }
+        EdgeKind::Bundles => {
+            matches!(prerequisite, NodeKind::Source | NodeKind::Output)
+                && matches!(dependent, NodeKind::Output)
+        }
+        EdgeKind::Invalidates => {
+            matches!(prerequisite, NodeKind::Action | NodeKind::Output)
+                && matches!(dependent, NodeKind::Action | NodeKind::Output)
+        }
     }
 }
 
@@ -582,9 +664,13 @@ mod tests {
     }
 
     fn node(value: &str) -> NodeDeclaration {
+        node_kind(value, NodeKind::Action)
+    }
+
+    fn node_kind(value: &str, kind: NodeKind) -> NodeDeclaration {
         NodeDeclaration {
             id: id(value),
-            kind: NodeKind::Action,
+            kind,
         }
     }
 
@@ -614,10 +700,14 @@ mod tests {
     }
 
     #[test]
-    fn model_graph_order_and_affected_closure_are_insertion_invariant() {
-        let nodes = vec![node("action:c"), node("source:a"), node("action:b")];
+    fn model_graph_order_is_insertion_invariant() {
+        let nodes = vec![
+            node_kind("output:c", NodeKind::Output),
+            node_kind("source:a", NodeKind::Source),
+            node("action:b"),
+        ];
         let edges = vec![
-            edge("action:b", "action:c", EdgeKind::Produces),
+            edge("action:b", "output:c", EdgeKind::Produces),
             edge("source:a", "action:b", EdgeKind::ReadsSemanticValue),
         ];
         let first = ModelGraph::compile(nodes.clone(), edges.clone(), bounds()).unwrap();
@@ -630,31 +720,35 @@ mod tests {
         assert_eq!(first.execution_order(), second.execution_order());
         assert_eq!(
             first.execution_order(),
-            &[id("source:a"), id("action:b"), id("action:c")]
+            &[id("source:a"), id("action:b"), id("output:c")]
         );
         assert_eq!(
             first.affected_closure(&id("source:a")),
-            vec![id("action:b"), id("action:c"), id("source:a")]
+            vec![id("action:b"), id("output:c"), id("source:a")]
+        );
+        assert_eq!(
+            first.prerequisite_closure(&id("output:c")),
+            vec![id("action:b"), id("output:c"), id("source:a")]
         );
     }
 
     #[test]
     fn model_cycles_project_stable_nodes_and_typed_edges() {
         let cases = [
-            (vec![node("a")], vec![edge("a", "a", EdgeKind::Produces)]),
+            (vec![node("a")], vec![edge("a", "a", EdgeKind::Invalidates)]),
             (
                 vec![node("b"), node("a")],
                 vec![
-                    edge("b", "a", EdgeKind::Consumes),
-                    edge("a", "b", EdgeKind::Produces),
+                    edge("b", "a", EdgeKind::Invalidates),
+                    edge("a", "b", EdgeKind::Invalidates),
                 ],
             ),
             (
                 vec![node("c"), node("a"), node("b")],
                 vec![
-                    edge("c", "a", EdgeKind::Verifies),
-                    edge("a", "b", EdgeKind::Produces),
-                    edge("b", "c", EdgeKind::Consumes),
+                    edge("c", "a", EdgeKind::Invalidates),
+                    edge("a", "b", EdgeKind::Invalidates),
+                    edge("b", "c", EdgeKind::Invalidates),
                 ],
             ),
         ];
@@ -673,7 +767,10 @@ mod tests {
     #[test]
     fn model_parallel_edge_kinds_are_preserved_and_exact_duplicates_fail() {
         let graph = ModelGraph::compile(
-            vec![node("a"), node("b")],
+            vec![
+                node_kind("a", NodeKind::Source),
+                node_kind("b", NodeKind::Action),
+            ],
             vec![
                 edge("a", "b", EdgeKind::ReadsExactBytes),
                 edge("a", "b", EdgeKind::ReadsSemanticValue),
@@ -686,13 +783,49 @@ mod tests {
         let error = ModelGraph::compile(
             vec![node("a"), node("b")],
             vec![
-                edge("a", "b", EdgeKind::Consumes),
-                edge("a", "b", EdgeKind::Consumes),
+                edge("a", "b", EdgeKind::Invalidates),
+                edge("a", "b", EdgeKind::Invalidates),
             ],
             bounds(),
         )
         .unwrap_err();
         assert_eq!(error.diagnostic_class(), DiagnosticClass::DuplicateEdge);
+    }
+
+    #[test]
+    fn model_graph_rejects_illegal_edges_duplicates_and_cycles() {
+        let illegal = ModelGraph::compile(
+            vec![
+                node_kind("source:a", NodeKind::Source),
+                node_kind("source:b", NodeKind::Source),
+            ],
+            vec![edge("source:a", "source:b", EdgeKind::Produces)],
+            bounds(),
+        )
+        .unwrap_err();
+        assert_eq!(illegal.diagnostic_class(), DiagnosticClass::IllegalEdge);
+
+        let duplicate = ModelGraph::compile(
+            vec![node("action:a"), node("action:b")],
+            vec![
+                edge("action:a", "action:b", EdgeKind::Invalidates),
+                edge("action:a", "action:b", EdgeKind::Invalidates),
+            ],
+            bounds(),
+        )
+        .unwrap_err();
+        assert_eq!(duplicate.diagnostic_class(), DiagnosticClass::DuplicateEdge);
+
+        let cycle = ModelGraph::compile(
+            vec![node("action:a"), node("action:b")],
+            vec![
+                edge("action:a", "action:b", EdgeKind::Invalidates),
+                edge("action:b", "action:a", EdgeKind::Invalidates),
+            ],
+            bounds(),
+        )
+        .unwrap_err();
+        assert_eq!(cycle.diagnostic_class(), DiagnosticClass::DependencyCycle);
     }
 
     #[test]
@@ -703,7 +836,7 @@ mod tests {
         );
         let error = ModelGraph::compile(
             vec![node("a")],
-            vec![edge("a", "a", EdgeKind::Produces)],
+            vec![edge("a", "a", EdgeKind::Invalidates)],
             ResourceBounds::new(2, 2, 1).unwrap(),
         )
         .unwrap_err();

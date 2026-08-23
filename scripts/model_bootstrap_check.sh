@@ -51,7 +51,7 @@ omit_generated_outputs() {
 
 model_bootstrap_has_no_generated_or_production_library_edge() {
   local source_hits tree
-  source_hits="$(rg -n 'include!|include_bytes!|codefabric::|extern crate codefabric|src/generated|contracts/generated' \
+  source_hits="$(rg -n 'include(_bytes)?!\s*\(|\bcodefabric::|extern\s+crate\s+codefabric|#\s*\[\s*path\s*=.*generated|\b(use|mod)\s+(crate::)?generated\b' \
     "$sandbox_root/src/bin/codefabric_model" || true)"
   [ -z "$source_hits" ] || fail "model binary source reaches a generated or production library surface: $source_hits"
 
@@ -68,11 +68,14 @@ model_bootstrap_builds_without_generated_outputs() {
   rustc_identity="$(rustc -vV)"
   lock_identity="$(shasum -a 256 "$repo_root/Cargo.lock" | awk '{print $1}')"
   source_identity="$(
-    shasum -a 256 \
-      "$repo_root/Cargo.toml" \
-      "$repo_root/src/bin/codefabric_model/main.rs" \
-      "$repo_root/src/bin/codefabric_model/model_control.rs" \
-      | shasum -a 256 | awk '{print $1}'
+    {
+      shasum -a 256 "$repo_root/Cargo.toml"
+      find "$repo_root/src/bin/codefabric_model" -type f -name '*.rs' -print \
+        | LC_ALL=C sort \
+        | while IFS= read -r source; do
+            shasum -a 256 "$source"
+          done
+    } | shasum -a 256 | awk '{print $1}'
   )"
   target_triple="$(printf '%s\n' "$rustc_identity" | sed -n 's/^host: //p')"
   build_key="$(printf '%s\n' "$rustc_identity" "$lock_identity" "$source_identity" \

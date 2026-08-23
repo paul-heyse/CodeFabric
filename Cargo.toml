@@ -40,9 +40,11 @@ model-compiler = [
     "dep:blake3",
     "dep:gix",
     "dep:petgraph",
+    "dep:rustix",
     "dep:serde",
     "dep:serde_json",
     "dep:serde_json_canonicalizer",
+    "dep:serde_yaml_ng",
     "dep:thiserror",
 ]
 data-fabric = [
