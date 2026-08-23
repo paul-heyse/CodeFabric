@@ -678,6 +678,8 @@ fn digest_file(path: &Path) -> Result<String, ProtoDriverError> {
 #[serde(deny_unknown_fields)]
 pub struct ProtoReport {
     pub family: String,
+    pub rule_version: String,
+    pub resource_profile: DriverResourceProfile,
     pub source_count: usize,
     pub rendered_outputs: Vec<String>,
     pub descriptor_file_count: usize,
@@ -731,6 +733,8 @@ pub fn check_family(repository_root: &Path) -> Result<ProtoReport, ProtoDriverEr
     }
     Ok(ProtoReport {
         family: "proto".to_owned(),
+        rule_version: plan.descriptor.rule_version.clone(),
+        resource_profile: plan.descriptor.resource_profile.clone(),
         source_count: plan.sources.len(),
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
         descriptor_file_count: files.len(),

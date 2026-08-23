@@ -512,10 +512,17 @@ def _render(ir: AdapterDriverIr, source_digest: str) -> dict[str, bytes]:
                 }
             )
         elif projection.projection_kind == "validation-report":
+            source_projection = ir.model_dump(mode="json")
+            source_projection.pop("canonical_digest", None)
+            source_projection.pop("source_digest", None)
             value = canonicalize_value(
                 {
                     "_generated": _generated(source_digest),
                     "family": "adapter",
+                    "source_artifact_id": ir.artifact_id,
+                    "source_canonical_digest": checksum(
+                        canonicalize_value(source_projection)
+                    ),
                     "model_count": len(ir.models),
                     "union_count": len(ir.unions),
                     "projection_count": len(ir.projections),

@@ -5,6 +5,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -14,6 +15,7 @@ use super::driver_protocol::{
     DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
 };
 use super::model_control::StableId;
+use super::registry_models as governed;
 use super::repository_model::read_stable;
 
 const CBEF_PATH: &str = "contracts/identity/cbef-v1.yaml";
@@ -31,6 +33,117 @@ const TRANSITION_OVERLAY_PATH: &str =
 const TRANSITION_VALIDATION_PATH: &str =
     "contracts/generated/model/registry-cbef-transition-validation.json";
 const MAX_AUTHORITY_BYTES: usize = 8 * 1024 * 1024;
+
+/// Compile one governed registry through the same closed family-native records used by runtime
+/// validation, returning its detached semantic identity. Unknown non-registry families return
+/// `None` so their owning driver can select another native model.
+///
+/// # Errors
+///
+/// Returns a bounded YAML, closed-model, invariant, or canonicalization failure.
+pub fn detached_registry_identity(
+    artifact_id: &str,
+    bytes: &[u8],
+) -> Result<Option<String>, RegistryCbefError> {
+    macro_rules! accepted {
+        ($record:ty, $validator:expr) => {{
+            let document: governed::AcceptedRegistry<$record> = decode_yaml(bytes)?;
+            ($validator)(&document.records).map_err(RegistryCbefError::RegistryModel)?;
+            Some(detached_typed_digest(&document)?)
+        }};
+    }
+    let digest = match artifact_id {
+        "codefabric.registry.enum-registry" => Some(detached_typed_digest(&decode_yaml::<
+            governed::AcceptedRegistry<governed::EnumDomain>,
+        >(bytes)?)?),
+        "codefabric.registry.flag-registry" => Some(detached_typed_digest(&decode_yaml::<
+            governed::AcceptedRegistry<governed::FlagDomain>,
+        >(bytes)?)?),
+        "codefabric.registry.ontology-entity-registry" => {
+            accepted!(governed::EntityKind, governed::validate_entity_records)
+        }
+        "codefabric.registry.ontology-relation-registry" => {
+            accepted!(governed::RelationKind, governed::validate_relation_records)
+        }
+        "codefabric.registry.ontology-property-registry" => {
+            accepted!(governed::PropertyKind, governed::validate_property_records)
+        }
+        "codefabric.registry.ontology-fact-registry" => {
+            accepted!(governed::FactKind, governed::validate_fact_records)
+        }
+        "codefabric.registry.unknown-registry" => {
+            accepted!(governed::UnknownKind, governed::validate_unknown_records)
+        }
+        "codefabric.registry.projection-registry" => {
+            accepted!(governed::Projection, governed::validate_projection_records)
+        }
+        "codefabric.registry.summary-registry" => {
+            accepted!(governed::SummaryProfile, governed::validate_summary_records)
+        }
+        "codefabric.registry.capability-registry" => {
+            accepted!(governed::Capability, governed::validate_capability_records)
+        }
+        "codefabric.registry.provider-registry" => {
+            accepted!(governed::Provider, governed::validate_provider_records)
+        }
+        "codefabric.registry.provider-resource-profile-registry" => accepted!(
+            governed::ProviderResourceProfile,
+            governed::validate_provider_resource_profiles
+        ),
+        "codefabric.registry.provider-normalization-registry" => accepted!(
+            governed::ProviderNormalization,
+            governed::validate_provider_normalizations
+        ),
+        "codefabric.registry.error-registry" => {
+            accepted!(governed::PublicError, governed::validate_error_records)
+        }
+        "codefabric.registry.state-machine-registry" => {
+            accepted!(governed::StateMachine, governed::validate_state_machines)
+        }
+        "codefabric.registry.phrase-registry" => {
+            accepted!(governed::PhraseRecord, governed::validate_phrase_records)
+        }
+        "codefabric.comparison.comparison-ignore-registry" => accepted!(
+            governed::ComparisonIgnoreRecord,
+            governed::validate_comparison_ignores
+        ),
+        "codefabric.faults.fault-point-registry" => {
+            accepted!(governed::FaultPointRecord, governed::validate_fault_points)
+        }
+        "codefabric.registry.derivation-registry" => {
+            let document: governed::AcceptedRegistry<governed::DerivationDefinition> =
+                decode_yaml(bytes)?;
+            let mut ids = BTreeSet::new();
+            if !document
+                .records
+                .iter()
+                .all(|record| ids.insert(record.derivation_id.as_str()))
+            {
+                return Err(RegistryCbefError::RegistryModel(
+                    "derivation IDs must be unique".to_owned(),
+                ));
+            }
+            Some(detached_typed_digest(&document)?)
+        }
+        _ => None,
+    };
+    Ok(digest)
+}
+
+fn decode_yaml<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RegistryCbefError> {
+    serde_yaml_ng::from_slice(bytes).map_err(RegistryCbefError::Yaml)
+}
+
+fn detached_typed_digest(value: &impl Serialize) -> Result<String, RegistryCbefError> {
+    let mut value = serde_json::to_value(value)?;
+    let object = value.as_object_mut().ok_or_else(|| {
+        RegistryCbefError::RegistryModel("typed registry root is not an object".to_owned())
+    })?;
+    object.remove("canonical_digest");
+    object.remove("source_digest");
+    let canonical = serde_json_canonicalizer::to_vec(&value)?;
+    Ok(format!("b3:{}", blake3::hash(&canonical).to_hex()))
+}
 
 /// Header common to the three native family authorities.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -588,6 +701,8 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
     validate_transition_semantics(&plan.enums, &plan.flags)?;
     Ok(RegistryCbefReport {
         family: "registry-cbef".to_owned(),
+        rule_version: plan.descriptor.rule_version.clone(),
+        resource_profile: plan.descriptor.resource_profile.clone(),
         domain_count: plan.cbef.domains.len(),
         enum_domain_count: plan.enums.records.len(),
         flag_domain_count: plan.flags.records.len(),
@@ -601,6 +716,8 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
 #[serde(deny_unknown_fields)]
 pub struct RegistryCbefReport {
     pub family: String,
+    pub rule_version: String,
+    pub resource_profile: DriverResourceProfile,
     pub domain_count: usize,
     pub enum_domain_count: usize,
     pub flag_domain_count: usize,
@@ -1611,8 +1728,12 @@ pub enum RegistryCbefError {
     ProjectionMismatch,
     #[error("WP32 transition semantics differ from governed allocations")]
     TransitionMismatch,
+    #[error("governed registry model is invalid: {0}")]
+    RegistryModel(String),
+    #[error("registry/CBEF YAML failed: {0}")]
+    Yaml(serde_yaml_ng::Error),
     #[error("registry/CBEF JSON failed: {0}")]
-    Json(serde_json::Error),
+    Json(#[from] serde_json::Error),
     #[error("registry/CBEF I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,

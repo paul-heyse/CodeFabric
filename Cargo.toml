@@ -45,6 +45,7 @@ model-compiler = [
     "dep:serde_json",
     "dep:serde_json_canonicalizer",
     "dep:serde_yaml_ng",
+    "dep:tempfile",
     "dep:thiserror",
 ]
 data-fabric = [

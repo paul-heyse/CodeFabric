@@ -375,6 +375,8 @@ impl ModelDriver for AdapterDriver {
 #[serde(deny_unknown_fields)]
 pub struct AdapterReport {
     pub family: String,
+    pub rule_version: String,
+    pub resource_profile: DriverResourceProfile,
     pub rendered_outputs: Vec<String>,
     pub tool_identity: AdapterToolIdentity,
     pub validation: Value,
@@ -414,6 +416,8 @@ pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriv
     }
     Ok(AdapterReport {
         family: "adapter".to_owned(),
+        rule_version: plan.descriptor.rule_version.clone(),
+        resource_profile: plan.descriptor.resource_profile.clone(),
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
         tool_identity: plan.tool_identity,
         validation,

@@ -5,7 +5,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 family="${1:-}"
 
+[ -n "$family" ] || family=aggregate
+
 case "$family" in
+  aggregate)
+    test_filter='test(model_detached_identity) | test(model_routine_tree) | test(model_rejects_missing_duplicate) | test(model_bundle_projection) | test(model_generated_aggregates) | test(model_released_traceability) | test(model_transition_patch) | test(model_driver_failure)'
+    ;;
   adapter)
     test_filter='test(model_adapter)'
     ;;
@@ -18,10 +23,6 @@ case "$family" in
   schemas)
     test_filter='test(model_tablespec) | test(model_row_encoder) | test(model_schema) | test(model_driver_cannot_generate_compatibility_acceptance)'
     ;;
-  "")
-    printf 'aggregate model-family-check becomes available after WP10\n' >&2
-    exit 2
-    ;;
   *)
     printf 'unknown model family: %s\n' "$family" >&2
     exit 2
@@ -29,6 +30,12 @@ case "$family" in
 esac
 
 before_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all | shasum -a 256 | awk '{print $1}')"
+
+if [ "$family" = aggregate ]; then
+  for child_family in registry-cbef schemas adapter proto; do
+    "$repo_root/scripts/model_family_check.sh" "$child_family"
+  done
+fi
 
 if [ "$family" = adapter ] || [ "$family" = proto ]; then
   env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT \
@@ -66,6 +73,24 @@ case "$family" in
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root:$repo_root/codefabric-cpg-mcp/src" \
       uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
       python "$repo_root/tooling/model/validate_staged_adapter.py" "$stage_root"
+    ;;
+  aggregate)
+    jq -e '
+      .family == "aggregate"
+      and .artifact_count >= .released_artifact_count
+      and .released_artifact_count > 0
+      and .family_output_count > 0
+      and .governance_output_count == 12
+      and .output_count == (.rendered_outputs | length)
+      and .requirement_count == .released_artifact_count
+      and .bundle_count == 8
+      and .fixture_count > 0
+      and .transition_target_count > 0
+      and (.tree_digest | startswith("b3:"))
+    ' <<<"$report" >/dev/null
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root" \
+      uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
+      python "$repo_root/tooling/model/validate_aggregate.py" "$stage_root"
     ;;
   proto)
     jq -e '

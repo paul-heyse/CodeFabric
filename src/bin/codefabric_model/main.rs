@@ -3,12 +3,22 @@
 use std::process::ExitCode;
 
 pub mod adapter_driver;
+pub mod aggregate_driver;
+#[allow(dead_code)] // The shared catalog deliberately exposes more views than this bootstrap uses.
+#[path = "../../contracts/catalog.rs"]
+pub(crate) mod catalog;
 pub mod desired_tree;
 pub mod driver_protocol;
 pub mod model_control;
 pub mod model_git_state;
+#[allow(dead_code, clippy::enum_variant_names, clippy::struct_field_names)] // The shared wire models retain their normative field vocabulary.
+#[path = "../../contracts/models.rs"]
+pub(crate) mod models;
 pub mod proto_driver;
 pub mod registry_cbef_driver;
+#[allow(dead_code, clippy::missing_errors_doc, clippy::must_use_candidate)] // The shared registry API is wider than this compiler's projection subset.
+#[path = "../../contracts/registry_models.rs"]
+pub(crate) mod registry_models;
 pub mod release_census;
 pub mod repository_model;
 pub mod schema_driver;
@@ -34,7 +44,7 @@ fn main() -> ExitCode {
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <registry-cbef|schemas|adapter|proto> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
             ExitCode::FAILURE
         }
@@ -53,6 +63,11 @@ fn family_check(arguments: &[String]) -> ExitCode {
         "adapter" => adapter_driver::check_family(&root)
             .and_then(|report| {
                 serde_json::to_string(&report).map_err(adapter_driver::AdapterDriverError::Json)
+            })
+            .map_err(|error| error.to_string()),
+        "aggregate" => aggregate_driver::check_family(&root)
+            .and_then(|report| {
+                serde_json::to_string(&report).map_err(aggregate_driver::AggregateError::Json)
             })
             .map_err(|error| error.to_string()),
         "registry-cbef" => registry_cbef_driver::check_family(&root)

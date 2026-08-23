@@ -1,0 +1,1692 @@
+//! Complete read-only model tree assembled from family drivers and accountable acceptances.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use thiserror::Error;
+
+use super::adapter_driver;
+use super::desired_tree::{
+    DesiredTree, DesiredTreeEntry, PlannedConsumer, PlannedOutput, PlannedOutputProjection,
+    PlannedOutputRole, PlannedValidator, SafeOutputPath,
+};
+use super::model_control::StableId;
+use super::proto_driver;
+use super::registry_cbef_driver;
+use super::release_census::ReleasedArtifactCensus;
+use super::repository_model::{
+    ArtifactRole, ClaimedPath, InventoryBounds, NativeParser, RepositoryModel,
+    RepositoryModelError, output_id, read_stable,
+};
+use super::schema_driver;
+
+const CENSUS_PATH: &str = "contracts/acceptance/released-artifact-census-v1.json";
+const PATCH_PATH: &str = "tooling/model-transition/consumer-overlays/registry-cbef-wp32.json";
+const ADAPTER_VALIDATION_PATH: &str = "contracts/generated/model/adapter-validation.json";
+const LEGACY_INDEX_PATH: &str =
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json";
+const MAX_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ModelArtifactRecord {
+    artifact_id: String,
+    artifact_kind: String,
+    authority_path: String,
+    owner: String,
+    version: String,
+    compatible_suite_major: u64,
+    status: String,
+    canonical_digest: String,
+    source_digest: String,
+    projection_profile: String,
+    release_status: String,
+    compilation_unit: String,
+    source_role: ArtifactRole,
+    consumers: BTreeSet<PlannedConsumer>,
+    resource_profile: Value,
+    provenance: BTreeSet<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ModelOutputRecord {
+    output_id: String,
+    path: String,
+    producer: String,
+    public_artifact_id: Option<String>,
+    projection: PlannedOutputProjection,
+    consumers: BTreeSet<PlannedConsumer>,
+    validators: BTreeSet<PlannedValidator>,
+    lineage: Vec<String>,
+    resource_profile: Value,
+    content_digest: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ModelRequirementRecord {
+    requirement_id: String,
+    source_artifact: String,
+    source_path: String,
+    normative_text: String,
+    normative_text_digest: String,
+    implements: Vec<String>,
+    verified_by: Vec<String>,
+    status: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ModelBundleRecord {
+    bundle_kind: String,
+    bundle_version: String,
+    bundle_major: u64,
+    artifacts: Vec<ModelBundleMember>,
+    compatibility: ModelBundleCompatibility,
+    created_by: ModelBundleCreatedBy,
+    bundle_digest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ModelBundleMember {
+    artifact_id: String,
+    version: String,
+    canonical_digest: String,
+    required: bool,
+    feature_bits: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ModelBundleCompatibility {
+    minimum_consumer_minor: u64,
+    maximum_consumer_minor: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ModelBundleCreatedBy {
+    generator_id: String,
+    generator_version: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct FamilyProjection {
+    family: String,
+    rule_version: String,
+    resource_profile: super::driver_protocol::DriverResourceProfile,
+    outputs: Vec<String>,
+    tool_identity: Value,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AggregateReport {
+    pub family: String,
+    pub artifact_count: usize,
+    pub released_artifact_count: usize,
+    pub family_output_count: usize,
+    pub governance_output_count: usize,
+    pub output_count: usize,
+    pub requirement_count: usize,
+    pub bundle_count: usize,
+    pub fixture_count: usize,
+    pub transition_target_count: usize,
+    pub tree_digest: String,
+    pub rendered_outputs: Vec<String>,
+    pub stage_root: String,
+}
+
+struct AggregateTree {
+    desired: DesiredTree,
+    owners: BTreeMap<String, String>,
+    family_output_count: usize,
+}
+
+impl AggregateTree {
+    fn new() -> Self {
+        Self {
+            desired: DesiredTree::default(),
+            owners: BTreeMap::new(),
+            family_output_count: 0,
+        }
+    }
+
+    fn insert(
+        &mut self,
+        path: &str,
+        producer: &str,
+        bytes: Vec<u8>,
+        family_output: bool,
+    ) -> Result<(), AggregateError> {
+        if path.starts_with("docs/upfront_design/")
+            || path.starts_with("contracts/acceptance/")
+            || path.starts_with("contracts/fixtures/")
+            || path.starts_with("tooling/model-transition/")
+        {
+            return Err(AggregateError::ForbiddenWrite(path.to_owned()));
+        }
+        let safe = SafeOutputPath::parse(path.as_bytes().to_vec())?;
+        if let Some(first) = self.owners.insert(path.to_owned(), producer.to_owned()) {
+            return Err(AggregateError::DuplicateOwner {
+                path: path.to_owned(),
+                first,
+                second: producer.to_owned(),
+            });
+        }
+        let producer_id = StableId::parse(producer.to_owned())?;
+        let output = PlannedOutput {
+            output_id: output_id(path.as_bytes())?,
+            public_artifact_id: None,
+            path: safe.clone(),
+            role: PlannedOutputRole::Derived,
+            producer: producer_id.clone(),
+            projection: projection(path),
+            consumers: consumers(path),
+            validators: validators(path),
+        };
+        let content_digest = digest_bytes(&bytes);
+        let previous = self.desired.entries.insert(
+            safe,
+            DesiredTreeEntry {
+                output,
+                lineage: vec![producer_id],
+                bytes,
+                content_digest,
+            },
+        );
+        if previous.is_some() {
+            return Err(AggregateError::DuplicateOwner {
+                path: path.to_owned(),
+                first: producer.to_owned(),
+                second: producer.to_owned(),
+            });
+        }
+        self.family_output_count += usize::from(family_output);
+        Ok(())
+    }
+
+    fn merge_stage(
+        &mut self,
+        model: &RepositoryModel,
+        stage_root: &Path,
+        producer: &str,
+        paths: &[String],
+    ) -> Result<(), AggregateError> {
+        for path in paths {
+            if path.starts_with("tooling/model-transition/") {
+                continue;
+            }
+            if let Some(claim) = model.claims.get(path.as_bytes())
+                && !matches!(claim.role, ArtifactRole::Derived | ArtifactRole::Ignored)
+            {
+                return Err(AggregateError::ForbiddenWrite(path.clone()));
+            }
+            let bytes = read_stable(&stage_root.join(path), MAX_BYTES)?;
+            self.insert(path, producer, bytes, true)?;
+        }
+        Ok(())
+    }
+
+    fn digest(&self) -> Result<String, AggregateError> {
+        let identities = self
+            .desired
+            .entries
+            .iter()
+            .map(|(path, entry)| (path.display(), entry.content_digest.clone()))
+            .collect::<BTreeMap<_, _>>();
+        canonical_digest(&identities)
+    }
+}
+
+/// Compile every family and all model-derived governance views without touching the worktree.
+///
+/// # Errors
+///
+/// Returns a source, family, ownership, transition, release, staging, or validation failure.
+#[allow(clippy::too_many_lines)] // One source fence encloses every family stage and governance view.
+pub fn check_family(repository_root: &Path) -> Result<AggregateReport, AggregateError> {
+    let before_model =
+        RepositoryModel::discover(repository_root, InventoryBounds::default(), true)?;
+    let before_digest = before_model.semantic_digest()?;
+    let census: ReleasedArtifactCensus =
+        serde_json::from_slice(&read_stable(&repository_root.join(CENSUS_PATH), MAX_BYTES)?)?;
+    super::release_census::check(repository_root, &before_model)?;
+
+    let registry = registry_cbef_driver::check_family(repository_root)?;
+    let schemas = schema_driver::check_family(repository_root)?;
+    let adapter = adapter_driver::check_family(repository_root)?;
+    let proto = proto_driver::check_family(repository_root)?;
+    let families = vec![
+        FamilyProjection {
+            family: registry.family.clone(),
+            rule_version: registry.rule_version.clone(),
+            resource_profile: registry.resource_profile.clone(),
+            outputs: registry.rendered_outputs.clone(),
+            tool_identity: json!({"driver": "native-rust", "rule": "registry-cbef-v1"}),
+        },
+        FamilyProjection {
+            family: schemas.family.clone(),
+            rule_version: schemas.rule_version.clone(),
+            resource_profile: schemas.resource_profile.clone(),
+            outputs: schemas.rendered_outputs.clone(),
+            tool_identity: json!({"driver": "native-rust", "rule": "schema-contract-v1"}),
+        },
+        FamilyProjection {
+            family: adapter.family.clone(),
+            rule_version: adapter.rule_version.clone(),
+            resource_profile: adapter.resource_profile.clone(),
+            outputs: adapter.rendered_outputs.clone(),
+            tool_identity: serde_json::to_value(&adapter.tool_identity)?,
+        },
+        FamilyProjection {
+            family: proto.family.clone(),
+            rule_version: proto.rule_version.clone(),
+            resource_profile: proto.resource_profile.clone(),
+            outputs: proto.rendered_outputs.clone(),
+            tool_identity: proto.tool_identity.clone(),
+        },
+    ];
+    let mut tree = AggregateTree::new();
+    tree.merge_stage(
+        &before_model,
+        Path::new(&registry.stage_root),
+        "action:registry-cbef",
+        &registry.rendered_outputs,
+    )?;
+    tree.merge_stage(
+        &before_model,
+        Path::new(&schemas.stage_root),
+        "action:schemas",
+        &schemas.rendered_outputs,
+    )?;
+    tree.merge_stage(
+        &before_model,
+        Path::new(&adapter.stage_root),
+        "action:adapter",
+        &adapter.rendered_outputs,
+    )?;
+    tree.merge_stage(
+        &before_model,
+        Path::new(&proto.stage_root),
+        "action:proto",
+        &proto.rendered_outputs,
+    )?;
+
+    let proto_census: Value = serde_json::from_slice(&read_stable(
+        &Path::new(&proto.stage_root).join("tooling/proto/descriptor-census.json"),
+        MAX_BYTES,
+    )?)?;
+    let mut family_identities = BTreeMap::new();
+    let adapter_source_id = adapter.validation["source_artifact_id"]
+        .as_str()
+        .ok_or_else(|| projection_error(ADAPTER_VALIDATION_PATH, "source artifact ID is absent"))?;
+    let adapter_source_digest = adapter.validation["source_canonical_digest"]
+        .as_str()
+        .ok_or_else(|| projection_error(ADAPTER_VALIDATION_PATH, "source identity is absent"))?;
+    family_identities.insert(
+        adapter_source_id.to_owned(),
+        adapter_source_digest.to_owned(),
+    );
+    let artifacts = model_artifacts(
+        repository_root,
+        &before_model,
+        &census,
+        &proto_census,
+        &family_identities,
+        &families,
+    )?;
+    let outputs = model_outputs(&tree, &families);
+    let requirements = requirements(&artifacts, &families);
+    validate_requirement_closure(&requirements)?;
+    let bundles = bundles(&artifacts)?;
+    validate_bundles(&bundles)?;
+    let fixtures = fixture_index(&before_model);
+    let transition = validate_transition_patch(repository_root)?;
+    let package_data = package_data(&tree);
+    let aggregators = module_aggregators(&tree);
+    let shadow_parity = legacy_shadow_parity(repository_root, &artifacts)?;
+
+    let manifest = json!({
+        "artifact_id": "codefabric.generated.model-suite-manifest",
+        "artifact_kind": "model-suite-manifest",
+        "schema_version": 1,
+        "compatible_suite_major": 1,
+        "status": "derived",
+        "release_census": {
+            "owner_acceptance": census.owner_acceptance,
+            "released_artifact_count": census.released_artifacts.len(),
+        },
+        "artifacts": artifacts,
+        "outputs": outputs,
+        "families": families,
+    });
+    let artifact_index = json!({
+        "schema_version": 1,
+        "source": "RepositoryModel + accepted release census",
+        "artifacts": artifacts,
+    });
+    let governance = [
+        (
+            "contracts/generated/model/governance/suite-manifest.json",
+            pretty_json(&manifest)?,
+        ),
+        (
+            "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
+            canonical_json(&artifact_index)?,
+        ),
+        (
+            "contracts/generated/model/governance/requirements.jsonl",
+            json_lines(&requirements)?,
+        ),
+        (
+            "contracts/generated/model/governance/traceability.jsonl",
+            json_lines(&requirements)?,
+        ),
+        (
+            "contracts/generated/model/governance/bundles.json",
+            pretty_json(&json!({"schema_version": 1, "bundles": bundles}))?,
+        ),
+        (
+            "contracts/generated/model/governance/fixture-index.json",
+            pretty_json(&json!({"schema_version": 1, "fixtures": fixtures}))?,
+        ),
+        (
+            "contracts/generated/model/governance/package-data.json",
+            pretty_json(&package_data)?,
+        ),
+        (
+            "contracts/generated/model/governance/module-aggregators.json",
+            pretty_json(&aggregators)?,
+        ),
+        (
+            "contracts/generated/model/governance/transition-patches.json",
+            pretty_json(&transition)?,
+        ),
+        (
+            "contracts/generated/model/governance/toolchain-identity.json",
+            pretty_json(&json!({"schema_version": 1, "families": families}))?,
+        ),
+        (
+            "contracts/generated/model/governance/legacy-shadow-parity.json",
+            pretty_json(&shadow_parity)?,
+        ),
+    ];
+    for (path, bytes) in governance {
+        tree.insert(path, "action:governance", bytes, false)?;
+    }
+    let validation = aggregate_validation(
+        &tree,
+        &artifacts,
+        &requirements,
+        &bundles,
+        &fixtures,
+        &transition,
+    )?;
+    tree.insert(
+        "contracts/generated/model/governance/validation.json",
+        "action:governance",
+        pretty_json(&validation)?,
+        false,
+    )?;
+
+    let stage_root = repository_root.join("target/model-stage/aggregate-shadow");
+    if stage_root.exists() {
+        fs::remove_dir_all(&stage_root).map_err(|source| AggregateError::Io {
+            path: stage_root.clone(),
+            source,
+        })?;
+    }
+    fs::create_dir_all(&stage_root).map_err(|source| AggregateError::Io {
+        path: stage_root.clone(),
+        source,
+    })?;
+    tree.desired.stage(&stage_root)?;
+    let after_model = RepositoryModel::discover(repository_root, InventoryBounds::default(), true)?;
+    if before_digest != after_model.semantic_digest()? {
+        return Err(AggregateError::SourceFence);
+    }
+    let tree_digest = tree.digest()?;
+    let rendered_outputs = tree
+        .desired
+        .entries
+        .keys()
+        .map(SafeOutputPath::display)
+        .collect::<Vec<_>>();
+    Ok(AggregateReport {
+        family: "aggregate".to_owned(),
+        artifact_count: artifacts.len(),
+        released_artifact_count: census.released_artifacts.len(),
+        family_output_count: tree.family_output_count,
+        governance_output_count: tree
+            .desired
+            .entries
+            .len()
+            .saturating_sub(tree.family_output_count),
+        output_count: tree.desired.entries.len(),
+        requirement_count: requirements.len(),
+        bundle_count: bundles.len(),
+        fixture_count: fixtures.len(),
+        transition_target_count: transition["targets"].as_array().map_or(0, Vec::len),
+        tree_digest,
+        rendered_outputs,
+        stage_root: stage_root.to_string_lossy().into_owned(),
+    })
+}
+
+fn model_artifacts(
+    root: &Path,
+    model: &RepositoryModel,
+    census: &ReleasedArtifactCensus,
+    proto_census: &Value,
+    family_identities: &BTreeMap<String, String>,
+    families: &[FamilyProjection],
+) -> Result<Vec<ModelArtifactRecord>, AggregateError> {
+    let released = census
+        .released_artifacts
+        .iter()
+        .map(|record| record.artifact_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let tombstoned = census
+        .accepted_tombstones
+        .iter()
+        .map(|record| record.artifact_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut records = BTreeMap::<String, (ArtifactRole, ModelArtifactRecord)>::new();
+    let mut found = BTreeSet::new();
+    for claim in model.claims.values() {
+        let Some(header) = &claim.header else {
+            continue;
+        };
+        let id = header.artifact_id.as_str();
+        if released.contains(id) {
+            found.insert(id);
+        }
+        let record = ModelArtifactRecord {
+            artifact_id: id.to_owned(),
+            artifact_kind: header.artifact_kind.clone(),
+            authority_path: claim.path.display().to_owned(),
+            owner: claim.family_id.clone(),
+            version: header.version.clone(),
+            compatible_suite_major: header.compatible_suite_major,
+            status: header.status.clone(),
+            canonical_digest: semantic_identity(root, claim, proto_census, family_identities)?,
+            source_digest: claim.source_digest.clone(),
+            projection_profile: projection_profile(claim).to_owned(),
+            release_status: if released.contains(id) {
+                "released"
+            } else {
+                "unreleased"
+            }
+            .to_owned(),
+            compilation_unit: compilation_unit(claim.path.display()).to_owned(),
+            source_role: claim.role,
+            consumers: consumers(claim.path.display()),
+            resource_profile: resource_profile_for(driver_family(claim.path.display()), families),
+            provenance: BTreeSet::from([
+                "current-stable-source-bytes".to_owned(),
+                "detached-family-native-semantic-projection".to_owned(),
+                "accepted-release-census".to_owned(),
+            ]),
+        };
+        match records.get(id) {
+            Some((existing_role, _))
+                if *existing_role != ArtifactRole::Derived
+                    || claim.role == ArtifactRole::Derived => {}
+            _ => {
+                records.insert(id.to_owned(), (claim.role, record));
+            }
+        }
+    }
+    if let Some(missing) = released
+        .difference(&found)
+        .find(|artifact_id| !tombstoned.contains(**artifact_id))
+    {
+        return Err(AggregateError::MissingReleased((*missing).to_owned()));
+    }
+    Ok(records.into_values().map(|(_, record)| record).collect())
+}
+
+fn semantic_identity(
+    root: &Path,
+    claim: &ClaimedPath,
+    proto_census: &Value,
+    family_identities: &BTreeMap<String, String>,
+) -> Result<String, AggregateError> {
+    let bytes = read_stable(&root.join(claim.path.display()), MAX_BYTES)?;
+    if let Some(header) = &claim.header
+        && let Some(digest) = family_identities.get(header.artifact_id.as_str())
+    {
+        return Ok(digest.clone());
+    }
+    if claim.parser == NativeParser::Yaml
+        && let Some(header) = &claim.header
+        && let Some(digest) =
+            registry_cbef_driver::detached_registry_identity(header.artifact_id.as_str(), &bytes)?
+    {
+        return Ok(digest);
+    }
+    if claim
+        .header
+        .as_ref()
+        .is_some_and(|header| header.artifact_id.as_str() == "codefabric.schema.contract-ir")
+    {
+        return Ok(schema_driver::detached_schema_identity(&bytes)?);
+    }
+    if let Some(header) = &claim.header {
+        match header.artifact_id.as_str() {
+            "codefabric.manifests.suite-manifest" => {
+                let source: super::catalog::ContractCatalog = serde_json::from_slice(&bytes)?;
+                let compiled = source.compile(root, true)?;
+                let mut value = serde_json::to_value(compiled.normalized_catalog())?;
+                remove_own_identity(&mut value, claim.path.display())?;
+                return Ok(digest_bytes(&canonical_json(&value)?));
+            }
+            "codefabric.manifests.fixture-oracles" => {
+                let mut document: super::models::FixtureOracleManifest =
+                    serde_json::from_slice(&bytes)?;
+                document
+                    .records
+                    .sort_by(|left, right| left.path.cmp(&right.path));
+                if document
+                    .records
+                    .windows(2)
+                    .any(|pair| pair[0].path == pair[1].path)
+                {
+                    return Err(projection_error(
+                        claim.path.display(),
+                        "duplicate fixture-oracle path",
+                    ));
+                }
+                let mut value = serde_json::to_value(document)?;
+                remove_own_identity(&mut value, claim.path.display())?;
+                return Ok(digest_bytes(&canonical_json(&value)?));
+            }
+            _ => {}
+        }
+    }
+    let projection = match claim.parser {
+        NativeParser::Json => canonical_json_projection(claim.path.display(), &bytes)?,
+        NativeParser::Yaml => canonical_yaml_projection(claim.path.display(), &bytes)?,
+        NativeParser::JsonLines => canonical_jsonl_projection(claim.path.display(), &bytes)?,
+        NativeParser::CommentHeader if has_extension(claim.path.display(), "proto") => {
+            canonical_proto_projection(claim.path.display(), proto_census)?
+        }
+        NativeParser::CommentHeader if has_extension(claim.path.display(), "ebnf") => {
+            canonical_ebnf_projection(claim.path.display(), &bytes)?
+        }
+        NativeParser::MarkdownHeader | NativeParser::CommentHeader | NativeParser::Opaque => bytes,
+    };
+    Ok(digest_bytes(&projection))
+}
+
+fn projection_profile(claim: &ClaimedPath) -> &'static str {
+    let artifact_id = claim
+        .header
+        .as_ref()
+        .map(|header| header.artifact_id.as_str());
+    match artifact_id {
+        Some("codefabric.manifests.suite-manifest") => "catalog-typed-v1",
+        Some("codefabric.manifests.fixture-oracles") => "fixture-oracle-typed-v1",
+        Some("codefabric.schema.contract-ir") => "schema-contract-ir-typed-v1",
+        Some("codefabric.adapter.model-ir") => "adapter-pydantic-typed-v1",
+        _ if driver_family(claim.path.display()) == "registry-cbef" => "registry-family-typed-v1",
+        _ => match claim.parser {
+            NativeParser::Json => "json-jcs-v1",
+            NativeParser::Yaml => "yaml-ac-g-53-v1",
+            NativeParser::JsonLines => "jsonl-jcs-v1",
+            NativeParser::MarkdownHeader => "prose-utf8-v1",
+            NativeParser::CommentHeader if has_extension(claim.path.display(), "proto") => {
+                "proto-descriptor-v1"
+            }
+            NativeParser::CommentHeader if has_extension(claim.path.display(), "ebnf") => {
+                "ebnf-source-v1"
+            }
+            NativeParser::CommentHeader | NativeParser::Opaque => "exact-bytes-v1",
+        },
+    }
+}
+
+fn remove_own_identity(value: &mut Value, path: &str) -> Result<(), AggregateError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| projection_error(path, "semantic root must be an object"))?;
+    let header = if path.ends_with(".schema.json") {
+        object
+            .get_mut("x-codefabric-artifact")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| projection_error(path, "JSON Schema artifact header is absent"))?
+    } else {
+        object
+    };
+    header.remove("canonical_digest");
+    header.remove("source_digest");
+    Ok(())
+}
+
+fn canonical_json_projection(path: &str, bytes: &[u8]) -> Result<Vec<u8>, AggregateError> {
+    reject_duplicate_json_keys(path, bytes)?;
+    let mut value: Value = serde_json::from_slice(bytes)?;
+    remove_own_identity(&mut value, path)?;
+    canonical_json(&value)
+}
+
+fn canonical_yaml_projection(path: &str, bytes: &[u8]) -> Result<Vec<u8>, AggregateError> {
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_slice(bytes)
+        .map_err(|error| projection_error(path, error.to_string()))?;
+    let mut value = yaml_to_json(path, yaml)?;
+    remove_own_identity(&mut value, path)?;
+    canonical_json(&value)
+}
+
+fn yaml_to_json(path: &str, value: serde_yaml_ng::Value) -> Result<Value, AggregateError> {
+    use serde_yaml_ng::Value as YamlValue;
+    match value {
+        YamlValue::Null => Ok(Value::Null),
+        YamlValue::Bool(value) => Ok(Value::Bool(value)),
+        YamlValue::Number(value) => serde_json::to_value(value).map_err(AggregateError::Json),
+        YamlValue::String(value) => Ok(Value::String(value)),
+        YamlValue::Sequence(values) => values
+            .into_iter()
+            .map(|value| yaml_to_json(path, value))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        YamlValue::Mapping(mapping) => {
+            let mut object = serde_json::Map::new();
+            for (key, value) in mapping {
+                let YamlValue::String(key) = key else {
+                    return Err(projection_error(path, "YAML map keys must be strings"));
+                };
+                if key == "<<" || object.contains_key(&key) {
+                    return Err(projection_error(
+                        path,
+                        "YAML merge or duplicate key is forbidden",
+                    ));
+                }
+                object.insert(key, yaml_to_json(path, value)?);
+            }
+            Ok(Value::Object(object))
+        }
+        YamlValue::Tagged(_) => Err(projection_error(path, "YAML tags are forbidden")),
+    }
+}
+
+fn canonical_jsonl_projection(path: &str, bytes: &[u8]) -> Result<Vec<u8>, AggregateError> {
+    if !bytes.ends_with(b"\n") {
+        return Err(projection_error(path, "JSON Lines source must end with LF"));
+    }
+    let mut projected = Vec::new();
+    for (index, line) in bytes[..bytes.len() - 1]
+        .split(|byte| *byte == b'\n')
+        .enumerate()
+    {
+        if line.is_empty() {
+            return Err(projection_error(path, "blank JSON Lines record"));
+        }
+        reject_duplicate_json_keys(path, line)?;
+        let mut value: Value = serde_json::from_slice(line)?;
+        if index == 0 {
+            remove_own_identity(&mut value, path)?;
+        }
+        projected.extend(canonical_json(&value)?);
+        projected.push(b'\n');
+    }
+    Ok(projected)
+}
+
+fn canonical_ebnf_projection(path: &str, bytes: &[u8]) -> Result<Vec<u8>, AggregateError> {
+    let normalized = std::str::from_utf8(bytes)
+        .map_err(|error| projection_error(path, error.to_string()))?
+        .replace("\r\n", "\n");
+    if normalized.as_bytes().contains(&b'\r') {
+        return Err(projection_error(path, "bare carriage return is forbidden"));
+    }
+    let mut offset = 0;
+    for line in normalized.split_inclusive('\n') {
+        let logical = line.trim();
+        if !logical.starts_with("(*") || !logical.ends_with("*)") {
+            break;
+        }
+        offset += line.len();
+    }
+    if offset == 0 {
+        return Err(projection_error(path, "EBNF typed header is absent"));
+    }
+    Ok(normalized.as_bytes()[offset..].to_vec())
+}
+
+fn canonical_proto_projection(path: &str, census: &Value) -> Result<Vec<u8>, AggregateError> {
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| projection_error(path, "Proto filename is not UTF-8"))?;
+    let files = census
+        .get("files")
+        .and_then(Value::as_array)
+        .ok_or_else(|| projection_error(path, "descriptor census files are absent"))?;
+    let selected = files
+        .iter()
+        .find(|file| {
+            file.get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| {
+                    Path::new(name).file_name().and_then(|value| value.to_str()) == Some(file_name)
+                })
+        })
+        .ok_or_else(|| projection_error(path, "Proto file is absent from sole FDS census"))?;
+    canonical_json(&json!({"files": [selected]}))
+}
+
+fn projection_error(path: &str, detail: impl Into<String>) -> AggregateError {
+    AggregateError::Projection {
+        path: path.to_owned(),
+        detail: detail.into(),
+    }
+}
+
+#[derive(Debug)]
+struct NoDuplicateKeys;
+
+impl<'de> Deserialize<'de> for NoDuplicateKeys {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateVisitor)
+    }
+}
+
+struct NoDuplicateVisitor;
+
+impl<'de> Visitor<'de> for NoDuplicateVisitor {
+    type Value = NoDuplicateKeys;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("JSON without duplicate object keys")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+    fn visit_string<E>(self, _: String) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        NoDuplicateKeys::deserialize(deserializer)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        while sequence.next_element::<NoDuplicateKeys>()?.is_some() {}
+        Ok(NoDuplicateKeys)
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut keys = BTreeSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !keys.insert(key.clone()) {
+                return Err(A::Error::custom(format!("duplicate object key {key}")));
+            }
+            map.next_value::<NoDuplicateKeys>()?;
+        }
+        Ok(NoDuplicateKeys)
+    }
+}
+
+fn reject_duplicate_json_keys(path: &str, bytes: &[u8]) -> Result<(), AggregateError> {
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    NoDuplicateKeys::deserialize(&mut deserializer)
+        .map_err(|error| projection_error(path, error.to_string()))?;
+    deserializer
+        .end()
+        .map_err(|error| projection_error(path, error.to_string()))
+}
+
+fn model_outputs(tree: &AggregateTree, families: &[FamilyProjection]) -> Vec<ModelOutputRecord> {
+    tree.desired
+        .entries
+        .values()
+        .map(|entry| ModelOutputRecord {
+            output_id: entry.output.output_id.to_string(),
+            path: entry.output.path.display(),
+            producer: entry.output.producer.to_string(),
+            public_artifact_id: entry
+                .output
+                .public_artifact_id
+                .as_ref()
+                .map(ToString::to_string),
+            projection: entry.output.projection.clone(),
+            consumers: entry.output.consumers.clone(),
+            validators: entry.output.validators.clone(),
+            lineage: entry.lineage.iter().map(ToString::to_string).collect(),
+            resource_profile: resource_profile_for(
+                entry.output.producer.as_str().trim_start_matches("action:"),
+                families,
+            ),
+            content_digest: entry.content_digest.clone(),
+        })
+        .collect()
+}
+
+fn resource_profile_for(family: &str, families: &[FamilyProjection]) -> Value {
+    families
+        .iter()
+        .find(|item| item.family == family)
+        .and_then(|item| serde_json::to_value(&item.resource_profile).ok())
+        .unwrap_or_else(|| json!({"profile": "aggregate-governance-bounded-v1"}))
+}
+
+fn requirements(
+    artifacts: &[ModelArtifactRecord],
+    families: &[FamilyProjection],
+) -> Vec<ModelRequirementRecord> {
+    artifacts
+        .iter()
+        .filter(|artifact| artifact.release_status == "released")
+        .map(|artifact| {
+            let family = driver_family(&artifact.authority_path);
+            let projection = families.iter().find(|item| item.family == family);
+            let implements = projection.map_or_else(
+                || vec!["contracts/generated/model/governance/suite-manifest.json".to_owned()],
+                |item| item.outputs.clone(),
+            );
+            let verified_by = if projection.is_some() {
+                vec![format!("just model-family-check {family}")]
+            } else {
+                vec!["just model-repro-check".to_owned()]
+            };
+            let normative_text = format!(
+                "Released artifact {} must retain its accepted identity and have model-derived implementation and executable proof closure.",
+                artifact.artifact_id
+            );
+            ModelRequirementRecord {
+                requirement_id: format!(
+                    "MODEL-{}",
+                    &blake3::hash(artifact.artifact_id.as_bytes()).to_hex()[..16]
+                ),
+                source_artifact: artifact.artifact_id.clone(),
+                source_path: artifact.authority_path.clone(),
+                normative_text_digest: digest_bytes(normative_text.as_bytes()),
+                normative_text,
+                implements,
+                verified_by,
+                status: "active".to_owned(),
+            }
+        })
+        .collect()
+}
+
+fn validate_requirement_closure(
+    requirements: &[ModelRequirementRecord],
+) -> Result<(), AggregateError> {
+    let mut ids = BTreeSet::new();
+    if requirements.iter().any(|requirement| {
+        !ids.insert(&requirement.requirement_id)
+            || requirement.source_path.is_empty()
+            || requirement.implements.is_empty()
+            || requirement.verified_by.is_empty()
+    }) {
+        return Err(AggregateError::RequirementClosure);
+    }
+    Ok(())
+}
+
+fn bundles(artifacts: &[ModelArtifactRecord]) -> Result<Vec<ModelBundleRecord>, AggregateError> {
+    let mut grouped = BTreeMap::<String, Vec<ModelBundleMember>>::new();
+    for artifact in artifacts
+        .iter()
+        .filter(|artifact| artifact.release_status == "released")
+    {
+        for kind in bundle_membership(&artifact.artifact_id) {
+            grouped
+                .entry(kind.to_owned())
+                .or_default()
+                .push(ModelBundleMember {
+                    artifact_id: artifact.artifact_id.clone(),
+                    version: artifact.version.clone(),
+                    canonical_digest: artifact.canonical_digest.clone(),
+                    required: true,
+                    feature_bits: Vec::new(),
+                });
+        }
+    }
+    grouped
+        .into_iter()
+        .map(
+            |(bundle_kind, mut artifacts)| -> Result<_, AggregateError> {
+                artifacts.sort_by(|left, right| left.artifact_id.cmp(&right.artifact_id));
+                let mut bundle = ModelBundleRecord {
+                    bundle_kind,
+                    bundle_version: "1.0".to_owned(),
+                    bundle_major: 1,
+                    artifacts,
+                    compatibility: ModelBundleCompatibility {
+                        minimum_consumer_minor: 0,
+                        maximum_consumer_minor: 0,
+                    },
+                    created_by: ModelBundleCreatedBy {
+                        generator_id: "codefabric-model".to_owned(),
+                        generator_version: "1.0".to_owned(),
+                    },
+                    bundle_digest: String::new(),
+                    signature: None,
+                };
+                bundle.bundle_digest = bundle_digest(&bundle)?;
+                Ok(bundle)
+            },
+        )
+        .collect()
+}
+
+fn bundle_digest(bundle: &ModelBundleRecord) -> Result<String, AggregateError> {
+    let mut value = serde_json::to_value(bundle)?;
+    let object = value
+        .as_object_mut()
+        .expect("typed bundle record serializes as an object");
+    object.remove("canonical_digest");
+    object.remove("source_digest");
+    object.remove("bundle_digest");
+    object.remove("signature");
+    Ok(digest_bytes(&canonical_json(&value)?))
+}
+
+fn bundle_membership(artifact_id: &str) -> BTreeSet<&'static str> {
+    let mut kinds = BTreeSet::new();
+    if artifact_id.starts_with("codefabric.identity.")
+        || artifact_id.starts_with("codefabric.registry.ontology-")
+        || matches!(
+            artifact_id,
+            "codefabric.registry.enum-registry"
+                | "codefabric.registry.flag-registry"
+                | "codefabric.registry.unknown-registry"
+        )
+    {
+        kinds.insert("ontology");
+    }
+    if artifact_id.starts_with("codefabric.schema.") {
+        kinds.insert("schema");
+    }
+    if artifact_id.starts_with("codefabric.registry.provider-")
+        || matches!(
+            artifact_id,
+            "codefabric.registry.capability-registry"
+                | "codefabric.rpc.feature-registry"
+                | "codefabric.rpc.provider-control"
+                | "codefabric.rpc.pyrefly-sidecar"
+                | "codefabric.rpc.rustc-extractor"
+        )
+    {
+        kinds.insert("provider");
+    }
+    if artifact_id.starts_with("codefabric.query.")
+        || artifact_id == "codefabric.registry.phrase-registry"
+        || artifact_id == "codefabric.rpc.cpg-query-service"
+        || artifact_id == "codefabric.rpc.feature-registry"
+        || artifact_id.starts_with("codefabric.schema.cpg-semantic-query-")
+    {
+        kinds.insert("query-language");
+    }
+    if artifact_id.starts_with("codefabric.adapter.")
+        || matches!(
+            artifact_id,
+            "codefabric.registry.capability-registry"
+                | "codefabric.registry.error-registry"
+                | "codefabric.registry.state-machine-registry"
+                | "codefabric.rpc.cpg-query-service"
+                | "codefabric.rpc.feature-registry"
+                | "codefabric.schema.public-status.schema"
+        )
+    {
+        kinds.insert("tool-contract");
+    }
+    if matches!(
+        artifact_id,
+        "codefabric.registry.derivation-registry"
+            | "codefabric.registry.projection-registry"
+            | "codefabric.registry.summary-registry"
+    ) {
+        kinds.insert("derivation");
+    }
+    if artifact_id == "codefabric.registry.model-pack.schema" {
+        kinds.insert("model-pack");
+    }
+    if artifact_id == "codefabric.toolchain.identity" {
+        kinds.insert("toolchain");
+    }
+    kinds
+}
+
+fn validate_bundles(bundles: &[ModelBundleRecord]) -> Result<(), AggregateError> {
+    let kinds = bundles
+        .iter()
+        .map(|bundle| bundle.bundle_kind.as_str())
+        .collect::<BTreeSet<_>>();
+    let expected = BTreeSet::from([
+        "derivation",
+        "model-pack",
+        "ontology",
+        "provider",
+        "query-language",
+        "schema",
+        "tool-contract",
+        "toolchain",
+    ]);
+    if kinds != expected
+        || bundles.iter().any(|bundle| {
+            bundle.artifacts.is_empty()
+                || bundle.bundle_version != "1.0"
+                || bundle.bundle_major != 1
+                || bundle.compatibility.minimum_consumer_minor
+                    > bundle.compatibility.maximum_consumer_minor
+                || bundle.created_by.generator_id != "codefabric-model"
+                || !bundle_digest(bundle).is_ok_and(|digest| digest == bundle.bundle_digest)
+                || bundle
+                    .artifacts
+                    .windows(2)
+                    .any(|pair| pair[0].artifact_id >= pair[1].artifact_id)
+                || bundle.artifacts.iter().any(|member| {
+                    member.version.is_empty()
+                        || !member.required
+                        || !member.feature_bits.windows(2).all(|pair| pair[0] < pair[1])
+                })
+        })
+    {
+        return Err(AggregateError::BundleClosure);
+    }
+    Ok(())
+}
+
+fn fixture_index(model: &RepositoryModel) -> Vec<Value> {
+    model
+        .claims
+        .values()
+        .filter(|claim| claim.role == ArtifactRole::EvidenceAuthority)
+        .map(|claim| {
+            let class = if claim.path.display().contains("/negative/") {
+                "negative-class"
+            } else if claim.path.display().contains("differential") {
+                "differential"
+            } else if claim.path.display().contains("vectors")
+                || claim.path.display().contains("production_wire")
+            {
+                "normative-kat"
+            } else {
+                "property"
+            };
+            json!({
+                "path": claim.path.display(),
+                "class": class,
+                "source_digest": claim.source_digest,
+            })
+        })
+        .collect()
+}
+
+fn validate_transition_patch(root: &Path) -> Result<Value, AggregateError> {
+    let document: Value = serde_json::from_slice(&read_stable(&root.join(PATCH_PATH), MAX_BYTES)?)?;
+    validate_transition_patch_value(root, &document)
+}
+
+fn validate_transition_patch_value(root: &Path, document: &Value) -> Result<Value, AggregateError> {
+    let baseline = document["planning_baseline_commit"]
+        .as_str()
+        .ok_or(AggregateError::TransitionPatch)?;
+    let targets = document["targets"]
+        .as_array()
+        .ok_or(AggregateError::TransitionPatch)?;
+    let mut paths = BTreeSet::new();
+    let mut report = Vec::new();
+    for target in targets {
+        let path = target["target_path"]
+            .as_str()
+            .ok_or(AggregateError::TransitionPatch)?;
+        if !paths.insert(path) || path.starts_with("contracts/") || path.starts_with("docs/") {
+            return Err(AggregateError::TransitionPatch);
+        }
+        let baseline_kind = target["baseline"]["kind"]
+            .as_str()
+            .ok_or(AggregateError::TransitionPatch)?;
+        let baseline_bytes = git_blob(root, baseline, path)?;
+        match baseline_kind {
+            "present" => {
+                let expected = target["baseline"]["source_digest"]
+                    .as_str()
+                    .ok_or(AggregateError::TransitionPatch)?;
+                if baseline_bytes.as_deref().map(digest_bytes).as_deref() != Some(expected) {
+                    return Err(AggregateError::TransitionPatch);
+                }
+            }
+            "absent" if baseline_bytes.is_none() => {}
+            _ => return Err(AggregateError::TransitionPatch),
+        }
+        report.push(json!({
+            "target_path": path,
+            "baseline_kind": baseline_kind,
+            "operation_count": target["operations"].as_array().map_or(0, Vec::len),
+        }));
+    }
+    let overlay = document["reviewed_overlay_path"]
+        .as_str()
+        .ok_or(AggregateError::TransitionPatch)?;
+    read_stable(&root.join(overlay), MAX_BYTES)?;
+    Ok(json!({
+        "schema_version": 1,
+        "family_owner": document["family_owner"],
+        "planning_baseline_commit": baseline,
+        "reviewed_overlay_path": overlay,
+        "targets": report,
+    }))
+}
+
+fn git_blob(root: &Path, revision: &str, path: &str) -> Result<Option<Vec<u8>>, AggregateError> {
+    let output = Command::new("git")
+        .args(["show", &format!("{revision}:{path}")])
+        .current_dir(root)
+        .output()
+        .map_err(|source| AggregateError::Io {
+            path: PathBuf::from("git"),
+            source,
+        })?;
+    if output.status.success() {
+        Ok(Some(output.stdout))
+    } else {
+        Ok(None)
+    }
+}
+
+fn package_data(tree: &AggregateTree) -> Value {
+    let files = tree
+        .desired
+        .entries
+        .keys()
+        .map(SafeOutputPath::display)
+        .filter(|path| path.starts_with("codefabric-cpg-mcp/src/codefabric_cpg_mcp/"))
+        .collect::<Vec<_>>();
+    json!({"schema_version": 1, "files": files})
+}
+
+fn module_aggregators(tree: &AggregateTree) -> Value {
+    let rust = tree
+        .desired
+        .entries
+        .keys()
+        .map(SafeOutputPath::display)
+        .filter(|path| has_extension(path, "rs"))
+        .collect::<Vec<_>>();
+    let python = tree
+        .desired
+        .entries
+        .keys()
+        .map(SafeOutputPath::display)
+        .filter(|path| has_extension(path, "py") || has_extension(path, "pyi"))
+        .collect::<Vec<_>>();
+    json!({"schema_version": 1, "rust": rust, "python": python})
+}
+
+fn legacy_shadow_parity(
+    root: &Path,
+    artifacts: &[ModelArtifactRecord],
+) -> Result<Value, AggregateError> {
+    let legacy: Value =
+        serde_json::from_slice(&read_stable(&root.join(LEGACY_INDEX_PATH), MAX_BYTES)?)?;
+    let legacy = legacy["artifacts"]
+        .as_array()
+        .ok_or(AggregateError::LegacyParity)?;
+    let current = artifacts
+        .iter()
+        .map(|artifact| (artifact.artifact_id.as_str(), artifact))
+        .collect::<BTreeMap<_, _>>();
+    let mut matched = 0_usize;
+    let mut accepted_corrections = Vec::new();
+    for previous in legacy {
+        let artifact_id = previous["artifact_id"]
+            .as_str()
+            .ok_or(AggregateError::LegacyParity)?;
+        let current = current
+            .get(artifact_id)
+            .ok_or(AggregateError::LegacyParity)?;
+        let previous_source = previous["source_digest"]
+            .as_str()
+            .ok_or(AggregateError::LegacyParity)?;
+        let previous_canonical = previous["canonical_digest"]
+            .as_str()
+            .ok_or(AggregateError::LegacyParity)?;
+        if previous_source == current.source_digest {
+            if previous_canonical != current.canonical_digest {
+                return Err(AggregateError::LegacyParity);
+            }
+            matched += 1;
+        } else {
+            accepted_corrections.push(json!({
+                "artifact_id": artifact_id,
+                "disposition": "current-authority-evolution-admitted-by-active-model-plan",
+                "previous_source_digest": previous_source,
+                "current_source_digest": current.source_digest,
+                "previous_canonical_digest": previous_canonical,
+                "current_canonical_digest": current.canonical_digest,
+            }));
+        }
+    }
+    Ok(json!({
+        "schema_version": 1,
+        "oracle": LEGACY_INDEX_PATH,
+        "legacy_artifact_count": legacy.len(),
+        "exact_identity_matches": matched,
+        "accepted_source_evolution_count": accepted_corrections.len(),
+        "accepted_corrections": accepted_corrections,
+        "unaccepted_same-source_semantic_differences": 0,
+    }))
+}
+
+fn aggregate_validation(
+    tree: &AggregateTree,
+    artifacts: &[ModelArtifactRecord],
+    requirements: &[ModelRequirementRecord],
+    bundles: &[ModelBundleRecord],
+    fixtures: &[Value],
+    transition: &Value,
+) -> Result<Value, AggregateError> {
+    Ok(json!({
+        "schema_version": 1,
+        "family": "aggregate",
+        "tree_digest": tree.digest()?,
+        "output_count": tree.desired.entries.len() + 1,
+        "artifact_count": artifacts.len(),
+        "released_requirement_count": requirements.len(),
+        "bundle_count": bundles.len(),
+        "fixture_count": fixtures.len(),
+        "transition_target_count": transition["targets"].as_array().map_or(0, Vec::len),
+        "routine_write_roots": [
+            "contracts/generated/model",
+            "contracts/schema",
+            "contracts/query",
+            "contracts/adapter",
+            "src/generated",
+            "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts",
+            "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated",
+            "tooling/proto",
+        ],
+        "forbidden_write_roots": [
+            "contracts/acceptance",
+            "contracts/fixtures",
+            "docs/upfront_design",
+            "tooling/model-transition",
+        ],
+    }))
+}
+
+fn driver_family(path: &str) -> &'static str {
+    if path.starts_with("contracts/rpc/") {
+        "proto"
+    } else if path.starts_with("contracts/adapter/") {
+        "adapter"
+    } else if path.starts_with("contracts/schema/") || path.starts_with("contracts/query/") {
+        "schemas"
+    } else if path.starts_with("contracts/identity/")
+        || path.starts_with("contracts/registry/")
+        || path.starts_with("contracts/comparison/")
+        || path.starts_with("contracts/faults/")
+    {
+        "registry-cbef"
+    } else {
+        "governance"
+    }
+}
+
+fn compilation_unit(path: &str) -> &'static str {
+    driver_family(path)
+}
+
+fn projection(path: &str) -> PlannedOutputProjection {
+    if has_extension(path, "rs") {
+        PlannedOutputProjection::RustSource
+    } else if has_extension(path, "py") || has_extension(path, "pyi") {
+        PlannedOutputProjection::PythonSource
+    } else if path.ends_with(".schema.json") {
+        PlannedOutputProjection::JsonSchema {
+            public_identity: path.to_owned(),
+        }
+    } else {
+        PlannedOutputProjection::CanonicalArtifact {
+            artifact_kind: Path::new(path)
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("binary")
+                .to_owned(),
+        }
+    }
+}
+
+fn consumers(path: &str) -> BTreeSet<PlannedConsumer> {
+    let mut result = BTreeSet::from([PlannedConsumer::ContractVerifier]);
+    if has_extension(path, "rs") {
+        result.insert(PlannedConsumer::RustCore);
+    }
+    if has_extension(path, "py")
+        || has_extension(path, "pyi")
+        || path.contains("codefabric-cpg-mcp")
+    {
+        result.insert(PlannedConsumer::PythonAdapter);
+        result.insert(PlannedConsumer::PythonPackage);
+    }
+    result
+}
+
+fn validators(path: &str) -> BTreeSet<PlannedValidator> {
+    let mut result = BTreeSet::from([PlannedValidator::ExactBytes]);
+    if has_extension(path, "rs") {
+        result.insert(PlannedValidator::RustConsumer);
+    } else if has_extension(path, "py") || has_extension(path, "pyi") {
+        result.insert(PlannedValidator::PythonConsumer);
+    } else {
+        result.insert(PlannedValidator::StrictDecode);
+    }
+    result
+}
+
+fn has_extension(path: &str, expected: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(expected))
+}
+
+fn canonical_json(value: &Value) -> Result<Vec<u8>, AggregateError> {
+    serde_json_canonicalizer::to_vec(value).map_err(AggregateError::Json)
+}
+
+fn pretty_json(value: &Value) -> Result<Vec<u8>, AggregateError> {
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn json_lines(values: &[ModelRequirementRecord]) -> Result<Vec<u8>, AggregateError> {
+    let mut bytes = Vec::new();
+    for value in values {
+        bytes.extend(serde_json_canonicalizer::to_vec(value)?);
+        bytes.push(b'\n');
+    }
+    Ok(bytes)
+}
+
+fn canonical_digest(value: &impl Serialize) -> Result<String, AggregateError> {
+    let value = serde_json::to_value(value)?;
+    Ok(digest_bytes(&canonical_json(&value)?))
+}
+
+fn digest_bytes(bytes: &[u8]) -> String {
+    format!("b3:{}", blake3::hash(bytes).to_hex())
+}
+
+#[derive(Debug, Error)]
+pub enum AggregateError {
+    #[error("aggregate output attempts a forbidden write: {0}")]
+    ForbiddenWrite(String),
+    #[error("aggregate output {path} has two producers: {first}, {second}")]
+    DuplicateOwner {
+        path: String,
+        first: String,
+        second: String,
+    },
+    #[error("released artifact is absent without an accepted tombstone: {0}")]
+    MissingReleased(String),
+    #[error("released requirement graph is incomplete")]
+    RequirementClosure,
+    #[error("typed bundle graph is incomplete or unsorted")]
+    BundleClosure,
+    #[error("transition patch is stale, overlapping, or undeclared")]
+    TransitionPatch,
+    #[error("aggregate source fence changed during rendering")]
+    SourceFence,
+    #[error("legacy shadow parity has an unaccepted semantic difference")]
+    LegacyParity,
+    #[error("detached semantic projection failed for {path}: {detail}")]
+    Projection { path: String, detail: String },
+    #[error("aggregate I/O failed at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Repository(#[from] RepositoryModelError),
+    #[error(transparent)]
+    Desired(#[from] super::desired_tree::DesiredTreeError),
+    #[error(transparent)]
+    Model(#[from] super::model_control::ModelError),
+    #[error(transparent)]
+    Release(#[from] super::release_census::ReleaseCensusError),
+    #[error(transparent)]
+    Catalog(#[from] super::catalog::CatalogError),
+    #[error(transparent)]
+    Registry(#[from] registry_cbef_driver::RegistryCbefError),
+    #[error(transparent)]
+    Schema(#[from] schema_driver::SchemaDriverError),
+    #[error(transparent)]
+    Adapter(#[from] adapter_driver::AdapterDriverError),
+    #[error(transparent)]
+    Proto(#[from] proto_driver::ProtoDriverError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_detached_identity_matches_independent_rust_and_python_kats() {
+        let own = format!("b3:{}", "0".repeat(64));
+        let nested = format!("b3:{}", "1".repeat(64));
+        let json = format!(
+            r#"{{"canonical_digest":"{own}","source_digest":"{own}","nested":{{"canonical_digest":"{nested}"}},"value":1}}"#
+        );
+        let yaml = format!(
+            "canonical_digest: {own}\nsource_digest: {own}\nnested:\n  canonical_digest: {nested}\nvalue: 1\n"
+        );
+        let expected = "b3:56e968977129a90a5d28259ef45c4cb79b721124e30cc442ade8bc22545e3045";
+        assert_eq!(
+            digest_bytes(&canonical_json_projection("example.json", json.as_bytes()).unwrap()),
+            expected
+        );
+        assert_eq!(
+            digest_bytes(&canonical_yaml_projection("example.yaml", yaml.as_bytes()).unwrap()),
+            expected
+        );
+
+        let jsonl = format!(
+            "{{\"artifact_id\":\"example\",\"canonical_digest\":\"{own}\",\"source_digest\":\"{own}\",\"nested\":{{\"canonical_digest\":\"{nested}\"}}}}\n{{\"value\":1}}\n"
+        );
+        assert_eq!(
+            digest_bytes(&canonical_jsonl_projection("example.jsonl", jsonl.as_bytes()).unwrap()),
+            "b3:f6f506acf9aa47a31d89b8655cf6143c369a48b21202bb3d57f46b970e78b5ba"
+        );
+        let ebnf = b"(* artifact_id: example *)\n\nrule = \"x\";\n";
+        assert_eq!(
+            digest_bytes(&canonical_ebnf_projection("example.ebnf", ebnf).unwrap()),
+            "b3:58dd94b018bdcb74cd3a77752a7dfa1b009bd6acdc33256b332bc31784ed5a7b"
+        );
+        let proto_census = json!({"files": [{"name": "x.proto"}]});
+        assert_eq!(
+            digest_bytes(
+                &canonical_proto_projection("contracts/rpc/x.proto", &proto_census).unwrap()
+            ),
+            "b3:278e7acbbecfc5fd42774de2185774f4dcdb7c37975ca08386f5158f5f84a170"
+        );
+        assert_eq!(
+            digest_bytes(b"# Example\n"),
+            "b3:a0f5e8f16750f4638b7d8ed55e400ea266f7d938bd19c42a8c626fb9025d97ec"
+        );
+    }
+
+    #[test]
+    fn model_routine_tree_excludes_authority_evidence_acceptance_and_signature_paths() {
+        let mut tree = AggregateTree::new();
+        for path in [
+            "docs/upfront_design/design.md",
+            "contracts/acceptance/accepted.json",
+            "contracts/fixtures/kat.json",
+            "tooling/model-transition/patch.rs",
+        ] {
+            assert!(tree.insert(path, "action:test", Vec::new(), false).is_err());
+        }
+    }
+
+    #[test]
+    fn model_rejects_missing_duplicate_or_multi_owner_outputs() {
+        let mut tree = AggregateTree::new();
+        tree.insert(
+            "contracts/generated/model/output.json",
+            "action:first",
+            b"{}".to_vec(),
+            true,
+        )
+        .unwrap();
+        assert!(
+            tree.insert(
+                "contracts/generated/model/output.json",
+                "action:second",
+                b"{}".to_vec(),
+                true,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn model_driver_failure_keeps_staged_diagnostics_and_never_applies_partial_output() {
+        let mut tree = AggregateTree::new();
+        tree.insert(
+            "contracts/generated/model/first.json",
+            "action:first",
+            b"{\"complete\":true}".to_vec(),
+            true,
+        )
+        .unwrap();
+        let before = tree.desired.entries.clone();
+        let failure = tree.insert(
+            "contracts/generated/model/first.json",
+            "action:second",
+            b"{\"partial\":true}".to_vec(),
+            true,
+        );
+        assert!(failure.is_err());
+        assert_eq!(tree.desired.entries, before);
+    }
+
+    #[test]
+    fn model_transition_patch_rejects_stale_base_overlap_and_undeclared_target() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = fs::read(root.join(PATCH_PATH)).unwrap();
+        let document: Value = serde_json::from_slice(&source).unwrap();
+        validate_transition_patch_value(root, &document).unwrap();
+
+        let mut stale = document.clone();
+        stale["planning_baseline_commit"] = Value::String("0".repeat(40));
+        assert!(validate_transition_patch_value(root, &stale).is_err());
+
+        let mut overlap = document.clone();
+        let duplicate = overlap["targets"][0].clone();
+        overlap["targets"].as_array_mut().unwrap().push(duplicate);
+        assert!(validate_transition_patch_value(root, &overlap).is_err());
+
+        let mut undeclared = document;
+        undeclared["targets"][0]["target_path"] =
+            Value::String("contracts/authority.json".to_owned());
+        assert!(validate_transition_patch_value(root, &undeclared).is_err());
+    }
+
+    #[test]
+    fn model_bundle_projection_matches_typed_ac_g_07_semantics() {
+        let artifact = ModelArtifactRecord {
+            artifact_id: "codefabric.toolchain.identity".to_owned(),
+            artifact_kind: "manifest".to_owned(),
+            authority_path: "contracts/toolchain/toolchain-identity.json".to_owned(),
+            owner: "contracts".to_owned(),
+            version: "1.0".to_owned(),
+            compatible_suite_major: 1,
+            status: "released".to_owned(),
+            canonical_digest: format!("b3:{}", "0".repeat(64)),
+            source_digest: format!("b3:{}", "1".repeat(64)),
+            projection_profile: "test-v1".to_owned(),
+            release_status: "released".to_owned(),
+            compilation_unit: "governance".to_owned(),
+            source_role: ArtifactRole::Authority,
+            consumers: BTreeSet::from([PlannedConsumer::ContractVerifier]),
+            resource_profile: json!({"profile": "test"}),
+            provenance: BTreeSet::from(["test".to_owned()]),
+        };
+        let bundles = bundles(&[artifact]).unwrap();
+        assert_eq!(bundles[0].bundle_kind, "toolchain");
+        assert_eq!(bundles[0].artifacts.len(), 1);
+        assert_eq!(bundles[0].artifacts[0].version, "1.0");
+        assert!(bundles[0].artifacts[0].required);
+        let unsigned_digest = bundles[0].bundle_digest.clone();
+        let mut signed = bundles[0].clone();
+        signed.signature = Some("owner-accepted-signature".to_owned());
+        assert_eq!(bundle_digest(&signed).unwrap(), unsigned_digest);
+        signed.artifacts[0]
+            .feature_bits
+            .push("feature-a".to_owned());
+        assert_ne!(bundle_digest(&signed).unwrap(), unsigned_digest);
+    }
+
+    #[test]
+    fn model_generated_aggregates_have_no_manual_member_list_input() {
+        let source = include_str!("aggregate_driver.rs");
+        assert!(!source.contains(&["BUNDLE", "_MEMBERS"].concat()));
+        assert!(!source.contains(&["PUBLIC_SCHEMA", "_ARTIFACTS"].concat()));
+    }
+
+    #[test]
+    fn model_released_traceability_has_source_implementation_and_executable_oracle_closure() {
+        let requirement = ModelRequirementRecord {
+            requirement_id: "MODEL-example".to_owned(),
+            source_artifact: "codefabric.example".to_owned(),
+            source_path: "contracts/example.json".to_owned(),
+            normative_text: "example".to_owned(),
+            normative_text_digest: digest_bytes(b"example"),
+            implements: vec!["src/example.rs".to_owned()],
+            verified_by: vec!["just model-family-check schemas".to_owned()],
+            status: "active".to_owned(),
+        };
+        validate_requirement_closure(&[requirement]).unwrap();
+    }
+}

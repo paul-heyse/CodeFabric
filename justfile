@@ -200,6 +200,11 @@ model-check profile="edit":
 model-family-check family="":
     ./scripts/model_family_check.sh "{{family}}"
 
+[doc("Generate the complete model DesiredTree twice and compare exact path and byte identity")]
+[group('gate')]
+model-repro-check:
+    ./scripts/model_repro_check.sh
+
 [doc("Explain a model artifact ID or repository path")]
 [group('environment')]
 model-explain target:

@@ -661,6 +661,8 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
         .collect();
     Ok(SchemaReport {
         family: "schemas".to_owned(),
+        rule_version: plan.descriptor.rule_version.clone(),
+        resource_profile: plan.descriptor.resource_profile.clone(),
         table_count: plan.ir.tables.len(),
         operational_table_count: plan.ir.operational_tables.len(),
         public_schema_count: plan.ir.public_schemas.len(),
@@ -675,6 +677,8 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
 #[serde(deny_unknown_fields)]
 pub struct SchemaReport {
     pub family: String,
+    pub rule_version: String,
+    pub resource_profile: DriverResourceProfile,
     pub table_count: usize,
     pub operational_table_count: usize,
     pub public_schema_count: usize,
@@ -922,6 +926,28 @@ fn invalid<T>(path: &str, detail: impl Into<String>) -> Result<T, SchemaDriverEr
 fn decode_ir(bytes: &[u8]) -> Result<SchemaContractIr, SchemaDriverError> {
     reject_duplicate_keys(bytes)?;
     serde_json::from_slice(bytes).map_err(SchemaDriverError::Json)
+}
+
+/// Compile the schema Contract IR through its closed family-native model and return the detached
+/// semantic identity used by aggregate provenance.
+///
+/// # Errors
+///
+/// Returns a duplicate-key, closed-model, schema-invariant, or canonicalization failure.
+pub fn detached_schema_identity(bytes: &[u8]) -> Result<String, SchemaDriverError> {
+    let document = decode_ir(bytes)?;
+    document.validate()?;
+    let mut value = serde_json::to_value(document)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| SchemaDriverError::Invalid {
+            path: "$".to_owned(),
+            detail: "typed schema Contract IR root is not an object".to_owned(),
+        })?;
+    object.remove("canonical_digest");
+    object.remove("source_digest");
+    let canonical = serde_json_canonicalizer::to_vec(&value)?;
+    Ok(format!("b3:{}", blake3::hash(&canonical).to_hex()))
 }
 
 #[derive(Debug)]
