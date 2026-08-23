@@ -465,6 +465,46 @@ def _accepted_input_evolution_paths(root: Path, state: Mapping[str, Any]) -> set
     return accepted
 
 
+def _accepted_gate_substitutions(
+    state: Mapping[str, Any],
+) -> dict[str, str]:
+    """Return explicit historical-packet to current replacement-proof judgments."""
+    substitutions: dict[str, str] = {}
+    packets = state.get("packets", {})
+    for deviation in state.get("plan_deviations", []):
+        if (
+            not isinstance(deviation, dict)
+            or deviation.get("kind") != "accepted_gate_substitution"
+            or "superseded_packets" not in deviation
+        ):
+            continue
+        replacement = deviation.get("replacement_packet")
+        superseded = deviation.get("superseded_packets")
+        if not isinstance(replacement, str) or replacement not in packets:
+            raise ArtifactContractError(
+                "accepted_gate_substitution requires a known replacement_packet"
+            )
+        if not isinstance(superseded, list) or not superseded:
+            raise ArtifactContractError(
+                "accepted_gate_substitution requires nonempty superseded_packets"
+            )
+        for packet in superseded:
+            if not isinstance(packet, str) or packet not in packets:
+                raise ArtifactContractError(
+                    "accepted_gate_substitution names an unknown superseded packet"
+                )
+            if packet == replacement:
+                raise ArtifactContractError(
+                    "accepted_gate_substitution cannot replace a packet with itself"
+                )
+            prior = substitutions.setdefault(packet, replacement)
+            if prior != replacement:
+                raise ArtifactContractError(
+                    f"accepted_gate_substitution gives {packet} multiple replacements"
+                )
+    return substitutions
+
+
 def _validate_declared_inputs(
     root: Path,
     plan_path: Path,
@@ -693,12 +733,10 @@ def derive_plan_status(
     oracle_catalog = _validate_oracle_catalog(plan_path)
     just_recipes = load_just_recipes()
     blocks = _packet_blocks(plan_path)
-    packet_status: dict[str, Any] = {}
-    untrusted: list[str] = []
+    substitutions = _accepted_gate_substitutions(state)
+    current_proofs: dict[str, tuple[dict[str, bool | None], list[str], bool]] = {}
     for packet, entry in state["packets"].items():
-        commit = commit_trust(root, entry["proving_commit"])
         declared_oracles = oracle_catalog[packet]
-        implemented: dict[str, bool | None]
         if entry["status"] == "complete":
             implemented = {
                 oracle: (
@@ -712,11 +750,31 @@ def derive_plan_status(
             implemented = dict.fromkeys(declared_oracles)
         required_recipes = sorted(set(JUST_RECIPE.findall(blocks[packet])))
         recipes_resolve = all(recipe in just_recipes for recipe in required_recipes)
+        current_proofs[packet] = (implemented, required_recipes, recipes_resolve)
+
+    packet_status: dict[str, Any] = {}
+    untrusted: list[str] = []
+    for packet, entry in state["packets"].items():
+        commit = commit_trust(root, entry["proving_commit"])
+        implemented, required_recipes, recipes_resolve = current_proofs[packet]
+        replacement = substitutions.get(packet)
+        replacement_trusted = False
+        if replacement is not None:
+            replacement_entry = state["packets"][replacement]
+            replacement_commit = commit_trust(root, replacement_entry["proving_commit"])
+            replacement_implemented, _, replacement_recipes_resolve = current_proofs[
+                replacement
+            ]
+            replacement_trusted = (
+                replacement_entry["status"] == "complete"
+                and replacement_commit["ancestor"]
+                and all(replacement_implemented.values())
+                and replacement_recipes_resolve
+            )
         trusted = (
             entry["status"] == "complete"
             and commit["ancestor"]
-            and all(implemented.values())
-            and recipes_resolve
+            and ((all(implemented.values()) and recipes_resolve) or replacement_trusted)
         )
         if entry["status"] == "complete" and not trusted:
             untrusted.append(packet)
@@ -727,6 +785,7 @@ def derive_plan_status(
             "named_oracles": implemented,
             "required_recipes": required_recipes,
             "recipes_resolve": recipes_resolve,
+            "assurance_substitute": replacement if replacement_trusted else None,
             "trusted": trusted,
         }
     completion_groups: dict[str, dict[str, Any]] = {}

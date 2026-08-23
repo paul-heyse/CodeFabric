@@ -13,6 +13,7 @@ from tooling.ci.artifact_contracts import (
     DEFAULT_PLAN,
     ROOT,
     ArtifactContractError,
+    _accepted_gate_substitutions,
     _accepted_input_evolution_paths,
     active_plan_path,
     check_tracked_target_zero_state,
@@ -137,6 +138,24 @@ def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
     assert _accepted_input_evolution_paths(ROOT, state) == expected
 
 
+def test_gate_substitution_is_explicit_and_cannot_self_replace() -> None:
+    state = load_state(STATE)
+    substitutions = _accepted_gate_substitutions(state)
+    assert substitutions
+    assert set(substitutions.values()) == {"WP14"}
+
+    invalid = deepcopy(state)
+    deviation = next(
+        item
+        for item in invalid["plan_deviations"]
+        if item.get("kind") == "accepted_gate_substitution"
+        and "superseded_packets" in item
+    )
+    deviation["superseded_packets"] = ["WP14"]
+    with pytest.raises(ArtifactContractError, match="replace a packet with itself"):
+        _accepted_gate_substitutions(invalid)
+
+
 def test_active_program_negative_zero_state(tmp_path: Path) -> None:
     state = load_state(STATE)
     packet = next(iter(state["packets"]))
@@ -187,4 +206,4 @@ def test_active_program_operational_acceptance() -> None:
     for packet in status["packets"].values():
         for oracle, implemented in packet["named_oracles"].items():
             if packet["status"] == "complete" and oracle.startswith("just "):
-                assert implemented is True
+                assert implemented is True or packet["assurance_substitute"] is not None
