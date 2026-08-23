@@ -165,6 +165,11 @@ advisory-policy-check:
 stable-graph-check:
     ./scripts/stable_graph_check.sh
 
+[doc("Build the handwritten model compiler with every generated production output absent")]
+[group('gate')]
+model-bootstrap-check:
+    ./scripts/model_bootstrap_check.sh
+
 [doc("Run repository structural governance rules")]
 [group('gate')]
 governance-scan:

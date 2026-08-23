@@ -36,6 +36,15 @@ contracts-tooling = [
     "dep:serde_yaml_ng",
     "dep:tempfile",
 ]
+model-compiler = [
+    "dep:blake3",
+    "dep:gix",
+    "dep:petgraph",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:serde_json_canonicalizer",
+    "dep:thiserror",
+]
 data-fabric = [
     "canonical-json",
     "contracts-tooling",
@@ -119,6 +128,7 @@ futures = { version = "0.3", optional = true }
 gix = { version = "=0.86.0", default-features = false, features = ["sha1", "sha256", "index", "status", "attributes", "excludes", "dirwalk", "blob-diff", "interrupt", "parallel", "auto-chain-error", "tracing"], optional = true }
 object_store = { version = "=0.13.2", optional = true }
 parquet = { version = "=58.4.0", features = ["arrow", "async", "object_store"], optional = true }
+petgraph = { version = "=0.8.3", default-features = false, features = ["std"], optional = true }
 prost = { version = "=0.14.4", optional = true }
 prost-types = { version = "=0.14.4", optional = true }
 rayon = { version = "=1.12.0", optional = true }
@@ -174,6 +184,11 @@ required-features = ["proto-tooling"]
 name = "codefabric-contracts"
 path = "src/bin/codefabric-contracts.rs"
 required-features = ["contracts-tooling"]
+
+[[bin]]
+name = "codefabric-model"
+path = "src/bin/codefabric_model/main.rs"
+required-features = ["model-compiler"]
 
 [[bin]]
 name = "codefabricd"

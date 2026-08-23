@@ -27,6 +27,13 @@ pub mod provider_runtime;
 #[cfg(feature = "fact-generation")]
 pub mod provider_types;
 /// Generated categorical and lifecycle registry types.
+#[cfg(any(
+    feature = "contracts-tooling",
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
 pub mod registries;
 #[cfg(feature = "rpc")]
 pub mod rpc;

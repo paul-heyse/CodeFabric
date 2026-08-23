@@ -1193,6 +1193,7 @@ dependencies = [
  "insta",
  "object_store",
  "parquet",
+ "petgraph",
  "prost",
  "prost-types",
  "rayon",

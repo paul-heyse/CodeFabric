@@ -35,6 +35,7 @@ require_one_version parquet 58.4.0
 require_family_version '^datafusion($|-)' '54.1.0' 'DataFusion'
 require_one_version object_store 0.13.2
 require_one_version gix 0.86.0
+require_one_version petgraph 0.8.3
 require_one_version rusqlite 0.40.2
 require_one_version rustix 1.1.4
 require_one_version hyper-util 0.1.20
@@ -175,6 +176,15 @@ printf '%s' "$root_shape" | jq -e '
       "dep:thiserror"
     ],
     "local-workstation": ["daemon", "compatibility-probes"],
+    "model-compiler": [
+      "dep:blake3",
+      "dep:gix",
+      "dep:petgraph",
+      "dep:serde",
+      "dep:serde_json",
+      "dep:serde_json_canonicalizer",
+      "dep:thiserror"
+    ],
     "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
     "repository-state": ["dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix", "dep:thiserror", "dep:url"],
     "rpc": ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"],
@@ -195,6 +205,8 @@ declared_features() {
   fail 'deltalake direct features drifted'
 [ "$(declared_features gix)" = '["attributes","auto-chain-error","blob-diff","dirwalk","excludes","index","interrupt","parallel","sha1","sha256","status","tracing"]' ] || \
   fail 'gix direct features drifted'
+[ "$(declared_features petgraph)" = '["std"]' ] || \
+  fail 'petgraph direct features drifted'
 [ "$(declared_features rusqlite)" = '["backup","bundled"]' ] || \
   fail 'rusqlite direct features drifted'
 [ "$(declared_features rustix)" = '["fs"]' ] || fail 'rustix direct features drifted'
@@ -267,12 +279,21 @@ assert_graph_omits() {
 featureless_tree="$(cargo tree --locked --edges normal --no-default-features --prefix none)"
 canonical_tree="$(cargo tree --locked --edges normal --no-default-features --features canonical-json --prefix none)"
 contracts_tree="$(cargo tree --locked --edges normal --no-default-features --features contracts-tooling --prefix none)"
+model_tree="$(cargo tree --locked --edges normal --no-default-features --features model-compiler --prefix none)"
 proto_tree="$(cargo tree --locked --edges normal --no-default-features --features proto-tooling --prefix none)"
 fact_generation_tree="$(cargo tree --locked --edges normal --no-default-features --features fact-generation --prefix none)"
 assert_graph_omits featureless "$featureless_tree"
 assert_graph_omits canonical-json "$canonical_tree"
 assert_graph_omits contracts-tooling "$contracts_tree"
 assert_graph_omits proto-tooling "$proto_tree"
+for required in blake3 gix petgraph serde serde_json serde_json_canonicalizer thiserror; do
+  printf '%s\n' "$model_tree" | rg -q "^${required} " || \
+    fail "model-compiler graph omits required package $required"
+done
+if printf '%s\n' "$model_tree" | rg -q \
+  '^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |pyo3($|-)|rusqlite |tonic($|-)|prost |rayon |tree-sitter($|-)|ruff_python_|ruff_source_file |ruff_text_size )'; then
+  fail 'model-compiler graph contains a production, runtime, or provider family'
+fi
 for required in blake3 thiserror rayon tree-sitter tree-sitter-python tree-sitter-rust ruff_python_ast ruff_python_index ruff_python_parser ruff_python_trivia ruff_source_file ruff_text_size; do
   printf '%s\n' "$fact_generation_tree" | rg -q "^${required} " || \
     fail "fact-generation graph omits required package $required"
