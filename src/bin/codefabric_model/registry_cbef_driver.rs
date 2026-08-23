@@ -447,6 +447,7 @@ impl ModelDriver for RegistryCbefDriver {
                     .map_err(|_| DriverProtocolError::InvalidDescriptor)
             })
             .collect::<Result<Vec<_>, _>>()?,
+            output_roots: vec![],
             outputs: vec![
                 Self::output(
                     "output:model-identity-recipes-rust",

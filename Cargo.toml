@@ -194,6 +194,11 @@ path = "src/bin/codefabric_model/main.rs"
 required-features = ["model-compiler"]
 
 [[bin]]
+name = "codefabric-model-schema-consumer"
+path = "tooling/model/schema_consumer.rs"
+required-features = ["data-fabric"]
+
+[[bin]]
 name = "codefabricd"
 path = "src/bin/codefabricd.rs"
 required-features = ["daemon"]

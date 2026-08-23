@@ -38,6 +38,10 @@ pub enum DriverOutputRole {
     RustBinding,
     PythonBinding,
     CanonicalProjection,
+    PublicJsonSchema,
+    SqliteDdl,
+    TableSpec,
+    ValidationReport,
     TransitionOverlay,
 }
 
@@ -49,6 +53,8 @@ pub struct DriverDescriptor {
     pub family: StableId,
     pub rule_version: String,
     pub sources: Vec<SafeOutputPath>,
+    /// Closed roots below which `plan` may resolve authority-declared exact outputs.
+    pub output_roots: Vec<SafeOutputPath>,
     pub outputs: Vec<DriverOutputSpec>,
     pub resource_profile: DriverResourceProfile,
 }
@@ -73,9 +79,11 @@ impl DriverDescriptor {
             .map(|output| &output.output_id)
             .collect();
         let output_paths: BTreeSet<_> = self.outputs.iter().map(|output| &output.path).collect();
+        let output_roots: BTreeSet<_> = self.output_roots.iter().collect();
         if sources.len() != self.sources.len()
             || output_ids.len() != self.outputs.len()
             || output_paths.len() != self.outputs.len()
+            || output_roots.len() != self.output_roots.len()
         {
             return Err(DriverProtocolError::InvalidDescriptor);
         }
@@ -402,6 +410,7 @@ mod tests {
             family: StableId::parse("family:test").unwrap(),
             rule_version: "v1".to_owned(),
             sources: vec![],
+            output_roots: vec![],
             outputs: vec![DriverOutputSpec {
                 output_id: StableId::parse("output:test").unwrap(),
                 path: SafeOutputPath::parse(b"src/generated/test.rs".to_vec()).unwrap(),
