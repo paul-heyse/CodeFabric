@@ -1,0 +1,279 @@
+{
+  "artifact_id": "codefabric.acceptance.released-artifact-census-v1",
+  "artifact_kind": "release-census-acceptance",
+  "version": "1.0",
+  "compatible_suite_major": 1,
+  "status": "accepted",
+  "released_artifacts": [
+    {
+      "artifact_id": "codefabric-composable-semantic-cpg-query",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric-continuous-cpg-lifecycle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric-implementation-roadmap",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-data-fabric",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-fact-generation",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-fastmcp-serving",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-ontology",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric-present-state-cpg-suite-manifest",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.adapter.fastmcp-input.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.adapter.fastmcp-output.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.adapter.fastmcp-public-meta.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.adapter.model-ir",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.derivation-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.model-pack-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.ontology-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.provider-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.query-language-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.schema-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.tool-contract-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.bundles.toolchain-bundle",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.comparison.comparison-ignore-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.deployment.local-workstation-v1",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.faults.fault-point-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.identity.cbef-v1",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.identity.path-canonicalization-v1",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.identity.type-algebra-v1",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.manifests.deployment-profile.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.manifests.fixture-oracles",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.manifests.requirements",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.manifests.suite-manifest",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.manifests.traceability",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.query.english-controlled-v1",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.query.planspec.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.capability-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.derivation-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.enum-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.error-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.flag-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.model-pack.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-entity-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-fact-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-property-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-relation-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.phrase-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.projection-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.provider-normalization-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.provider-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.provider-resource-profile-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.state-machine-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.summary-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.registry.unknown-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.rpc.cpg-query-service",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.rpc.feature-registry",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.rpc.provider-control",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.rpc.pyrefly-sidecar",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.rpc.rustc-extractor",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.analysis-context.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.contract-ir",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.public-status.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.serving-snapshot.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.schema.source-context.schema",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.security.security-corpus-manifest",
+      "status": "released"
+    },
+    {
+      "artifact_id": "codefabric.toolchain.identity",
+      "status": "released"
+    }
+  ],
+  "accepted_tombstones": [],
+  "owner_acceptance": {
+    "owner_identity": "codefabric-repository-owner",
+    "acceptance_provenance": "Explicitly authorized by the CodeFabric repository owner in the implementation-plan execution thread on 2026-08-22 after review of the deterministic 66-ID candidate and exact parity with the prior released-ID census.",
+    "candidate_digest": "b3:6cbdbf8aa134c8ff9f71cb6ba44dbe1588ce877bff59d5f4ec8c1c9cef85a75e"
+  }
+}
