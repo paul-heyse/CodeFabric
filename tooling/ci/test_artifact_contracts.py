@@ -184,3 +184,7 @@ def test_active_program_operational_acceptance() -> None:
     status = derive_plan_status(ROOT, DEFAULT_PLAN)
     assert status["healthy"]
     assert status["untrusted_complete_entries"] == []
+    for packet in status["packets"].values():
+        for oracle, implemented in packet["named_oracles"].items():
+            if packet["status"] == "complete" and oracle.startswith("just "):
+                assert implemented is True

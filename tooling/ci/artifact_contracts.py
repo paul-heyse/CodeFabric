@@ -686,7 +686,12 @@ def derive_plan_status(
         implemented: dict[str, bool | None]
         if entry["status"] == "complete":
             implemented = {
-                oracle: _implemented_oracle(root, oracle) for oracle in declared_oracles
+                oracle: (
+                    oracle.removeprefix("just ") in just_recipes
+                    if oracle.startswith("just ")
+                    else _implemented_oracle(root, oracle)
+                )
+                for oracle in declared_oracles
             }
         else:
             implemented = dict.fromkeys(declared_oracles)

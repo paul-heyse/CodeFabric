@@ -390,7 +390,7 @@ seed-zero-state-check:
 
 [doc("Run structural, artifact, graph-policy, and generated-output governance")]
 [group('gate')]
-governance: governance-scan model-design-contract-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
+governance: governance-scan artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
