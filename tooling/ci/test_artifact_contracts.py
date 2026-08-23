@@ -140,18 +140,20 @@ def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
 
 def test_gate_substitution_is_explicit_and_cannot_self_replace() -> None:
     state = load_state(STATE)
-    substitutions = _accepted_gate_substitutions(state)
-    assert substitutions
-    assert set(substitutions.values()) == {"WP14"}
-
-    invalid = deepcopy(state)
-    deviation = next(
-        item
-        for item in invalid["plan_deviations"]
-        if item.get("kind") == "accepted_gate_substitution"
-        and "superseded_packets" in item
+    packet, replacement = list(state["packets"])[:2]
+    synthetic = deepcopy(state)
+    synthetic["plan_deviations"].append(
+        {
+            "kind": "accepted_gate_substitution",
+            "replacement_packet": replacement,
+            "superseded_packets": [packet],
+            "summary": "Synthetic judgment for the generic state-contract oracle.",
+        }
     )
-    deviation["superseded_packets"] = ["WP14"]
+    assert _accepted_gate_substitutions(synthetic)[packet] == replacement
+
+    invalid = deepcopy(synthetic)
+    invalid["plan_deviations"][-1]["superseded_packets"] = [replacement]
     with pytest.raises(ArtifactContractError, match="replace a packet with itself"):
         _accepted_gate_substitutions(invalid)
 
