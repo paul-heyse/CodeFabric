@@ -342,7 +342,7 @@ pub trait ModelDriver {
     ) -> Result<Vec<SafeOutputPath>, DriverProtocolError>;
 }
 
-/// Format generated Rust with the repository toolchain before it enters DesiredTree.
+/// Format generated Rust with the repository toolchain before it enters `DesiredTree`.
 ///
 /// # Errors
 ///
@@ -422,6 +422,10 @@ fn reject_symlink_ancestors(root: &Path, parent: &Path) -> Result<(), DriverProt
 
 /// Resolve an external executable by PATH and bind both its bytes and reported version.
 /// Paths remain diagnostic; action identity never trusts a path alone.
+///
+/// # Errors
+///
+/// Returns an error when the executable cannot be resolved/read or its version query fails.
 pub fn executable_tool_identity(
     program: &str,
     version_arguments: &[&str],

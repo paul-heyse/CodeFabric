@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 pub mod adapter_driver;
 pub mod aggregate_driver;
+pub mod assurance;
 #[allow(dead_code)] // The shared catalog deliberately exposes more views than this bootstrap uses.
 #[path = "../../contracts/catalog.rs"]
 pub(crate) mod catalog;
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
         Some("explain") => explain(&arguments.collect::<Vec<_>>()),
         Some("plan") => plan(&arguments.collect::<Vec<_>>()),
         Some("check") => check(&arguments.collect::<Vec<_>>()),
+        Some("assurance") => assurance_report(&arguments.collect::<Vec<_>>()),
         Some("family-check") => family_check(&arguments.collect::<Vec<_>>()),
         Some("release-census-candidate") => {
             release_census_candidate(&arguments.collect::<Vec<_>>())
@@ -48,7 +50,7 @@ fn main() -> ExitCode {
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | sync --confirm [root] | watch [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check <edit|changed|tier-a|release> [--root root] | assurance [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | sync --confirm [root] | watch [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
             ExitCode::FAILURE
         }
@@ -194,17 +196,56 @@ fn check(arguments: &[String]) -> ExitCode {
     let result = root_and_values(arguments).and_then(|(root, values)| {
         let _guard = transaction::read_guard(&root).map_err(|error| error.to_string())?;
         let profile = match values.as_slice() {
-            [] => "edit",
-            [profile] if matches!(profile.as_str(), "shadow" | "edit" | "full" | "release") => {
-                profile
+            [] => assurance::AssuranceProfile::Edit,
+            [profile] => {
+                assurance::AssuranceProfile::parse(profile).map_err(|error| error.to_string())?
             }
-            _ => return Err("check accepts one of shadow, edit, full, or release".to_owned()),
+            _ => return Err("check accepts one closed assurance profile".to_owned()),
         };
         let (_, plan) = compile_plan(&root)?;
         plan.check(&root).map_err(|error| error.to_string())?;
+        let inventory =
+            assurance::AssuranceInventory::collect(&root).map_err(|error| error.to_string())?;
+        let assurance = inventory
+            .profile(profile)
+            .map_err(|error| error.to_string())?;
         serde_json::to_string(&serde_json::json!({
             "profile": profile,
             "plan": plan.report(&[]),
+            "assurance": assurance,
+        }))
+        .map_err(|error| error.to_string())
+    });
+    print_result(result)
+}
+
+fn assurance_report(arguments: &[String]) -> ExitCode {
+    let result = root_and_values(arguments).and_then(|(root, values)| {
+        if !values.is_empty() {
+            return Err("assurance accepts only --root".to_owned());
+        }
+        let _guard = transaction::read_guard(&root).map_err(|error| error.to_string())?;
+        let (_, plan) = compile_plan(&root)?;
+        plan.check(&root).map_err(|error| error.to_string())?;
+        let inventory =
+            assurance::AssuranceInventory::collect(&root).map_err(|error| error.to_string())?;
+        let profiles = [
+            assurance::AssuranceProfile::Edit,
+            assurance::AssuranceProfile::Changed,
+            assurance::AssuranceProfile::TierA,
+            assurance::AssuranceProfile::Release,
+        ]
+        .into_iter()
+        .map(|profile| {
+            inventory
+                .profile(profile)
+                .map(|report| (profile, report))
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        serde_json::to_string(&serde_json::json!({
+            "schema_version": 1,
+            "profiles": profiles,
         }))
         .map_err(|error| error.to_string())
     });

@@ -73,6 +73,10 @@ struct ActionUpstreamIdentity {
 
 impl FamilyActionIdentity {
     /// Compute the RFC 8785/BLAKE3 key for this complete identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the closed identity cannot be canonically serialized.
     pub fn action_key(&self) -> Result<String, IncrementalError> {
         canonical_digest(self)
     }
@@ -261,6 +265,10 @@ impl ActionCache {
     }
 
     /// Publish one immutable cache entry from staged bytes. A competing valid entry wins.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unsafe key, invalid output census, or cache I/O failure.
     pub fn store(
         &self,
         identity: &FamilyActionIdentity,
@@ -357,6 +365,10 @@ impl ActionCache {
 
 /// Render a family through its staging capability, optionally restoring/storing an exact cache
 /// entry. Validators still run in the owning family after this function returns.
+///
+/// # Errors
+///
+/// Returns an error from identity resolution, cache publication, or the family renderer.
 pub fn render_with_cache<R, T>(
     repository_root: &Path,
     family: &str,
@@ -511,6 +523,10 @@ pub fn classify_watch_batch(result: &DebounceEventResult) -> WatchHint {
 }
 
 /// Reconstruct the complete current-byte repository model after any watcher hint.
+///
+/// # Errors
+///
+/// Returns an error when repository discovery or summary serialization fails.
 pub fn reinventory_watch(repository_root: &Path) -> Result<Value, IncrementalError> {
     let model = super::repository_model::RepositoryModel::discover(
         repository_root,
@@ -528,6 +544,10 @@ pub fn property_replay(seed: u64, minimized_edit: &str) -> String {
 
 /// Run the explicit opt-in watcher. Every batch is followed by a complete current-byte model
 /// inventory before it is reported; event absence is never treated as source truth.
+///
+/// # Errors
+///
+/// Returns an error for watcher setup, event-channel loss, or repository reinventory failure.
 pub fn watch(repository_root: &Path) -> Result<(), IncrementalError> {
     let root = fs::canonicalize(repository_root).map_err(|source| io(repository_root, source))?;
     let (sender, receiver) = mpsc::sync_channel::<DebounceEventResult>(4096);

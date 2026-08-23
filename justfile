@@ -190,6 +190,16 @@ model-plan-check:
 model-plan *paths:
     ./scripts/model_exec.sh plan "$@" --root .
 
+# These private recipes are the small, reviewable profile roots. The model compiler derives
+# every transitive capability from Just's live JSON graph; there is no sibling proof manifest.
+_model-profile-edit: root-fmt model-plan-check
+
+_model-profile-changed: _model-profile-edit model-family-check model-incremental-check governance-scan root-check root-clippy root-doctest extractor-ci-fast sidecar-ci-fast adapter-ci-fast stable-graph-check
+
+_model-profile-tier-a: _model-profile-changed
+
+_model-profile-release: _model-profile-tier-a model-bootstrap-check model-inventory-check model-release-census-check model-repro-check model-transaction-check adapter-wheel-test features-each policy seed-zero-state-check
+
 [doc("Validate the read-only desired tree under a model assurance profile")]
 [group('gate')]
 model-check profile="edit":
@@ -214,6 +224,11 @@ model-transaction-check:
 [group('gate')]
 model-incremental-check:
     ./scripts/model_incremental_check.sh
+
+[doc("Compile live assurance evidence and prove conservative model profiles")]
+[group('gate')]
+model-assurance-check:
+    ./scripts/model_assurance_check.sh
 
 [doc("Watch repository hints and recompile the current-byte model after every batch")]
 [group('environment')]

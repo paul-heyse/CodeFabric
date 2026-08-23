@@ -212,7 +212,7 @@ pub fn read_guard(repository_root: &Path) -> Result<ReadGuard, TransactionError>
     })
 }
 
-/// Compile, validate, and atomically reconcile the complete aggregate DesiredTree.
+/// Compile, validate, and atomically reconcile the complete aggregate `DesiredTree`.
 ///
 /// # Errors
 ///
@@ -272,6 +272,7 @@ fn open_lock(paths: &TransactionPaths) -> Result<File, TransactionError> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .mode(0o600)
         .open(&path)
         .map_err(|source| io(&path, source))?;
@@ -383,6 +384,7 @@ fn compile_sync_plan(paths: &TransactionPaths) -> Result<SyncPlan, TransactionEr
     })
 }
 
+#[allow(clippy::too_many_lines)] // The durable state machine stays linear for kill-point review.
 fn apply_plan(
     paths: &TransactionPaths,
     plan: SyncPlan,

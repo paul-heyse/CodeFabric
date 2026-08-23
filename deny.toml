@@ -119,9 +119,11 @@ skip = [
   { crate = "reqwest@0.13.4", reason = "transitive HTTP ecosystem split" },
   { crate = "sqlparser@0.62.0", reason = "transitive parser consumers currently require two lines" },
   { crate = "syn@3.0.3", reason = "transitive procedural-macro ecosystem split" },
-  { crate = "windows-sys@0.52.0", reason = "transitive Windows support split" },
 ]
-skip-tree = []
+skip-tree = [
+  { crate = "windows-sys@0.52.0", depth = 3, reason = "transitive Windows support split retained by existing platform crates" },
+  { crate = "windows-sys@0.60.2", depth = 3, reason = "notify 8.2 platform support uses the Windows 0.60/targets 0.53 line" },
+]
 
 # ---------------------------------------------------------------------- sources
 

@@ -1,6 +1,7 @@
 //! Complete read-only model tree assembled from family drivers and accountable acceptances.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -1207,14 +1208,15 @@ fn rust_module_aggregator(tree: &AggregateTree) -> Vec<u8> {
         .entries
         .keys()
         .map(SafeOutputPath::display)
-        .filter(|path| path.starts_with("src/generated/model_") && path.ends_with(".rs"))
+        .filter(|path| path.starts_with("src/generated/model_") && has_extension(path, "rs"))
     {
         let file = Path::new(&path)
             .file_name()
             .and_then(|value| value.to_str())
             .expect("validated model source path");
         let module = file.trim_start_matches("model_").trim_end_matches(".rs");
-        output.push_str(&format!("#[path = \"{file}\"]\npub(crate) mod {module};\n"));
+        writeln!(output, "#[path = \"{file}\"]\npub(crate) mod {module};")
+            .expect("writing to String cannot fail");
     }
     output.into_bytes()
 }
