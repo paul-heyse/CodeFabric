@@ -1,0 +1,469 @@
+{
+  "bundles": [
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.registry.derivation-registry",
+          "canonical_digest": "b3:48b4deb6890017b14457f31ad03add128af391c78179d56d3b53697fce90cd60",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.projection-registry",
+          "canonical_digest": "b3:2f9c4bd292da802fe2f2f9e1ccbdcdb034fffa52b01e9b42b7682afadea70c6f",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.summary-registry",
+          "canonical_digest": "b3:cb86c470b1640a80ecc2668bca9312862f38441be08d906b7967aaba272606e1",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:a93f1f2275141808100999b2f6531c93c4d1ca80ebbaabc7c363267e90364f55",
+      "bundle_kind": "derivation",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.registry.model-pack.schema",
+          "canonical_digest": "b3:425ef0f440c3a064af8026ab0a3ebde47dc2dbc490416d7ea8023cbe4c55260b",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:ffa47f29727aba003836d1e3bedd892e7d9638f41ceb83108810e6745a089e59",
+      "bundle_kind": "model-pack",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.identity.cbef-v1",
+          "canonical_digest": "b3:a749eca0307587c485412a1ce9770947068f8d44f2d8e23381a433a4e9dee252",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.identity.path-canonicalization-v1",
+          "canonical_digest": "b3:7efb391e76722d272c9953dbe305190f7793014e699d1fbe462eeb24665a6762",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.identity.type-algebra-v1",
+          "canonical_digest": "b3:73da9c1c7479b44bed00612631e7ff8fa648ccaea31bd715597233b7accdc22d",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.enum-registry",
+          "canonical_digest": "b3:3667a0653c0d50a85277d7efbdac8ac5f8bc626b8d936c05430752596d6ac035",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.flag-registry",
+          "canonical_digest": "b3:e8f5cc419132108c65548b6f594124197913e4d24907b4d46b2e694d66cc9499",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.ontology-entity-registry",
+          "canonical_digest": "b3:1aef53a170d4a00b4549dda8b9fe67ac7644976669b8db3f6e29380ab2b9064f",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.ontology-fact-registry",
+          "canonical_digest": "b3:77d21f5ff81e0202d753bdd7fc2a606bdb31503a4f2c1880db2f04e0e4aa6ba2",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.ontology-property-registry",
+          "canonical_digest": "b3:05b14e4de007611d241113f336378fd5040defe3e2c0d7d056fbfce1466a79c7",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.ontology-relation-registry",
+          "canonical_digest": "b3:d6605d0f4bc7b3f374f3a7547d965e261e9e544ffb6d7705eba84ca89623aa77",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.unknown-registry",
+          "canonical_digest": "b3:d0963ec768d11455304dfab7160c207870b6505bbf8b350728e1f7e950a095d6",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:2600bfa644ffd4cfce53d3fa15c41895a404b3327cfcc66782b77fe0f0806fea",
+      "bundle_kind": "ontology",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.registry.capability-registry",
+          "canonical_digest": "b3:1bb7395ee44b7c263e27ea087875555374f1e2e7e253891949c0ff13876da8dc",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.provider-normalization-registry",
+          "canonical_digest": "b3:79e12dbe7adbe5407041c5b464132c58c563653e802a5f0825c2ac1c08888beb",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.provider-registry",
+          "canonical_digest": "b3:b8af9dfda78eea60fa7836fc9b3b08523938829216e71aa5e87e88ba7ddd7d7c",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.provider-resource-profile-registry",
+          "canonical_digest": "b3:a8e3d25b71d2767b3ecfe80d40f0e3bcc4fa16a779c895a7861f8a3b8f737bcf",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.feature-registry",
+          "canonical_digest": "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.provider-control",
+          "canonical_digest": "b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.pyrefly-sidecar",
+          "canonical_digest": "b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.rustc-extractor",
+          "canonical_digest": "b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:f7285df32837c1555baf060d8849db4c0ec31fe3bebe3042c0bb99aac1624e57",
+      "bundle_kind": "provider",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.query.english-controlled-v1",
+          "canonical_digest": "b3:e337ede8c7843ed8058b7e5c1f0871a1707ac2d03df8cc2519c4b8999ffbf0a8",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.query.planspec.schema",
+          "canonical_digest": "b3:4ada1be8d3be0eeb6405c25e818fcd7b520d2674b52914ea948942c6ab568170",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.phrase-registry",
+          "canonical_digest": "b3:f889d4a52ef079e0b3a372a5e11dae9005c587c0d006aa39eca89107d25d1092",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.cpg-query-service",
+          "canonical_digest": "b3:502dfd819e70a154db899bd6bdbe580d01bb56f1654790d5adb241199d43b434",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.feature-registry",
+          "canonical_digest": "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
+          "canonical_digest": "b3:c6806d1ac3c7eb71fff83a2e0daccc611c5da363eee39ad1df0c796d79788657",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
+          "canonical_digest": "b3:aa0ef3a4e2766b18aec8ee0b15d2f5fca243a47537b6bee9eb94fe022d184b69",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:f4d3d3f7fff40534c5cbd2e54a7808193cdc82b61034ef525519ba64e14d5e7b",
+      "bundle_kind": "query-language",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.schema.analysis-context.schema",
+          "canonical_digest": "b3:bb1bc1af82b7267b82614faa9618600bc6717c189f376c88103d3a35d2d5a658",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.contract-ir",
+          "canonical_digest": "b3:7e889a6095bb08aa73e6fbb8418a831ad4fa0d49690b5f4cca753041de3b9ce8",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
+          "canonical_digest": "b3:c6806d1ac3c7eb71fff83a2e0daccc611c5da363eee39ad1df0c796d79788657",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
+          "canonical_digest": "b3:aa0ef3a4e2766b18aec8ee0b15d2f5fca243a47537b6bee9eb94fe022d184b69",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
+          "canonical_digest": "b3:a83a41e17dcda0837446b5fe3206545574c7975f65dd476afea3e9fb1d5d018b",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.public-status.schema",
+          "canonical_digest": "b3:4b6fce29cbcf27ce0706243ee4853a070f36f929fca0a0d1089c4ac9a3891816",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.serving-snapshot.schema",
+          "canonical_digest": "b3:8f151294feb37d2e367ecfe4f6af274b7738eb30ee3442fd3d8c2c614df973c7",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.source-context.schema",
+          "canonical_digest": "b3:bae88fd2334bb521813c4a6f49ec582ab219dccc30cc510de501889c7c2500c0",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:841ea8848e151925ded4c45dc739362ff70c441851330a812a610a4b2b6cc0a4",
+      "bundle_kind": "schema",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.adapter.fastmcp-input.schema",
+          "canonical_digest": "b3:4e0d415cfabfb972644c55de5e254defd54fb3b8d11e5e7b1cb99db2875df7e8",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.adapter.fastmcp-output.schema",
+          "canonical_digest": "b3:d7bdc648b2d32324403acfb02b6c5c498e92f9040b3b4d45a247a75cb6fea15e",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.adapter.fastmcp-public-meta.schema",
+          "canonical_digest": "b3:39b08d1fb58cebc739c78ca86a69a79d4202a35baab470caa3a3c0a89fa99b61",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.adapter.model-ir",
+          "canonical_digest": "b3:fc4c1fc4d8e8ae9933c15ba6d146a729915b1b1d611d9ebba92b9c53f868d52d",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.capability-registry",
+          "canonical_digest": "b3:1bb7395ee44b7c263e27ea087875555374f1e2e7e253891949c0ff13876da8dc",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.error-registry",
+          "canonical_digest": "b3:25cfd27732b0403f2424985b534f42388d8baf98120892902d7271581c4a11a4",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.registry.state-machine-registry",
+          "canonical_digest": "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.cpg-query-service",
+          "canonical_digest": "b3:502dfd819e70a154db899bd6bdbe580d01bb56f1654790d5adb241199d43b434",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.rpc.feature-registry",
+          "canonical_digest": "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        },
+        {
+          "artifact_id": "codefabric.schema.public-status.schema",
+          "canonical_digest": "b3:4b6fce29cbcf27ce0706243ee4853a070f36f929fca0a0d1089c4ac9a3891816",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:0eabbbeb13c595985d053a886625de7c8f958cfc40c3e61595c46d1e2c0a8798",
+      "bundle_kind": "tool-contract",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    },
+    {
+      "artifacts": [
+        {
+          "artifact_id": "codefabric.toolchain.identity",
+          "canonical_digest": "b3:bab0da97993c4e1cb094b27d9e499462f87b072f5c3701d1315f4740c4dafd0e",
+          "feature_bits": [],
+          "required": true,
+          "version": "1.0"
+        }
+      ],
+      "bundle_digest": "b3:334ee3ae323831c1ecca73af6891dfe43b43be459745daa312d3c00ec25a4ed2",
+      "bundle_kind": "toolchain",
+      "bundle_major": 1,
+      "bundle_version": "1.0",
+      "compatibility": {
+        "maximum_consumer_minor": 0,
+        "minimum_consumer_minor": 0
+      },
+      "created_by": {
+        "generator_id": "codefabric-model",
+        "generator_version": "1.0"
+      }
+    }
+  ],
+  "schema_version": 1
+}

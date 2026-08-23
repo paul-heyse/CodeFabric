@@ -252,6 +252,7 @@ class AnnotationKind(IntEnum):
     DOCUMENTATION = 20
     PRAGMA_OR_DIRECTIVE = 30
     PARSE_ERROR = 40
+    MISSING_SYNTAX = 50
 
 
 class SyntaxKind(IntEnum):
@@ -299,6 +300,27 @@ class SyntaxFieldRole(IntEnum):
     PATTERN = 150
     HANDLER = 160
     FINALLY_BODY = 170
+
+
+class Language(IntEnum):
+    COMMON = 10
+    PYTHON = 20
+    RUST = 30
+    UNKNOWN = 40
+
+
+class PathEncoding(IntEnum):
+    UNIX_BYTES = 10
+    MACOS_BYTES = 20
+    WINDOWS_WTF8 = 30
+
+
+class NewlineKind(IntEnum):
+    NONE = 10
+    LF = 20
+    CRLF = 30
+    CR = 40
+    MIXED = 50
 
 
 class WorkspaceLifecycle(IntEnum):
@@ -1290,6 +1312,11 @@ ENUM_TRIPLES = MappingProxyType(
                 "PARSE_ERROR",
                 "parse-error",
             ),
+            (
+                50,
+                "MISSING_SYNTAX",
+                "missing-syntax",
+            ),
         ),
         "SYNTAX_KIND": (
             (
@@ -1498,6 +1525,72 @@ ENUM_TRIPLES = MappingProxyType(
                 170,
                 "FINALLY_BODY",
                 "finally-body",
+            ),
+        ),
+        "LANGUAGE": (
+            (
+                10,
+                "COMMON",
+                "common",
+            ),
+            (
+                20,
+                "PYTHON",
+                "python",
+            ),
+            (
+                30,
+                "RUST",
+                "rust",
+            ),
+            (
+                40,
+                "UNKNOWN",
+                "unknown",
+            ),
+        ),
+        "PATH_ENCODING": (
+            (
+                10,
+                "UNIX_BYTES",
+                "unix-bytes",
+            ),
+            (
+                20,
+                "MACOS_BYTES",
+                "macos-bytes",
+            ),
+            (
+                30,
+                "WINDOWS_WTF8",
+                "windows-wtf8",
+            ),
+        ),
+        "NEWLINE_KIND": (
+            (
+                10,
+                "NONE",
+                "none",
+            ),
+            (
+                20,
+                "LF",
+                "lf",
+            ),
+            (
+                30,
+                "CRLF",
+                "crlf",
+            ),
+            (
+                40,
+                "CR",
+                "cr",
+            ),
+            (
+                50,
+                "MIXED",
+                "mixed",
             ),
         ),
     }

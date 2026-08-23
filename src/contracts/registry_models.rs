@@ -1107,6 +1107,7 @@ pub fn validate_enum_domains(records: &[EnumDomain]) -> Result<(), String> {
                 "DOCUMENTATION",
                 "PRAGMA_OR_DIRECTIVE",
                 "PARSE_ERROR",
+                "MISSING_SYNTAX",
             ],
         ),
         (
@@ -1160,6 +1161,12 @@ pub fn validate_enum_domains(records: &[EnumDomain]) -> Result<(), String> {
                 "FINALLY_BODY",
             ],
         ),
+        ("LANGUAGE", &["COMMON", "PYTHON", "RUST", "UNKNOWN"]),
+        (
+            "PATH_ENCODING",
+            &["UNIX_BYTES", "MACOS_BYTES", "WINDOWS_WTF8"],
+        ),
+        ("NEWLINE_KIND", &["NONE", "LF", "CRLF", "CR", "MIXED"]),
     ];
     if records.len() != EXPECTED.len() {
         return Err("enum registry must contain every §62, effect, and resource domain".into());

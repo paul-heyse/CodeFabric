@@ -22,6 +22,7 @@ pub(crate) mod registry_models;
 pub mod release_census;
 pub mod repository_model;
 pub mod schema_driver;
+pub mod transaction;
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args().skip(1);
@@ -41,11 +42,35 @@ fn main() -> ExitCode {
             release_census_candidate(&arguments.collect::<Vec<_>>())
         }
         Some("release-census-check") => release_census_check(&arguments.collect::<Vec<_>>()),
+        Some("sync") => sync(&arguments.collect::<Vec<_>>()),
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | sync --confirm [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn sync(arguments: &[String]) -> ExitCode {
+    if !arguments.iter().any(|argument| argument == "--confirm") {
+        eprintln!("sync requires explicit --confirm");
+        return ExitCode::FAILURE;
+    }
+    let root = arguments
+        .iter()
+        .find(|argument| argument.as_str() != "--confirm")
+        .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    match transaction::sync(&root).and_then(|report| {
+        serde_json::to_string(&report).map_err(transaction::TransactionError::Json)
+    }) {
+        Ok(report) => {
+            println!("{report}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::FAILURE
         }
     }
@@ -59,6 +84,13 @@ fn family_check(arguments: &[String]) -> ExitCode {
     let root = arguments
         .get(1)
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    let _guard = match transaction::read_guard(&root) {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let result = match family.as_str() {
         "adapter" => adapter_driver::check_family(&root)
             .and_then(|report| {
@@ -132,6 +164,7 @@ fn root_and_values(arguments: &[String]) -> Result<(std::path::PathBuf, Vec<Stri
 
 fn plan(arguments: &[String]) -> ExitCode {
     let result = root_and_values(arguments).and_then(|(root, changed)| {
+        let _guard = transaction::read_guard(&root).map_err(|error| error.to_string())?;
         let (model, plan) = compile_plan(&root)?;
         let changed_ids = changed
             .iter()
@@ -144,6 +177,7 @@ fn plan(arguments: &[String]) -> ExitCode {
 
 fn check(arguments: &[String]) -> ExitCode {
     let result = root_and_values(arguments).and_then(|(root, values)| {
+        let _guard = transaction::read_guard(&root).map_err(|error| error.to_string())?;
         let profile = match values.as_slice() {
             [] => "edit",
             [profile] if matches!(profile.as_str(), "shadow" | "edit" | "full" | "release") => {
@@ -235,6 +269,13 @@ fn release_census_check(arguments: &[String]) -> ExitCode {
     let root = arguments
         .first()
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    let _guard = match transaction::read_guard(&root) {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
     match compile_repository(&root)
         .and_then(|model| release_census::check(&root, &model).map_err(|error| error.to_string()))
     {
@@ -310,6 +351,17 @@ fn inventory(arguments: &[String]) -> ExitCode {
         .iter()
         .find(|argument| argument.as_str() != "--no-gix")
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    let _guard = if use_gix {
+        match transaction::read_guard(&root) {
+            Ok(guard) => Some(guard),
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
     match repository_model::RepositoryModel::discover(
         &root,
         repository_model::InventoryBounds::default(),
@@ -340,6 +392,13 @@ fn explain(arguments: &[String]) -> ExitCode {
     let root = arguments
         .get(1)
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    let _guard = match transaction::read_guard(&root) {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
     match compile_plan(&root) {
         Ok((model, plan)) => {
             let explanations = model.explain(target);

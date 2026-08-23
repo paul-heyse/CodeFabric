@@ -1084,7 +1084,19 @@ fn parse_derived_header(
         NativeParser::Opaque => return Ok(None),
     };
     if fields.contains_key("artifact_id") {
-        return header_from_fields(path, &fields).map(Some);
+        let complete = [
+            "artifact_kind",
+            "version",
+            "compatible_suite_major",
+            "status",
+        ]
+        .into_iter()
+        .all(|field| fields.contains_key(field));
+        return if complete {
+            header_from_fields(path, &fields).map(Some)
+        } else {
+            Ok(None)
+        };
     }
     if path.raw_bytes.ends_with(b".schema.json") && fields.contains_key("$id") {
         return schema_header_from_id(path, &fields).map(Some);

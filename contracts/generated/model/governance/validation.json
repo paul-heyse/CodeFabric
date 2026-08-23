@@ -1,0 +1,25 @@
+{
+  "artifact_count": 117,
+  "bundle_count": 8,
+  "family": "aggregate",
+  "fixture_count": 49,
+  "forbidden_write_roots": [
+    "contracts/acceptance",
+    "contracts/fixtures",
+    "docs/upfront_design"
+  ],
+  "output_count": 56,
+  "released_requirement_count": 66,
+  "routine_write_roots": [
+    "contracts/generated/model",
+    "contracts/schema",
+    "contracts/query",
+    "contracts/adapter",
+    "src/generated",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated",
+    "tooling/proto"
+  ],
+  "schema_version": 1,
+  "tree_digest": "b3:2a9e9ac76f3ff3b8e6c04e95c8caa8bafa9ef7be3fcf929f83d95e4a073cb169"
+}

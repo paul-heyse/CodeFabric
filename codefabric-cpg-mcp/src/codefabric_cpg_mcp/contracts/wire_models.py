@@ -1,4 +1,4 @@
-# @generated from codefabric.adapter.model-ir b3:e9a5df2b3a872e47faa4bb539bf4eb845319a3479666b672c2de356e09f240c0; codefabric-adapter-model-compiler-v1; do not edit.
+# @generated from codefabric.adapter.model-ir source b3:8d689318b8ee7d1ec3b6e0d0a68961a5b04f35a9a38fe40819cff8f0e55b3b8c; codefabric-model-adapter-driver-v1; do not edit.
 """Statically typed public adapter contracts compiled from Contract IR."""
 
 from typing import Annotated, Literal
@@ -305,3 +305,46 @@ TYPE_ADAPTERS = {
     "Delivery": TypeAdapter(Delivery),
     "ReferenceToolOutput": TypeAdapter(ReferenceToolOutput),
 }
+MODEL_ADAPTERS = {
+    "SnapshotSummary": TypeAdapter(SnapshotSummary),
+    "QueryCounts": TypeAdapter(QueryCounts),
+    "QueryStatus": TypeAdapter(QueryStatus),
+    "ResultResource": TypeAdapter(ResultResource),
+    "InlineDelivery": TypeAdapter(InlineDelivery),
+    "ResourceDelivery": TypeAdapter(ResourceDelivery),
+    "QueryToolOutput": TypeAdapter(QueryToolOutput),
+    "PublicToolMeta": TypeAdapter(PublicToolMeta),
+    "ValidationIssue": TypeAdapter(ValidationIssue),
+    "ValidateQueryOutput": TypeAdapter(ValidateQueryOutput),
+    "StatusToolOutput": TypeAdapter(StatusToolOutput),
+    "InlineReference": TypeAdapter(InlineReference),
+    "ResourceReference": TypeAdapter(ResourceReference),
+    "QueryToolInput": TypeAdapter(QueryToolInput),
+    "ValidateToolInput": TypeAdapter(ValidateToolInput),
+    "StatusToolInput": TypeAdapter(StatusToolInput),
+    "ReferenceToolInput": TypeAdapter(ReferenceToolInput),
+}
+__all__ = [
+    "SnapshotSummary",
+    "QueryCounts",
+    "QueryStatus",
+    "ResultResource",
+    "InlineDelivery",
+    "ResourceDelivery",
+    "QueryToolOutput",
+    "PublicToolMeta",
+    "ValidationIssue",
+    "ValidateQueryOutput",
+    "StatusToolOutput",
+    "InlineReference",
+    "ResourceReference",
+    "QueryToolInput",
+    "ValidateToolInput",
+    "StatusToolInput",
+    "ReferenceToolInput",
+    "Delivery",
+    "ReferenceToolOutput",
+    "JSON_OBJECT_ADAPTER",
+    "MODEL_ADAPTERS",
+    "TYPE_ADAPTERS",
+]

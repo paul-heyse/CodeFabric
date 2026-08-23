@@ -4,7 +4,10 @@ severity: error
 message: Production identities must use a generated recipe-aware CBEF builder.
 note: Arbitrary tagged-field vectors are private codec machinery, never a production API.
 files:
-  - tooling/model-transition/consumer-overlays/**/*.rs
-  - tooling/model-transition/live/**/*.rs
+  - src/identity.rs
+  - src/source_syntax.rs
 rule:
-  pattern: CbefRecord { $$$FIELDS }
+  pattern: 'CbefRecord { domain: IdentityDomain::$DOMAIN, $$$FIELDS }'
+constraints:
+  DOMAIN:
+    regex: '^(Entity|RelationFact)$'

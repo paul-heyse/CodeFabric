@@ -1,5 +1,12 @@
 # Fixture oracle change record
 
+## 2026-08-22 source/syntax canonicalization
+
+- Added exact Arrow IPC projection digests and row counts for the canonical
+  source, lexical, syntax, entity, relation, property, and evidence tables.
+- Froze all five deterministic source-range reconciliation outcomes, including
+  provider-only synthesis with incompatible observations retained separately.
+
 ## 2026-08-22 Ruff frontend adapter corpus
 
 - Added exact framed projections for the pinned Ruff 0.0.7 token stream, source-order

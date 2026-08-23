@@ -11,6 +11,7 @@ ignores:
   - src/identity.rs
   - src/operational_store.rs
   - src/contracts/**/*.rs
+  - src/bin/codefabric_model/**/*.rs
 rule:
   any:
     - pattern: std::fs::read($PATH)

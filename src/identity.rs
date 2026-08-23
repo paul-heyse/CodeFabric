@@ -10,6 +10,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::model_generated::identity_recipes as recipes;
 use unicode_casefold::UnicodeCaseFold as _;
 use unicode_normalization::UnicodeNormalization as _;
 
@@ -730,6 +732,188 @@ pub fn source_file_identity(path: &WorkspacePath) -> Result<DerivedIdentity, Ide
                 value: CbefValue::Bytes(path.comparison_key_bytes.clone()),
             },
         ],
+    })
+}
+
+/// Provider-independent source occurrence fields used by AC-G-13 identities.
+///
+/// Display text and provider-local node handles are deliberately absent. Structural
+/// occurrences use their canonical kind/parent/role/ordinal anchor; flat occurrences
+/// use their family-local kind and ordinal. The normalized semantic kind keeps
+/// incompatible provider observations distinct without admitting provider-local IDs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceOccurrenceIdentityInput {
+    pub workspace_id: [u8; 16],
+    pub file_id: [u8; 16],
+    pub source_digest: [u8; 32],
+    pub start_byte: u64,
+    pub end_byte: u64,
+    pub owner_id: [u8; 16],
+    pub entity_kind_code: u16,
+    pub occurrence_family_code: u16,
+    pub normalized_kind_code: u32,
+    pub parent_id: Option<[u8; 16]>,
+    pub role_code: Option<u16>,
+    pub ordinal: u32,
+}
+
+/// Derive one canonical source occurrence without provider or display identity.
+///
+/// # Errors
+///
+/// Returns an error only if the closed CBEF occurrence recipe cannot be encoded.
+pub fn source_occurrence_identity(
+    input: SourceOccurrenceIdentityInput,
+) -> Result<DerivedIdentity, IdentityError> {
+    #[derive(Serialize)]
+    struct SemanticKey {
+        schema_version: u8,
+        file_id: [u8; 16],
+        source_digest: [u8; 32],
+        start_byte: u64,
+        end_byte: u64,
+        occurrence_family_code: u16,
+        normalized_kind_code: u32,
+        parent_id: Option<[u8; 16]>,
+        role_code: Option<u16>,
+        ordinal: u32,
+    }
+    if input.start_byte > input.end_byte {
+        return Err(IdentityError::Scalar);
+    }
+    let semantic_key_value = serde_json::to_value(SemanticKey {
+        schema_version: 1,
+        file_id: input.file_id,
+        source_digest: input.source_digest,
+        start_byte: input.start_byte,
+        end_byte: input.end_byte,
+        occurrence_family_code: input.occurrence_family_code,
+        normalized_kind_code: input.normalized_kind_code,
+        parent_id: input.parent_id,
+        role_code: input.role_code,
+        ordinal: input.ordinal,
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    let semantic_key =
+        serde_json_canonicalizer::to_vec(&semantic_key_value).map_err(|_| IdentityError::Scalar)?;
+    let record = recipes::entity(recipes::EntityFields {
+        workspace_id: recipes::RecipeValue::Id(input.workspace_id),
+        analysis_context_id: recipes::RecipeValue::Id(SOURCE_CONTEXT_ID),
+        kind_code: recipes::RecipeValue::Unsigned(input.entity_kind_code.to_be_bytes().to_vec()),
+        owner_id: recipes::RecipeValue::Id(input.owner_id),
+        semantic_key: recipes::RecipeValue::Bytes(semantic_key),
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    derive_recipe_identity(record)
+}
+
+/// Provider-independent source relation fields used by AC-G-13 identities.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceRelationIdentityInput {
+    pub workspace_id: [u8; 16],
+    pub owner_id: [u8; 16],
+    pub relation_kind_code: i32,
+    pub source_id: [u8; 16],
+    pub target_id: [u8; 16],
+    pub ordinal: Option<u32>,
+    pub role_code: Option<u16>,
+}
+
+/// Derive one canonical source-context relationship.
+///
+/// # Errors
+///
+/// Returns an error when a negative relation code is supplied or the closed CBEF
+/// relation recipe cannot be encoded.
+pub fn source_relation_identity(
+    input: SourceRelationIdentityInput,
+) -> Result<DerivedIdentity, IdentityError> {
+    #[derive(Serialize)]
+    struct RelationMetadata {
+        schema_version: u8,
+        owner_id: [u8; 16],
+        ordinal: Option<u32>,
+        role_code: Option<u16>,
+    }
+    let relation_kind_code =
+        u16::try_from(input.relation_kind_code).map_err(|_| IdentityError::Scalar)?;
+    let role_value = serde_json::to_value(RelationMetadata {
+        schema_version: 1,
+        owner_id: input.owner_id,
+        ordinal: input.ordinal,
+        role_code: input.role_code,
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    let role =
+        serde_json_canonicalizer::to_string(&role_value).map_err(|_| IdentityError::Scalar)?;
+    let record = recipes::relation_fact(recipes::RelationFactFields {
+        workspace_id: recipes::RecipeValue::Id(input.workspace_id),
+        analysis_context_id: recipes::RecipeValue::Id(SOURCE_CONTEXT_ID),
+        relation_kind_code: recipes::RecipeValue::Unsigned(
+            relation_kind_code.to_be_bytes().to_vec(),
+        ),
+        subject_entity_id: recipes::RecipeValue::Id(input.source_id),
+        object_entity_id: recipes::RecipeValue::Id(input.target_id),
+        role: recipes::RecipeValue::TaggedUnion(1, Box::new(recipes::RecipeValue::Utf8(role))),
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    derive_recipe_identity(record)
+}
+
+fn derive_recipe_identity(record: recipes::RecipeRecord) -> Result<DerivedIdentity, IdentityError> {
+    let domain = IdentityDomain::from_code(record.domain_code)?;
+    let fields = record
+        .fields
+        .into_iter()
+        .map(|field| {
+            Ok(CbefField {
+                tag: field.tag,
+                value: recipe_value(field.value)?,
+            })
+        })
+        .collect::<Result<Vec<_>, IdentityError>>()?;
+    derive_identity(&CbefRecord { domain, fields })
+}
+
+fn recipe_value(value: recipes::RecipeValue) -> Result<CbefValue, IdentityError> {
+    Ok(match value {
+        recipes::RecipeValue::Absent => CbefValue::Absent,
+        recipes::RecipeValue::Bytes(value) => CbefValue::Bytes(value),
+        recipes::RecipeValue::Utf8(value) => CbefValue::Utf8 {
+            value,
+            normalization: StringNormalization::None,
+        },
+        recipes::RecipeValue::RawPath(platform_code, bytes) => CbefValue::RawPath {
+            platform_code,
+            bytes,
+        },
+        recipes::RecipeValue::Unsigned(value) => CbefValue::Unsigned(value),
+        recipes::RecipeValue::Signed(value) => CbefValue::Signed(value),
+        recipes::RecipeValue::Boolean(value) => CbefValue::Boolean(value),
+        recipes::RecipeValue::Id(value) => CbefValue::Id(value),
+        recipes::RecipeValue::Digest(value) => CbefValue::Digest(value),
+        recipes::RecipeValue::OrderedList(values) => CbefValue::OrderedList(
+            values
+                .into_iter()
+                .map(recipe_value)
+                .collect::<Result<_, _>>()?,
+        ),
+        recipes::RecipeValue::Set(values) => CbefValue::Set(
+            values
+                .into_iter()
+                .map(recipe_value)
+                .collect::<Result<_, _>>()?,
+        ),
+        recipes::RecipeValue::Map(values) => CbefValue::Map(
+            values
+                .into_iter()
+                .map(|(key, value)| Ok((recipe_value(key)?, recipe_value(value)?)))
+                .collect::<Result<_, IdentityError>>()?,
+        ),
+        recipes::RecipeValue::TaggedUnion(variant, value) => CbefValue::TaggedUnion {
+            variant,
+            value: Box::new(recipe_value(*value)?),
+        },
     })
 }
 

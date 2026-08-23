@@ -424,38 +424,6 @@ impl SourceFence {
     }
 }
 
-/// Temporary, reviewed consumer overlay. It is never a routine output or authority.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TransitionConsumerPatch {
-    pub schema_version: u64,
-    pub family_owner: StableId,
-    pub target_path: SafeOutputPath,
-    pub expected_baseline_bytes: Vec<u8>,
-    pub expected_baseline_source_digest: String,
-    pub reviewed_replacement_bytes: Vec<u8>,
-    pub compatibility_intent: String,
-}
-
-impl TransitionConsumerPatch {
-    /// Validate baseline identity and the temporary-root boundary.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for unsupported schema, empty intent, mismatched identity, or a target
-    /// inside an authority/evidence/acceptance root.
-    pub fn validate(&self) -> Result<(), DesiredTreeError> {
-        if self.schema_version != 1
-            || self.compatibility_intent.trim().is_empty()
-            || digest_bytes(&self.expected_baseline_bytes) != self.expected_baseline_source_digest
-        {
-            return Err(DesiredTreeError::InvalidTransitionPatch);
-        }
-        SafeOutputPath::parse(self.target_path.0.clone())?;
-        Ok(())
-    }
-}
-
 /// Cache payload shape introduced for key/byte semantics only. Pass verdicts are deliberately not
 /// representable.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1054,8 +1022,6 @@ pub enum DesiredTreeError {
     SourceFenceChanged(String),
     #[error("shadow plan is not zero at {path}: {kind:?}")]
     NonZeroShadowPlan { path: String, kind: ChangeKind },
-    #[error("transition consumer patch is invalid")]
-    InvalidTransitionPatch,
     #[error("action references missing upstream output: {0}")]
     MissingUpstreamOutput(StableId),
 }
@@ -1311,32 +1277,6 @@ mod tests {
         assert_eq!(object.keys().collect::<Vec<_>>(), ["action_key", "outputs"]);
         assert!(!value.to_string().contains("verdict"));
         assert!(!value.to_string().contains("pass"));
-    }
-
-    #[test]
-    fn model_transition_consumer_patch_is_closed_and_identity_fenced() {
-        let bytes = b"fn baseline() {}\n".to_vec();
-        let mut patch = TransitionConsumerPatch {
-            schema_version: 1,
-            family_owner: id("family:registry-cbef"),
-            target_path: SafeOutputPath::parse(b"src/identity.rs".to_vec()).unwrap(),
-            expected_baseline_source_digest: digest_bytes(&bytes),
-            expected_baseline_bytes: bytes,
-            reviewed_replacement_bytes: b"fn generated() {}\n".to_vec(),
-            compatibility_intent: "replace positional construction".to_owned(),
-        };
-        assert!(patch.validate().is_ok());
-        patch.expected_baseline_bytes.push(b'x');
-        assert!(matches!(
-            patch.validate(),
-            Err(DesiredTreeError::InvalidTransitionPatch)
-        ));
-        let mut value = serde_json::to_value(&patch).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .insert("unknown".to_owned(), serde_json::json!(true));
-        assert!(serde_json::from_value::<TransitionConsumerPatch>(value).is_err());
     }
 
     #[test]

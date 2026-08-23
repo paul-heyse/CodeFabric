@@ -1,0 +1,250 @@
+{
+  "fixtures": [
+    {
+      "class": "normative-kat",
+      "path": "contracts/fixtures/identity/cbef-v1-vectors.json",
+      "source_digest": "b3:923b33877fb2a979893146c98397770318e53459368e50bb0e23a8d6d3385037"
+    },
+    {
+      "class": "normative-kat",
+      "path": "contracts/fixtures/identity/path-canonicalization-v1-vectors.json",
+      "source_digest": "b3:ff1789483d78b1a10026ad6113ecad6ba9769d1a4beede38a9f652fda18d79b8"
+    },
+    {
+      "class": "normative-kat",
+      "path": "contracts/fixtures/identity/type-algebra-v1-vectors.json",
+      "source_digest": "b3:0715d29f41a81370644100166b98cdff180765788b9d338e754907b42a5afdb8"
+    },
+    {
+      "class": "differential",
+      "path": "contracts/fixtures/jcs/differential-cases.json",
+      "source_digest": "b3:1d21584c10652405271d20bcc6671e86da27bfacc3e969e0a76faa2d73b68467"
+    },
+    {
+      "class": "normative-kat",
+      "path": "contracts/fixtures/jcs/vectors.json",
+      "source_digest": "b3:b2da5982e450cfc1e06ccaa097e9083a89012247220ea92a3a2209f541783396"
+    },
+    {
+      "class": "property",
+      "path": "contracts/fixtures/model-packs/invalid-executable-field.json",
+      "source_digest": "b3:3030fd722996d428570f3a0907a435ae964ae96203481cbb71b5f71b37464daf"
+    },
+    {
+      "class": "property",
+      "path": "contracts/fixtures/model-packs/valid-minimal.json",
+      "source_digest": "b3:05eb5b6939383d175d40bf2891c1c5a1f6690200a34758303a22a6a7eabebbb0"
+    },
+    {
+      "class": "negative-class",
+      "path": "contracts/fixtures/negative/broken-trace-edge.json",
+      "source_digest": "b3:fba8cea4d78deb7d86a50e639615df84da4e18af1f975623943f12d382d923a7"
+    },
+    {
+      "class": "negative-class",
+      "path": "contracts/fixtures/negative/drifted-digest.json",
+      "source_digest": "b3:f0e29de6f6fd197280c9ff4ec77c0d18f3eb09711a82478ee54c33c9554ec3b3"
+    },
+    {
+      "class": "negative-class",
+      "path": "contracts/fixtures/negative/perturbed-artifact.json",
+      "source_digest": "b3:06347930cf36a289b851ca02e3d86fc1ffdd82d968f3196e5e5a1a50462ed8ef"
+    },
+    {
+      "class": "negative-class",
+      "path": "contracts/fixtures/negative/schema-version-drift.json",
+      "source_digest": "b3:a57c7678b9a7c38b4271c27f4b7d68718f581ef982c8201c54f5de5e0cd1cad5"
+    },
+    {
+      "class": "normative-kat",
+      "path": "contracts/fixtures/projections/vectors.json",
+      "source_digest": "b3:c4a7dfd8e4e24522dd4c5b44f046bcbfa754ff8550741650e2198aa71a295329"
+    },
+    {
+      "class": "normative-kat",
+      "path": "contracts/fixtures/proto/production_wire.json",
+      "source_digest": "b3:689e7d7db3c3607de93d2eb06e424ffab45cfacad9e1d6ae721c794a21d0d101"
+    },
+    {
+      "class": "normative-kat",
+      "path": "contracts/fixtures/registries/enum-flag-v1-vectors.json",
+      "source_digest": "b3:f0d3fe83fdd54674ff9b431b74f4ab65fea076388da6279ed15fcff2b623fc48"
+    },
+    {
+      "class": "property",
+      "path": "contracts/fixtures/ruff/adapter-cases-v1.json",
+      "source_digest": "b3:cf1b0bca98c78d9017db3a6f933704514a13cb16dfbf83d3c5ee46c5d69a7616"
+    },
+    {
+      "class": "property",
+      "path": "contracts/fixtures/security/source-capture-race-v1.json",
+      "source_digest": "b3:9cf3fb732c1fdcb6d88005790ffdc484716ab215805c607e3d1e565cba2d092a"
+    },
+    {
+      "class": "property",
+      "path": "contracts/fixtures/synthetic/conflicting-observations-v1.json",
+      "source_digest": "b3:0d511aba8c2749ded8813f907f2a1894401c79ca28df2d48391385331b0d21e0"
+    },
+    {
+      "class": "property",
+      "path": "contracts/fixtures/synthetic/source-syntax-canonicalization-v1.json",
+      "source_digest": "b3:f65b4a08def70597884327e93c113412ca24495b4af81703f583ec40b787a8e4"
+    },
+    {
+      "class": "property",
+      "path": "contracts/fixtures/tree-sitter/adapter-cases-v1.json",
+      "source_digest": "b3:fc9117dcca0d91c8ef72a62c78f6df5021d67461528d6033a3dd9118db479d62"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/authoritative-source-read-boundary-test.yml",
+      "source_digest": "b3:071e05aa3bcb2399a54efaffcd452e4d21cc621e8f320060c80266827cfd7a74"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/delta-handle-factory-only-test.yml",
+      "source_digest": "b3:46eb061e5ffc006dc7fd5277d4ab7a531d44b0731d11193913102318a1a4aaf5"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/deltalake-boundary-only-test.yml",
+      "source_digest": "b3:e63ac707eef2f348ab4b9bc6b3896db30da04c5a5a38bd2609ce6fe2266b6d15"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/gix-boundary-only-test.yml",
+      "source_digest": "b3:c28d2a2c3456168c0efe64a3a4004fb9426489226b71e47a70f7760ffc85de04"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/gix-read-only-test.yml",
+      "source_digest": "b3:c39f73428b418b1395579fa13aedf1b7d315435ee12f22331d7244bfc05ed2ca"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/model-no-direct-authority-write-test.yml",
+      "source_digest": "b3:ed84cfaf41d6c94c07e23ffdd1075d3e130ca9c6478375eb62d7707a3338825c"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/model-no-positional-cbef-construction-test.yml",
+      "source_digest": "b3:c7b56087c9438e604b233693b6a0d130f3a0c8f4dcf40d15206b323603a2c04c"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/model-no-raw-governed-code-or-flag-test.yml",
+      "source_digest": "b3:da826de6fd28fa2b00a44c940e4893017ac67de271a29cec9e09a9d2c2dac938"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/no-framework-internal-contract-imports-test.yml",
+      "source_digest": "b3:86358b7a9a7c85a7fb3b309109bda7ede604bbea4e802c708bf0671dad2856a1"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/no-pyrefly-public-api-test.yml",
+      "source_digest": "b3:99a27c2055c53a8470a3f015e6ced927a6547f64e8aae13c92de4a0698c4a85a"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/provider-observation-boundary-only-test.yml",
+      "source_digest": "b3:32a0cf3d643437d4493cecce2923bf6f1000b2203432c1ac25c98a62ee7c8ca4"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ruff-boundary-only-test.yml",
+      "source_digest": "b3:4ff0bb4ed966ab000c7cbf62bf576c1a4140e0b360e457cf64523f9c8e638c18"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/serving-leased-providers-only-test.yml",
+      "source_digest": "b3:5679831515bbd4d11c0253a5f86c405841b97ccb3fa0e1b4299c67827fcb8f3b"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/serving-projections-generated-only-test.yml",
+      "source_digest": "b3:2b3b9b03583a04e26bab69f09745e214fe40c10d0a5af4262b2d5d7d48858944"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/tree-sitter-boundary-only-test.yml",
+      "source_digest": "b3:e8a5e31405a52a99710a22bc10f5c79de36d2a05d4478c249dc2db8a6daf5b38"
+    },
+    {
+      "class": "property",
+      "path": "rules/authoritative-source-read-boundary.yml",
+      "source_digest": "b3:63c9eb7b74b869b75906c5b5420a312420f3f2266fe2f4b93fc15da0d41a56d2"
+    },
+    {
+      "class": "property",
+      "path": "rules/delta-handle-factory-only.yml",
+      "source_digest": "b3:28046094981f363206c7e9cb9ebef7ad7d612252de335193c2416455ea6e3b10"
+    },
+    {
+      "class": "property",
+      "path": "rules/deltalake-boundary-only.yml",
+      "source_digest": "b3:492ef7d10624cc52c7a9b65a72406fc9f619e223c180d0752399598f43ab745b"
+    },
+    {
+      "class": "property",
+      "path": "rules/gix-boundary-only.yml",
+      "source_digest": "b3:baecf96e40dc27d1159a8bb32c990e10be81a7f8211d033e90f14f8cbe1ab231"
+    },
+    {
+      "class": "property",
+      "path": "rules/gix-read-only.yml",
+      "source_digest": "b3:eee38859243302460f9a6edce0bbebdce96f81d0c0a6f19b3ed9a92c1d6b35fe"
+    },
+    {
+      "class": "property",
+      "path": "rules/model-no-direct-authority-write.yml",
+      "source_digest": "b3:af558b633405e856d37fd29832ecafca6c9320b289ad64421f1c6b1ab9580688"
+    },
+    {
+      "class": "property",
+      "path": "rules/model-no-positional-cbef-construction.yml",
+      "source_digest": "b3:4d493878e8692a4af212a74d6d18ea155f639394264d1dc1ed68eabeb2bbe474"
+    },
+    {
+      "class": "property",
+      "path": "rules/model-no-raw-governed-code-or-flag.yml",
+      "source_digest": "b3:17d11cbf434f2879a3f37940895efc7f14132f013759bcc46198c28d86b84b30"
+    },
+    {
+      "class": "property",
+      "path": "rules/no-framework-internal-contract-imports.yml",
+      "source_digest": "b3:97be8746d75b559c8c8e4c236999e8f8fd0d2d5baa7bae99eb38220fd97d7047"
+    },
+    {
+      "class": "property",
+      "path": "rules/no-pyrefly-public-api.yml",
+      "source_digest": "b3:19a470ba17069ed1b0599774a3ae9be1c128c16d219970701ffc33c85e4d2d9d"
+    },
+    {
+      "class": "property",
+      "path": "rules/provider-observation-boundary-only.yml",
+      "source_digest": "b3:a29a77c39c364f189e45eee1ea839ebe30b472ca0e35c1b15be8f5371dda2d7a"
+    },
+    {
+      "class": "property",
+      "path": "rules/ruff-boundary-only.yml",
+      "source_digest": "b3:49e835c0efc37fe842022adf535ddf5e435187ccbb3174d73f5ff977b56386cf"
+    },
+    {
+      "class": "property",
+      "path": "rules/serving-leased-providers-only.yml",
+      "source_digest": "b3:e56eae7f598557a98f740c51fca8eb394f2aa3685927d5378ab562bcf459ac99"
+    },
+    {
+      "class": "property",
+      "path": "rules/serving-projections-generated-only.yml",
+      "source_digest": "b3:52bac7201b9c2837a35b20385b78c7b825e9a84ccea682cfa0d6b7e056d9187f"
+    },
+    {
+      "class": "property",
+      "path": "rules/tree-sitter-boundary-only.yml",
+      "source_digest": "b3:75ccc99b4ba9afcc8761e8d9e2b6606430c500a9d66d8287650047a61d561d47"
+    }
+  ],
+  "schema_version": 1
+}

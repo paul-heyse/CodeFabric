@@ -4,8 +4,8 @@ severity: error
 message: Model drivers and promoted consumers may write only through the staged DesiredTree capability.
 note: Authorities, KATs, fixtures, and owner acceptances are never routine driver outputs.
 files:
-  - tooling/model-transition/consumer-overlays/**/*.rs
-  - tooling/model-transition/live/**/*.rs
+  - src/bin/codefabric_model/**/*.rs
+  - src/source_syntax.rs
 rule:
   any:
     - all:

@@ -13,7 +13,7 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, rustfmt_source,
 };
 use super::model_control::StableId;
 use super::repository_model::read_stable;
@@ -504,7 +504,10 @@ impl SchemaDriver {
         let mut outputs = vec![
             (safe(TABLE_MANIFEST_PATH)?, render_table_manifest(plan)?),
             (safe(DDL_PATH)?, render_ddl(plan)),
-            (safe(RUST_BINDINGS_PATH)?, render_rust(&plan.ir)),
+            (
+                safe(RUST_BINDINGS_PATH)?,
+                rustfmt_source(&render_rust(&plan.ir))?,
+            ),
             (safe(VALIDATION_PATH)?, render_validation(plan)?),
         ];
         for schema in &plan.ir.public_schemas {
@@ -764,6 +767,17 @@ fn render_public_schema(
         Value::String(format!("https://codefabric.dev/{}", contract.path)),
     );
     body.insert("title".to_owned(), Value::String(contract.title.clone()));
+    body.insert(
+        "x-codefabric-artifact".to_owned(),
+        json!({
+            "artifact_id": contract.artifact_id,
+            "artifact_kind": "json-schema",
+            "version": "1.0",
+            "compatible_suite_major": 1,
+            "status": "released",
+            "generator_revision": "codefabric-model-schema-driver-v1",
+        }),
+    );
     body.insert(
         "x-codefabric-generated".to_owned(),
         json!({

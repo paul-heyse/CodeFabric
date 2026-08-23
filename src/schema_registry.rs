@@ -215,6 +215,7 @@ struct GeneratedColumn {
 }
 
 #[derive(Clone, Copy)]
+#[allow(dead_code)] // Legacy metadata remains only until the model driver projects every role.
 struct GeneratedTableSpec {
     table_code: i16,
     name: &'static str,
@@ -321,6 +322,53 @@ fn field(contract: GeneratedColumn, primary_key: &[&str]) -> Field {
     .with_metadata(metadata)
 }
 
+fn model_logical_type(
+    logical: crate::model_generated::schema_tables::ModelLogicalType,
+) -> LogicalType {
+    use crate::model_generated::schema_tables::ModelLogicalType as Model;
+    match logical {
+        Model::Id16 => LogicalType::Id16,
+        Model::Hash32 => LogicalType::Hash32,
+        Model::Code16 => LogicalType::Code16,
+        Model::Code32 => LogicalType::Code32,
+        Model::Bucket16 => LogicalType::Bucket16,
+        Model::Int16 => LogicalType::Int16,
+        Model::Int32 => LogicalType::Int32,
+        Model::Int64 => LogicalType::Int64,
+        Model::Float64 => LogicalType::Float64,
+        Model::Boolean => LogicalType::Boolean,
+        Model::Utf8 => LogicalType::Utf8,
+        Model::Binary => LogicalType::Binary,
+        Model::TimestampUtc => LogicalType::TimestampUtc,
+        Model::IdList => LogicalType::IdList,
+        Model::Int64List => LogicalType::Int64List,
+        Model::StringMap => LogicalType::StringMap,
+    }
+}
+
+fn model_field(
+    column: crate::model_generated::schema_tables::ModelColumn,
+    primary_key: &[&str],
+    legacy: GeneratedTableSpec,
+) -> Field {
+    let hidden_operational = legacy
+        .columns
+        .iter()
+        .find(|candidate| candidate.name == column.name)
+        .is_some_and(|candidate| candidate.hidden_operational);
+    field(
+        GeneratedColumn {
+            name: column.name,
+            logical_type: model_logical_type(column.logical_type),
+            nullable: column.nullable,
+            semantic_type: column.semantic_type,
+            foreign_key: column.foreign_key,
+            hidden_operational,
+        },
+        primary_key,
+    )
+}
+
 const fn durable_name(value: DurableMutationClass) -> &'static str {
     match value {
         DurableMutationClass::StaticDimension => "STATIC_DIMENSION",
@@ -361,6 +409,10 @@ const fn publication_pin_name(value: PublicationPinRole) -> &'static str {
 }
 
 fn build(contract: GeneratedTableSpec) -> TableSpec {
+    let model = crate::model_generated::schema_tables::MODEL_TABLES
+        .iter()
+        .find(|candidate| candidate.table_code == contract.table_code)
+        .expect("model-generated table is complete for every runtime table");
     let metadata = HashMap::from([
         (
             "com.codefabric.cpg.table_name".to_owned(),
@@ -384,7 +436,7 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         ),
         (
             "com.codefabric.cpg.primary_key".to_owned(),
-            contract.primary_key.join(","),
+            model.primary_key.join(","),
         ),
         (
             "com.codefabric.cpg.partition_columns".to_owned(),
@@ -411,11 +463,11 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
             "suite-major-1".to_owned(),
         ),
     ]);
-    let fields = contract
+    let fields = model
         .columns
         .iter()
         .copied()
-        .map(|column| field(column, contract.primary_key))
+        .map(|column| model_field(column, model.primary_key, contract))
         .collect::<Vec<_>>();
     let arrow_schema = Arc::new(Schema::new_with_metadata(fields, metadata));
     TableSpec {
@@ -426,7 +478,7 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         schema_version: contract.schema_version,
         schema_digest: schema_digest(&arrow_schema),
         arrow_schema,
-        primary_key: contract.primary_key,
+        primary_key: model.primary_key,
         partition_columns: contract.partition_columns,
         zorder_columns: contract.zorder_columns,
         durable_mutation: contract.durable_mutation,

@@ -1,0 +1,152 @@
+{
+  "families": [
+    {
+      "family": "registry-cbef",
+      "outputs": [
+        "src/generated/model_identity_recipes.rs",
+        "src/generated/model_registries.rs",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
+        "contracts/generated/model/registry-cbef.json"
+      ],
+      "resource_profile": {
+        "max_output_bytes": 4194304,
+        "max_outputs": 8,
+        "max_source_bytes": 8388608
+      },
+      "rule_version": "registry-cbef-driver-v1",
+      "tool_identity": {
+        "driver": "native-rust",
+        "rule": "registry-cbef-v1"
+      }
+    },
+    {
+      "family": "schemas",
+      "outputs": [
+        "contracts/generated/model/schema/operational-store.sql",
+        "contracts/generated/model/schema/schema-validation.json",
+        "contracts/generated/model/schema/table-specs.json",
+        "contracts/query/planspec.schema.json",
+        "contracts/schema/analysis-context.schema.json",
+        "contracts/schema/cpg-semantic-query-request.schema.json",
+        "contracts/schema/cpg-semantic-query-response.schema.json",
+        "contracts/schema/public-snapshot-metadata.schema.json",
+        "contracts/schema/public-status.schema.json",
+        "contracts/schema/serving-snapshot.schema.json",
+        "contracts/schema/source-context.schema.json",
+        "src/generated/model_schema_tables.rs"
+      ],
+      "resource_profile": {
+        "max_output_bytes": 8388608,
+        "max_outputs": 16,
+        "max_source_bytes": 16777216
+      },
+      "rule_version": "schema-contract-driver-v1",
+      "tool_identity": {
+        "driver": "native-rust",
+        "rule": "schema-contract-v1"
+      }
+    },
+    {
+      "family": "adapter",
+      "outputs": [
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-package-data.json",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-schemas.json",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/fingerprints.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/wire_models.py",
+        "contracts/adapter/fastmcp-input.schema.json",
+        "contracts/adapter/fastmcp-output.schema.json",
+        "contracts/adapter/fastmcp-public-meta.schema.json",
+        "contracts/generated/model/adapter-validation.json"
+      ],
+      "resource_profile": {
+        "max_output_bytes": 8388608,
+        "max_outputs": 16,
+        "max_source_bytes": 16777216
+      },
+      "rule_version": "external-pydantic-fastmcp-v1",
+      "tool_identity": {
+        "fastmcp_version": "3.4.7",
+        "lock_digest": "b3:edecd82d69bbf3f1d2416c727f25d67680136416dd461878838fd6dd8372b3ac",
+        "mcp_version": "1.29.0",
+        "project_digest": "b3:e47b1e7e59dc6fb722143ab4d1171456485acdb9682d9b459f30d57ea2be0112",
+        "pydantic_version": "2.13.4",
+        "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
+        "python_path": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "python_version": "3.14.7",
+        "ruff_digest": "b3:ed298c066aa3bc5cf37ad821e2265f628fb74cfc5504eab4bf62401e344b08e4",
+        "ruff_path": "/Users/paulheyse/CodeFabric/codefabric-cpg-mcp/.venv/bin/ruff",
+        "ruff_version": "ruff 0.16.3",
+        "script_digest": "b3:dd33293432fb49a6875e77d6d857ce0ac918c72b2c1585355058777858940f2f"
+      }
+    },
+    {
+      "family": "proto",
+      "outputs": [
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2_grpc.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.pyi",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2_grpc.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.pyi",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2_grpc.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.py",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.pyi",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2_grpc.py",
+        "src/generated/codefabric.cpgd.v1.rs",
+        "src/generated/codefabric.provider.v1.rs",
+        "src/generated/codefabric.pyrefly.v1.rs",
+        "src/generated/codefabric.rustc.v1.rs",
+        "tooling/proto/descriptor-census.json",
+        "tooling/proto/production-descriptor.pb",
+        "tooling/proto/toolchain-identity.json"
+      ],
+      "resource_profile": {
+        "max_output_bytes": 16777216,
+        "max_outputs": 64,
+        "max_source_bytes": 16777216
+      },
+      "rule_version": "one-fds-grpc-tools-compile-fds-v1",
+      "tool_identity": {
+        "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
+        "descriptor_sha256": "318ab83ef6f6195e67ccd98cf24e48dcf46ab35d1421fd83532c64693bb6e529",
+        "python": {
+          "grpcio": "1.83.0",
+          "grpcio-tools": "1.83.0",
+          "lock_digest": "b3:edecd82d69bbf3f1d2416c727f25d67680136416dd461878838fd6dd8372b3ac",
+          "project_digest": "b3:e47b1e7e59dc6fb722143ab4d1171456485acdb9682d9b459f30d57ea2be0112",
+          "protobuf": "7.36.0",
+          "protoc": "libprotoc 35.1",
+          "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
+          "python_path": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+          "python_version": "3.14.7",
+          "script_digest": "b3:ed7cfafc5648d428bee76e718688ed0633d0f8a947b8d10865b193ca8ea6fd8d"
+        },
+        "rust": {
+          "action_key": "b3:0c73e467928b8a4ea815d252d4e544573d3abdcf1dad18b403a16baa35fa1979",
+          "binary_digest": "b3:959205d5b4024af6c222209bb60f14d666430520cb50fd6fac4d62eba35a6ecf",
+          "binary_path": "/Users/paulheyse/CodeFabric/target/model-tools/proto/0c73e467928b8a4ea815d252d4e544573d3abdcf1dad18b403a16baa35fa1979/debug/codefabric-proto-gen",
+          "cargo_lock_digest": "b3:85ff00324247382b5b5bbc769217b79dec16b3a91c5b9ff78bdee274a681cc06",
+          "cargo_manifest_digest": "b3:4fee444d692f11c0554b3f65c900a0ab4b55f450c975ecfc85101567af8f6622",
+          "descriptor_api": "tonic_prost_build::Builder::compile_fds",
+          "features": [
+            "proto-tooling"
+          ],
+          "profile": "debug",
+          "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+          "target_triple": "aarch64-apple-darwin"
+        },
+        "schema": 4,
+        "sources": {
+          "contracts/rpc/cpg_query_service.proto": "b3:eba80a4b95280db5d635d2a3a6d8bbd45f9ee2841ce67b1a9cc49867543fa83b",
+          "contracts/rpc/provider_control.proto": "b3:88e322e42cc6475bfa810a4a3b4479a1620bef22e3156b3b82469abc4fd36e38",
+          "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
+          "contracts/rpc/rustc_extractor.proto": "b3:2d3a327183e2d56b83078fb77ed0b810e6bc0382b7e856e0e0028ee713114d4e"
+        }
+      }
+    }
+  ],
+  "schema_version": 1
+}

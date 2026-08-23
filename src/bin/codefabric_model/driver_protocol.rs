@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -339,6 +341,53 @@ pub trait ModelDriver {
     ) -> Result<Vec<SafeOutputPath>, DriverProtocolError>;
 }
 
+/// Format generated Rust with the repository toolchain before it enters DesiredTree.
+///
+/// # Errors
+///
+/// Returns a protocol error when rustfmt cannot be started, rejects the source, or emits no
+/// successful output. The caller's action identity already binds the exact Rust toolchain.
+pub fn rustfmt_source(bytes: &[u8]) -> Result<Vec<u8>, DriverProtocolError> {
+    let mut child = Command::new("rustfmt")
+        .args(["--emit", "stdout", "--edition", "2024"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| DriverProtocolError::ExternalTool {
+            tool: "rustfmt",
+            detail: source.to_string(),
+        })?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| DriverProtocolError::ExternalTool {
+            tool: "rustfmt",
+            detail: "stdin is unavailable".to_owned(),
+        })?
+        .write_all(bytes)
+        .map_err(|source| DriverProtocolError::ExternalTool {
+            tool: "rustfmt",
+            detail: source.to_string(),
+        })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|source| DriverProtocolError::ExternalTool {
+            tool: "rustfmt",
+            detail: source.to_string(),
+        })?;
+    if !output.status.success() {
+        return Err(DriverProtocolError::ExternalTool {
+            tool: "rustfmt",
+            detail: String::from_utf8_lossy(&output.stderr)
+                .chars()
+                .take(512)
+                .collect(),
+        });
+    }
+    Ok(output.stdout)
+}
+
 fn source_path(path: &SafeOutputPath) -> Result<PathBuf, DriverProtocolError> {
     let path = PathBuf::from(std::ffi::OsString::from(
         String::from_utf8(path.as_bytes().to_vec())
@@ -393,6 +442,8 @@ pub enum DriverProtocolError {
     SourceChanged(String),
     #[error("driver authority is invalid: {0}")]
     InvalidAuthority(String),
+    #[error("driver external tool {tool} failed: {detail}")]
+    ExternalTool { tool: &'static str, detail: String },
     #[error("driver I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,

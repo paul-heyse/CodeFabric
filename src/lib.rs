@@ -18,6 +18,10 @@ pub mod daemon;
 pub mod identity;
 #[cfg(feature = "daemon")]
 pub mod inventory;
+/// Model-generated exhaustive bindings. The generated aggregator owns its member list.
+#[cfg(any(feature = "canonical-json", feature = "fact-generation"))]
+#[path = "generated/model.rs"]
+pub(crate) mod model_generated;
 #[cfg(feature = "data-fabric")]
 pub mod operational_store;
 #[cfg(feature = "fact-generation")]
@@ -49,6 +53,8 @@ pub mod snapshot;
 pub mod snapshot_runtime;
 #[cfg(feature = "daemon")]
 pub mod source_image;
+#[cfg(feature = "daemon")]
+pub mod source_syntax;
 #[cfg(feature = "data-fabric")]
 pub mod workspace_registry;
 

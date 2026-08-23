@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -15,6 +14,7 @@ use super::desired_tree::{
     DesiredTree, DesiredTreeEntry, PlannedConsumer, PlannedOutput, PlannedOutputProjection,
     PlannedOutputRole, PlannedValidator, SafeOutputPath,
 };
+use super::driver_protocol::rustfmt_source;
 use super::model_control::StableId;
 use super::proto_driver;
 use super::registry_cbef_driver;
@@ -26,7 +26,6 @@ use super::repository_model::{
 use super::schema_driver;
 
 const CENSUS_PATH: &str = "contracts/acceptance/released-artifact-census-v1.json";
-const PATCH_PATH: &str = "tooling/model-transition/consumer-overlays/registry-cbef-wp32.json";
 const ADAPTER_VALIDATION_PATH: &str = "contracts/generated/model/adapter-validation.json";
 const LEGACY_INDEX_PATH: &str =
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/artifact-index.json";
@@ -141,7 +140,6 @@ pub struct AggregateReport {
     pub requirement_count: usize,
     pub bundle_count: usize,
     pub fixture_count: usize,
-    pub transition_target_count: usize,
     pub tree_digest: String,
     pub rendered_outputs: Vec<String>,
     pub stage_root: String,
@@ -352,17 +350,18 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
     let bundles = bundles(&artifacts)?;
     validate_bundles(&bundles)?;
     let fixtures = fixture_index(&before_model);
-    let transition = validate_transition_patch(repository_root)?;
     let package_data = package_data(&tree);
     let aggregators = module_aggregators(&tree);
+    let rust_aggregator = rustfmt_source(&rust_module_aggregator(&tree))?;
     let shadow_parity = legacy_shadow_parity(repository_root, &artifacts)?;
 
     let manifest = json!({
         "artifact_id": "codefabric.generated.model-suite-manifest",
         "artifact_kind": "model-suite-manifest",
+        "version": "1.0",
         "schema_version": 1,
         "compatible_suite_major": 1,
-        "status": "derived",
+        "status": "draft",
         "release_census": {
             "owner_acceptance": census.owner_acceptance,
             "released_artifact_count": census.released_artifacts.len(),
@@ -409,10 +408,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
             "contracts/generated/model/governance/module-aggregators.json",
             pretty_json(&aggregators)?,
         ),
-        (
-            "contracts/generated/model/governance/transition-patches.json",
-            pretty_json(&transition)?,
-        ),
+        ("src/generated/model.rs", rust_aggregator),
         (
             "contracts/generated/model/governance/toolchain-identity.json",
             pretty_json(&json!({"schema_version": 1, "families": families}))?,
@@ -425,14 +421,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
     for (path, bytes) in governance {
         tree.insert(path, "action:governance", bytes, false)?;
     }
-    let validation = aggregate_validation(
-        &tree,
-        &artifacts,
-        &requirements,
-        &bundles,
-        &fixtures,
-        &transition,
-    )?;
+    let validation = aggregate_validation(&tree, &artifacts, &requirements, &bundles, &fixtures)?;
     tree.insert(
         "contracts/generated/model/governance/validation.json",
         "action:governance",
@@ -477,7 +466,6 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         requirement_count: requirements.len(),
         bundle_count: bundles.len(),
         fixture_count: fixtures.len(),
-        transition_target_count: transition["targets"].as_array().map_or(0, Vec::len),
         tree_digest,
         rendered_outputs,
         stage_root: stage_root.to_string_lossy().into_owned(),
@@ -509,6 +497,9 @@ fn model_artifacts(
             continue;
         };
         let id = header.artifact_id.as_str();
+        if claim.role == ArtifactRole::Derived && !released.contains(id) {
+            continue;
+        }
         if released.contains(id) {
             found.insert(id);
         }
@@ -1159,78 +1150,6 @@ fn fixture_index(model: &RepositoryModel) -> Vec<Value> {
         .collect()
 }
 
-fn validate_transition_patch(root: &Path) -> Result<Value, AggregateError> {
-    let document: Value = serde_json::from_slice(&read_stable(&root.join(PATCH_PATH), MAX_BYTES)?)?;
-    validate_transition_patch_value(root, &document)
-}
-
-fn validate_transition_patch_value(root: &Path, document: &Value) -> Result<Value, AggregateError> {
-    let baseline = document["planning_baseline_commit"]
-        .as_str()
-        .ok_or(AggregateError::TransitionPatch)?;
-    let targets = document["targets"]
-        .as_array()
-        .ok_or(AggregateError::TransitionPatch)?;
-    let mut paths = BTreeSet::new();
-    let mut report = Vec::new();
-    for target in targets {
-        let path = target["target_path"]
-            .as_str()
-            .ok_or(AggregateError::TransitionPatch)?;
-        if !paths.insert(path) || path.starts_with("contracts/") || path.starts_with("docs/") {
-            return Err(AggregateError::TransitionPatch);
-        }
-        let baseline_kind = target["baseline"]["kind"]
-            .as_str()
-            .ok_or(AggregateError::TransitionPatch)?;
-        let baseline_bytes = git_blob(root, baseline, path)?;
-        match baseline_kind {
-            "present" => {
-                let expected = target["baseline"]["source_digest"]
-                    .as_str()
-                    .ok_or(AggregateError::TransitionPatch)?;
-                if baseline_bytes.as_deref().map(digest_bytes).as_deref() != Some(expected) {
-                    return Err(AggregateError::TransitionPatch);
-                }
-            }
-            "absent" if baseline_bytes.is_none() => {}
-            _ => return Err(AggregateError::TransitionPatch),
-        }
-        report.push(json!({
-            "target_path": path,
-            "baseline_kind": baseline_kind,
-            "operation_count": target["operations"].as_array().map_or(0, Vec::len),
-        }));
-    }
-    let overlay = document["reviewed_overlay_path"]
-        .as_str()
-        .ok_or(AggregateError::TransitionPatch)?;
-    read_stable(&root.join(overlay), MAX_BYTES)?;
-    Ok(json!({
-        "schema_version": 1,
-        "family_owner": document["family_owner"],
-        "planning_baseline_commit": baseline,
-        "reviewed_overlay_path": overlay,
-        "targets": report,
-    }))
-}
-
-fn git_blob(root: &Path, revision: &str, path: &str) -> Result<Option<Vec<u8>>, AggregateError> {
-    let output = Command::new("git")
-        .args(["show", &format!("{revision}:{path}")])
-        .current_dir(root)
-        .output()
-        .map_err(|source| AggregateError::Io {
-            path: PathBuf::from("git"),
-            source,
-        })?;
-    if output.status.success() {
-        Ok(Some(output.stdout))
-    } else {
-        Ok(None)
-    }
-}
-
 fn package_data(tree: &AggregateTree) -> Value {
     let files = tree
         .desired
@@ -1258,6 +1177,26 @@ fn module_aggregators(tree: &AggregateTree) -> Value {
         .filter(|path| has_extension(path, "py") || has_extension(path, "pyi"))
         .collect::<Vec<_>>();
     json!({"schema_version": 1, "rust": rust, "python": python})
+}
+
+fn rust_module_aggregator(tree: &AggregateTree) -> Vec<u8> {
+    let mut output =
+        String::from("// @generated by codefabric-model; do not edit.\n#![allow(dead_code)]\n\n");
+    for path in tree
+        .desired
+        .entries
+        .keys()
+        .map(SafeOutputPath::display)
+        .filter(|path| path.starts_with("src/generated/model_") && path.ends_with(".rs"))
+    {
+        let file = Path::new(&path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("validated model source path");
+        let module = file.trim_start_matches("model_").trim_end_matches(".rs");
+        output.push_str(&format!("#[path = \"{file}\"]\npub(crate) mod {module};\n"));
+    }
+    output.into_bytes()
 }
 
 fn legacy_shadow_parity(
@@ -1321,7 +1260,6 @@ fn aggregate_validation(
     requirements: &[ModelRequirementRecord],
     bundles: &[ModelBundleRecord],
     fixtures: &[Value],
-    transition: &Value,
 ) -> Result<Value, AggregateError> {
     Ok(json!({
         "schema_version": 1,
@@ -1332,7 +1270,6 @@ fn aggregate_validation(
         "released_requirement_count": requirements.len(),
         "bundle_count": bundles.len(),
         "fixture_count": fixtures.len(),
-        "transition_target_count": transition["targets"].as_array().map_or(0, Vec::len),
         "routine_write_roots": [
             "contracts/generated/model",
             "contracts/schema",
@@ -1347,7 +1284,6 @@ fn aggregate_validation(
             "contracts/acceptance",
             "contracts/fixtures",
             "docs/upfront_design",
-            "tooling/model-transition",
         ],
     }))
 }
@@ -1471,8 +1407,6 @@ pub enum AggregateError {
     RequirementClosure,
     #[error("typed bundle graph is incomplete or unsorted")]
     BundleClosure,
-    #[error("transition patch is stale, overlapping, or undeclared")]
-    TransitionPatch,
     #[error("aggregate source fence changed during rendering")]
     SourceFence,
     #[error("legacy shadow parity has an unaccepted semantic difference")]
@@ -1493,6 +1427,8 @@ pub enum AggregateError {
     Desired(#[from] super::desired_tree::DesiredTreeError),
     #[error(transparent)]
     Model(#[from] super::model_control::ModelError),
+    #[error(transparent)]
+    Driver(#[from] super::driver_protocol::DriverProtocolError),
     #[error(transparent)]
     Release(#[from] super::release_census::ReleaseCensusError),
     #[error(transparent)]
@@ -1563,7 +1499,6 @@ mod tests {
             "docs/upfront_design/design.md",
             "contracts/acceptance/accepted.json",
             "contracts/fixtures/kat.json",
-            "tooling/model-transition/patch.rs",
         ] {
             assert!(tree.insert(path, "action:test", Vec::new(), false).is_err());
         }
@@ -1612,28 +1547,6 @@ mod tests {
     }
 
     #[test]
-    fn model_transition_patch_rejects_stale_base_overlap_and_undeclared_target() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let source = fs::read(root.join(PATCH_PATH)).unwrap();
-        let document: Value = serde_json::from_slice(&source).unwrap();
-        validate_transition_patch_value(root, &document).unwrap();
-
-        let mut stale = document.clone();
-        stale["planning_baseline_commit"] = Value::String("0".repeat(40));
-        assert!(validate_transition_patch_value(root, &stale).is_err());
-
-        let mut overlap = document.clone();
-        let duplicate = overlap["targets"][0].clone();
-        overlap["targets"].as_array_mut().unwrap().push(duplicate);
-        assert!(validate_transition_patch_value(root, &overlap).is_err());
-
-        let mut undeclared = document;
-        undeclared["targets"][0]["target_path"] =
-            Value::String("contracts/authority.json".to_owned());
-        assert!(validate_transition_patch_value(root, &undeclared).is_err());
-    }
-
-    #[test]
     fn model_bundle_projection_matches_typed_ac_g_07_semantics() {
         let artifact = ModelArtifactRecord {
             artifact_id: "codefabric.toolchain.identity".to_owned(),
@@ -1673,6 +1586,18 @@ mod tests {
         let source = include_str!("aggregate_driver.rs");
         assert!(!source.contains(&["BUNDLE", "_MEMBERS"].concat()));
         assert!(!source.contains(&["PUBLIC_SCHEMA", "_ARTIFACTS"].concat()));
+    }
+
+    #[test]
+    fn model_promoted_consumers_and_desired_tree_compile_as_one_dependency_closed_state() {
+        let aggregator = include_str!("../../generated/model.rs");
+        let identity = include_str!("../../identity.rs");
+        let source_syntax = include_str!("../../source_syntax.rs");
+        assert!(aggregator.contains("model_identity_recipes.rs"));
+        assert!(aggregator.contains("model_registries.rs"));
+        assert!(aggregator.contains("model_schema_tables.rs"));
+        assert!(identity.contains("model_generated::identity_recipes"));
+        assert!(source_syntax.contains("model_generated::registries"));
     }
 
     #[test]

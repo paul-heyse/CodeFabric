@@ -205,6 +205,11 @@ model-family-check family="":
 model-repro-check:
     ./scripts/model_repro_check.sh
 
+[doc("Validate worktree-local locking, crash recovery, and exact transactional reconciliation")]
+[group('gate')]
+model-transaction-check:
+    ./scripts/model_transaction_check.sh
+
 [doc("Explain a model artifact ID or repository path")]
 [group('environment')]
 model-explain target:
@@ -625,11 +630,10 @@ profile-build:
 root-fmt-write:
     cargo fmt --all
 
-[confirm("Regenerate committed Rust and Python Protobuf outputs. Continue?")]
-[doc("MUTATES: regenerate committed Protobuf stubs and identity")]
+[doc("LEGACY ALIAS: delegate all generated reconciliation to model-sync")]
 [group('mutating')]
 proto-gen:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py write
+    just model-sync
 
 [confirm("Accept the current production descriptor census as the compatibility baseline. Continue?")]
 [doc("MUTATES: accept a reviewed Protobuf compatibility baseline and regenerate outputs")]
@@ -637,20 +641,21 @@ proto-gen:
 proto-baseline-accept:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/proto/generate.py accept-baseline
 
-[confirm("Regenerate committed contract derivatives from authority sources. Continue?")]
-[doc("MUTATES: regenerate contract indexes, canonical registries, and typed identities")]
+[doc("LEGACY ALIAS: delegate all generated reconciliation to model-sync")]
 [group('mutating')]
 contracts-gen:
-    cargo run --locked --no-default-features --features contracts-tooling,fact-generation --bin codefabric-contracts -- generate
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py write
-    cargo run --locked --no-default-features --features contracts-tooling,fact-generation --bin codefabric-contracts -- generate
+    just model-sync
 
-[confirm("Regenerate committed Pydantic models and schema resources from Contract IR. Continue?")]
-[doc("MUTATES: regenerate adapter models, schemas, and fingerprints")]
+[doc("LEGACY ALIAS: delegate all generated reconciliation to model-sync")]
 [group('mutating')]
 adapter-contracts-gen:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/generate_adapter_models.py write
-    cargo run --locked --no-default-features --features contracts-tooling,fact-generation --bin codefabric-contracts -- generate
+    just model-sync
+
+[confirm("Reconcile every model-owned Derived output transactionally. Continue?")]
+[doc("MUTATES: apply the complete validated model DesiredTree through the sole writer")]
+[group('mutating')]
+model-sync:
+    ./scripts/model_exec.sh sync --confirm .
 
 [doc("MUTATES: emit fixture candidates to an isolated review directory")]
 [group('mutating')]

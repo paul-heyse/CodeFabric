@@ -1,0 +1,23 @@
+{
+  "files": [
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-package-data.json",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-schemas.json",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/fingerprints.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/wire_models.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2_grpc.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.pyi",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2_grpc.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2.pyi",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/pyrefly_sidecar_pb2_grpc.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2.pyi",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2_grpc.py"
+  ],
+  "schema_version": 1
+}

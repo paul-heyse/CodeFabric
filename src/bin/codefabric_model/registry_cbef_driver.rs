@@ -12,7 +12,7 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, rustfmt_source,
 };
 use super::model_control::StableId;
 use super::registry_models as governed;
@@ -26,12 +26,6 @@ const RUST_REGISTRIES_PATH: &str = "src/generated/model_registries.rs";
 const PYTHON_REGISTRIES_PATH: &str =
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py";
 const PROJECTION_PATH: &str = "contracts/generated/model/registry-cbef.json";
-const TRANSITION_PATCH_PATH: &str =
-    "tooling/model-transition/consumer-overlays/registry-cbef-wp32.json";
-const TRANSITION_OVERLAY_PATH: &str =
-    "tooling/model-transition/consumer-overlays/registry-cbef-wp32.rs";
-const TRANSITION_VALIDATION_PATH: &str =
-    "contracts/generated/model/registry-cbef-transition-validation.json";
 const MAX_AUTHORITY_BYTES: usize = 8 * 1024 * 1024;
 
 /// Compile one governed registry through the same closed family-native records used by runtime
@@ -416,8 +410,6 @@ pub struct RegistryCbefPlan {
     cbef: CbefAuthority,
     enums: EnumRegistry,
     flags: FlagRegistry,
-    transition_patch: TransitionPatch,
-    transition_overlay: Vec<u8>,
     source_fence: DriverSourceFence,
 }
 
@@ -547,19 +539,13 @@ impl ModelDriver for RegistryCbefDriver {
             family: StableId::parse("family:registry-cbef".to_owned())
                 .map_err(|_| DriverProtocolError::InvalidDescriptor)?,
             rule_version: "registry-cbef-driver-v1".to_owned(),
-            sources: [
-                CBEF_PATH,
-                ENUM_PATH,
-                FLAG_PATH,
-                TRANSITION_PATCH_PATH,
-                TRANSITION_OVERLAY_PATH,
-            ]
-            .into_iter()
-            .map(|path| {
-                SafeOutputPath::parse(path.as_bytes().to_vec())
-                    .map_err(|_| DriverProtocolError::InvalidDescriptor)
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+            sources: [CBEF_PATH, ENUM_PATH, FLAG_PATH]
+                .into_iter()
+                .map(|path| {
+                    SafeOutputPath::parse(path.as_bytes().to_vec())
+                        .map_err(|_| DriverProtocolError::InvalidDescriptor)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             output_roots: vec![],
             outputs: vec![
                 Self::output(
@@ -582,16 +568,6 @@ impl ModelDriver for RegistryCbefDriver {
                     PROJECTION_PATH,
                     DriverOutputRole::CanonicalProjection,
                 )?,
-                Self::output(
-                    "output:model-registry-cbef-transition-overlay",
-                    TRANSITION_OVERLAY_PATH,
-                    DriverOutputRole::TransitionOverlay,
-                )?,
-                Self::output(
-                    "output:model-registry-cbef-transition-validation",
-                    TRANSITION_VALIDATION_PATH,
-                    DriverOutputRole::CanonicalProjection,
-                )?,
             ],
             resource_profile: DriverResourceProfile {
                 max_source_bytes: MAX_AUTHORITY_BYTES,
@@ -609,25 +585,13 @@ impl ModelDriver for RegistryCbefDriver {
         let cbef = parse_yaml::<CbefAuthority>(repository_root, CBEF_PATH)?;
         let enums = parse_yaml::<EnumRegistry>(repository_root, ENUM_PATH)?;
         let flags = parse_yaml::<FlagRegistry>(repository_root, FLAG_PATH)?;
-        let transition_patch =
-            parse_json::<TransitionPatch>(repository_root, TRANSITION_PATCH_PATH)?;
-        let transition_overlay = read_stable(
-            &repository_root.join(TRANSITION_OVERLAY_PATH),
-            MAX_AUTHORITY_BYTES,
-        )?;
         validate_authorities(&cbef, &enums, &flags)
-            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
-        validate_transition_patch(&transition_patch, &transition_overlay, &enums, &flags)
-            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
-        validate_transition_baselines(repository_root, &transition_patch)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         Ok(RegistryCbefPlan {
             descriptor,
             cbef,
             enums,
             flags,
-            transition_patch,
-            transition_overlay,
             source_fence,
         })
     }
@@ -638,10 +602,13 @@ impl ModelDriver for RegistryCbefDriver {
         staging_root: &StagingRoot,
     ) -> Result<Vec<SafeOutputPath>, DriverProtocolError> {
         let outputs = [
-            (RUST_RECIPES_PATH, render_rust_recipes(&plan.cbef)),
+            (
+                RUST_RECIPES_PATH,
+                rustfmt_source(&render_rust_recipes(&plan.cbef))?,
+            ),
             (
                 RUST_REGISTRIES_PATH,
-                render_rust_registries(&plan.enums, &plan.flags),
+                rustfmt_source(&render_rust_registries(&plan.enums, &plan.flags))?,
             ),
             (
                 PYTHON_REGISTRIES_PATH,
@@ -650,12 +617,6 @@ impl ModelDriver for RegistryCbefDriver {
             (
                 PROJECTION_PATH,
                 render_projection(plan).map_err(|_| DriverProtocolError::InvalidDescriptor)?,
-            ),
-            (TRANSITION_OVERLAY_PATH, plan.transition_overlay.clone()),
-            (
-                TRANSITION_VALIDATION_PATH,
-                render_transition_validation(plan)
-                    .map_err(|_| DriverProtocolError::InvalidDescriptor)?,
             ),
         ];
         let mut rendered = Vec::new();
@@ -735,69 +696,6 @@ struct RegistryCbefProjection {
     flag_domains: Vec<FlagDomain>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TransitionValidation {
-    schema_version: u8,
-    family_owner: String,
-    planning_baseline_commit: String,
-    reviewed_overlay_path: String,
-    identity_recipe: String,
-    entity_field_count: usize,
-    relation_fact_field_count: usize,
-    occurrence_semantic_key: Vec<String>,
-    relation_role: Vec<String>,
-    syntax_detail_fields: Vec<String>,
-    forbidden_legacy_shapes: Vec<String>,
-    preserved_semantics: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TransitionPatch {
-    schema_version: u8,
-    family_owner: String,
-    planning_baseline_commit: String,
-    reviewed_overlay_path: String,
-    targets: Vec<TransitionTarget>,
-    preserved_semantics: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TransitionTarget {
-    target_path: String,
-    baseline: TransitionBaseline,
-    operations: Vec<TransitionOperation>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-enum TransitionBaseline {
-    Present { source_digest: String },
-    Absent,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
-enum TransitionOperation {
-    ReplacePositionalCbef {
-        function: String,
-        recipe: String,
-        semantic_payload: String,
-    },
-    ReplaceGovernedLiteral {
-        symbol: String,
-        registry_domain: String,
-    },
-    AddTypedProjectionField {
-        model: String,
-        field: String,
-        registry_domain: String,
-        nullable: bool,
-    },
-}
-
 fn parse_yaml<T: for<'de> Deserialize<'de>>(
     root: &Path,
     relative: &str,
@@ -805,18 +703,6 @@ fn parse_yaml<T: for<'de> Deserialize<'de>>(
     let path = root.join(relative);
     let bytes = read_stable(&path, MAX_AUTHORITY_BYTES)?;
     serde_yaml_ng::from_slice(&bytes).map_err(|source| DriverProtocolError::Io {
-        path,
-        source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
-    })
-}
-
-fn parse_json<T: for<'de> Deserialize<'de>>(
-    root: &Path,
-    relative: &str,
-) -> Result<T, DriverProtocolError> {
-    let path = root.join(relative);
-    let bytes = read_stable(&path, MAX_AUTHORITY_BYTES)?;
-    serde_json::from_slice(&bytes).map_err(|source| DriverProtocolError::Io {
         path,
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
     })
@@ -1276,195 +1162,6 @@ fn render_projection(plan: &RegistryCbefPlan) -> Result<Vec<u8>, RegistryCbefErr
     Ok(bytes)
 }
 
-fn render_transition_validation(plan: &RegistryCbefPlan) -> Result<Vec<u8>, RegistryCbefError> {
-    let entity = domain(&plan.cbef, "ENTITY")?;
-    let relation = domain(&plan.cbef, "RELATION_FACT")?;
-    let overlay = TransitionValidation {
-        schema_version: 1,
-        family_owner: plan.transition_patch.family_owner.clone(),
-        planning_baseline_commit: plan.transition_patch.planning_baseline_commit.clone(),
-        reviewed_overlay_path: plan.transition_patch.reviewed_overlay_path.clone(),
-        identity_recipe: "CBEF-v1".to_owned(),
-        entity_field_count: entity.fields.len(),
-        relation_fact_field_count: relation.fields.len(),
-        occurrence_semantic_key: vec![
-            "file_id".to_owned(),
-            "source_digest".to_owned(),
-            "start_byte".to_owned(),
-            "end_byte".to_owned(),
-            "occurrence_family_code".to_owned(),
-            "normalized_kind_code".to_owned(),
-            "parent_id".to_owned(),
-            "role_code".to_owned(),
-            "ordinal".to_owned(),
-        ],
-        relation_role: vec!["ordinal".to_owned(), "role_code".to_owned()],
-        syntax_detail_fields: vec![
-            "occurrence_family_code".to_owned(),
-            "reconciliation_step_code".to_owned(),
-            "raw_kind_disposition_code".to_owned(),
-            "provider_node_flags".to_owned(),
-            "error".to_owned(),
-            "missing".to_owned(),
-            "explicitly_parenthesized".to_owned(),
-        ],
-        forbidden_legacy_shapes: vec![
-            "ENTITY:12-fields".to_owned(),
-            "RELATION_FACT:8-fields".to_owned(),
-            "provider_node_flags:raw-integer".to_owned(),
-        ],
-        preserved_semantics: plan.transition_patch.preserved_semantics.clone(),
-    };
-    let value = serde_json::to_value(overlay).map_err(RegistryCbefError::Json)?;
-    let mut bytes = serde_json_canonicalizer::to_vec(&value).map_err(RegistryCbefError::Json)?;
-    bytes.push(b'\n');
-    Ok(bytes)
-}
-
-#[allow(clippy::too_many_lines)] // The transition is intentionally one closed semantic checklist.
-fn validate_transition_patch(
-    patch: &TransitionPatch,
-    overlay: &[u8],
-    enums: &EnumRegistry,
-    flags: &FlagRegistry,
-) -> Result<(), RegistryCbefError> {
-    if patch.schema_version != 1
-        || patch.family_owner != "family:registry-cbef"
-        || patch.planning_baseline_commit.len() != 40
-        || !patch
-            .planning_baseline_commit
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit())
-        || patch.reviewed_overlay_path != TRANSITION_OVERLAY_PATH
-        || patch.targets.len() != 2
-        || patch.preserved_semantics.is_empty()
-    {
-        return Err(RegistryCbefError::TransitionMismatch);
-    }
-    let targets: BTreeMap<_, _> = patch
-        .targets
-        .iter()
-        .map(|target| (target.target_path.as_str(), target))
-        .collect();
-    if targets.len() != 2
-        || !matches!(
-            targets.get("src/identity.rs").map(|target| &target.baseline),
-            Some(TransitionBaseline::Present { source_digest })
-                if source_digest.starts_with("b3:") && source_digest.len() == 67
-        )
-        || !matches!(
-            targets
-                .get("src/source_syntax.rs")
-                .map(|target| &target.baseline),
-            Some(TransitionBaseline::Absent)
-        )
-    {
-        return Err(RegistryCbefError::TransitionMismatch);
-    }
-    let operations = patch
-        .targets
-        .iter()
-        .flat_map(|target| target.operations.iter())
-        .collect::<Vec<_>>();
-    for recipe in ["ENTITY", "RELATION_FACT"] {
-        if !operations.iter().any(|operation| {
-            matches!(operation, TransitionOperation::ReplacePositionalCbef { recipe: observed, .. } if observed == recipe)
-        }) {
-            return Err(RegistryCbefError::TransitionMismatch);
-        }
-    }
-    for registry_domain in [
-        "OCCURRENCE_FAMILY",
-        "PROVIDER_NODE_FLAGS",
-        "RANGE_RECONCILIATION_STEP",
-        "RAW_KIND_DISPOSITION",
-    ] {
-        if !operations.iter().any(|operation| match operation {
-            TransitionOperation::ReplaceGovernedLiteral {
-                registry_domain: observed,
-                ..
-            }
-            | TransitionOperation::AddTypedProjectionField {
-                registry_domain: observed,
-                ..
-            } => observed == registry_domain,
-            TransitionOperation::ReplacePositionalCbef { .. } => false,
-        }) {
-            return Err(RegistryCbefError::TransitionMismatch);
-        }
-    }
-    let overlay =
-        std::str::from_utf8(overlay).map_err(|_| RegistryCbefError::TransitionMismatch)?;
-    for required in [
-        "entity(EntityFields",
-        "relation_fact(RelationFactFields",
-        "OccurrenceFamily::Syntax",
-        "ProviderNodeFlags::empty()",
-        "RangeReconciliationStep::SmallestEnclosingCompatible",
-        "RawKindDisposition::Normalize",
-    ] {
-        if !overlay.contains(required) {
-            return Err(RegistryCbefError::TransitionMismatch);
-        }
-    }
-    for forbidden in [
-        "const OCCURRENCE_",
-        "occurrence_family_code: 30",
-        "provider_node_flags: 1",
-        "CbefRecord {",
-    ] {
-        if overlay.contains(forbidden) {
-            return Err(RegistryCbefError::TransitionMismatch);
-        }
-    }
-    let enum_domains: BTreeSet<_> = enums
-        .records
-        .iter()
-        .map(|domain| domain.domain.as_str())
-        .collect();
-    let flag_domains: BTreeSet<_> = flags
-        .records
-        .iter()
-        .map(|domain| domain.domain.as_str())
-        .collect();
-    if ![
-        "OCCURRENCE_FAMILY",
-        "RANGE_RECONCILIATION_STEP",
-        "RAW_KIND_DISPOSITION",
-    ]
-    .into_iter()
-    .all(|domain| enum_domains.contains(domain))
-        || !flag_domains.contains("PROVIDER_NODE_FLAGS")
-    {
-        return Err(RegistryCbefError::TransitionMismatch);
-    }
-    Ok(())
-}
-
-fn validate_transition_baselines(
-    repository_root: &Path,
-    patch: &TransitionPatch,
-) -> Result<(), RegistryCbefError> {
-    for target in &patch.targets {
-        let observed = super::model_git_state::blob_at_revision(
-            repository_root,
-            &patch.planning_baseline_commit,
-            Path::new(&target.target_path),
-        )?;
-        match (&target.baseline, observed) {
-            (TransitionBaseline::Absent, None) => {}
-            (TransitionBaseline::Present { source_digest }, Some(bytes))
-                if *source_digest == digest_bytes(&bytes) => {}
-            _ => return Err(RegistryCbefError::TransitionMismatch),
-        }
-    }
-    Ok(())
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
-}
-
 fn render_rust_recipes(authority: &CbefAuthority) -> Vec<u8> {
     let mut output = String::from(
         "// @generated by codefabric-model; do not edit.\n\
@@ -1544,24 +1241,47 @@ fn render_rust_registries(enums: &EnumRegistry, flags: &FlagRegistry) -> Vec<u8>
         for value in &domain.values {
             let bit = 1_u64 << value.bit;
             mask |= bit;
-            writeln!(output, "    pub const {}: Self = Self({bit});", value.name).unwrap();
+            writeln!(
+                output,
+                "    pub const {}: Self = Self({});",
+                value.name,
+                rust_u64_literal(bit)
+            )
+            .unwrap();
         }
-        writeln!(output, "    pub const fn from_bits(bits: u64) -> Option<Self> {{ if bits & !{mask} == 0 {{ Some(Self(bits)) }} else {{ None }} }}").unwrap();
+        if mask == 0 {
+            output.push_str(
+                "    pub const fn from_bits(bits: u64) -> Option<Self> { if bits == 0 { Some(Self(bits)) } else { None } }\n",
+            );
+        } else {
+            writeln!(output, "    pub const fn from_bits(bits: u64) -> Option<Self> {{ if bits & !{} == 0 {{ Some(Self(bits)) }} else {{ None }} }}", rust_u64_literal(mask)).unwrap();
+        }
         output.push_str("    pub const fn bits(self) -> u64 { self.0 }\n}\n\n");
     }
     output.into_bytes()
 }
 
+fn rust_u64_literal(value: u64) -> String {
+    let hex = format!("{value:016x}");
+    format!(
+        "0x{}_{}_{}_{}",
+        &hex[0..4],
+        &hex[4..8],
+        &hex[8..12],
+        &hex[12..16]
+    )
+}
+
 fn render_python_registries(enums: &EnumRegistry, flags: &FlagRegistry) -> Vec<u8> {
     let mut output = String::from(
-        "# @generated by codefabric-model; do not edit.\nfrom enum import IntEnum, IntFlag\n\n",
+        "# @generated by codefabric-model; do not edit.\nfrom enum import IntEnum, IntFlag\n\n\n",
     );
     for domain in &enums.records {
         writeln!(output, "class {}(IntEnum):", pascal(&domain.domain)).unwrap();
         for value in &domain.values {
             writeln!(output, "    {} = {}", value.name, value.code).unwrap();
         }
-        output.push('\n');
+        output.push_str("\n\n");
     }
     for domain in &flags.records {
         writeln!(output, "class {}(IntFlag):", pascal(&domain.domain)).unwrap();
@@ -1569,7 +1289,10 @@ fn render_python_registries(enums: &EnumRegistry, flags: &FlagRegistry) -> Vec<u
         for value in &domain.values {
             writeln!(output, "    {} = {}", value.name, 1_u64 << value.bit).unwrap();
         }
-        output.push('\n');
+        output.push_str("\n\n");
+    }
+    while output.ends_with("\n\n") {
+        output.pop();
     }
     output.into_bytes()
 }
@@ -1618,17 +1341,6 @@ fn validate_transition_semantics(
         return Err(RegistryCbefError::TransitionMismatch);
     }
     Ok(())
-}
-
-fn domain<'a>(
-    authority: &'a CbefAuthority,
-    name: &str,
-) -> Result<&'a CbefDomainSpec, RegistryCbefError> {
-    authority
-        .domains
-        .iter()
-        .find(|domain| domain.name == name)
-        .ok_or_else(|| RegistryCbefError::UnknownDomain(name.to_owned()))
 }
 
 fn pascal(value: &str) -> String {

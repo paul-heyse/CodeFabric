@@ -883,6 +883,7 @@ pub enum AnnotationKind {
     Documentation = 20,
     PragmaOrDirective = 30,
     ParseError = 40,
+    MissingSyntax = 50,
 }
 impl TryFrom<u16> for AnnotationKind {
     type Error = UnknownRegistryCode;
@@ -892,6 +893,7 @@ impl TryFrom<u16> for AnnotationKind {
             20 => Ok(Self::Documentation),
             30 => Ok(Self::PragmaOrDirective),
             40 => Ok(Self::ParseError),
+            50 => Ok(Self::MissingSyntax),
             _ => Err(UnknownRegistryCode { domain: "ANNOTATION_KIND", code }),
         }
     }
@@ -901,6 +903,7 @@ pub const ANNOTATION_KIND_VALUES: &[RegistryEntry] = &[
     RegistryEntry { code: 20, name: "DOCUMENTATION", slug: "documentation" },
     RegistryEntry { code: 30, name: "PRAGMA_OR_DIRECTIVE", slug: "pragma-or-directive" },
     RegistryEntry { code: 40, name: "PARSE_ERROR", slug: "parse-error" },
+    RegistryEntry { code: 50, name: "MISSING_SYNTAX", slug: "missing-syntax" },
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1058,6 +1061,87 @@ pub const SYNTAX_FIELD_ROLE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u16)]
+pub enum Language {
+    Common = 10,
+    Python = 20,
+    Rust = 30,
+    Unknown = 40,
+}
+impl TryFrom<u16> for Language {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Common),
+            20 => Ok(Self::Python),
+            30 => Ok(Self::Rust),
+            40 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode { domain: "LANGUAGE", code }),
+        }
+    }
+}
+pub const LANGUAGE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "COMMON", slug: "common" },
+    RegistryEntry { code: 20, name: "PYTHON", slug: "python" },
+    RegistryEntry { code: 30, name: "RUST", slug: "rust" },
+    RegistryEntry { code: 40, name: "UNKNOWN", slug: "unknown" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum PathEncoding {
+    UnixBytes = 10,
+    MacosBytes = 20,
+    WindowsWtf8 = 30,
+}
+impl TryFrom<u16> for PathEncoding {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::UnixBytes),
+            20 => Ok(Self::MacosBytes),
+            30 => Ok(Self::WindowsWtf8),
+            _ => Err(UnknownRegistryCode { domain: "PATH_ENCODING", code }),
+        }
+    }
+}
+pub const PATH_ENCODING_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "UNIX_BYTES", slug: "unix-bytes" },
+    RegistryEntry { code: 20, name: "MACOS_BYTES", slug: "macos-bytes" },
+    RegistryEntry { code: 30, name: "WINDOWS_WTF8", slug: "windows-wtf8" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum NewlineKind {
+    None = 10,
+    Lf = 20,
+    Crlf = 30,
+    Cr = 40,
+    Mixed = 50,
+}
+impl TryFrom<u16> for NewlineKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::None),
+            20 => Ok(Self::Lf),
+            30 => Ok(Self::Crlf),
+            40 => Ok(Self::Cr),
+            50 => Ok(Self::Mixed),
+            _ => Err(UnknownRegistryCode { domain: "NEWLINE_KIND", code }),
+        }
+    }
+}
+pub const NEWLINE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry { code: 10, name: "NONE", slug: "none" },
+    RegistryEntry { code: 20, name: "LF", slug: "lf" },
+    RegistryEntry { code: 30, name: "CRLF", slug: "crlf" },
+    RegistryEntry { code: 40, name: "CR", slug: "cr" },
+    RegistryEntry { code: 50, name: "MIXED", slug: "mixed" },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
 pub enum WorkspaceLifecycle {
     Bootstrapping = 10,
     Ready = 20,
@@ -1204,32 +1288,35 @@ pub canonical_digest: &'static str, pub values: &'static [RegistryEntry],
 }
 
 pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
-    RegistryDomainEntry { domain: "EVIDENCE_CERTAINTY", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: EVIDENCE_CERTAINTY_VALUES },
-    RegistryDomainEntry { domain: "RESOLUTION_CLASS", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: RESOLUTION_CLASS_VALUES },
-    RegistryDomainEntry { domain: "DIRECTNESS", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: DIRECTNESS_VALUES },
-    RegistryDomainEntry { domain: "COMPLETENESS", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: COMPLETENESS_VALUES },
-    RegistryDomainEntry { domain: "OWNER_CAPABILITY_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: OWNER_CAPABILITY_STATE_VALUES },
-    RegistryDomainEntry { domain: "PROVIDER_RUN_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: PROVIDER_RUN_STATE_VALUES },
-    RegistryDomainEntry { domain: "QUERY_EXECUTION_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: QUERY_EXECUTION_STATE_VALUES },
-    RegistryDomainEntry { domain: "QUERY_AVAILABILITY_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: QUERY_AVAILABILITY_STATE_VALUES },
-    RegistryDomainEntry { domain: "COMPLETENESS_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: COMPLETENESS_STATE_VALUES },
-    RegistryDomainEntry { domain: "FRESHNESS_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: FRESHNESS_STATE_VALUES },
-    RegistryDomainEntry { domain: "LIMIT_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: LIMIT_STATE_VALUES },
-    RegistryDomainEntry { domain: "DEPENDENCY_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: DEPENDENCY_STATE_VALUES },
-    RegistryDomainEntry { domain: "DURABLE_PUBLICATION_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: DURABLE_PUBLICATION_STATE_VALUES },
-    RegistryDomainEntry { domain: "SERVING_ACTIVATION_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: SERVING_ACTIVATION_STATE_VALUES },
-    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_KIND", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: SNAPSHOT_LEASE_KIND_VALUES },
-    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: SNAPSHOT_LEASE_STATE_VALUES },
-    RegistryDomainEntry { domain: "SOURCE_TRUST_STATE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: SOURCE_TRUST_STATE_VALUES },
-    RegistryDomainEntry { domain: "EVENT_STREAM_HEALTH", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: EVENT_STREAM_HEALTH_VALUES },
-    RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: GIT_ACCELERATION_STATUS_VALUES },
-    RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: EFFECT_KIND_VALUES },
-    RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: RESOURCE_KIND_VALUES },
-    RegistryDomainEntry { domain: "PROVIDER_CODE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: PROVIDER_CODE_VALUES },
-    RegistryDomainEntry { domain: "TOKEN_KIND", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: TOKEN_KIND_VALUES },
-    RegistryDomainEntry { domain: "ANNOTATION_KIND", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: ANNOTATION_KIND_VALUES },
-    RegistryDomainEntry { domain: "SYNTAX_KIND", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: SYNTAX_KIND_VALUES },
-    RegistryDomainEntry { domain: "SYNTAX_FIELD_ROLE", version: "1.0", canonical_digest: "b3:e8b4db031045fd31ca21100afa134d164460ec53962dccef9332e9ab0d2e1e72", values: SYNTAX_FIELD_ROLE_VALUES },
+    RegistryDomainEntry { domain: "EVIDENCE_CERTAINTY", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: EVIDENCE_CERTAINTY_VALUES },
+    RegistryDomainEntry { domain: "RESOLUTION_CLASS", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: RESOLUTION_CLASS_VALUES },
+    RegistryDomainEntry { domain: "DIRECTNESS", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: DIRECTNESS_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: COMPLETENESS_VALUES },
+    RegistryDomainEntry { domain: "OWNER_CAPABILITY_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: OWNER_CAPABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "PROVIDER_RUN_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: PROVIDER_RUN_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_EXECUTION_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: QUERY_EXECUTION_STATE_VALUES },
+    RegistryDomainEntry { domain: "QUERY_AVAILABILITY_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: QUERY_AVAILABILITY_STATE_VALUES },
+    RegistryDomainEntry { domain: "COMPLETENESS_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: COMPLETENESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "FRESHNESS_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: FRESHNESS_STATE_VALUES },
+    RegistryDomainEntry { domain: "LIMIT_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: LIMIT_STATE_VALUES },
+    RegistryDomainEntry { domain: "DEPENDENCY_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: DEPENDENCY_STATE_VALUES },
+    RegistryDomainEntry { domain: "DURABLE_PUBLICATION_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: DURABLE_PUBLICATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SERVING_ACTIVATION_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: SERVING_ACTIVATION_STATE_VALUES },
+    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_KIND", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: SNAPSHOT_LEASE_KIND_VALUES },
+    RegistryDomainEntry { domain: "SNAPSHOT_LEASE_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: SNAPSHOT_LEASE_STATE_VALUES },
+    RegistryDomainEntry { domain: "SOURCE_TRUST_STATE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: SOURCE_TRUST_STATE_VALUES },
+    RegistryDomainEntry { domain: "EVENT_STREAM_HEALTH", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: EVENT_STREAM_HEALTH_VALUES },
+    RegistryDomainEntry { domain: "GIT_ACCELERATION_STATUS", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: GIT_ACCELERATION_STATUS_VALUES },
+    RegistryDomainEntry { domain: "EFFECT_KIND", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: EFFECT_KIND_VALUES },
+    RegistryDomainEntry { domain: "RESOURCE_KIND", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: RESOURCE_KIND_VALUES },
+    RegistryDomainEntry { domain: "PROVIDER_CODE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: PROVIDER_CODE_VALUES },
+    RegistryDomainEntry { domain: "TOKEN_KIND", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: TOKEN_KIND_VALUES },
+    RegistryDomainEntry { domain: "ANNOTATION_KIND", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: ANNOTATION_KIND_VALUES },
+    RegistryDomainEntry { domain: "SYNTAX_KIND", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: SYNTAX_KIND_VALUES },
+    RegistryDomainEntry { domain: "SYNTAX_FIELD_ROLE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: SYNTAX_FIELD_ROLE_VALUES },
+    RegistryDomainEntry { domain: "LANGUAGE", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: LANGUAGE_VALUES },
+    RegistryDomainEntry { domain: "PATH_ENCODING", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: PATH_ENCODING_VALUES },
+    RegistryDomainEntry { domain: "NEWLINE_KIND", version: "1.0", canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5", values: NEWLINE_KIND_VALUES },
     RegistryDomainEntry { domain: "WORKSPACE_LIFECYCLE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: WORKSPACE_LIFECYCLE_VALUES },
     RegistryDomainEntry { domain: "UPDATE_WAVE_STATE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: UPDATE_WAVE_STATE_VALUES },
     RegistryDomainEntry { domain: "ARTIFACT_STATE", version: "1.0", canonical_digest: "b3:770cc77a62bc830f59bd53623e8a9da66909df837cfcd8568a3be8d6832bb938", values: ARTIFACT_STATE_VALUES },

@@ -4,8 +4,7 @@ severity: error
 message: Governed occurrence codes and persisted provider flags require generated typed accessors.
 note: Numeric allocations live in enum/flag authorities and are projected by the model driver.
 files:
-  - tooling/model-transition/consumer-overlays/**/*.rs
-  - tooling/model-transition/live/**/*.rs
+  - src/source_syntax.rs
 rule:
   any:
     - all:

@@ -59,7 +59,7 @@ pub enum RuffAstCategory {
 }
 
 impl RuffAstCategory {
-    const fn registry_code(self) -> u16 {
+    pub(crate) const fn registry_code(self) -> u16 {
         match self {
             Self::SyntaxNode => 10,
             Self::Statement => 20,

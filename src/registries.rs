@@ -52,6 +52,30 @@ pub fn registry_state_name(values: &[RegistryEntry], code: u16) -> Option<&'stat
         .map(|entry| entry.name)
 }
 
+/// Resolve one generated entity name to its code and family without duplicating either.
+#[must_use]
+pub fn entity_kind(name: &str) -> Option<OntologyCodeEntry> {
+    ontology_kind(ENTITY_KIND_IDS, ENTITY_KIND_CODES, name)
+}
+
+/// Resolve one generated relation name to its code and family without duplicating either.
+#[must_use]
+pub fn relation_kind(name: &str) -> Option<OntologyCodeEntry> {
+    ontology_kind(RELATION_KIND_IDS, RELATION_KIND_CODES, name)
+}
+
+fn ontology_kind(
+    names: &'static [&'static str],
+    codes: &'static [OntologyCodeEntry],
+    name: &str,
+) -> Option<OntologyCodeEntry> {
+    debug_assert_eq!(names.len(), codes.len());
+    names
+        .iter()
+        .position(|candidate| *candidate == name)
+        .and_then(|index| codes.get(index).copied())
+}
+
 #[cfg(all(test, feature = "canonical-json"))]
 mod tests {
     use std::any::TypeId;

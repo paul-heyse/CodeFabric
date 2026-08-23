@@ -400,9 +400,8 @@
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.schema.serving-snapshot.schema",
     "artifact_kind": "json-schema",
-    "canonical_digest": "b3:c1c8405d537f06469a73dcbac86d757df3b31fc5ce4d59969cc7ab63e3d84b7c",
     "compatible_suite_major": 1,
-    "generator_revision": "codefabric-schema-contracts-v1",
+    "generator_revision": "codefabric-model-schema-driver-v1",
     "status": "released",
     "version": "1.0"
   },
@@ -421,10 +420,9 @@
     "limits_profile_digest"
   ],
   "x-codefabric-generated": {
-    "generator_revision": "codefabric-schema-contracts-v1",
+    "driver": "schema-contract-driver-v1",
     "source_artifact_id": "codefabric.schema.contract-ir",
-    "source_canonical_digest": "b3:c91578c6397913f454105090d51ea091051f89e9a78ff7211071e0a2ab7c64e8",
-    "source_digest": "b3:7e1b29fe62a219003b302b970dfdaf0749d03c30847c307d2c6a045c98925496"
+    "source_digest": "b3:580695b40be192ec85d39efb57d465094ef8ad86de7b4a300e12a3940c56edd3"
   },
   "x-codefabric-identity": {
     "excluded_from_body": [
