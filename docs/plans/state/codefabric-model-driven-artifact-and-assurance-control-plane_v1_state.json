@@ -4,12 +4,12 @@
   "design_path": "docs/designs/codefabric_model_driven_artifact_and_assurance_control_plane_design_v1_2026-08-22.md",
   "baseline_commit": "6b42f33b7de72044b40939f7d86b5dee8888d06c",
   "status": "executing",
-  "current_packet": "WP03",
+  "current_packet": "WP04",
   "packets": {
     "WP01": {"status": "complete", "proving_commit": "a5e3ab4614ebb141a1a81e2530fdb5a7387a6e35", "deviations": ["The accepted five-path evolution makes artifact freshness a post-judgment check: focused WP01 gates passed at the proving commit, and artifact freshness was re-derived after this state seal.", "The isolated legacy renderer refreshed only the generated requirements/provenance views made stale by the five normative changes; it did not write an authority, evidence, or acceptance path."], "failed_approaches": [], "blockers": []},
     "WP02": {"status": "complete", "proving_commit": "3143e6cd9e745b5fd806d5c159687c0183f6e078", "deviations": [], "failed_approaches": ["A top-level model source reached only through a path attribute was rejected by cargo-shear as unlinked; the compiler core now uses a conventional bin-local module tree.", "The first isolated target key omitted compiler source bytes; the corrected identity includes the Cargo manifest and exact compiler module bytes in addition to lock, toolchain, feature, profile, and target identity."], "blockers": []},
-    "WP03": {"status": "in_progress", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
-    "WP04": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP03": {"status": "complete", "proving_commit": "0b34edd96d0e88b666903146cde6cc9651b7a23e", "deviations": ["The accepted gate-substitution doctrine treats legacy authored toolchain-digest freshness as non-blocking for WP03 because exact compiler/action identity is independently enforced by model-bootstrap-check and model-inventory-check; the legacy projection remains owned by WP10 and DB01 and was not refreshed."], "failed_approaches": ["The first family classifier treated handwritten Proto tooling and adapter support modules as derived; closed family claim policies now keep support outside the derived write set.", "The first bootstrap negative search confused generated-root string literals with generated-code link edges; it now checks code-level include, external-crate, path-module, and generated-module edges."], "blockers": []},
+    "WP04": {"status": "in_progress", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
@@ -51,6 +51,6 @@
     {"kind": "accepted_scope_deferral", "summary": "License considerations remain user-deferred and are not part of this plan."},
     {"kind": "accepted_gate_substitution", "summary": "Once a model-driven governance measure is fully functional and has independent equivalence or stronger-coverage evidence for an invariant, the superseded legacy measure is no longer a completion blocker and moves to its planned decommission zero state. This does not waive legacy checks for invariants the replacement does not yet cover."}
   ],
-  "next_action": "Implement WP03's exact byte-safe repository inventory, family claims, typed repository model, deterministic graph plan, and gix-disabled equivalence proof without making the current authored catalog authoritative.",
-  "updated_at": "2026-08-23T02:31:00Z"
+  "next_action": "Implement WP04's compact owner-accepted release census, candidate review path, guarded acceptance command, tombstone semantics, and routine-write prohibition without deriving acceptance from the legacy catalog.",
+  "updated_at": "2026-08-23T03:08:49Z"
 }
