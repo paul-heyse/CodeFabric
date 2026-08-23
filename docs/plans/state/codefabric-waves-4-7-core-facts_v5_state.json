@@ -3,7 +3,7 @@
   "plan_path": "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v5_2026-08-22.md",
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "3830acade129b2a63a1927ac5e2f4d3ac284f38c",
-  "status": "not_started",
+  "status": "executing",
   "current_packet": "WP32",
   "packets": {
     "WP27": {"status": "complete", "proving_commit": "7d82ec80b8b3e0812e97b668058315da1aa73030", "deviations": ["Historical v4 judgment preserved; current-head model-native feature, provider-inventory, and toolchain-provenance gates must remain green."], "failed_approaches": ["The v2 attempt proved Ruff 0.0.7 could not compile under Rust 1.94.1; the approved design raised the stable floor to 1.95.0."], "blockers": []},
@@ -59,6 +59,6 @@
     {"kind": "accepted_assurance_deferral", "summary": "Ubuntu clean-host evidence remains user-deferred and is not a packet or milestone blocker."},
     {"kind": "accepted_scope_deferral", "summary": "License considerations remain user-deferred and are outside this plan."}
   ],
-  "next_action": "Await the sealed model-control-plane M05 handoff; then resume the still-incomplete WP32 without claiming remediation substrate as product completion.",
-  "updated_at": "2026-08-23T18:30:00Z"
+  "next_action": "After the model-control-plane M05 seal records activation commit H, resume the still-incomplete WP32 without claiming remediation substrate as product completion.",
+  "updated_at": "2026-08-23T19:00:00Z"
 }
