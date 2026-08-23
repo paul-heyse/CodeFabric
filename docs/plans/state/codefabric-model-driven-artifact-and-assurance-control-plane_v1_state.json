@@ -3,8 +3,8 @@
   "plan_path": "docs/plans/codefabric_model_driven_artifact_and_assurance_control_plane_implementation_plan_v1_2026-08-22.md",
   "design_path": "docs/designs/codefabric_model_driven_artifact_and_assurance_control_plane_design_v1_2026-08-22.md",
   "baseline_commit": "6b42f33b7de72044b40939f7d86b5dee8888d06c",
-  "status": "executing",
-  "current_packet": "WP15",
+  "status": "complete",
+  "current_packet": null,
   "packets": {
     "WP01": {"status": "complete", "proving_commit": "a5e3ab4614ebb141a1a81e2530fdb5a7387a6e35", "deviations": ["The accepted five-path evolution makes artifact freshness a post-judgment check: focused WP01 gates passed at the proving commit, and artifact freshness was re-derived after this state seal.", "The isolated legacy renderer refreshed only the generated requirements/provenance views made stale by the five normative changes; it did not write an authority, evidence, or acceptance path."], "failed_approaches": [], "blockers": []},
     "WP02": {"status": "complete", "proving_commit": "3143e6cd9e745b5fd806d5c159687c0183f6e078", "deviations": [], "failed_approaches": ["A top-level model source reached only through a path attribute was rejected by cargo-shear as unlinked; the compiler core now uses a conventional bin-local module tree.", "The first isolated target key omitted compiler source bytes; the corrected identity includes the Cargo manifest and exact compiler module bytes in addition to lock, toolchain, feature, profile, and target identity."], "blockers": []},
@@ -35,7 +35,7 @@
     "WP12": {"status": "complete", "proving_commit": "69a290fea1b2be8594b8bc58887323ce577481eb", "deviations": ["The broad root-test gate stops in the already accepted superseded embedded-identity/schema renderer before reaching the complete suite. All twelve incremental/cache/watch/differential tests, all four real-family cold/warm exact-report checks, transaction recovery, two-root reproduction, model planning, stable dependency graph, Clippy, and model-native family consumers passed; no timing or cache-hit threshold is a correctness gate."], "failed_approaches": ["Cache manifests initially stored only an action key and were corrected to embed and revalidate the complete canonical action identity.", "The first watcher callback could silently drop a full queue; it now records overflow atomically and widens the next cycle to a full current-byte reinventory.", "Rendered and cache-restored output diagnostics initially differed in ordering; sorting now occurs at the shared execution seam."], "blockers": []},
     "WP13": {"status": "complete", "proving_commit": "ff2976faf6f893c554da4f458f4cfc7827e3fb3b", "deviations": ["The broad root-test gate remains red only in superseded embedded-identity and legacy schema-renderer tests. The live Just, Nextest, Pytest, structural-rule, fixture, package, and model-requirement collectors; deterministic perturbation corpus; model-check edit execution; strict model-feature Clippy; policy; model reproduction; and installed-wheel evidence passed, so the accepted model-governance substitution applies."], "failed_approaches": ["Cargo Deny initially rejected notify's transitive Windows support versions. The policy now uses exact depth-bounded skip-tree entries for the two non-type-bearing platform subtrees while duplicate-family-check continues to prohibit type-bearing duplicate families."], "blockers": []},
     "WP14": {"status": "complete", "proving_commit": "b883c3f1ed9d3d2c6851b0b7ecbeecea9c8e928e", "deviations": ["The user-approved model-governance substitution permits terminal deletion of superseded legacy gates once their invariants are independently covered. The release proof therefore certifies the model-native release, zero-state, family, transaction, incremental, assurance, package, feature, and policy surfaces without requiring deleted legacy governance to pass.", "The Waves 4-7 v5 successor was authored and explicitly approved while remaining inactive; its historical WP27-WP31 judgments are trusted ancestors, WP32 remains incomplete, and no successor product packet was executed."], "failed_approaches": ["The successor initially named a descriptive WP28 table bootstrap test as a distinct operational oracle. The existing behavioral test was given the stable declared oracle name so the candidate plan derives healthy without adding duplicate proof logic."], "blockers": []},
-    "WP15": {"status": "in_progress", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+    "WP15": {"status": "complete", "proving_commit": "bb692e5798f4f3c4f3925a61f09d335e4f55063e", "deviations": ["Activation commit H changed only the active-plan pointer and successor activation fields. The approved successor is active at incomplete WP32, WP27-WP31 retain historical proving commits, and zero WP33+ product packets were released."], "failed_approaches": ["After activation, a generic artifact-contract unit test exposed an assumption that the active state always contained remediation-only gate-substitution records. The test was made plan-independent with a synthetic state judgment before terminal seal; no product code or packet executed."], "blockers": []}
   },
   "milestones": {
     "M01": {"status": "complete", "proving_commit": "c60394a792061fd151b093793c59eaa031213a07", "deviations": [], "failed_approaches": [], "blockers": []},
@@ -50,7 +50,7 @@
     },
     "M03": {"status": "complete", "proving_commit": "0d2dabc8d7502e9d551e1346c21b0e85848d099f", "deviations": ["The milestone uses the accepted model-governance substitute for the sixteen legacy embedded-identity/schema-renderer failures; all target sole-writer, transaction, recovery, reproduction, staged-consumer, package, and promoted runtime proofs pass."], "failed_approaches": [], "blockers": []},
     "M04": {"status": "complete", "proving_commit": "b883c3f1ed9d3d2c6851b0b7ecbeecea9c8e928e", "deviations": ["Certification uses the complete model-native invariant set and terminal legacy zero states under the accepted gate-substitution doctrine."], "failed_approaches": [], "blockers": []},
-    "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+    "M05": {"status": "complete", "proving_commit": "bb692e5798f4f3c4f3925a61f09d335e4f55063e", "deviations": [], "failed_approaches": [], "blockers": []}
   },
   "decommission_batches": {
     "DB01": {"status": "complete", "proving_commit": "b883c3f1ed9d3d2c6851b0b7ecbeecea9c8e928e", "deviations": [], "failed_approaches": [], "blockers": []},
@@ -58,7 +58,7 @@
     "DB03": {"status": "complete", "proving_commit": "b883c3f1ed9d3d2c6851b0b7ecbeecea9c8e928e", "deviations": [], "failed_approaches": [], "blockers": []},
     "DB04": {"status": "complete", "proving_commit": "b883c3f1ed9d3d2c6851b0b7ecbeecea9c8e928e", "deviations": [], "failed_approaches": [], "blockers": []},
     "DB05": {"status": "complete", "proving_commit": "b883c3f1ed9d3d2c6851b0b7ecbeecea9c8e928e", "deviations": [], "failed_approaches": [], "blockers": []},
-    "DB06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+    "DB06": {"status": "complete", "proving_commit": "bb692e5798f4f3c4f3925a61f09d335e4f55063e", "deviations": [], "failed_approaches": [], "blockers": []}
   },
   "baseline_failures": [
     "The pre-adoption `just ci-fast` failed only in active Waves 4-7 v4 artifact-contract tests because its declared Data Fabric input is stale; all Rust, doctest, extractor, sidecar, adapter, and structural-rule stages passed."
@@ -78,6 +78,6 @@
     {"kind": "accepted_scope_deferral", "summary": "License considerations remain user-deferred and are not part of this plan."},
     {"kind": "accepted_gate_substitution", "replacement_packet": "WP14", "superseded_packets": ["WP04", "WP05", "WP06", "WP07", "WP08", "WP09", "WP10", "WP11", "WP13"], "summary": "WP14's model-native release proof independently covers the invariants of these completed historical packets after their legacy oracle implementations and recipes reach the planned zero state. Historical proving commits remain provenance; this substitution does not waive any invariant absent from WP14's release proof."}
   ],
-  "next_action": "Execute WP15's two-commit H/S handoff: activate only the approved Waves 4-7 v5 successor at incomplete WP32, then seal the remediation terminal state without executing product work between commits.",
-  "updated_at": "2026-08-23T18:45:00Z"
+  "next_action": "The model-control-plane plan is complete. The approved Waves 4-7 v5 successor is active and may resume at its still-incomplete WP32.",
+  "updated_at": "2026-08-23T19:15:00Z"
 }
