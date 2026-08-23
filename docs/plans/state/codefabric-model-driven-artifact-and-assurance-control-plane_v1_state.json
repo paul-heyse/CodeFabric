@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_model_driven_artifact_and_assurance_control_plane_design_v1_2026-08-22.md",
   "baseline_commit": "6b42f33b7de72044b40939f7d86b5dee8888d06c",
   "status": "executing",
-  "current_packet": "WP09",
+  "current_packet": "WP10",
   "packets": {
     "WP01": {"status": "complete", "proving_commit": "a5e3ab4614ebb141a1a81e2530fdb5a7387a6e35", "deviations": ["The accepted five-path evolution makes artifact freshness a post-judgment check: focused WP01 gates passed at the proving commit, and artifact freshness was re-derived after this state seal.", "The isolated legacy renderer refreshed only the generated requirements/provenance views made stale by the five normative changes; it did not write an authority, evidence, or acceptance path."], "failed_approaches": [], "blockers": []},
     "WP02": {"status": "complete", "proving_commit": "3143e6cd9e745b5fd806d5c159687c0183f6e078", "deviations": [], "failed_approaches": ["A top-level model source reached only through a path attribute was rejected by cargo-shear as unlinked; the compiler core now uses a conventional bin-local module tree.", "The first isolated target key omitted compiler source bytes; the corrected identity includes the Cargo manifest and exact compiler module bytes in addition to lock, toolchain, feature, profile, and target identity."], "blockers": []},
