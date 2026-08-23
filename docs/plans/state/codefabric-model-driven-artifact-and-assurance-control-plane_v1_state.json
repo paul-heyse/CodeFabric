@@ -31,8 +31,8 @@
       ],
       "blockers": []
     },
-    "WP11": {"status": "in_progress", "proving_commit": null, "deviations": ["The bounded WP06-WP10 transition patch was promoted directly into live typed consumers and then deleted rather than retained as a permanent migration input. The model reconciler now generates the complete live DesiredTree, including the Rust module aggregator, and legacy generation names delegate only to confirm-guarded model-sync."], "failed_approaches": ["Formatting generated Rust after reconciliation caused repeated user-edit detections because the renderer emitted pre-rustfmt bytes. The driver protocol now applies the repository rustfmt tool before DesiredTree construction so formatted live outputs converge exactly."], "blockers": []},
-    "WP12": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP11": {"status": "complete", "proving_commit": "0d2dabc8d7502e9d551e1346c21b0e85848d099f", "deviations": ["The bounded WP06-WP10 transition patch was promoted directly into live typed consumers and then deleted rather than retained as a permanent migration input. The model reconciler now generates the complete live DesiredTree, including the Rust module aggregator, and legacy generation names delegate only to confirm-guarded model-sync.", "The broad ci-fast run reached 159 green Rust tests and stopped only on sixteen superseded contract-tooling/schema-renderer tests that require removed embedded identities or the former schema IR. Detached identity KATs, complete typed family and staged-consumer checks, exact two-root reproduction, crash recovery, promoted WP32 tests, Clippy, doctests, adapter wheel installation, and all three auxiliary domains passed; under the user-approved gate substitution the legacy failures remain non-blocking until WP14 deletes their code."], "failed_approaches": ["Formatting generated Rust after reconciliation caused repeated user-edit detections because the renderer emitted pre-rustfmt bytes. The driver protocol now applies the repository rustfmt tool before DesiredTree construction so formatted live outputs converge exactly.", "The first generated registry binding used unformatted decimal flag masks and only one Python top-level blank line, which failed Clippy and Ruff. The renderer now emits grouped hexadecimal Rust masks with a zero-mask branch and formatter-conformant Python module spacing before DesiredTree construction."], "blockers": []},
+    "WP12": {"status": "ready", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP13": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP14": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "WP15": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
@@ -48,7 +48,7 @@
       "failed_approaches": [],
       "blockers": []
     },
-    "M03": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M03": {"status": "complete", "proving_commit": "0d2dabc8d7502e9d551e1346c21b0e85848d099f", "deviations": ["The milestone uses the accepted model-governance substitute for the sixteen legacy embedded-identity/schema-renderer failures; all target sole-writer, transaction, recovery, reproduction, staged-consumer, package, and promoted runtime proofs pass."], "failed_approaches": [], "blockers": []},
     "M04": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
     "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
   },
@@ -76,6 +76,6 @@
     {"kind": "accepted_scope_deferral", "summary": "License considerations remain user-deferred and are not part of this plan."},
     {"kind": "accepted_gate_substitution", "summary": "Once a model-driven governance measure is fully functional and has independent equivalence or stronger-coverage evidence for an invariant, the superseded legacy measure is no longer a completion blocker and moves to its planned decommission zero state. This does not waive legacy checks for invariants the replacement does not yet cover."}
   ],
-  "next_action": "Finish WP11 packet gates at the converged no-op DesiredTree, commit the sole-writer transaction and promoted WP32 consumer substrate, record its proving commit, and close M03 before enabling incremental execution.",
+  "next_action": "Implement WP12 content-addressed cache entries, deterministic affected-closure scheduling, fixed-seed pure differential tests, bounded real-family equivalence, and explicit model-watch invalidation without making cache, timing, or notify delivery correctness authorities.",
   "updated_at": "2026-08-23T12:45:00Z"
 }
