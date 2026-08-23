@@ -15,8 +15,11 @@ records:
       - {bit: 32, name: PYTHON_PROFILE, slug: python-profile, meaning: Python profile applies}
       - {bit: 33, name: RUST_PROFILE, slug: rust-profile, meaning: Rust profile applies}
       - {bit: 48, name: COMPILER_SYNTHETIC, slug: compiler-synthetic, meaning: Compiler synthesized representation}
+  - domain: PROVIDER_NODE_FLAGS
+    width_bits: 64
+    values: []
 owner_acceptance:
   approver: suite-governance-owner
   accepted_at: "2026-08-21"
-  construction_rule: AC-G-06 64-bit partition with reserved bits unallocated
+  construction_rule: AC-G-06 64-bit partition with reserved bits unallocated; provider-node flags are closed with no accepted allocations
   source_digest: "b3:dcdfc92f0cdab44a7d5af008814564088dcc9275047bf72c0782a2917a6456bf"

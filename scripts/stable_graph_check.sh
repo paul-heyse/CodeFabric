@@ -205,7 +205,7 @@ declared_features() {
 
 [ "$(declared_features deltalake)" = '["datafusion","rustls"]' ] || \
   fail 'deltalake direct features drifted'
-[ "$(declared_features gix)" = '["attributes","auto-chain-error","blob-diff","dirwalk","excludes","index","interrupt","parallel","sha1","sha256","status","tracing"]' ] || \
+[ "$(declared_features gix)" = '["attributes","auto-chain-error","blob-diff","dirwalk","excludes","index","interrupt","parallel","revision","sha1","sha256","status","tracing"]' ] || \
   fail 'gix direct features drifted'
 [ "$(declared_features petgraph)" = '["std"]' ] || \
   fail 'petgraph direct features drifted'
@@ -224,7 +224,7 @@ resolved_features() {
 }
 
 gix_features="$(resolved_features gix)"
-for required in sha1 sha256 status attributes excludes dirwalk blob-diff interrupt parallel auto-chain-error tracing; do
+for required in sha1 sha256 revision status attributes excludes dirwalk blob-diff interrupt parallel auto-chain-error tracing; do
   printf '%s\n' "$gix_features" | rg -qx "$required" || fail "gix feature $required is absent"
 done
 if printf '%s\n' "$gix_features" | rg -q \

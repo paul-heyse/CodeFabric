@@ -113,3 +113,40 @@ pub(super) fn inventory(root: &Path) -> Result<GitInventory, RepositoryModelErro
     }
     Ok(GitInventory { topology, states })
 }
+
+/// Read one immutable baseline blob without consulting the worktree or invoking Git.
+pub(super) fn blob_at_revision(
+    root: &Path,
+    revision: &str,
+    relative_path: &Path,
+) -> Result<Option<Vec<u8>>, RepositoryModelError> {
+    let repository = gix::open_opts(
+        root,
+        gix::open::Options::isolated()
+            .strict_config(true)
+            .bail_if_untrusted(true),
+    )
+    .map_err(|_| RepositoryModelError::GitUnavailable)?;
+    let commit = repository
+        .rev_parse_single(revision)
+        .map_err(|_| RepositoryModelError::GitUnavailable)?
+        .object()
+        .map_err(|_| RepositoryModelError::GitUnavailable)?
+        .try_into_commit()
+        .map_err(|_| RepositoryModelError::GitUnavailable)?;
+    let tree = commit
+        .tree()
+        .map_err(|_| RepositoryModelError::GitUnavailable)?;
+    let Some(entry) = tree
+        .lookup_entry_by_path(relative_path)
+        .map_err(|_| RepositoryModelError::GitUnavailable)?
+    else {
+        return Ok(None);
+    };
+    let mut blob = entry
+        .object()
+        .map_err(|_| RepositoryModelError::GitUnavailable)?
+        .try_into_blob()
+        .map_err(|_| RepositoryModelError::GitUnavailable)?;
+    Ok(Some(blob.take_data()))
+}

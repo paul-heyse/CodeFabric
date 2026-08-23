@@ -3,8 +3,10 @@
 use std::process::ExitCode;
 
 pub mod desired_tree;
+pub mod driver_protocol;
 pub mod model_control;
 pub mod model_git_state;
+pub mod registry_cbef_driver;
 pub mod release_census;
 pub mod repository_model;
 
@@ -21,6 +23,7 @@ fn main() -> ExitCode {
         Some("explain") => explain(&arguments.collect::<Vec<_>>()),
         Some("plan") => plan(&arguments.collect::<Vec<_>>()),
         Some("check") => check(&arguments.collect::<Vec<_>>()),
+        Some("family-check") => family_check(&arguments.collect::<Vec<_>>()),
         Some("release-census-candidate") => {
             release_census_candidate(&arguments.collect::<Vec<_>>())
         }
@@ -28,11 +31,31 @@ fn main() -> ExitCode {
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check registry-cbef [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
             ExitCode::FAILURE
         }
     }
+}
+
+fn family_check(arguments: &[String]) -> ExitCode {
+    let Some(family) = arguments.first() else {
+        eprintln!("family-check requires a closed family name");
+        return ExitCode::FAILURE;
+    };
+    let root = arguments
+        .get(1)
+        .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    let result = match family.as_str() {
+        "registry-cbef" => registry_cbef_driver::check_family(&root)
+            .and_then(|report| {
+                serde_json::to_string(&report)
+                    .map_err(registry_cbef_driver::RegistryCbefError::Json)
+            })
+            .map_err(|error| error.to_string()),
+        _ => Err(format!("unknown model family {family}")),
+    };
+    print_result(result)
 }
 
 fn compile_repository(root: &std::path::Path) -> Result<repository_model::RepositoryModel, String> {

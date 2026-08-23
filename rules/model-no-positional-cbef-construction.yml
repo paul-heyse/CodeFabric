@@ -1,0 +1,10 @@
+id: model-no-positional-cbef-construction
+language: Rust
+severity: error
+message: Production identities must use a generated recipe-aware CBEF builder.
+note: Arbitrary tagged-field vectors are private codec machinery, never a production API.
+files:
+  - tooling/model-transition/consumer-overlays/**/*.rs
+  - tooling/model-transition/live/**/*.rs
+rule:
+  pattern: CbefRecord { $$$FIELDS }

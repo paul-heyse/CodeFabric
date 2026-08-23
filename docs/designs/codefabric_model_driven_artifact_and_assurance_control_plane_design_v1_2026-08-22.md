@@ -634,7 +634,8 @@ paths or family cardinalities.
   filesystem walk and BLAKE3 of stable current reads remain the authoritative inventory and byte
   identity. gix failure falls back to the full walk; Git ignore state never authorizes omission.
 - **Version basis:** `gix = "=0.86.0"`, `default-features = false`, with the repository's governed
-  read-only feature set. No Git mutation, network, credentials, hooks, checkout, filters, or index
+  read-only feature set, including `revision` for immutable baseline-blob validation of typed
+  transition patches. No Git mutation, network, credentials, hooks, checkout, filters, or index
   writes enter the compiler.
 - **Displaces:** ad hoc `git diff`/UTF-8 path parsing as the source universe while retaining diffs
   and watch events as invalidation hints.

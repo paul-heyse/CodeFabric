@@ -195,6 +195,11 @@ model-plan *paths:
 model-check profile="edit":
     ./scripts/model_exec.sh check "{{profile}}" --root .
 
+[doc("Validate one model family through typed render, independent decode, and staged consumers")]
+[group('gate')]
+model-family-check family="":
+    ./scripts/model_family_check.sh "{{family}}"
+
 [doc("Explain a model artifact ID or repository path")]
 [group('environment')]
 model-explain target:

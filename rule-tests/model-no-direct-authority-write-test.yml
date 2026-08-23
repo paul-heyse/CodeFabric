@@ -1,0 +1,15 @@
+id: model-no-direct-authority-write
+valid:
+  - |
+      fn render(stage: &StagingRoot, output: &SafeOutputPath, bytes: &[u8]) {
+          stage.write(output, bytes).unwrap();
+      }
+invalid:
+  - |
+      fn overwrite() {
+          std::fs::write("contracts/acceptance/released.json", b"accepted").unwrap();
+      }
+  - |
+      fn overwrite() {
+          fs::write("docs/upfront_design/spec.md", b"generated").unwrap();
+      }

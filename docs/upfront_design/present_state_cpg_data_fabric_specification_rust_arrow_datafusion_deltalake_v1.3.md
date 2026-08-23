@@ -1510,6 +1510,9 @@ coherent tables, not duplicate independent facts.
 | `owner_bucket` | `bucket16` | no |
 | `raw_kind_code` | `code32` | no |
 | `normalized_kind_code` | `code32` | no |
+| `occurrence_family_code` | `code16` | no |
+| `reconciliation_step_code` | `code16` | yes |
+| `raw_kind_disposition_code` | `code16` | no |
 | `parent_syntax_id` | `id16` | yes |
 | `field_role_code` | `code16` | yes |
 | `ordinal` | `Int32` | yes |
@@ -1536,6 +1539,13 @@ allocation remain evidence payload or typed source annotations; reconciliation s
 disposition, and occurrence-family classification remain their own modeled fields and
 SHALL NOT be packed into undocumented bits. Table row encoders accept the generated
 flag type rather than a raw integer, and reject reserved or unknown emitted bits.
+
+`occurrence_family_code`, `reconciliation_step_code`, and
+`raw_kind_disposition_code` use the corresponding closed enum-registry domains. A null
+reconciliation step means that no cross-provider range reconciliation was attempted;
+it never means an unknown step. The released provider-node flag domain initially has no
+allocated bits, so the only valid encoded value is zero until an owner accepts an
+append-only allocation.
 
 ## 21. `semantic_detail`
 
