@@ -25,6 +25,16 @@ The roadmap has four goals:
 
 The waves are **scope units, not calendar estimates**. Each wave is intended to become one detailed implementation plan with a coherent objective, a bounded set of major work packages, explicit entry dependencies, and a binary exit gate.
 
+Exactly one implementation plan and one schema-current execution state may be mutable at
+a time. A remediation overlay freezes its predecessor as read-only provenance: trusted
+ancestor proving commits remain historical evidence, incomplete packets remain
+incomplete, and no second executor advances the frozen state. A successor may become
+active only after a cache-disabled full check, exact two-root reproduction, independent
+consumer validation, required decommission zero states, and state/proving-commit
+reconciliation pass at one candidate commit. Activation is a separate sealed handoff:
+the active-plan pointer changes only after certification, and the successor's first
+packet revalidates the inherited surface before product execution resumes.
+
 ---
 
 ## 1. Source design and governing implementation invariants
@@ -108,6 +118,15 @@ Every wave, beginning with Wave 1, SHALL update as applicable:
 - upgrade compatibility records.
 
 Testing, security, and observability are not deferred wholesale to the final wave; the final wave closes the full acceptance gates.
+
+Those updates are model-driven. Requirement declarations remain co-located with their
+normative source; implementation and oracle declarations remain with the code or
+evidence they describe. Aggregate requirements, traceability, bundle membership,
+artifact/provenance indexes, output censuses, and assurance-profile membership are
+compiled views and SHALL NOT be maintained as parallel manifests. Packet-named mutation
+campaigns are not completion evidence. The generic file-scoped mutation tool remains an
+optional human Tier-C diagnostic outside edit, packet, milestone, CI, and release
+profiles.
 
 ---
 
@@ -245,9 +264,13 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
 
 2. **Contract compiler and verifier**
    - implement the repository-owned `codefabric-contracts` generator/verifier;
-   - load only the closed typed catalog in `contracts/manifests/suite-manifest.json`,
-     compile native sources through staged typed ingress and cross-record validation,
-     and derive every source/output census, consumer edge, and provenance obligation;
+   - discover self-identifying native sources, evidence, and acceptance through closed
+     family roots and typed family declarations, compile them through staged typed
+     ingress and cross-record validation, and derive every source/output census,
+     consumer edge, and provenance obligation;
+   - emit `contracts/manifests/suite-manifest.json` as a compatibility/provenance view
+     of the compiled repository model, never as compiler bootstrap or an authored
+     membership list;
    - use catalog schema v2: artifact descriptors catalog governed native or generated
      authority identity while
      closed typed derivation units own outputs, complete source sets, producer/tool
@@ -318,8 +341,11 @@ Instantiate the complete machine-contract tree required by the 1.3 design and ma
    - keep independent intent recipes and the complete milestone gate;
    - change aggregate command edges only after controlled warm and fresh-target
      Hyperfine measurements demonstrate material benefit;
-   - compare a machine-readable proof manifest before and after, preserving exact
+   - compare the closure of the compiled assurance graph derived from co-located declarations and live Just,
+     Nextest, Pytest, rule, fixture, and consumer inventories, preserving exact
      toolchains, targets, features, tests, fixtures, and negative cases;
+   - unknown command reads conservatively widen to the full applicable profile; no
+     hand-maintained proof manifest or packet-specific mutation recipe is authoritative;
    - never use `cargo clean` or shared-cache deletion as routine benchmark setup.
 
 ### Exit evidence
@@ -1552,7 +1578,10 @@ The next planning pass for any wave should produce a separate document with this
 7. **Execution and concurrency model** — Tokio/Rayon/process placement, admission, cancellation, and backpressure.
 8. **Failure and degradation behavior** — explicit capability gaps, retry boundaries, fault points, and recovery.
 9. **Security controls** — trust boundary, authorization, path/source disclosure, sandboxing, and redaction.
-10. **Verification plan** — unit, property, differential, golden, integration, incremental-equivalence, and host tests.
+10. **Verification plan** — unit, property, differential, golden, integration,
+    incremental-equivalence, recovery, and host tests selected from the compiled
+    assurance graph; mutation testing is optional diagnostic work, never a required
+    packet campaign.
 11. **Performance evidence** — measurements required even when the wave is not the final performance gate.
 12. **Migration and rollback** — how pre-wave state/artifacts are accepted, upgraded, rebuilt, or rolled back.
 13. **Deferred scope** — capabilities deliberately excluded so the plan cannot expand into later waves.

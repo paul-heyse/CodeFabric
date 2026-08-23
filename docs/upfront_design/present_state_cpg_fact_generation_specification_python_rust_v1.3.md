@@ -721,7 +721,18 @@ specialization/generic arguments when executable identity differs
 
 ### 13.2 Source occurrences
 
-Occurrence keys SHALL include workspace, exact file identity, source digest/range, normalized role, and owner. Path display text SHALL not participate.
+Occurrence keys SHALL include workspace, exact file identity, source digest/range,
+normalized occurrence family/kind, normalized role, structural parent/field/ordinal
+anchor, and owner. Path display text, provider-local node handles, provider identity,
+and reconciliation disposition SHALL not participate.
+
+Providers construct occurrence and relation identities only through the generated
+recipe-aware CBEF builders owned by AC-G-13. The builder encodes occurrence structure
+inside the released `ENTITY.semantic_key` and occurrence-specific relation structure
+inside the governed `RELATION_FACT.role`; providers SHALL NOT append CBEF fields or call
+the generic field-vector encoder. Occurrence-family codes and persisted syntax/provider
+flags come from generated enum/flag accessors. Module-local numeric codes, bit masks, and
+overloaded flag bits for reconciliation or evidence disposition are prohibited.
 
 ### 13.3 Anonymous entities
 
@@ -779,7 +790,7 @@ SourceSnapshot
 | `PRAGMA_OR_DIRECTIVE` | Ruff trivia/pragmas | Recognize `noqa`, `type: ignore`, formatter directives, type comments | Classify directive and target syntax |
 | `PARSE_ERROR` | Ruff `ParseError` + Tree-sitter `ERROR` | Emit both; canonicalize overlapping errors | Ruff is typed-parser authority; TS preserves recovery region |
 | `MISSING_SYNTAX` | Tree-sitter missing nodes | Emit zero-width missing nodes and expected kind | Do not synthesize from Ruff absence |
-| Explicit parentheses | Ruff `ParenthesizedExpressions` | Emit `EXPLICITLY_PARENTHESIZED` property/edge | Attach to smallest matching expression |
+| Explicit parentheses | Ruff `ParenthesizedExpressions` | Set `syntax_detail.explicitly_parenthesized` on the reconciled occurrence | Attach to smallest matching expression; do not duplicate the typed extension as a relation |
 | Multiline/interpolated string range | Ruff `Indexer` | Emit string-region facts | Link to string expression |
 | Continuation line | Ruff `Indexer` | Emit physical continuation fact | Useful for exact source structure |
 
@@ -3173,7 +3184,7 @@ and transitive summaries SHALL not claim a closed complete effect set.
 | `ENCLOSING_SCOPE` | Ruff scope parent | Source syntax/rustc owner | Normalize |
 
 
-## 67A. Source and lexical relationship generation
+## 67A. Source and lexical relationship and typed-extension generation
 
 | Relationship/fact | Python generation | Rust generation | Additional logic |
 |---|---|---|---|
@@ -3182,9 +3193,14 @@ and transitive summaries SHALL not claim a closed complete effect set.
 | `LEXICALLY_PRECEDES` | Token/source ordering | CST leaf/source ordering | Emit immediate relation; closure query-time |
 | `DOCUMENTS` | Ruff docstring helpers | Rust doc comments/attributes | Attach to nearest language-recognized declaration |
 | `DIRECTIVE_APPLIES_TO` | Ruff pragma/type-comment association | Rust attribute/cfg attachment | Syntax-role-specific association |
-| `EXPLICITLY_PARENTHESIZED` | Ruff `ParenthesizedExpressions` | Tree-sitter punctuation/CST | Python source-layout fact |
-| `PARSE_ERROR_AT` | Ruff parse diagnostic + Tree-sitter error node | Tree-sitter error + rustc diagnostic evidence | Retain provider-specific evidence |
-| `MISSING_AT` | Tree-sitter missing node | Tree-sitter missing node | Zero-width expected-kind fact |
+| `syntax_detail.explicitly_parenthesized` | Ruff `ParenthesizedExpressions` | Tree-sitter punctuation/CST | Python source-layout fact on the reconciled syntax occurrence; not a relation kind |
+| `source_annotation(PARSE_ERROR)` → `target_entity_id` | Ruff parse diagnostic + Tree-sitter error node | Tree-sitter error + rustc diagnostic evidence | Retain provider-specific evidence; `syntax_detail.error` is the occurrence flag |
+| `source_annotation(MISSING_SYNTAX)` → `target_entity_id` | Tree-sitter missing node | Tree-sitter missing node | Zero-width expected-kind fact; `syntax_detail.missing` is the occurrence flag |
+
+The last three rows are modeled typed-extension/annotation surfaces rather than
+canonical relation kinds. Implementations SHALL NOT allocate duplicate
+`EXPLICITLY_PARENTHESIZED`, `PARSE_ERROR_AT`, or `MISSING_AT` relation codes: the
+closed relation registry remains the authority for relation-shaped facts.
 
 ## 68. Symbol and binding relationship generation
 

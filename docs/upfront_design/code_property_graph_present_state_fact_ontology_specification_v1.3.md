@@ -3129,7 +3129,7 @@ Transient parser IDs, Pyrefly internal IDs, rustc session-local `DefId`, MIR loc
 
 ### 64.6 Anonymous entities
 
-Anonymous entities use owner-relative structural identity plus normalized semantic role. Context-sensitive anonymous entities include the analysis context in their preimage.
+Anonymous entities use owner-relative structural identity plus normalized semantic role. Source-occurrence identity therefore includes the normalized occurrence kind in addition to the structural parent/role/ordinal anchor: incompatible provider observations at the same byte range remain distinct canonical occurrences, while provider-local node handles and provider identity remain excluded. Context-sensitive anonymous entities include the analysis context in their preimage.
 
 ### 64.7 Collision handling
 
@@ -3801,6 +3801,30 @@ RESULT_ARTIFACT
 SOURCE_CONTEXT
 UNKNOWN_REMAINDER
 ```
+
+The CBEF authority is executable schema, not documentation for callers to reproduce.
+The model compiler SHALL generate one recipe-aware builder, validator, and typed field
+view per domain. A builder fixes the domain code, field tags, type codes, widths,
+normalization, optionality, and declared order; it rejects a missing, extra, duplicate,
+mis-typed, or non-normalized field before encoding. Production callers SHALL NOT submit
+an arbitrary vector of tagged fields to the generic codec. The generic framing codec may
+remain private implementation machinery and SHALL validate the selected domain recipe
+when decoding as well as generic frame legality.
+
+The released `ENTITY` recipe remains exactly five fields. Source-occurrence structure—
+including normalized occurrence family/kind, file identity, source digest/range,
+parent/role/ordinal anchor, and any context-sensitive discriminator—is encoded as the
+typed, versioned `semantic_key` payload rather than appended as undocumented CBEF
+fields. The released `RELATION_FACT` recipe remains exactly six fields; occurrence or
+program-point specificity belongs in the governed `role` tagged union or in the owning
+fact recipe, never in ad hoc trailing fields. A genuine recipe change requires an
+owner-accepted contract version and regenerated builders before any producer may emit it.
+
+All categorical components inside a semantic key, role, or fact payload—including
+occurrence-family codes and persisted provider-node flag bits—come from the governed
+enum/flag registries. Generated accessors are the only production spelling of those
+allocations; first-party numeric literals and module-local bit assignments are
+non-conforming.
 
 A detected unequal-preimage 128-bit collision blocks activation with `ID_COLLISION`. There is no re-salting or silent fallback.
 ## AC-G-15 — Canonical type algebra

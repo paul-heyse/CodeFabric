@@ -115,7 +115,8 @@ same concern as authoritative.
 ### Decision
 
 Every normative prose document and every machine bundle uses a two-component public
-version `major.minor`. Every governed source has two deliberately distinct identities:
+version `major.minor`. Every governed source has two deliberately distinct, detached
+identities in the generated provenance index:
 
 - `canonical_digest` identifies its compiled semantic contract under a named,
   versioned projection profile;
@@ -127,8 +128,8 @@ change `canonical_digest`, but they always change `source_digest`.
 
 ### Contract
 
-Every artifact SHALL have this metadata in its own header or in the generated artifact
-index:
+Every artifact SHALL self-identify the authored fields below in its own header or through
+one typed adjacent family declaration:
 
 ```yaml
 artifact_id: stable ASCII identifier
@@ -137,10 +138,12 @@ version: "<major>.<minor>"
 compatible_suite_major: 1
 status: draft | released | deprecated
 digest_projection: prose-utf8-v1 | json-jcs-v1 | yaml-ac-g-53-v1 | jsonl-jcs-v1 | proto-descriptor-v1 | ebnf-source-v1 | bundle-ac-g-07-v1
-canonical_digest: "b3:<64 lowercase hex>"
-source_digest: "b3:<64 lowercase hex>"
-generator_revision: optional source-control digest
 ```
+
+The compiled provenance record adds `canonical_digest` and `source_digest` as
+`b3:<64 lowercase hex>` values and, for generated outputs, the generator revision.
+Those computed identities are not authored fields and
+routine checking or synchronization SHALL NOT rewrite an authority to refresh them.
 
 For machine artifacts, `canonical_digest` is BLAKE3-256 over the artifact's canonical
 semantic projection with only that artifact's root/header `canonical_digest` and
@@ -149,10 +152,9 @@ referenced-artifact digests remain semantic data. `prose-utf8-v1` is the explici
 exception: prose contains external sentinels rather than computed identity fields, so
 the complete document bytes are hashed. `source_digest` is BLAKE3-256 over the complete
 checked-in byte sequence and therefore SHALL live outside those bytes in the generated
-artifact index or another detached provenance envelope. Machine sources may embed
-`canonical_digest` because their named semantic projection structurally omits that
-field; prose headers use the `external` sentinel because prose hashes complete bytes.
-Generated outputs SHALL embed the applicable source artifact IDs, source
+artifact index or another detached provenance envelope. Existing source headers that
+carry an `external` sentinel remain readable self-identification; no source header
+carries a computed identity. Generated outputs MAY embed the applicable source artifact IDs, source
 digests, canonical digests, projection IDs, and generator revision when doing so does
 not create a self-reference. This preserves both semantic comparison and exact-byte
 verification.
@@ -271,7 +273,9 @@ A mismatch SHALL fail before query acceptance or provider output activation. Com
 ## AC-G-04 — Requirement IDs and end-to-end traceability
 ### Decision
 
-All normative requirements receive stable IDs and a generated cross-layer trace graph.
+All normative requirements receive stable IDs at their normative source. Implementation
+and oracle declarations are co-located with the code or evidence they describe, and the
+cross-layer trace graph is a generated join.
 
 ### Contract
 
@@ -283,16 +287,13 @@ CF-<owner>-<four digits>
 
 where `<owner>` is one of `ARCH`, `ONT`, `GEN`, `FAB`, `LIFE`, `QUERY`, `SERVE`, `SEC`, or `TEST`. IDs are never reused.
 
-A machine record SHALL contain:
+A normative requirement declaration SHALL contain:
 
 ```yaml
 requirement_id: CF-QUERY-0042
 source_artifact: code_property_graph_semantic_query_specification
 source_section: "48.3"
 normative_text: "Exact normalized normative statement"
-normative_text_digest: "b3:..."
-implements:
-  - rust module or generated artifact identifier
 traces_to:
   ontology_kinds: []
   capability_codes: []
@@ -303,20 +304,25 @@ traces_to:
 trace_selectors:
   - all-query-phrase-ids
   - all-response-fields
-verified_by:
-  - test IDs
 status: active | deprecated | superseded
 ```
+
+An implementation declaration names one or more requirement IDs and the implementing
+symbol, generated output, or closed selector. An oracle declaration names one or more
+requirement IDs and the collected test/evidence identity. These declarations SHALL live
+with their implementation or oracle source; they SHALL NOT copy normative text, source
+digests, expanded trace edges, or each other's membership.
 
 `trace_selectors` is an optional closed set of catalog-backed expansions. The initial
 selectors cover all ontology kinds, capability codes, table fields, query phrase IDs,
 response fields, and error codes. The contract generator resolves these selectors from
 the same typed registries and Contract IR used by their consumers, writes the expanded
-`traces_to` edges, and derives `traceability.jsonl` from the requirement records. A
-second hand-maintained trace inventory is prohibited. Reordering or extending a selected
-registry therefore updates the trace graph programmatically. The generator likewise
-resolves `source_artifact` against the typed catalog and refreshes the detached accepted
-source digest and normalized normative-text digest; digest strings are not authored twice.
+`traces_to` edges, and derives both `requirements.jsonl` and `traceability.jsonl` from
+the distributed declarations. A second hand-maintained requirement or trace inventory
+is prohibited. Reordering or extending a selected registry therefore updates the trace
+graph programmatically. The compiler resolves `source_artifact` against the repository
+model, computes the detached source identity and normalized normative-text digest, and
+joins `implements` and `verified_by`; none of those computed values is authored twice.
 
 The trace graph SHALL support these mandatory paths:
 
@@ -343,12 +349,12 @@ reference is not an executable mapping and SHALL fail the released profile.
 ## AC-G-05 — Required machine artifacts and repository layout
 ### Decision
 
-The machine artifacts are first-class sources of truth and SHALL live in a dedicated
-`contracts/` tree generated or validated from the normative specifications.
-`contracts/manifests/suite-manifest.json` is the sole compiler bootstrap and typed
-catalog authority for artifact ownership and derivation edges. It describes native
-sources; it does not replace JSON Schema, Protobuf, YAML-registry, JSONL, or EBNF
-semantics.
+Native machine authorities and irreducible evidence or acceptance SHALL live in a
+dedicated `contracts/` tree. A handwritten-only repository-model compiler discovers
+them through closed family roots, source self-identification, and typed family rules.
+`contracts/manifests/suite-manifest.json` is a generated compatibility/provenance view
+of that compiled model, not compiler bootstrap or an authored membership list. It does
+not replace JSON Schema, Protobuf, YAML-registry, JSONL, or EBNF semantics.
 
 ### Contract
 
@@ -433,19 +439,32 @@ contracts/
     toolchain-identity.json
 ```
 
+The compiler owns a closed, versioned family-root table in handwritten code. Every
+present governed file below those roots SHALL self-identify or have one typed adjacent
+family declaration; every tracked, staged, or untracked current path is claimed exactly
+once or rejected. Directory walking, filename shape, Git status, and the generated
+suite manifest are discovery inputs or projections, never semantic authority.
+
+An owner-accepted release census, stored outside every routine generated write set,
+contains only released stable IDs, suite-major/status, and accepted tombstone
+references. It is the independent absence oracle: a previously released ID may disappear
+only through an accepted compatible tombstone or reviewed major transition. Routine
+check and synchronization commands SHALL NOT modify the census, compatibility baselines,
+KATs, signatures, trust roots, or registry-allocation acceptance.
+
 Generated Rust and Python types SHALL be emitted under `generated/` and SHALL contain a
 header naming the semantic identity of the primary source artifact. Exact source identity
 remains detached in the generated artifact index, so an editorial-only source edit does
 not churn generated source. Hand-edited generated files are prohibited.
 
-The suite manifest SHALL use closed typed catalog schema version 2. The catalog has two
-peer collections: `artifacts` and `derivations`. Artifact descriptors own governed source
-authority and declare stable ID, native source path and kind, compatibility family,
-projection profile, consumer domains, provenance obligations, resource budget profile,
-zero or more closed `bundle_membership` values, and a typed
+The generated suite manifest SHALL retain closed typed schema version 2 compatibility.
+Its two peer collections, `artifacts` and `derivations`, are projections of the compiled
+repository model. Artifact records expose stable ID, native source path and kind,
+compatibility family, projection profile, consumer domains, provenance obligations,
+resource budget profile, compiled bundle membership, and a typed
 `semantic_projection_source`. That source is either `Native` or one exact
 `DerivationOutput(OutputRef)`, where `OutputRef` contains a derivation ID and output path.
-Artifact descriptors SHALL NOT own generated outputs or build-order dependencies.
+Artifact records SHALL NOT own generated outputs or build-order dependencies.
 When a generated public file is itself governed (for example a released JSON Schema),
 its descriptor catalogs that file's identity and selects the exact owning
 `DerivationOutput` as its semantic-projection source. The descriptor does not thereby
@@ -453,10 +472,11 @@ become an independent source or output owner. The output path MAY equal that des
 authority path only for this self-owned generated-authority case; unrelated
 authority/output path collisions remain invalid.
 
-A closed `DerivationUnitDescriptor` owns each generation or compilation operation. It
-contains `derivation_id`, a closed `derivation_kind`, typed sorted inputs, typed sorted
-outputs, and a unit resource-budget profile. Producer/tool dispatch is derived from the
-kind and is never an authored command or producer field. The initial kinds are:
+A closed family declaration compiles each generation or compilation operation into a
+`DerivationUnitDescriptor`. It contains `derivation_id`, a closed `derivation_kind`,
+typed sorted inputs, typed sorted outputs, and a unit resource-budget profile.
+Producer/tool dispatch is derived from the kind and is never an authored command or
+producer field. The initial kinds are:
 
 ```text
 ArtifactIndex
@@ -514,11 +534,12 @@ review projection or maintain a sibling raw-kind table on their hot path. Its ge
 inventory carries the exact grammar ABI, node-type identity, runtime kind/field
 fingerprint, and governed query-bundle identity used by startup validation.
 
-The suite manifest's first logical artifact descriptor SHALL describe the manifest
-itself, including authority path, projection, owner, compatibility family, and budget.
-It owns no generated output. The `ArtifactIndex` derivation separately consumes the
-`AllCompiledArtifacts` intrinsic. This is ordinary typed self-description, not a
-computed census or embedded digest.
+The repository model SHALL describe the generated suite-manifest projection itself,
+including output path, projection, owner, compatibility family, and budget. It owns no
+source authority. The `ArtifactIndex` derivation consumes the `AllCompiledArtifacts`
+intrinsic and produces the suite-manifest compatibility view and packaged artifact
+index. This is ordinary typed model projection, not authored self-bootstrap or embedded
+digest authority.
 
 Computed observations do not become a second self-referential catalog. A generated
 artifact index SHALL contain peer artifact and derivation collections. Artifact records
@@ -556,6 +577,16 @@ The AC-G-08 YAML deployment instance SHALL additionally validate against
 `deployment-profile.schema.json` with the exact suite-pinned safe YAML loader and the
 same bounded source bytes; schema validity alone is not instance evidence.
 
+Every external derivation driver executes from a resolved typed invocation against an
+isolated staging root and declared input/output plan. Its protocol declares no network
+capability; the launcher supplies a closed environment allowlist and strips credentials,
+tokens, proxy variables, ambient Python/Cargo configuration, and unrelated repository
+state. A before/after source fence detects any repository write outside the declared
+staging outputs and fails the action. Portable correctness depends on the protocol,
+staging confinement, exact output census, and source fence; an operating-system sandbox
+that denies sockets or filesystem access is defense in depth, not a cross-platform
+assumption.
+
 The four `.proto` authorities SHALL be compiled by one exact `grpcio-tools` invocation
 into Python bindings and one committed `FileDescriptorSet` with imports included and
 source information excluded. Rust generation SHALL decode that same descriptor set and
@@ -574,9 +605,9 @@ Normative known-answer vectors remain independently reviewed oracles. Generator-
 property, and differential corpora provide broad coverage but SHALL NOT approve or
 overwrite their own expected bytes or digests.
 
-All eight built-in bundle manifests are compiler-owned views of the catalog's closed
-`bundle_membership` relation. Generation sorts members by artifact ID and copies each
-member's compiled canonical identity and catalog version; release verification rejects
+All eight built-in bundle manifests are compiler-owned views of family policy and the
+compiled repository graph. Generation derives membership, sorts members by artifact ID,
+and copies each member's compiled canonical identity and version; release verification rejects
 missing, extra, duplicate, optional, or stale members. Hand-maintaining bundle arrays or
 assigning membership in a second source is prohibited.
 
@@ -631,11 +662,13 @@ A flag meaning is immutable. Mutually exclusive flags SHALL identify an enum dom
 ## AC-G-07 — Bundle manifests and fingerprints
 ### Decision
 
-A bundle is an immutable ordered manifest over compatibility-sensitive artifacts. Every snapshot pins exact bundle IDs and digests.
+A bundle is an immutable generated manifest over compatibility-sensitive artifacts.
+Every snapshot pins exact bundle IDs and digests. Humans author only bundle policy and,
+where required, accountable signature acceptance.
 
 ### Contract
 
-A bundle manifest contains:
+The compiler derives a bundle manifest containing:
 
 ```yaml
 bundle_kind: ontology | schema | provider | derivation | query-language | tool-contract | toolchain | model-pack
@@ -665,6 +698,12 @@ are retained. The bundle artifact's separate `canonical_digest` omits only its r
 any signature.
 
 Built-in bundles are trusted by exact digest shipped with the binary. External model-pack bundles require an Ed25519 signature by a configured trust root. No other bundle accepts executable extensions.
+
+Bundle membership, member identities, payload ordering, artifact identity, and
+`bundle_digest` are derived outputs. Routine synchronization SHALL NOT edit bundle
+policy, signature acceptance, compatibility acceptance, or any trust root. A guarded
+owner-acceptance operation may accept those irreducible records only after reviewing the
+staged candidate.
 
 `ServingSnapshot` stores both the human version and exact digest for every bundle. Query responses expose versions and abbreviated digests; diagnostics expose full digests only to authorized clients.
 

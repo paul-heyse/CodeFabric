@@ -17,9 +17,11 @@ from tooling.ci.artifact_contracts import (
     active_plan_path,
     check_tracked_target_zero_state,
     commit_trust,
+    declared_inputs,
     derive_plan_status,
     load_state,
     parse_frontmatter,
+    plan_ids,
     validate_artifacts,
     validate_state,
 )
@@ -91,24 +93,22 @@ def test_packet_trust_requires_ancestor_commit(tmp_path: Path) -> None:
     }
 
 
-def test_wp00_behavioral_acceptance() -> None:
+def test_active_program_behavioral_acceptance() -> None:
     assert active_plan_path(ROOT) == DEFAULT_PLAN
-    assert DEFAULT_PLAN.name == (
-        "codefabric_waves_4-7_core_facts_implementation_plan_v4_2026-08-22.md"
-    )
+    assert parse_frontmatter(DEFAULT_PLAN)["status"] == "approved"
     state = validate_state(ROOT, STATE)
     assert state["schema_version"] == 2
     assert (
         state["current_packet"] is None or state["current_packet"] in state["packets"]
     )
-    assert set(state["packets"]) == {f"WP{number}" for number in range(27, 54)}
+    assert set(state["packets"]) == set(plan_ids(DEFAULT_PLAN)["packets"])
     assert commit_trust(ROOT, state["baseline_commit"])["ancestor"]
 
 
-def test_wp00_structural_acceptance() -> None:
+def test_active_program_structural_acceptance() -> None:
     report = validate_artifacts(ROOT, DEFAULT_PLAN)
-    assert report["packet_count"] == 27
-    assert report["declared_input_count"] == 15
+    assert report["packet_count"] == len(plan_ids(DEFAULT_PLAN)["packets"])
+    assert report["declared_input_count"] == len(declared_inputs(DEFAULT_PLAN))
 
 
 def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
@@ -137,18 +137,19 @@ def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
     assert _accepted_input_evolution_paths(ROOT, state) == expected
 
 
-def test_wp00_negative_zero_state(tmp_path: Path) -> None:
+def test_active_program_negative_zero_state(tmp_path: Path) -> None:
     state = load_state(STATE)
+    packet = next(iter(state["packets"]))
     derived = deepcopy(state)
-    derived["packets"]["WP27"]["checks"] = ["invented"]
+    derived["packets"][packet]["checks"] = ["invented"]
     derived_path = tmp_path / "derived.json"
     _write_state(derived_path, derived)
     with pytest.raises(ArtifactContractError, match="expected keys|derived"):
         validate_state(ROOT, derived_path)
 
     unproved = deepcopy(state)
-    unproved["packets"]["WP27"]["status"] = "complete"
-    unproved["packets"]["WP27"]["proving_commit"] = None
+    unproved["packets"][packet]["status"] = "complete"
+    unproved["packets"][packet]["proving_commit"] = None
     unproved_path = tmp_path / "unproved.json"
     _write_state(unproved_path, unproved)
     with pytest.raises(ArtifactContractError, match="requires a proving commit"):
@@ -172,7 +173,7 @@ def test_wp00_negative_zero_state(tmp_path: Path) -> None:
         check_tracked_target_zero_state(history_repo)
 
 
-def test_wp00_operational_acceptance() -> None:
+def test_active_program_operational_acceptance() -> None:
     recipes = load_just_recipes()
     assert {
         "artifacts-check",

@@ -318,6 +318,12 @@ artifacts-check: contracts-tooling-lint
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_artifact_contracts.py
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py artifacts-check
 
+[doc("Validate model-control ownership and single-active-program design contracts")]
+[group('gate')]
+model-design-contract-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_model_design_contracts.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/model_design_contracts.py
+
 [doc("Derive active-plan input freshness and proving-commit trust")]
 [group('gate')]
 plan-status:
@@ -384,7 +390,7 @@ seed-zero-state-check:
 
 [doc("Run structural, artifact, graph-policy, and generated-output governance")]
 [group('gate')]
-governance: governance-scan artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
+governance: governance-scan model-design-contract-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check proto-check contracts-verify contracts-repro-check adapter-contracts-governance adapter-contracts-repro-check proof-coverage-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]

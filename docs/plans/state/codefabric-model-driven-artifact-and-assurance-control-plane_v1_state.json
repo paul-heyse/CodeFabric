@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_model_driven_artifact_and_assurance_control_plane_implementation_plan_v1_2026-08-22.md",
+  "design_path": "docs/designs/codefabric_model_driven_artifact_and_assurance_control_plane_design_v1_2026-08-22.md",
+  "baseline_commit": "6b42f33b7de72044b40939f7d86b5dee8888d06c",
+  "status": "executing",
+  "current_packet": "WP01",
+  "packets": {
+    "WP01": {"status": "in_progress", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP02": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP03": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP04": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP07": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP08": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP09": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP10": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP11": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP12": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP13": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP14": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "WP15": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "milestones": {
+    "M01": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M02": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M03": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M04": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "M05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "decommission_batches": {
+    "DB01": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB02": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB03": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB04": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB05": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []},
+    "DB06": {"status": "not_started", "proving_commit": null, "deviations": [], "failed_approaches": [], "blockers": []}
+  },
+  "baseline_failures": [
+    "The pre-adoption `just ci-fast` failed only in active Waves 4-7 v4 artifact-contract tests because its declared Data Fabric input is stale; all Rust, doctest, extractor, sidecar, adapter, and structural-rule stages passed."
+  ],
+  "discovered_obligations": [
+    {"owner": "WP06", "summary": "Absorb the pre-existing unproved WP32 source/syntax work through the tracked transition-overlay mechanism without storing derived diff identity in state or claiming WP32 completion."}
+  ],
+  "plan_deviations": [
+    {"kind": "explicit_user_approval", "summary": "The user explicitly approved and requested execution of implementation plan v1 on 2026-08-22."},
+    {"kind": "successor_execution_overlay", "summary": "This plan is the sole mutable execution program. Waves 4-7 v4 and its state are frozen history; WP27-WP31 proving commits remain provenance and WP32 remains unproved."},
+    {"kind": "planned_design_input_evolution", "packet": "WP01", "paths": ["docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md", "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md", "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md", "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md", "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"], "summary": "The accepted dossier requires these five normative owners to adopt detached identities, distributed requirements, compiled catalog/release census, generated bundle membership, model-based assurance, and recipe-aware CBEF/allocation ownership. Planning-time input hashes remain immutable."},
+    {"kind": "accepted_assurance_deferral", "summary": "Ubuntu clean-host evidence remains user-deferred and is not a packet or milestone blocker."},
+    {"kind": "accepted_scope_deferral", "summary": "License considerations remain user-deferred and are not part of this plan."}
+  ],
+  "next_action": "Complete WP01 normative ownership corrections and active-program governance, prove its named oracles, and create the mandatory proving commit without disturbing the pre-existing WP32 implementation work.",
+  "updated_at": "2026-08-23T01:26:57Z"
+}

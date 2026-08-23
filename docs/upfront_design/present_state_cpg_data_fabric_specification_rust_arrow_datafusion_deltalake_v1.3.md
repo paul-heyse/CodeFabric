@@ -1524,6 +1524,19 @@ coherent tables, not duplicate independent facts.
 
 `AST_CHILD` relations SHALL be generated into `relation` from these parent/role/ordinal columns.
 
+`raw_kind_code` is the selected provider catalog's local raw-kind code. Its provider
+and version namespace is recovered from the `fact_evidence` row for the same entity
+fact; consumers SHALL NOT interpret that value without the evidence namespace or
+compare it across provider catalogs.
+
+`provider_node_flags` is a persisted governed bitset, not spare storage for a producer.
+Every emitted bit SHALL be allocated in the flag registry with immutable meaning and
+exposed through generated typed accessors. Provider-native flags that lack an accepted
+allocation remain evidence payload or typed source annotations; reconciliation state,
+disposition, and occurrence-family classification remain their own modeled fields and
+SHALL NOT be packed into undocumented bits. Table row encoders accept the generated
+flag type rather than a raw integer, and reject reserved or unknown emitted bits.
+
 ## 21. `semantic_detail`
 
 **Grain:** one semantic declaration/symbol/member entity extension.

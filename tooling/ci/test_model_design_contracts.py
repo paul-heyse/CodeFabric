@@ -1,0 +1,79 @@
+"""Executable WP01 oracles for model-control design adoption."""
+
+from __future__ import annotations
+
+import subprocess
+from copy import deepcopy
+
+from tooling.ci.artifact_contracts import (
+    DEFAULT_PLAN,
+    ROOT,
+    _accepted_input_evolution_paths,
+    _sha256,
+    active_plan_path,
+    declared_inputs,
+    load_state,
+    parse_frontmatter,
+)
+from tooling.ci.model_design_contracts import (
+    EVOLVED_DESIGN_INPUTS,
+    FORBIDDEN_DESIGN_PHRASES,
+    validate_model_design_contract,
+)
+
+
+def test_model_active_program_is_unique() -> None:
+    report = validate_model_design_contract()
+    assert active_plan_path(ROOT) == DEFAULT_PLAN
+    assert report["active_plan"] != report["suspended_plan"]
+
+
+def test_model_design_rejects_routine_acceptance_writes() -> None:
+    validate_model_design_contract()
+    suite = (
+        ROOT
+        / "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md"
+    ).read_text(encoding="utf-8")
+    assert "Routine synchronization SHALL NOT edit bundle" in suite
+    combined = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in sorted(EVOLVED_DESIGN_INPUTS)
+    )
+    assert not [phrase for phrase in FORBIDDEN_DESIGN_PHRASES if phrase in combined]
+
+
+def test_model_wp01_planned_input_evolution_names_exactly_five_accepted_paths() -> None:
+    plan = parse_frontmatter(DEFAULT_PLAN)
+    state = load_state(ROOT / str(plan["state_path"]))
+    evolutions = [
+        deviation
+        for deviation in state["plan_deviations"]
+        if deviation.get("kind") == "planned_design_input_evolution"
+    ]
+    assert len(evolutions) == 1
+    assert evolutions[0]["packet"] == "WP01"
+    assert set(evolutions[0]["paths"]) == set(EVOLVED_DESIGN_INPUTS)
+
+
+def test_model_wp01_state_transition_enables_post_judgment_artifact_freshness() -> None:
+    plan = parse_frontmatter(DEFAULT_PLAN)
+    state = deepcopy(load_state(ROOT / str(plan["state_path"])))
+    head = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    state["packets"]["WP01"]["status"] = "complete"
+    state["packets"]["WP01"]["proving_commit"] = head
+    accepted = _accepted_input_evolution_paths(ROOT, state)
+    assert accepted == set(EVOLVED_DESIGN_INPUTS)
+
+    drifted = {
+        declared.path
+        for declared in declared_inputs(DEFAULT_PLAN)
+        if _sha256(ROOT / declared.path) != declared.digest
+    }
+    assert drifted == set(EVOLVED_DESIGN_INPUTS)
+    assert drifted <= accepted
