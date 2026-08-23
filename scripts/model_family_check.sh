@@ -97,7 +97,7 @@ case "$family" in
       and .source_count > 0
       and .descriptor_file_count == .source_count
       and .package_count == .source_count
-      and .compiler_invocations == 1
+      and .compiler_invocations == (if .cache_lookup.status == "hit" then 0 else 1 end)
       and (.rendered_outputs | length) == (3 + (4 * .source_count))
       and .tool_identity.schema == 4
       and .tool_identity.python."grpcio-tools" == "1.83.0"

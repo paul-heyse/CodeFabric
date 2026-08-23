@@ -179,12 +179,14 @@ printf '%s' "$root_shape" | jq -e '
     "model-compiler": [
       "dep:blake3",
       "dep:gix",
+      "dep:notify-debouncer-full",
       "dep:petgraph",
       "dep:rustix",
       "dep:serde",
       "dep:serde_json",
       "dep:serde_json_canonicalizer",
       "dep:serde_yaml_ng",
+      "dep:tempfile",
       "dep:thiserror"
     ],
     "proto-tooling": ["dep:prost", "dep:prost-types", "dep:tonic-prost-build"],
@@ -288,10 +290,12 @@ assert_graph_omits featureless "$featureless_tree"
 assert_graph_omits canonical-json "$canonical_tree"
 assert_graph_omits contracts-tooling "$contracts_tree"
 assert_graph_omits proto-tooling "$proto_tree"
-for required in blake3 gix petgraph rustix serde serde_json serde_json_canonicalizer serde_yaml_ng thiserror; do
+for required in blake3 gix notify-debouncer-full petgraph rustix serde serde_json serde_json_canonicalizer serde_yaml_ng tempfile thiserror; do
   printf '%s\n' "$model_tree" | rg -q "^${required} " || \
     fail "model-compiler graph omits required package $required"
 done
+printf '%s\n' "$model_tree" | rg -qx 'notify-debouncer-full v0.7.0' || \
+  fail 'model-compiler notify-debouncer-full version drifted'
 if printf '%s\n' "$model_tree" | rg -q \
   '^(arrow($|-)|parquet |datafusion($|-)|deltalake($|-)|object_store |pyo3($|-)|rusqlite |tonic($|-)|prost |rayon |tree-sitter($|-)|ruff_python_|ruff_source_file |ruff_text_size )'; then
   fail 'model-compiler graph contains a production, runtime, or provider family'

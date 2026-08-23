@@ -64,7 +64,7 @@ impl SafeOutputPath {
         display_bytes(&self.0)
     }
 
-    fn path_buf(&self) -> PathBuf {
+    pub(crate) fn path_buf(&self) -> PathBuf {
         PathBuf::from(OsString::from_vec(self.0.clone()))
     }
 }
@@ -1324,7 +1324,7 @@ mod tests {
         })]
 
         #[test]
-        fn model_affected_closure_matches_full_recomputation(
+        fn model_incremental_matches_full_for_fixed_property_seed_matrix(
             node_count in 1_usize..24,
             parents in prop::collection::vec(0_usize..24, 0..23),
         ) {
@@ -1339,7 +1339,12 @@ mod tests {
                 .filter(|candidate| graph.prerequisite_closure(candidate).contains(changed))
                 .cloned()
                 .collect();
-            prop_assert_eq!(affected, recomputed);
+            prop_assert_eq!(
+                affected,
+                recomputed,
+                "replay: just model-incremental-check # seed=0xC0DEFAB1 edit=change:{}",
+                changed
+            );
         }
     }
 

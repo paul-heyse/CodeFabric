@@ -13,8 +13,10 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, rustfmt_source,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
+    rustfmt_source,
 };
+use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
 use super::repository_model::read_stable;
 
@@ -640,7 +642,15 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage_path, &plan.descriptor)?;
-    let rendered = driver.render(&plan, &staging)?;
+    let (rendered, cache_lookup) = render_with_cache(
+        repository_root,
+        "schemas",
+        &plan.descriptor,
+        &plan.source_fence,
+        &staging,
+        || executable_tool_identity("rustfmt", &["--version"]),
+        || driver.render(&plan, &staging),
+    )?;
     plan.source_fence.verify(repository_root)?;
     let manifest: Value = serde_json::from_slice(&read_stable(
         &stage_path.join(TABLE_MANIFEST_PATH),
@@ -670,6 +680,7 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
         operational_table_count: plan.ir.operational_tables.len(),
         public_schema_count: plan.ir.public_schemas.len(),
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
+        cache_lookup,
         syntax_detail_fields: syntax_fields,
         stage_root: staging.path().to_string_lossy().into_owned(),
     })
@@ -686,6 +697,7 @@ pub struct SchemaReport {
     pub operational_table_count: usize,
     pub public_schema_count: usize,
     pub rendered_outputs: Vec<String>,
+    pub cache_lookup: CacheLookup,
     pub syntax_detail_fields: Vec<String>,
     pub stage_root: String,
 }

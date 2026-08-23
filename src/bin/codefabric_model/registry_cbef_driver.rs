@@ -12,8 +12,10 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, rustfmt_source,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
+    rustfmt_source,
 };
+use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
 use super::registry_models as governed;
 use super::repository_model::read_stable;
@@ -650,7 +652,15 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage_path, &plan.descriptor)?;
-    let rendered = driver.render(&plan, &staging)?;
+    let (rendered, cache_lookup) = render_with_cache(
+        repository_root,
+        "registry-cbef",
+        &plan.descriptor,
+        &plan.source_fence,
+        &staging,
+        || executable_tool_identity("rustfmt", &["--version"]),
+        || driver.render(&plan, &staging),
+    )?;
     plan.source_fence.verify(repository_root)?;
     let projection_path = staging.output_path(
         &SafeOutputPath::parse(PROJECTION_PATH.as_bytes().to_vec())
@@ -668,6 +678,7 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
         enum_domain_count: plan.enums.records.len(),
         flag_domain_count: plan.flags.records.len(),
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
+        cache_lookup,
         stage_root: staging.path().to_string_lossy().into_owned(),
     })
 }
@@ -683,6 +694,7 @@ pub struct RegistryCbefReport {
     pub enum_domain_count: usize,
     pub flag_domain_count: usize,
     pub rendered_outputs: Vec<String>,
+    pub cache_lookup: CacheLookup,
     pub stage_root: String,
 }
 

@@ -210,6 +210,16 @@ model-repro-check:
 model-transaction-check:
     ./scripts/model_transaction_check.sh
 
+[doc("Validate content-addressed family caching, affected closure, and watcher widening")]
+[group('gate')]
+model-incremental-check:
+    ./scripts/model_incremental_check.sh
+
+[doc("Watch repository hints and recompile the current-byte model after every batch")]
+[group('environment')]
+model-watch:
+    ./scripts/model_exec.sh watch .
+
 [doc("Explain a model artifact ID or repository path")]
 [group('environment')]
 model-explain target:

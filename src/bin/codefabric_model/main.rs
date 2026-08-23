@@ -9,6 +9,7 @@ pub mod aggregate_driver;
 pub(crate) mod catalog;
 pub mod desired_tree;
 pub mod driver_protocol;
+pub mod incremental;
 pub mod model_control;
 pub mod model_git_state;
 #[allow(dead_code, clippy::enum_variant_names, clippy::struct_field_names)] // The shared wire models retain their normative field vocabulary.
@@ -43,11 +44,25 @@ fn main() -> ExitCode {
         }
         Some("release-census-check") => release_census_check(&arguments.collect::<Vec<_>>()),
         Some("sync") => sync(&arguments.collect::<Vec<_>>()),
+        Some("watch") => watch(&arguments.collect::<Vec<_>>()),
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | sync --confirm [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <aggregate|registry-cbef|schemas|adapter|proto> [root] | sync --confirm [root] | watch [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn watch(arguments: &[String]) -> ExitCode {
+    let root = arguments
+        .first()
+        .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    match incremental::watch(&root) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::FAILURE
         }
     }

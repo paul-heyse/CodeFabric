@@ -15,6 +15,7 @@ use super::driver_protocol::{
     DriverDescriptor, DriverEnvironment, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
     DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
 };
+use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
 use super::repository_model::{RepositoryModelError, read_stable};
 
@@ -380,6 +381,7 @@ pub struct AdapterReport {
     pub rendered_outputs: Vec<String>,
     pub tool_identity: AdapterToolIdentity,
     pub validation: Value,
+    pub cache_lookup: CacheLookup,
     pub stage_root: String,
 }
 
@@ -403,7 +405,18 @@ pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriv
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage_path, &plan.descriptor)?;
-    let rendered = driver.render(&plan, &staging)?;
+    let (rendered, cache_lookup) = render_with_cache(
+        repository_root,
+        "adapter",
+        &plan.descriptor,
+        &plan.source_fence,
+        &staging,
+        || {
+            serde_json::to_value(&plan.tool_identity)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))
+        },
+        || driver.render(&plan, &staging),
+    )?;
     plan.source_fence.verify(repository_root)?;
     let validation_path = stage_path.join("contracts/generated/model/adapter-validation.json");
     let validation_bytes =
@@ -421,6 +434,7 @@ pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriv
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
         tool_identity: plan.tool_identity,
         validation,
+        cache_lookup,
         stage_root: stage_path.to_string_lossy().into_owned(),
     })
 }

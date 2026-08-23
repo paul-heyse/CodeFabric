@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 use super::desired_tree::SafeOutputPath;
@@ -417,6 +418,51 @@ fn reject_symlink_ancestors(root: &Path, parent: &Path) -> Result<(), DriverProt
         }
     }
     Ok(())
+}
+
+/// Resolve an external executable by PATH and bind both its bytes and reported version.
+/// Paths remain diagnostic; action identity never trusts a path alone.
+pub fn executable_tool_identity(
+    program: &str,
+    version_arguments: &[&str],
+) -> Result<Value, DriverProtocolError> {
+    let path = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .map(|directory| directory.join(program))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| DriverProtocolError::ExternalTool {
+            tool: "executable-identity",
+            detail: format!("{program} is absent from PATH"),
+        })?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|source| DriverProtocolError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    let bytes = read_stable(&canonical, MAX_DRIVER_SOURCE_BYTES)?;
+    let output = Command::new(&path)
+        .args(version_arguments)
+        .output()
+        .map_err(|source| DriverProtocolError::ExternalTool {
+            tool: "executable-identity",
+            detail: source.to_string(),
+        })?;
+    if !output.status.success() {
+        return Err(DriverProtocolError::ExternalTool {
+            tool: "executable-identity",
+            detail: format!("{program} version query failed"),
+        });
+    }
+    Ok(serde_json::json!({
+        "program": program,
+        "resolved_path": path,
+        "canonical_path": canonical,
+        "executable_digest": digest_bytes(&bytes),
+        "version_stdout": String::from_utf8_lossy(&output.stdout).trim(),
+        "version_stderr": String::from_utf8_lossy(&output.stderr).trim(),
+    }))
 }
 
 fn digest_bytes(bytes: &[u8]) -> String {

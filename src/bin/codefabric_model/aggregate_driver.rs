@@ -140,6 +140,9 @@ pub struct AggregateReport {
     pub requirement_count: usize,
     pub bundle_count: usize,
     pub fixture_count: usize,
+    pub cache_hit_count: usize,
+    pub cache_miss_count: usize,
+    pub conservative_fallback_reasons: Vec<String>,
     pub tree_digest: String,
     pub rendered_outputs: Vec<String>,
     pub stage_root: String,
@@ -452,6 +455,20 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         .keys()
         .map(SafeOutputPath::display)
         .collect::<Vec<_>>();
+    let cache_lookups = [
+        &registry.cache_lookup,
+        &schemas.cache_lookup,
+        &adapter.cache_lookup,
+        &proto.cache_lookup,
+    ];
+    let cache_hit_count = cache_lookups
+        .iter()
+        .filter(|lookup| lookup.is_hit())
+        .count();
+    let conservative_fallback_reasons = cache_lookups
+        .iter()
+        .filter_map(|lookup| lookup.miss_reason().map(str::to_owned))
+        .collect::<Vec<_>>();
     Ok(AggregateReport {
         family: "aggregate".to_owned(),
         artifact_count: artifacts.len(),
@@ -466,6 +483,9 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         requirement_count: requirements.len(),
         bundle_count: bundles.len(),
         fixture_count: fixtures.len(),
+        cache_hit_count,
+        cache_miss_count: cache_lookups.len() - cache_hit_count,
+        conservative_fallback_reasons,
         tree_digest,
         rendered_outputs,
         stage_root: stage_root.to_string_lossy().into_owned(),

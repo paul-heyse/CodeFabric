@@ -39,6 +39,7 @@ contracts-tooling = [
 model-compiler = [
     "dep:blake3",
     "dep:gix",
+    "dep:notify-debouncer-full",
     "dep:petgraph",
     "dep:rustix",
     "dep:serde",
@@ -129,6 +130,7 @@ datafusion = { version = "=54.1.0", optional = true }
 deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion"], optional = true }
 futures = { version = "0.3", optional = true }
 gix = { version = "=0.86.0", default-features = false, features = ["sha1", "sha256", "revision", "index", "status", "attributes", "excludes", "dirwalk", "blob-diff", "interrupt", "parallel", "auto-chain-error", "tracing"], optional = true }
+notify-debouncer-full = { version = "=0.7.0", optional = true }
 object_store = { version = "=0.13.2", optional = true }
 parquet = { version = "=58.4.0", features = ["arrow", "async", "object_store"], optional = true }
 petgraph = { version = "=0.8.3", default-features = false, features = ["std"], optional = true }

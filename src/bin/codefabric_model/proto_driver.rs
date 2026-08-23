@@ -13,8 +13,9 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverEnvironment, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
 };
+use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
 use super::repository_model::{RepositoryModelError, read_stable};
 
@@ -613,6 +614,23 @@ fn build_rust_generator(plan: &ProtoPlan) -> Result<RustGenerator, ProtoDriverEr
     })
 }
 
+fn cache_tool_identity(plan: &ProtoPlan) -> Result<Value, ProtoDriverError> {
+    let generator = build_rust_generator(plan)?;
+    Ok(json!({
+        "python": plan.python_identity,
+        "rust_generator": {
+            "action_key": format!("b3:{}", generator.action_key),
+            "executable_digest": digest_file(&generator.executable)?,
+            "cargo_lock_digest": digest_file(&plan.repository_root.join(CARGO_LOCK_PATH))?,
+            "cargo_manifest_digest": digest_file(&plan.repository_root.join(CARGO_MANIFEST_PATH))?,
+            "features": ["proto-tooling"],
+            "profile": "debug",
+            "rustc": generator.rustc.trim(),
+        },
+        "rustfmt": executable_tool_identity("rustfmt", &["--version"])?
+    }))
+}
+
 fn generated_header(
     sources: &[ExternalProtoSource],
     comment: &str,
@@ -686,6 +704,7 @@ pub struct ProtoReport {
     pub package_count: usize,
     pub compiler_invocations: u64,
     pub tool_identity: Value,
+    pub cache_lookup: CacheLookup,
     pub stage_root: String,
 }
 
@@ -709,7 +728,18 @@ pub fn check_family(repository_root: &Path) -> Result<ProtoReport, ProtoDriverEr
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage, &plan.descriptor)?;
-    let rendered = driver.render(&plan, &staging)?;
+    let (rendered, cache_lookup) = render_with_cache(
+        repository_root,
+        "proto",
+        &plan.descriptor,
+        &plan.source_fence,
+        &staging,
+        || {
+            cache_tool_identity(&plan)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))
+        },
+        || driver.render(&plan, &staging),
+    )?;
     let census: Value = serde_json::from_slice(&read_stable(
         &stage.join("tooling/proto/descriptor-census.json"),
         MAX_OUTPUT_BYTES,
@@ -739,8 +769,9 @@ pub fn check_family(repository_root: &Path) -> Result<ProtoReport, ProtoDriverEr
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
         descriptor_file_count: files.len(),
         package_count: packages.len(),
-        compiler_invocations: 1,
+        compiler_invocations: u64::from(!matches!(&cache_lookup, CacheLookup::Hit { .. })),
         tool_identity,
+        cache_lookup,
         stage_root: stage.to_string_lossy().into_owned(),
     })
 }
