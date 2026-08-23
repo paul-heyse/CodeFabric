@@ -6,6 +6,21 @@
   "status": "released",
   "canonical_digest": "b3:e9a5df2b3a872e47faa4bb539bf4eb845319a3479666b672c2de356e09f240c0",
   "schema_version": 1,
+  "fastmcp_tool_profile": {
+    "profile": "codefabric-fastmcp-tool-manifest-v1",
+    "fields": ["name", "title", "description", "inputSchema", "outputSchema", "icons", "annotations", "_meta", "execution"]
+  },
+  "projections": [
+    {"output_id":"output:adapter-wire-models","path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/wire_models.py","role":"python-binding","projection_kind":"pydantic-model-source","package_path":"contracts/wire_models.py"},
+    {"output_id":"output:adapter-schema-manifest","path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-schemas.json","role":"canonical-projection","projection_kind":"pydantic-schema-manifest","package_path":"contracts/adapter-schemas.json"},
+    {"output_id":"output:adapter-schema-fingerprints","path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json","role":"canonical-projection","projection_kind":"pydantic-fingerprint-manifest","package_path":"contracts/adapter-fingerprints.json"},
+    {"output_id":"output:adapter-fastmcp-fingerprints","path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/fingerprints.py","role":"python-binding","projection_kind":"fastmcp-fingerprint-module","package_path":"contracts/fingerprints.py"},
+    {"output_id":"output:adapter-package-data","path":"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-package-data.json","role":"canonical-projection","projection_kind":"python-package-manifest","package_path":"contracts/adapter-package-data.json"},
+    {"output_id":"output:adapter-fastmcp-input-schema","path":"contracts/adapter/fastmcp-input.schema.json","role":"public-json-schema","projection_kind":"public-json-schema","artifact_id":"codefabric.adapter.fastmcp-input.schema","title":"FastMCP tool input contracts","model_roots":["QueryToolInput","ValidateToolInput","StatusToolInput","ReferenceToolInput"],"mode":"validation"},
+    {"output_id":"output:adapter-fastmcp-output-schema","path":"contracts/adapter/fastmcp-output.schema.json","role":"public-json-schema","projection_kind":"public-json-schema","artifact_id":"codefabric.adapter.fastmcp-output.schema","title":"FastMCP tool output contracts","model_roots":["QueryToolOutput","ValidateQueryOutput","StatusToolOutput","ReferenceToolOutput"],"mode":"serialization"},
+    {"output_id":"output:adapter-fastmcp-public-meta-schema","path":"contracts/adapter/fastmcp-public-meta.schema.json","role":"public-json-schema","projection_kind":"public-json-schema","artifact_id":"codefabric.adapter.fastmcp-public-meta.schema","title":"FastMCP public metadata contract","model_roots":["PublicToolMeta"],"mode":"serialization"},
+    {"output_id":"output:adapter-validation","path":"contracts/generated/model/adapter-validation.json","role":"validation-report","projection_kind":"validation-report"}
+  ],
   "models": [
     {
       "name": "SnapshotSummary",

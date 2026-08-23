@@ -2,6 +2,7 @@
 
 use std::process::ExitCode;
 
+pub mod adapter_driver;
 pub mod desired_tree;
 pub mod driver_protocol;
 pub mod model_control;
@@ -32,7 +33,7 @@ fn main() -> ExitCode {
         Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <registry-cbef|schemas> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | plan [changed-id-or-path ...] [--root root] | check [--root root] | family-check <registry-cbef|schemas|adapter> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
             ExitCode::FAILURE
         }
@@ -48,6 +49,11 @@ fn family_check(arguments: &[String]) -> ExitCode {
         .get(1)
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
     let result = match family.as_str() {
+        "adapter" => adapter_driver::check_family(&root)
+            .and_then(|report| {
+                serde_json::to_string(&report).map_err(adapter_driver::AdapterDriverError::Json)
+            })
+            .map_err(|error| error.to_string()),
         "registry-cbef" => registry_cbef_driver::check_family(&root)
             .and_then(|report| {
                 serde_json::to_string(&report)

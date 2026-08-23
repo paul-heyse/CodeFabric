@@ -6,6 +6,9 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 family="${1:-}"
 
 case "$family" in
+  adapter)
+    test_filter='test(model_adapter)'
+    ;;
   registry-cbef)
     test_filter='test(model_cbef) | test(model_registry) | test(model_overlay)'
     ;;
@@ -24,6 +27,11 @@ esac
 
 before_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all | shasum -a 256 | awk '{print $1}')"
 
+if [ "$family" = adapter ]; then
+  env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT \
+    uv sync --frozen --project "$repo_root/codefabric-cpg-mcp"
+fi
+
 cargo nextest run \
   --manifest-path "$repo_root/Cargo.toml" \
   --locked \
@@ -35,6 +43,27 @@ cargo nextest run \
 report="$($repo_root/scripts/model_exec.sh family-check "$family" "$repo_root")"
 stage_root="$(jq -r '.stage_root' <<<"$report")"
 case "$family" in
+  adapter)
+    jq -e '
+      .family == "adapter"
+      and .validation.model_count > 0
+      and .validation.union_count > 0
+      and .validation.projection_count == (.rendered_outputs | length)
+      and .validation.validation_schema_count == (.validation.model_count + .validation.union_count + 1)
+      and .validation.serialization_schema_count == .validation.validation_schema_count
+      and .tool_identity.python_version == "3.14.7"
+      and .tool_identity.pydantic_version == "2.13.4"
+      and .tool_identity.fastmcp_version == "3.4.7"
+      and (.tool_identity.python_digest | startswith("b3:"))
+      and (.tool_identity.ruff_digest | startswith("b3:"))
+    ' <<<"$report" >/dev/null
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root:$repo_root/codefabric-cpg-mcp/src" \
+      uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
+      pytest "$repo_root/tooling/model/test_adapter_driver.py"
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root:$repo_root/codefabric-cpg-mcp/src" \
+      uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
+      python "$repo_root/tooling/model/validate_staged_adapter.py" "$stage_root"
+    ;;
   registry-cbef)
     jq -e '
       .family == "registry-cbef"
