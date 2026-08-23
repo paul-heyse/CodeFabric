@@ -41,7 +41,8 @@
     "The pre-adoption `just ci-fast` failed only in active Waves 4-7 v4 artifact-contract tests because its declared Data Fabric input is stale; all Rust, doctest, extractor, sidecar, adapter, and structural-rule stages passed."
   ],
   "discovered_obligations": [
-    {"owner": "WP06", "summary": "Absorb the pre-existing unproved WP32 source/syntax work through the tracked transition-overlay mechanism without storing derived diff identity in state or claiming WP32 completion."}
+    {"owner": "WP06", "summary": "Absorb the pre-existing unproved WP32 source/syntax work through the tracked transition-overlay mechanism without storing derived diff identity in state or claiming WP32 completion."},
+    {"owner": "WP14/DB01-DB05", "summary": "At terminal cutover, remove every legacy artifact, authored manifest, dispatcher, writer, script, recipe, packet mutation surface, and assurance implementation whose invariant is independently owned and proven by the model-driven control plane; do not retain superseded governance merely to keep its historical gate green."}
   ],
   "plan_deviations": [
     {"kind": "explicit_user_approval", "summary": "The user explicitly approved and requested execution of implementation plan v1 on 2026-08-22."},
@@ -51,6 +52,6 @@
     {"kind": "accepted_scope_deferral", "summary": "License considerations remain user-deferred and are not part of this plan."},
     {"kind": "accepted_gate_substitution", "summary": "Once a model-driven governance measure is fully functional and has independent equivalence or stronger-coverage evidence for an invariant, the superseded legacy measure is no longer a completion blocker and moves to its planned decommission zero state. This does not waive legacy checks for invariants the replacement does not yet cover."}
   ],
-  "next_action": "Implement WP04's compact owner-accepted release census, candidate review path, guarded acceptance command, tombstone semantics, and routine-write prohibition without deriving acceptance from the legacy catalog.",
-  "updated_at": "2026-08-23T03:08:49Z"
+  "next_action": "Pause at WP04's required human checkpoint: the owner reviews the generated 66-ID release-census candidate and explicitly supplies owner identity and acceptance provenance before the guarded one-time acceptance command runs.",
+  "updated_at": "2026-08-23T03:25:47Z"
 }

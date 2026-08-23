@@ -880,13 +880,12 @@ fn walk_family(
             return Err(RepositoryModelError::ResourceLimit("total-bytes"));
         }
         let parser = parser_for(&path.raw_bytes, rule.parser);
-        let header = if matches!(
-            claim_role,
-            ArtifactRole::Authority | ArtifactRole::EvidenceAuthority | ArtifactRole::Acceptance
-        ) {
-            Some(parse_header(&path, parser, &bytes, claim_role)?)
-        } else {
-            None
+        let header = match claim_role {
+            ArtifactRole::Authority
+            | ArtifactRole::EvidenceAuthority
+            | ArtifactRole::Acceptance => Some(parse_header(&path, parser, &bytes, claim_role)?),
+            ArtifactRole::Derived => parse_derived_header(&path, parser, &bytes)?,
+            ArtifactRole::Ignored => None,
         };
         let mut states = git_states.get(&path.raw_bytes).cloned().unwrap_or_default();
         if states.is_empty() {
@@ -990,9 +989,11 @@ fn role_for(policy: ClaimPolicy, path: &[u8], suffix: &str) -> ArtifactRole {
     }
 }
 
-fn contract_role(path: &[u8]) -> ArtifactRole {
+pub(super) fn contract_role(path: &[u8]) -> ArtifactRole {
     if path.starts_with(b"contracts/fixtures/") {
         ArtifactRole::EvidenceAuthority
+    } else if path.starts_with(b"contracts/acceptance/") {
+        ArtifactRole::Acceptance
     } else if path.starts_with(b"contracts/generated/")
         || path.starts_with(b"contracts/bundles/")
         || path.starts_with(b"contracts/toolchain/")
@@ -1056,6 +1057,33 @@ fn parse_header(
         return schema_header_from_id(path, &fields);
     }
     header_from_fields(path, &fields)
+}
+
+fn parse_derived_header(
+    path: &RepositoryPath,
+    parser: NativeParser,
+    bytes: &[u8],
+) -> Result<Option<ArtifactHeader>, RepositoryModelError> {
+    let fields = match parser {
+        NativeParser::Json => json_header(path, bytes)?,
+        NativeParser::JsonLines => jsonl_header(path, bytes)?,
+        NativeParser::Yaml => yaml_header(path, bytes)?,
+        NativeParser::MarkdownHeader | NativeParser::CommentHeader => {
+            match text_header(path, bytes) {
+                Ok(fields) => fields,
+                Err(RepositoryModelError::MissingHeader(_)) => return Ok(None),
+                Err(error) => return Err(error),
+            }
+        }
+        NativeParser::Opaque => return Ok(None),
+    };
+    if fields.contains_key("artifact_id") {
+        return header_from_fields(path, &fields).map(Some);
+    }
+    if path.raw_bytes.ends_with(b".schema.json") && fields.contains_key("$id") {
+        return schema_header_from_id(path, &fields).map(Some);
+    }
+    Ok(None)
 }
 
 fn synthetic_acceptance_header(
@@ -1289,7 +1317,7 @@ fn output_id(path: &[u8]) -> Result<StableId, RepositoryModelError> {
     StableId::parse(format!("output:{}", blake3::hash(path).to_hex())).map_err(Into::into)
 }
 
-fn read_stable(path: &Path, maximum: usize) -> Result<Vec<u8>, RepositoryModelError> {
+pub(super) fn read_stable(path: &Path, maximum: usize) -> Result<Vec<u8>, RepositoryModelError> {
     let before = fs::metadata(path).map_err(|error| io_error(path, error))?;
     if before.len() > u64::try_from(maximum).unwrap_or(u64::MAX) {
         return Err(RepositoryModelError::ResourceLimit("file-bytes"));

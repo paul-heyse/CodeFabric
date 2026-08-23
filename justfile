@@ -175,6 +175,11 @@ model-bootstrap-check:
 model-inventory-check:
     ./scripts/model_inventory_check.sh
 
+[doc("Verify the owner-accepted released-artifact census against the compiled model")]
+[group('gate')]
+model-release-census-check:
+    ./scripts/model_release_census_check.sh
+
 [doc("Explain a model artifact ID or repository path")]
 [group('environment')]
 model-explain target:
@@ -626,6 +631,17 @@ adapter-contracts-gen:
 [group('mutating')]
 fixture-candidates output_dir="target/fixture-candidates":
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/contracts/fixture_candidates.py --output-dir "{{output_dir}}"
+
+[doc("MUTATES DISPOSABLE STATE: emit the released-artifact census review candidate under target/")]
+[group('mutating')]
+model-release-census-candidate:
+    ./scripts/model_exec.sh release-census-candidate .
+
+[confirm("Accept the reviewed released-artifact census as owner authority. Continue?")]
+[doc("MUTATES: create the owner-accepted released-artifact census exactly once")]
+[group('mutating')]
+model-accept kind owner provenance:
+    ./scripts/model_exec.sh accept "{{kind}}" --owner "{{owner}}" --provenance "{{provenance}}" --reviewed .
 
 [confirm("typos -w rewrites source in place; identifier fixes can be API changes. Continue?")]
 [doc("MUTATES: apply spelling corrections to source")]

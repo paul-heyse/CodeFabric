@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 pub mod model_control;
 pub mod model_git_state;
+pub mod release_census;
 pub mod repository_model;
 
 fn main() -> ExitCode {
@@ -17,10 +18,116 @@ fn main() -> ExitCode {
         }
         Some("inventory") => inventory(&arguments.collect::<Vec<_>>()),
         Some("explain") => explain(&arguments.collect::<Vec<_>>()),
+        Some("release-census-candidate") => {
+            release_census_candidate(&arguments.collect::<Vec<_>>())
+        }
+        Some("release-census-check") => release_census_check(&arguments.collect::<Vec<_>>()),
+        Some("accept") => accept(&arguments.collect::<Vec<_>>()),
         _ => {
             eprintln!(
-                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root]"
+                "usage: codefabric-model --identity | inventory [--no-gix] [root] | explain <id-or-path> [root] | release-census-candidate [root] | release-census-check [root] | accept release-census --owner <id> --provenance <text> --reviewed [root]"
             );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn compile_repository(root: &std::path::Path) -> Result<repository_model::RepositoryModel, String> {
+    repository_model::RepositoryModel::discover(
+        root,
+        repository_model::InventoryBounds::default(),
+        true,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn release_census_candidate(arguments: &[String]) -> ExitCode {
+    let root = arguments
+        .first()
+        .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    match compile_repository(&root)
+        .and_then(|model| release_census::write_candidate(&root, &model).map_err(|e| e.to_string()))
+        .and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
+    {
+        Ok(report) => {
+            println!("{report}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn release_census_check(arguments: &[String]) -> ExitCode {
+    let root = arguments
+        .first()
+        .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    match compile_repository(&root)
+        .and_then(|model| release_census::check(&root, &model).map_err(|error| error.to_string()))
+    {
+        Ok(()) => {
+            println!("release census check passed");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn accept(arguments: &[String]) -> ExitCode {
+    if arguments.first().map(String::as_str) != Some("release-census") {
+        eprintln!("accept requires the closed kind release-census");
+        return ExitCode::FAILURE;
+    }
+    let option = |name: &str| {
+        arguments
+            .windows(2)
+            .find(|pair| pair[0] == name)
+            .map(|pair| pair[1].clone())
+    };
+    let Some(owner_identity) = option("--owner") else {
+        eprintln!("accept release-census requires --owner");
+        return ExitCode::FAILURE;
+    };
+    let Some(acceptance_provenance) = option("--provenance") else {
+        eprintln!("accept release-census requires --provenance");
+        return ExitCode::FAILURE;
+    };
+    let root = arguments
+        .iter()
+        .rev()
+        .find(|argument| {
+            argument.as_str() != "release-census"
+                && argument.as_str() != "--reviewed"
+                && !argument.starts_with("--")
+                && *argument != &owner_identity
+                && *argument != &acceptance_provenance
+        })
+        .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
+    let authorization = release_census::AcceptanceAuthorization {
+        owner_identity,
+        acceptance_provenance,
+        reviewed_candidate: arguments.iter().any(|argument| argument == "--reviewed"),
+    };
+    match release_census::accept_candidate(&root, &authorization) {
+        Ok(census) => {
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "accepted_path": release_census::accepted_relative_path(),
+                    "artifact_id": census.artifact_id,
+                    "candidate_digest": census.owner_acceptance.candidate_digest,
+                }))
+                .expect("acceptance report serializes")
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::FAILURE
         }
     }
