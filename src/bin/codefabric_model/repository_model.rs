@@ -85,6 +85,12 @@ impl RepositoryPath {
     pub const fn display_is_lossy(&self) -> bool {
         self.display_is_lossy
     }
+
+    /// Borrow the byte-native repository-relative path identity.
+    #[must_use]
+    pub fn raw_bytes(&self) -> &[u8] {
+        &self.raw_bytes
+    }
 }
 
 /// Read-only Git/worktree classification. Multiple states may apply to one path.
@@ -1313,7 +1319,7 @@ fn normalize_kind(value: &str) -> String {
         .replace("released-normative-specification", "released")
 }
 
-fn output_id(path: &[u8]) -> Result<StableId, RepositoryModelError> {
+pub(super) fn output_id(path: &[u8]) -> Result<StableId, RepositoryModelError> {
     StableId::parse(format!("output:{}", blake3::hash(path).to_hex())).map_err(Into::into)
 }
 

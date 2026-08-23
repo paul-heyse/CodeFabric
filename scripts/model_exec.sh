@@ -34,4 +34,10 @@ CARGO_TARGET_DIR="$target_dir" cargo build --quiet --locked --no-default-feature
   printf 'model executable is absent after build: %s\n' "$executable" >&2
   exit 1
 }
+export CODEFABRIC_MODEL_COMPILER_SOURCE_IDENTITY="sha256:$source_identity"
+export CODEFABRIC_MODEL_CARGO_LOCK_IDENTITY="sha256:$lock_identity"
+export CODEFABRIC_MODEL_RUSTC_IDENTITY="$rustc_identity"
+export CODEFABRIC_MODEL_FEATURE_SET="model-compiler"
+export CODEFABRIC_MODEL_PROFILE="dev"
+export CODEFABRIC_MODEL_TARGET_TRIPLE="$target_triple"
 exec "$executable" "$@"

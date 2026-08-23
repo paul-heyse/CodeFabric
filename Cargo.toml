@@ -165,6 +165,7 @@ url = { version = "2", optional = true }
 [dev-dependencies]
 hyper-util = { version = "=0.1.20", features = ["tokio"] }
 insta = "=1.48.0"
+proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
 serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
 tokio-stream = { version = "=0.1.18", features = ["net"] }
 tower = { version = "=0.5.3", features = ["util"] }

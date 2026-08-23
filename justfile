@@ -180,6 +180,21 @@ model-inventory-check:
 model-release-census-check:
     ./scripts/model_release_census_check.sh
 
+[doc("Validate typed action keys, affected closure, DesiredTree parity, and zero repository writes")]
+[group('gate')]
+model-plan-check:
+    ./scripts/model_plan_check.sh
+
+[doc("Print the structured read-only model action plan for optional changed paths")]
+[group('environment')]
+model-plan *paths:
+    ./scripts/model_exec.sh plan "$@" --root .
+
+[doc("Validate the read-only desired tree under a model assurance profile")]
+[group('gate')]
+model-check profile="edit":
+    ./scripts/model_exec.sh check "{{profile}}" --root .
+
 [doc("Explain a model artifact ID or repository path")]
 [group('environment')]
 model-explain target:
