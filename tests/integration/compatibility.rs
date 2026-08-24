@@ -51,6 +51,7 @@ fn wp02_structural_exact_graph() {
     let output = Command::new("bash")
         .arg(repository_root().join("scripts/stable_graph_check.sh"))
         .current_dir(repository_root())
+        .env_remove("CARGO_TARGET_DIR")
         .output()
         .expect("run exact resolved-graph contract");
     assert!(
