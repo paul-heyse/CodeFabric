@@ -590,7 +590,7 @@ fn build_rust_generator(plan: &ProtoPlan) -> Result<RustGenerator, ProtoDriverEr
     )?);
     identity_material.extend(rustc.as_bytes());
     identity_material
-        .extend(b"proto-tooling|debug|host|reproducible-path-remap-strip-no-uuid-v3|incremental=0");
+        .extend(b"proto-tooling|debug|host|reproducible-path-remap-nodebug-v3|incremental=0");
     let action_key = blake3::hash(&identity_material).to_hex().to_string();
     let target = plan
         .repository_root

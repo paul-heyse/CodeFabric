@@ -489,10 +489,7 @@ pub fn configure_reproducible_cargo_build(command: &mut Command, repository_root
         .env(
             "CARGO_ENCODED_RUSTFLAGS",
             format!(
-                concat!(
-                    "--remap-path-prefix={}=/codefabric\u{1f}",
-                    "-Cstrip=debuginfo\u{1f}-Clink-arg=-Wl,-no_uuid"
-                ),
+                "--remap-path-prefix={}=/codefabric\u{1f}-Cdebuginfo=0",
                 repository_root.display()
             ),
         );
@@ -634,10 +631,9 @@ mod tests {
             environment
                 .get(std::ffi::OsStr::new("CARGO_ENCODED_RUSTFLAGS"))
                 .and_then(Option::as_deref),
-            Some(std::ffi::OsStr::new(concat!(
-                "--remap-path-prefix=/tmp/source root=/codefabric\u{1f}",
-                "-Cstrip=debuginfo\u{1f}-Clink-arg=-Wl,-no_uuid"
-            )))
+            Some(std::ffi::OsStr::new(
+                "--remap-path-prefix=/tmp/source root=/codefabric\u{1f}-Cdebuginfo=0"
+            ))
         );
         assert_eq!(
             environment.get(std::ffi::OsStr::new("RUSTFLAGS")),
