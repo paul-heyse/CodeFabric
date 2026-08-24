@@ -1,0 +1,134 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_data_fabric_datafusion55_arrow59_delta43a0cf10_implementation_plan_v1_2026-08-23.md",
+  "design_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+  "baseline_commit": "d89cc90cd2e51c4b716b2a4da2c0a8d6f79d5409",
+  "status": "executing",
+  "current_packet": "WP01",
+  "packets": {
+    "WP01": {
+      "status": "in_progress",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP06": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [
+    {
+      "command": "just ci-fast",
+      "summary": "The pre-edit baseline reached root nextest and failed golden_corpus::tests::wp34_behavioral_acceptance because the observed profile digest differs from the accepted fixture digest.",
+      "ownership": "The failure predates this plan's edits and coincides with the pre-existing user modification to artifact-schemas.md; WP02 model reconciliation must preserve that edit and eliminate the unexplained digest drift before final certification."
+    }
+  ],
+  "discovered_obligations": [
+    {
+      "owner": "WP02",
+      "summary": "Preserve and incorporate the pre-existing user edit to .claude/skills/_shared/artifact-schemas.md when model-owned digest outputs are reconciled; do not overwrite or revert it."
+    },
+    {
+      "owner": "WP06",
+      "summary": "Limit old-authority zero-state claims to tracked live scopes; the pre-existing untracked top-level skills tree and unrelated user documents remain outside the authorized edit scope."
+    }
+  ],
+  "plan_deviations": [
+    {
+      "kind": "explicit_user_approval",
+      "summary": "The repository owner explicitly requested execution of the entire draft plan on 2026-08-24; this instruction approved the plan and authorized activation."
+    },
+    {
+      "kind": "active_program_transition",
+      "summary": "The prior Waves 4-7 active plan was complete and healthy before the pointer moved to this upgrade plan; its plan and state remain immutable historical evidence."
+    }
+  ],
+  "next_action": "Execute WP01 preflight, commit the old-stack compatibility and checksum baseline, and establish the reusable benchmark and cross-revision recipes before changing dependency pins.",
+  "updated_at": "2026-08-24T05:55:01Z"
+}
