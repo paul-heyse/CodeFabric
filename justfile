@@ -131,8 +131,8 @@ wave3-integration-check:
 [doc("Run the DataFusion 55, Arrow 59, and delta 43a0cf10 behavioral contract")]
 [group('test')]
 data-fabric-upgrade-check:
-    cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|delta_43a0cf10_)/)' --no-tests=fail
-    cargo nextest run --locked --lib -E 'test(/(datafusion_55_|delta_43a0cf10_unapproved|wp03_operational)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|wp05_|delta_43a0cf10_|data_fabric_(old_write_new_read|new_write_old_read)_compatibility)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(datafusion_55_|delta_43a0cf10_|wp03_operational|wp05_|wp2[12]_)/)' --no-tests=fail
 
 [doc("Run the complete Wave-4 source/provider/core-fact acceptance slice")]
 [group('test')]

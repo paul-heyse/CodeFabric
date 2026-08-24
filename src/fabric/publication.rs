@@ -1758,4 +1758,11 @@ mod tests {
             assert_eq!(operations, committed);
         }
     }
+
+    #[test]
+    fn wp05_behavioral_mutation_recovery() {
+        wp22_behavioral_acceptance();
+        wp22_negative_zero_state();
+        wp22_operational_acceptance();
+    }
 }

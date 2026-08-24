@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -21,12 +22,15 @@ use codefabric::fabric::{
 };
 use datafusion::catalog::ScanArgs;
 use datafusion::logical_expr::statistics::StatisticsRequest;
+use datafusion::logical_expr::{col, lit};
 use datafusion::physical_plan::displayable;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use deltalake::DeltaTableBuilder;
+use deltalake::delta_datafusion::SessionFallbackPolicy;
 use deltalake::kernel::engine::arrow_conversion::TryIntoKernel as _;
 use deltalake::kernel::{Transaction, transaction::CommitProperties};
 use deltalake::operations::create::CreateBuilder;
+use deltalake::operations::optimize::OptimizeType;
 use deltalake::protocol::SaveMode;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -125,6 +129,26 @@ fn second_batch() -> RecordBatch {
     .expect("valid second fixture batch")
 }
 
+fn mutation_batch() -> RecordBatch {
+    RecordBatch::try_new(
+        fixture_schema(),
+        vec![
+            Arc::new(BinaryArray::from(vec![Some(
+                [170_u8, 187, 204, 221].as_slice(),
+            )])),
+            Arc::new(StringArray::from(vec![Some("target-insert")])),
+            Arc::new(Float64Array::from(vec![Some(9.25)])),
+            Arc::new(
+                TimestampMicrosecondArray::from(vec![Some(1_900_000_000_000_000_i64)])
+                    .with_timezone("UTC"),
+            ),
+            tags(&[Some(vec![Some("target"), Some("compatibility")])]),
+            Arc::new(BooleanArray::from(vec![true])),
+        ],
+    )
+    .expect("valid target mutation batch")
+}
+
 fn ordered_batch() -> RecordBatch {
     concat_batches(&fixture_schema(), &[first_batch(), second_batch()])
         .expect("fixture batches concatenate")
@@ -155,6 +179,10 @@ fn projected_primary_key(batch: &RecordBatch) -> RecordBatch {
 
 fn digest(value: &[u8]) -> String {
     format!("b3:{}", blake3::hash(value).to_hex())
+}
+
+fn inferred_default<T: Default>() -> T {
+    T::default()
 }
 
 fn batch_digest(batch: &RecordBatch) -> String {
@@ -389,6 +417,24 @@ fn assert_protocol_baseline(root: &Path, expected: &Value) {
     assert!(log.contains("\"version\":2"));
     assert_eq!(expected["delta"]["reader_features"], json!([]));
     assert_eq!(expected["delta"]["writer_features"], json!([]));
+}
+
+async fn assert_latest_retry_posture(table: &deltalake::DeltaTable, expected: Option<u64>) {
+    let latest = table
+        .history(Some(1))
+        .await
+        .expect("read latest Delta commit")
+        .next()
+        .expect("latest Delta commit exists");
+    let metrics = &latest.info["operationMetrics"];
+    let observed = metrics
+        .get("num_retries")
+        .or_else(|| metrics.get("numRetries"));
+    assert_eq!(
+        observed.and_then(Value::as_u64),
+        expected,
+        "operationMetrics={metrics}"
+    );
 }
 
 async fn validate_fixture(root: &Path, require_old_identity: bool) {
@@ -662,6 +708,223 @@ async fn delta_43a0cf10_provider_pruning_contract() {
             .sum::<usize>(),
         1
     );
+}
+
+#[tokio::test]
+async fn data_fabric_old_write_new_read_compatibility() {
+    let temporary = TempDir::new().expect("fixture copy temporary directory");
+    copy_tree(&fixture_root(), temporary.path());
+    let location = Url::from_directory_path(temporary.path().join(DELTA_DIR))
+        .expect("fixture path is a file URL");
+    let expected = manifest(temporary.path());
+    let baseline_checksum = batch_digest(&query_version(temporary.path(), 2).await);
+    let table = DeltaTableBuilder::from_url(location)
+        .expect("create old-state mutation builder")
+        .load()
+        .await
+        .expect("open old-stack state with target delta-rs");
+
+    let table = table
+        .write([mutation_batch()])
+        .with_save_mode(SaveMode::Append)
+        .with_commit_properties(commit_properties(3))
+        .await
+        .expect("append target row to old-stack state");
+    assert_eq!(table.version(), Some(3));
+    assert_latest_retry_posture(&table, Some(0)).await;
+    let latest = table
+        .history(Some(1))
+        .await
+        .expect("read append history")
+        .next()
+        .expect("append commit exists");
+    assert_eq!(latest.info["operation_id"], "fixture-3");
+    assert_eq!(latest.info["application_version"], 3);
+
+    let (table, updated) = table
+        .update()
+        .with_predicate(col("label").eq(lit("omega")))
+        .with_update("label", lit("omega-updated"))
+        .with_commit_properties(commit_properties(4))
+        .await
+        .expect("update old-stack state with target delta-rs");
+    assert_eq!(updated.num_updated_rows, 1);
+    assert_eq!(table.version(), Some(4));
+    // The pinned revision persists retry telemetry for Write metrics only. DML
+    // remains coordinator-owned with max_retries=0, but its metrics schema has
+    // no retry field, so absence is the explicit non-applicable posture.
+    assert_latest_retry_posture(&table, None).await;
+
+    let before_noop = table.version();
+    let (table, no_op) = table
+        .delete()
+        .with_predicate(col("label").eq(lit("absent-row")))
+        .with_commit_properties(commit_properties(5))
+        .await
+        .expect("execute no-op target delete");
+    assert_eq!(no_op.num_deleted_rows, Some(0));
+    assert_eq!(table.version(), before_noop);
+
+    let (table, deleted) = table
+        .delete()
+        .with_predicate(col("active").eq(lit(false)))
+        .with_commit_properties(commit_properties(5))
+        .await
+        .expect("delete old-stack row with target delta-rs");
+    assert_eq!(deleted.num_deleted_rows, Some(1));
+    assert_eq!(table.version(), Some(5));
+    assert_latest_retry_posture(&table, None).await;
+    assert_eq!(
+        table
+            .snapshot()
+            .expect("target mutation snapshot")
+            .transaction_version(&table.log_store(), "codefabric/wp01/data-fabric-upgrade")
+            .await
+            .expect("application transaction version"),
+        Some(5)
+    );
+
+    assert_eq!(
+        batch_digest(&query_version(temporary.path(), 2).await),
+        baseline_checksum
+    );
+    assert_eq!(query_version(temporary.path(), 3).await.num_rows(), 4);
+    assert_eq!(query_version(temporary.path(), 4).await.num_rows(), 4);
+    let final_rows = query_version(temporary.path(), 5).await;
+    assert_eq!(final_rows.schema(), fixture_schema());
+    assert_eq!(final_rows.num_rows(), 3);
+    let labels = final_rows
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("label column");
+    assert!(
+        labels
+            .iter()
+            .flatten()
+            .any(|label| label == "omega-updated")
+    );
+    assert!(
+        labels
+            .iter()
+            .flatten()
+            .any(|label| label == "target-insert")
+    );
+    assert_protocol_baseline(temporary.path(), &expected);
+    DeltaHandleFactory::open(
+        table.table_url().as_str(),
+        Some(5),
+        DeltaAccessProfile::QueryServing,
+    )
+    .await
+    .expect("reopen target-mutated old state through fail-closed factory");
+}
+
+#[tokio::test]
+async fn data_fabric_new_write_old_read_compatibility() {
+    let temporary = TempDir::new().expect("target fixture temporary directory");
+    let root = temporary.path().join("target-produced");
+    generate_fixture(&root).await;
+    let expected = manifest(&root);
+    assert_eq!(expected["producer"]["arrow"], "59.2.0");
+    assert_eq!(expected["producer"]["datafusion"], "55.0.0");
+    assert_eq!(
+        expected["producer"]["delta_revision"],
+        "43a0cf10a313e5077c48637ad786a05359136bbb"
+    );
+    validate_fixture(&root, false).await;
+    assert_protocol_baseline(&root, &expected);
+}
+
+#[tokio::test]
+async fn delta_43a0cf10_maintenance_contract() {
+    let temporary = TempDir::new().expect("maintenance fixture temporary directory");
+    copy_tree(&fixture_root(), temporary.path());
+    let location = Url::from_directory_path(temporary.path().join(DELTA_DIR))
+        .expect("fixture path is a file URL");
+    let table = DeltaTableBuilder::from_url(location.clone())
+        .expect("create maintenance builder")
+        .load()
+        .await
+        .expect("open maintenance fixture");
+    let before = batch_digest(&query_version(temporary.path(), 2).await);
+    let context = SessionContext::new_with_config(
+        SessionConfig::new()
+            .set_bool("datafusion.execution.parquet.pushdown_filters", false)
+            .set_bool("datafusion.execution.parquet.reorder_filters", false),
+    );
+    let (table, metrics) = table
+        .optimize()
+        .with_type(OptimizeType::Compact)
+        .with_target_size(NonZeroU64::new(1_048_576).expect("non-zero target size"))
+        .with_session_state(Arc::new(context.state()))
+        .with_session_fallback_policy(SessionFallbackPolicy::RequireSessionState)
+        .with_max_concurrent_tasks(1)
+        .with_commit_properties(commit_properties(3))
+        .await
+        .expect("compact nested Arrow/Delta fixture");
+    assert!(metrics.num_files_removed >= 2);
+    assert!(metrics.num_files_added >= 1);
+    assert_eq!(
+        before,
+        batch_digest(&query_version(temporary.path(), 3).await)
+    );
+    assert_latest_retry_posture(&table, None).await;
+
+    deltalake::checkpoints::create_checkpoint(&table, None)
+        .await
+        .expect("checkpoint optimized fixture");
+    let reopened = DeltaTableBuilder::from_url(location)
+        .expect("create optimized checkpoint reopen builder")
+        .with_version(3)
+        .load()
+        .await
+        .expect("reopen optimized exact version from checkpoint");
+    assert_eq!(reopened.version(), Some(3));
+    assert_eq!(
+        before,
+        batch_digest(&query_version(temporary.path(), 3).await)
+    );
+
+    let (_table, candidates) = reopened
+        .clone()
+        .vacuum()
+        .with_retention_period(inferred_default())
+        .with_enforce_retention_duration(false)
+        .with_dry_run(true)
+        .await
+        .expect("collect vacuum candidates without deleting files");
+    assert!(candidates.dry_run);
+    assert!(!candidates.files_deleted.is_empty());
+    assert!(candidates.files_deleted.iter().all(|path| {
+        !path.starts_with('/') && !path.split('/').any(|component| component == "..")
+    }));
+
+    let (_table, retained) = reopened
+        .vacuum()
+        .with_retention_period(inferred_default())
+        .with_enforce_retention_duration(false)
+        .with_keep_versions(&[2])
+        .with_dry_run(true)
+        .await
+        .expect("collect retained-version vacuum candidates");
+    assert!(retained.dry_run);
+    assert!(retained.files_deleted.is_empty());
+    assert_eq!(
+        before,
+        batch_digest(&query_version(temporary.path(), 2).await)
+    );
+}
+
+#[test]
+fn wp05_operational_cross_version_compatibility() {
+    data_fabric_old_write_new_read_compatibility();
+    data_fabric_new_write_old_read_compatibility();
+}
+
+#[test]
+fn wp05_negative_protocol_feature_elevation() {
+    data_fabric_old_write_new_read_compatibility();
 }
 
 #[tokio::test]

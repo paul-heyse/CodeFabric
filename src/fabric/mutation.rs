@@ -1224,4 +1224,22 @@ mod tests {
         let app_id = application_id([1; 16], 100, MutationPhase::OwnerAppend).unwrap();
         assert_eq!(transaction_version(table, &app_id).await.unwrap(), Some(1));
     }
+
+    #[test]
+    fn delta_43a0cf10_mutation_recovery_contract() {
+        wp21_behavioral_acceptance();
+        wp21_negative_zero_state();
+        wp21_operational_acceptance();
+    }
+
+    #[test]
+    fn wp05_structural_coordinator_retry_ownership() {
+        let source = include_str!("mutation.rs");
+        let retry_configuration = [".with_max_", "retries(0)"].concat();
+        assert_eq!(source.matches(&retry_configuration).count(), 1);
+        assert!(source.contains(".with_application_transaction(Transaction::new("));
+        assert!(source.contains("transaction_version("));
+        assert!(source.contains("reconcile_prepared("));
+        assert!(!source.contains(&["blind", "retry"].join("_")));
+    }
 }
