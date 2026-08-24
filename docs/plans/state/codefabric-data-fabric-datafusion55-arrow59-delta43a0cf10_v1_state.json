@@ -4,17 +4,25 @@
   "design_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
   "baseline_commit": "d89cc90cd2e51c4b716b2a4da2c0a8d6f79d5409",
   "status": "executing",
-  "current_packet": "WP01",
+  "current_packet": "WP02",
   "packets": {
     "WP01": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "3561bf35dc496a6ba5bfdccd72a3feadccdb39a2",
+      "deviations": [
+        {
+          "summary": "WP01 calibrates the revision harness with the durable Arrow batch-checksum boundary; WP06 remains responsible for extending the same comparator to activation, query, publication, and checkpoint workloads."
+        }
+      ],
+      "failed_approaches": [
+        {
+          "summary": "The fixture generator initially rejected explicit disabled table properties until CreateBuilder was configured to allow the known Delta keys, and the macOS temporary cleanup allowlist initially omitted /var/folders; both defects were corrected before the proving commit."
+        }
+      ],
       "blockers": []
     },
     "WP02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -51,9 +59,13 @@
   },
   "milestones": {
     "M01": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "3561bf35dc496a6ba5bfdccd72a3feadccdb39a2",
+      "deviations": [
+        {
+          "summary": "The reusable old-stack compatibility, checksum, IPC, protocol, namespace, and benchmark-self-comparison oracles are green; the broader performance workload is intentionally deferred to WP06."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -107,6 +119,16 @@
       "command": "just ci-fast",
       "summary": "The pre-edit baseline reached root nextest and failed golden_corpus::tests::wp34_behavioral_acceptance because the observed profile digest differs from the accepted fixture digest.",
       "ownership": "The failure predates this plan's edits and coincides with the pre-existing user modification to artifact-schemas.md; WP02 model reconciliation must preserve that edit and eliminate the unexplained digest drift before final certification."
+    },
+    {
+      "command": "just stable-graph-check",
+      "summary": "The old-stack baseline validator expects serde_path_to_error 0.1.20 even though that package is absent from the manifest and lock.",
+      "ownership": "WP02 owns removal of the stale assertion while replacing the validator's old stack and kernel expectations."
+    },
+    {
+      "command": "just extractor-ci-fast",
+      "summary": "The pre-edit dated-nightly extractor gate cannot find rustc_private crates in the command environment even though the repository session bootstrap reports the nightly toolchain installed.",
+      "ownership": "WP02 must distinguish a shell/toolchain-path defect from target Arrow API fallout and record the final extractor proof with the repository-managed environment."
     }
   ],
   "discovered_obligations": [
@@ -117,6 +139,10 @@
     {
       "owner": "WP06",
       "summary": "Limit old-authority zero-state claims to tracked live scopes; the pre-existing untracked top-level skills tree and unrelated user documents remain outside the authorized edit scope."
+    },
+    {
+      "owner": "WP02",
+      "summary": "Extend the model-owned AC-G-07 toolchain identity with explicit DataFusion, Arrow, Parquet, object_store, delta revision and declared version, root manifest/lock, and extractor manifest/lock/toolchain identities; current generated output only records family-driver identities."
     }
   ],
   "plan_deviations": [
@@ -129,6 +155,6 @@
       "summary": "The prior Waves 4-7 active plan was complete and healthy before the pointer moved to this upgrade plan; its plan and state remain immutable historical evidence."
     }
   ],
-  "next_action": "Execute WP01 preflight, commit the old-stack compatibility and checksum baseline, and establish the reusable benchmark and cross-revision recipes before changing dependency pins.",
-  "updated_at": "2026-08-24T05:55:01Z"
+  "next_action": "Execute WP02 as one coherent target pin, lock, graph-policy, version-authority, skill-routing, and model-identity cutover; preserve the WP01 namespace and checksum oracles without a dual-stack shim.",
+  "updated_at": "2026-08-24T06:41:05Z"
 }
