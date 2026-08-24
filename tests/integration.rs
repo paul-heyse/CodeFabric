@@ -7,6 +7,8 @@ mod integration {
     mod coordinator;
     #[cfg(feature = "daemon")]
     mod daemon;
+    #[cfg(feature = "daemon")]
+    mod data_fabric_upgrade;
     #[cfg(feature = "fact-generation")]
     mod fact_generation_build;
     #[cfg(feature = "daemon")]

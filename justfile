@@ -539,6 +539,11 @@ features-no-default:
 msrv:
     cargo msrv verify
 
+[doc("Exercise the persisted data-fabric contract in both directions across two revisions")]
+[group('compat')]
+data-fabric-stack-compat baseline_ref target_ref:
+    ./scripts/data_fabric_revision_check.sh compat "{{baseline_ref}}" "{{target_ref}}"
+
 [doc("Rust API compatibility against a baseline revision")]
 [group('compat')]
 semver baseline:
@@ -573,6 +578,11 @@ bloat:
 [group('perf')]
 symbols:
     cargo nm --release
+
+[doc("Compare the predeclared data-fabric workload across two revisions")]
+[group('perf')]
+data-fabric-upgrade-bench baseline_ref target_ref:
+    ./scripts/data_fabric_revision_check.sh benchmark "{{baseline_ref}}" "{{target_ref}}"
 
 [doc("Section sizes of the release artifact")]
 [group('perf')]

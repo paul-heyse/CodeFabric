@@ -1,0 +1,10 @@
+{
+  "contract": "codefabric-data-fabric-upgrade-comparator-v1",
+  "bootstrap_confidence_percent": 95,
+  "bootstrap_resamples": 2000,
+  "median_regression_limit_basis_points": 1000,
+  "parity_basis_points": 0,
+  "required_correctness_differential": "empty",
+  "resource_ceiling_policy": "each report declares and must satisfy its invariant ceiling",
+  "self_compare_policy": "one measured report is compared with itself"
+}

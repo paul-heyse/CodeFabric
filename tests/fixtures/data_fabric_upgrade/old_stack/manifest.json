@@ -1,0 +1,63 @@
+{
+  "checksums": {
+    "batch": "b3:042ab8bceca81f7cb58fc35be604b0afdccafa548051a047455e59d2722ff3e2",
+    "empty_batch": "b3:59de587ca19bf007edd8406d4da37f5558daece80cc238f123f637411b7d8194",
+    "ipc_bytes": "b3:20bd706ed577680224789045a83c5ea4874d7977c78ef3d44be5d51ff296f87a",
+    "overlay": "b3:480793b472e945105a2cfe026dbbab53cb43383b5af15437f68fa1132f1e144e",
+    "primary_key": "b3:44a07819affa608add9aafe23f4c2433c81140d8e93c1d289c8639431d60eef0",
+    "provider_content": "b3:042ab8bceca81f7cb58fc35be604b0afdccafa548051a047455e59d2722ff3e2",
+    "query_result": "b3:042ab8bceca81f7cb58fc35be604b0afdccafa548051a047455e59d2722ff3e2"
+  },
+  "delta": {
+    "application_id": "codefabric/wp01/data-fabric-upgrade",
+    "application_versions": [
+      0,
+      1,
+      2
+    ],
+    "min_reader_version": 1,
+    "min_writer_version": 2,
+    "reader_features": [],
+    "row_counts": {
+      "0": 0,
+      "1": 2,
+      "2": 3
+    },
+    "table_features": {
+      "change_data_feed": false,
+      "deletion_vectors": false,
+      "type_widening": false
+    },
+    "versions": [
+      0,
+      1,
+      2
+    ],
+    "writer_features": []
+  },
+  "fixture_contract": "codefabric-data-fabric-upgrade-v1",
+  "producer": {
+    "arrow": "58.4.0",
+    "datafusion": "54.1.0",
+    "delta_revision": "9f9223197469897ef05ae4369eb4fd1390174e65"
+  },
+  "schema": {
+    "fields": [
+      "id",
+      "label",
+      "score",
+      "occurred_at",
+      "tags",
+      "active"
+    ],
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      false
+    ],
+    "rows": 3
+  }
+}
