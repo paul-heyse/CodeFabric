@@ -2007,6 +2007,7 @@ mod tests {
 
     #[derive(Debug, Deserialize)]
     struct SourceSyntaxFixture {
+        arrow_version: String,
         source: String,
         required_reconciliation_steps: Vec<String>,
     }
@@ -2022,6 +2023,7 @@ mod tests {
     #[allow(clippy::too_many_lines)] // One acceptance case proves all four tables and all five ladder steps.
     fn wp32_behavioral_acceptance() {
         let fixture = canonical_fixture();
+        assert_eq!(fixture.arrow_version, arrow::ARROW_VERSION);
         let source = source_image(&fixture.source);
         let (tree, ruff) = snapshots(&source);
         let actual_output = output(&source, &tree, &ruff);

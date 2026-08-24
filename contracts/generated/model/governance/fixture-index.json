@@ -88,7 +88,7 @@
     {
       "class": "normative-kat",
       "path": "contracts/fixtures/synthetic/source-syntax-canonicalization-v1.json",
-      "source_digest": "b3:f65b4a08def70597884327e93c113412ca24495b4af81703f583ec40b787a8e4"
+      "source_digest": "b3:80a0d350fdf7e93051cc01eca903bd86bad47a71e92223f47b6d0dc552297570"
     },
     {
       "class": "normative-kat",

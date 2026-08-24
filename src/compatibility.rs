@@ -20,7 +20,7 @@ pub struct CompatibilityRecord {
     pub id: u32,
 }
 
-/// Constructs an Arrow schema through the exact `58.4.0` public type universe.
+/// Constructs an Arrow schema through the exact `59.2.0` public type universe.
 #[must_use]
 pub fn schema() -> SchemaRef {
     Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)]))

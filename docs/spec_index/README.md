@@ -407,7 +407,7 @@ what changed and why.
 | `CLAUDE.md` and the `code-facts-lib-ref` / `gix-notify-ref` skills cited the specs by their `_v1.2.md` filenames | All cite `_v1.3`. `CLAUDE.md` lists the governance manifest as the seventh artifact and points here. `gix-notify-ref`'s Part IV note carried stale line numbers (1435/1994) and said §26–§36; it now cites Part III = §18–§36, watcher sections §27–§36, Part V from §37 |
 | `code-facts-lib-ref` claimed `GEN §2` "names exactly these four as its source basis" | `GEN §2` names **five** library references — those four plus `petgraph.md`, routed by `petgraph-ref` — alongside the ontology companion |
 | `datafusion-pyarrow-rust-ref`, `deltalake-rust-ref` and `typer-rich-ref` carried **`smartref`** project context — another project's crates, paths and command vocabulary | All three re-grounded on CodeFabric. The two Rust ones now carry a **spec-section → chapter map** and the boundary rules that constrain them; version pins are sourced from `FAB §2.1` rather than a lockfile, with a note that they move |
-| `deltalake-rust-ref` cited eight nonexistent `docs/library_ref/` documents; `datafusion-pyarrow-rust-ref` cited one (`datafusion_54vs53.md`) | Every remaining mention states plainly that the file is absent. `deltalake_rust_1.0.0_9f922319_advanced_reference_2026-08-20.md` is declared the only Delta reference here |
+| Legacy DataFusion/Arrow and delta-rs skills routed fragmented or stale reference sets | Current routing is consolidated on the 2026-08-23 DataFusion 55/Arrow 59 comprehensive reference and exact delta-rs `43a0cf10` reference; predecessor documents are historical only |
 | `datafusion-pyarrow-rust-ref` and `deltalake-rust-ref` pointed at a `datafusion-pyarrow-ref` sibling skill that does not exist | Replaced with the fact that `docs/library_ref/datafusion.md` and `pyarrow.md` exist but are unrouted — and that `SRV §18` and `SRV §6` invariant 3 give the Python side no Arrow/DataFusion demand |
 | `datafusion-pyarrow-rust-ref` advertised chapter ranges its targets do not have | Counted from the files: `datafusion_planning_rust.md` ends at **§56** (not §60), `datafusion_calculations_rust.md` at **C13** (not C26). See [`library-routing.md §1`](./library-routing.md#1-reference-shorthands) |
 | `attrs-cattrs-ref` and `typer-rich-ref` silently routed reference documents that do not exist | Both now self-declare. None of these libraries is a direct CodeFabric dependency after the Wave 0 packaging cutover; transitive adapter-lock presence is not adoption. The skills remain available only for a future direct seam. |
@@ -439,10 +439,9 @@ typos docs/spec_index/                                       clean
 
 **Verified against the seven `v1.3` design artifacts and roadmap `v1.0` as of 2026-08-20.**
 
-Drift is not hypothetical. `FAB §2`'s Arrow and DataFusion pins moved from `58.3.0`/`54.0.0` to
-`58.4.0`/`54.1.0` while this index was being written, and the delta-rs pin moved from
-`35cfed45…` to `9f922319…` — bringing a Rust floor of `1.94.1`, Cargo resolver `3`, and eleven
-new `FAB` subsections — the day after. The
+Drift is not hypothetical. `FAB §2` now pins Arrow/Parquet `59.2.0`, DataFusion `55.0.0`, and
+delta-rs `43a0cf10…`; its predecessor baseline used an earlier Arrow/DataFusion family and Delta
+revision. The Rust floor remains `1.95.0` and Cargo resolver `3`. The
 [pin ledger](./library-routing.md#8-version-pin-ledger) records the current values.
 
 There is **no committed checker** — the scaffolding above was discarded. When a spec is revised,

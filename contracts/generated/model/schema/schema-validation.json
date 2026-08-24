@@ -2,8 +2,8 @@
   "compatibility_acceptance_generated": false,
   "family": "schemas",
   "native_validators": [
-    "arrow-schema-58.4.0",
-    "datafusion-54.1.0",
+    "arrow-schema-59.2.0",
+    "datafusion-55.0.0",
     "sqlite-strict",
     "jsonschema-draft-2020-12"
   ],

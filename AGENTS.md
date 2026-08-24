@@ -286,10 +286,10 @@ dated-nightly extractor boundary. Compiled capability is not provider authority.
 
 | Decision | Value | Why |
 |---|---|---|
-| Arrow/Parquet | `58.4.0` | one public type universe |
-| DataFusion | `54.1.0` | query, catalog, execution |
+| Arrow/Parquet | `59.2.0` | one public type universe |
+| DataFusion | `55.0.0` | query, catalog, execution |
 | object_store | `0.13.2` | canonical storage abstraction |
-| delta-rs | git rev `9f922319…` | pinned pre-release; compile-probed |
+| delta-rs | git rev `43a0cf10…` | pinned pre-release; compile-probed |
 | gix | `0.86.0`, narrow read profile + SHA-256 probe | present-state accelerator, never byte authority |
 | SQLite | `rusqlite 0.40.2`, `bundled` + `backup` | operational state and online backup |
 | safe filesystem | `rustix 1.1.4`, `fs` | descriptor-relative authoritative reads |

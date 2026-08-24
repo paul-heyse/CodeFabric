@@ -466,6 +466,15 @@ fn extractor_arrow58_ipc_baseline() {
     );
 }
 
+#[test]
+fn extractor_arrow59_ipc_contract() {
+    assert_eq!(arrow::ARROW_VERSION, "59.2.0");
+    let expected = manifest(&fixture_root());
+    let batch = decode_ipc(&fixture_root());
+    assert_eq!(batch.schema(), fixture_schema());
+    assert_eq!(batch_digest(&batch), expected["checksums"]["batch"]);
+}
+
 #[tokio::test]
 async fn data_fabric_cross_revision_fixture_mode() {
     let mode = std::env::var("CODEFABRIC_CROSS_REVISION_MODE")

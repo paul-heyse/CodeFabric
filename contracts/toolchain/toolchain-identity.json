@@ -2,6 +2,28 @@
   "artifact_id": "codefabric.toolchain.identity",
   "artifact_kind": "manifest",
   "compatible_suite_major": 1,
+  "data_fabric": {
+    "arrow_version": "59.2.0",
+    "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
+    "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
+    "datafusion_version": "55.0.0",
+    "delta_rs_git_rev": "43a0cf10a313e5077c48637ad786a05359136bbb",
+    "deltalake_declared_version": "1.0.0",
+    "object_store_version": "0.13.2",
+    "parquet_version": "59.2.0",
+    "rust_version": "1.95.0",
+    "rustc_extractor": {
+      "identity": {
+        "cargo_lock_digest": "b3:8068587726b9046685d0f0ebb5649b6e3f62471b3f47a55636b784adb0cd1321",
+        "cargo_manifest_digest": "b3:0a1bc0f10e72b2c75e0a1a35570ee171d105fde2e3cd1282544d18c2b87bd90a",
+        "package_version": "0.1.0",
+        "toolchain_channel": "nightly-2026-08-18",
+        "toolchain_digest": "b3:66a6d03def9b55e175e8fe60e0bccf93bf2f68dc8d726c87468d23e7a112566b"
+      },
+      "identity_digest": "b3:a822fb2389e02c358ac9b1817f3d27a828a30477d02f0b289447b396b90aa0c4"
+    },
+    "toml_version": "1.1.4"
+  },
   "families": [
     {
       "family": "registry-cbef",
@@ -23,10 +45,10 @@
       },
       "rule_version": "registry-cbef-driver-v1",
       "tool_identity": {
-        "action_key": "b3:e675e13e0f49d91bde49a0f5065f14ad2bf52159327e0562cee20fe8b2d9c07e",
-        "cargo_lock_digest": "b3:78451df7a7d836bff0c9095cc5d5c3fdf74c7d68ecbfc426d2e8c80fe258cb2b",
-        "cargo_manifest_digest": "b3:3a745d715e27327e9fef280495ceb78d5ec9009144453d14d889a2099a2d0f78",
-        "executable_digest": "b3:83f67c6db537bd5748519474621bb7ea73689753ddbc3972fccb9c5229601f21",
+        "action_key": "b3:d18bad9214fa98dec4ab873e811fed3d4983677530b2a938da4aed4773968938",
+        "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
+        "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
+        "executable_digest": "b3:f2e53a5700a7fb7e0a4473f23898c9b7c6e79333ef8cc5f44723cc853ab2c815",
         "features": [
           "provider-inventory-tooling"
         ],
@@ -140,10 +162,10 @@
           "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
         },
         "rust": {
-          "action_key": "b3:147639b1e52ab7b3d72300f8068d5812ce2e18a551af174497213f71198d1b6f",
-          "binary_digest": "b3:67d16b121fe3265674261f8a6d9ba1e9c5ddff4a47e93fb1632d07c72a5d4206",
-          "cargo_lock_digest": "b3:78451df7a7d836bff0c9095cc5d5c3fdf74c7d68ecbfc426d2e8c80fe258cb2b",
-          "cargo_manifest_digest": "b3:3a745d715e27327e9fef280495ceb78d5ec9009144453d14d889a2099a2d0f78",
+          "action_key": "b3:6d77166e26b3a9833bac6e0d008461006ad99a081ec0902a84482ef7650b291a",
+          "binary_digest": "b3:c65fc077a6addc4bcf0d1fb9de5c83f71f25d103121b63515cc85809ffa42ed3",
+          "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
+          "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
           "descriptor_api": "tonic_prost_build::Builder::compile_fds",
           "features": [
             "proto-tooling"

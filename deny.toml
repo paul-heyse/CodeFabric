@@ -35,7 +35,6 @@ feature-depth = 1
 # tooling/security/advisory-exceptions.json. scripts/advisory_policy_check.sh requires
 # exact equality and verifies the selected lockfile plus current RustSec result.
 ignore = [
-  "RUSTSEC-2024-0436",
   "RUSTSEC-2026-0173",
   "RUSTSEC-2026-0194",
   "RUSTSEC-2026-0195",
@@ -93,6 +92,7 @@ allow = []
 allow-wildcard-paths = true
 deny = []
 skip = [
+  { crate = "base64@0.23.1", reason = "the target data-fabric stack retains the application-owned 0.22 line while a non-type-bearing transitive encoder requires 0.23" },
   { crate = "block-buffer@0.10.4", reason = "transitive crypto ecosystem split; not a type-bearing CodeFabric family" },
   { crate = "core-foundation@0.9.4", reason = "transitive macOS integration split" },
   { crate = "cpufeatures@0.2.17", reason = "transitive crypto ecosystem split" },
@@ -108,6 +108,7 @@ skip = [
   { crate = "http-body@0.4.6", reason = "transitive HTTP ecosystem split" },
   { crate = "itertools@0.15.0", reason = "exact Ruff 0.0.7 provider train requires a newer non-type-bearing iterator line" },
   { crate = "md-5@0.10.6", reason = "transitive crypto ecosystem split" },
+  { crate = "num-bigint@0.5.1", reason = "the target numeric implementation resolves 0.5 while exact Ruff and other non-type-bearing consumers retain 0.4" },
   { crate = "phf@0.11.3", reason = "exact Ruff 0.0.7 parser train requires the unicode_names2 perfect-hash line" },
   { crate = "phf_shared@0.11.3", reason = "exact Ruff 0.0.7 parser train requires the unicode_names2 perfect-hash line" },
   { crate = "r-efi@5.3.0", reason = "transitive WASI support split" },
@@ -118,7 +119,7 @@ skip = [
   { crate = "rand_core@0.9.5", reason = "transitive random ecosystem split" },
   { crate = "reqwest@0.13.4", reason = "transitive HTTP ecosystem split" },
   { crate = "sqlparser@0.62.0", reason = "transitive parser consumers currently require two lines" },
-  { crate = "syn@3.0.3", reason = "transitive procedural-macro ecosystem split" },
+  { crate = "syn@3.0.4", reason = "transitive procedural-macro ecosystem split" },
 ]
 skip-tree = [
   { crate = "windows-sys@0.52.0", depth = 3, reason = "transitive Windows support split retained by existing platform crates" },

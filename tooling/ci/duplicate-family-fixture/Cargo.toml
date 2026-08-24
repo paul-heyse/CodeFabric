@@ -5,5 +5,5 @@ edition = "2024"
 publish = false
 
 [dependencies]
-arrow-array = "=58.4.0"
+arrow-array = "=59.2.0"
 arrow-array-legacy = { package = "arrow-array", version = "=57.1.0" }

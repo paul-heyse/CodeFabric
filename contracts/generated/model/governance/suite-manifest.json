@@ -110,7 +110,7 @@
       "artifact_id": "codefabric-present-state-cpg-data-fabric",
       "artifact_kind": "normative-document",
       "authority_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
-      "canonical_digest": "b3:d0a72350a6568517a9006790cd3d82ca4d2a4d4809cc439e8ab888f6e0bd5631",
+      "canonical_digest": "b3:17c039dc6d939589eb6d0b79a2c028a16e411297c7ae21cebeeba14c3c456dab",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -127,7 +127,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:d0a72350a6568517a9006790cd3d82ca4d2a4d4809cc439e8ab888f6e0bd5631",
+      "source_digest": "b3:17c039dc6d939589eb6d0b79a2c028a16e411297c7ae21cebeeba14c3c456dab",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -560,7 +560,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:74270cf95ec47b3c0762a2c8db3aca3aa62ad13f20f0d028344f4683d0b9267b",
+      "canonical_digest": "b3:ff3a9513c1ccd0311db84f3227eb63a2021dfbe5249abe482131694608355ef8",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -577,7 +577,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:baa20bb5238cb0f4feca2dc2ae78e7f357b98a00c44f4682ce506152a8156036",
+      "source_digest": "b3:d67ef2efed33449fd4c2008e9b799f1fd0ef22e5167f3db6d6cd8a6aad682949",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1754,7 +1754,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:f556207ca1f3f242b1f45742d221c4ef8a0ddd4329e8ecd1e3630659e2104300",
+      "canonical_digest": "b3:ab4d2b425b0623df25450e3f8cdf24246186b6b240bd87d5d8dc39513f60965c",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -1771,7 +1771,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:e30997fe417021efe2ff830afca816e846d00417535057d9bfd7f0e884c75754",
+      "source_digest": "b3:dc2f90a1421d8038e36c3a92b4180c09b4ad3d17563232652e2a8ac16b65582c",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -2222,7 +2222,7 @@
       "artifact_id": "evidence:contracts-fixtures-synthetic-source-syntax-canonicalization-v1",
       "artifact_kind": "evidence",
       "authority_path": "contracts/fixtures/synthetic/source-syntax-canonicalization-v1.json",
-      "canonical_digest": "b3:f4c00bc273945f8a0921cf252ed0c7c55a1ebd6e3bbee292237a3a162f2897a1",
+      "canonical_digest": "b3:492261a7565b05c6145ac69ba7858d2803641edfc599ccc2401141dc62d584a2",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -2239,7 +2239,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:f65b4a08def70597884327e93c113412ca24495b4af81703f583ec40b787a8e4",
+      "source_digest": "b3:80a0d350fdf7e93051cc01eca903bd86bad47a71e92223f47b6d0dc552297570",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -3125,10 +3125,10 @@
       },
       "rule_version": "registry-cbef-driver-v1",
       "tool_identity": {
-        "action_key": "b3:e675e13e0f49d91bde49a0f5065f14ad2bf52159327e0562cee20fe8b2d9c07e",
-        "cargo_lock_digest": "b3:78451df7a7d836bff0c9095cc5d5c3fdf74c7d68ecbfc426d2e8c80fe258cb2b",
-        "cargo_manifest_digest": "b3:3a745d715e27327e9fef280495ceb78d5ec9009144453d14d889a2099a2d0f78",
-        "executable_digest": "b3:83f67c6db537bd5748519474621bb7ea73689753ddbc3972fccb9c5229601f21",
+        "action_key": "b3:d18bad9214fa98dec4ab873e811fed3d4983677530b2a938da4aed4773968938",
+        "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
+        "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
+        "executable_digest": "b3:f2e53a5700a7fb7e0a4473f23898c9b7c6e79333ef8cc5f44723cc853ab2c815",
         "features": [
           "provider-inventory-tooling"
         ],
@@ -3242,10 +3242,10 @@
           "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
         },
         "rust": {
-          "action_key": "b3:147639b1e52ab7b3d72300f8068d5812ce2e18a551af174497213f71198d1b6f",
-          "binary_digest": "b3:67d16b121fe3265674261f8a6d9ba1e9c5ddff4a47e93fb1632d07c72a5d4206",
-          "cargo_lock_digest": "b3:78451df7a7d836bff0c9095cc5d5c3fdf74c7d68ecbfc426d2e8c80fe258cb2b",
-          "cargo_manifest_digest": "b3:3a745d715e27327e9fef280495ceb78d5ec9009144453d14d889a2099a2d0f78",
+          "action_key": "b3:6d77166e26b3a9833bac6e0d008461006ad99a081ec0902a84482ef7650b291a",
+          "binary_digest": "b3:c65fc077a6addc4bcf0d1fb9de5c83f71f25d103121b63515cc85809ffa42ed3",
+          "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
+          "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
           "descriptor_api": "tonic_prost_build::Builder::compile_fds",
           "features": [
             "proto-tooling"
@@ -4004,7 +4004,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:baa20bb5238cb0f4feca2dc2ae78e7f357b98a00c44f4682ce506152a8156036",
+      "content_digest": "b3:d67ef2efed33449fd4c2008e9b799f1fd0ef22e5167f3db6d6cd8a6aad682949",
       "lineage": [
         "action:governance"
       ],
@@ -4054,7 +4054,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:20cd59c62c476ef3c61d1ef4a422a2c6b9aec08b90f0185d6e908f3234e437af",
+      "content_digest": "b3:b8b8e7f641788a58bb8aa39180b84bee6c327157040e5a890016f8c27ad9450e",
       "lineage": [
         "action:governance"
       ],
@@ -4130,7 +4130,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:84bb11193ded43459d408c697c4959d2e95067ba74b5d518be8df37f4e3c626f",
+      "content_digest": "b3:12ec0d895ea4353e559acba43d8e86ae2c373592987ca53d8d178bf5e04d21dd",
       "lineage": [
         "action:schemas"
       ],
@@ -4468,7 +4468,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:e30997fe417021efe2ff830afca816e846d00417535057d9bfd7f0e884c75754",
+      "content_digest": "b3:dc2f90a1421d8038e36c3a92b4180c09b4ad3d17563232652e2a8ac16b65582c",
       "lineage": [
         "action:governance"
       ],
@@ -4804,7 +4804,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:aa04be6995302c19d63b7e399cf8d45c5166625dd49c8dc3800b3efc55ee72fc",
+      "content_digest": "b3:cab62f5a6bbfa19e324324236fa85bb0370099a2f5527dc9b300aedfa789a39c",
       "lineage": [
         "action:proto"
       ],

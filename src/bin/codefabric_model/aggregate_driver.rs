@@ -327,6 +327,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         &Path::new(&proto.stage_root).join("tooling/proto/descriptor-census.json"),
         MAX_BYTES,
     )?)?;
+    let data_fabric_identity = data_fabric_toolchain_identity(repository_root)?;
     let mut family_identities = BTreeMap::new();
     let adapter_source_id = adapter.validation["source_artifact_id"]
         .as_str()
@@ -341,7 +342,11 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
     for (path, bytes) in [
         (
             "contracts/generated/model/governance/toolchain-identity.json",
-            pretty_json(&json!({"schema_version": 1, "families": families}))?,
+            pretty_json(&json!({
+                "schema_version": 1,
+                "data_fabric": data_fabric_identity,
+                "families": families,
+            }))?,
         ),
         (
             "contracts/toolchain/toolchain-identity.json",
@@ -352,6 +357,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
                 "compatible_suite_major": 1,
                 "status": "released",
                 "schema_version": 1,
+                "data_fabric": data_fabric_identity,
                 "families": families,
             }))?,
         ),
@@ -573,6 +579,172 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         rendered_outputs,
         stage_root: stage_root.to_string_lossy().into_owned(),
     })
+}
+
+fn data_fabric_toolchain_identity(repository_root: &Path) -> Result<Value, AggregateError> {
+    const ROOT_MANIFEST: &str = "Cargo.toml";
+    const ROOT_LOCK: &str = "Cargo.lock";
+    const EXTRACTOR_MANIFEST: &str = "rustc-extractor/Cargo.toml";
+    const EXTRACTOR_LOCK: &str = "rustc-extractor/Cargo.lock";
+    const EXTRACTOR_TOOLCHAIN: &str = "rustc-extractor/rust-toolchain.toml";
+
+    let root_manifest = read_stable(&repository_root.join(ROOT_MANIFEST), MAX_BYTES)?;
+    let root_lock = read_stable(&repository_root.join(ROOT_LOCK), MAX_BYTES)?;
+    let extractor_manifest = read_stable(&repository_root.join(EXTRACTOR_MANIFEST), MAX_BYTES)?;
+    let extractor_lock = read_stable(&repository_root.join(EXTRACTOR_LOCK), MAX_BYTES)?;
+    let extractor_toolchain = read_stable(&repository_root.join(EXTRACTOR_TOOLCHAIN), MAX_BYTES)?;
+    data_fabric_toolchain_identity_from_bytes(
+        &root_manifest,
+        &root_lock,
+        &extractor_manifest,
+        &extractor_lock,
+        &extractor_toolchain,
+    )
+}
+
+fn data_fabric_toolchain_identity_from_bytes(
+    root_manifest_bytes: &[u8],
+    root_lock_bytes: &[u8],
+    extractor_manifest_bytes: &[u8],
+    extractor_lock_bytes: &[u8],
+    extractor_toolchain_bytes: &[u8],
+) -> Result<Value, AggregateError> {
+    let root_manifest = parse_toml("Cargo.toml", root_manifest_bytes)?;
+    let root_lock = parse_toml("Cargo.lock", root_lock_bytes)?;
+    let extractor_manifest = parse_toml("rustc-extractor/Cargo.toml", extractor_manifest_bytes)?;
+    let extractor_toolchain = parse_toml(
+        "rustc-extractor/rust-toolchain.toml",
+        extractor_toolchain_bytes,
+    )?;
+
+    let delta_revision = dependency_string(&root_manifest, "deltalake", "rev")?;
+    let delta_version = lock_package_version(&root_lock, "deltalake", Some(&delta_revision))?;
+    let extractor = json!({
+        "package_version": table_string(
+            &extractor_manifest,
+            &["package", "version"],
+            "rustc-extractor/Cargo.toml",
+        )?,
+        "toolchain_channel": table_string(
+            &extractor_toolchain,
+            &["toolchain", "channel"],
+            "rustc-extractor/rust-toolchain.toml",
+        )?,
+        "cargo_manifest_digest": digest_bytes(extractor_manifest_bytes),
+        "cargo_lock_digest": digest_bytes(extractor_lock_bytes),
+        "toolchain_digest": digest_bytes(extractor_toolchain_bytes),
+    });
+    let extractor_identity_digest = canonical_digest(&extractor)?;
+
+    Ok(json!({
+        "rust_version": table_string(&root_manifest, &["package", "rust-version"], "Cargo.toml")?,
+        "datafusion_version": dependency_version(&root_manifest, "datafusion")?,
+        "arrow_version": dependency_version(&root_manifest, "arrow")?,
+        "parquet_version": dependency_version(&root_manifest, "parquet")?,
+        "object_store_version": dependency_version(&root_manifest, "object_store")?,
+        "delta_rs_git_rev": delta_revision,
+        "deltalake_declared_version": delta_version,
+        "toml_version": dependency_version(&root_manifest, "toml")?,
+        "cargo_manifest_digest": digest_bytes(root_manifest_bytes),
+        "cargo_lock_digest": digest_bytes(root_lock_bytes),
+        "rustc_extractor": {
+            "identity_digest": extractor_identity_digest,
+            "identity": extractor,
+        },
+    }))
+}
+
+fn parse_toml(path: &str, bytes: &[u8]) -> Result<toml::Value, AggregateError> {
+    let text =
+        std::str::from_utf8(bytes).map_err(|error| projection_error(path, error.to_string()))?;
+    toml::from_str(text).map_err(|error| projection_error(path, error.to_string()))
+}
+
+fn table_string(value: &toml::Value, keys: &[&str], path: &str) -> Result<String, AggregateError> {
+    let selected = keys.iter().try_fold(value, |current, key| {
+        current
+            .get(*key)
+            .ok_or_else(|| projection_error(path, format!("{} is absent", keys.join("."))))
+    })?;
+    selected
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| projection_error(path, format!("{} is not a string", keys.join("."))))
+}
+
+fn dependency_value<'a>(
+    manifest: &'a toml::Value,
+    name: &str,
+) -> Result<&'a toml::Value, AggregateError> {
+    manifest
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.get(name))
+        .ok_or_else(|| projection_error("Cargo.toml", format!("dependency {name} is absent")))
+}
+
+fn dependency_version(manifest: &toml::Value, name: &str) -> Result<String, AggregateError> {
+    let dependency = dependency_value(manifest, name)?;
+    let version = dependency
+        .as_str()
+        .or_else(|| dependency.get("version").and_then(toml::Value::as_str))
+        .ok_or_else(|| {
+            projection_error(
+                "Cargo.toml",
+                format!("dependency {name} has no string version"),
+            )
+        })?;
+    Ok(version.strip_prefix('=').unwrap_or(version).to_owned())
+}
+
+fn dependency_string(
+    manifest: &toml::Value,
+    name: &str,
+    key: &str,
+) -> Result<String, AggregateError> {
+    dependency_value(manifest, name)?
+        .get(key)
+        .and_then(toml::Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            projection_error(
+                "Cargo.toml",
+                format!("dependency {name} has no string {key}"),
+            )
+        })
+}
+
+fn lock_package_version(
+    lock: &toml::Value,
+    name: &str,
+    source_contains: Option<&str>,
+) -> Result<String, AggregateError> {
+    let packages = lock
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| projection_error("Cargo.lock", "package array is absent"))?;
+    let matches = packages
+        .iter()
+        .filter(|package| package.get("name").and_then(toml::Value::as_str) == Some(name))
+        .filter(|package| {
+            source_contains.is_none_or(|expected| {
+                package
+                    .get("source")
+                    .and_then(toml::Value::as_str)
+                    .is_some_and(|source| source.contains(expected))
+            })
+        })
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err(projection_error(
+            "Cargo.lock",
+            format!("expected one {name} package matching its declared source"),
+        ));
+    }
+    matches[0]
+        .get("version")
+        .and_then(toml::Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| projection_error("Cargo.lock", format!("{name} version is absent")))
 }
 
 fn model_artifacts(
@@ -1584,6 +1756,52 @@ pub enum AggregateError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_toolchain_identity_tracks_data_fabric_pins() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let identity = data_fabric_toolchain_identity(root).unwrap();
+        assert_eq!(identity["rust_version"], "1.95.0");
+        assert_eq!(identity["datafusion_version"], "55.0.0");
+        assert_eq!(identity["arrow_version"], "59.2.0");
+        assert_eq!(identity["parquet_version"], "59.2.0");
+        assert_eq!(identity["object_store_version"], "0.13.2");
+        assert_eq!(
+            identity["delta_rs_git_rev"],
+            "43a0cf10a313e5077c48637ad786a05359136bbb"
+        );
+        assert_eq!(identity["deltalake_declared_version"], "1.0.0");
+        assert_eq!(
+            identity["rustc_extractor"]["identity"]["toolchain_channel"],
+            "nightly-2026-08-18"
+        );
+
+        let root_manifest = fs::read(root.join("Cargo.toml")).unwrap();
+        let root_lock = fs::read(root.join("Cargo.lock")).unwrap();
+        let extractor_manifest = fs::read(root.join("rustc-extractor/Cargo.toml")).unwrap();
+        let extractor_lock = fs::read(root.join("rustc-extractor/Cargo.lock")).unwrap();
+        let extractor_toolchain =
+            fs::read(root.join("rustc-extractor/rust-toolchain.toml")).unwrap();
+        let mut changed_lock = extractor_lock.clone();
+        changed_lock.extend_from_slice(b"\n# identity mutation\n");
+        let changed = data_fabric_toolchain_identity_from_bytes(
+            &root_manifest,
+            &root_lock,
+            &extractor_manifest,
+            &changed_lock,
+            &extractor_toolchain,
+        )
+        .unwrap();
+        assert_ne!(
+            identity["rustc_extractor"]["identity_digest"],
+            changed["rustc_extractor"]["identity_digest"]
+        );
+    }
+
+    #[test]
+    fn wp02_operational_model_identity() {
+        model_toolchain_identity_tracks_data_fabric_pins();
+    }
 
     #[test]
     fn model_detached_identity_matches_independent_rust_and_python_kats() {

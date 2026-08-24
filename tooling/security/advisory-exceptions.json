@@ -1,30 +1,20 @@
 {
   "schema_version": 1,
-  "policy": "Exact temporary exceptions forced by the FAB 2.1 dependency baseline",
-  "accepted_by": "user",
-  "accepted_at": "2026-08-21T12:51:34Z",
-  "review_owner_packet": "M04",
-  "review_trigger": "before_m04_completion_or_any_fab_dependency_or_cloud_profile_change",
+  "policy": "Exact temporary exceptions forced by the DataFusion 55, Arrow 59, delta-rs 43a0cf10 FAB baseline",
+  "accepted_by": "repository-owner approved upgrade plan",
+  "accepted_at": "2026-08-24T06:41:05Z",
+  "review_owner_packet": "WP06",
+  "review_trigger": "before_m05_completion_or_any_fab_dependency_or_cloud_profile_change",
   "exceptions": [
-    {
-      "advisory_id": "RUSTSEC-2024-0436",
-      "package": "paste",
-      "version": "1.0.15",
-      "classification": "unmaintained",
-      "affected_surface": "Parquet macro dependency in the exact Arrow/Parquet 58.4.0 family",
-      "rationale": "No known vulnerability; replacement is owned by the pinned upstream Parquet family.",
-      "owner_packet": "M04",
-      "review_trigger": "before_m04_completion_or_any_arrow_parquet_baseline_change"
-    },
     {
       "advisory_id": "RUSTSEC-2026-0173",
       "package": "proc-macro-error2",
       "version": "2.0.1",
       "classification": "unmaintained",
-      "affected_surface": "validator derive path selected by the exact delta-rs revision",
-      "rationale": "No known vulnerability; replacement requires an upstream delta-rs or validator dependency refresh.",
-      "owner_packet": "M04",
-      "review_trigger": "before_m04_completion_or_any_delta_validator_baseline_change"
+      "affected_surface": "validator derive path selected by delta-rs revision 43a0cf10a313e5077c48637ad786a05359136bbb",
+      "rationale": "No known vulnerability; replacement requires an upstream delta-rs or validator dependency refresh beyond the approved exact revision.",
+      "owner_packet": "WP06",
+      "review_trigger": "before_m05_completion_or_any_delta_validator_baseline_change"
     },
     {
       "advisory_id": "RUSTSEC-2026-0194",
@@ -33,8 +23,8 @@
       "classification": "vulnerability",
       "affected_surface": "Cloud XML response parsing compiled through kernel-forced object_store cloud features",
       "rationale": "Waves 0-3 authorize only the local filesystem provider; the provider factory rejects cloud schemes and configuration before construction, while object_store 0.13.2 cannot resolve the fixed quick-xml 0.41 line.",
-      "owner_packet": "M04",
-      "review_trigger": "before_m04_completion_or_enabling_cloud_or_changing_object_store"
+      "owner_packet": "WP06",
+      "review_trigger": "before_m05_completion_or_enabling_cloud_or_changing_object_store"
     },
     {
       "advisory_id": "RUSTSEC-2026-0195",
@@ -43,8 +33,8 @@
       "classification": "vulnerability",
       "affected_surface": "Cloud XML namespace parsing compiled through kernel-forced object_store cloud features",
       "rationale": "Waves 0-3 authorize only the local filesystem provider; the provider factory rejects cloud schemes and configuration before construction, while object_store 0.13.2 cannot resolve the fixed quick-xml 0.41 line.",
-      "owner_packet": "M04",
-      "review_trigger": "before_m04_completion_or_enabling_cloud_or_changing_object_store"
+      "owner_packet": "WP06",
+      "review_trigger": "before_m05_completion_or_enabling_cloud_or_changing_object_store"
     }
   ]
 }

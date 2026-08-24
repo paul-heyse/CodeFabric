@@ -20,12 +20,12 @@ See [`README.md §2`](./README.md#2-citation-convention) for spec tags.
 | `pyrefly` | `pyrefly_rust_cpg_advanced_reference_1.2.0_2026-08-19.md` | §0–§38 + §15A + App. A–E | `code-facts-lib-ref` |
 | `mir` | `rust_mir_cpg_continuous_reference_2026-08-18.md` | §0–§58 + App. A–R | `code-facts-lib-ref` |
 | `pg` | `petgraph.md` | §0, §2–§30 | `petgraph-ref` |
-| `df` | `datafusion_rust.md` | §0–§40 | `datafusion-pyarrow-rust-ref` |
-| `df-plan` | `datafusion_planning_rust.md` | §41–§56 | `datafusion-pyarrow-rust-ref` |
-| `df-schema` | `datafusion_schemas_rust.md` | S1–S15 | `datafusion-pyarrow-rust-ref` |
-| `df-calc` | `datafusion_calculations_rust.md` | C1–C13 | `datafusion-pyarrow-rust-ref` |
-| `arrow` | `pyarrow_rust.md` | §0–§30 | `datafusion-pyarrow-rust-ref` |
-| `delta` | `deltalake_rust_1.0.0_9f922319_advanced_reference_2026-08-20.md` | §0, §2–§13 (no §1) | `deltalake-rust-ref` |
+| `df` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | §0–§40A and §40 | `datafusion-pyarrow-rust-ref` |
+| `df-plan` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | §41–§56 | `datafusion-pyarrow-rust-ref` |
+| `df-schema` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | S1–S15 | `datafusion-pyarrow-rust-ref` |
+| `df-calc` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | C1–C13 | `datafusion-pyarrow-rust-ref` |
+| `arrow` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | Arrow/Parquet integration throughout §0–§40A, S1–S15, and C1–C13 | `datafusion-pyarrow-rust-ref` |
+| `delta` | `deltalake_rust_1.0.0_43a0cf10_datafusion55_arrow59_advanced_reference_2026-08-23.md` | §0, §2–§13 (no §1) | `deltalake-rust-ref` |
 | `gix` | `gix_rust_advanced_reference.md` | §0–§50 + §1A + App. A–F | `gix-notify-ref` |
 | `notify` | `notify_debouncer_full_rust_reference.md` | §0–§40 | `gix-notify-ref` |
 | `fastmcp` | `fastmcp_python_advanced_reference_3.4.7.md` | §0–§37 | `fastmcp-pydantic-ref` |
@@ -45,11 +45,10 @@ The skills already carry dense per-document section indexes with line numbers in
 The last two rows are agent tooling rather than dependencies: no spec section cites them, so
 they appear in this table and nowhere else in this file.
 
-Two chapter ranges above disagree with the `datafusion-pyarrow-rust-ref` skill description,
-which advertises `datafusion_planning_rust.md` as §41–§60 and `datafusion_calculations_rust.md`
-as C1–C26. The files actually end at **§56** and **C13**. The ranges here were counted from the
-documents. Navigate a reference
-with `just lib-outline <ref>.md --match '^30\)' --view expanded`.
+The target DataFusion/Arrow document consolidates the former engine, planning, schema,
+calculation, and Arrow routes. Its source-verified §40A and Part III upgrade gate take precedence
+over stale illustrative version strings in its imported deep dives. Navigate it with
+`just lib-outline <ref>.md --match '^30\)' --view expanded`.
 
 ## 2. `LIFE` — watcher, Git state, scheduling
 
@@ -297,13 +296,13 @@ too — it is a decision still open.
 
 | Library | Pin | Stated at |
 |---|---|---|
-| Arrow Rust | `=58.4.0` family (`arrow`, `-array`, `-buffer`, `-schema`, `-cast`, `-select`, `-ord`, `-string`, `-row`) | `FAB §2` · `FAB §2.1` |
-| Parquet Rust | `=58.4.0`, features `["arrow","async","object_store"]` | `FAB §2.1` |
-| DataFusion | `=54.1.0` | `FAB §2` |
-| `deltalake` / delta-rs | `1.0.0` at git rev `9f9223197469897ef05ae4369eb4fd1390174e65` — **a pinned pre-release revision, not a tagged stable release**; `default-features=false`, features `["rustls","datafusion"]`. Object-store backends are feature-gated, not default | `FAB §2` · `FAB §2.1` |
+| Arrow Rust | `=59.2.0` family (`arrow`, `-array`, `-buffer`, `-schema`, `-cast`, `-select`, `-ord`, `-string`, `-row`) | `FAB §2` · `FAB §2.1` |
+| Parquet Rust | `=59.2.0`, features `["arrow","async","object_store"]` | `FAB §2.1` |
+| DataFusion | `=55.0.0` | `FAB §2` |
+| `deltalake` / delta-rs | `1.0.0` at git rev `43a0cf10a313e5077c48637ad786a05359136bbb` — **a pinned pre-release revision, not a tagged stable release**; `default-features=false`, features `["rustls","datafusion"]`. Object-store backends are feature-gated, not default | `FAB §2` · `FAB §2.1` |
 | `object_store` | `=0.13.2` | `FAB §2.1` |
 | Rust toolchain | `rust-version = "1.95.0"`, `edition = "2024"`, `resolver = "3"` — floor set by the Ruff 0.0.7 provider train above delta-rs's 1.94.1 minimum | `FAB §2` · `FAB §2.1` |
-| Delta kernel | `buoyant_kernel` + `buoyant_kernel_engine` `0.25.x`, **selected transitively**; CodeFabric does not pin it | `FAB §2` · `FAB §2.2` |
+| Delta kernel | `buoyant_kernel 0.25.1` + `buoyant_kernel_engine 0.25.0`, `arrow-59`, **selected transitively**; CodeFabric does not declare it directly | `FAB §2` · `FAB §2.2` |
 | tree-sitter | `0.26.12`; `tree-sitter-python 0.25.0` | `GEN §2` |
 | Ruff | `0.16.1`; component crates `0.0.7` | `GEN §2` |
 | Pyrefly | `1.2.0` | `GEN §2` |

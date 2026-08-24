@@ -1285,7 +1285,7 @@ fn render_validation(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
         "public_schema_count": plan.ir.public_schemas.len(),
         "stable_field_id_rule": "<table-name>.<field-name>",
         "compatibility_acceptance_generated": false,
-        "native_validators": ["arrow-schema-58.4.0", "datafusion-54.1.0", "sqlite-strict", "jsonschema-draft-2020-12"],
+        "native_validators": ["arrow-schema-59.2.0", "datafusion-55.0.0", "sqlite-strict", "jsonschema-draft-2020-12"],
     }))
 }
 

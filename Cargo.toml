@@ -44,6 +44,7 @@ model-compiler = [
     "dep:serde_yaml_ng",
     "dep:tempfile",
     "dep:thiserror",
+    "dep:toml",
 ]
 provider-inventory-tooling = [
     "dep:ruff_python_ast",
@@ -119,26 +120,26 @@ s3-storage = ["data-fabric", "deltalake/s3"]
 [dependencies]
 # FAB §2.1 is the normative alignment baseline. Keep every Arrow type-bearing crate on
 # exactly one family; scripts/stable_graph_check.sh validates the resolved graph.
-arrow = { version = "=58.4.0", optional = true }
-arrow-array = { version = "=58.4.0", optional = true }
-arrow-buffer = { version = "=58.4.0", optional = true }
-arrow-cast = { version = "=58.4.0", optional = true }
-arrow-ord = { version = "=58.4.0", optional = true }
-arrow-row = { version = "=58.4.0", optional = true }
-arrow-schema = { version = "=58.4.0", optional = true }
-arrow-select = { version = "=58.4.0", optional = true }
-arrow-string = { version = "=58.4.0", optional = true }
+arrow = { version = "=59.2.0", optional = true }
+arrow-array = { version = "=59.2.0", optional = true }
+arrow-buffer = { version = "=59.2.0", optional = true }
+arrow-cast = { version = "=59.2.0", optional = true }
+arrow-ord = { version = "=59.2.0", optional = true }
+arrow-row = { version = "=59.2.0", optional = true }
+arrow-schema = { version = "=59.2.0", optional = true }
+arrow-select = { version = "=59.2.0", optional = true }
+arrow-string = { version = "=59.2.0", optional = true }
 arc-swap = { version = "=1.9.2", optional = true }
 async-trait = { version = "=0.1.92", optional = true }
 base64 = { version = "=0.22.1", optional = true }
 blake3 = { version = "1", optional = true }
-datafusion = { version = "=54.1.0", optional = true }
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "9f9223197469897ef05ae4369eb4fd1390174e65", default-features = false, features = ["rustls", "datafusion"], optional = true }
+datafusion = { version = "=55.0.0", optional = true }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "43a0cf10a313e5077c48637ad786a05359136bbb", default-features = false, features = ["rustls", "datafusion"], optional = true }
 futures = { version = "0.3", optional = true }
 gix = { version = "=0.86.0", default-features = false, features = ["sha1", "sha256", "revision", "index", "status", "attributes", "excludes", "dirwalk", "blob-diff", "interrupt", "parallel", "auto-chain-error", "tracing"], optional = true }
 notify-debouncer-full = { version = "=0.7.0", optional = true }
 object_store = { version = "=0.13.2", optional = true }
-parquet = { version = "=58.4.0", features = ["arrow", "async", "object_store"], optional = true }
+parquet = { version = "=59.2.0", features = ["arrow", "async", "object_store"], optional = true }
 petgraph = { version = "=0.8.3", default-features = false, features = ["std"], optional = true }
 prost = { version = "=0.14.4", optional = true }
 prost-types = { version = "=0.14.4", optional = true }

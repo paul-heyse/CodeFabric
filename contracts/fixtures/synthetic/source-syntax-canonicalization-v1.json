@@ -1,7 +1,7 @@
 {
   "fixture_id": "codefabric.synthetic.source-syntax-canonicalization-v1",
   "projection": "codefabric:canonical-source-syntax-arrow-ipc:v1",
-  "arrow_version": "58.4.0",
+  "arrow_version": "59.2.0",
   "source": "# fmt: off\nclass Box:\n    \"\"\"box docs\"\"\"\n    def get(self, x: int = 1):\n        return (x)  # inline",
   "required_reconciliation_steps": [
     "EXACT_RANGE_AND_KIND",

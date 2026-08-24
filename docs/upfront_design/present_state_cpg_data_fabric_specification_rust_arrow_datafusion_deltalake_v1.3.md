@@ -275,10 +275,10 @@ This specification is grounded in the attached references and uses their termino
 
 | Technology | Version anchor used by this specification | Primary role |
 |---|---:|---|
-| Arrow Rust | `58.4.0` family | Canonical in-memory schemas, arrays, buffers, builders, `RecordBatch`, vectorized kernels, Parquet interchange |
-| DataFusion Rust | `54.1.0` | Catalog, SQL/DataFrame/Expr planning, streaming execution, joins, aggregations, custom functions, custom logical/physical operators |
-| `deltalake` / delta-rs | `1.0.0` at git rev `9f9223197469897ef05ae4369eb4fd1390174e65` | Transactional Delta tables, table schemas, DataFusion providers, writes, DML, constraints, optimize, vacuum |
-| Parquet Rust | `58.4.0` | Physical data-file format beneath Delta Lake |
+| Arrow Rust | `59.2.0` family | Canonical in-memory schemas, arrays, buffers, builders, `RecordBatch`, vectorized kernels, Parquet interchange |
+| DataFusion Rust | `55.0.0` | Catalog, SQL/DataFrame/Expr planning, streaming execution, joins, aggregations, custom functions, custom logical/physical operators |
+| `deltalake` / delta-rs | `1.0.0` at git rev `43a0cf10a313e5077c48637ad786a05359136bbb` | Transactional Delta tables, table schemas, DataFusion providers, writes, DML, constraints, optimize, vacuum |
+| Parquet Rust | `59.2.0` | Physical data-file format beneath Delta Lake |
 | `object_store` | `0.13.2` | Local and object-store I/O used by DataFusion and delta-rs |
 | Tree-sitter provider set | `tree-sitter 0.26.12`, `tree-sitter-python 0.25.0`, `tree-sitter-rust 0.24.2` (grammar ABI 15) | Incremental Python/Rust CST and generated provider raw-kind inventories |
 | Ruff analysis set | `ruff_python_parser`, `ruff_python_ast`, `ruff_python_trivia`, `ruff_python_index`, `ruff_source_file`, `ruff_text_size` all `0.0.7` | Python tokens, typed AST, trivia/indexes, and coordinates |
@@ -290,9 +290,16 @@ The delta-rs `1.0.0` target is a pinned pre-release revision rather than a tagge
 
 The Rust floor of `1.95.0` is set by the Ruff 0.0.7 provider train. This remains compatible with the pinned delta-rs revision, whose own minimum is `1.94.1`. It is a build-tooling obligation, not a CodeFabric language-feature requirement.
 
-The storage-substrate contracts in sections 2, 12.5–12.9, 67.3, 98.1–98.3, 100.1, 101.1, 103.4, 111.1 and 112.6 were integrated from `docs/codefabric_delta_rs_9f922319_design_change_recommendations_2026-08-20.md`, which assessed the move from delta-rs `35cfed45…` to `9f922319…`. That assessment found no required change to the ontology, semantic query model, hot-overlay model, multi-table publication model, or `ServingSnapshot` consistency semantics; the changes are confined to the implementation baseline, the provider lifecycle, and the conformance suite.
+The DataFusion 55, Arrow 59, and delta-rs `43a0cf10…` storage-substrate pivot is governed by the
+2026-08-23 comprehensive DataFusion/Arrow and delta-rs references. Its compatibility plan retains
+the ontology, semantic-query, hot-overlay, multi-table publication, and `ServingSnapshot`
+consistency semantics; only the implementation baseline, provider lifecycle, generated toolchain
+identity, and conformance evidence change.
 
-The pinned revision declares looser upstream requirements than CodeFabric's exact pins — `arrow = "58"`, `parquet = "58"`, `datafusion = "54.0.0"` — all of which are caret requirements satisfied by CodeFabric's `=58.4.0` and `=54.1.0`. CodeFabric pins exactly where delta-rs pins loosely; the exact pins remain authoritative for this specification.
+The pinned revision declares looser upstream requirements than CodeFabric's exact pins —
+`arrow = "59"`, `parquet = "59"`, and `datafusion = "55"` — which are satisfied by
+CodeFabric's `=59.2.0` and `=55.0.0`. CodeFabric pins exactly where delta-rs pins loosely; the
+exact pins remain authoritative for this specification.
 
 ### 2.1 Canonical workspace baseline
 
@@ -305,24 +312,24 @@ edition = "2024"
 rust-version = "1.95.0"
 
 [workspace.dependencies]
-datafusion = "=54.1.0"
+datafusion = "=55.0.0"
 
-arrow = "=58.4.0"
-arrow-array = "=58.4.0"
-arrow-buffer = "=58.4.0"
-arrow-schema = "=58.4.0"
-arrow-cast = "=58.4.0"
-arrow-select = "=58.4.0"
-arrow-ord = "=58.4.0"
-arrow-string = "=58.4.0"
-arrow-row = "=58.4.0"
+arrow = "=59.2.0"
+arrow-array = "=59.2.0"
+arrow-buffer = "=59.2.0"
+arrow-schema = "=59.2.0"
+arrow-cast = "=59.2.0"
+arrow-select = "=59.2.0"
+arrow-ord = "=59.2.0"
+arrow-string = "=59.2.0"
+arrow-row = "=59.2.0"
 
-parquet = { version = "=58.4.0", features = ["arrow", "async", "object_store"] }
+parquet = { version = "=59.2.0", features = ["arrow", "async", "object_store"] }
 object_store = "=0.13.2"
 
 deltalake = {
   git = "https://github.com/delta-io/delta-rs.git",
-  rev = "9f9223197469897ef05ae4369eb4fd1390174e65",
+  rev = "43a0cf10a313e5077c48637ad786a05359136bbb",
   default-features = false,
   features = ["rustls", "datafusion"]
 }
@@ -367,7 +374,7 @@ contract-models = ["canonical-json", "dep:serde_yaml_ng"]
 model-compiler = [
   "dep:blake3", "dep:gix", "dep:notify-debouncer-full", "dep:petgraph",
   "dep:rustix", "dep:serde", "dep:serde_json", "dep:serde_json_canonicalizer",
-  "dep:serde_yaml_ng", "dep:tempfile", "dep:thiserror",
+  "dep:serde_yaml_ng", "dep:tempfile", "dep:thiserror", "dep:toml",
 ]
 data-fabric = [
   "canonical-json", "dep:async-trait",
@@ -401,8 +408,8 @@ Protobuf, and fuzz invocations SHALL disable default features and select only th
 capability. The default `local-workstation` aggregate SHALL retain the complete accepted
 local production graph. Source modules, required-feature binaries, the single integration
 test target, local recipes, and CI SHALL use the same feature ownership. The accepted
-correction and its proof obligations are specified in
-`docs/designs/codefabric_build_cache_and_feature_isolation_design_v1_2026-08-20.md`.
+correction and its target-stack proof obligations are specified in
+`docs/designs/codefabric_build_cache_and_feature_isolation_design_v2_2026-08-24.md`.
 
 A deployment profile that requires object-store durability SHALL enable the
 corresponding storage feature explicitly. In particular, the default resolved
@@ -410,7 +417,7 @@ graph SHALL contain neither `deltalake-aws` nor the `aws-sdk-*` family, while
 `s3-storage` SHALL resolve `deltalake-aws` through `deltalake/s3`.
 
 The exact pinned graph has one important limitation that graph evidence SHALL
-report rather than hide: `buoyant_kernel` 0.25.x's `arrow-58` feature
+report rather than hide: `buoyant_kernel` 0.25.x's `arrow-59` feature
 unconditionally requests `object_store` 0.13.2 with its `aws`, `azure`, `gcp`,
 and `http` features. Those latent implementations therefore compile in the
 default binary even though CodeFabric neither registers nor authorizes them
@@ -442,7 +449,7 @@ one transitively selected Delta kernel line (buoyant_kernel + buoyant_kernel_eng
 
 CI SHALL reject duplicate Arrow, Parquet, DataFusion, or `object_store` versions that cross public type boundaries.
 
-The Delta kernel line is part of the alignment universe even though CodeFabric does not pin it directly. `buoyant_kernel` and `buoyant_kernel_engine` are compiled against a specific Arrow feature (`arrow-58`), so a kernel pair drawn from a different line can introduce a second Arrow type universe underneath `deltalake` without appearing anywhere in CodeFabric's own manifests. The duplicate-version gate SHALL therefore inspect the resolved graph, not only the declared dependencies, and SHALL fail when the kernel pair is split across minor lines or bound to a different Arrow feature than the workspace Arrow family.
+The Delta kernel line is part of the alignment universe even though CodeFabric does not pin it directly. `buoyant_kernel` and `buoyant_kernel_engine` are compiled against a specific Arrow feature (`arrow-59`), so a kernel pair drawn from a different line can introduce a second Arrow type universe underneath `deltalake` without appearing anywhere in CodeFabric's own manifests. The duplicate-version gate SHALL therefore inspect the resolved graph, not only the declared dependencies, and SHALL fail when the kernel pair is split across minor lines or bound to a different Arrow feature than the workspace Arrow family.
 
 CodeFabric does not pin the kernel. The pinned delta-rs revision consumes **released** `buoyant_kernel` and `buoyant_kernel_engine` crates on the `0.25.x` line — the engine is a separate package from the kernel — rather than a separately git-pinned kernel revision.
 

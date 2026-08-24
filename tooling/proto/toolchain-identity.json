@@ -13,10 +13,10 @@
     "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
   },
   "rust": {
-    "action_key": "b3:147639b1e52ab7b3d72300f8068d5812ce2e18a551af174497213f71198d1b6f",
-    "binary_digest": "b3:67d16b121fe3265674261f8a6d9ba1e9c5ddff4a47e93fb1632d07c72a5d4206",
-    "cargo_lock_digest": "b3:78451df7a7d836bff0c9095cc5d5c3fdf74c7d68ecbfc426d2e8c80fe258cb2b",
-    "cargo_manifest_digest": "b3:3a745d715e27327e9fef280495ceb78d5ec9009144453d14d889a2099a2d0f78",
+    "action_key": "b3:6d77166e26b3a9833bac6e0d008461006ad99a081ec0902a84482ef7650b291a",
+    "binary_digest": "b3:c65fc077a6addc4bcf0d1fb9de5c83f71f25d103121b63515cc85809ffa42ed3",
+    "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
+    "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
     "descriptor_api": "tonic_prost_build::Builder::compile_fds",
     "features": [
       "proto-tooling"
