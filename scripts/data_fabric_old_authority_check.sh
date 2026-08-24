@@ -40,7 +40,7 @@ allowed_historical_hit() {
       [[ "$content" == *'known typo'* ]] && return 0
       ;;
     docs/designs/*_v2_*)
-      [[ "$content" =~ historical|predecessor|supersed|never|different|prior ]] && return 0
+      [[ "$content" =~ historical|predecessor|superseded|supersedes|superseding|never|different|prior ]] && return 0
       ;;
   esac
   return 1
