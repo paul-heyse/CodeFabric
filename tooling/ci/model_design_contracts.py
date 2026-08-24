@@ -23,6 +23,10 @@ CONTROL_PLAN = Path(
 SUCCESSOR_PLAN = Path(
     "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v5_2026-08-22.md"
 )
+DATA_FABRIC_MIGRATION_PLAN = Path(
+    "docs/plans/codefabric_data_fabric_datafusion55_arrow59_delta43a0cf10_implementation_plan_v1_2026-08-23.md"
+)
+POST_CONTROL_PLANS = frozenset({SUCCESSOR_PLAN, DATA_FABRIC_MIGRATION_PLAN})
 
 
 @dataclass(frozen=True)
@@ -128,8 +132,11 @@ def validate_model_design_contract(
     """Validate the accepted WP01 ownership decisions and the sealed active-program handoff."""
     plan_path = plan_path if plan_path.is_absolute() else root / plan_path
     active = active_plan_path(root)
-    successor_path = root / SUCCESSOR_PLAN
-    if active.resolve() not in {plan_path.resolve(), successor_path.resolve()}:
+    post_control_paths = {root / path for path in POST_CONTROL_PLANS}
+    allowed_active_paths = {plan_path.resolve()} | {
+        path.resolve() for path in post_control_paths
+    }
+    if active.resolve() not in allowed_active_paths:
         raise ArtifactContractError(
             "active plan is outside the sealed model-control handoff"
         )
@@ -147,10 +154,10 @@ def validate_model_design_contract(
         raise ArtifactContractError(
             "active state does not identify the accepted design"
         )
-    if active.resolve() == successor_path.resolve():
-        successor = parse_frontmatter(successor_path)
-        if successor.get("status") != "approved":
-            raise ArtifactContractError("active Waves successor is not approved")
+    if active.resolve() != plan_path.resolve():
+        active_program = parse_frontmatter(active)
+        if active_program.get("status") != "approved":
+            raise ArtifactContractError("active post-control program is not approved")
         if (
             state.get("status") != "complete"
             or state.get("current_packet") is not None

@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import subprocess
 from copy import deepcopy
+from pathlib import Path
+
+import pytest
 
 from tooling.ci.artifact_contracts import (
     ROOT,
+    ArtifactContractError,
     _accepted_input_evolution_paths,
     _sha256,
     active_plan_path,
@@ -16,6 +20,7 @@ from tooling.ci.artifact_contracts import (
 )
 from tooling.ci.model_design_contracts import (
     CONTROL_PLAN,
+    DATA_FABRIC_MIGRATION_PLAN,
     EVOLVED_DESIGN_INPUTS,
     FORBIDDEN_DESIGN_PHRASES,
     validate_model_design_contract,
@@ -30,6 +35,23 @@ def test_model_active_program_is_unique() -> None:
         == report["active_plan"]
     )
     assert report["active_plan"] != report["suspended_plan"]
+    assert report["active_plan"] == DATA_FABRIC_MIGRATION_PLAN.as_posix()
+
+
+def test_model_active_program_rejects_an_unlisted_plan(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rogue_plan = tmp_path / "rogue-plan.md"
+    rogue_plan.write_text("---\nstatus: approved\n---\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "tooling.ci.model_design_contracts.active_plan_path",
+        lambda _root: rogue_plan,
+    )
+    with pytest.raises(
+        ArtifactContractError,
+        match="outside the sealed model-control handoff",
+    ):
+        validate_model_design_contract()
 
 
 def test_model_design_rejects_routine_acceptance_writes() -> None:

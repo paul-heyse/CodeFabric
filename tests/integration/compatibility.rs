@@ -47,6 +47,36 @@ fn wp02_behavioral_target_compile() {
 }
 
 #[test]
+fn wp02_structural_exact_graph() {
+    let output = Command::new("bash")
+        .arg(repository_root().join("scripts/stable_graph_check.sh"))
+        .current_dir(repository_root())
+        .output()
+        .expect("run exact resolved-graph contract");
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn wp02_negative_old_family_graph() {
+    let lock = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.lock"));
+    for predecessor in [
+        "name = \"arrow\"\nversion = \"58.4.0\"",
+        "name = \"datafusion\"\nversion = \"54.1.0\"",
+        "9f9223197469897ef05ae4369eb4fd1390174e65",
+    ] {
+        assert!(
+            !lock.contains(predecessor),
+            "live predecessor {predecessor}"
+        );
+    }
+}
+
+#[test]
 fn data_fabric_target_stack_release_contract() {
     wp02_behavioral_target_compile();
     let lock = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.lock"));

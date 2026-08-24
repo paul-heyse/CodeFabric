@@ -33,6 +33,9 @@ allowed_historical_hit() {
     scripts/stable_graph_check.sh)
       [[ "$content" == *'forbidden'* || "$content" == *'rg -qx'* ]] && return 0
       ;;
+    scripts/data_fabric_old_authority_check.sh)
+      [[ "$content" == old_pattern=* ]] && return 0
+      ;;
     .claude/skills/deltalake-rust-ref/SKILL.md)
       [[ "$content" == *'known typo'* ]] && return 0
       ;;

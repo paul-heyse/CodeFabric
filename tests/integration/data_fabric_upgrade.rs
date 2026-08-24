@@ -565,7 +565,7 @@ fn wp03_negative_checksum_drift() {
 }
 
 #[tokio::test]
-async fn delta_43a0cf10_snapshot_replay_contract() {
+async fn delta_43a0cf10_snapshot_replay_contract_wp04_behavioral_snapshot_equivalence() {
     let temporary = TempDir::new().expect("fixture copy temporary directory");
     copy_tree(&fixture_root(), temporary.path());
     let table_uri = Url::from_directory_path(temporary.path().join(DELTA_DIR))
@@ -602,7 +602,7 @@ async fn delta_43a0cf10_snapshot_replay_contract() {
 }
 
 #[tokio::test]
-async fn delta_43a0cf10_checkpoint_identity_contract() {
+async fn delta_43a0cf10_checkpoint_identity_contract_wp04_operational_checkpoint_restart() {
     let temporary = TempDir::new().expect("fixture copy temporary directory");
     copy_tree(&fixture_root(), temporary.path());
     let location = Url::from_directory_path(temporary.path().join(DELTA_DIR))
@@ -636,7 +636,7 @@ async fn delta_43a0cf10_checkpoint_identity_contract() {
 }
 
 #[tokio::test]
-async fn delta_43a0cf10_provider_pruning_contract() {
+async fn delta_43a0cf10_provider_pruning_contract_wp04_structural_delta_provider_path() {
     let temporary = TempDir::new().expect("fixture copy temporary directory");
     copy_tree(&fixture_root(), temporary.path());
     let location = Url::from_directory_path(temporary.path().join(DELTA_DIR))
@@ -708,6 +708,41 @@ async fn delta_43a0cf10_provider_pruning_contract() {
             .sum::<usize>(),
         1
     );
+}
+
+#[tokio::test]
+async fn delta_43a0cf10_exact_open_wp04_negative_feature_cache_mismatch() {
+    let temporary = TempDir::new().expect("fixture copy temporary directory");
+    copy_tree(&fixture_root(), temporary.path());
+    let table_uri = Url::from_directory_path(temporary.path().join(DELTA_DIR))
+        .expect("fixture path is a file URL")
+        .to_string();
+
+    assert!(
+        DeltaHandleFactory::open(&table_uri, None, DeltaAccessProfile::QueryServing)
+            .await
+            .is_err(),
+        "a query-serving handle must not cache or infer an unspecified version"
+    );
+    assert!(
+        DeltaHandleFactory::open(&table_uri, Some(u64::MAX), DeltaAccessProfile::QueryServing,)
+            .await
+            .is_err(),
+        "a missing exact version must not fall back to cached current state"
+    );
+
+    let expected = manifest(temporary.path());
+    assert_eq!(expected["delta"]["reader_features"], json!([]));
+    assert_eq!(expected["delta"]["writer_features"], json!([]));
+    assert_eq!(
+        expected["delta"]["table_features"]["change_data_feed"],
+        false
+    );
+    assert_eq!(
+        expected["delta"]["table_features"]["deletion_vectors"],
+        false
+    );
+    assert_eq!(expected["delta"]["table_features"]["type_widening"], false);
 }
 
 #[tokio::test]

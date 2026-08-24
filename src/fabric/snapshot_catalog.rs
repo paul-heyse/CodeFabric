@@ -1284,7 +1284,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn datafusion_55_table_provider_scan_contract() {
+    async fn datafusion_55_table_provider_scan_contract_wp03_structural_provider_forwarding() {
         let schema = Arc::clone(&table_spec(1).unwrap().arrow_schema);
         let spy = Arc::new(StructuredScanSpy {
             schema,
