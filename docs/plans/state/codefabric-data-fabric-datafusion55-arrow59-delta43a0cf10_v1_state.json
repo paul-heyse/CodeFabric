@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
   "baseline_commit": "d89cc90cd2e51c4b716b2a4da2c0a8d6f79d5409",
   "status": "executing",
-  "current_packet": "WP02",
+  "current_packet": "WP03",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -22,10 +22,18 @@
       "blockers": []
     },
     "WP02": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "5d81f7bb6fdbc9206229b9b11b45caeb91348f47",
+      "deviations": [
+        {
+          "summary": "The model compiler now directly parses the root and extractor TOML authorities so AC-G-07 records exact data-fabric and extractor identities; this is the dependency-closed implementation of the packet's explicit toolchain-identity obligation."
+        }
+      ],
+      "failed_approaches": [
+        {
+          "summary": "An initial combined nextest filter selected zero tests because model-binary and integration-test names occupy different binaries; the five acceptance tests were rerun with exact binary, feature, and test filters and all passed."
+        }
+      ],
       "blockers": []
     },
     "WP03": {
@@ -70,9 +78,13 @@
       "blockers": []
     },
     "M02": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "5d81f7bb6fdbc9206229b9b11b45caeb91348f47",
+      "deviations": [
+        {
+          "summary": "The exact target graph, version authorities, generated identities, security policy, current skill routes, extractor IPC contract, and all sixteen feature profiles are green at the proving commit."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -118,7 +130,7 @@
     {
       "command": "just ci-fast",
       "summary": "The pre-edit baseline reached root nextest and failed golden_corpus::tests::wp34_behavioral_acceptance because the observed profile digest differs from the accepted fixture digest.",
-      "ownership": "The failure predates this plan's edits and coincides with the pre-existing user modification to artifact-schemas.md; WP02 model reconciliation must preserve that edit and eliminate the unexplained digest drift before final certification."
+      "ownership": "The failure predates this plan's edits. The modified artifact-schemas.md is outside the golden-corpus digest roots and is not causal; WP06 owns final reconciliation without silently accepting a new golden digest."
     },
     {
       "command": "just stable-graph-check",
@@ -134,7 +146,7 @@
   "discovered_obligations": [
     {
       "owner": "WP02",
-      "summary": "Preserve and incorporate the pre-existing user edit to .claude/skills/_shared/artifact-schemas.md when model-owned digest outputs are reconciled; do not overwrite or revert it."
+      "summary": "Preserve the pre-existing user edit to .claude/skills/_shared/artifact-schemas.md without overwrite or attribution; model-plan proved it is outside the generated-output cascade."
     },
     {
       "owner": "WP06",
@@ -153,8 +165,12 @@
     {
       "kind": "active_program_transition",
       "summary": "The prior Waves 4-7 active plan was complete and healthy before the pointer moved to this upgrade plan; its plan and state remain immutable historical evidence."
+    },
+    {
+      "kind": "planned_input_evolution",
+      "summary": "WP02 intentionally evolved the declared FAB v1.3 input in place from the predecessor dependency baseline to DataFusion 55.0.0, Arrow and Parquet 59.2.0, object_store 0.13.2, and delta-rs 43a0cf10; proving commit 5d81f7bb6fdbc9206229b9b11b45caeb91348f47 contains the corresponding generated digest restamp."
     }
   ],
-  "next_action": "Execute WP02 as one coherent target pin, lock, graph-policy, version-authority, skill-routing, and model-identity cutover; preserve the WP01 namespace and checksum oracles without a dual-stack shim.",
-  "updated_at": "2026-08-24T06:41:05Z"
+  "next_action": "Execute WP03 by proving DF55 structured scan forwarding, explicit effective-provider statistics behavior, Arrow 59 checksum and extractor IPC equivalence, and serving resource/cancellation invariants.",
+  "updated_at": "2026-08-24T07:57:35Z"
 }
