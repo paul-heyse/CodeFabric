@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
   "baseline_commit": "d89cc90cd2e51c4b716b2a4da2c0a8d6f79d5409",
   "status": "executing",
-  "current_packet": "WP03",
+  "current_packet": "WP05",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -37,17 +37,39 @@
       "blockers": []
     },
     "WP03": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "fa1af15b452633df6c32fe05a196c6d6e9bccb3b",
+      "deviations": [
+        {
+          "summary": "DataFusion 55 Parquet filter pushdown and filter reordering are explicitly disabled while pruning remains enabled. Enabling both changed the reviewed scoped-query physical plan by duplicating the application-owned predicate, so the compatibility-preserving posture is encoded as a closed runtime-evidence enum rather than inherited defaults."
+        },
+        {
+          "summary": "The packet-local wave5, gate-b, and rebuild-equivalence paths remain blocked only by the pre-existing golden-corpus digest mismatch recorded at activation; wave3, vacuum dry-run, focused upgrade checks, root checks, Clippy, and extractor gates pass."
+        }
+      ],
+      "failed_approaches": [
+        {
+          "summary": "The first target configuration enabled Parquet filter pushdown and reordering; snapshot review exposed a duplicated scoped predicate, so the generated pending snapshot was discarded and the explicit compatibility posture was changed to disabled."
+        }
+      ],
       "blockers": []
     },
     "WP04": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "fa1af15b452633df6c32fe05a196c6d6e9bccb3b",
+      "deviations": [
+        {
+          "summary": "The exact pinned delta-rs revision supports same-version checkpoint creation and exact-version reopen without checksum drift; fresh full-stat reloads remain the supported policy and no same-handle skip-stats mutation was introduced."
+        },
+        {
+          "summary": "The packet-local wave5 and rebuild-equivalence paths retain the inherited golden-corpus digest mismatch and no target-stack snapshot or golden digest was accepted to conceal it."
+        }
+      ],
+      "failed_approaches": [
+        {
+          "summary": "A first direct structured-scan probe used an incompatible binary comparison for the fixture column type; it was replaced with a type-correct Boolean predicate before the provider/pruning contract was recorded."
+        }
+      ],
       "blockers": []
     },
     "WP05": {
@@ -89,9 +111,13 @@
       "blockers": []
     },
     "M03": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "fa1af15b452633df6c32fe05a196c6d6e9bccb3b",
+      "deviations": [
+        {
+          "summary": "Arrow 59 checksums and extractor IPC are byte/semantic equivalent, DataFusion 55 structured scan and statistics behavior is explicit for both wrappers, and delta-rs 43a0cf10 exact-version, restart, checkpoint, cache, provider, pruning, and feature-rejection contracts are green."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -171,6 +197,6 @@
       "summary": "WP02 intentionally evolved the declared FAB v1.3 input in place from the predecessor dependency baseline to DataFusion 55.0.0, Arrow and Parquet 59.2.0, object_store 0.13.2, and delta-rs 43a0cf10; proving commit 5d81f7bb6fdbc9206229b9b11b45caeb91348f47 contains the corresponding generated digest restamp."
     }
   ],
-  "next_action": "Execute WP03 by proving DF55 structured scan forwarding, explicit effective-provider statistics behavior, Arrow 59 checksum and extractor IPC equivalence, and serving resource/cancellation invariants.",
-  "updated_at": "2026-08-24T07:57:35Z"
+  "next_action": "Execute WP05 by proving target mutation, publication, idempotency, maintenance, predecessor reconciliation, and bidirectional old/target persisted compatibility without protocol-feature elevation.",
+  "updated_at": "2026-08-24T08:21:40Z"
 }
