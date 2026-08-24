@@ -14,8 +14,9 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
-    process_stage_root, rustfmt_source,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
+    configure_reproducible_cargo_build, executable_tool_identity, process_stage_root,
+    rustfmt_source,
 };
 use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
@@ -949,12 +950,15 @@ fn run_provider_probe(repository_root: &Path) -> Result<(ProviderProbe, Value), 
         )?);
     }
     material.extend(rustc.as_bytes());
-    material.extend(b"provider-inventory-tooling|debug|host");
+    material
+        .extend(b"provider-inventory-tooling|debug|host|reproducible-path-remap-v1|incremental=0");
     let action_key = blake3::hash(&material).to_hex().to_string();
     let target = repository_root
         .join("target/model-tools/provider-inventory")
         .join(&action_key);
-    let status = Command::new("cargo")
+    let mut command = Command::new("cargo");
+    configure_reproducible_cargo_build(&mut command, repository_root);
+    let status = command
         .args([
             "build",
             "--offline",

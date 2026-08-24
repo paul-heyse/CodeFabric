@@ -5,14 +5,19 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 compiler_source_identity() {
-  {
-    shasum -a 256 "$repo_root/Cargo.toml"
-    find "$repo_root/src/bin/codefabric_model" -type f -name '*.rs' -print \
-      | LC_ALL=C sort \
-      | while IFS= read -r source; do
-          shasum -a 256 "$source"
-        done
-  } | shasum -a 256 | awk '{print $1}'
+  (
+    cd "$repo_root"
+    {
+      shasum -a 256 Cargo.toml | awk '{print $1 "  Cargo.toml"}'
+      shasum -a 256 scripts/model_exec.sh \
+        | awk '{print $1 "  scripts/model_exec.sh"}'
+      find src/bin/codefabric_model -type f -name '*.rs' -print \
+        | LC_ALL=C sort \
+        | while IFS= read -r source; do
+            shasum -a 256 "$source" | awk -v path="$source" '{print $1 "  " path}'
+          done
+    } | shasum -a 256 | awk '{print $1}'
+  )
 }
 
 rustc_identity="$(rustc -vV)"
@@ -26,8 +31,10 @@ build_key="$(
 )"
 target_dir="$repo_root/target/model-builds/$build_key"
 executable="$target_dir/debug/codefabric-model"
+encoded_rustflags="--remap-path-prefix=$repo_root=/codefabric"
 
-CARGO_TARGET_DIR="$target_dir" cargo build --quiet --locked --no-default-features \
+CARGO_INCREMENTAL=0 CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
+  CARGO_TARGET_DIR="$target_dir" cargo build --quiet --locked --no-default-features \
   --features model-compiler --bin codefabric-model --manifest-path "$repo_root/Cargo.toml"
 
 [ -x "$executable" ] || {

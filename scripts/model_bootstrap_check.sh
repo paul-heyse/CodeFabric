@@ -67,14 +67,19 @@ model_bootstrap_builds_without_generated_outputs() {
   rustc_identity="$(rustc -vV)"
   lock_identity="$(shasum -a 256 "$repo_root/Cargo.lock" | awk '{print $1}')"
   source_identity="$(
-    {
-      shasum -a 256 "$repo_root/Cargo.toml"
-      find "$repo_root/src/bin/codefabric_model" -type f -name '*.rs' -print \
-        | LC_ALL=C sort \
-        | while IFS= read -r source; do
-            shasum -a 256 "$source"
-          done
-    } | shasum -a 256 | awk '{print $1}'
+    (
+      cd "$repo_root"
+      {
+        shasum -a 256 Cargo.toml | awk '{print $1 "  Cargo.toml"}'
+        shasum -a 256 scripts/model_exec.sh \
+          | awk '{print $1 "  scripts/model_exec.sh"}'
+        find src/bin/codefabric_model -type f -name '*.rs' -print \
+          | LC_ALL=C sort \
+          | while IFS= read -r source; do
+              shasum -a 256 "$source" | awk -v path="$source" '{print $1 "  " path}'
+            done
+      } | shasum -a 256 | awk '{print $1}'
+    )
   )"
   target_triple="$(printf '%s\n' "$rustc_identity" | sed -n 's/^host: //p')"
   build_key="$(printf '%s\n' "$rustc_identity" "$lock_identity" "$source_identity" \
@@ -83,9 +88,13 @@ model_bootstrap_builds_without_generated_outputs() {
 
   (
     cd "$sandbox_root"
-    CARGO_TARGET_DIR="$target_dir" cargo test --locked --no-default-features \
+    CARGO_INCREMENTAL=0 \
+      CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$sandbox_root=/codefabric" \
+      CARGO_TARGET_DIR="$target_dir" cargo test --locked --no-default-features \
       --features model-compiler --bin codefabric-model model_control::tests
-    CARGO_TARGET_DIR="$target_dir" cargo build --locked --no-default-features \
+    CARGO_INCREMENTAL=0 \
+      CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$sandbox_root=/codefabric" \
+      CARGO_TARGET_DIR="$target_dir" cargo build --locked --no-default-features \
       --features model-compiler --bin codefabric-model
   )
 

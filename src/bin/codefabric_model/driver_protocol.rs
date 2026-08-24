@@ -481,6 +481,20 @@ pub fn executable_tool_identity(
     }))
 }
 
+/// Configure a Cargo subprocess so debug artifacts are byte-identical across worktree roots.
+pub fn configure_reproducible_cargo_build(command: &mut Command, repository_root: &Path) {
+    command
+        .env("CARGO_INCREMENTAL", "0")
+        .env_remove("RUSTFLAGS")
+        .env(
+            "CARGO_ENCODED_RUSTFLAGS",
+            format!(
+                "--remap-path-prefix={}=/codefabric",
+                repository_root.display()
+            ),
+        );
+}
+
 fn digest_bytes(bytes: &[u8]) -> String {
     format!("b3:{}", blake3::hash(bytes).to_hex())
 }
@@ -596,5 +610,34 @@ mod tests {
                 || name.contains("token")
                 || matches!(name.as_str(), "http_proxy" | "https_proxy" | "all_proxy")
         }));
+    }
+
+    #[test]
+    fn model_cargo_tool_builds_use_a_closed_reproducible_path_contract() {
+        let mut command = Command::new("cargo");
+        command.env("RUSTFLAGS", "ambient-flag");
+        configure_reproducible_cargo_build(&mut command, Path::new("/tmp/source root"));
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| (name.to_owned(), value.map(ToOwned::to_owned)))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            environment
+                .get(std::ffi::OsStr::new("CARGO_INCREMENTAL"))
+                .and_then(Option::as_deref),
+            Some(std::ffi::OsStr::new("0"))
+        );
+        assert_eq!(
+            environment
+                .get(std::ffi::OsStr::new("CARGO_ENCODED_RUSTFLAGS"))
+                .and_then(Option::as_deref),
+            Some(std::ffi::OsStr::new(
+                "--remap-path-prefix=/tmp/source root=/codefabric"
+            ))
+        );
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new("RUSTFLAGS")),
+            Some(&None)
+        );
     }
 }

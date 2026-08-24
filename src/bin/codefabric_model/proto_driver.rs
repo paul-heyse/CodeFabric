@@ -13,8 +13,8 @@ use thiserror::Error;
 use super::desired_tree::SafeOutputPath;
 use super::driver_protocol::{
     DriverDescriptor, DriverEnvironment, DriverOutputRole, DriverOutputSpec, DriverProtocolError,
-    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot, executable_tool_identity,
-    process_stage_root,
+    DriverResourceProfile, DriverSourceFence, ModelDriver, StagingRoot,
+    configure_reproducible_cargo_build, executable_tool_identity, process_stage_root,
 };
 use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
@@ -589,13 +589,15 @@ fn build_rust_generator(plan: &ProtoPlan) -> Result<RustGenerator, ProtoDriverEr
         MAX_SOURCE_BYTES,
     )?);
     identity_material.extend(rustc.as_bytes());
-    identity_material.extend(b"proto-tooling|debug|host");
+    identity_material.extend(b"proto-tooling|debug|host|reproducible-path-remap-v1|incremental=0");
     let action_key = blake3::hash(&identity_material).to_hex().to_string();
     let target = plan
         .repository_root
         .join("target/model-tools/proto")
         .join(&action_key);
-    let status = Command::new("cargo")
+    let mut command = Command::new("cargo");
+    configure_reproducible_cargo_build(&mut command, &plan.repository_root);
+    let status = command
         .args([
             "build",
             "--locked",
