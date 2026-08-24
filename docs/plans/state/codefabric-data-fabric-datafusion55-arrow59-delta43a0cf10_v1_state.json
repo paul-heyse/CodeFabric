@@ -214,7 +214,11 @@
       "summary": "The prior Waves 4-7 active plan was complete and healthy before the pointer moved to this upgrade plan; its plan and state remain immutable historical evidence."
     },
     {
-      "kind": "planned_input_evolution",
+      "kind": "planned_design_input_evolution",
+      "packet": "WP02",
+      "paths": [
+        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
+      ],
       "summary": "WP02 intentionally evolved the declared FAB v1.3 input in place from the predecessor dependency baseline to DataFusion 55.0.0, Arrow and Parquet 59.2.0, object_store 0.13.2, and delta-rs 43a0cf10; proving commit 5d81f7bb6fdbc9206229b9b11b45caeb91348f47 contains the corresponding generated digest restamp."
     }
   ],
