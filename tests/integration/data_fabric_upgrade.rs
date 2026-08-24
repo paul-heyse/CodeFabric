@@ -1075,10 +1075,11 @@ fn compare_benchmark_reports(baseline: &Value, target: &Value, comparator: &Valu
         baseline["workloads"].as_object(),
         target["workloads"].as_object(),
     ) {
-        assert_eq!(
-            baseline_workloads.keys().collect::<Vec<_>>(),
-            target_workloads.keys().collect::<Vec<_>>()
-        );
+        let mut baseline_names = baseline_workloads.keys().collect::<Vec<_>>();
+        let mut target_names = target_workloads.keys().collect::<Vec<_>>();
+        baseline_names.sort_unstable();
+        target_names.sort_unstable();
+        assert_eq!(baseline_names, target_names);
         for report in [baseline, target] {
             assert!(
                 report["observed_peak_rss_bytes"].as_u64().expect("RSS")
