@@ -13,8 +13,8 @@
     "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
   },
   "rust": {
-    "action_key": "b3:6d77166e26b3a9833bac6e0d008461006ad99a081ec0902a84482ef7650b291a",
-    "binary_digest": "b3:c65fc077a6addc4bcf0d1fb9de5c83f71f25d103121b63515cc85809ffa42ed3",
+    "action_key": "b3:4c8d6bf22d182a483433ec68aa6aa8eb99bd966303b7c86a4d8c5c65ae503119",
+    "binary_digest": "b3:b6751909f69fc42af4cbd95f37a032a986f235593b3b87ddf61c48e2b8423528",
     "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
     "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
     "descriptor_api": "tonic_prost_build::Builder::compile_fds",

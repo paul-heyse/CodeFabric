@@ -560,7 +560,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:ff3a9513c1ccd0311db84f3227eb63a2021dfbe5249abe482131694608355ef8",
+      "canonical_digest": "b3:19ecf7a46c65617aae3df06e31c1b9ed8a66f9a16a49f1c1c42a4b93504e9cbb",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -577,7 +577,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:d67ef2efed33449fd4c2008e9b799f1fd0ef22e5167f3db6d6cd8a6aad682949",
+      "source_digest": "b3:01888e9d2c5cc6e9ca49f8be2a7727eecd4d01465774c7f0b2b8535b220733fb",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1754,7 +1754,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:ab4d2b425b0623df25450e3f8cdf24246186b6b240bd87d5d8dc39513f60965c",
+      "canonical_digest": "b3:17bbdcd037256ad87a4d0f4d5b49f96b1da323cf1d54f130df2835c55a2f59e6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -1771,7 +1771,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:dc2f90a1421d8038e36c3a92b4180c09b4ad3d17563232652e2a8ac16b65582c",
+      "source_digest": "b3:a786dbaeeaf235bfef63067c25ab76cef5cf1fc74d173b7d618c041f473f0f0e",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -3125,10 +3125,10 @@
       },
       "rule_version": "registry-cbef-driver-v1",
       "tool_identity": {
-        "action_key": "b3:d18bad9214fa98dec4ab873e811fed3d4983677530b2a938da4aed4773968938",
+        "action_key": "b3:ac5500e0440a8e1f1ddad89209040ef7b92643a5d6b3a05d58023933ac0d6158",
         "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
         "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
-        "executable_digest": "b3:f2e53a5700a7fb7e0a4473f23898c9b7c6e79333ef8cc5f44723cc853ab2c815",
+        "executable_digest": "b3:a3e552c7b5342f0b0a7e3449880876d4ff27566e73ecdc52f3473952fcb40ce2",
         "features": [
           "provider-inventory-tooling"
         ],
@@ -3242,8 +3242,8 @@
           "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
         },
         "rust": {
-          "action_key": "b3:6d77166e26b3a9833bac6e0d008461006ad99a081ec0902a84482ef7650b291a",
-          "binary_digest": "b3:c65fc077a6addc4bcf0d1fb9de5c83f71f25d103121b63515cc85809ffa42ed3",
+          "action_key": "b3:4c8d6bf22d182a483433ec68aa6aa8eb99bd966303b7c86a4d8c5c65ae503119",
+          "binary_digest": "b3:b6751909f69fc42af4cbd95f37a032a986f235593b3b87ddf61c48e2b8423528",
           "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
           "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
           "descriptor_api": "tonic_prost_build::Builder::compile_fds",
@@ -4004,7 +4004,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:d67ef2efed33449fd4c2008e9b799f1fd0ef22e5167f3db6d6cd8a6aad682949",
+      "content_digest": "b3:01888e9d2c5cc6e9ca49f8be2a7727eecd4d01465774c7f0b2b8535b220733fb",
       "lineage": [
         "action:governance"
       ],
@@ -4054,7 +4054,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:b8b8e7f641788a58bb8aa39180b84bee6c327157040e5a890016f8c27ad9450e",
+      "content_digest": "b3:67df617fe06379979d9488fa2e7dea3fbc7d27d3b6a7a0d2ec22d6c8ce392c75",
       "lineage": [
         "action:governance"
       ],
@@ -4468,7 +4468,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:dc2f90a1421d8038e36c3a92b4180c09b4ad3d17563232652e2a8ac16b65582c",
+      "content_digest": "b3:a786dbaeeaf235bfef63067c25ab76cef5cf1fc74d173b7d618c041f473f0f0e",
       "lineage": [
         "action:governance"
       ],
@@ -4804,7 +4804,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:cab62f5a6bbfa19e324324236fa85bb0370099a2f5527dc9b300aedfa789a39c",
+      "content_digest": "b3:a7f803742d370d3e06a298f09a29bba9b93db090210079ebc3d3b437d7591902",
       "lineage": [
         "action:proto"
       ],
