@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
   "baseline_commit": "d89cc90cd2e51c4b716b2a4da2c0a8d6f79d5409",
   "status": "executing",
-  "current_packet": "WP05",
+  "current_packet": "WP06",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -73,10 +73,27 @@
       "blockers": []
     },
     "WP05": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "12983aa57949d3f2c893de3fbcb97ecf654e105a",
+      "deviations": [
+        {
+          "summary": "The pinned revision persists num_retries=0 in Write operationMetrics. Update, delete, and optimize metric schemas omit a retry field, so those operations retain coordinator-owned with_max_retries(0) while retry telemetry is explicitly non-applicable rather than promoted into a new application contract."
+        },
+        {
+          "summary": "Direct target-library optimize and vacuum compatibility remains isolated in tests because production has no vacuum orchestration. The probe is dry-run-only, validates relative non-traversing action paths, and proves keep_versions protects the rollback-required version."
+        },
+        {
+          "summary": "Wave6 and the root/rebuild families continue to fail only at the activation-recorded golden-corpus profile digest mismatch; root check, Clippy, wave3, vacuum dry-run, focused upgrade, mutation/publication recovery, maintenance, and bidirectional revision compatibility checks pass."
+        }
+      ],
+      "failed_approaches": [
+        {
+          "summary": "The first telemetry assertion expected every DML and maintenance operationMetrics object to expose num_retries. The exact target revision exposes it for Write only; tests now distinguish persisted zero for Write from explicitly non-applicable telemetry for Update, Delete, and Optimize."
+        },
+        {
+          "summary": "The maintenance probe initially named chrono::TimeDelta without a direct dependency, then used an inferred Default that Clippy rejected. A context-inferred helper now compile-probes the API without expanding the manifest and passes Clippy."
+        }
+      ],
       "blockers": []
     },
     "WP06": {
@@ -122,9 +139,13 @@
       "blockers": []
     },
     "M04": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "12983aa57949d3f2c893de3fbcb97ecf654e105a",
+      "deviations": [
+        {
+          "summary": "Old-state target mutation, exact time travel, metadata, application transactions, no-op and real DML, fault recovery, concurrency, checkpoint/optimize/vacuum safety, protocol non-elevation, and bidirectional persisted-format compatibility are green at the proving commit."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -197,6 +218,6 @@
       "summary": "WP02 intentionally evolved the declared FAB v1.3 input in place from the predecessor dependency baseline to DataFusion 55.0.0, Arrow and Parquet 59.2.0, object_store 0.13.2, and delta-rs 43a0cf10; proving commit 5d81f7bb6fdbc9206229b9b11b45caeb91348f47 contains the corresponding generated digest restamp."
     }
   ],
-  "next_action": "Execute WP05 by proving target mutation, publication, idempotency, maintenance, predecessor reconciliation, and bidirectional old/target persisted compatibility without protocol-feature elevation.",
-  "updated_at": "2026-08-24T08:21:40Z"
+  "next_action": "Execute WP06 by extending the revision comparator to the full declared workload, reconciling the inherited golden-corpus digest without blind acceptance, proving live old-authority zero state, running the final gate matrix, and preparing the owner-reviewed rollback handoff.",
+  "updated_at": "2026-08-24T08:44:39Z"
 }
