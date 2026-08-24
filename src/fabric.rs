@@ -44,8 +44,8 @@ pub use publication::{
 };
 #[cfg(feature = "daemon")]
 pub use serving::{
-    QueryPlanArtifact, ServingQueryError, ServingQueryResult, ServingQuerySession,
-    ServingRuntimeConfig, ServingRuntimeEvidence,
+    ParquetFilterPushdownPosture, QueryPlanArtifact, ServingQueryError, ServingQueryResult,
+    ServingQuerySession, ServingRuntimeConfig, ServingRuntimeEvidence,
 };
 pub use snapshot_catalog::{
     DeltaAccessProfile, DeltaHandleFactory, DeltaMaterializationPosture, EmptySnapshotOverlay,
@@ -558,12 +558,27 @@ fn validate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), Fabri
         .map(String::as_str)
         != Some("false")
         || configuration.get(TYPE_WIDENING_KEY).map(String::as_str) != Some("false")
+        || configuration
+            .get("delta.enableDeletionVectors")
+            .map(String::as_str)
+            != Some("false")
     {
         return Err(FabricError::TableInvariant {
             table: spec.name.into(),
-            detail: "CDF and type widening must remain disabled".into(),
+            detail: "CDF, deletion vectors, and type widening must remain disabled".into(),
         });
     }
+    validate_protocol_feature_posture(
+        spec.name,
+        state
+            .protocol()
+            .reader_features()
+            .map(|features| features.iter().map(ToString::to_string).collect::<Vec<_>>()),
+        state
+            .protocol()
+            .writer_features()
+            .map(|features| features.iter().map(ToString::to_string).collect::<Vec<_>>()),
+    )?;
     if metadata.partition_columns()
         != spec
             .partition_columns
@@ -589,6 +604,24 @@ fn validate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), Fabri
         return Err(FabricError::TableInvariant {
             table: spec.name.into(),
             detail: "Delta StructType round trip changed Arrow fields".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_protocol_feature_posture(
+    table: &str,
+    reader_features: Option<Vec<String>>,
+    writer_features: Option<Vec<String>>,
+) -> Result<(), FabricError> {
+    let reader_features = reader_features.unwrap_or_default();
+    let writer_features = writer_features.unwrap_or_default();
+    if !reader_features.is_empty() || !writer_features.is_empty() {
+        return Err(FabricError::TableInvariant {
+            table: table.into(),
+            detail: format!(
+                "Delta table features are not approved (reader={reader_features:?}, writer={writer_features:?})"
+            ),
         });
     }
     Ok(())
@@ -627,10 +660,13 @@ pub(super) async fn exact_provider(
     // Delta/DataFusion defaults to Arrow view types for Parquet scans. The governed
     // schema deliberately uses ordinary Utf8/Binary, so bind the provider to the
     // library's session option instead of maintaining a conversion layer.
-    let config = SessionConfig::new().set_bool(
-        "datafusion.execution.parquet.schema_force_view_types",
-        false,
-    );
+    let config = SessionConfig::new()
+        .set_bool(
+            "datafusion.execution.parquet.schema_force_view_types",
+            false,
+        )
+        .set_bool("datafusion.execution.parquet.pushdown_filters", false)
+        .set_bool("datafusion.execution.parquet.reorder_filters", false);
     let session = Arc::new(SessionContext::new_with_config(config).state());
     let inner = table.table_provider().with_session(session).await?;
     let provider_schema = inner.schema();
@@ -1047,6 +1083,35 @@ mod tests {
             })
             .is_err()
         );
+        assert!(validate_protocol_feature_posture("workspace", None, None).is_ok());
+        assert!(matches!(
+            validate_protocol_feature_posture(
+                "workspace",
+                Some(vec!["deletionVectors".into()]),
+                Some(vec!["deletionVectors".into()]),
+            ),
+            Err(FabricError::TableInvariant { .. })
+        ));
+    }
+
+    #[test]
+    fn delta_43a0cf10_unapproved_feature_rejection() {
+        for (reader, writer) in [
+            (vec!["deletionVectors"], vec!["deletionVectors"]),
+            (vec!["typeWidening"], vec!["typeWidening"]),
+            (vec!["columnMapping"], vec!["columnMapping"]),
+            (vec!["v2Checkpoint"], vec!["v2Checkpoint"]),
+            (Vec::new(), vec!["changeDataFeed"]),
+        ] {
+            assert!(matches!(
+                validate_protocol_feature_posture(
+                    "workspace",
+                    Some(reader.into_iter().map(str::to_owned).collect()),
+                    Some(writer.into_iter().map(str::to_owned).collect()),
+                ),
+                Err(FabricError::TableInvariant { .. })
+            ));
+        }
     }
 
     #[tokio::test]

@@ -22,7 +22,9 @@ use arrow_row::{RowConverter, SortField};
 #[cfg(test)]
 use arrow_select::concat::concat_batches;
 use async_trait::async_trait;
-use datafusion::catalog::{CatalogProvider, SchemaProvider, Session, TableProvider};
+use datafusion::catalog::{
+    CatalogProvider, ScanArgs, ScanResult, SchemaProvider, Session, TableProvider,
+};
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::{ViewTable, provider_as_source};
 use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, TrackConsumersPool};
@@ -261,6 +263,16 @@ impl TableProvider for OverlayIdentityProvider {
         limit: Option<usize>,
     ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
         self.inner.scan(state, projection, filters, limit).await
+    }
+
+    async fn scan_with_args<'a>(
+        &self,
+        state: &dyn Session,
+        args: ScanArgs<'a>,
+    ) -> datafusion::error::Result<ScanResult> {
+        // The wrapper owns identity only. Forward the complete DF55 structure so
+        // query-aware statistics requests are not lost by the default adapter.
+        self.inner.scan_with_args(state, args).await
     }
 
     fn supports_filters_pushdown(
@@ -1037,6 +1049,8 @@ fn validate_provider_record(
 #[cfg(all(test, feature = "daemon"))]
 mod tests {
     use std::path::Path;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::fabric::{
@@ -1044,6 +1058,61 @@ mod tests {
     };
     use crate::registries::WorkspaceRegistryLifecycle;
     use crate::workspace_registry::WorkspaceRecord;
+    use datafusion::logical_expr::statistics::StatisticsRequest;
+    use datafusion::physical_plan::empty::EmptyExec;
+    use datafusion::prelude::{col, lit};
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct CapturedStructuredScan {
+        projection: Option<Vec<usize>>,
+        filters: Vec<Expr>,
+        limit: Option<usize>,
+        statistics_requests: Vec<StatisticsRequest>,
+    }
+
+    #[derive(Debug)]
+    struct StructuredScanSpy {
+        schema: arrow_schema::SchemaRef,
+        default_scan_calls: AtomicUsize,
+        structured: Mutex<Option<CapturedStructuredScan>>,
+    }
+
+    #[async_trait]
+    impl TableProvider for StructuredScanSpy {
+        fn schema(&self) -> arrow_schema::SchemaRef {
+            Arc::clone(&self.schema)
+        }
+
+        fn table_type(&self) -> TableType {
+            TableType::Base
+        }
+
+        async fn scan(
+            &self,
+            _state: &dyn Session,
+            _projection: Option<&Vec<usize>>,
+            _filters: &[Expr],
+            _limit: Option<usize>,
+        ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
+            self.default_scan_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Arc::new(EmptyExec::new(self.schema())))
+        }
+
+        async fn scan_with_args<'a>(
+            &self,
+            _state: &dyn Session,
+            args: ScanArgs<'a>,
+        ) -> datafusion::error::Result<ScanResult> {
+            *self.structured.lock().unwrap() = Some(CapturedStructuredScan {
+                projection: args.projection().map(<[usize]>::to_vec),
+                filters: args.filters().unwrap_or(&[]).to_vec(),
+                limit: args.limit(),
+                statistics_requests: args.statistics_requests().to_vec(),
+            });
+            let plan: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(self.schema()));
+            Ok(plan.into())
+        }
+    }
 
     fn workspace_record() -> WorkspaceRecord {
         WorkspaceRecord {
@@ -1211,6 +1280,54 @@ mod tests {
         assert_eq!(
             first.statistics().is_some(),
             catalog_provider.statistics().is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn datafusion_55_table_provider_scan_contract() {
+        let schema = Arc::clone(&table_spec(1).unwrap().arrow_schema);
+        let spy = Arc::new(StructuredScanSpy {
+            schema,
+            default_scan_calls: AtomicUsize::new(0),
+            structured: Mutex::new(None),
+        });
+        let provider = OverlayIdentityProvider {
+            inner: Arc::clone(&spy) as Arc<dyn TableProvider>,
+            table_code: 1,
+            generation: 7,
+            checksum: [8; 32],
+        };
+        let projection = [0, 3];
+        let filters = [col("workspace_kind").eq(lit(1_i16))];
+        let statistics_requests = [
+            StatisticsRequest::RowCount,
+            StatisticsRequest::Min(Arc::new(datafusion::common::Column::from_name(
+                "workspace_kind",
+            ))),
+        ];
+        let context = SessionContext::new();
+        let state = context.state();
+        provider
+            .scan_with_args(
+                &state,
+                ScanArgs::default()
+                    .with_projection(Some(&projection))
+                    .with_filters(Some(&filters))
+                    .with_limit(Some(11))
+                    .with_statistics_requests(&statistics_requests),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(spy.default_scan_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            spy.structured.lock().unwrap().as_ref(),
+            Some(&CapturedStructuredScan {
+                projection: Some(projection.to_vec()),
+                filters: filters.to_vec(),
+                limit: Some(11),
+                statistics_requests: statistics_requests.to_vec(),
+            })
         );
     }
 

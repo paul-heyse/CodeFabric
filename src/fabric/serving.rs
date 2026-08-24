@@ -179,6 +179,13 @@ impl ServingRuntimeConfig {
 }
 
 /// Observable functional runtime configuration; no elapsed-time fields exist.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ParquetFilterPushdownPosture {
+    Disabled,
+    EnabledPreservingOrder,
+    EnabledWithReordering,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServingRuntimeEvidence {
     pub memory_pool: String,
@@ -188,6 +195,7 @@ pub struct ServingRuntimeEvidence {
     pub batch_size: usize,
     pub target_partitions: usize,
     pub parquet_pruning: bool,
+    pub parquet_filter_pushdown: ParquetFilterPushdownPosture,
     pub repartition_joins: bool,
     pub repartition_aggregations: bool,
 }
@@ -273,6 +281,8 @@ impl ServingQuerySession {
             .with_batch_size(serving_resource_profile().batch_size)
             .with_target_partitions(config.target_partitions)
             .with_parquet_pruning(true)
+            .set_bool("datafusion.execution.parquet.pushdown_filters", false)
+            .set_bool("datafusion.execution.parquet.reorder_filters", false)
             .with_repartition_joins(true)
             .with_repartition_aggregations(true);
         let context = SessionContext::new_with_config_rt(session_config, Arc::clone(&runtime));
@@ -311,6 +321,14 @@ impl ServingQuerySession {
         // the installed catalog and schemas reject all subsequent mutation.
         context.register_catalog(CATALOG_NAME, catalog);
         let actual = context.state().config().clone();
+        let parquet_filter_pushdown = match (
+            actual.options().execution.parquet.pushdown_filters,
+            actual.options().execution.parquet.reorder_filters,
+        ) {
+            (false, _) => ParquetFilterPushdownPosture::Disabled,
+            (true, false) => ParquetFilterPushdownPosture::EnabledPreservingOrder,
+            (true, true) => ParquetFilterPushdownPosture::EnabledWithReordering,
+        };
         let evidence = ServingRuntimeEvidence {
             memory_pool: runtime.memory_pool.name().to_owned(),
             memory_limit_bytes: config.memory_limit_bytes,
@@ -319,6 +337,7 @@ impl ServingQuerySession {
             batch_size: actual.batch_size(),
             target_partitions: actual.target_partitions(),
             parquet_pruning: actual.parquet_pruning(),
+            parquet_filter_pushdown,
             repartition_joins: actual.repartition_joins(),
             repartition_aggregations: actual.repartition_aggregations(),
         };
@@ -2154,6 +2173,10 @@ mod tests {
         assert_eq!(evidence.batch_size, 65_536);
         assert_eq!(evidence.target_partitions, 2);
         assert!(evidence.parquet_pruning);
+        assert_eq!(
+            evidence.parquet_filter_pushdown,
+            ParquetFilterPushdownPosture::Disabled
+        );
         assert!(evidence.repartition_joins);
         assert!(evidence.repartition_aggregations);
         assert!(evidence.spill_directory.is_dir());
@@ -2522,5 +2545,73 @@ FilterExec: workspace_id@0 = 11111111111111111111...
     RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
       DataSourceExec: file_groups=<NORMALIZED>, projection=[workspace_id, __delta_rs_file_id__], file_type=parquet, predicate=workspace_id@0 = 11111111111111111111..., pruning_predicate=workspace_id_null_count@2 != row_count@3 AND workspace_id_min@0 <= 11111111111111111111... AND 11111111111111111111... <= workspace_id_max@1, required_guarantees=[workspace_id in (11111111111111111111...)]
 "###);
+    }
+
+    #[tokio::test]
+    async fn datafusion_55_serving_equivalence() {
+        let (directory, mut store, mut images) = operational_store();
+        let candidate = published_delta_candidate(directory.path(), &mut store).await;
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate,
+            directory.path(),
+        );
+        let result = session
+            .query(
+                "SELECT workspace_id FROM cpg_base.workspace \
+                 WHERE workspace_id IS NOT NULL",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            result.artifact.datafusion_version,
+            datafusion::DATAFUSION_VERSION
+        );
+        assert_eq!(result.artifact.arrow_version, arrow::ARROW_VERSION);
+        assert_eq!(result.artifact.output_row_count, 1);
+        assert!(!result.artifact.source_table_versions.is_empty());
+        assert!(result.artifact.physical_plan.contains("DeltaScanExec"));
+        assert!(result.artifact.physical_plan.contains("pruning_predicate="));
+        let evidence = session.runtime_evidence();
+        assert!(
+            result.artifact.execution_metrics["memory_reserved_after_execution"]
+                < evidence.memory_limit_bytes as u64
+        );
+        assert!(evidence.parquet_pruning);
+        assert_eq!(
+            evidence.parquet_filter_pushdown,
+            ParquetFilterPushdownPosture::Disabled
+        );
+    }
+
+    #[tokio::test]
+    async fn wp03_operational_resource_cancellation() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate([0x57; 16], 1, 2),
+            directory.path(),
+        );
+        let mut stream = session
+            .start_query_stream("SELECT * FROM cpg_serving.entities")
+            .await
+            .unwrap();
+        assert!(stream.next().await.transpose().unwrap().is_some());
+        drop(stream);
+        let follow_up = session
+            .query("SELECT COUNT(*) FROM cpg_serving.entities")
+            .await
+            .unwrap();
+        assert_eq!(count(&follow_up), 2);
+        assert!(
+            follow_up.artifact.execution_metrics["memory_reserved_after_execution"]
+                < session.runtime_evidence().memory_limit_bytes as u64
+        );
     }
 }

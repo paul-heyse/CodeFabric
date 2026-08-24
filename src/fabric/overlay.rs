@@ -13,7 +13,7 @@ use arrow_schema::{Field, Schema, SchemaRef};
 use arrow_select::concat::concat_batches;
 use arrow_select::take::take;
 use async_trait::async_trait;
-use datafusion::catalog::{Session, TableProvider};
+use datafusion::catalog::{ScanArgs, ScanResult, Session, TableProvider};
 use datafusion::common::{Column, Constraints, Statistics};
 use datafusion::datasource::{MemTable, provider_as_source};
 use datafusion::execution::memory_pool::{GreedyMemoryPool, MemoryConsumer, MemoryReservation};
@@ -748,6 +748,25 @@ impl TableProvider for OverlayEffectiveProvider {
             plan = plan.limit(0, Some(limit))?;
         }
         state.create_physical_plan(&plan.build()?).await
+    }
+
+    async fn scan_with_args<'a>(
+        &self,
+        state: &dyn Session,
+        args: ScanArgs<'a>,
+    ) -> datafusion::error::Result<ScanResult> {
+        // This provider owns a materialized effective logical plan rather than a
+        // transparent base scan. It preserves projection/filter/limit but cannot
+        // prove query-aware statistics for the rewritten plan, so statistics
+        // requests are deliberately unanswered and statistics() remains None.
+        let projection = args.projection().map(<[usize]>::to_vec);
+        let filters = args.filters().unwrap_or(&[]);
+        let limit = args.limit();
+        let _unanswered_statistics_requests = args.statistics_requests();
+        Ok(self
+            .scan(state, projection.as_ref(), filters, limit)
+            .await?
+            .into())
     }
 
     fn supports_filters_pushdown(
@@ -1880,6 +1899,63 @@ mod tests {
             .await
             .unwrap();
         concat_batches(&spec.arrow_schema, &batches).unwrap()
+    }
+
+    #[tokio::test]
+    async fn datafusion_55_effective_provider_statistics_contract() {
+        use datafusion::catalog::ScanArgs;
+        use datafusion::logical_expr::statistics::StatisticsRequest;
+
+        let spec = table_spec(8).unwrap();
+        let base_batch = owner_batch(&[(1, 0, 10), (2, 0, 20), (3, 0, 30)]);
+        let base: Arc<dyn TableProvider> = Arc::new(
+            MemTable::try_new(
+                Arc::clone(&spec.arrow_schema),
+                vec![vec![base_batch.as_ref().clone()]],
+            )
+            .unwrap(),
+        );
+        let overlay = consolidate(
+            1,
+            None,
+            &[OverlayMutation::owner_replacement(
+                WORKSPACE,
+                CONTEXT,
+                8,
+                1,
+                owner_batch(&[(2, 1, 22)]),
+            )
+            .unwrap()],
+        );
+        let provider = overlay.wrap(spec, base).unwrap();
+        assert!(provider.statistics().is_none());
+
+        let projection = [0, 3, 14];
+        let filters =
+            [datafusion::prelude::col("owner_bucket").eq(datafusion::prelude::lit(2_i16))];
+        let statistics_requests = [StatisticsRequest::RowCount];
+        let context = SessionContext::new();
+        let state = context.state();
+        let result = provider
+            .scan_with_args(
+                &state,
+                ScanArgs::default()
+                    .with_projection(Some(&projection))
+                    .with_filters(Some(&filters))
+                    .with_limit(Some(1))
+                    .with_statistics_requests(&statistics_requests),
+            )
+            .await
+            .unwrap();
+        let batches = datafusion::physical_plan::collect(result.into_inner(), context.task_ctx())
+            .await
+            .unwrap();
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+        assert!(
+            batches
+                .iter()
+                .all(|batch| batch.num_columns() == projection.len())
+        );
     }
 
     #[tokio::test]

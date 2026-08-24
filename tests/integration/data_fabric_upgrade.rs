@@ -15,7 +15,13 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arrow_select::concat::concat_batches;
-use codefabric::fabric::{EmptySnapshotOverlay, SnapshotOverlayProviderFactory, batch_checksum};
+use codefabric::fabric::{
+    DeltaAccessProfile, DeltaHandleFactory, EmptySnapshotOverlay, SnapshotOverlayProviderFactory,
+    batch_checksum,
+};
+use datafusion::catalog::ScanArgs;
+use datafusion::logical_expr::statistics::StatisticsRequest;
+use datafusion::physical_plan::displayable;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use deltalake::DeltaTableBuilder;
 use deltalake::kernel::engine::arrow_conversion::TryIntoKernel as _;
@@ -328,10 +334,13 @@ async fn query_version(root: &Path, version: u64) -> RecordBatch {
         .await
         .expect("open exact Delta fixture version");
     assert_eq!(table.version(), Some(version));
-    let config = SessionConfig::new().set_bool(
-        "datafusion.execution.parquet.schema_force_view_types",
-        false,
-    );
+    let config = SessionConfig::new()
+        .set_bool(
+            "datafusion.execution.parquet.schema_force_view_types",
+            false,
+        )
+        .set_bool("datafusion.execution.parquet.pushdown_filters", false)
+        .set_bool("datafusion.execution.parquet.reorder_filters", false);
     let context = SessionContext::new_with_config(config);
     let provider = table
         .table_provider()
@@ -473,6 +482,186 @@ fn extractor_arrow59_ipc_contract() {
     let batch = decode_ipc(&fixture_root());
     assert_eq!(batch.schema(), fixture_schema());
     assert_eq!(batch_digest(&batch), expected["checksums"]["batch"]);
+}
+
+#[test]
+fn arrow59_codefabric_batch_checksum_kat() {
+    assert_eq!(arrow::ARROW_VERSION, "59.2.0");
+    arrow58_codefabric_batch_checksum_kat();
+}
+
+#[test]
+fn extractor_arrow59_root_decode_equivalence() {
+    extractor_arrow59_ipc_contract();
+    let expected = manifest(&fixture_root());
+    let batch = decode_ipc(&fixture_root());
+    assert_eq!(batch.num_rows(), 3);
+    assert_eq!(batch.schema(), fixture_schema());
+    assert_eq!(batch_digest(&batch), expected["checksums"]["batch"]);
+    assert_eq!(
+        digest(&fs::read(fixture_root().join(IPC_FILE)).expect("read IPC fixture")),
+        expected["checksums"]["ipc_bytes"]
+    );
+}
+
+#[tokio::test]
+async fn wp03_behavioral_query_equivalence() {
+    let temporary = TempDir::new().expect("fixture copy temporary directory");
+    copy_tree(&fixture_root(), temporary.path());
+    validate_fixture(temporary.path(), true).await;
+}
+
+#[test]
+fn wp03_negative_checksum_drift() {
+    let expected = manifest(&fixture_root());
+    assert_ne!(batch_digest(&first_batch()), expected["checksums"]["batch"]);
+    arrow59_codefabric_batch_checksum_kat();
+}
+
+#[tokio::test]
+async fn delta_43a0cf10_snapshot_replay_contract() {
+    let temporary = TempDir::new().expect("fixture copy temporary directory");
+    copy_tree(&fixture_root(), temporary.path());
+    let table_uri = Url::from_directory_path(temporary.path().join(DELTA_DIR))
+        .expect("fixture path is a file URL")
+        .to_string();
+
+    for version in 0_u64..=2 {
+        let handle =
+            DeltaHandleFactory::open(&table_uri, Some(version), DeltaAccessProfile::QueryServing)
+                .await
+                .expect("open exact query-serving fixture version");
+        assert_eq!(handle.version(), Some(version));
+        assert_eq!(handle.profile(), DeltaAccessProfile::QueryServing);
+    }
+    for profile in [
+        DeltaAccessProfile::PublicationMetadata,
+        DeltaAccessProfile::AppendOnlyWriter,
+        DeltaAccessProfile::VacuumFilesystemCheck,
+        DeltaAccessProfile::OptimizeDml,
+    ] {
+        let handle = DeltaHandleFactory::open(&table_uri, Some(2), profile)
+            .await
+            .expect("open classified fixture profile");
+        assert_eq!(handle.version(), Some(2));
+        assert_eq!(handle.profile(), profile);
+    }
+    let before_restart = batch_digest(&query_version(temporary.path(), 2).await);
+    let after_restart = batch_digest(&query_version(temporary.path(), 2).await);
+    assert_eq!(before_restart, after_restart);
+    assert_eq!(
+        before_restart,
+        manifest(temporary.path())["checksums"]["batch"]
+    );
+}
+
+#[tokio::test]
+async fn delta_43a0cf10_checkpoint_identity_contract() {
+    let temporary = TempDir::new().expect("fixture copy temporary directory");
+    copy_tree(&fixture_root(), temporary.path());
+    let location = Url::from_directory_path(temporary.path().join(DELTA_DIR))
+        .expect("fixture path is a file URL");
+    let table = DeltaTableBuilder::from_url(location.clone())
+        .expect("create checkpoint fixture builder")
+        .with_version(2)
+        .load()
+        .await
+        .expect("open checkpoint fixture version");
+    let before = batch_digest(&query_version(temporary.path(), 2).await);
+    deltalake::checkpoints::create_checkpoint(&table, None)
+        .await
+        .expect("create same-version checkpoint");
+    assert!(
+        temporary
+            .path()
+            .join(DELTA_DIR)
+            .join("_delta_log/_last_checkpoint")
+            .is_file()
+    );
+    let reopened = DeltaTableBuilder::from_url(location)
+        .expect("create checkpoint reopen builder")
+        .with_version(2)
+        .load()
+        .await
+        .expect("reopen exact checkpoint version");
+    assert_eq!(reopened.version(), Some(2));
+    let after = batch_digest(&query_version(temporary.path(), 2).await);
+    assert_eq!(before, after);
+}
+
+#[tokio::test]
+async fn delta_43a0cf10_provider_pruning_contract() {
+    let temporary = TempDir::new().expect("fixture copy temporary directory");
+    copy_tree(&fixture_root(), temporary.path());
+    let location = Url::from_directory_path(temporary.path().join(DELTA_DIR))
+        .expect("fixture path is a file URL");
+    let table = DeltaTableBuilder::from_url(location)
+        .expect("create pruning fixture builder")
+        .with_version(2)
+        .load()
+        .await
+        .expect("open pruning fixture version");
+    let config = SessionConfig::new()
+        .set_bool(
+            "datafusion.execution.parquet.schema_force_view_types",
+            false,
+        )
+        .set_bool("datafusion.execution.parquet.pushdown_filters", false)
+        .set_bool("datafusion.execution.parquet.reorder_filters", false)
+        .with_parquet_pruning(true);
+    let context = SessionContext::new_with_config(config);
+    let provider = table
+        .table_provider()
+        .with_session(Arc::new(context.state()))
+        .await
+        .expect("construct pruning Delta provider");
+    let projection = [0, 1];
+    let filters = [];
+    let statistics_requests = [StatisticsRequest::RowCount];
+    let plan = provider
+        .scan_with_args(
+            &context.state(),
+            ScanArgs::default()
+                .with_projection(Some(&projection))
+                .with_filters(Some(&filters))
+                .with_limit(Some(1))
+                .with_statistics_requests(&statistics_requests),
+        )
+        .await
+        .expect("structured Delta scan")
+        .into_inner();
+    let batches = datafusion::physical_plan::collect(plan, context.task_ctx())
+        .await
+        .expect("execute structured Delta scan");
+    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+    assert!(batches.iter().all(|batch| batch.num_columns() == 2));
+
+    context
+        .register_table("fixture", provider)
+        .expect("register pruning Delta provider");
+    let dataframe = context
+        .sql("SELECT id, label FROM fixture WHERE active = true LIMIT 1")
+        .await
+        .expect("plan filtered Delta query");
+    let filtered = dataframe
+        .create_physical_plan()
+        .await
+        .expect("create filtered Delta physical plan");
+    let diagnostic = displayable(filtered.as_ref()).indent(true).to_string();
+    assert!(diagnostic.contains("DeltaScanExec"));
+    assert!(diagnostic.contains("projection="));
+    assert!(diagnostic.contains("predicate="));
+    assert!(diagnostic.contains("pruning_predicate="));
+    let filtered_batches = datafusion::physical_plan::collect(filtered, context.task_ctx())
+        .await
+        .expect("execute filtered Delta scan");
+    assert_eq!(
+        filtered_batches
+            .iter()
+            .map(RecordBatch::num_rows)
+            .sum::<usize>(),
+        1
+    );
 }
 
 #[tokio::test]
