@@ -963,6 +963,7 @@ fn wp05_negative_protocol_feature_elevation() {
 }
 
 #[tokio::test]
+#[ignore = "cross-revision driver; scripts/data_fabric_revision_check.sh supplies an isolated namespace"]
 async fn data_fabric_cross_revision_fixture_mode() {
     let mode = std::env::var("CODEFABRIC_CROSS_REVISION_MODE")
         .expect("CODEFABRIC_CROSS_REVISION_MODE must be produce or consume");
@@ -1155,6 +1156,7 @@ fn compare_benchmark_reports(baseline: &Value, target: &Value, comparator: &Valu
 }
 
 #[test]
+#[ignore = "benchmark driver; requires an explicit report path"]
 fn data_fabric_benchmark_emit_mode() {
     let output = PathBuf::from(
         std::env::var_os("CODEFABRIC_BENCHMARK_REPORT")
@@ -1171,6 +1173,7 @@ fn data_fabric_benchmark_emit_mode() {
 }
 
 #[test]
+#[ignore = "benchmark comparator; requires two explicit revision reports"]
 fn data_fabric_benchmark_compare_mode() {
     let baseline = manifest_from_env("CODEFABRIC_BENCHMARK_BASELINE");
     let target = manifest_from_env("CODEFABRIC_BENCHMARK_TARGET");
@@ -1183,11 +1186,13 @@ fn data_fabric_benchmark_compare_mode() {
 }
 
 #[test]
+#[ignore = "benchmark comparator; exercised by the revision-check driver"]
 fn data_fabric_upgrade_performance_contract() {
     data_fabric_benchmark_compare_mode();
 }
 
 #[test]
+#[ignore = "benchmark comparator; exercised by the revision-check driver"]
 fn wp06_operational_performance_rollback() {
     data_fabric_upgrade_performance_contract();
 }

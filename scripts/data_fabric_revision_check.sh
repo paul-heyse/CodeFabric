@@ -58,7 +58,7 @@ run_fixture_mode() {
       CODEFABRIC_CROSS_REVISION_FIXTURE="$fixture" \
       cargo test --locked --test integration \
         integration::data_fabric_upgrade::data_fabric_cross_revision_fixture_mode \
-        -- --exact
+        -- --exact --ignored
   )
 }
 
@@ -130,7 +130,7 @@ run_benchmark() {
       CODEFABRIC_BENCHMARK_TARGET="$target_report" \
       cargo test --locked --test integration \
         integration::data_fabric_upgrade::wp06_operational_performance_rollback \
-        -- --exact
+        -- --exact --ignored
   )
   jq -n \
     --arg baseline_commit "$baseline_commit" \
