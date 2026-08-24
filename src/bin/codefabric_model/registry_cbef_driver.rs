@@ -951,7 +951,7 @@ fn run_provider_probe(repository_root: &Path) -> Result<(ProviderProbe, Value), 
     }
     material.extend(rustc.as_bytes());
     material.extend(
-        b"provider-inventory-tooling|debug|host|reproducible-path-remap-strip-v2|incremental=0",
+        b"provider-inventory-tooling|debug|host|reproducible-path-remap-strip-no-uuid-v3|incremental=0",
     );
     let action_key = blake3::hash(&material).to_hex().to_string();
     let target = repository_root

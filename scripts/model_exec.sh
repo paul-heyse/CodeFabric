@@ -32,9 +32,10 @@ build_key="$(
 target_dir="$repo_root/target/model-builds/$build_key"
 executable="$target_dir/debug/codefabric-model"
 encoded_rustflags="$(
-  printf '%s\037%s' \
+  printf '%s\037%s\037%s' \
     "--remap-path-prefix=$repo_root=/codefabric" \
-    '-Cstrip=debuginfo'
+    '-Cstrip=debuginfo' \
+    '-Clink-arg=-Wl,-no_uuid'
 )"
 
 CARGO_INCREMENTAL=0 CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \

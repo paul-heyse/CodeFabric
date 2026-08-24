@@ -89,13 +89,15 @@ model_bootstrap_builds_without_generated_outputs() {
   (
     cd "$sandbox_root"
     CARGO_INCREMENTAL=0 \
-      CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037%s' \
-        "--remap-path-prefix=$sandbox_root=/codefabric" '-Cstrip=debuginfo')" \
+      CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037%s\037%s' \
+        "--remap-path-prefix=$sandbox_root=/codefabric" '-Cstrip=debuginfo' \
+        '-Clink-arg=-Wl,-no_uuid')" \
       CARGO_TARGET_DIR="$target_dir" cargo test --locked --no-default-features \
       --features model-compiler --bin codefabric-model model_control::tests
     CARGO_INCREMENTAL=0 \
-      CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037%s' \
-        "--remap-path-prefix=$sandbox_root=/codefabric" '-Cstrip=debuginfo')" \
+      CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037%s\037%s' \
+        "--remap-path-prefix=$sandbox_root=/codefabric" '-Cstrip=debuginfo' \
+        '-Clink-arg=-Wl,-no_uuid')" \
       CARGO_TARGET_DIR="$target_dir" cargo build --locked --no-default-features \
       --features model-compiler --bin codefabric-model
   )
