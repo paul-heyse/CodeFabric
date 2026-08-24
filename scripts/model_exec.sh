@@ -31,7 +31,11 @@ build_key="$(
 )"
 target_dir="$repo_root/target/model-builds/$build_key"
 executable="$target_dir/debug/codefabric-model"
-encoded_rustflags="--remap-path-prefix=$repo_root=/codefabric"
+encoded_rustflags="$(
+  printf '%s\037%s' \
+    "--remap-path-prefix=$repo_root=/codefabric" \
+    '-Cstrip=debuginfo'
+)"
 
 CARGO_INCREMENTAL=0 CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
   CARGO_TARGET_DIR="$target_dir" cargo build --quiet --locked --no-default-features \
