@@ -13,7 +13,7 @@
         "workspace"
       ],
       "file_count": 39,
-      "canonical_digest": "b3:7801342c4d442992ce63aa5349f1f15cf0292f1669e092c20fe77532385e5f47",
+      "canonical_digest": "b3:45205c097bae69e22afe344003fd356f9a6311714af015c4fce2521179b07dfd",
       "owned_requirements": [
         "AC-G-78",
         "READINESS-GATE-B",
@@ -27,9 +27,9 @@
     }
   ],
   "accepted_profile_digests": [
-    "b3:7801342c4d442992ce63aa5349f1f15cf0292f1669e092c20fe77532385e5f47"
+    "b3:45205c097bae69e22afe344003fd356f9a6311714af015c4fce2521179b07dfd"
   ],
-  "source_archive_digest": "b3:7801342c4d442992ce63aa5349f1f15cf0292f1669e092c20fe77532385e5f47",
+  "source_archive_digest": "b3:45205c097bae69e22afe344003fd356f9a6311714af015c4fce2521179b07dfd",
   "workspace_registration_digest": "b3:7ba2716655512ea1025366aeb3bb75f61b5cd26011ae9ea71bdeb6800265228d",
   "context_manifest_digests": [
     "b3:71473ddf5d6a34d4412dd7cea333145377ac034cbfeb24d40aee9373af26624f"

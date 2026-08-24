@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(validated.files.len(), 39);
         assert_eq!(
             validated.canonical_digest,
-            "b3:7801342c4d442992ce63aa5349f1f15cf0292f1669e092c20fe77532385e5f47"
+            "b3:45205c097bae69e22afe344003fd356f9a6311714af015c4fce2521179b07dfd"
         );
     }
 

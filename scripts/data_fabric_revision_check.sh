@@ -102,12 +102,14 @@ run_compat() {
 
 emit_benchmark() {
   local tree="$1" target_dir="$2" output="$3"
+  cp "$repo_root/tooling/data_fabric_revision_benchmark.rs" \
+    "$tree/tests/data_fabric_revision_benchmark.rs"
   (
     cd "$tree"
     CARGO_TARGET_DIR="$target_dir" \
       CODEFABRIC_BENCHMARK_REPORT="$output" \
-      cargo test --locked --test integration \
-        integration::data_fabric_upgrade::data_fabric_benchmark_emit_mode \
+      cargo test --locked --test data_fabric_revision_benchmark \
+        data_fabric_revision_benchmark_emit \
         -- --exact
   )
 }
@@ -127,7 +129,7 @@ run_benchmark() {
       CODEFABRIC_BENCHMARK_BASELINE="$baseline_report" \
       CODEFABRIC_BENCHMARK_TARGET="$target_report" \
       cargo test --locked --test integration \
-        integration::data_fabric_upgrade::data_fabric_benchmark_compare_mode \
+        integration::data_fabric_upgrade::wp06_operational_performance_rollback \
         -- --exact
   )
   jq -n \

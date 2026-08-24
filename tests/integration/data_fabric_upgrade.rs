@@ -1003,13 +1003,38 @@ fn median(values: &[u64]) -> u64 {
     sorted[sorted.len() / 2]
 }
 
-fn benchmark_samples(report: &Value) -> Vec<u64> {
-    report["workload"]["samples_micros"]
+fn benchmark_samples(workload: &Value) -> Vec<u64> {
+    workload["samples_micros"]
         .as_array()
         .expect("benchmark samples array")
         .iter()
         .map(|value| value.as_u64().expect("benchmark sample is u64"))
         .collect()
+}
+
+fn compare_benchmark_workload(name: &str, baseline: &Value, target: &Value, comparator: &Value) {
+    assert_eq!(
+        baseline["correctness_checksum"], target["correctness_checksum"],
+        "correctness differential for workload {name}"
+    );
+    let baseline_samples = benchmark_samples(baseline);
+    let target_samples = benchmark_samples(target);
+    let baseline_median = median(&baseline_samples);
+    let target_median = median(&target_samples);
+    let regression_bps = (u128::from(target_median).saturating_mul(10_000)
+        / u128::from(baseline_median.max(1)))
+    .saturating_sub(10_000);
+    let allowed_bps = u128::from(
+        comparator["median_regression_limit_basis_points"]
+            .as_u64()
+            .expect("median comparator limit"),
+    );
+    let (low_bps, _high_bps) =
+        deterministic_bootstrap_regression_interval(&baseline_samples, &target_samples);
+    assert!(
+        regression_bps <= allowed_bps || low_bps <= 0,
+        "workload {name}: target median regressed {regression_bps} bps and the 95% bootstrap interval excludes parity ({low_bps} bps lower bound)"
+    );
 }
 
 fn deterministic_bootstrap_regression_interval(baseline: &[u64], target: &[u64]) -> (i64, i64) {
@@ -1046,10 +1071,33 @@ fn deterministic_bootstrap_regression_interval(baseline: &[u64], target: &[u64])
 
 fn compare_benchmark_reports(baseline: &Value, target: &Value, comparator: &Value) {
     assert_eq!(baseline["contract"], target["contract"]);
-    assert_eq!(
-        baseline["workload"]["correctness_checksum"],
-        target["workload"]["correctness_checksum"]
-    );
+    if let (Some(baseline_workloads), Some(target_workloads)) = (
+        baseline["workloads"].as_object(),
+        target["workloads"].as_object(),
+    ) {
+        assert_eq!(
+            baseline_workloads.keys().collect::<Vec<_>>(),
+            target_workloads.keys().collect::<Vec<_>>()
+        );
+        for report in [baseline, target] {
+            assert!(
+                report["observed_peak_rss_bytes"].as_u64().expect("RSS")
+                    <= report["resource_ceiling_bytes"]
+                        .as_u64()
+                        .expect("resource ceiling")
+            );
+        }
+        for (name, baseline_workload) in baseline_workloads {
+            compare_benchmark_workload(
+                name,
+                baseline_workload,
+                &target_workloads[name],
+                comparator,
+            );
+        }
+        return;
+    }
+
     for report in [baseline, target] {
         assert!(
             report["workload"]["observed_rss_bytes"]
@@ -1060,23 +1108,13 @@ fn compare_benchmark_reports(baseline: &Value, target: &Value, comparator: &Valu
                     .expect("resource ceiling")
         );
     }
-    let baseline_samples = benchmark_samples(baseline);
-    let target_samples = benchmark_samples(target);
-    let baseline_median = median(&baseline_samples);
-    let target_median = median(&target_samples);
-    let regression_bps = (u128::from(target_median).saturating_mul(10_000)
-        / u128::from(baseline_median.max(1)))
-    .saturating_sub(10_000);
-    let allowed_bps = u128::from(
-        comparator["median_regression_limit_basis_points"]
-            .as_u64()
-            .expect("median comparator limit"),
-    );
-    let (low_bps, _high_bps) =
-        deterministic_bootstrap_regression_interval(&baseline_samples, &target_samples);
-    assert!(
-        regression_bps <= allowed_bps || low_bps <= 0,
-        "target median regressed {regression_bps} bps and the 95% bootstrap interval excludes parity ({low_bps} bps lower bound)"
+    compare_benchmark_workload(
+        baseline["workload"]["name"]
+            .as_str()
+            .expect("legacy workload name"),
+        &baseline["workload"],
+        &target["workload"],
+        comparator,
     );
 }
 
@@ -1106,6 +1144,16 @@ fn data_fabric_benchmark_compare_mode() {
     )
     .expect("benchmark comparator JSON");
     compare_benchmark_reports(&baseline, &target, &comparator);
+}
+
+#[test]
+fn data_fabric_upgrade_performance_contract() {
+    data_fabric_benchmark_compare_mode();
+}
+
+#[test]
+fn wp06_operational_performance_rollback() {
+    data_fabric_upgrade_performance_contract();
 }
 
 fn manifest_from_env(name: &str) -> Value {
