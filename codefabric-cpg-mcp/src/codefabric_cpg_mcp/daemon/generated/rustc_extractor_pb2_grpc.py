@@ -4,7 +4,6 @@
 import grpc
 import warnings
 
-from . import provider_control_pb2 as contracts_dot_rpc_dot_provider__control__pb2
 from . import rustc_extractor_pb2 as contracts_dot_rpc_dot_rustc__extractor__pb2
 
 GRPC_GENERATED_VERSION = '1.83.0'
@@ -41,15 +40,10 @@ class RustcExtractorStub:
                 request_serializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorHello.SerializeToString,
                 response_deserializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorHelloAck.FromString,
                 _registered_method=True)
-        self.Extract = channel.stream_stream(
-                '/codefabric.rustc.v1.RustcExtractor/Extract',
-                request_serializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorCommand.SerializeToString,
-                response_deserializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractionEvent.FromString,
-                _registered_method=True)
-        self.CancelCompilation = channel.unary_unary(
-                '/codefabric.rustc.v1.RustcExtractor/CancelCompilation',
-                request_serializer=contracts_dot_rpc_dot_rustc__extractor__pb2.CancelCompilationRequest.SerializeToString,
-                response_deserializer=contracts_dot_rpc_dot_provider__control__pb2.CancelAcknowledgement.FromString,
+        self.Observe = channel.stream_stream(
+                '/codefabric.rustc.v1.RustcExtractor/Observe',
+                request_serializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractionEvent.SerializeToString,
+                response_deserializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorCommand.FromString,
                 _registered_method=True)
 
 
@@ -62,13 +56,7 @@ class RustcExtractorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def Extract(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CancelCompilation(self, request, context):
+    def Observe(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -82,15 +70,10 @@ def add_RustcExtractorServicer_to_server(servicer, server):
                     request_deserializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorHello.FromString,
                     response_serializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorHelloAck.SerializeToString,
             ),
-            'Extract': grpc.stream_stream_rpc_method_handler(
-                    servicer.Extract,
-                    request_deserializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorCommand.FromString,
-                    response_serializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractionEvent.SerializeToString,
-            ),
-            'CancelCompilation': grpc.unary_unary_rpc_method_handler(
-                    servicer.CancelCompilation,
-                    request_deserializer=contracts_dot_rpc_dot_rustc__extractor__pb2.CancelCompilationRequest.FromString,
-                    response_serializer=contracts_dot_rpc_dot_provider__control__pb2.CancelAcknowledgement.SerializeToString,
+            'Observe': grpc.stream_stream_rpc_method_handler(
+                    servicer.Observe,
+                    request_deserializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractionEvent.FromString,
+                    response_serializer=contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorCommand.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -131,7 +114,7 @@ class RustcExtractor:
             _registered_method=True)
 
     @staticmethod
-    def Extract(request_iterator,
+    def Observe(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -144,36 +127,9 @@ class RustcExtractor:
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            '/codefabric.rustc.v1.RustcExtractor/Extract',
-            contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorCommand.SerializeToString,
-            contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractionEvent.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CancelCompilation(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/codefabric.rustc.v1.RustcExtractor/CancelCompilation',
-            contracts_dot_rpc_dot_rustc__extractor__pb2.CancelCompilationRequest.SerializeToString,
-            contracts_dot_rpc_dot_provider__control__pb2.CancelAcknowledgement.FromString,
+            '/codefabric.rustc.v1.RustcExtractor/Observe',
+            contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractionEvent.SerializeToString,
+            contracts_dot_rpc_dot_rustc__extractor__pb2.ExtractorCommand.FromString,
             options,
             channel_credentials,
             insecure,

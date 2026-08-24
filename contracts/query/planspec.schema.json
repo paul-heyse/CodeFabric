@@ -737,6 +737,6 @@
   "x-codefabric-generated": {
     "driver": "schema-contract-driver-v1",
     "source_artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:580695b40be192ec85d39efb57d465094ef8ad86de7b4a300e12a3940c56edd3"
+    "source_digest": "b3:33ae78a663002316f4675b9adb18ac582aee60e911ffc95944d14cd802592bd7"
   }
 }

@@ -29,7 +29,7 @@ records:
     max_retries: 0
     introduced: "1.3"
   - profile_id: sidecar-semantic-standard
-    provider_ids: [pyrefly-python, rustc-mir]
+    provider_ids: [pyrefly-python]
     max_parallel_jobs_global: 4
     max_parallel_jobs_per_workspace: 2
     max_parallel_jobs_per_context: 1
@@ -47,6 +47,29 @@ records:
     max_memory_mib: 4096
     cancellation_check_interval: 1024
     cancellation_ack_millis: 2000
+    hard_stop_policy: PROCESS_GROUP_TERMINATE
+    retry_policy: TRANSIENT_ONLY
+    max_retries: 1
+    introduced: "1.3"
+  - profile_id: compiler-semantic-standard
+    provider_ids: [rustc-mir]
+    max_parallel_jobs_global: 4
+    max_parallel_jobs_per_workspace: 2
+    max_parallel_jobs_per_context: 1
+    max_input_bytes: 67108864
+    max_work_units: 20000000
+    max_wall_millis: 120000
+    max_visited_nodes: 4000000
+    max_traversal_depth: 512
+    max_output_records: 4000000
+    max_output_bytes: 536870912
+    max_diagnostics: 20000
+    max_parser_workers: 2
+    max_retained_tree_revisions: 1
+    max_cpu_weight: 8
+    max_memory_mib: 4096
+    cancellation_check_interval: 1024
+    cancellation_ack_millis: 10000
     hard_stop_policy: PROCESS_GROUP_TERMINATE
     retry_policy: TRANSIENT_ONLY
     max_retries: 1

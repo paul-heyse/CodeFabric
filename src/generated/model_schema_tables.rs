@@ -2568,3 +2568,83 @@ pub const MODEL_TABLES: &[ModelTable] = &[
         ],
     },
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderObservationLogicalType {
+    Utf8,
+    Boolean,
+    UInt64,
+    Utf8List,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderObservationField {
+    pub name: &'static str,
+    pub logical_type: ProviderObservationLogicalType,
+    pub nullable: bool,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct ProviderObservationSchema {
+    pub schema_id: &'static str,
+    pub provider_id: &'static str,
+    pub observation_family_code: u16,
+    pub canonical_descriptor: &'static str,
+    pub schema_digest: &'static str,
+    pub fields: &'static [ProviderObservationField],
+}
+
+pub const PROVIDER_OBSERVATION_SCHEMAS: &[ProviderObservationSchema] = &[
+    ProviderObservationSchema {
+        schema_id: "codefabric.rustc.owned-mir.v1",
+        provider_id: "rustc-mir",
+        observation_family_code: 120,
+        canonical_descriptor: "codefabric.rustc.owned-mir.v1:name:utf8:item_kind:utf8:type_description:utf8:requires_monomorphization:boolean:basic_block_count:uint64:local_count:uint64:statement_kinds:list<utf8>:terminator_kinds:list<utf8>:successor_count:uint64",
+        schema_digest: "b3:812eb4f5f038e7149984b1ef0d8227938e2a034bbdbe81f17403fbce6ca4c616",
+        fields: &[
+            ProviderObservationField {
+                name: "name",
+                logical_type: ProviderObservationLogicalType::Utf8,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "item_kind",
+                logical_type: ProviderObservationLogicalType::Utf8,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "type_description",
+                logical_type: ProviderObservationLogicalType::Utf8,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "requires_monomorphization",
+                logical_type: ProviderObservationLogicalType::Boolean,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "basic_block_count",
+                logical_type: ProviderObservationLogicalType::UInt64,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "local_count",
+                logical_type: ProviderObservationLogicalType::UInt64,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "statement_kinds",
+                logical_type: ProviderObservationLogicalType::Utf8List,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "terminator_kinds",
+                logical_type: ProviderObservationLogicalType::Utf8List,
+                nullable: false,
+            },
+            ProviderObservationField {
+                name: "successor_count",
+                logical_type: ProviderObservationLogicalType::UInt64,
+                nullable: false,
+            },
+        ],
+    },
+];

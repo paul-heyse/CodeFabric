@@ -29,7 +29,7 @@ def main() -> int:
         print("usage: python -m codefabric_cpg_mcp [--identity]", file=sys.stderr)
         return 2
 
-    mcp.run()
+    mcp.run(show_banner=False)
     return 0
 
 

@@ -107,6 +107,8 @@ daemon = [
     "fact-generation",
     "repository-state",
     "rpc",
+    "dep:notify-debouncer-full",
+    "dep:petgraph",
     "dep:toml",
     "dep:tracing",
 ]
@@ -152,7 +154,6 @@ rustix = { version = "=1.1.4", features = ["fs"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "=1.0.151", features = ["arbitrary_precision"], optional = true }
 serde_json_canonicalizer = { version = "=0.3.2", optional = true }
-serde_path_to_error = { version = "=0.1.20", optional = true }
 serde_yaml_ng = { version = "=0.10.0", optional = true }
 tempfile = { version = "=3.27.0", optional = true }
 thiserror = { version = "=2.0.20", optional = true }

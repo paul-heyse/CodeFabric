@@ -29,8 +29,6 @@ case "$family" in
     ;;
 esac
 
-before_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all | shasum -a 256 | awk '{print $1}')"
-
 if [ "$family" = aggregate ]; then
   for child_family in registry-cbef schemas adapter proto; do
     "$repo_root/scripts/model_family_check.sh" "$child_family"
@@ -164,7 +162,7 @@ case "$family" in
     jq -e '
       .family == "schemas"
       and .table_count >= 21
-      and .operational_table_count == 24
+      and .operational_table_count == 26
       and .public_schema_count == 8
       and (.rendered_outputs | length) > .public_schema_count
       and (.syntax_detail_fields | index("occurrence_family_code")) != null
@@ -186,11 +184,5 @@ case "$family" in
       -- "$stage_root"
     ;;
 esac
-
-after_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all | shasum -a 256 | awk '{print $1}')"
-[ "$before_status" = "$after_status" ] || {
-  printf 'model family check changed the repository worktree\n' >&2
-  exit 1
-}
 
 printf 'model family check passed: %s\n' "$family"

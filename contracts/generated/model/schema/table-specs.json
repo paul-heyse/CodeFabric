@@ -30,6 +30,13 @@
       "view_name": "update_wave_item"
     },
     {
+      "availability_wave": 6,
+      "columns": [],
+      "projection_role": "OPERATIONAL_SOURCE",
+      "source_table": "operational_dependency_edge",
+      "view_name": "operational_dependency_edge"
+    },
+    {
       "availability_wave": 2,
       "columns": [],
       "projection_role": "OPERATIONAL_SOURCE",
@@ -42,6 +49,13 @@
       "projection_role": "OPERATIONAL_SOURCE",
       "source_table": "git_operation_run",
       "view_name": "git_operation_run"
+    },
+    {
+      "availability_wave": 7,
+      "columns": [],
+      "projection_role": "OPERATIONAL_SOURCE",
+      "source_table": "git_candidate_cache",
+      "view_name": "git_candidate_cache"
     },
     {
       "availability_wave": 3,
@@ -1073,6 +1087,62 @@
     {
       "columns": [
         {
+          "name": "workspace_id",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "source_owner_id",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "dependent_owner_id",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "edge_kind_code",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        },
+        {
+          "name": "derivation_id",
+          "nullable": true,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "source_generation",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        },
+        {
+          "name": "input_digest",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "active",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        }
+      ],
+      "name": "operational_dependency_edge",
+      "primary_key": [
+        "workspace_id",
+        "source_owner_id",
+        "dependent_owner_id",
+        "edge_kind_code"
+      ],
+      "unique": [],
+      "workspace_scope": {
+        "kind": "DIRECT",
+        "workspace_column": "workspace_id"
+      }
+    },
+    {
+      "columns": [
+        {
           "name": "provider_run_id",
           "nullable": false,
           "sqlite_type": "BLOB"
@@ -1209,6 +1279,63 @@
       "name": "git_operation_run",
       "primary_key": [
         "git_operation_run_id"
+      ],
+      "unique": [],
+      "workspace_scope": {
+        "kind": "DIRECT",
+        "workspace_column": "workspace_id"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "workspace_id",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "worktree_id",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "state_vector_digest",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "topology_digest",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "mode_code",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        },
+        {
+          "name": "candidate_payload",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "payload_digest",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "source_generation",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        }
+      ],
+      "name": "git_candidate_cache",
+      "primary_key": [
+        "workspace_id",
+        "worktree_id",
+        "state_vector_digest",
+        "topology_digest",
+        "mode_code"
       ],
       "unique": [],
       "workspace_scope": {
@@ -1695,7 +1822,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:580695b40be192ec85d39efb57d465094ef8ad86de7b4a300e12a3940c56edd3"
+    "source_digest": "b3:33ae78a663002316f4675b9adb18ac582aee60e911ffc95944d14cd802592bd7"
   },
   "table_scopes": [
     {

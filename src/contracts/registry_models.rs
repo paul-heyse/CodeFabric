@@ -472,6 +472,10 @@ pub struct StateMachine {
     pub states: Vec<EnumValue>,
     pub initial_state: String,
     pub terminal_states: Vec<String>,
+    /// Append-only historical codes accepted for decode/recovery but forbidden as transition
+    /// targets or active scheduler states.
+    #[serde(default)]
+    pub decode_only_states: Vec<String>,
     pub transitions: Vec<StateTransition>,
 }
 
@@ -1942,6 +1946,7 @@ pub fn validate_phrase_records(records: &[PhraseRecord]) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // One pass keeps every cross-machine registry invariant adjacent.
 pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
     const REQUIRED: [&str; 13] = [
         "WorkspaceLifecycle",
@@ -1986,6 +1991,23 @@ pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
                 machine.machine_id
             ));
         }
+        let decode_only: BTreeSet<_> = machine
+            .decode_only_states
+            .iter()
+            .map(String::as_str)
+            .collect();
+        if decode_only.contains(machine.initial_state.as_str())
+            || machine
+                .terminal_states
+                .iter()
+                .any(|state| decode_only.contains(state.as_str()))
+            || !decode_only.is_subset(&states)
+        {
+            return Err(format!(
+                "machine {} has invalid decode-only states",
+                machine.machine_id
+            ));
+        }
         let mut reachable = BTreeSet::from([machine.initial_state.as_str()]);
         loop {
             let before = reachable.len();
@@ -1997,6 +2019,8 @@ pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
                     || transition.actions.is_empty()
                     || transition.idempotency_key.is_empty()
                     || transition.error_on_illegal != "STATE_TRANSITION_VIOLATION"
+                    || decode_only.contains(transition.from.as_str())
+                    || decode_only.contains(transition.to.as_str())
                 {
                     return Err(format!(
                         "machine {} has an incomplete transition",
@@ -2011,7 +2035,11 @@ pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
                 break;
             }
         }
-        if reachable != states {
+        let active_states = states
+            .difference(&decode_only)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if reachable != active_states {
             return Err(format!(
                 "machine {} contains unreachable states",
                 machine.machine_id
@@ -2030,7 +2058,7 @@ pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
                 break;
             }
         }
-        if can_terminate != states {
+        if can_terminate != active_states {
             return Err(format!(
                 "machine {} has a state without a terminal path",
                 machine.machine_id

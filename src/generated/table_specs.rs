@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:580695b40be192ec85d39efb57d465094ef8ad86de7b4a300e12a3940c56edd3; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:33ae78a663002316f4675b9adb18ac582aee60e911ffc95944d14cd802592bd7; schema-contract-driver-v1; do not edit.
 
 const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
     GeneratedTableSpec {
@@ -3660,6 +3660,60 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
         }),
     },
     GeneratedOperationalTableSpec {
+        name: "operational_dependency_edge",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_owner_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "dependent_owner_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "edge_kind_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "derivation_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "input_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "active",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+        ],
+        primary_key: &[
+            "workspace_id",
+            "source_owner_id",
+            "dependent_owner_id",
+            "edge_kind_code",
+        ],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
         name: "provider_run",
         columns: &[
             GeneratedOperationalColumn {
@@ -3793,6 +3847,61 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
             },
         ],
         primary_key: &["git_operation_run_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "git_candidate_cache",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "worktree_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "state_vector_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "topology_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "mode_code",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "candidate_payload",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "payload_digest",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+        ],
+        primary_key: &[
+            "workspace_id",
+            "worktree_id",
+            "state_vector_digest",
+            "topology_digest",
+            "mode_code",
+        ],
         workspace_scope: Some(OperationalWorkspaceScope::Direct {
             workspace_column: "workspace_id",
         }),
@@ -4369,6 +4478,13 @@ const GENERATED_CONTROL_PROJECTION_SPECS: &[ControlProjectionSpec] = &[
         columns: &[],
     },
     ControlProjectionSpec {
+        view_name: "operational_dependency_edge",
+        availability_wave: 6,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("operational_dependency_edge"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
         view_name: "provider_run",
         availability_wave: 2,
         projection_role: ControlProjectionRole::OperationalSource,
@@ -4380,6 +4496,13 @@ const GENERATED_CONTROL_PROJECTION_SPECS: &[ControlProjectionSpec] = &[
         availability_wave: 2,
         projection_role: ControlProjectionRole::OperationalSource,
         source_table: Some("git_operation_run"),
+        columns: &[],
+    },
+    ControlProjectionSpec {
+        view_name: "git_candidate_cache",
+        availability_wave: 7,
+        projection_role: ControlProjectionRole::OperationalSource,
+        source_table: Some("git_candidate_cache"),
         columns: &[],
     },
     ControlProjectionSpec {

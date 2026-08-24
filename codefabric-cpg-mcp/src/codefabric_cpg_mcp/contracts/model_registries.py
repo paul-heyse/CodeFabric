@@ -300,6 +300,17 @@ class SyntaxFieldRole(IntEnum):
     FINALLY_BODY = 170
 
 
+class OwnerKind(IntEnum):
+    SOURCE_FILE = 10
+    MODULE = 20
+    SCOPE = 30
+    CALLABLE = 40
+    CLASS_OR_TYPE = 50
+    MIR_BODY = 60
+    CRATE_OR_BUILD_UNIT = 70
+    WORKSPACE_GLOBAL_DERIVATION = 80
+
+
 class Language(IntEnum):
     COMMON = 10
     PYTHON = 20
@@ -311,6 +322,98 @@ class PathEncoding(IntEnum):
     UNIX_BYTES = 10
     MACOS_BYTES = 20
     WINDOWS_WTF8 = 30
+
+
+class UpdateCandidateStrategy(IntEnum):
+    ISOLATED_PATHS = 10
+    GIT_STATUS_INDEX = 20
+    HEAD_TREE_AND_STATUS = 30
+    GENERIC_INVENTORY = 40
+
+
+class UpdateWaveItemState(IntEnum):
+    PENDING = 10
+    CAPTURED = 20
+    REMOVED = 30
+    DEFERRED_SOURCE_DRIFT = 40
+    FAILED = 50
+
+
+class OperationalDependencyEdgeKind(IntEnum):
+    SYNTAX = 10
+    SEMANTIC = 20
+    DERIVATION = 30
+    PUBLICATION = 40
+
+
+class GitHashAlgorithm(IntEnum):
+    SHA1 = 10
+    SHA256 = 20
+
+
+class GitRepositoryKind(IntEnum):
+    COMMON = 10
+    LINKED_WORKTREE = 20
+    SUBMODULE = 30
+
+
+class GitHeadKind(IntEnum):
+    SYMBOLIC = 10
+    DETACHED = 20
+    UNBORN = 30
+
+
+class GitOperationState(IntEnum):
+    CLEAN = 10
+    MERGE = 20
+    REBASE = 30
+    CHERRY_PICK = 40
+    REVERT = 50
+    BISECT = 60
+    APPLY = 70
+    OTHER_OPERATION = 80
+    UNKNOWN = 90
+
+
+class GitInventoryClassification(IntEnum):
+    TRACKED = 10
+    UNTRACKED_NOT_IGNORED = 20
+    UNTRACKED_IGNORED = 30
+    TRACKED_BUT_IGNORED_PATTERN_MATCHES = 40
+    EXCLUDED_BY_CODE_FABRIC_POLICY = 50
+    SUBMODULE_GITLINK = 60
+    NESTED_REPOSITORY = 70
+    SPECIAL_FILE = 80
+
+
+class InventoryInclusionState(IntEnum):
+    INCLUDED = 10
+    EXCLUDED_POLICY = 20
+    EXCLUDED_SPECIAL_FILE = 30
+    EXCLUDED_SIZE_LIMIT = 40
+
+
+class InventoryFileKind(IntEnum):
+    REGULAR = 10
+    SYMLINK = 20
+    SPECIAL = 30
+
+
+class GitCandidateOrigin(IntEnum):
+    INDEX_WORKTREE = 10
+    HEAD_INDEX = 20
+    HEAD_TREE = 30
+
+
+class GitCandidateMode(IntEnum):
+    STATUS = 10
+    HEAD_TREE = 20
+
+
+class OverlayTombstoneReason(IntEnum):
+    OWNER_REPLACED_EMPTY = 10
+    SOURCE_REMOVED = 20
+    SUPERSEDED_GENERATION = 30
 
 
 class NewlineKind(IntEnum):
@@ -325,6 +428,10 @@ class OccurrenceFamily(IntEnum):
     TOKEN = 10
     ANNOTATION = 20
     SYNTAX = 30
+
+
+class ProviderObservationFamily(IntEnum):
+    RUST_MIR_OWNER = 120
 
 
 class RangeReconciliationStep(IntEnum):

@@ -238,6 +238,28 @@ pub struct SourceImageLimitProfile {
     pub garbage_collection_batch_size: u32,
 }
 
+/// One magic-byte prefix admitted by the AC-G-43 binary classifier.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinarySignatureProfile {
+    pub name: String,
+    pub prefix_hex: String,
+}
+
+/// Model-owned source admission and classification policy.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceAdmissionProfile {
+    pub binary_sample_bytes: u32,
+    pub maximum_single_line_bytes: u32,
+    pub maximum_path_components: u16,
+    pub maximum_path_bytes: u16,
+    pub excluded_directory_names: BTreeSet<String>,
+    pub vendored_directory_names: BTreeSet<String>,
+    pub generated_directory_names: BTreeSet<String>,
+    pub binary_signatures: Vec<BinarySignatureProfile>,
+}
+
 /// Six independently enforceable generic-inventory bounds.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -248,6 +270,23 @@ pub struct InventoryLimitProfile {
     pub maximum_total_bytes_considered: u64,
     pub maximum_duration_ms: u64,
     pub maximum_entries_per_directory: u64,
+}
+
+/// Bounded continuous-update configuration owned by the deployment profile.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LifecycleLimitProfile {
+    pub watch_debounce_timeout_ms: u64,
+    pub watch_tick_rate_ms: u64,
+    pub watch_ingress_capacity: u16,
+    pub maximum_watch_paths_per_batch: u32,
+    pub gather_window_ms: u64,
+    pub dirty_path_bulk_threshold: u32,
+    pub default_await_current_timeout_ms: u64,
+    pub overlay_flush_maximum_rows: u64,
+    pub overlay_flush_maximum_bytes: u64,
+    pub overlay_flush_maximum_touched_owners: u64,
+    pub overlay_flush_maximum_generations: u64,
 }
 
 /// Closed AC-G-08 local workstation deployment profile.
@@ -273,7 +312,9 @@ pub struct DeploymentProfileDocument {
     pub maximum_concurrent_source_reads: u16,
     pub maximum_concurrent_gix_jobs: u16,
     pub source_image_limits: SourceImageLimitProfile,
+    pub source_admission: SourceAdmissionProfile,
     pub inventory_limits: InventoryLimitProfile,
+    pub lifecycle_limits: LifecycleLimitProfile,
     pub default_query_freshness: String,
     pub provider_sandbox: String,
     pub follow_directory_symlinks: bool,

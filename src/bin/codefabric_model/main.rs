@@ -185,6 +185,16 @@ fn compile_plan(
     Ok((model, plan))
 }
 
+fn compile_reconciled_plan(
+    root: &std::path::Path,
+) -> Result<(repository_model::RepositoryModel, desired_tree::ModelPlan), String> {
+    let preview = transaction::preview_current(root).map_err(|error| error.to_string())?;
+    let _guard = transaction::read_guard(root).map_err(|error| error.to_string())?;
+    let (model, mut plan) = compile_plan(root)?;
+    plan.apply_reconciliation_preview(preview.output_paths, preview.changes);
+    Ok((model, plan))
+}
+
 fn root_and_values(arguments: &[String]) -> Result<(std::path::PathBuf, Vec<String>), String> {
     let mut root = std::path::PathBuf::from(".");
     let mut values = Vec::new();
@@ -206,8 +216,7 @@ fn root_and_values(arguments: &[String]) -> Result<(std::path::PathBuf, Vec<Stri
 
 fn plan(arguments: &[String]) -> ExitCode {
     let result = root_and_values(arguments).and_then(|(root, changed)| {
-        let _guard = transaction::read_guard(&root).map_err(|error| error.to_string())?;
-        let (model, plan) = compile_plan(&root)?;
+        let (model, plan) = compile_reconciled_plan(&root)?;
         let changed_ids = changed
             .iter()
             .map(|target| resolve_model_id(&model, target))
@@ -219,7 +228,6 @@ fn plan(arguments: &[String]) -> ExitCode {
 
 fn check(arguments: &[String]) -> ExitCode {
     let result = root_and_values(arguments).and_then(|(root, values)| {
-        let _guard = transaction::read_guard(&root).map_err(|error| error.to_string())?;
         let profile = match values.as_slice() {
             [] => assurance::AssuranceProfile::Edit,
             [profile] => {
@@ -227,7 +235,7 @@ fn check(arguments: &[String]) -> ExitCode {
             }
             _ => return Err("check accepts one closed assurance profile".to_owned()),
         };
-        let (_, plan) = compile_plan(&root)?;
+        let (_, plan) = compile_reconciled_plan(&root)?;
         plan.check(&root).map_err(|error| error.to_string())?;
         let inventory =
             assurance::AssuranceInventory::collect(&root).map_err(|error| error.to_string())?;
@@ -249,8 +257,7 @@ fn assurance_report(arguments: &[String]) -> ExitCode {
         if !values.is_empty() {
             return Err("assurance accepts only --root".to_owned());
         }
-        let _guard = transaction::read_guard(&root).map_err(|error| error.to_string())?;
-        let (_, plan) = compile_plan(&root)?;
+        let (_, plan) = compile_reconciled_plan(&root)?;
         plan.check(&root).map_err(|error| error.to_string())?;
         let inventory =
             assurance::AssuranceInventory::collect(&root).map_err(|error| error.to_string())?;

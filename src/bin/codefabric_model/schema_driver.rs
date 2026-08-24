@@ -258,6 +258,36 @@ struct PublicSchemaContract {
     schema: Value,
 }
 
+/// Closed physical types allowed on provider-to-daemon Arrow observation streams.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProviderObservationLogicalType {
+    Utf8,
+    Boolean,
+    #[serde(rename = "uint64")]
+    UInt64,
+    Utf8List,
+}
+
+/// One required field in a provider observation Arrow schema.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderObservationFieldContract {
+    name: String,
+    logical_type: ProviderObservationLogicalType,
+    nullable: bool,
+}
+
+/// One provider-native Arrow schema admitted before canonical reconciliation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderObservationSchemaContract {
+    schema_id: String,
+    provider_id: String,
+    observation_family_code: u16,
+    fields: Vec<ProviderObservationFieldContract>,
+}
+
 /// Single typed source for every schema-family projection.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -274,6 +304,7 @@ struct SchemaContractIr {
     serving_projections: Vec<ServingProjectionContract>,
     control_projections: Vec<ControlProjectionContract>,
     serving_resource_profile: ServingResourceProfileContract,
+    provider_observation_schemas: Vec<ProviderObservationSchemaContract>,
     public_schemas: Vec<PublicSchemaContract>,
 }
 
@@ -388,6 +419,32 @@ impl SchemaContractIr {
                 );
             }
         }
+        let mut observation_schema_ids = BTreeSet::new();
+        let mut observation_family_codes = BTreeSet::new();
+        for (schema_index, schema) in self.provider_observation_schemas.iter().enumerate() {
+            let path = format!("$.provider_observation_schemas[{schema_index}]");
+            if schema.schema_id.is_empty()
+                || !schema.schema_id.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".-".contains(&byte)
+                })
+                || schema.provider_id.is_empty()
+                || schema.observation_family_code == 0
+                || schema.fields.is_empty()
+                || !observation_schema_ids.insert(schema.schema_id.as_str())
+                || !observation_family_codes.insert(schema.observation_family_code)
+            {
+                return invalid(&path, "invalid or duplicate provider observation schema");
+            }
+            let mut fields = BTreeSet::new();
+            for (field_index, field) in schema.fields.iter().enumerate() {
+                if !identifier(&field.name) || !fields.insert(field.name.as_str()) {
+                    return invalid(
+                        &format!("{path}.fields[{field_index}].name"),
+                        "invalid or duplicate provider observation field",
+                    );
+                }
+            }
+        }
         let mut operational_names = BTreeSet::new();
         for (table_index, table) in self.operational_tables.iter().enumerate() {
             let path = format!("$.operational_tables[{table_index}]");
@@ -409,6 +466,80 @@ impl SchemaContractIr {
             {
                 if !fields.contains(key.as_str()) {
                     return invalid(&path, format!("unknown SQLite key field {key}"));
+                }
+            }
+        }
+        let operational_tables = self
+            .operational_tables
+            .iter()
+            .map(|table| (table.name.as_str(), table))
+            .collect::<BTreeMap<_, _>>();
+        let mut control_views = BTreeSet::new();
+        for (projection_index, projection) in self.control_projections.iter().enumerate() {
+            let path = format!("$.control_projections[{projection_index}]");
+            if !identifier(&projection.view_name)
+                || !control_views.insert(projection.view_name.as_str())
+                || projection.availability_wave == 0
+            {
+                return invalid(&path, "duplicate or invalid control projection identity");
+            }
+            match projection.projection_role {
+                ControlProjectionRole::OperationalSource => {
+                    if projection.source_table.as_deref() != Some(projection.view_name.as_str())
+                        || !projection.columns.is_empty()
+                        || !operational_tables.contains_key(projection.view_name.as_str())
+                    {
+                        return invalid(
+                            &path,
+                            "operational-source projection must name its governed table",
+                        );
+                    }
+                }
+                ControlProjectionRole::DerivedOperational => {
+                    let source_name = projection.source_table.as_deref().ok_or_else(|| {
+                        SchemaDriverError::Invalid {
+                            path: format!("{path}.source_table"),
+                            detail: "derived operational projection source is absent".into(),
+                        }
+                    })?;
+                    let source = operational_tables.get(source_name).ok_or_else(|| {
+                        SchemaDriverError::Invalid {
+                            path: format!("{path}.source_table"),
+                            detail: "derived operational projection source is unknown".into(),
+                        }
+                    })?;
+                    let source_columns = source
+                        .columns
+                        .iter()
+                        .map(|column| column.name.as_str())
+                        .collect::<BTreeSet<_>>();
+                    let selected = projection
+                        .columns
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>();
+                    if selected.len() != projection.columns.len()
+                        || selected.is_empty()
+                        || selected
+                            .iter()
+                            .any(|column| !identifier(column) || !source_columns.contains(column))
+                    {
+                        return invalid(
+                            &format!("{path}.columns"),
+                            "derived operational projection columns are invalid",
+                        );
+                    }
+                }
+                ControlProjectionRole::ActiveServingSnapshot => {
+                    if projection.view_name != "active_serving_snapshot"
+                        || projection.source_table.is_some()
+                        || !projection.columns.is_empty()
+                    {
+                        return invalid(
+                            &path,
+                            "active serving snapshot is a runtime pinned-session projection",
+                        );
+                    }
                 }
             }
         }
@@ -482,6 +613,7 @@ pub struct SchemaPlan {
     descriptor: DriverDescriptor,
     ir: SchemaContractIr,
     source_digest: String,
+    semantic_digest: String,
     source_fence: DriverSourceFence,
 }
 
@@ -608,10 +740,13 @@ impl ModelDriver for SchemaDriver {
             descriptor.outputs.push(output);
         }
         descriptor.validate()?;
+        let semantic_digest = detached_schema_identity(&bytes)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         Ok(SchemaPlan {
             descriptor,
             ir,
             source_digest: format!("b3:{}", blake3::hash(&bytes).to_hex()),
+            semantic_digest,
             source_fence,
         })
     }
@@ -813,8 +948,8 @@ fn render_public_schema(
 
 fn render_ddl(plan: &SchemaPlan) -> Vec<u8> {
     let mut output = format!(
-        "-- generated by schema-contract-driver-v1 from {}\nPRAGMA foreign_keys = ON;\n\n",
-        plan.source_digest
+        "-- @generated from codefabric.schema.contract-ir semantic={} source={}; schema-contract-driver-v1; do not edit.\nPRAGMA foreign_keys = ON;\n\n",
+        plan.semantic_digest, plan.source_digest
     );
     for table in &plan.ir.operational_tables {
         writeln!(output, "CREATE TABLE {} (", table.name).unwrap();
@@ -843,6 +978,23 @@ fn render_ddl(plan: &SchemaPlan) -> Vec<u8> {
                 .map(|columns| format!("  UNIQUE ({})", columns.join(", "))),
         );
         writeln!(output, "{}\n) STRICT;\n", definitions.join(",\n")).unwrap();
+    }
+    for projection in &plan.ir.control_projections {
+        if projection.projection_role != ControlProjectionRole::DerivedOperational {
+            continue;
+        }
+        let source = projection
+            .source_table
+            .as_deref()
+            .expect("validated derived projection source");
+        writeln!(
+            output,
+            "CREATE VIEW {} AS\nSELECT {}\nFROM {};\n",
+            projection.view_name,
+            projection.columns.join(", "),
+            source,
+        )
+        .unwrap();
     }
     output.into_bytes()
 }
@@ -882,8 +1034,60 @@ fn render_rust(ir: &SchemaContractIr) -> Vec<u8> {
         }
         writeln!(output, "    ], primary_key: &{:?} }},", table.primary_key).unwrap();
     }
+    output.push_str("];\n\n");
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub enum ProviderObservationLogicalType { Utf8, Boolean, UInt64, Utf8List }\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderObservationField { pub name: &'static str, pub logical_type: ProviderObservationLogicalType, pub nullable: bool }\n\
+         #[derive(Clone, Copy, Debug)]\n\
+         pub struct ProviderObservationSchema { pub schema_id: &'static str, pub provider_id: &'static str, pub observation_family_code: u16, pub canonical_descriptor: &'static str, pub schema_digest: &'static str, pub fields: &'static [ProviderObservationField] }\n\n\
+         pub const PROVIDER_OBSERVATION_SCHEMAS: &[ProviderObservationSchema] = &[\n",
+    );
+    for schema in &ir.provider_observation_schemas {
+        let descriptor = provider_observation_descriptor(schema);
+        let digest = format!("b3:{}", blake3::hash(descriptor.as_bytes()).to_hex());
+        writeln!(
+            output,
+            "    ProviderObservationSchema {{ schema_id: {:?}, provider_id: {:?}, observation_family_code: {}, canonical_descriptor: {:?}, schema_digest: {:?}, fields: &[",
+            schema.schema_id,
+            schema.provider_id,
+            schema.observation_family_code,
+            descriptor,
+            digest,
+        )
+        .unwrap();
+        for field in &schema.fields {
+            writeln!(
+                output,
+                "        ProviderObservationField {{ name: {:?}, logical_type: ProviderObservationLogicalType::{:?}, nullable: {} }},",
+                field.name, field.logical_type, field.nullable,
+            )
+            .unwrap();
+        }
+        output.push_str("    ] },\n");
+    }
     output.push_str("];\n");
     output.into_bytes()
+}
+
+fn provider_observation_descriptor(schema: &ProviderObservationSchemaContract) -> String {
+    let mut descriptor = schema.schema_id.clone();
+    for field in &schema.fields {
+        descriptor.push(':');
+        descriptor.push_str(&field.name);
+        descriptor.push(':');
+        descriptor.push_str(match field.logical_type {
+            ProviderObservationLogicalType::Utf8 => "utf8",
+            ProviderObservationLogicalType::Boolean => "boolean",
+            ProviderObservationLogicalType::UInt64 => "uint64",
+            ProviderObservationLogicalType::Utf8List => "list<utf8>",
+        });
+        if field.nullable {
+            descriptor.push('?');
+        }
+    }
+    descriptor
 }
 
 #[allow(clippy::too_many_lines)] // One linear pass keeps the complete runtime view tied to one IR.
@@ -1292,7 +1496,7 @@ mod tests {
         let ir = authority();
         ir.validate().unwrap();
         assert_eq!(ir.public_schemas.len(), 8);
-        assert_eq!(ir.operational_tables.len(), 24);
+        assert_eq!(ir.operational_tables.len(), 26);
         for table in &ir.tables {
             let ids = table
                 .columns
@@ -1302,6 +1506,20 @@ mod tests {
             assert_eq!(ids.len(), table.columns.len());
             for column in &table.columns {
                 assert!(arrow_type(column.logical_type).is_object());
+            }
+        }
+        let plan = SchemaDriver.plan(Path::new(".")).unwrap();
+        let ddl = String::from_utf8(render_ddl(&plan)).unwrap();
+        for projection in &ir.control_projections {
+            let declaration = format!("CREATE VIEW {} AS", projection.view_name);
+            match projection.projection_role {
+                ControlProjectionRole::DerivedOperational => {
+                    assert!(ddl.contains(&declaration));
+                }
+                ControlProjectionRole::OperationalSource
+                | ControlProjectionRole::ActiveServingSnapshot => {
+                    assert!(!ddl.contains(&declaration));
+                }
             }
         }
     }

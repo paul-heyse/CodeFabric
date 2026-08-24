@@ -3068,17 +3068,19 @@ Public phrases such as “exact,” “statically resolved,” “sound possible
 Every fact SHALL have a deterministic replacement/recomputation owner. Typical owner kinds are:
 
 ```text
-source_file
-module
-scope
-callable
-class_or_type
-MIR_body
-crate_or_build_unit
-workspace_global_derivation
+10  SOURCE_FILE
+20  MODULE
+30  SCOPE
+40  CALLABLE
+50  CLASS_OR_TYPE
+60  MIR_BODY
+70  CRATE_OR_BUILD_UNIT
+80  WORKSPACE_GLOBAL_DERIVATION
 ```
 
 `workspace_global_derivation` is permitted only for facts whose scope cannot be replaced safely by a smaller owner. Ownership does not create history; it defines current-state replacement, capability aggregation, and derivation invalidation.
+The `OWNER_KIND` enum registry is the executable authority for these append-only codes;
+the `owner.owner_kind_code` column SHALL contain one of its generated values.
 
 ---
 

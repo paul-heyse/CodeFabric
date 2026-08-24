@@ -15,8 +15,7 @@ option java_package = "dev.codefabric.rustc.v1";
 
 service RustcExtractor {
   rpc Handshake(ExtractorHello) returns (ExtractorHelloAck);
-  rpc Extract(stream ExtractorCommand) returns (stream ExtractionEvent);
-  rpc CancelCompilation(CancelCompilationRequest) returns (codefabric.provider.v1.CancelAcknowledgement);
+  rpc Observe(stream ExtractionEvent) returns (stream ExtractorCommand);
 }
 
 enum ExtractorEnvironmentVariable {
@@ -27,6 +26,11 @@ enum ExtractorEnvironmentVariable {
   EXTRACTOR_ENVIRONMENT_VARIABLE_ANALYSIS_CONTEXT_ID = 4;
   EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_GENERATION = 5;
   EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST = 6;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RESOURCE_PROFILE_ID = 7;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_SNAPSHOT_MANIFEST_DIGEST = 8;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_METADATA_DIGEST = 9;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_LOCK_DIGEST = 10;
+  EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_CONFIG_DIGEST = 11;
 }
 
 enum RejectionRuleErrorCode {
@@ -48,20 +52,24 @@ message ExtractorHello {
   uint32 protocol_minor = 2;
   uint64 required_feature_bits = 3;
   uint64 optional_feature_bits = 4;
-  string daemon_build = 5;
-  string output_schema_bundle_digest = 6;
-  string sandbox_profile_digest = 7;
+  string extractor_build = 5;
+  string rustc_version = 6;
+  string rustc_commit = 7;
+  string toolchain_identity_digest = 8;
+  string resource_profile_id = 9;
 }
 
 message ExtractorHelloAck {
   uint32 protocol_major = 1;
   uint32 protocol_minor = 2;
   uint64 negotiated_feature_bits = 3;
-  string extractor_build = 4;
-  string rustc_version = 5;
-  string rustc_commit = 6;
+  string daemon_build = 4;
+  string output_schema_bundle_digest = 5;
+  string sandbox_profile_digest = 6;
   uint32 maximum_outstanding_chunks = 7;
   uint64 maximum_unacknowledged_bytes = 8;
+  string accepted_resource_profile_id = 9;
+  int64 provider_deadline_unix_ms = 10;
 }
 
 message PackageTargetIdentity {
@@ -92,6 +100,8 @@ message CompilationBegin {
   string source_snapshot_manifest_digest = 15;
   repeated uint32 requested_capability_codes = 16;
   string context_manifest_digest = 17;
+  string resource_profile_id = 18;
+  string toolchain_identity_digest = 19;
 }
 
 message CompilationAccepted {
@@ -161,7 +171,7 @@ message CompilationEnd {
 
 message ExtractorCommand {
   oneof command {
-    CompilationBegin begin = 1;
+    CompilationAccepted compilation_accepted = 1;
     codefabric.provider.v1.ChunkAccepted chunk_accepted = 2;
     codefabric.provider.v1.ChunkRejected chunk_rejected = 3;
     CancelCompilationRequest cancel = 4;
@@ -169,8 +179,9 @@ message ExtractorCommand {
 }
 
 message ExtractionEvent {
+  reserved 1;
+  reserved "compilation_accepted";
   oneof event {
-    CompilationAccepted compilation_accepted = 1;
     CompilationBegin compilation_begin = 2;
     OwnerBegin owner_begin = 3;
     OwnerObservationChunk owner_observation_chunk = 4;

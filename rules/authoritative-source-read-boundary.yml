@@ -10,6 +10,9 @@ ignores:
   - src/daemon.rs
   - src/identity.rs
   - src/operational_store.rs
+  # Released golden artifacts and result artifacts are contract/storage boundaries, not source.
+  - src/golden_corpus.rs
+  - src/query_service.rs
   - src/contracts/**/*.rs
   - src/bin/codefabric_model/**/*.rs
 rule:

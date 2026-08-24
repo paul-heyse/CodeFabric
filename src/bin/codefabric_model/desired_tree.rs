@@ -331,6 +331,16 @@ impl DesiredTree {
             .collect()
     }
 
+    fn staging_identity(&self) -> Result<String, DesiredTreeError> {
+        canonical_digest(
+            &self
+                .entries
+                .iter()
+                .map(|(path, entry)| (path.as_bytes(), entry.content_digest.as_str()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
     /// Materialize exact desired bytes beneath a disposable staging root without touching the
     /// repository tree.
     ///
@@ -383,7 +393,7 @@ pub struct TreeChange {
 }
 
 impl TreeChange {
-    fn new(
+    pub(crate) fn new(
         path: SafeOutputPath,
         kind: ChangeKind,
         current_digest: Option<String>,
@@ -442,6 +452,7 @@ pub struct ModelPlan {
     pub changes: Vec<TreeChange>,
     pub source_fence: SourceFence,
     graph: ModelGraph,
+    reconciled_output_paths: Option<Vec<String>>,
 }
 
 impl ModelPlan {
@@ -490,7 +501,19 @@ impl ModelPlan {
             changes,
             source_fence,
             graph,
+            reconciled_output_paths: None,
         })
+    }
+
+    /// Replace the bootstrap shadow comparison with the aggregate renderer's real
+    /// transaction preview while retaining the typed action graph and explanations.
+    pub fn apply_reconciliation_preview(
+        &mut self,
+        output_paths: Vec<String>,
+        changes: Vec<TreeChange>,
+    ) {
+        self.reconciled_output_paths = Some(output_paths);
+        self.changes = changes;
     }
 
     /// Stable prerequisite-first action order.
@@ -582,13 +605,13 @@ impl ModelPlan {
     /// Returns an error for source drift, staging conflict, or any non-unchanged repository output.
     pub fn check(&self, root: &Path) -> Result<(), DesiredTreeError> {
         self.source_fence.verify(root)?;
-        let plan_digest = canonical_digest(
-            &self
-                .actions
-                .values()
-                .map(|action| (&action.action_id, &action.action_key))
-                .collect::<Vec<_>>(),
-        )?;
+        let action_identity = self
+            .actions
+            .values()
+            .map(|action| (&action.action_id, &action.action_key))
+            .collect::<Vec<_>>();
+        let desired_tree_identity = self.desired_tree.staging_identity()?;
+        let plan_digest = canonical_digest(&(action_identity, desired_tree_identity))?;
         let stage_name = plan_digest.strip_prefix("b3:").unwrap_or(&plan_digest);
         self.desired_tree
             .stage(&root.join("target/model-stage/read-only").join(stage_name))?;
@@ -632,6 +655,13 @@ impl ModelPlan {
     /// Build a byte-free structured CLI report.
     #[must_use]
     pub fn report(&self, changed: &[StableId]) -> PlanReport {
+        let output_paths = self.reconciled_output_paths.clone().unwrap_or_else(|| {
+            self.desired_tree
+                .entries
+                .keys()
+                .map(SafeOutputPath::display)
+                .collect()
+        });
         PlanReport {
             action_order: self.action_order(),
             action_keys: self
@@ -639,13 +669,8 @@ impl ModelPlan {
                 .iter()
                 .map(|(id, action)| (id.clone(), action.action_key.clone()))
                 .collect(),
-            output_count: self.desired_tree.entries.len(),
-            output_paths: self
-                .desired_tree
-                .entries
-                .keys()
-                .map(SafeOutputPath::display)
-                .collect(),
+            output_count: output_paths.len(),
+            output_paths,
             changes: self.changes.clone(),
             affected: self.affected(changed),
         }

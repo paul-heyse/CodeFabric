@@ -14,9 +14,10 @@ use thiserror::Error;
 use crate::contracts::index::model_artifact_index;
 use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
 
-const SCHEMA_VERSION: u32 = 6;
+const SCHEMA_VERSION: u32 = 8;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-const OPERATIONAL_DDL: &str = include_str!("../contracts/schema/operational-store.sql");
+const OPERATIONAL_DDL: &str =
+    include_str!("../contracts/generated/model/schema/operational-store.sql");
 const SCHEMA_IR_ARTIFACT_ID: &str = "codefabric.schema.contract-ir";
 static OPEN_WRITERS: OnceLock<Mutex<BTreeSet<PathBuf>>> = OnceLock::new();
 type GeneratedColumnShapes = BTreeMap<String, Vec<(String, String, bool)>>;
@@ -413,23 +414,40 @@ impl OperationalStore {
                 migrate_v3_to_v4(&transaction)?;
                 migrate_v4_to_v5(&transaction)?;
                 migrate_v5_to_v6(&transaction)?;
+                migrate_v6_to_v7(&transaction)?;
+                migrate_v7_to_v8(&transaction)?;
             }
             2 => {
                 migrate_v2_to_v3(&transaction)?;
                 migrate_v3_to_v4(&transaction)?;
                 migrate_v4_to_v5(&transaction)?;
                 migrate_v5_to_v6(&transaction)?;
+                migrate_v6_to_v7(&transaction)?;
+                migrate_v7_to_v8(&transaction)?;
             }
             3 => {
                 migrate_v3_to_v4(&transaction)?;
                 migrate_v4_to_v5(&transaction)?;
                 migrate_v5_to_v6(&transaction)?;
+                migrate_v6_to_v7(&transaction)?;
+                migrate_v7_to_v8(&transaction)?;
             }
             4 => {
                 migrate_v4_to_v5(&transaction)?;
                 migrate_v5_to_v6(&transaction)?;
+                migrate_v6_to_v7(&transaction)?;
+                migrate_v7_to_v8(&transaction)?;
             }
-            5 => migrate_v5_to_v6(&transaction)?,
+            5 => {
+                migrate_v5_to_v6(&transaction)?;
+                migrate_v6_to_v7(&transaction)?;
+                migrate_v7_to_v8(&transaction)?;
+            }
+            6 => {
+                migrate_v6_to_v7(&transaction)?;
+                migrate_v7_to_v8(&transaction)?;
+            }
+            7 => migrate_v7_to_v8(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -781,6 +799,16 @@ fn migrate_v5_to_v6(transaction: &Transaction<'_>) -> Result<(), OperationalStor
     ] {
         transaction.execute_batch(&generated_table_ddl(table)?)?;
     }
+    Ok(())
+}
+
+fn migrate_v6_to_v7(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    transaction.execute_batch(&generated_table_ddl("operational_dependency_edge")?)?;
+    Ok(())
+}
+
+fn migrate_v7_to_v8(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    transaction.execute_batch(&generated_table_ddl("git_candidate_cache")?)?;
     Ok(())
 }
 
@@ -1172,6 +1200,7 @@ mod tests {
     #[allow(clippy::too_many_lines)] // One oracle covers the ordered migration/fault/retention proof.
     fn wp13_operational_acceptance() {
         assert_eq!(StoreFaultPoint::ALL.len(), 2);
+        let migration_backup_marker = format!("pre-migration-v{SCHEMA_VERSION}");
         let (_directory, path) = database();
         assert!(matches!(
             OperationalStore::open_with_fault(&path, Some(StoreFaultPoint::MigrationBeforeCommit))
@@ -1188,7 +1217,7 @@ mod tests {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v6")
+                    .contains(&migration_backup_marker)
             })
             .unwrap()
             .path();
@@ -1212,7 +1241,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v6"))
+                    .contains(&migration_backup_marker))
                 .count(),
             1
         );
@@ -1225,7 +1254,7 @@ mod tests {
                 .filter(|entry| entry
                     .file_name()
                     .to_string_lossy()
-                    .contains("pre-migration-v6"))
+                    .contains(&migration_backup_marker))
                 .count(),
             2
         );
@@ -1351,6 +1380,8 @@ mod tests {
                  DROP TABLE source_blob_lease;
                  DROP TABLE source_blob_lease_member;
                  DROP TABLE table_mutation_operation;
+                 DROP TABLE operational_dependency_edge;
+                 DROP TABLE git_candidate_cache;
                  PRAGMA user_version=1;",
             )
             .unwrap();

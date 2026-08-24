@@ -294,6 +294,19 @@
               "proto3_optional": false,
               "type": "TYPE_INT64",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "leaseToken",
+              "label": "LABEL_OPTIONAL",
+              "name": "lease_token",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v1.ArtifactReadyEvent",
@@ -6648,6 +6661,31 @@
               "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST",
               "number": 6,
               "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RESOURCE_PROFILE_ID",
+              "number": 7,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_SNAPSHOT_MANIFEST_DIGEST",
+              "number": 8,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_METADATA_DIGEST",
+              "number": 9,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_LOCK_DIGEST",
+              "number": 10,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_CONFIG_DIGEST",
+              "number": 11,
+              "options": {}
             }
           ]
         },
@@ -7063,6 +7101,32 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 18,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "toolchainIdentityDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "toolchain_identity_digest",
+              "number": 19,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.rustc.v1.CompilationBegin",
@@ -7346,19 +7410,6 @@
             {
               "default_value": null,
               "has_presence": true,
-              "json_name": "compilationAccepted",
-              "label": "LABEL_OPTIONAL",
-              "name": "compilation_accepted",
-              "number": 1,
-              "oneof": "event",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.rustc.v1.CompilationAccepted"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
               "json_name": "compilationBegin",
               "label": "LABEL_OPTIONAL",
               "name": "compilation_begin",
@@ -7430,8 +7481,15 @@
             }
           ],
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
+          "reserved_names": [
+            "compilation_accepted"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 2,
+              "start": 1
+            }
+          ]
         },
         {
           "extension_ranges": [],
@@ -7439,15 +7497,15 @@
             {
               "default_value": null,
               "has_presence": true,
-              "json_name": "begin",
+              "json_name": "compilationAccepted",
               "label": "LABEL_OPTIONAL",
-              "name": "begin",
+              "name": "compilation_accepted",
               "number": 1,
               "oneof": "command",
               "options": {},
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.rustc.v1.CompilationBegin"
+              "type_name": ".codefabric.rustc.v1.CompilationAccepted"
             },
             {
               "default_value": null,
@@ -7558,9 +7616,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "daemonBuild",
+              "json_name": "extractorBuild",
               "label": "LABEL_OPTIONAL",
-              "name": "daemon_build",
+              "name": "extractor_build",
               "number": 5,
               "oneof": null,
               "options": {},
@@ -7571,9 +7629,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "outputSchemaBundleDigest",
+              "json_name": "rustcVersion",
               "label": "LABEL_OPTIONAL",
-              "name": "output_schema_bundle_digest",
+              "name": "rustc_version",
               "number": 6,
               "oneof": null,
               "options": {},
@@ -7584,10 +7642,36 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "sandboxProfileDigest",
+              "json_name": "rustcCommit",
               "label": "LABEL_OPTIONAL",
-              "name": "sandbox_profile_digest",
+              "name": "rustc_commit",
               "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "toolchainIdentityDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "toolchain_identity_digest",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 9,
               "oneof": null,
               "options": {},
               "proto3_optional": false,
@@ -7646,9 +7730,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "extractorBuild",
+              "json_name": "daemonBuild",
               "label": "LABEL_OPTIONAL",
-              "name": "extractor_build",
+              "name": "daemon_build",
               "number": 4,
               "oneof": null,
               "options": {},
@@ -7659,9 +7743,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "rustcVersion",
+              "json_name": "outputSchemaBundleDigest",
               "label": "LABEL_OPTIONAL",
-              "name": "rustc_version",
+              "name": "output_schema_bundle_digest",
               "number": 5,
               "oneof": null,
               "options": {},
@@ -7672,9 +7756,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "rustcCommit",
+              "json_name": "sandboxProfileDigest",
               "label": "LABEL_OPTIONAL",
-              "name": "rustc_commit",
+              "name": "sandbox_profile_digest",
               "number": 6,
               "oneof": null,
               "options": {},
@@ -7706,6 +7790,32 @@
               "options": {},
               "proto3_optional": false,
               "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "acceptedResourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "accepted_resource_profile_id",
+              "number": 9,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "providerDeadlineUnixMs",
+              "label": "LABEL_OPTIONAL",
+              "name": "provider_deadline_unix_ms",
+              "number": 10,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_INT64",
               "type_name": ""
             }
           ],
@@ -8175,27 +8285,19 @@
           "methods": [
             {
               "client_streaming": false,
-              "input_type": ".codefabric.rustc.v1.CancelCompilationRequest",
-              "name": "CancelCompilation",
-              "options": {},
-              "output_type": ".codefabric.provider.v1.CancelAcknowledgement",
-              "server_streaming": false
-            },
-            {
-              "client_streaming": true,
-              "input_type": ".codefabric.rustc.v1.ExtractorCommand",
-              "name": "Extract",
-              "options": {},
-              "output_type": ".codefabric.rustc.v1.ExtractionEvent",
-              "server_streaming": true
-            },
-            {
-              "client_streaming": false,
               "input_type": ".codefabric.rustc.v1.ExtractorHello",
               "name": "Handshake",
               "options": {},
               "output_type": ".codefabric.rustc.v1.ExtractorHelloAck",
               "server_streaming": false
+            },
+            {
+              "client_streaming": true,
+              "input_type": ".codefabric.rustc.v1.ExtractionEvent",
+              "name": "Observe",
+              "options": {},
+              "output_type": ".codefabric.rustc.v1.ExtractorCommand",
+              "server_streaming": true
             }
           ],
           "options": {}

@@ -20,16 +20,16 @@
       },
       "rule_version": "registry-cbef-driver-v1",
       "tool_identity": {
-        "action_key": "b3:45f2e1daa36aaba2e2f5271e4e370dd0a8ea796228b793d5933b44c97d1908f4",
-        "cargo_lock_digest": "b3:fa00119187ec3a1914a8a740587a5aa572185b02f5cbd64a13370c7819a8821b",
-        "cargo_manifest_digest": "b3:7f2a7d64e10c35633141c297f47d56b3ec653c7a732ccbad7b440074e9661795",
-        "executable_digest": "b3:ea57e0cd13f842fde117b914761266bc6236597864477844ae0e02be4552e398",
+        "action_key": "b3:e675e13e0f49d91bde49a0f5065f14ad2bf52159327e0562cee20fe8b2d9c07e",
+        "cargo_lock_digest": "b3:78451df7a7d836bff0c9095cc5d5c3fdf74c7d68ecbfc426d2e8c80fe258cb2b",
+        "cargo_manifest_digest": "b3:3a745d715e27327e9fef280495ceb78d5ec9009144453d14d889a2099a2d0f78",
+        "executable_digest": "b3:83f67c6db537bd5748519474621bb7ea73689753ddbc3972fccb9c5229601f21",
         "features": [
           "provider-inventory-tooling"
         ],
         "profile": "debug",
         "protocol": "codefabric-provider-inventory-v1",
-        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+        "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
         "source_digest": "b3:530b05f58c111594fb662108abe593406746386b7dc559b6907b501e7abc49c0"
       }
     },
@@ -124,7 +124,7 @@
       "rule_version": "one-fds-grpc-tools-compile-fds-v1",
       "tool_identity": {
         "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
-        "descriptor_sha256": "318ab83ef6f6195e67ccd98cf24e48dcf46ab35d1421fd83532c64693bb6e529",
+        "descriptor_sha256": "dab30a99d17f66011a9d5d29a8d91069f69bc7e3fc02c38dd5f2de00230eaa9a",
         "python": {
           "grpcio": "1.83.0",
           "grpcio-tools": "1.83.0",
@@ -137,24 +137,24 @@
           "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
         },
         "rust": {
-          "action_key": "b3:e1526bd9b244623386bd4ceeb119628fc7596926caeec1f3574af517d22e1e74",
-          "binary_digest": "b3:ed9f66bf0f6413428ddeeaadfb305ad950c73c0ad44f5677aa593400c1512481",
-          "cargo_lock_digest": "b3:fa00119187ec3a1914a8a740587a5aa572185b02f5cbd64a13370c7819a8821b",
-          "cargo_manifest_digest": "b3:7f2a7d64e10c35633141c297f47d56b3ec653c7a732ccbad7b440074e9661795",
+          "action_key": "b3:147639b1e52ab7b3d72300f8068d5812ce2e18a551af174497213f71198d1b6f",
+          "binary_digest": "b3:67d16b121fe3265674261f8a6d9ba1e9c5ddff4a47e93fb1632d07c72a5d4206",
+          "cargo_lock_digest": "b3:78451df7a7d836bff0c9095cc5d5c3fdf74c7d68ecbfc426d2e8c80fe258cb2b",
+          "cargo_manifest_digest": "b3:3a745d715e27327e9fef280495ceb78d5ec9009144453d14d889a2099a2d0f78",
           "descriptor_api": "tonic_prost_build::Builder::compile_fds",
           "features": [
             "proto-tooling"
           ],
           "profile": "debug",
-          "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+          "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
           "target_triple": "aarch64-apple-darwin"
         },
         "schema": 4,
         "sources": {
-          "contracts/rpc/cpg_query_service.proto": "b3:eba80a4b95280db5d635d2a3a6d8bbd45f9ee2841ce67b1a9cc49867543fa83b",
+          "contracts/rpc/cpg_query_service.proto": "b3:e73c3a48cfc2fa9d492b64dbe8802d6d20bd94387894019d9d09cc6924401f88",
           "contracts/rpc/provider_control.proto": "b3:88e322e42cc6475bfa810a4a3b4479a1620bef22e3156b3b82469abc4fd36e38",
           "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
-          "contracts/rpc/rustc_extractor.proto": "b3:2d3a327183e2d56b83078fb77ed0b810e6bc0382b7e856e0e0028ee713114d4e"
+          "contracts/rpc/rustc_extractor.proto": "b3:3fb3384fa6dfd521b4ed4690102d5e00e8c7fda7f4a95c5c2543d81bd156fac6"
         }
       }
     }

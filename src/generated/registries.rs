@@ -20,7 +20,7 @@ pub struct FlagEntry {
     pub slug: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum EvidenceCertainty {
     SourceExact = 10,
@@ -87,7 +87,7 @@ pub const EVIDENCE_CERTAINTY_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum ResolutionClass {
     Exact = 10,
@@ -168,7 +168,7 @@ pub const RESOLUTION_CLASS_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum Directness {
     Direct = 10,
@@ -214,7 +214,7 @@ pub const DIRECTNESS_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum Completeness {
     Complete = 10,
@@ -267,7 +267,7 @@ pub const COMPLETENESS_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum OwnerCapabilityState {
     Current = 10,
@@ -369,7 +369,7 @@ pub const OWNER_CAPABILITY_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum ProviderRunState {
     Queued = 10,
@@ -471,7 +471,7 @@ pub const PROVIDER_RUN_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum QueryExecutionState {
     Accepted = 10,
@@ -538,7 +538,7 @@ pub const QUERY_EXECUTION_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum QueryAvailabilityState {
     Available = 10,
@@ -584,7 +584,7 @@ pub const QUERY_AVAILABILITY_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum CompletenessState {
     Complete = 10,
@@ -637,7 +637,7 @@ pub const COMPLETENESS_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum FreshnessState {
     Current = 10,
@@ -676,7 +676,7 @@ pub const FRESHNESS_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum LimitState {
     NotApplied = 10,
@@ -715,7 +715,7 @@ pub const LIMIT_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum DependencyState {
     Ready = 10,
@@ -754,7 +754,7 @@ pub const DEPENDENCY_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum DurablePublicationState {
     Staging = 10,
@@ -821,7 +821,7 @@ pub const DURABLE_PUBLICATION_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum ServingActivationState {
     Building = 10,
@@ -881,7 +881,7 @@ pub const SERVING_ACTIVATION_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum SnapshotLeaseKind {
     Query = 10,
@@ -927,7 +927,7 @@ pub const SNAPSHOT_LEASE_KIND_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum SnapshotLeaseState {
     Active = 10,
@@ -980,7 +980,7 @@ pub const SNAPSHOT_LEASE_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum SourceTrustState {
     Unverified = 10,
@@ -1033,7 +1033,7 @@ pub const SOURCE_TRUST_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum EventStreamHealth {
     Healthy = 10,
@@ -1079,7 +1079,7 @@ pub const EVENT_STREAM_HEALTH_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum GitAccelerationStatus {
     NotAGitWorktree = 10,
@@ -1153,7 +1153,7 @@ pub const GIT_ACCELERATION_STATUS_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum EffectKind {
     ReadMemory = 10,
@@ -1430,7 +1430,7 @@ pub const EFFECT_KIND_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum ResourceKind {
     FileHandle = 10,
@@ -1518,7 +1518,7 @@ pub const RESOURCE_KIND_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum ProviderCode {
     TreeSitter = 10,
@@ -1578,7 +1578,7 @@ pub const PROVIDER_CODE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum TokenKind {
     Identifier = 10,
@@ -1652,7 +1652,7 @@ pub const TOKEN_KIND_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum AnnotationKind {
     Comment = 10,
@@ -1705,7 +1705,7 @@ pub const ANNOTATION_KIND_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum SyntaxKind {
     SyntaxNode = 10,
@@ -1891,7 +1891,7 @@ pub const SYNTAX_KIND_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum SyntaxFieldRole {
     Name = 10,
@@ -2028,7 +2028,81 @@ pub const SYNTAX_FIELD_ROLE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OwnerKind {
+    SourceFile = 10,
+    Module = 20,
+    Scope = 30,
+    Callable = 40,
+    ClassOrType = 50,
+    MirBody = 60,
+    CrateOrBuildUnit = 70,
+    WorkspaceGlobalDerivation = 80,
+}
+impl TryFrom<u16> for OwnerKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::SourceFile),
+            20 => Ok(Self::Module),
+            30 => Ok(Self::Scope),
+            40 => Ok(Self::Callable),
+            50 => Ok(Self::ClassOrType),
+            60 => Ok(Self::MirBody),
+            70 => Ok(Self::CrateOrBuildUnit),
+            80 => Ok(Self::WorkspaceGlobalDerivation),
+            _ => Err(UnknownRegistryCode {
+                domain: "OWNER_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const OWNER_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SOURCE_FILE",
+        slug: "source-file",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "MODULE",
+        slug: "module",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SCOPE",
+        slug: "scope",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "CALLABLE",
+        slug: "callable",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "CLASS_OR_TYPE",
+        slug: "class-or-type",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "MIR_BODY",
+        slug: "mir-body",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "CRATE_OR_BUILD_UNIT",
+        slug: "crate-or-build-unit",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "WORKSPACE_GLOBAL_DERIVATION",
+        slug: "workspace-global-derivation",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum Language {
     Common = 10,
@@ -2074,7 +2148,7 @@ pub const LANGUAGE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum PathEncoding {
     UnixBytes = 10,
@@ -2113,7 +2187,612 @@ pub const PATH_ENCODING_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum UpdateCandidateStrategy {
+    IsolatedPaths = 10,
+    GitStatusIndex = 20,
+    HeadTreeAndStatus = 30,
+    GenericInventory = 40,
+}
+impl TryFrom<u16> for UpdateCandidateStrategy {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::IsolatedPaths),
+            20 => Ok(Self::GitStatusIndex),
+            30 => Ok(Self::HeadTreeAndStatus),
+            40 => Ok(Self::GenericInventory),
+            _ => Err(UnknownRegistryCode {
+                domain: "UPDATE_CANDIDATE_STRATEGY",
+                code,
+            }),
+        }
+    }
+}
+pub const UPDATE_CANDIDATE_STRATEGY_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "ISOLATED_PATHS",
+        slug: "isolated-paths",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "GIT_STATUS_INDEX",
+        slug: "git-status-index",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "HEAD_TREE_AND_STATUS",
+        slug: "head-tree-and-status",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "GENERIC_INVENTORY",
+        slug: "generic-inventory",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum UpdateWaveItemState {
+    Pending = 10,
+    Captured = 20,
+    Removed = 30,
+    DeferredSourceDrift = 40,
+    Failed = 50,
+}
+impl TryFrom<u16> for UpdateWaveItemState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Pending),
+            20 => Ok(Self::Captured),
+            30 => Ok(Self::Removed),
+            40 => Ok(Self::DeferredSourceDrift),
+            50 => Ok(Self::Failed),
+            _ => Err(UnknownRegistryCode {
+                domain: "UPDATE_WAVE_ITEM_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const UPDATE_WAVE_ITEM_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "PENDING",
+        slug: "pending",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "CAPTURED",
+        slug: "captured",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "REMOVED",
+        slug: "removed",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "DEFERRED_SOURCE_DRIFT",
+        slug: "deferred-source-drift",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "FAILED",
+        slug: "failed",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OperationalDependencyEdgeKind {
+    Syntax = 10,
+    Semantic = 20,
+    Derivation = 30,
+    Publication = 40,
+}
+impl TryFrom<u16> for OperationalDependencyEdgeKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Syntax),
+            20 => Ok(Self::Semantic),
+            30 => Ok(Self::Derivation),
+            40 => Ok(Self::Publication),
+            _ => Err(UnknownRegistryCode {
+                domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SYNTAX",
+        slug: "syntax",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SEMANTIC",
+        slug: "semantic",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "DERIVATION",
+        slug: "derivation",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "PUBLICATION",
+        slug: "publication",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitHashAlgorithm {
+    Sha1 = 10,
+    Sha256 = 20,
+}
+impl TryFrom<u16> for GitHashAlgorithm {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Sha1),
+            20 => Ok(Self::Sha256),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_HASH_ALGORITHM",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_HASH_ALGORITHM_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SHA1",
+        slug: "sha1",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SHA256",
+        slug: "sha256",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitRepositoryKind {
+    Common = 10,
+    LinkedWorktree = 20,
+    Submodule = 30,
+}
+impl TryFrom<u16> for GitRepositoryKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Common),
+            20 => Ok(Self::LinkedWorktree),
+            30 => Ok(Self::Submodule),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_REPOSITORY_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_REPOSITORY_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "COMMON",
+        slug: "common",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "LINKED_WORKTREE",
+        slug: "linked-worktree",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SUBMODULE",
+        slug: "submodule",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitHeadKind {
+    Symbolic = 10,
+    Detached = 20,
+    Unborn = 30,
+}
+impl TryFrom<u16> for GitHeadKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Symbolic),
+            20 => Ok(Self::Detached),
+            30 => Ok(Self::Unborn),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_HEAD_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_HEAD_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SYMBOLIC",
+        slug: "symbolic",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "DETACHED",
+        slug: "detached",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNBORN",
+        slug: "unborn",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitOperationState {
+    Clean = 10,
+    Merge = 20,
+    Rebase = 30,
+    CherryPick = 40,
+    Revert = 50,
+    Bisect = 60,
+    Apply = 70,
+    OtherOperation = 80,
+    Unknown = 90,
+}
+impl TryFrom<u16> for GitOperationState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Clean),
+            20 => Ok(Self::Merge),
+            30 => Ok(Self::Rebase),
+            40 => Ok(Self::CherryPick),
+            50 => Ok(Self::Revert),
+            60 => Ok(Self::Bisect),
+            70 => Ok(Self::Apply),
+            80 => Ok(Self::OtherOperation),
+            90 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_OPERATION_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_OPERATION_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "CLEAN",
+        slug: "clean",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "MERGE",
+        slug: "merge",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "REBASE",
+        slug: "rebase",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "CHERRY_PICK",
+        slug: "cherry-pick",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "REVERT",
+        slug: "revert",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "BISECT",
+        slug: "bisect",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "APPLY",
+        slug: "apply",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "OTHER_OPERATION",
+        slug: "other-operation",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "UNKNOWN",
+        slug: "unknown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitInventoryClassification {
+    Tracked = 10,
+    UntrackedNotIgnored = 20,
+    UntrackedIgnored = 30,
+    TrackedButIgnoredPatternMatches = 40,
+    ExcludedByCodeFabricPolicy = 50,
+    SubmoduleGitlink = 60,
+    NestedRepository = 70,
+    SpecialFile = 80,
+}
+impl TryFrom<u16> for GitInventoryClassification {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Tracked),
+            20 => Ok(Self::UntrackedNotIgnored),
+            30 => Ok(Self::UntrackedIgnored),
+            40 => Ok(Self::TrackedButIgnoredPatternMatches),
+            50 => Ok(Self::ExcludedByCodeFabricPolicy),
+            60 => Ok(Self::SubmoduleGitlink),
+            70 => Ok(Self::NestedRepository),
+            80 => Ok(Self::SpecialFile),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_INVENTORY_CLASSIFICATION",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_INVENTORY_CLASSIFICATION_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "TRACKED",
+        slug: "tracked",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "UNTRACKED_NOT_IGNORED",
+        slug: "untracked-not-ignored",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNTRACKED_IGNORED",
+        slug: "untracked-ignored",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "TRACKED_BUT_IGNORED_PATTERN_MATCHES",
+        slug: "tracked-but-ignored-pattern-matches",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "EXCLUDED_BY_CODE_FABRIC_POLICY",
+        slug: "excluded-by-code-fabric-policy",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "SUBMODULE_GITLINK",
+        slug: "submodule-gitlink",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "NESTED_REPOSITORY",
+        slug: "nested-repository",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "SPECIAL_FILE",
+        slug: "special-file",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum InventoryInclusionState {
+    Included = 10,
+    ExcludedPolicy = 20,
+    ExcludedSpecialFile = 30,
+    ExcludedSizeLimit = 40,
+}
+impl TryFrom<u16> for InventoryInclusionState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Included),
+            20 => Ok(Self::ExcludedPolicy),
+            30 => Ok(Self::ExcludedSpecialFile),
+            40 => Ok(Self::ExcludedSizeLimit),
+            _ => Err(UnknownRegistryCode {
+                domain: "INVENTORY_INCLUSION_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const INVENTORY_INCLUSION_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "INCLUDED",
+        slug: "included",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "EXCLUDED_POLICY",
+        slug: "excluded-policy",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "EXCLUDED_SPECIAL_FILE",
+        slug: "excluded-special-file",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "EXCLUDED_SIZE_LIMIT",
+        slug: "excluded-size-limit",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum InventoryFileKind {
+    Regular = 10,
+    Symlink = 20,
+    Special = 30,
+}
+impl TryFrom<u16> for InventoryFileKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Regular),
+            20 => Ok(Self::Symlink),
+            30 => Ok(Self::Special),
+            _ => Err(UnknownRegistryCode {
+                domain: "INVENTORY_FILE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const INVENTORY_FILE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "REGULAR",
+        slug: "regular",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SYMLINK",
+        slug: "symlink",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SPECIAL",
+        slug: "special",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitCandidateOrigin {
+    IndexWorktree = 10,
+    HeadIndex = 20,
+    HeadTree = 30,
+}
+impl TryFrom<u16> for GitCandidateOrigin {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::IndexWorktree),
+            20 => Ok(Self::HeadIndex),
+            30 => Ok(Self::HeadTree),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_CANDIDATE_ORIGIN",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_CANDIDATE_ORIGIN_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "INDEX_WORKTREE",
+        slug: "index-worktree",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "HEAD_INDEX",
+        slug: "head-index",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "HEAD_TREE",
+        slug: "head-tree",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitCandidateMode {
+    Status = 10,
+    HeadTree = 20,
+}
+impl TryFrom<u16> for GitCandidateMode {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::Status),
+            20 => Ok(Self::HeadTree),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_CANDIDATE_MODE",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_CANDIDATE_MODE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "STATUS",
+        slug: "status",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "HEAD_TREE",
+        slug: "head-tree",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OverlayTombstoneReason {
+    OwnerReplacedEmpty = 10,
+    SourceRemoved = 20,
+    SupersededGeneration = 30,
+}
+impl TryFrom<u16> for OverlayTombstoneReason {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::OwnerReplacedEmpty),
+            20 => Ok(Self::SourceRemoved),
+            30 => Ok(Self::SupersededGeneration),
+            _ => Err(UnknownRegistryCode {
+                domain: "OVERLAY_TOMBSTONE_REASON",
+                code,
+            }),
+        }
+    }
+}
+pub const OVERLAY_TOMBSTONE_REASON_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "OWNER_REPLACED_EMPTY",
+        slug: "owner-replaced-empty",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SOURCE_REMOVED",
+        slug: "source-removed",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SUPERSEDED_GENERATION",
+        slug: "superseded-generation",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum NewlineKind {
     None = 10,
@@ -2166,7 +2845,7 @@ pub const NEWLINE_KIND_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum OccurrenceFamily {
     Token = 10,
@@ -2205,7 +2884,30 @@ pub const OCCURRENCE_FAMILY_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum ProviderObservationFamily {
+    RustMirOwner = 120,
+}
+impl TryFrom<u16> for ProviderObservationFamily {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            120 => Ok(Self::RustMirOwner),
+            _ => Err(UnknownRegistryCode {
+                domain: "PROVIDER_OBSERVATION_FAMILY",
+                code,
+            }),
+        }
+    }
+}
+pub const PROVIDER_OBSERVATION_FAMILY_VALUES: &[RegistryEntry] = &[RegistryEntry {
+    code: 120,
+    name: "RUST_MIR_OWNER",
+    slug: "rust-mir-owner",
+}];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum RangeReconciliationStep {
     ExactRangeAndKind = 10,
@@ -2258,7 +2960,7 @@ pub const RANGE_RECONCILIATION_STEP_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum RawKindDisposition {
     Normalize = 10,
@@ -2297,7 +2999,7 @@ pub const RAW_KIND_DISPOSITION_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum WorkspaceLifecycle {
     Bootstrapping = 10,
@@ -2350,7 +3052,7 @@ pub const WORKSPACE_LIFECYCLE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum UpdateWaveState {
     Collecting = 10,
@@ -2360,6 +3062,19 @@ pub enum UpdateWaveState {
     Complete = 50,
     Failed = 60,
     Superseded = 70,
+    GitCandidateBuilding = 80,
+    GitBaselineVerifying = 90,
+    Classifying = 100,
+    FastAnalyzing = 110,
+    FastValidating = 120,
+    FastPublished = 130,
+    SemanticAnalyzing = 140,
+    Deriving = 150,
+    Validating = 160,
+    HotPublished = 170,
+    DurableFlushing = 180,
+    DurablePublished = 190,
+    Cancelled = 200,
 }
 impl TryFrom<u16> for UpdateWaveState {
     type Error = UnknownRegistryCode;
@@ -2372,6 +3087,19 @@ impl TryFrom<u16> for UpdateWaveState {
             50 => Ok(Self::Complete),
             60 => Ok(Self::Failed),
             70 => Ok(Self::Superseded),
+            80 => Ok(Self::GitCandidateBuilding),
+            90 => Ok(Self::GitBaselineVerifying),
+            100 => Ok(Self::Classifying),
+            110 => Ok(Self::FastAnalyzing),
+            120 => Ok(Self::FastValidating),
+            130 => Ok(Self::FastPublished),
+            140 => Ok(Self::SemanticAnalyzing),
+            150 => Ok(Self::Deriving),
+            160 => Ok(Self::Validating),
+            170 => Ok(Self::HotPublished),
+            180 => Ok(Self::DurableFlushing),
+            190 => Ok(Self::DurablePublished),
+            200 => Ok(Self::Cancelled),
             _ => Err(UnknownRegistryCode {
                 domain: "UpdateWaveState",
                 code,
@@ -2415,9 +3143,74 @@ pub const UPDATE_WAVE_STATE_VALUES: &[RegistryEntry] = &[
         name: "SUPERSEDED",
         slug: "superseded",
     },
+    RegistryEntry {
+        code: 80,
+        name: "GIT_CANDIDATE_BUILDING",
+        slug: "git-candidate-building",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "GIT_BASELINE_VERIFYING",
+        slug: "git-baseline-verifying",
+    },
+    RegistryEntry {
+        code: 100,
+        name: "CLASSIFYING",
+        slug: "classifying",
+    },
+    RegistryEntry {
+        code: 110,
+        name: "FAST_ANALYZING",
+        slug: "fast-analyzing",
+    },
+    RegistryEntry {
+        code: 120,
+        name: "FAST_VALIDATING",
+        slug: "fast-validating",
+    },
+    RegistryEntry {
+        code: 130,
+        name: "FAST_PUBLISHED",
+        slug: "fast-published",
+    },
+    RegistryEntry {
+        code: 140,
+        name: "SEMANTIC_ANALYZING",
+        slug: "semantic-analyzing",
+    },
+    RegistryEntry {
+        code: 150,
+        name: "DERIVING",
+        slug: "deriving",
+    },
+    RegistryEntry {
+        code: 160,
+        name: "VALIDATING",
+        slug: "validating",
+    },
+    RegistryEntry {
+        code: 170,
+        name: "HOT_PUBLISHED",
+        slug: "hot-published",
+    },
+    RegistryEntry {
+        code: 180,
+        name: "DURABLE_FLUSHING",
+        slug: "durable-flushing",
+    },
+    RegistryEntry {
+        code: 190,
+        name: "DURABLE_PUBLISHED",
+        slug: "durable-published",
+    },
+    RegistryEntry {
+        code: 200,
+        name: "CANCELLED",
+        slug: "cancelled",
+    },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum ArtifactState {
     Building = 10,
@@ -2470,7 +3263,7 @@ pub const ARTIFACT_STATE_VALUES: &[RegistryEntry] = &[
     },
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum WorkspaceRegistryLifecycle {
     Registering = 10,
@@ -2724,6 +3517,12 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
         values: SYNTAX_FIELD_ROLE_VALUES,
     },
     RegistryDomainEntry {
+        domain: "OWNER_KIND",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: OWNER_KIND_VALUES,
+    },
+    RegistryDomainEntry {
         domain: "LANGUAGE",
         version: "1.0",
         canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
@@ -2736,6 +3535,84 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
         values: PATH_ENCODING_VALUES,
     },
     RegistryDomainEntry {
+        domain: "UPDATE_CANDIDATE_STRATEGY",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: UPDATE_CANDIDATE_STRATEGY_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "UPDATE_WAVE_ITEM_STATE",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: UPDATE_WAVE_ITEM_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_HASH_ALGORITHM",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: GIT_HASH_ALGORITHM_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_REPOSITORY_KIND",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: GIT_REPOSITORY_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_HEAD_KIND",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: GIT_HEAD_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_OPERATION_STATE",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: GIT_OPERATION_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_INVENTORY_CLASSIFICATION",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: GIT_INVENTORY_CLASSIFICATION_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "INVENTORY_INCLUSION_STATE",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: INVENTORY_INCLUSION_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "INVENTORY_FILE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: INVENTORY_FILE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_CANDIDATE_ORIGIN",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: GIT_CANDIDATE_ORIGIN_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_CANDIDATE_MODE",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: GIT_CANDIDATE_MODE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "OVERLAY_TOMBSTONE_REASON",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: OVERLAY_TOMBSTONE_REASON_VALUES,
+    },
+    RegistryDomainEntry {
         domain: "NEWLINE_KIND",
         version: "1.0",
         canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
@@ -2746,6 +3623,12 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
         version: "1.0",
         canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
         values: OCCURRENCE_FAMILY_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PROVIDER_OBSERVATION_FAMILY",
+        version: "1.0",
+        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        values: PROVIDER_OBSERVATION_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "RANGE_RECONCILIATION_STEP",
@@ -2784,6 +3667,31 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
         values: WORKSPACE_REGISTRY_LIFECYCLE_VALUES,
     },
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DerivationEntry {
+    pub derivation_id: &'static str,
+    pub owner_kind: &'static str,
+    pub input_fact_families: &'static [&'static str],
+    pub output_fact_families: &'static [&'static str],
+    pub projection_id: &'static str,
+    pub precision_profile: &'static str,
+    pub algorithm_version: &'static str,
+    pub replacement_scope: &'static str,
+    pub dependency_rule: &'static str,
+}
+
+pub const DERIVATION_ENTRIES: &[DerivationEntry] = &[DerivationEntry {
+    derivation_id: "SYNTAX_TREE_V1",
+    owner_kind: "source-file",
+    input_fact_families: &["syntax-detail", "relation"],
+    output_fact_families: &["syntax-projection"],
+    projection_id: "SYNTAX_TREE_V1",
+    precision_profile: "CORE_SOURCE_V1",
+    algorithm_version: "1.0",
+    replacement_scope: "OWNER_REPLACE",
+    dependency_rule: "source-file->syntax-detail+AST_CHILD",
+}];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StateTransitionEntry {
@@ -3089,30 +3997,129 @@ pub const UPDATE_WAVE_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
+        from: "COLLECTING",
+        event: "git-candidates-required",
+        guard: "git-ready",
+        to: "GIT_CANDIDATE_BUILDING",
+        actions: &["build-git-candidates"],
+        idempotency_key: "wave:git-candidates",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "GIT_CANDIDATE_BUILDING",
+        event: "candidates-built",
+        guard: "candidate-set-bounded",
+        to: "GIT_BASELINE_VERIFYING",
+        actions: &["capture-git-baseline"],
+        idempotency_key: "wave:git-baseline",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "GIT_BASELINE_VERIFYING",
+        event: "git-baseline-stable",
+        guard: "baseline-unchanged",
+        to: "SNAPSHOTTING",
+        actions: &["freeze-path-set"],
+        idempotency_key: "wave:snapshot",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
         from: "SNAPSHOTTING",
-        event: "source-image-accepted",
+        event: "source-images-accepted",
         guard: "reads-stable",
-        to: "RUNNING",
-        actions: &["schedule-providers"],
-        idempotency_key: "wave:run",
+        to: "CLASSIFYING",
+        actions: &["classify-sources"],
+        idempotency_key: "wave:classify",
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
-        from: "RUNNING",
-        event: "outputs-staged",
+        from: "CLASSIFYING",
+        event: "sources-classified",
+        guard: "classifications-closed",
+        to: "FAST_ANALYZING",
+        actions: &["schedule-fast-providers"],
+        idempotency_key: "wave:fast-analyze",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "FAST_ANALYZING",
+        event: "fast-outputs-staged",
+        guard: "fast-providers-terminal",
+        to: "FAST_VALIDATING",
+        actions: &["validate-fast-output"],
+        idempotency_key: "wave:fast-validate",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "FAST_VALIDATING",
+        event: "fast-output-valid",
+        guard: "fast-contracts-satisfied",
+        to: "FAST_PUBLISHED",
+        actions: &["publish-fast-overlay"],
+        idempotency_key: "wave:fast-publish",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "FAST_PUBLISHED",
+        event: "semantic-work-required",
+        guard: "semantic-capabilities-applicable",
+        to: "SEMANTIC_ANALYZING",
+        actions: &["schedule-semantic-providers"],
+        idempotency_key: "wave:semantic-analyze",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "FAST_PUBLISHED",
+        event: "semantic-work-not-applicable",
+        guard: "semantic-capabilities-terminal",
+        to: "VALIDATING",
+        actions: &["validate-wave-output"],
+        idempotency_key: "wave:validate",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "SEMANTIC_ANALYZING",
+        event: "semantic-outputs-staged",
+        guard: "semantic-providers-terminal",
+        to: "DERIVING",
+        actions: &["schedule-derivations"],
+        idempotency_key: "wave:derive",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "DERIVING",
+        event: "derivations-staged",
+        guard: "derivations-terminal",
+        to: "VALIDATING",
+        actions: &["validate-wave-output"],
+        idempotency_key: "wave:validate",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "VALIDATING",
+        event: "wave-output-valid",
         guard: "required-capabilities-terminal",
-        to: "PUBLISHING",
-        actions: &["validate-publication"],
-        idempotency_key: "wave:publish",
+        to: "HOT_PUBLISHED",
+        actions: &["publish-hot-overlay"],
+        idempotency_key: "wave:hot-publish",
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
-        from: "PUBLISHING",
-        event: "activation-complete",
+        from: "HOT_PUBLISHED",
+        event: "durable-flush-required",
+        guard: "flush-policy-triggered",
+        to: "DURABLE_FLUSHING",
+        actions: &["capture-flush-set"],
+        idempotency_key: "wave:durable-flush",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "DURABLE_FLUSHING",
+        event: "durable-activation-complete",
         guard: "pointer-active",
-        to: "COMPLETE",
+        to: "DURABLE_PUBLISHED",
         actions: &["release-wave-resources"],
-        idempotency_key: "wave:complete",
+        idempotency_key: "wave:durable-published",
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
@@ -3134,7 +4141,7 @@ pub const UPDATE_WAVE_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
-        from: "RUNNING",
+        from: "FAST_ANALYZING",
         event: "newer-wave",
         guard: "no-committed-dependents",
         to: "SUPERSEDED",
@@ -3143,6 +4150,60 @@ pub const UPDATE_WAVE_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
+        from: "SEMANTIC_ANALYZING",
+        event: "newer-wave",
+        guard: "no-committed-dependents",
+        to: "SUPERSEDED",
+        actions: &["cancel-providers", "discard-outputs"],
+        idempotency_key: "wave:supersede",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "DERIVING",
+        event: "newer-wave",
+        guard: "no-committed-dependents",
+        to: "SUPERSEDED",
+        actions: &["cancel-derivations", "discard-outputs"],
+        idempotency_key: "wave:supersede",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "COLLECTING",
+        event: "cancelled",
+        guard: "cancellation-active",
+        to: "CANCELLED",
+        actions: &["discard-outputs"],
+        idempotency_key: "wave:cancel",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "SNAPSHOTTING",
+        event: "cancelled",
+        guard: "cancellation-active",
+        to: "CANCELLED",
+        actions: &["discard-outputs"],
+        idempotency_key: "wave:cancel",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "FAST_ANALYZING",
+        event: "cancelled",
+        guard: "cancellation-active",
+        to: "CANCELLED",
+        actions: &["cancel-providers", "discard-outputs"],
+        idempotency_key: "wave:cancel",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "SEMANTIC_ANALYZING",
+        event: "cancelled",
+        guard: "cancellation-active",
+        to: "CANCELLED",
+        actions: &["cancel-providers", "discard-outputs"],
+        idempotency_key: "wave:cancel",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
         from: "COLLECTING",
         event: "terminal-failure",
         guard: "unrecoverable",
@@ -3161,7 +4222,7 @@ pub const UPDATE_WAVE_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
-        from: "RUNNING",
+        from: "FAST_ANALYZING",
         event: "terminal-failure",
         guard: "unrecoverable",
         to: "FAILED",
@@ -3170,11 +4231,29 @@ pub const UPDATE_WAVE_STATE_TRANSITIONS: &[StateTransitionEntry] = &[
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
     StateTransitionEntry {
-        from: "PUBLISHING",
+        from: "SEMANTIC_ANALYZING",
         event: "terminal-failure",
         guard: "unrecoverable",
         to: "FAILED",
         actions: &["publish-diagnostic"],
+        idempotency_key: "wave:failed",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "VALIDATING",
+        event: "terminal-failure",
+        guard: "unrecoverable",
+        to: "FAILED",
+        actions: &["publish-diagnostic"],
+        idempotency_key: "wave:failed",
+        error_on_illegal: "STATE_TRANSITION_VIOLATION",
+    },
+    StateTransitionEntry {
+        from: "DURABLE_FLUSHING",
+        event: "terminal-failure",
+        guard: "durable-base-preserved",
+        to: "FAILED",
+        actions: &["publish-diagnostic", "preserve-hot-overlay"],
         idempotency_key: "wave:failed",
         error_on_illegal: "STATE_TRANSITION_VIOLATION",
     },
@@ -4514,6 +5593,7 @@ pub const PROVIDER_NORMALIZATION_IDS: &[&str] = &[
 pub const PROVIDER_RESOURCE_PROFILE_IDS: &[&str] = &[
     "in-process-syntax-standard",
     "sidecar-semantic-standard",
+    "compiler-semantic-standard",
     "derivation-standard",
 ];
 
@@ -4581,7 +5661,7 @@ pub const PUBLIC_ERROR_IDS: &[&str] = &[
     "INTERNAL",
 ];
 
-pub const DERIVATION_IDS: &[&str] = &[];
+pub const DERIVATION_IDS: &[&str] = &["SYNTAX_TREE_V1"];
 
 pub const PHRASE_IDS: &[&str] = &[
     "Q50_SOURCE_FILES",
@@ -4689,7 +5769,7 @@ pub const PROVIDER_ENTRIES: &[ProviderEntry] = &[
             "BORROW_LOANS",
             "CFG",
         ],
-        resource_profile_id: "sidecar-semantic-standard",
+        resource_profile_id: "compiler-semantic-standard",
         event_mapping_version: "1.0",
     },
     ProviderEntry {
@@ -4772,7 +5852,7 @@ pub const PROVIDER_RESOURCE_PROFILES: &[ProviderResourceProfileEntry] = &[
     },
     ProviderResourceProfileEntry {
         profile_id: "sidecar-semantic-standard",
-        provider_ids: &["pyrefly-python", "rustc-mir"],
+        provider_ids: &["pyrefly-python"],
         max_parallel_jobs_global: 4,
         max_parallel_jobs_per_workspace: 2,
         max_parallel_jobs_per_context: 1,
@@ -4790,6 +5870,30 @@ pub const PROVIDER_RESOURCE_PROFILES: &[ProviderResourceProfileEntry] = &[
         max_memory_mib: 4096,
         cancellation_check_interval: 1_024,
         cancellation_ack_millis: 2000,
+        hard_stop_policy: "PROCESS_GROUP_TERMINATE",
+        retry_policy: "TRANSIENT_ONLY",
+        max_retries: 1,
+    },
+    ProviderResourceProfileEntry {
+        profile_id: "compiler-semantic-standard",
+        provider_ids: &["rustc-mir"],
+        max_parallel_jobs_global: 4,
+        max_parallel_jobs_per_workspace: 2,
+        max_parallel_jobs_per_context: 1,
+        max_input_bytes: 67_108_864,
+        max_work_units: 20_000_000,
+        max_wall_millis: 120_000,
+        max_visited_nodes: 4_000_000,
+        max_traversal_depth: 512,
+        max_output_records: 4_000_000,
+        max_output_bytes: 536_870_912,
+        max_diagnostics: 20000,
+        max_parser_workers: 2,
+        max_retained_tree_revisions: 1,
+        max_cpu_weight: 8,
+        max_memory_mib: 4096,
+        cancellation_check_interval: 1_024,
+        cancellation_ack_millis: 10000,
         hard_stop_policy: "PROCESS_GROUP_TERMINATE",
         retry_policy: "TRANSIENT_ONLY",
         max_retries: 1,

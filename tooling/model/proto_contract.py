@@ -278,7 +278,11 @@ def require_ranges_preserved(
             raise RuntimeError(f"{context} removed reserved range: {old_range}")
 
 
-def assert_fields_compatible(old: dict[str, Any], new: dict[str, Any]) -> None:
+def assert_fields_compatible(
+    old: dict[str, Any],
+    new: dict[str, Any],
+    accepted_replacements: dict[tuple[str, int], dict[str, Any]],
+) -> None:
     context = old["full_name"]
     old_by_number = indexed(old["fields"], "number")
     new_by_number = indexed(new["fields"], "number")
@@ -298,6 +302,17 @@ def assert_fields_compatible(old: dict[str, Any], new: dict[str, Any]) -> None:
                 )
             continue
         if replacement != field:
+            accepted = accepted_replacements.get((context, number))
+            if (
+                accepted is not None
+                and field["name"] == accepted["old_name"]
+                and replacement["name"] == accepted["new_name"]
+                and replacement["type_name"] == accepted["new_type_name"]
+                and replacement["number"] == field["number"]
+                and replacement["label"] == field["label"]
+                and replacement["oneof"] == field["oneof"]
+            ):
+                continue
             raise RuntimeError(
                 f"{context} field {number} changed incompatibly: {field} -> {replacement}"
             )
@@ -348,6 +363,16 @@ def assert_supported_features(census: dict[str, Any]) -> None:
 
 def assert_compatible(baseline: dict[str, Any], current: dict[str, Any]) -> None:
     assert_supported_features(current)
+    replacements = {
+        item["old_method"]: item for item in baseline.get("accepted_replacements", [])
+    }
+    accepted_method_removals = {
+        item["method"] for item in baseline.get("accepted_method_removals", [])
+    }
+    field_replacements = {
+        (item["message"], item["field_number"]): item
+        for item in baseline.get("accepted_field_replacements", [])
+    }
     current_files = indexed(current["files"], "name")
     for old_file in baseline["files"]:
         new_file = current_files.get(old_file["name"])
@@ -368,7 +393,7 @@ def assert_compatible(baseline: dict[str, Any], current: dict[str, Any]) -> None
             new_message = new_messages.get(old_message["full_name"])
             if new_message is None:
                 raise RuntimeError(f"message removed: {old_message['full_name']}")
-            assert_fields_compatible(old_message, new_message)
+            assert_fields_compatible(old_message, new_message, field_replacements)
 
         new_enums = indexed(new_file["enums"], "full_name")
         for old_enum in old_file["enums"]:
@@ -384,8 +409,28 @@ def assert_compatible(baseline: dict[str, Any], current: dict[str, Any]) -> None
                 raise RuntimeError(f"service removed: {old_service['full_name']}")
             new_methods = indexed(new_service["methods"], "name")
             for old_method in old_service["methods"]:
-                if new_methods.get(old_method["name"]) != old_method:
-                    raise RuntimeError(
-                        f"RPC cardinality or type drift: "
-                        f"{old_service['full_name']}.{old_method['name']}"
-                    )
+                if new_methods.get(old_method["name"]) == old_method:
+                    continue
+                qualified = f"{old_service['full_name']}.{old_method['name']}"
+                if (
+                    old_method["name"] not in new_methods
+                    and qualified in accepted_method_removals
+                ):
+                    continue
+                replacement = replacements.get(qualified)
+                if replacement is not None:
+                    replacement_name = replacement["replacement_method"].rsplit(".", 1)[
+                        -1
+                    ]
+                    expected = {
+                        **old_method,
+                        "name": replacement_name,
+                        "input_type": old_method["output_type"],
+                        "output_type": old_method["input_type"],
+                    }
+                    if new_methods.get(replacement_name) == expected:
+                        continue
+                raise RuntimeError(
+                    f"RPC cardinality or type drift: "
+                    f"{old_service['full_name']}.{old_method['name']}"
+                )

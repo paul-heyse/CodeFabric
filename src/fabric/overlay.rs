@@ -566,6 +566,41 @@ impl ConsolidatedOverlay {
             .collect()
     }
 
+    /// Monotonic immutable overlay generation.
+    #[must_use]
+    pub const fn overlay_generation(&self) -> u64 {
+        self.overlay_generation
+    }
+
+    /// Exact reserved Arrow bytes for this immutable generation.
+    #[must_use]
+    pub fn memory_bytes(&self) -> u64 {
+        u64::try_from(self.reservation.size()).unwrap_or(u64::MAX)
+    }
+
+    /// Number of selected typed mutation scopes after deterministic consolidation.
+    #[must_use]
+    pub fn touched_scope_count(&self) -> u64 {
+        u64::try_from(self.selected.len()).unwrap_or(u64::MAX)
+    }
+
+    /// Exact replacement and tombstone row count in the consolidated overlay.
+    #[must_use]
+    pub fn row_count(&self) -> u64 {
+        self.tables.values().fold(0_u64, |count, table| {
+            count
+                .saturating_add(
+                    table
+                        .replacement_batches
+                        .iter()
+                        .map(|batch| batch.num_rows() as u64)
+                        .sum::<u64>(),
+                )
+                .saturating_add(table.owner_tombstones.num_rows() as u64)
+                .saturating_add(table.key_tombstones.num_rows() as u64)
+        })
+    }
+
     #[cfg(any(feature = "daemon", test))]
     fn rebased_delta(
         &self,
@@ -1718,7 +1753,7 @@ impl ConsolidatedOverlay {
 }
 
 #[cfg(feature = "daemon")]
-fn inject_rebase_fault(
+pub(super) fn inject_rebase_fault(
     selected: Option<OverlayRebaseFaultPoint>,
     current: OverlayRebaseFaultPoint,
 ) -> Result<(), FabricError> {

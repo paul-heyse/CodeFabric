@@ -8,16 +8,26 @@
 pub mod analysis_context;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
+#[cfg(feature = "daemon")]
+pub mod continuous;
 #[cfg(any(feature = "canonical-json", feature = "contract-models"))]
 pub mod contracts;
 #[cfg(feature = "daemon")]
 pub mod coordinator;
 #[cfg(feature = "daemon")]
+pub mod core_facts;
+#[cfg(feature = "daemon")]
 pub mod daemon;
+#[cfg(feature = "daemon")]
+pub mod derivation;
+#[cfg(feature = "daemon")]
+pub mod golden_corpus;
 #[cfg(feature = "canonical-json")]
 pub mod identity;
 #[cfg(feature = "daemon")]
 pub mod inventory;
+#[cfg(feature = "daemon")]
+pub mod lifecycle;
 /// Model-generated exhaustive bindings. The generated aggregator owns its member list.
 #[cfg(any(feature = "canonical-json", feature = "fact-generation"))]
 #[path = "generated/model.rs"]
@@ -30,6 +40,8 @@ pub mod provider_raw_kinds;
 pub mod provider_runtime;
 #[cfg(feature = "fact-generation")]
 pub mod provider_types;
+#[cfg(feature = "daemon")]
+pub mod query_service;
 /// Generated categorical and lifecycle registry types.
 #[cfg(any(
     feature = "contract-models",
@@ -43,10 +55,14 @@ pub mod registries;
 pub mod rpc;
 #[cfg(feature = "fact-generation")]
 pub mod ruff_adapter;
+#[cfg(feature = "daemon")]
+pub mod rustc_service;
 #[cfg(feature = "data-fabric")]
 pub mod schema_registry;
 #[cfg(feature = "daemon")]
 pub mod secure_path;
+#[cfg(feature = "daemon")]
+pub mod semantic_query;
 #[cfg(feature = "canonical-json")]
 pub mod snapshot;
 #[cfg(feature = "daemon")]

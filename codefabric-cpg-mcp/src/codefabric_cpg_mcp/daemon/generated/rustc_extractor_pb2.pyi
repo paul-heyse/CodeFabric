@@ -18,6 +18,11 @@ class ExtractorEnvironmentVariable(int, metaclass=_enum_type_wrapper.EnumTypeWra
     EXTRACTOR_ENVIRONMENT_VARIABLE_ANALYSIS_CONTEXT_ID: _ClassVar[ExtractorEnvironmentVariable]
     EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_GENERATION: _ClassVar[ExtractorEnvironmentVariable]
     EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST: _ClassVar[ExtractorEnvironmentVariable]
+    EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RESOURCE_PROFILE_ID: _ClassVar[ExtractorEnvironmentVariable]
+    EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_SNAPSHOT_MANIFEST_DIGEST: _ClassVar[ExtractorEnvironmentVariable]
+    EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_METADATA_DIGEST: _ClassVar[ExtractorEnvironmentVariable]
+    EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_LOCK_DIGEST: _ClassVar[ExtractorEnvironmentVariable]
+    EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_CONFIG_DIGEST: _ClassVar[ExtractorEnvironmentVariable]
 
 class RejectionRuleErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -39,6 +44,11 @@ EXTRACTOR_ENVIRONMENT_VARIABLE_WORKSPACE_ID: ExtractorEnvironmentVariable
 EXTRACTOR_ENVIRONMENT_VARIABLE_ANALYSIS_CONTEXT_ID: ExtractorEnvironmentVariable
 EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_GENERATION: ExtractorEnvironmentVariable
 EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST: ExtractorEnvironmentVariable
+EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RESOURCE_PROFILE_ID: ExtractorEnvironmentVariable
+EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_SNAPSHOT_MANIFEST_DIGEST: ExtractorEnvironmentVariable
+EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_METADATA_DIGEST: ExtractorEnvironmentVariable
+EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_LOCK_DIGEST: ExtractorEnvironmentVariable
+EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_CONFIG_DIGEST: ExtractorEnvironmentVariable
 REJECTION_RULE_ERROR_CODE_UNSPECIFIED: RejectionRuleErrorCode
 REJECTION_RULE_ERROR_CODE_UNEXPECTED_OWNER: RejectionRuleErrorCode
 REJECTION_RULE_ERROR_CODE_DUPLICATE_SEQUENCE: RejectionRuleErrorCode
@@ -52,42 +62,50 @@ REJECTION_RULE_ERROR_CODE_PROVIDER_DEADLINE: RejectionRuleErrorCode
 REJECTION_RULE_ERROR_CODE_WORKSPACE_ESCAPE: RejectionRuleErrorCode
 
 class ExtractorHello(_message.Message):
-    __slots__ = ("protocol_major", "protocol_minor", "required_feature_bits", "optional_feature_bits", "daemon_build", "output_schema_bundle_digest", "sandbox_profile_digest")
+    __slots__ = ("protocol_major", "protocol_minor", "required_feature_bits", "optional_feature_bits", "extractor_build", "rustc_version", "rustc_commit", "toolchain_identity_digest", "resource_profile_id")
     PROTOCOL_MAJOR_FIELD_NUMBER: _ClassVar[int]
     PROTOCOL_MINOR_FIELD_NUMBER: _ClassVar[int]
     REQUIRED_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
     OPTIONAL_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
-    DAEMON_BUILD_FIELD_NUMBER: _ClassVar[int]
-    OUTPUT_SCHEMA_BUNDLE_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    SANDBOX_PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    EXTRACTOR_BUILD_FIELD_NUMBER: _ClassVar[int]
+    RUSTC_VERSION_FIELD_NUMBER: _ClassVar[int]
+    RUSTC_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    TOOLCHAIN_IDENTITY_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_PROFILE_ID_FIELD_NUMBER: _ClassVar[int]
     protocol_major: int
     protocol_minor: int
     required_feature_bits: int
     optional_feature_bits: int
-    daemon_build: str
-    output_schema_bundle_digest: str
-    sandbox_profile_digest: str
-    def __init__(self, protocol_major: _Optional[int] = ..., protocol_minor: _Optional[int] = ..., required_feature_bits: _Optional[int] = ..., optional_feature_bits: _Optional[int] = ..., daemon_build: _Optional[str] = ..., output_schema_bundle_digest: _Optional[str] = ..., sandbox_profile_digest: _Optional[str] = ...) -> None: ...
-
-class ExtractorHelloAck(_message.Message):
-    __slots__ = ("protocol_major", "protocol_minor", "negotiated_feature_bits", "extractor_build", "rustc_version", "rustc_commit", "maximum_outstanding_chunks", "maximum_unacknowledged_bytes")
-    PROTOCOL_MAJOR_FIELD_NUMBER: _ClassVar[int]
-    PROTOCOL_MINOR_FIELD_NUMBER: _ClassVar[int]
-    NEGOTIATED_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
-    EXTRACTOR_BUILD_FIELD_NUMBER: _ClassVar[int]
-    RUSTC_VERSION_FIELD_NUMBER: _ClassVar[int]
-    RUSTC_COMMIT_FIELD_NUMBER: _ClassVar[int]
-    MAXIMUM_OUTSTANDING_CHUNKS_FIELD_NUMBER: _ClassVar[int]
-    MAXIMUM_UNACKNOWLEDGED_BYTES_FIELD_NUMBER: _ClassVar[int]
-    protocol_major: int
-    protocol_minor: int
-    negotiated_feature_bits: int
     extractor_build: str
     rustc_version: str
     rustc_commit: str
+    toolchain_identity_digest: str
+    resource_profile_id: str
+    def __init__(self, protocol_major: _Optional[int] = ..., protocol_minor: _Optional[int] = ..., required_feature_bits: _Optional[int] = ..., optional_feature_bits: _Optional[int] = ..., extractor_build: _Optional[str] = ..., rustc_version: _Optional[str] = ..., rustc_commit: _Optional[str] = ..., toolchain_identity_digest: _Optional[str] = ..., resource_profile_id: _Optional[str] = ...) -> None: ...
+
+class ExtractorHelloAck(_message.Message):
+    __slots__ = ("protocol_major", "protocol_minor", "negotiated_feature_bits", "daemon_build", "output_schema_bundle_digest", "sandbox_profile_digest", "maximum_outstanding_chunks", "maximum_unacknowledged_bytes", "accepted_resource_profile_id", "provider_deadline_unix_ms")
+    PROTOCOL_MAJOR_FIELD_NUMBER: _ClassVar[int]
+    PROTOCOL_MINOR_FIELD_NUMBER: _ClassVar[int]
+    NEGOTIATED_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
+    DAEMON_BUILD_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_SCHEMA_BUNDLE_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_OUTSTANDING_CHUNKS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_UNACKNOWLEDGED_BYTES_FIELD_NUMBER: _ClassVar[int]
+    ACCEPTED_RESOURCE_PROFILE_ID_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_DEADLINE_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    protocol_major: int
+    protocol_minor: int
+    negotiated_feature_bits: int
+    daemon_build: str
+    output_schema_bundle_digest: str
+    sandbox_profile_digest: str
     maximum_outstanding_chunks: int
     maximum_unacknowledged_bytes: int
-    def __init__(self, protocol_major: _Optional[int] = ..., protocol_minor: _Optional[int] = ..., negotiated_feature_bits: _Optional[int] = ..., extractor_build: _Optional[str] = ..., rustc_version: _Optional[str] = ..., rustc_commit: _Optional[str] = ..., maximum_outstanding_chunks: _Optional[int] = ..., maximum_unacknowledged_bytes: _Optional[int] = ...) -> None: ...
+    accepted_resource_profile_id: str
+    provider_deadline_unix_ms: int
+    def __init__(self, protocol_major: _Optional[int] = ..., protocol_minor: _Optional[int] = ..., negotiated_feature_bits: _Optional[int] = ..., daemon_build: _Optional[str] = ..., output_schema_bundle_digest: _Optional[str] = ..., sandbox_profile_digest: _Optional[str] = ..., maximum_outstanding_chunks: _Optional[int] = ..., maximum_unacknowledged_bytes: _Optional[int] = ..., accepted_resource_profile_id: _Optional[str] = ..., provider_deadline_unix_ms: _Optional[int] = ...) -> None: ...
 
 class PackageTargetIdentity(_message.Message):
     __slots__ = ("package_id", "package_name", "target_name", "target_kind", "crate_name", "crate_type", "crate_disambiguator")
@@ -108,7 +126,7 @@ class PackageTargetIdentity(_message.Message):
     def __init__(self, package_id: _Optional[str] = ..., package_name: _Optional[str] = ..., target_name: _Optional[str] = ..., target_kind: _Optional[str] = ..., crate_name: _Optional[str] = ..., crate_type: _Optional[str] = ..., crate_disambiguator: _Optional[str] = ...) -> None: ...
 
 class CompilationBegin(_message.Message):
-    __slots__ = ("provider_run_id", "compilation_unit_id", "workspace_id", "analysis_context_id", "source_generation", "target", "rustc_version", "rustc_commit", "normalized_rustc_invocation_digest", "cargo_metadata_digest", "cargo_lock_digest", "cargo_config_digest", "build_script_output_digests", "proc_macro_output_digests", "source_snapshot_manifest_digest", "requested_capability_codes", "context_manifest_digest")
+    __slots__ = ("provider_run_id", "compilation_unit_id", "workspace_id", "analysis_context_id", "source_generation", "target", "rustc_version", "rustc_commit", "normalized_rustc_invocation_digest", "cargo_metadata_digest", "cargo_lock_digest", "cargo_config_digest", "build_script_output_digests", "proc_macro_output_digests", "source_snapshot_manifest_digest", "requested_capability_codes", "context_manifest_digest", "resource_profile_id", "toolchain_identity_digest")
     PROVIDER_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     COMPILATION_UNIT_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
@@ -126,6 +144,8 @@ class CompilationBegin(_message.Message):
     SOURCE_SNAPSHOT_MANIFEST_DIGEST_FIELD_NUMBER: _ClassVar[int]
     REQUESTED_CAPABILITY_CODES_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_MANIFEST_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_PROFILE_ID_FIELD_NUMBER: _ClassVar[int]
+    TOOLCHAIN_IDENTITY_DIGEST_FIELD_NUMBER: _ClassVar[int]
     provider_run_id: str
     compilation_unit_id: str
     workspace_id: str
@@ -143,7 +163,9 @@ class CompilationBegin(_message.Message):
     source_snapshot_manifest_digest: str
     requested_capability_codes: _containers.RepeatedScalarFieldContainer[int]
     context_manifest_digest: str
-    def __init__(self, provider_run_id: _Optional[str] = ..., compilation_unit_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., target: _Optional[_Union[PackageTargetIdentity, _Mapping]] = ..., rustc_version: _Optional[str] = ..., rustc_commit: _Optional[str] = ..., normalized_rustc_invocation_digest: _Optional[str] = ..., cargo_metadata_digest: _Optional[str] = ..., cargo_lock_digest: _Optional[str] = ..., cargo_config_digest: _Optional[str] = ..., build_script_output_digests: _Optional[_Iterable[str]] = ..., proc_macro_output_digests: _Optional[_Iterable[str]] = ..., source_snapshot_manifest_digest: _Optional[str] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., context_manifest_digest: _Optional[str] = ...) -> None: ...
+    resource_profile_id: str
+    toolchain_identity_digest: str
+    def __init__(self, provider_run_id: _Optional[str] = ..., compilation_unit_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., target: _Optional[_Union[PackageTargetIdentity, _Mapping]] = ..., rustc_version: _Optional[str] = ..., rustc_commit: _Optional[str] = ..., normalized_rustc_invocation_digest: _Optional[str] = ..., cargo_metadata_digest: _Optional[str] = ..., cargo_lock_digest: _Optional[str] = ..., cargo_config_digest: _Optional[str] = ..., build_script_output_digests: _Optional[_Iterable[str]] = ..., proc_macro_output_digests: _Optional[_Iterable[str]] = ..., source_snapshot_manifest_digest: _Optional[str] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., context_manifest_digest: _Optional[str] = ..., resource_profile_id: _Optional[str] = ..., toolchain_identity_digest: _Optional[str] = ...) -> None: ...
 
 class CompilationAccepted(_message.Message):
     __slots__ = ("provider_run_id", "compilation_unit_id", "accepted_generation", "granted_chunk_credits", "granted_credit_bytes")
@@ -269,32 +291,30 @@ class CompilationEnd(_message.Message):
     def __init__(self, provider_run_id: _Optional[str] = ..., compilation_unit_id: _Optional[str] = ..., sequence: _Optional[int] = ..., compiler_exit_status: _Optional[int] = ..., closed_owner_set_digest: _Optional[str] = ..., capability_outcomes: _Optional[_Iterable[_Union[_provider_control_pb2.CapabilityOutcome, _Mapping]]] = ..., diagnostic_summary: _Optional[_Union[DiagnosticSummary, _Mapping]] = ..., overall_stream_digest: _Optional[str] = ..., terminal_state: _Optional[_Union[_provider_control_pb2.ProviderRunState, str]] = ..., rejection_error: _Optional[_Union[RejectionRuleErrorCode, str]] = ...) -> None: ...
 
 class ExtractorCommand(_message.Message):
-    __slots__ = ("begin", "chunk_accepted", "chunk_rejected", "cancel")
-    BEGIN_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("compilation_accepted", "chunk_accepted", "chunk_rejected", "cancel")
+    COMPILATION_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     CHUNK_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     CHUNK_REJECTED_FIELD_NUMBER: _ClassVar[int]
     CANCEL_FIELD_NUMBER: _ClassVar[int]
-    begin: CompilationBegin
+    compilation_accepted: CompilationAccepted
     chunk_accepted: _provider_control_pb2.ChunkAccepted
     chunk_rejected: _provider_control_pb2.ChunkRejected
     cancel: CancelCompilationRequest
-    def __init__(self, begin: _Optional[_Union[CompilationBegin, _Mapping]] = ..., chunk_accepted: _Optional[_Union[_provider_control_pb2.ChunkAccepted, _Mapping]] = ..., chunk_rejected: _Optional[_Union[_provider_control_pb2.ChunkRejected, _Mapping]] = ..., cancel: _Optional[_Union[CancelCompilationRequest, _Mapping]] = ...) -> None: ...
+    def __init__(self, compilation_accepted: _Optional[_Union[CompilationAccepted, _Mapping]] = ..., chunk_accepted: _Optional[_Union[_provider_control_pb2.ChunkAccepted, _Mapping]] = ..., chunk_rejected: _Optional[_Union[_provider_control_pb2.ChunkRejected, _Mapping]] = ..., cancel: _Optional[_Union[CancelCompilationRequest, _Mapping]] = ...) -> None: ...
 
 class ExtractionEvent(_message.Message):
-    __slots__ = ("compilation_accepted", "compilation_begin", "owner_begin", "owner_observation_chunk", "owner_end", "compilation_end")
-    COMPILATION_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("compilation_begin", "owner_begin", "owner_observation_chunk", "owner_end", "compilation_end")
     COMPILATION_BEGIN_FIELD_NUMBER: _ClassVar[int]
     OWNER_BEGIN_FIELD_NUMBER: _ClassVar[int]
     OWNER_OBSERVATION_CHUNK_FIELD_NUMBER: _ClassVar[int]
     OWNER_END_FIELD_NUMBER: _ClassVar[int]
     COMPILATION_END_FIELD_NUMBER: _ClassVar[int]
-    compilation_accepted: CompilationAccepted
     compilation_begin: CompilationBegin
     owner_begin: OwnerBegin
     owner_observation_chunk: OwnerObservationChunk
     owner_end: OwnerEnd
     compilation_end: CompilationEnd
-    def __init__(self, compilation_accepted: _Optional[_Union[CompilationAccepted, _Mapping]] = ..., compilation_begin: _Optional[_Union[CompilationBegin, _Mapping]] = ..., owner_begin: _Optional[_Union[OwnerBegin, _Mapping]] = ..., owner_observation_chunk: _Optional[_Union[OwnerObservationChunk, _Mapping]] = ..., owner_end: _Optional[_Union[OwnerEnd, _Mapping]] = ..., compilation_end: _Optional[_Union[CompilationEnd, _Mapping]] = ...) -> None: ...
+    def __init__(self, compilation_begin: _Optional[_Union[CompilationBegin, _Mapping]] = ..., owner_begin: _Optional[_Union[OwnerBegin, _Mapping]] = ..., owner_observation_chunk: _Optional[_Union[OwnerObservationChunk, _Mapping]] = ..., owner_end: _Optional[_Union[OwnerEnd, _Mapping]] = ..., compilation_end: _Optional[_Union[CompilationEnd, _Mapping]] = ...) -> None: ...
 
 class CancelCompilationRequest(_message.Message):
     __slots__ = ("provider_run_id", "compilation_unit_id", "reason")

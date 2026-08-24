@@ -4,9 +4,18 @@ version: "1.0"
 compatible_suite_major: 1
 status: released
 canonical_digest: "b3:48b4deb6890017b14457f31ad03add128af391c78179d56d3b53697fce90cd60"
-records: []
+records:
+  - derivation_id: SYNTAX_TREE_V1
+    owner_kind: source-file
+    input_fact_families: [syntax-detail, relation]
+    output_fact_families: [syntax-projection]
+    projection_id: SYNTAX_TREE_V1
+    precision_profile: CORE_SOURCE_V1
+    algorithm_version: "1.0"
+    replacement_scope: OWNER_REPLACE
+    dependency_rule: source-file->syntax-detail+AST_CHILD
 owner_acceptance:
   approver: data-fabric-owner
   accepted_at: "2026-08-21"
-  construction_rule: AC-G-79A schema accepted with allocations intentionally deferred to Wave 5+
+  construction_rule: AC-G-79A registry with the Wave-5 SYNTAX_TREE_V1 owner-replace derivation
   source_digest: "b3:d55a5efa8ce523348ee671afecf561e6c188c5918fed488b48f4c977cbf40fa9"

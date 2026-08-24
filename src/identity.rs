@@ -735,6 +735,85 @@ pub fn source_file_identity(path: &WorkspacePath) -> Result<DerivedIdentity, Ide
     })
 }
 
+/// Derive one governed semantic owner identity from its closed owner recipe.
+///
+/// # Errors
+///
+/// Rejects an invalid owner-kind normalization or a recipe-incompatible value.
+pub fn semantic_owner_identity(
+    workspace_id: [u8; 16],
+    analysis_context_id: [u8; 16],
+    owner_kind: &str,
+    semantic_key: Vec<u8>,
+) -> Result<DerivedIdentity, IdentityError> {
+    let record = recipes::owner(recipes::OwnerFields {
+        workspace_id: recipes::RecipeValue::Id(workspace_id),
+        analysis_context_id: recipes::RecipeValue::Id(analysis_context_id),
+        owner_kind: recipes::RecipeValue::Utf8(owner_kind.to_ascii_lowercase()),
+        semantic_key: recipes::RecipeValue::Bytes(semantic_key),
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    derive_recipe_identity(record)
+}
+
+/// Derive one governed semantic entity identity from its closed entity recipe.
+///
+/// # Errors
+///
+/// Rejects a zero kind code or a recipe-incompatible semantic key.
+pub fn semantic_entity_identity(
+    workspace_id: [u8; 16],
+    analysis_context_id: [u8; 16],
+    kind_code: u16,
+    owner_id: [u8; 16],
+    semantic_key: Vec<u8>,
+) -> Result<DerivedIdentity, IdentityError> {
+    if kind_code == 0 {
+        return Err(IdentityError::Scalar);
+    }
+    let record = recipes::entity(recipes::EntityFields {
+        workspace_id: recipes::RecipeValue::Id(workspace_id),
+        analysis_context_id: recipes::RecipeValue::Id(analysis_context_id),
+        kind_code: recipes::RecipeValue::Unsigned(kind_code.to_be_bytes().to_vec()),
+        owner_id: recipes::RecipeValue::Id(owner_id),
+        semantic_key: recipes::RecipeValue::Bytes(semantic_key),
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    derive_recipe_identity(record)
+}
+
+/// Derive one governed UTF-8 property proposition.
+///
+/// # Errors
+///
+/// Rejects a zero property code or a recipe-incompatible canonical value.
+pub fn text_property_fact_identity(
+    workspace_id: [u8; 16],
+    analysis_context_id: [u8; 16],
+    property_kind_code: u16,
+    subject_entity_id: [u8; 16],
+    value: &str,
+) -> Result<DerivedIdentity, IdentityError> {
+    if property_kind_code == 0 {
+        return Err(IdentityError::Scalar);
+    }
+    let normalized = value.nfc().collect::<String>();
+    let record = recipes::property_fact(recipes::PropertyFactFields {
+        workspace_id: recipes::RecipeValue::Id(workspace_id),
+        analysis_context_id: recipes::RecipeValue::Id(analysis_context_id),
+        property_kind_code: recipes::RecipeValue::Unsigned(
+            property_kind_code.to_be_bytes().to_vec(),
+        ),
+        subject_entity_id: recipes::RecipeValue::Id(subject_entity_id),
+        canonical_value: recipes::RecipeValue::TaggedUnion(
+            50,
+            Box::new(recipes::RecipeValue::Utf8(normalized)),
+        ),
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    derive_recipe_identity(record)
+}
+
 /// Provider-independent source occurrence fields used by AC-G-13 identities.
 ///
 /// Display text and provider-local node handles are deliberately absent. Structural
@@ -1034,7 +1113,7 @@ fn decode_lower_hex_16(value: &str) -> Result<[u8; 16], IdentityError> {
         return Err(IdentityError::PublicId);
     }
     let mut decoded = [0; 16];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         decoded[index] = u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)
             .map_err(|_| IdentityError::PublicId)?;
     }
@@ -1571,7 +1650,9 @@ mod tests {
         assert_eq!(value.len() % 2, 0);
         value
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect()
     }

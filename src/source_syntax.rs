@@ -3,10 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::fact_ingest::{
-    CanonicalIngestOutput, ConflictRecord, EntityRow, FactEvidenceRow, FactIngestError, FactScope,
-    IngestDiagnostic, IngestMetrics, PropertyFactRow, RelationRow, SourceAnnotationRow,
-    SourceFileRow, SourceTokenRow, SyntaxDetailRow, ValidatedFactBatch, encode_entities,
-    encode_evidence, encode_properties, encode_relations, encode_source_annotations,
+    CanonicalIngestOutput, CapabilityStatusRow, ConflictRecord, EntityRow, FactEvidenceRow,
+    FactIngestError, FactScope, IngestDiagnostic, IngestMetrics, OwnerRow, PropertyFactRow,
+    RelationRow, SourceAnnotationRow, SourceFileRow, SourceTokenRow, SyntaxDetailRow,
+    ValidatedFactBatch, encode_capability_statuses, encode_entities, encode_evidence,
+    encode_owners, encode_properties, encode_relations, encode_source_annotations,
     encode_source_files, encode_source_tokens, encode_syntax_details,
 };
 use crate::identity::{
@@ -16,9 +17,10 @@ use crate::identity::{
 use crate::model_generated::registries::{OccurrenceFamily, ProviderNodeFlags, RawKindDisposition};
 use crate::provider_raw_kinds::ProviderRawKindDisposition;
 use crate::registries::{
-    AnnotationKind, Language, NewlineKind as RegistryNewlineKind, PathEncoding, ProviderCode,
-    SYNTAX_KIND_VALUES, SyntaxFieldRole, SyntaxKind, TokenKind, entity_kind, registry_state_name,
-    relation_kind,
+    AnnotationKind, CompletenessState, Language, NewlineKind as RegistryNewlineKind,
+    OwnerCapabilityState, OwnerKind, PathEncoding, ProviderCode, SYNTAX_KIND_VALUES,
+    SyntaxFieldRole, SyntaxKind, TokenKind, capability_code, capability_mask, entity_kind,
+    registry_state_name, relation_kind,
 };
 use crate::ruff_adapter::{
     RuffAstCategory, RuffAstFact, RuffChildRole, RuffDirectiveKind, RuffOccurrenceId, RuffSnapshot,
@@ -63,6 +65,8 @@ pub struct RangeObservation {
 pub struct ReconciliationOutcome {
     pub entity_id: Option<[u8; 16]>,
     pub step: ReconciliationStep,
+    /// More than one distinct canonical anchor had the same best governed rank.
+    pub ambiguous: bool,
 }
 
 /// Apply the five-step range ladder without arbitrary-overlap fallback.
@@ -71,83 +75,151 @@ pub fn reconcile_range(
     observation: RangeObservation,
     candidates: &[RangeAnchor],
 ) -> ReconciliationOutcome {
-    if let Some(candidate) = candidates
-        .iter()
-        .filter(|candidate| {
+    reconcile_range_with_preference(observation, candidates, None)
+}
+
+fn reconcile_range_with_preference(
+    observation: RangeObservation,
+    candidates: &[RangeAnchor],
+    preferred_entity_id: Option<[u8; 16]>,
+) -> ReconciliationOutcome {
+    let (candidate, ambiguous) = select_unique_by_key(
+        candidates.iter().filter(|candidate| {
             candidate.start_byte == observation.start_byte
                 && candidate.end_byte == observation.end_byte
                 && candidate.normalized_kind_code == observation.normalized_kind_code
-        })
-        .min_by_key(|candidate| candidate.entity_id)
-    {
-        return outcome(candidate, ReconciliationStep::ExactRangeAndKind);
+        }),
+        |candidate| preference_rank(candidate, preferred_entity_id),
+    );
+    if let Some(candidate) = candidate {
+        return outcome(candidate, ReconciliationStep::ExactRangeAndKind, ambiguous);
     }
     if observation.normalized_kind_code == SyntaxKind::DeclarationSyntax as u16
         && let Some(name_span) = observation.declaration_name_span
-        && let Some(candidate) = candidates
-            .iter()
-            .filter(|candidate| {
+    {
+        let (candidate, ambiguous) = select_unique_by_key(
+            candidates.iter().filter(|candidate| {
                 candidate.normalized_kind_code == SyntaxKind::DeclarationSyntax as u16
                     && candidate.declaration_name_span == Some(name_span)
                     && candidate.start_byte <= name_span.0
                     && candidate.end_byte >= name_span.1
-            })
-            .min_by_key(|candidate| {
+            }),
+            |candidate| {
                 (
                     candidate.end_byte.saturating_sub(candidate.start_byte),
-                    candidate.entity_id,
+                    preference_rank(candidate, preferred_entity_id),
                 )
-            })
-    {
-        return outcome(candidate, ReconciliationStep::ExactDeclarationName);
+            },
+        );
+        if let Some(candidate) = candidate {
+            return outcome(
+                candidate,
+                ReconciliationStep::ExactDeclarationName,
+                ambiguous,
+            );
+        }
     }
-    if let Some(candidate) = candidates
-        .iter()
-        .filter(|candidate| {
+    let (candidate, ambiguous) = select_unique_by_key(
+        candidates.iter().filter(|candidate| {
             candidate.start_byte <= observation.start_byte
                 && candidate.end_byte >= observation.end_byte
                 && compatible_kind(
                     candidate.normalized_kind_code,
                     observation.normalized_kind_code,
                 )
-        })
-        .min_by_key(|candidate| {
+        }),
+        |candidate| {
             (
                 candidate.end_byte.saturating_sub(candidate.start_byte),
-                candidate.entity_id,
+                u8::from(candidate.normalized_kind_code != observation.normalized_kind_code),
+                preference_rank(candidate, preferred_entity_id),
             )
-        })
-    {
-        return outcome(candidate, ReconciliationStep::SmallestEnclosingCompatible);
+        },
+    );
+    if let Some(candidate) = candidate {
+        return outcome(
+            candidate,
+            ReconciliationStep::SmallestEnclosingCompatible,
+            ambiguous,
+        );
     }
-    if let Some(candidate) = candidates
-        .iter()
-        .filter(|candidate| {
+    let (candidate, ambiguous) = select_unique_by_key(
+        candidates.iter().filter(|candidate| {
             candidate.start_byte == observation.start_byte
                 && compatible_kind(
                     candidate.normalized_kind_code,
                     observation.normalized_kind_code,
                 )
-        })
-        .min_by_key(|candidate| {
+        }),
+        |candidate| {
             (
                 candidate.end_byte.abs_diff(observation.end_byte),
-                candidate.entity_id,
+                u8::from(candidate.normalized_kind_code != observation.normalized_kind_code),
+                candidate.end_byte.saturating_sub(candidate.start_byte),
+                preference_rank(candidate, preferred_entity_id),
             )
-        })
-    {
-        return outcome(candidate, ReconciliationStep::SameStartCompatible);
+        },
+    );
+    if let Some(candidate) = candidate {
+        return outcome(
+            candidate,
+            ReconciliationStep::SameStartCompatible,
+            ambiguous,
+        );
     }
     ReconciliationOutcome {
         entity_id: None,
         step: ReconciliationStep::ProviderOnlySynthetic,
+        ambiguous: false,
     }
 }
 
-const fn outcome(candidate: &RangeAnchor, step: ReconciliationStep) -> ReconciliationOutcome {
+fn preference_rank(candidate: &RangeAnchor, preferred_entity_id: Option<[u8; 16]>) -> u8 {
+    match preferred_entity_id {
+        Some(preferred) if candidate.entity_id == preferred => 0,
+        Some(_) => 1,
+        None => 0,
+    }
+}
+
+fn select_unique_by_key<'a, I, K>(
+    candidates: I,
+    mut key: impl FnMut(&RangeAnchor) -> K,
+) -> (Option<&'a RangeAnchor>, bool)
+where
+    I: Iterator<Item = &'a RangeAnchor>,
+    K: Ord,
+{
+    let mut best: Option<(&RangeAnchor, K)> = None;
+    let mut ambiguous = false;
+    for candidate in candidates {
+        let candidate_key = key(candidate);
+        match &best {
+            None => best = Some((candidate, candidate_key)),
+            Some((selected, selected_key)) => match candidate_key.cmp(selected_key) {
+                std::cmp::Ordering::Less => {
+                    best = Some((candidate, candidate_key));
+                    ambiguous = false;
+                }
+                std::cmp::Ordering::Equal if candidate.entity_id != selected.entity_id => {
+                    ambiguous = true;
+                }
+                std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => {}
+            },
+        }
+    }
+    (best.map(|(candidate, _)| candidate), ambiguous)
+}
+
+const fn outcome(
+    candidate: &RangeAnchor,
+    step: ReconciliationStep,
+    ambiguous: bool,
+) -> ReconciliationOutcome {
     ReconciliationOutcome {
         entity_id: Some(candidate.entity_id),
         step,
+        ambiguous,
     }
 }
 
@@ -253,7 +325,7 @@ pub(crate) fn project(
     let mut entity_index = BTreeMap::from([(source.file_id, 0_usize)]);
     let mut tree_observation = BTreeMap::new();
     for fact in tree.facts.iter() {
-        validate_span(fact.start_byte, fact.end_byte, byte_len, "Tree-sitter")?;
+        validate_span(source, fact.start_byte, fact.end_byte, "Tree-sitter")?;
         let parent_id = fact
             .parent
             .and_then(|parent| tree_entity.get(&parent).copied());
@@ -337,14 +409,28 @@ pub(crate) fn project(
         let run_id = runs.ruff_python.expect("validated Ruff run identity");
         let name_spans = ruff_name_spans(&ruff.ast);
         for fact in ruff.ast.iter() {
-            validate_span(fact.start_byte, fact.end_byte, byte_len, "Ruff")?;
+            validate_span(source, fact.start_byte, fact.end_byte, "Ruff")?;
             let observation = RangeObservation {
                 start_byte: fact.start_byte,
                 end_byte: fact.end_byte,
                 normalized_kind_code: fact.category.registry_code(),
                 declaration_name_span: name_spans.get(&fact.id).copied(),
             };
-            let reconciled = reconcile_range(observation, &anchors);
+            let preferred_entity_id = ruff
+                .correspondences
+                .iter()
+                .find(|correspondence| correspondence.ruff_id == fact.id)
+                .and_then(|correspondence| {
+                    tree_entity.get(&correspondence.tree_sitter_id).copied()
+                });
+            let reconciled =
+                reconcile_range_with_preference(observation, &anchors, preferred_entity_id);
+            if reconciled.ambiguous {
+                return Err(FactIngestError::Protocol(format!(
+                    "Ruff source-range reconciliation is ambiguous at {}..{}",
+                    fact.start_byte, fact.end_byte
+                )));
+            }
             let observed = observation_id(run_id, 3, fact.id.0);
             ruff_observation.insert(fact.id, observed);
             let entity_id = if let Some(entity_id) = reconciled.entity_id {
@@ -533,6 +619,56 @@ pub(crate) fn project(
         &source_annotations,
         &syntax_details,
     )?;
+    let provided_capabilities = ["SOURCE_BYTES", "TOKENS", "CST"];
+    let owner_capability_mask = capability_mask(&provided_capabilities)
+        .and_then(|mask| i64::try_from(mask).ok())
+        .ok_or_else(|| FactIngestError::Protocol("generated capability mask overflow".into()))?;
+    let owners = vec![OwnerRow {
+        scope: expected_scope,
+        parent_owner_id: None,
+        owner_kind_code: OwnerKind::SourceFile as i16,
+        language,
+        file_id: Some(source.file_id),
+        semantic_entity_id: Some(source.file_id),
+        start_byte: Some(0),
+        end_byte: Some(to_i64(byte_len, "source byte length")?),
+        source_fingerprint: Some(source.digest),
+        semantic_fingerprint: None,
+        capability_mask: owner_capability_mask,
+    }];
+    let capability_statuses = provided_capabilities
+        .into_iter()
+        .map(|capability| {
+            let (provider_run_id, producer_code) = if capability == "SOURCE_BYTES" {
+                (source.lease.lease_id, ProviderCode::SourceSubstrate as i16)
+            } else {
+                (runs.tree_sitter, ProviderCode::TreeSitter as i16)
+            };
+            let capability_code = capability_code(capability)
+                .and_then(|code| i16::try_from(code).ok())
+                .ok_or_else(|| {
+                    FactIngestError::Protocol(format!(
+                        "unknown generated capability identifier {capability}"
+                    ))
+                })?;
+            Ok(CapabilityStatusRow {
+                scope: expected_scope,
+                snapshot_id: None,
+                capability_code,
+                owner_capability_state_code: OwnerCapabilityState::Current as i16,
+                completeness_state_code: CompletenessState::Complete as i16,
+                provider_run_id: Some(provider_run_id),
+                producer_code: Some(producer_code),
+                reason_code: None,
+                diagnostic_id: None,
+                fallback_source_available: true,
+                coverage_scope_fingerprint: capability_scope_fingerprint(
+                    expected_scope,
+                    capability,
+                ),
+            })
+        })
+        .collect::<Result<Vec<_>, FactIngestError>>()?;
     let source_files = vec![source_file_row(expected_scope, source)?];
     let mut evidence = evidence_inputs
         .into_iter()
@@ -553,6 +689,8 @@ pub(crate) fn project(
         syntax_details.len(),
     ])?;
     let batches = [
+        (8, encode_owners(&owners)?),
+        (9, encode_capability_statuses(&capability_statuses)?),
         (100, encode_entities(&entities)?),
         (110, encode_relations(&relations)?),
         (120, encode_properties(&properties)?),
@@ -588,6 +726,17 @@ pub(crate) fn project(
         diagnostics,
         metrics,
     })
+}
+
+fn capability_scope_fingerprint(scope: FactScope, capability: &str) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric-capability-scope-v1\0");
+    hasher.update(&scope.workspace_id);
+    hasher.update(&scope.analysis_context_id);
+    hasher.update(&scope.owner_id);
+    hasher.update(&scope.source_generation.to_be_bytes());
+    hasher.update(capability.as_bytes());
+    *hasher.finalize().as_bytes()
 }
 
 fn validate_inputs(
@@ -663,6 +812,112 @@ fn validate_inputs(
             "Ruff run supplied without a complete snapshot".into(),
         ));
     }
+    validate_provider_structure(source, tree, ruff)?;
+    Ok(())
+}
+
+fn validate_provider_structure(
+    source: &SourceImage,
+    tree: &TreeSitterSnapshot,
+    ruff: Option<&RuffSnapshot>,
+) -> Result<(), FactIngestError> {
+    let mut tree_by_id = BTreeMap::new();
+    for fact in tree.facts.iter() {
+        validate_span(source, fact.start_byte, fact.end_byte, "Tree-sitter")?;
+        if tree_by_id.insert(fact.id, fact).is_some() {
+            return Err(FactIngestError::Protocol(
+                "Tree-sitter emitted a duplicate occurrence identity".into(),
+            ));
+        }
+    }
+    for fact in tree.facts.iter() {
+        if let Some(parent_id) = fact.parent {
+            let parent = tree_by_id.get(&parent_id).ok_or_else(|| {
+                FactIngestError::Protocol("Tree-sitter parent occurrence is absent".into())
+            })?;
+            if parent.id == fact.id
+                || parent.start_byte > fact.start_byte
+                || parent.end_byte < fact.end_byte
+            {
+                return Err(FactIngestError::Protocol(
+                    "Tree-sitter emitted an invalid parent/source-range relationship".into(),
+                ));
+            }
+        }
+    }
+
+    let Some(ruff) = ruff else {
+        return Ok(());
+    };
+    let mut ruff_by_id = BTreeMap::new();
+    for fact in ruff.ast.iter() {
+        validate_span(source, fact.start_byte, fact.end_byte, "Ruff AST")?;
+        if ruff_by_id.insert(fact.id, fact).is_some() {
+            return Err(FactIngestError::Protocol(
+                "Ruff emitted a duplicate occurrence identity".into(),
+            ));
+        }
+    }
+    for fact in ruff.ast.iter() {
+        if let Some(parent_id) = fact.parent {
+            let parent = ruff_by_id.get(&parent_id).ok_or_else(|| {
+                FactIngestError::Protocol("Ruff parent occurrence is absent".into())
+            })?;
+            if parent.id == fact.id
+                || parent.start_byte > fact.start_byte
+                || parent.end_byte < fact.end_byte
+            {
+                return Err(FactIngestError::Protocol(
+                    "Ruff emitted an invalid parent/source-range relationship".into(),
+                ));
+            }
+        }
+    }
+
+    let mut tokens = ruff.tokens.iter().collect::<Vec<_>>();
+    tokens.sort_by_key(|token| (token.start_byte, token.end_byte, token.ordinal));
+    let mut previous_nonempty_end = 0_u64;
+    for token in tokens {
+        validate_span(source, token.start_byte, token.end_byte, "Ruff token")?;
+        if token.start_byte != token.end_byte && token.start_byte < previous_nonempty_end {
+            return Err(FactIngestError::Protocol(
+                "Ruff emitted overlapping token spans".into(),
+            ));
+        }
+        if token.start_byte != token.end_byte {
+            previous_nonempty_end = token.end_byte;
+        }
+    }
+    for (start, end, label) in ruff
+        .comments
+        .iter()
+        .map(|fact| (fact.start_byte, fact.end_byte, "Ruff comment"))
+        .chain(
+            ruff.directives
+                .iter()
+                .map(|fact| (fact.start_byte, fact.end_byte, "Ruff directive")),
+        )
+        .chain(
+            ruff.strings
+                .iter()
+                .map(|fact| (fact.start_byte, fact.end_byte, "Ruff string")),
+        )
+        .chain(
+            ruff.docstrings
+                .iter()
+                .map(|fact| (fact.start_byte, fact.end_byte, "Ruff docstring")),
+        )
+        .chain(
+            ruff.diagnostics
+                .iter()
+                .map(|fact| (fact.start_byte, fact.end_byte, "Ruff diagnostic")),
+        )
+    {
+        validate_span(source, start, end, label)?;
+    }
+    for offset in ruff.continuation_line_starts.iter().copied() {
+        validate_span(source, offset, offset, "Ruff continuation line")?;
+    }
     Ok(())
 }
 
@@ -725,12 +980,7 @@ fn project_ruff_tokens(
     evidence: &mut Vec<EvidenceInput>,
 ) -> Result<(), FactIngestError> {
     for token in ruff.tokens.iter() {
-        validate_span(
-            token.start_byte,
-            token.end_byte,
-            source.byte_length,
-            "Ruff token",
-        )?;
+        validate_span(source, token.start_byte, token.end_byte, "Ruff token")?;
         let normalized = token_kind(token);
         let entity_kind = required_entity_kind(token_entity_kind(normalized))?;
         let identity = source_occurrence_identity(SourceOccurrenceIdentityInput {
@@ -993,12 +1243,7 @@ fn push_annotation(
     rows: &mut Vec<SourceAnnotationRow>,
     evidence: &mut Vec<EvidenceInput>,
 ) -> Result<[u8; 16], FactIngestError> {
-    validate_span(
-        start_byte,
-        end_byte,
-        source.byte_length,
-        "source annotation",
-    )?;
+    validate_span(source, start_byte, end_byte, "source annotation")?;
     let ordinal = u32::try_from(rows.len())
         .map_err(|_| FactIngestError::Protocol("annotation ordinal overflow".into()))?;
     let entity_kind = required_entity_kind(annotation_entity_kind(annotation_kind))?;
@@ -1558,14 +1803,24 @@ fn source_text(source: &SourceImage, start: u64, end: u64) -> Option<String> {
 }
 
 fn validate_span(
+    source: &SourceImage,
     start: u64,
     end: u64,
-    maximum: u64,
     provider: &str,
 ) -> Result<(), FactIngestError> {
-    if start > end || end > maximum {
+    if start > end || end > source.byte_length {
         return Err(FactIngestError::Protocol(format!(
             "{provider} emitted an invalid source span"
+        )));
+    }
+    let boundaries = &source
+        .provider_text
+        .as_ref()
+        .ok_or_else(|| FactIngestError::Protocol("provider source text is absent".into()))?
+        .original_byte_offsets;
+    if boundaries.binary_search(&start).is_err() || boundaries.binary_search(&end).is_err() {
+        return Err(FactIngestError::Protocol(format!(
+            "{provider} emitted a non-boundary source span"
         )));
     }
     Ok(())
@@ -1607,7 +1862,7 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
-    use crate::fact_ingest::{SyntheticCanonicalIngest, validate_fact_batch};
+    use crate::fact_ingest::{CanonicalReconciliationEngine, validate_fact_batch};
     use crate::identity::{CaseSensitivityMode, WorkspacePath};
     use crate::provider_types::ProviderText;
     use crate::ruff_adapter::{NeverRuffCancelled, RuffAdapter};
@@ -1726,7 +1981,7 @@ mod tests {
         tree: &TreeSitterSnapshot,
         ruff: &RuffSnapshot,
     ) -> CanonicalIngestOutput {
-        SyntheticCanonicalIngest::default()
+        CanonicalReconciliationEngine::default()
             .ingest_source_syntax(
                 scope(source),
                 source,
@@ -1773,7 +2028,7 @@ mod tests {
         let replay = output(&source, &tree, &ruff);
         assert_eq!(
             actual_output.batches.keys().copied().collect::<Vec<_>>(),
-            [100, 110, 120, 130, 140, 150, 160, 170]
+            [8, 9, 100, 110, 120, 130, 140, 150, 160, 170]
         );
         for (table_code, actual) in &actual_output.batches {
             let replayed = &replay.batches[table_code];
@@ -1896,8 +2151,22 @@ mod tests {
             ),
         ];
         for (observation, expected) in cases {
-            assert_eq!(reconcile_range(observation, &candidates).step, expected);
+            let reconciled = reconcile_range(observation, &candidates);
+            assert_eq!(reconciled.step, expected);
+            assert!(!reconciled.ambiguous);
         }
+        let ambiguous = reconcile_range(
+            cases[0].0,
+            &[
+                candidates[0],
+                RangeAnchor {
+                    entity_id: [9; 16],
+                    ..candidates[0]
+                },
+            ],
+        );
+        assert_eq!(ambiguous.step, ReconciliationStep::ExactRangeAndKind);
+        assert!(ambiguous.ambiguous);
         let declaration = RangeObservation {
             start_byte: 31,
             end_byte: 59,
@@ -2077,7 +2346,7 @@ mod tests {
         let mut wrong_scope = scope(&source);
         wrong_scope.analysis_context_id = [3; 16];
         assert!(matches!(
-            SyntheticCanonicalIngest::default().ingest_source_syntax(
+            CanonicalReconciliationEngine::default().ingest_source_syntax(
                 wrong_scope,
                 &source,
                 &tree,
@@ -2108,6 +2377,77 @@ mod tests {
             )
             .is_err()
         );
+
+        let unicode_source = source_image("é = 1\n");
+        let (mut non_boundary_tree, unicode_ruff) = snapshots(&unicode_source);
+        let mut non_boundary_facts = non_boundary_tree.facts.to_vec();
+        non_boundary_facts[0].start_byte = 1;
+        non_boundary_tree.facts = non_boundary_facts.into();
+        assert!(matches!(
+            CanonicalReconciliationEngine::default().ingest_source_syntax(
+                scope(&unicode_source),
+                &unicode_source,
+                &non_boundary_tree,
+                Some(&unicode_ruff),
+                valid_runs,
+            ),
+            Err(FactIngestError::Protocol(detail)) if detail.contains("non-boundary")
+        ));
+
+        let mut overlapping_ruff = admission_ruff.clone();
+        let mut overlapping_tokens = overlapping_ruff.tokens.to_vec();
+        let nonempty = overlapping_tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, token)| token.start_byte < token.end_byte)
+            .map(|(index, _)| index)
+            .take(2)
+            .collect::<Vec<_>>();
+        overlapping_tokens[nonempty[1]].start_byte =
+            overlapping_tokens[nonempty[0]].end_byte.saturating_sub(1);
+        overlapping_ruff.tokens = overlapping_tokens.into();
+        assert!(matches!(
+            CanonicalReconciliationEngine::default().ingest_source_syntax(
+                scope(&admission_source),
+                &admission_source,
+                &admission_tree,
+                Some(&overlapping_ruff),
+                valid_runs,
+            ),
+            Err(FactIngestError::Protocol(detail)) if detail.contains("overlapping token")
+        ));
+
+        let mut ambiguous_tree = admission_tree.clone();
+        let mut ambiguous_facts = ambiguous_tree.facts.to_vec();
+        let ruff_anchor = &admission_ruff.ast[0];
+        let mut first = ambiguous_facts[0].clone();
+        first.id = SyntaxOccurrenceId(10_000);
+        first.start_byte = ruff_anchor.start_byte;
+        first.end_byte = ruff_anchor.end_byte;
+        first.normalized_kind = NormalizedSyntaxKind(ruff_anchor.category.registry_code());
+        first.named = true;
+        first.extra = false;
+        first.error = false;
+        first.missing = false;
+        first.parent = None;
+        first.ordinal = 10_000;
+        let mut second = first.clone();
+        second.id = SyntaxOccurrenceId(10_001);
+        second.ordinal = 10_001;
+        ambiguous_facts.extend([first, second]);
+        ambiguous_tree.facts = ambiguous_facts.into();
+        let mut ambiguous_ruff = admission_ruff.clone();
+        ambiguous_ruff.correspondences = Arc::from([]);
+        assert!(matches!(
+            CanonicalReconciliationEngine::default().ingest_source_syntax(
+                scope(&admission_source),
+                &admission_source,
+                &ambiguous_tree,
+                Some(&ambiguous_ruff),
+                valid_runs,
+            ),
+            Err(FactIngestError::Protocol(detail)) if detail.contains("ambiguous")
+        ));
         let mut wrong_path_workspace = admission_source.clone();
         wrong_path_workspace.path.workspace_id = [2; 16];
         wrong_path_workspace.file_id = source_file_identity(&wrong_path_workspace.path).unwrap().id;
@@ -2247,7 +2587,7 @@ mod tests {
             )
             .is_err()
         );
-        let rust_output = SyntheticCanonicalIngest::default()
+        let rust_output = CanonicalReconciliationEngine::default()
             .ingest_source_syntax(
                 scope(&rust_source),
                 &rust_source,
@@ -2274,7 +2614,7 @@ mod tests {
                 &NeverCancelled,
             )
             .unwrap();
-        let rust_recovery = SyntheticCanonicalIngest::default()
+        let rust_recovery = CanonicalReconciliationEngine::default()
             .ingest_source_syntax(
                 scope(&rust_recovery_source),
                 &rust_recovery_source,
@@ -2442,7 +2782,7 @@ mod tests {
     fn wp32_operational_acceptance() {
         let source = source_image("x = 1\ny = x\n");
         let (tree, ruff) = snapshots(&source);
-        let ingress = SyntheticCanonicalIngest::default();
+        let ingress = CanonicalReconciliationEngine::default();
         let output = ingress
             .ingest_source_syntax(
                 scope(&source),

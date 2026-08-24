@@ -1,10 +1,10 @@
 //! Bounded descriptor-relative source inventory and Merkle root construction.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension as _, params};
 use thiserror::Error;
 
 use crate::identity::{IdentityError, WorkspacePath, source_file_identity};
@@ -53,38 +53,10 @@ impl InventoryCancellation {
     }
 }
 
-/// Exact Lifecycle §46 inventory classification.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u16)]
-pub enum InventoryClassification {
-    Tracked = 10,
-    UntrackedNotIgnored = 20,
-    UntrackedIgnored = 30,
-    TrackedButIgnoredPatternMatches = 40,
-    ExcludedByCodeFabricPolicy = 50,
-    SubmoduleGitlink = 60,
-    NestedRepository = 70,
-    SpecialFile = 80,
-}
-
-/// Inclusion decision remains distinct from Git classification and authorization.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u16)]
-pub enum InclusionState {
-    Included = 10,
-    ExcludedPolicy = 20,
-    ExcludedSpecialFile = 30,
-    ExcludedSizeLimit = 40,
-}
-
-/// Stable inventory entry kind.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u16)]
-pub enum InventoryFileKind {
-    Regular = 10,
-    Symlink = 20,
-    Special = 30,
-}
+pub use crate::registries::{
+    GitInventoryClassification as InventoryClassification, InventoryFileKind,
+    InventoryInclusionState as InclusionState,
+};
 
 /// All Lifecycle §34 fields, detached from filesystem and Git library types.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -110,6 +82,16 @@ pub struct SourceInventory {
     pub source_generation: u64,
     pub records: Vec<SourceInventoryRecord>,
     pub digest: [u8; 32],
+}
+
+/// One stable current-byte replacement used to advance an existing inventory generation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InventoryFileUpsert {
+    pub path: WorkspacePath,
+    pub file_id: [u8; 16],
+    pub content_digest: [u8; 32],
+    pub byte_length: u64,
+    pub language: Option<&'static str>,
 }
 
 /// Operational observations for one walk.
@@ -369,6 +351,7 @@ pub(crate) fn persist_inventory(
     source_generation: u64,
     records: &[SourceInventoryRecord],
 ) -> Result<(), InventoryError> {
+    let inventory_digest = merkle_inventory_digest(records);
     let source_generation = i64::try_from(source_generation)
         .map_err(|_| InventoryError::BoundExceeded("source-generation"))?;
     store.write_transaction(|transaction| {
@@ -411,8 +394,169 @@ pub(crate) fn persist_inventory(
                 record.current_file_owner.as_ref().map(<[u8; 16]>::as_slice),
             ])?;
         }
+        let changed = transaction.execute(
+            "UPDATE worktree_state SET inventory_digest=?1 WHERE workspace_id=?2 AND source_generation=?3",
+            params![inventory_digest.as_slice(), workspace_id.as_slice(), source_generation],
+        )?;
+        if changed != 1 {
+            return Err(InventoryError::SourceChanged);
+        }
         Ok(())
     })
+}
+
+/// Copy the prior coherent inventory, apply current-byte replacements/removals, and publish the
+/// new Merkle digest in one transaction after the workspace generation has advanced.
+///
+/// # Errors
+///
+/// Returns an error when generations drift, an inventory record is invalid, a numeric bound is
+/// exceeded, or the atomic operational-store transaction fails.
+pub fn advance_inventory_generation(
+    store: &mut OperationalStore,
+    workspace_id: [u8; 16],
+    prior_generation: u64,
+    source_generation: u64,
+    upserts: &[InventoryFileUpsert],
+    removals: &BTreeSet<Vec<u8>>,
+) -> Result<[u8; 32], InventoryError> {
+    let prior_generation = i64::try_from(prior_generation)
+        .map_err(|_| InventoryError::BoundExceeded("source-generation"))?;
+    let source_generation = i64::try_from(source_generation)
+        .map_err(|_| InventoryError::BoundExceeded("source-generation"))?;
+    store.write_transaction(|transaction| {
+        let current = transaction.query_row(
+            "SELECT source_generation FROM workspace_generation WHERE workspace_id=?1",
+            [workspace_id.as_slice()],
+            |row| row.get::<_, i64>(0),
+        )?;
+        if current != source_generation {
+            return Err(InventoryError::SourceChanged);
+        }
+        transaction.execute(
+            "DELETE FROM source_inventory WHERE workspace_id=?1 AND source_generation=?2",
+            params![workspace_id.as_slice(), source_generation],
+        )?;
+        transaction.execute(
+            "INSERT INTO source_inventory(
+               workspace_id,source_generation,path_bytes,path_display,comparison_key_bytes,file_id,
+               content_digest,byte_length,file_kind_code,language_code,
+               inventory_classification_code,inclusion_state_code,git_repo_path_bytes,git_blob_oid,
+               current_file_owner
+             )
+             SELECT workspace_id,?1,path_bytes,path_display,comparison_key_bytes,file_id,
+               content_digest,byte_length,file_kind_code,language_code,
+               inventory_classification_code,inclusion_state_code,git_repo_path_bytes,git_blob_oid,
+               current_file_owner
+             FROM source_inventory WHERE workspace_id=?2 AND source_generation=?3",
+            params![source_generation, workspace_id.as_slice(), prior_generation],
+        )?;
+        for path in removals {
+            transaction.execute(
+                "DELETE FROM source_inventory WHERE workspace_id=?1 AND source_generation=?2 AND path_bytes=?3",
+                params![workspace_id.as_slice(), source_generation, path],
+            )?;
+        }
+        for upsert in upserts {
+            let prior = transaction
+                .query_row(
+                    "SELECT inventory_classification_code,git_repo_path_bytes,git_blob_oid FROM source_inventory WHERE workspace_id=?1 AND source_generation=?2 AND path_bytes=?3",
+                    params![
+                        workspace_id.as_slice(),
+                        source_generation,
+                        &upsert.path.raw_relative_path_bytes
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, Option<Vec<u8>>>(1)?,
+                            row.get::<_, Option<Vec<u8>>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let (classification, git_path, git_oid) = prior.unwrap_or((
+                i64::from(InventoryClassification::UntrackedNotIgnored as u16),
+                None,
+                None,
+            ));
+            transaction.execute(
+                "INSERT OR REPLACE INTO source_inventory(
+                   workspace_id,source_generation,path_bytes,path_display,comparison_key_bytes,
+                   file_id,content_digest,byte_length,file_kind_code,language_code,
+                   inventory_classification_code,inclusion_state_code,git_repo_path_bytes,
+                   git_blob_oid,current_file_owner
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                params![
+                    workspace_id.as_slice(),
+                    source_generation,
+                    &upsert.path.raw_relative_path_bytes,
+                    &upsert.path.display_string,
+                    &upsert.path.comparison_key_bytes,
+                    upsert.file_id.as_slice(),
+                    upsert.content_digest.as_slice(),
+                    i64::try_from(upsert.byte_length)
+                        .map_err(|_| InventoryError::BoundExceeded("file-size"))?,
+                    i64::from(InventoryFileKind::Regular as u16),
+                    upsert.language,
+                    classification,
+                    i64::from(InclusionState::Included as u16),
+                    git_path,
+                    git_oid,
+                    upsert.file_id.as_slice(),
+                ],
+            )?;
+        }
+        let digest = persisted_inventory_digest(transaction, workspace_id, source_generation)?;
+        let changed = transaction.execute(
+            "UPDATE worktree_state SET inventory_digest=?1 WHERE workspace_id=?2 AND source_generation=?3",
+            params![digest.as_slice(), workspace_id.as_slice(), source_generation],
+        )?;
+        if changed != 1 {
+            return Err(InventoryError::SourceChanged);
+        }
+        Ok::<_, InventoryError>(digest)
+    })
+}
+
+fn persisted_inventory_digest(
+    connection: &rusqlite::Connection,
+    workspace_id: [u8; 16],
+    source_generation: i64,
+) -> Result<[u8; 32], InventoryError> {
+    let mut statement = connection.prepare(
+        "SELECT path_bytes,content_digest,byte_length,file_kind_code,
+           inventory_classification_code,inclusion_state_code
+         FROM source_inventory WHERE workspace_id=?1 AND source_generation=?2 ORDER BY path_bytes",
+    )?;
+    let leaves = statement
+        .query_map(params![workspace_id.as_slice(), source_generation], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, Option<Vec<u8>>>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut encoded = Vec::with_capacity(leaves.len());
+    for (path, digest, length, file_kind, classification, inclusion) in leaves {
+        let digest = digest
+            .map(|bytes| <[u8; 32]>::try_from(bytes).map_err(|_| InventoryError::SourceChanged))
+            .transpose()?;
+        let leaf = inventory_leaf_fields_digest(
+            &path,
+            digest,
+            u64::try_from(length).map_err(|_| InventoryError::SourceChanged)?,
+            u16::try_from(file_kind).map_err(|_| InventoryError::SourceChanged)?,
+            u16::try_from(classification).map_err(|_| InventoryError::SourceChanged)?,
+            u16::try_from(inclusion).map_err(|_| InventoryError::SourceChanged)?,
+        );
+        encoded.push((path, leaf));
+    }
+    Ok(merkle_from_leaves(encoded))
 }
 
 fn require_source_generation(
@@ -439,18 +583,29 @@ fn require_source_generation(
 }
 
 pub(crate) fn merkle_inventory_digest(records: &[SourceInventoryRecord]) -> [u8; 32] {
+    merkle_from_leaves(records.iter().map(|record| {
+        (
+            record.path.raw_relative_path_bytes.clone(),
+            inventory_leaf_digest(record),
+        )
+    }))
+}
+
+fn merkle_from_leaves(leaves: impl IntoIterator<Item = (Vec<u8>, [u8; 32])>) -> [u8; 32] {
     let mut directories = BTreeMap::<Vec<u8>, Vec<(Vec<u8>, u8, [u8; 32])>>::new();
-    for record in records {
-        let (parent, name) = split_parent(&record.path.raw_relative_path_bytes);
+    let mut leaf_paths = Vec::new();
+    for (path, digest) in leaves {
+        let (parent, name) = split_parent(&path);
         directories
             .entry(parent)
             .or_default()
-            .push((name, 1, inventory_leaf_digest(record)));
+            .push((name, 1, digest));
+        leaf_paths.push(path);
     }
     let mut directory_paths = directories.keys().cloned().collect::<Vec<_>>();
     directory_paths.push(Vec::new());
-    for record in records {
-        let mut parent = split_parent(&record.path.raw_relative_path_bytes).0;
+    for path in leaf_paths {
+        let mut parent = split_parent(&path).0;
         while !parent.is_empty() {
             if !directory_paths.contains(&parent) {
                 directory_paths.push(parent.clone());
@@ -483,14 +638,32 @@ pub(crate) fn merkle_inventory_digest(records: &[SourceInventoryRecord]) -> [u8;
 }
 
 fn inventory_leaf_digest(record: &SourceInventoryRecord) -> [u8; 32] {
+    inventory_leaf_fields_digest(
+        &record.path.raw_relative_path_bytes,
+        record.content_digest,
+        record.byte_length,
+        record.file_kind as u16,
+        record.classification as u16,
+        record.inclusion as u16,
+    )
+}
+
+fn inventory_leaf_fields_digest(
+    path: &[u8],
+    content_digest: Option<[u8; 32]>,
+    byte_length: u64,
+    file_kind: u16,
+    classification: u16,
+    inclusion: u16,
+) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"codefabric.inventory.file.v1\0");
-    hash_length_prefixed(&mut hasher, &record.path.raw_relative_path_bytes);
-    hasher.update(&record.content_digest.unwrap_or([0; 32]));
-    hasher.update(&record.byte_length.to_be_bytes());
-    hasher.update(&(record.file_kind as u16).to_be_bytes());
-    hasher.update(&(record.classification as u16).to_be_bytes());
-    hasher.update(&(record.inclusion as u16).to_be_bytes());
+    hash_length_prefixed(&mut hasher, path);
+    hasher.update(&content_digest.unwrap_or([0; 32]));
+    hasher.update(&byte_length.to_be_bytes());
+    hasher.update(&file_kind.to_be_bytes());
+    hasher.update(&classification.to_be_bytes());
+    hasher.update(&inclusion.to_be_bytes());
     *hasher.finalize().as_bytes()
 }
 

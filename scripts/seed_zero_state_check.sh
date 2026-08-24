@@ -33,6 +33,7 @@ legacy_packaging_hits="$({
     -g '!.git/**' \
     -g '!docs/**' \
     -g '!.claude/skills/**/REFERENCE.md' \
+    -g '!skills/**/REFERENCE.md' \
     -g '!tooling/ci/test_wave0_reconciliation.py' \
     -e "${legacy_backend}|${legacy_native_package}|${legacy_stub}|${legacy_python_tree}|${legacy_test_tree}" . || true
 })"

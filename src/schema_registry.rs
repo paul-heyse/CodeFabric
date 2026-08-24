@@ -784,7 +784,7 @@ mod tests {
     #[cfg(feature = "repository-state")]
     #[test]
     fn wp09_operational_store_ddl_executes() {
-        let ddl = include_str!("../contracts/schema/operational-store.sql");
+        let ddl = include_str!("../contracts/generated/model/schema/operational-store.sql");
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection.execute_batch(ddl).unwrap();
         let table_count: i64 = connection

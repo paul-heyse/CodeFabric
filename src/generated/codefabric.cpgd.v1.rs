@@ -350,6 +350,8 @@ pub struct ArtifactReadyEvent {
     pub encoding: i32,
     #[prost(int64, tag = "6")]
     pub lease_expires_at_unix_ms: i64,
+    #[prost(string, tag = "7")]
+    pub lease_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TerminalEvent {

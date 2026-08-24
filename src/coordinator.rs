@@ -978,32 +978,15 @@ fn hex_digest(digest: [u8; 32]) -> String {
 }
 
 const fn head_kind_code(kind: HeadKind) -> u16 {
-    match kind {
-        HeadKind::Symbolic => 10,
-        HeadKind::Detached => 20,
-        HeadKind::Unborn => 30,
-    }
+    kind as u16
 }
 
 const fn repository_state_code(state: GitOperationState) -> u16 {
-    match state {
-        GitOperationState::Clean => 10,
-        GitOperationState::Merge => 20,
-        GitOperationState::Rebase => 30,
-        GitOperationState::CherryPick => 40,
-        GitOperationState::Revert => 50,
-        GitOperationState::Bisect => 60,
-        GitOperationState::Apply => 70,
-        GitOperationState::OtherOperation => 80,
-        GitOperationState::Unknown => 90,
-    }
+    state as u16
 }
 
 const fn object_format_code(format: GitHashAlgorithm) -> u16 {
-    match format {
-        GitHashAlgorithm::Sha1 => 10,
-        GitHashAlgorithm::Sha256 => 20,
-    }
+    format as u16
 }
 
 fn trust_policy_fingerprint() -> [u8; 32] {

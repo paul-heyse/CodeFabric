@@ -10,7 +10,7 @@
     "supported_platforms", "windows_support", "network_listeners",
     "workspace_registration", "operational_store", "fact_store", "object_store",
     "hot_overlay_journal", "source_blob_persistence", "result_artifact_ttl_seconds",
-    "source_result_artifact_ttl_seconds", "source_image_limits", "inventory_limits",
+    "source_result_artifact_ttl_seconds", "source_image_limits", "source_admission", "inventory_limits",
     "coordinator_command_capacity", "maximum_concurrent_source_reads",
     "maximum_concurrent_gix_jobs",
     "default_query_freshness", "provider_sandbox",
@@ -46,6 +46,7 @@
     "result_artifact_ttl_seconds": {"const": 3600},
     "source_result_artifact_ttl_seconds": {"const": 1800},
     "source_image_limits": {"$ref": "#/$defs/sourceImageLimits"},
+    "source_admission": {"$ref": "#/$defs/sourceAdmission"},
     "inventory_limits": {"$ref": "#/$defs/inventoryLimits"},
     "coordinator_command_capacity": {"type": "integer", "minimum": 1, "maximum": 65535},
     "maximum_concurrent_source_reads": {"type": "integer", "minimum": 1, "maximum": 65535},
@@ -75,6 +76,33 @@
         "stable_read_retry_count": {"const": 3},
         "orphan_grace_seconds": {"const": 300},
         "garbage_collection_batch_size": {"const": 256}
+      }
+    },
+    "sourceAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binary_sample_bytes", "maximum_single_line_bytes", "maximum_path_components", "maximum_path_bytes", "excluded_directory_names", "vendored_directory_names", "generated_directory_names", "binary_signatures"],
+      "properties": {
+        "binary_sample_bytes": {"const": 8192},
+        "maximum_single_line_bytes": {"const": 1048576},
+        "maximum_path_components": {"const": 256},
+        "maximum_path_bytes": {"const": 4096},
+        "excluded_directory_names": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "vendored_directory_names": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "generated_directory_names": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "binary_signatures": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "prefix_hex"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "prefix_hex": {"type": "string", "pattern": "^[0-9a-f]+$", "minLength": 2}
+            }
+          }
+        }
       }
     },
     "inventoryLimits": {

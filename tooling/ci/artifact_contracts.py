@@ -113,6 +113,12 @@ REVIEW_REQUIREMENTS = {
     "library-capability-research": {"topic"},
     "lib-leverage": {"library"},
     "skill-eval": set(),
+    "design-principles-conformance": {
+        "principles_path",
+        "principles_digest",
+        "baseline_commit",
+        "verdict",
+    },
 }
 REVIEW_VERDICTS = {
     "plan-audit": {
@@ -126,6 +132,12 @@ REVIEW_VERDICTS = {
         "approved-with-minor-findings",
         "changes-required",
         "design-invalidated",
+    },
+    "design-principles-conformance": {
+        "conformant",
+        "conformant-with-findings",
+        "divergent",
+        "framework-unowned",
     },
 }
 TARGET_PATH = re.compile(rb"(?:^|/)target(?:/|$)")

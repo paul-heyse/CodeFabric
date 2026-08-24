@@ -128,6 +128,42 @@ wave3-integration-check:
     cargo nextest run --locked -E 'test(/wp(19|2[0-6])/)' --no-tests=fail
     cargo test --doc
 
+[doc("Run the complete Wave-4 source/provider/core-fact acceptance slice")]
+[group('test')]
+wave4-integration-check:
+    cargo nextest run --locked -E 'test(/wp(27|28|29|30|31|32|33)/)' --no-tests=fail
+    cargo test --doc
+
+[doc("Run the complete Wave-5 vertical golden-slice acceptance surface")]
+[group('test')]
+wave5-integration-check:
+    cargo nextest run --locked -E 'test(/wp(20|3[4-9]|40)/)' --no-tests=fail
+    cd rustc-extractor && cargo test --locked wp35
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests
+
+[doc("Prove Readiness Gate B across all eleven accepted golden artifacts")]
+[group('test')]
+gate-b-check: wave5-integration-check adapter-wheel-test model-release-census-check
+
+[doc("Compare continuous effective state with the clean-rebuild oracle")]
+[group('test')]
+rebuild-equivalence-check:
+    cargo nextest run --locked -E 'test(/wp48/)' --no-tests=fail
+
+[doc("Run the complete Wave-6 continuous-update acceptance surface")]
+[group('test')]
+wave6-integration-check:
+    cargo nextest run --locked -E 'test(/wp(23|24|25|26|4[1-8])/)' --no-tests=fail
+
+[doc("Compare Git-accelerated candidates and state with authoritative fallback")]
+[group('test')]
+git-parity-check:
+    cargo nextest run --locked --test integration -E 'test(/wp(49|50|51|52|53)/)' --no-tests=fail
+
+[doc("Run the complete Wave-7 Git-aware lifecycle acceptance surface")]
+[group('test')]
+wave7-integration-check: git-parity-check rebuild-equivalence-check
+
 [doc("Validate that a vacuum dry-run cannot include retained snapshot files")]
 [group('test')]
 vacuum-dry-run-check:

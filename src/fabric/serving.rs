@@ -341,6 +341,12 @@ impl ServingQuerySession {
         self.lease.record().snapshot_id
     }
 
+    /// Immutable manifest that supplies the client-visible snapshot projection.
+    #[must_use]
+    pub fn snapshot_manifest(&self) -> crate::snapshot::ServingSnapshotManifest {
+        self.lease.snapshot().manifest().clone()
+    }
+
     /// Plan, verify, execute, and describe one read-only SQL query.
     ///
     /// # Errors
@@ -1842,6 +1848,47 @@ mod tests {
         let mut valid_null = make_builder();
         assert!(valid_null.append(&optional, ValueRef::Null).is_ok());
         assert_eq!(valid_null.finish().null_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn wp38_response_kat_is_canonical_and_snapshot_pinned() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let candidate = candidate([0x38; 16], 1, 1);
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            Arc::clone(&candidate),
+            directory.path(),
+        );
+        let workspace_id = candidate.manifest().body.workspace_id.clone();
+        let request = format!(
+            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"response-kat","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":"syntax nodes","input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":30}}}}"#
+        );
+        let first = crate::semantic_query::execute_request(
+            &session,
+            crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
+        )
+        .await
+        .unwrap();
+        let second = crate::semantic_query::execute_request(
+            &session,
+            crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.canonical_bytes, second.canonical_bytes);
+        assert_eq!(first.response_digest, second.response_digest);
+        assert_eq!(
+            first.response.snapshot.snapshot_id,
+            session.snapshot_manifest().snapshot_id
+        );
+        assert_eq!(first.response.successful_query_count, 3);
+        assert_eq!(
+            first.response.query_results[0].resolved_semantics["phrase_id"],
+            "Q51_SYNTAX_NODES"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

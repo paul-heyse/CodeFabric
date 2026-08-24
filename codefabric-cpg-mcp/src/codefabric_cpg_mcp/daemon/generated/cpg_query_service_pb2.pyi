@@ -449,20 +449,22 @@ class ResponseChunkEvent(_message.Message):
     def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., offset: _Optional[int] = ..., uncompressed_length: _Optional[int] = ..., payload: _Optional[bytes] = ..., payload_checksum: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., final_chunk: _Optional[bool] = ...) -> None: ...
 
 class ArtifactReadyEvent(_message.Message):
-    __slots__ = ("header", "artifact_id", "artifact_checksum", "content_type", "encoding", "lease_expires_at_unix_ms")
+    __slots__ = ("header", "artifact_id", "artifact_checksum", "content_type", "encoding", "lease_expires_at_unix_ms", "lease_token")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     ARTIFACT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
     CONTENT_TYPE_FIELD_NUMBER: _ClassVar[int]
     ENCODING_FIELD_NUMBER: _ClassVar[int]
     LEASE_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
     artifact_id: str
     artifact_checksum: str
     content_type: str
     encoding: PayloadCompression
     lease_expires_at_unix_ms: int
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., artifact_id: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., lease_expires_at_unix_ms: _Optional[int] = ...) -> None: ...
+    lease_token: str
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., artifact_id: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., lease_expires_at_unix_ms: _Optional[int] = ..., lease_token: _Optional[str] = ...) -> None: ...
 
 class TerminalEvent(_message.Message):
     __slots__ = ("header", "execution_state", "availability_state", "freshness_state", "limit_state", "dependency_state", "canonical_response_checksum", "canonical_error_record_json", "artifact_id", "result_row_count", "result_byte_count", "cleanup_state")

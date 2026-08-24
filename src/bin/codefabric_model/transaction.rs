@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::aggregate_driver;
+use super::desired_tree::{ChangeKind, SafeOutputPath, TreeChange};
 use super::repository_model::{ArtifactRole, InventoryBounds, RepositoryModel, read_stable};
 
 const ADMIN_DIRECTORY: &str = "codefabric-model/transaction-v1";
@@ -89,6 +90,14 @@ pub struct SyncReport {
     pub deleted_stale: usize,
     pub unchanged: usize,
     pub transaction_applied: bool,
+}
+
+/// Byte-free aggregate renderer preview consumed by `model-plan` and assurance profiles.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReconciliationPreview {
+    pub desired_tree_identity: String,
+    pub output_paths: Vec<String>,
+    pub changes: Vec<TreeChange>,
 }
 
 #[derive(Clone, Debug)]
@@ -260,6 +269,64 @@ pub fn check_current(repository_root: &Path) -> Result<SyncReport, TransactionEr
         deleted_stale,
         unchanged: plan.unchanged,
         transaction_applied: false,
+    })
+}
+
+/// Compile the aggregate desired tree under the transaction lock and project every
+/// current/desired path comparison without modifying the repository.
+///
+/// # Errors
+///
+/// Returns the same topology, source-fence, ownership, and recovery errors as [`sync`].
+pub fn preview_current(repository_root: &Path) -> Result<ReconciliationPreview, TransactionError> {
+    let paths = transaction_paths(repository_root)?;
+    let _exclusive = acquire_write(&paths)?;
+    recover_locked(&paths)?;
+    let plan = compile_sync_plan(&paths)?;
+    reconciliation_preview(&plan)
+}
+
+fn reconciliation_preview(plan: &SyncPlan) -> Result<ReconciliationPreview, TransactionError> {
+    let mut changes = BTreeMap::new();
+    for entry in &plan.entries {
+        let path = SafeOutputPath::parse(entry.path.as_bytes().to_vec())
+            .map_err(|_| TransactionError::UnsafeOutputPath(entry.path.clone()))?;
+        let kind = match (&entry.old_bytes, &entry.new_bytes) {
+            (None, Some(_)) => ChangeKind::Add,
+            (Some(_), None) => ChangeKind::DeleteStale,
+            (Some(_), Some(_)) => ChangeKind::Replace,
+            (None, None) => continue,
+        };
+        changes.insert(
+            entry.path.clone(),
+            TreeChange::new(
+                path,
+                kind,
+                entry.old_bytes.as_deref().map(digest_bytes),
+                entry.new_bytes.as_deref().map(digest_bytes),
+            ),
+        );
+    }
+    for (path, digest) in &plan.desired_outputs {
+        if changes.contains_key(path) {
+            continue;
+        }
+        let safe = SafeOutputPath::parse(path.as_bytes().to_vec())
+            .map_err(|_| TransactionError::UnsafeOutputPath(path.clone()))?;
+        changes.insert(
+            path.clone(),
+            TreeChange::new(
+                safe,
+                ChangeKind::Unchanged,
+                Some(digest.clone()),
+                Some(digest.clone()),
+            ),
+        );
+    }
+    Ok(ReconciliationPreview {
+        desired_tree_identity: plan.desired_tree_identity.clone(),
+        output_paths: plan.desired_outputs.keys().cloned().collect(),
+        changes: changes.into_values().collect(),
     })
 }
 
@@ -971,6 +1038,50 @@ mod tests {
                 .unwrap_or_default(),
             unchanged: 0,
         }
+    }
+
+    #[test]
+    fn model_transaction_preview_reports_the_real_aggregate_delta() {
+        let unchanged = b"same".to_vec();
+        let plan = SyncPlan {
+            source_identity: "b3:source".into(),
+            desired_tree_identity: "b3:tree".into(),
+            entries: vec![
+                PlannedEntry {
+                    path: "generated/added.txt".into(),
+                    old_bytes: None,
+                    new_bytes: Some(b"added".to_vec()),
+                },
+                PlannedEntry {
+                    path: "generated/deleted.txt".into(),
+                    old_bytes: Some(b"deleted".to_vec()),
+                    new_bytes: None,
+                },
+                PlannedEntry {
+                    path: "generated/replaced.txt".into(),
+                    old_bytes: Some(b"old".to_vec()),
+                    new_bytes: Some(b"new".to_vec()),
+                },
+            ],
+            desired_outputs: BTreeMap::from([
+                ("generated/added.txt".into(), digest_bytes(b"added")),
+                ("generated/replaced.txt".into(), digest_bytes(b"new")),
+                ("generated/unchanged.txt".into(), digest_bytes(&unchanged)),
+            ]),
+            unchanged: 1,
+        };
+        let preview = reconciliation_preview(&plan).unwrap();
+        assert_eq!(preview.desired_tree_identity, "b3:tree");
+        assert_eq!(preview.output_paths.len(), 3);
+        let kinds = preview
+            .changes
+            .iter()
+            .map(|change| (change.path.display(), change.kind))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(kinds["generated/added.txt"], ChangeKind::Add);
+        assert_eq!(kinds["generated/deleted.txt"], ChangeKind::DeleteStale);
+        assert_eq!(kinds["generated/replaced.txt"], ChangeKind::Replace);
+        assert_eq!(kinds["generated/unchanged.txt"], ChangeKind::Unchanged);
     }
 
     fn apply_without_source_probe(

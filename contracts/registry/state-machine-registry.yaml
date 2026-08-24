@@ -60,22 +60,62 @@ records:
       - {from: GIT_BULK_RECONCILING, event: reconcile-failed, guard: terminal-git-failure, to: GIT_UNAVAILABLE, actions: [use-generic-inventory], idempotency_key: git:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: GIT_DEGRADED, event: git-failed, guard: terminal-git-failure, to: GIT_UNAVAILABLE, actions: [use-generic-inventory], idempotency_key: git:unavailable, error_on_illegal: STATE_TRANSITION_VIOLATION}
   - machine_id: UpdateWaveState
-    version: "1.0"
-    states: [{code: 10, name: COLLECTING, slug: collecting, meaning: Gathering paths}, {code: 20, name: SNAPSHOTTING, slug: snapshotting, meaning: Freezing source set}, {code: 30, name: RUNNING, slug: running, meaning: Providers and derivations running}, {code: 40, name: PUBLISHING, slug: publishing, meaning: Publishing result}, {code: 50, name: COMPLETE, slug: complete, meaning: Wave complete}, {code: 60, name: FAILED, slug: failed, meaning: Wave failed}, {code: 70, name: SUPERSEDED, slug: superseded, meaning: Wave superseded}]
+    version: "1.1"
+    states:
+      - {code: 10, name: COLLECTING, slug: collecting, meaning: Gathering paths}
+      - {code: 20, name: SNAPSHOTTING, slug: snapshotting, meaning: Freezing source set}
+      - {code: 30, name: RUNNING, slug: running, meaning: Deprecated decode-only coarse active state}
+      - {code: 40, name: PUBLISHING, slug: publishing, meaning: Deprecated decode-only coarse publication state}
+      - {code: 50, name: COMPLETE, slug: complete, meaning: Deprecated decode-only coarse terminal state}
+      - {code: 60, name: FAILED, slug: failed, meaning: Wave failed}
+      - {code: 70, name: SUPERSEDED, slug: superseded, meaning: Wave superseded}
+      - {code: 80, name: GIT_CANDIDATE_BUILDING, slug: git-candidate-building, meaning: Git candidate reduction active}
+      - {code: 90, name: GIT_BASELINE_VERIFYING, slug: git-baseline-verifying, meaning: Git baseline fence verification active}
+      - {code: 100, name: CLASSIFYING, slug: classifying, meaning: Captured sources are being classified}
+      - {code: 110, name: FAST_ANALYZING, slug: fast-analyzing, meaning: Fast syntax providers are active}
+      - {code: 120, name: FAST_VALIDATING, slug: fast-validating, meaning: Fast facts are being validated}
+      - {code: 130, name: FAST_PUBLISHED, slug: fast-published, meaning: Fast facts are visible in the hot overlay}
+      - {code: 140, name: SEMANTIC_ANALYZING, slug: semantic-analyzing, meaning: Semantic providers are active}
+      - {code: 150, name: DERIVING, slug: deriving, meaning: Registered derivations are active}
+      - {code: 160, name: VALIDATING, slug: validating, meaning: Complete wave output is being validated}
+      - {code: 170, name: HOT_PUBLISHED, slug: hot-published, meaning: Immutable wave output is visible in the hot overlay}
+      - {code: 180, name: DURABLE_FLUSHING, slug: durable-flushing, meaning: Overlay content is being durably published}
+      - {code: 190, name: DURABLE_PUBLISHED, slug: durable-published, meaning: Durable publication and activation completed}
+      - {code: 200, name: CANCELLED, slug: cancelled, meaning: Wave was cancelled before hot publication}
     initial_state: COLLECTING
-    terminal_states: [COMPLETE, FAILED, SUPERSEDED]
+    terminal_states: [DURABLE_PUBLISHED, FAILED, SUPERSEDED, CANCELLED]
+    decode_only_states: [RUNNING, PUBLISHING, COMPLETE]
     transitions:
       - {from: COLLECTING, event: gather-barrier-closed, guard: stable-window, to: SNAPSHOTTING, actions: [freeze-path-set], idempotency_key: wave:snapshot, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: SNAPSHOTTING, event: source-image-accepted, guard: reads-stable, to: RUNNING, actions: [schedule-providers], idempotency_key: wave:run, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: RUNNING, event: outputs-staged, guard: required-capabilities-terminal, to: PUBLISHING, actions: [validate-publication], idempotency_key: wave:publish, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: PUBLISHING, event: activation-complete, guard: pointer-active, to: COMPLETE, actions: [release-wave-resources], idempotency_key: wave:complete, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: COLLECTING, event: git-candidates-required, guard: git-ready, to: GIT_CANDIDATE_BUILDING, actions: [build-git-candidates], idempotency_key: wave:git-candidates, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_CANDIDATE_BUILDING, event: candidates-built, guard: candidate-set-bounded, to: GIT_BASELINE_VERIFYING, actions: [capture-git-baseline], idempotency_key: wave:git-baseline, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: GIT_BASELINE_VERIFYING, event: git-baseline-stable, guard: baseline-unchanged, to: SNAPSHOTTING, actions: [freeze-path-set], idempotency_key: wave:snapshot, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SNAPSHOTTING, event: source-images-accepted, guard: reads-stable, to: CLASSIFYING, actions: [classify-sources], idempotency_key: wave:classify, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: CLASSIFYING, event: sources-classified, guard: classifications-closed, to: FAST_ANALYZING, actions: [schedule-fast-providers], idempotency_key: wave:fast-analyze, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAST_ANALYZING, event: fast-outputs-staged, guard: fast-providers-terminal, to: FAST_VALIDATING, actions: [validate-fast-output], idempotency_key: wave:fast-validate, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAST_VALIDATING, event: fast-output-valid, guard: fast-contracts-satisfied, to: FAST_PUBLISHED, actions: [publish-fast-overlay], idempotency_key: wave:fast-publish, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAST_PUBLISHED, event: semantic-work-required, guard: semantic-capabilities-applicable, to: SEMANTIC_ANALYZING, actions: [schedule-semantic-providers], idempotency_key: wave:semantic-analyze, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAST_PUBLISHED, event: semantic-work-not-applicable, guard: semantic-capabilities-terminal, to: VALIDATING, actions: [validate-wave-output], idempotency_key: wave:validate, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SEMANTIC_ANALYZING, event: semantic-outputs-staged, guard: semantic-providers-terminal, to: DERIVING, actions: [schedule-derivations], idempotency_key: wave:derive, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DERIVING, event: derivations-staged, guard: derivations-terminal, to: VALIDATING, actions: [validate-wave-output], idempotency_key: wave:validate, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATING, event: wave-output-valid, guard: required-capabilities-terminal, to: HOT_PUBLISHED, actions: [publish-hot-overlay], idempotency_key: wave:hot-publish, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: HOT_PUBLISHED, event: durable-flush-required, guard: flush-policy-triggered, to: DURABLE_FLUSHING, actions: [capture-flush-set], idempotency_key: wave:durable-flush, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DURABLE_FLUSHING, event: durable-activation-complete, guard: pointer-active, to: DURABLE_PUBLISHED, actions: [release-wave-resources], idempotency_key: wave:durable-published, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: COLLECTING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: SNAPSHOTTING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: RUNNING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [cancel-providers, discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAST_ANALYZING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [cancel-providers, discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SEMANTIC_ANALYZING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [cancel-providers, discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DERIVING, event: newer-wave, guard: no-committed-dependents, to: SUPERSEDED, actions: [cancel-derivations, discard-outputs], idempotency_key: wave:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: COLLECTING, event: cancelled, guard: cancellation-active, to: CANCELLED, actions: [discard-outputs], idempotency_key: wave:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SNAPSHOTTING, event: cancelled, guard: cancellation-active, to: CANCELLED, actions: [discard-outputs], idempotency_key: wave:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAST_ANALYZING, event: cancelled, guard: cancellation-active, to: CANCELLED, actions: [cancel-providers, discard-outputs], idempotency_key: wave:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SEMANTIC_ANALYZING, event: cancelled, guard: cancellation-active, to: CANCELLED, actions: [cancel-providers, discard-outputs], idempotency_key: wave:cancel, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: COLLECTING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: SNAPSHOTTING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: RUNNING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
-      - {from: PUBLISHING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: FAST_ANALYZING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SEMANTIC_ANALYZING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: VALIDATING, event: terminal-failure, guard: unrecoverable, to: FAILED, actions: [publish-diagnostic], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: DURABLE_FLUSHING, event: terminal-failure, guard: durable-base-preserved, to: FAILED, actions: [publish-diagnostic, preserve-hot-overlay], idempotency_key: wave:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
   - machine_id: ProviderRunState
     version: "1.0"
     states: [{code: 10, name: QUEUED, slug: queued, meaning: Waiting for admission}, {code: 20, name: RUNNING, slug: running, meaning: Provider active}, {code: 30, name: SUCCEEDED, slug: succeeded, meaning: Complete output accepted}, {code: 40, name: PARTIAL, slug: partial, meaning: Partial output accepted}, {code: 50, name: FAILED, slug: failed, meaning: Domain failure}, {code: 60, name: TIMED_OUT, slug: timed-out, meaning: Deadline expired}, {code: 70, name: CANCELLED, slug: cancelled, meaning: Cancelled}, {code: 80, name: SUPERSEDED, slug: superseded, meaning: Superseded}, {code: 90, name: CRASHED, slug: crashed, meaning: Process crashed}, {code: 100, name: PROTOCOL_ERROR, slug: protocol-error, meaning: Protocol violated}, {code: 110, name: STALE_RESULT, slug: stale-result, meaning: Stale result rejected}, {code: 120, name: STALE_GIT_BASELINE, slug: stale-git-baseline, meaning: Git baseline invalidated}]

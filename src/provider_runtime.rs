@@ -1471,7 +1471,7 @@ fn parse_blake3_digest(value: &str) -> Result<[u8; 32], ProviderRuntimeError> {
         .filter(|payload| payload.len() == 64)
         .ok_or_else(|| ProviderRuntimeError::Protocol("terminal digest is malformed".into()))?;
     let mut digest = [0_u8; 32];
-    for (index, chunk) in payload.as_bytes().chunks_exact(2).enumerate() {
+    for (index, chunk) in payload.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let text = std::str::from_utf8(chunk)
             .map_err(|_| ProviderRuntimeError::Protocol("terminal digest is malformed".into()))?;
         digest[index] = u8::from_str_radix(text, 16)
@@ -1489,7 +1489,7 @@ fn decode_lower_hex_id16(value: &str) -> Result<[u8; 16], ()> {
         return Err(());
     }
     let mut output = [0_u8; 16];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         output[index] =
             u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| ())?, 16).map_err(|_| ())?;
     }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Write as _;
@@ -9,12 +9,16 @@ use std::thread;
 use std::time::Duration;
 
 use codefabric::git_state::{
-    GitBlockingExecutor, GitCancellation, GitHashAlgorithm, GitInventoryClassification,
+    GitBlockingExecutor, GitCancellation, GitCandidateCache, GitCandidateMode, GitCandidateOrigin,
+    GitCandidatePlanner, GitCandidatePlanningRequest, GitHashAlgorithm, GitInventoryClassification,
     GitOperationState, GitStateAdapter, GitStateError, GitStateObservations, GitTrustPolicy,
     GixGitStateAdapter, HeadKind, RegisteredGitIdentity, apply_to_source_inventory,
+    candidate_cache_key, supported_hash_algorithms, topology_digest,
 };
 use codefabric::inventory::{InventoryCancellation, InventoryLimits, InventoryWalker};
 use codefabric::operational_store::OperationalStore;
+use codefabric::registries::GIT_INVENTORY_CLASSIFICATION_VALUES;
+use codefabric::registries::{GitAccelerationStatus, UpdateCandidateStrategy};
 use codefabric::secure_path::open_workspace_root;
 use codefabric::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
 
@@ -343,14 +347,24 @@ fn wp17_structural_acceptance() {
     assert_eq!(vector.index_entry_count, Some(1));
     assert_eq!(vector.attributes_fingerprint, [0x32; 32]);
     assert_eq!(vector.worktree_inventory_digest, [0x33; 32]);
-    assert!(matches!(
-        adapter.status_candidates(),
-        Err(GitStateError::CandidateDeltasDeferred)
-    ));
-    assert!(matches!(
-        adapter.tree_diff_candidates(),
-        Err(GitStateError::CandidateDeltasDeferred)
-    ));
+    let status = adapter
+        .status_candidates(
+            &snapshot.selected_worktree,
+            OBSERVATIONS,
+            &GitCancellation::default(),
+        )
+        .expect("status candidates");
+    assert!(status.candidates.is_empty());
+    assert!(!status.full_rescan_required);
+    let tree = adapter
+        .tree_diff_candidates(
+            &snapshot.selected_worktree,
+            &vector,
+            OBSERVATIONS,
+            &GitCancellation::default(),
+        )
+        .expect("tree candidates");
+    assert!(tree.candidates.is_empty());
 
     let mut store =
         OperationalStore::open(&fixture.path().join("state.sqlite3")).expect("operational store");
@@ -387,6 +401,265 @@ fn wp17_structural_acceptance() {
             && record.content_digest.is_some()
             && record.classification as u16 == GitInventoryClassification::Tracked as u16
     }));
+}
+
+#[test]
+fn wp51_behavioral_acceptance() {
+    let fixture = tempfile::tempdir().expect("status fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open fixture");
+
+    fs::write(root.join("tracked.rs"), b"fn changed() {}\n").expect("edit tracked file");
+    fs::write(root.join("untracked.rs"), b"fn new_file() {}\n").expect("new file");
+    let candidates = adapter
+        .status_candidates(
+            &snapshot.selected_worktree,
+            OBSERVATIONS,
+            &GitCancellation::default(),
+        )
+        .expect("status candidates");
+
+    assert!(candidates.candidates.iter().any(|candidate| {
+        candidate.repo_path_bytes == b"tracked.rs"
+            && candidate.origin == GitCandidateOrigin::IndexWorktree
+    }));
+    assert!(
+        candidates
+            .candidates
+            .iter()
+            .any(|candidate| candidate.repo_path_bytes == b"untracked.rs")
+    );
+    assert_eq!(candidates.vector.worktree_id, REGISTERED.worktree_id);
+    assert!(!candidates.full_rescan_required);
+}
+
+#[test]
+fn wp52_behavioral_acceptance() {
+    let fixture = tempfile::tempdir().expect("tree-diff fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "old.rs", b"fn old() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open fixture");
+    let before = adapter
+        .capture_state(&snapshot.selected_worktree, OBSERVATIONS)
+        .expect("capture prior vector");
+
+    fs::rename(root.join("old.rs"), root.join("renamed.rs")).expect("rename fixture");
+    commit_file(&root, "added.rs", b"fn added() {}\n");
+    let candidates = adapter
+        .tree_diff_candidates(
+            &snapshot.selected_worktree,
+            &before,
+            OBSERVATIONS,
+            &GitCancellation::default(),
+        )
+        .expect("tree diff candidates");
+    assert!(candidates.candidates.iter().any(|candidate| {
+        candidate.repo_path_bytes == b"added.rs" && candidate.origin == GitCandidateOrigin::HeadTree
+    }));
+    assert!(candidates.candidates.iter().any(|candidate| {
+        candidate.repo_path_bytes == b"renamed.rs" || candidate.repo_path_bytes == b"old.rs"
+    }));
+
+    let mut stale = before;
+    stale.worktree_id = [0x55; 16];
+    assert!(matches!(
+        adapter.tree_diff_candidates(
+            &snapshot.selected_worktree,
+            &stale,
+            OBSERVATIONS,
+            &GitCancellation::default(),
+        ),
+        Err(GitStateError::Unavailable("stale-state-vector-identity"))
+    ));
+}
+
+#[test]
+fn wp53_behavioral_acceptance() {
+    let fixture = tempfile::tempdir().expect("cache fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open fixture");
+    fs::write(root.join("tracked.rs"), b"fn changed() {}\n").expect("edit tracked file");
+    let candidates = adapter
+        .status_candidates(
+            &snapshot.selected_worktree,
+            OBSERVATIONS,
+            &GitCancellation::default(),
+        )
+        .expect("status candidates");
+    let key = candidate_cache_key(
+        [0x44; 16],
+        &candidates.vector,
+        topology_digest(&snapshot),
+        GitCandidateMode::Status,
+    );
+    let database = fixture.path().join("state.sqlite3");
+    let mut store = OperationalStore::open(&database).expect("operational store");
+    let mut producer_cache = GitCandidateCache::new(1, 1);
+    producer_cache
+        .put(&key, &candidates, 1, Some(&mut store))
+        .expect("populate cache");
+
+    let reader = store.reader_factory().open().expect("cache reader");
+    let mut restarted_cache = GitCandidateCache::new(1, 1);
+    assert_eq!(
+        restarted_cache
+            .get(&key, &candidates.vector, Some(&reader))
+            .expect("L2 cache lookup"),
+        Some(candidates.clone())
+    );
+
+    let mut stale_vector = candidates.vector.clone();
+    stale_vector.attributes_fingerprint = [0x99; 32];
+    assert_eq!(
+        restarted_cache
+            .get(&key, &stale_vector, Some(&reader))
+            .expect("stale key lookup"),
+        None
+    );
+    drop(reader);
+    store
+        .write_transaction(|transaction| {
+            transaction.execute(
+                "UPDATE git_candidate_cache SET candidate_payload = X'00'",
+                [],
+            )?;
+            Ok::<_, codefabric::operational_store::OperationalStoreError>(())
+        })
+        .expect("inject cache corruption");
+    let reader = store.reader_factory().open().expect("corrupt cache reader");
+    let mut cold_cache = GitCandidateCache::new(1, 1);
+    assert_eq!(
+        cold_cache
+            .get(&key, &candidates.vector, Some(&reader))
+            .expect("corrupt entry is a miss"),
+        None
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // One oracle covers every graceful degradation and no-authority fallback.
+fn wp53_operational_acceptance() {
+    let fixture = tempfile::tempdir().expect("candidate planner fixture");
+    let missing_root = fixture.path().join("not-opened-for-isolated-event");
+    let mut planner = GitCandidatePlanner::without_cache(GixGitStateAdapter);
+    let isolated = planner.plan(
+        &missing_root,
+        &GitCandidatePlanningRequest {
+            workspace_id: [0x44; 16],
+            registered_identity: REGISTERED,
+            observations: OBSERVATIONS,
+            watcher_paths: BTreeSet::from([b"src/lib.rs".to_vec()]),
+            rescan_required: false,
+            dirty_path_bulk_threshold: 2,
+            maximum_candidate_paths: 100,
+            source_generation: 1,
+            prior_vector: None,
+            cache_fence_verified: false,
+        },
+        None,
+        &GitCancellation::default(),
+    );
+    assert_eq!(isolated.strategy, UpdateCandidateStrategy::IsolatedPaths);
+    assert_eq!(
+        isolated.candidate_paths,
+        BTreeSet::from([b"src/lib.rs".to_vec()])
+    );
+    assert!(isolated.state_vector.is_none());
+
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn original() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open candidate fixture");
+    let prior = adapter
+        .capture_state(&snapshot.selected_worktree, OBSERVATIONS)
+        .expect("prior Git vector");
+
+    fs::write(root.join("tracked.rs"), b"fn changed() {}\n").expect("working-tree edit");
+    let status = planner.plan(
+        &root,
+        &GitCandidatePlanningRequest {
+            workspace_id: [0x44; 16],
+            registered_identity: REGISTERED,
+            observations: OBSERVATIONS,
+            watcher_paths: BTreeSet::new(),
+            rescan_required: true,
+            dirty_path_bulk_threshold: 2,
+            maximum_candidate_paths: 100,
+            source_generation: 2,
+            prior_vector: Some(prior.clone()),
+            cache_fence_verified: false,
+        },
+        None,
+        &GitCancellation::default(),
+    );
+    assert_eq!(status.strategy, UpdateCandidateStrategy::GitStatusIndex);
+    assert!(status.candidate_paths.contains(b"tracked.rs".as_slice()));
+    assert!(status.state_vector.is_some());
+    assert_eq!(status.acceleration, GitAccelerationStatus::GitReady);
+
+    commit_file(&root, "new.rs", b"fn new_head() {}\n");
+    let head = planner.plan(
+        &root,
+        &GitCandidatePlanningRequest {
+            workspace_id: [0x44; 16],
+            registered_identity: REGISTERED,
+            observations: OBSERVATIONS,
+            watcher_paths: BTreeSet::new(),
+            rescan_required: true,
+            dirty_path_bulk_threshold: 2,
+            maximum_candidate_paths: 100,
+            source_generation: 3,
+            prior_vector: Some(prior),
+            cache_fence_verified: false,
+        },
+        None,
+        &GitCancellation::default(),
+    );
+    assert_eq!(head.strategy, UpdateCandidateStrategy::HeadTreeAndStatus);
+    assert!(head.candidate_paths.contains(b"new.rs".as_slice()));
+
+    let not_a_repository = fixture.path().join("ordinary-directory");
+    fs::create_dir(&not_a_repository).expect("ordinary directory");
+    let fallback = planner.plan(
+        &not_a_repository,
+        &GitCandidatePlanningRequest {
+            workspace_id: [0x44; 16],
+            registered_identity: REGISTERED,
+            observations: OBSERVATIONS,
+            watcher_paths: BTreeSet::new(),
+            rescan_required: true,
+            dirty_path_bulk_threshold: 2,
+            maximum_candidate_paths: 100,
+            source_generation: 4,
+            prior_vector: None,
+            cache_fence_verified: false,
+        },
+        None,
+        &GitCancellation::default(),
+    );
+    assert_eq!(fallback.strategy, UpdateCandidateStrategy::GenericInventory);
+    assert!(fallback.requires_generic_inventory());
+    assert_eq!(
+        fallback.acceleration,
+        GitAccelerationStatus::NotAGitWorktree
+    );
 }
 
 #[test]
@@ -465,4 +738,245 @@ async fn wp17_operational_acceptance() {
     assert_eq!(metrics.completed_jobs, 1);
     assert_eq!(metrics.interrupted_jobs, 1);
     assert!(metrics.total_duration_micros > 0);
+}
+
+#[test]
+fn wp49_behavioral_acceptance() {
+    wp17_behavioral_acceptance();
+}
+
+#[test]
+fn wp49_structural_acceptance() {
+    wp17_structural_acceptance();
+}
+
+#[test]
+fn wp49_negative_zero_state() {
+    wp17_negative_zero_state();
+}
+
+#[tokio::test]
+async fn wp49_operational_acceptance() {
+    let executor = GitBlockingExecutor::new(1);
+    let cancellation = GitCancellation::default();
+    assert_eq!(
+        executor
+            .run(cancellation, |_| Ok::<_, GitStateError>(49_u8))
+            .await
+            .unwrap(),
+        49
+    );
+    assert_eq!(executor.metrics().completed_jobs, 1);
+}
+
+#[test]
+fn wp50_behavioral_acceptance() {
+    wp17_structural_acceptance();
+}
+
+#[test]
+fn wp50_structural_acceptance() {
+    assert_eq!(GIT_INVENTORY_CLASSIFICATION_VALUES.len(), 8);
+    assert_eq!(
+        GIT_INVENTORY_CLASSIFICATION_VALUES
+            .iter()
+            .map(|entry| entry.code)
+            .collect::<Vec<_>>(),
+        vec![10, 20, 30, 40, 50, 60, 70, 80]
+    );
+}
+
+#[test]
+fn wp50_negative_zero_state() {
+    let fixture = tempfile::tempdir().expect("cancel fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open fixture");
+    let cancellation = GitCancellation::default();
+    cancellation.cancel();
+    assert!(matches!(
+        adapter.inventory(&snapshot.selected_worktree, OBSERVATIONS, &cancellation),
+        Err(GitStateError::Cancelled)
+    ));
+}
+
+#[test]
+fn wp50_operational_acceptance() {
+    let fixture = tempfile::tempdir().expect("inventory parity fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    fs::write(root.join("untracked.py"), b"value = 1\n").expect("untracked fixture");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open fixture");
+    let git = adapter
+        .inventory(
+            &snapshot.selected_worktree,
+            OBSERVATIONS,
+            &GitCancellation::default(),
+        )
+        .expect("Git inventory");
+    let git_paths = git
+        .entries
+        .iter()
+        .filter(|entry| {
+            !matches!(
+                entry.classification,
+                GitInventoryClassification::UntrackedIgnored
+                    | GitInventoryClassification::ExcludedByCodeFabricPolicy
+                    | GitInventoryClassification::SpecialFile
+            )
+        })
+        .map(|entry| entry.repo_path_bytes.clone())
+        .collect::<BTreeSet<_>>();
+    assert!(git_paths.contains(b"tracked.rs".as_slice()));
+    assert!(git_paths.contains(b"untracked.py".as_slice()));
+}
+
+#[test]
+fn wp51_structural_acceptance() {
+    assert_eq!(GitCandidateMode::Status.code(), 10);
+    assert_eq!(GitCandidateOrigin::IndexWorktree as u16, 10);
+    assert_eq!(GitCandidateOrigin::HeadIndex as u16, 20);
+}
+
+#[test]
+fn wp51_negative_zero_state() {
+    let cancellation = GitCancellation::default();
+    cancellation.cancel();
+    let fixture = tempfile::tempdir().expect("status cancel fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open fixture");
+    assert!(matches!(
+        adapter.status_candidates(&snapshot.selected_worktree, OBSERVATIONS, &cancellation),
+        Err(GitStateError::Cancelled)
+    ));
+}
+
+#[test]
+fn wp51_operational_acceptance() {
+    let fixture = tempfile::tempdir().expect("isolated planning fixture");
+    let mut planner = GitCandidatePlanner::without_cache(GixGitStateAdapter);
+    let plan = planner.plan(
+        &fixture.path().join("Git must not be opened"),
+        &GitCandidatePlanningRequest {
+            workspace_id: [0x44; 16],
+            registered_identity: REGISTERED,
+            observations: OBSERVATIONS,
+            watcher_paths: BTreeSet::from([b"src/lib.rs".to_vec()]),
+            rescan_required: false,
+            dirty_path_bulk_threshold: 2,
+            maximum_candidate_paths: 100,
+            source_generation: 1,
+            prior_vector: None,
+            cache_fence_verified: false,
+        },
+        None,
+        &GitCancellation::default(),
+    );
+    assert_eq!(plan.strategy, UpdateCandidateStrategy::IsolatedPaths);
+    assert_eq!(
+        plan.candidate_paths,
+        BTreeSet::from([b"src/lib.rs".to_vec()])
+    );
+    assert!(plan.state_vector.is_none());
+}
+
+#[test]
+fn wp52_structural_acceptance() {
+    assert_eq!(
+        supported_hash_algorithms(),
+        [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256]
+    );
+    assert_eq!(GitCandidateMode::HeadTree.code(), 20);
+}
+
+#[test]
+fn wp52_negative_zero_state() {
+    let cancellation = GitCancellation::default();
+    cancellation.cancel();
+    let fixture = tempfile::tempdir().expect("tree cancel fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open fixture");
+    let prior = adapter
+        .capture_state(&snapshot.selected_worktree, OBSERVATIONS)
+        .expect("capture vector");
+    assert!(matches!(
+        adapter.tree_diff_candidates(
+            &snapshot.selected_worktree,
+            &prior,
+            OBSERVATIONS,
+            &cancellation,
+        ),
+        Err(GitStateError::Cancelled)
+    ));
+}
+
+#[test]
+fn wp52_operational_acceptance() {
+    wp52_behavioral_acceptance();
+}
+
+#[test]
+fn wp53_structural_acceptance() {
+    let vector = codefabric::git_state::GitStateVector {
+        repository_id: REGISTERED.repository_id,
+        worktree_id: REGISTERED.worktree_id,
+        head_kind: HeadKind::Unborn,
+        head_target: None,
+        head_tree: None,
+        index_fingerprint: None,
+        index_entry_count: None,
+        has_conflict_stages: false,
+        repository_state: GitOperationState::Clean,
+        inclusion_policy_fingerprint: OBSERVATIONS.inclusion_policy_fingerprint,
+        attributes_fingerprint: OBSERVATIONS.attributes_fingerprint,
+        worktree_inventory_digest: OBSERVATIONS.worktree_inventory_digest,
+    };
+    let status = candidate_cache_key([1; 16], &vector, [2; 32], GitCandidateMode::Status);
+    let tree = candidate_cache_key([1; 16], &vector, [2; 32], GitCandidateMode::HeadTree);
+    let topology = candidate_cache_key([1; 16], &vector, [3; 32], GitCandidateMode::Status);
+    assert_ne!(status, tree);
+    assert_ne!(status, topology);
+}
+
+#[test]
+fn wp53_negative_zero_state() {
+    let mut planner = GitCandidatePlanner::without_cache(GixGitStateAdapter);
+    let fixture = tempfile::tempdir().expect("fallback fixture");
+    let plan = planner.plan(
+        fixture.path(),
+        &GitCandidatePlanningRequest {
+            workspace_id: [0x44; 16],
+            registered_identity: REGISTERED,
+            observations: OBSERVATIONS,
+            watcher_paths: BTreeSet::new(),
+            rescan_required: true,
+            dirty_path_bulk_threshold: 2,
+            maximum_candidate_paths: 100,
+            source_generation: 1,
+            prior_vector: None,
+            cache_fence_verified: false,
+        },
+        None,
+        &GitCancellation::default(),
+    );
+    assert!(plan.requires_generic_inventory());
+    assert_eq!(plan.acceleration, GitAccelerationStatus::NotAGitWorktree);
 }

@@ -75,6 +75,47 @@ def validate(stage_root: Path) -> dict[str, int]:
             "SELECT count(*) FROM sqlite_schema "
             "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
+        actual_views = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_schema WHERE type = 'view'"
+            )
+        }
+        declarations = manifest.get("control_projections")
+        if not isinstance(declarations, list):
+            raise TypeError(f"{MANIFEST}: control_projections is not an array")
+        expected_views: dict[str, list[str]] = {}
+        for index, declaration in enumerate(declarations):
+            if not isinstance(declaration, dict):
+                raise TypeError(
+                    f"{MANIFEST}: control_projections[{index}] is not an object"
+                )
+            if declaration.get("projection_role") != "DERIVED_OPERATIONAL":
+                continue
+            name = declaration.get("view_name")
+            columns = declaration.get("columns")
+            if (
+                not isinstance(name, str)
+                or not isinstance(columns, list)
+                or not all(isinstance(column, str) for column in columns)
+            ):
+                raise TypeError(
+                    f"{MANIFEST}: control_projections[{index}] has invalid view fields"
+                )
+            expected_views[name] = columns
+        if actual_views != set(expected_views):
+            raise ValueError(
+                f"{DDL}: derived view mismatch expected={sorted(expected_views)} "
+                f"actual={sorted(actual_views)}"
+            )
+        for name, expected_columns in expected_views.items():
+            actual_columns = [
+                row[1] for row in connection.execute(f"PRAGMA table_info({name})")
+            ]
+            if actual_columns != expected_columns:
+                raise ValueError(
+                    f"{DDL}: view {name} columns differ from the typed projection"
+                )
     finally:
         connection.close()
     expected_tables = manifest.get("operational_tables")
@@ -82,7 +123,11 @@ def validate(stage_root: Path) -> dict[str, int]:
         raise ValueError(
             f"{DDL}: table count mismatch expected={len(expected_tables)} actual={table_count}"
         )
-    return {"public_schema_count": len(seen), "sqlite_table_count": table_count}
+    return {
+        "public_schema_count": len(seen),
+        "sqlite_table_count": table_count,
+        "sqlite_view_count": len(actual_views),
+    }
 
 
 def main() -> None:

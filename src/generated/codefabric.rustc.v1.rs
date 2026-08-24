@@ -11,11 +11,15 @@ pub struct ExtractorHello {
     #[prost(uint64, tag = "4")]
     pub optional_feature_bits: u64,
     #[prost(string, tag = "5")]
-    pub daemon_build: ::prost::alloc::string::String,
+    pub extractor_build: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
-    pub output_schema_bundle_digest: ::prost::alloc::string::String,
+    pub rustc_version: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
-    pub sandbox_profile_digest: ::prost::alloc::string::String,
+    pub rustc_commit: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub toolchain_identity_digest: ::prost::alloc::string::String,
+    #[prost(string, tag = "9")]
+    pub resource_profile_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExtractorHelloAck {
@@ -26,15 +30,19 @@ pub struct ExtractorHelloAck {
     #[prost(uint64, tag = "3")]
     pub negotiated_feature_bits: u64,
     #[prost(string, tag = "4")]
-    pub extractor_build: ::prost::alloc::string::String,
+    pub daemon_build: ::prost::alloc::string::String,
     #[prost(string, tag = "5")]
-    pub rustc_version: ::prost::alloc::string::String,
+    pub output_schema_bundle_digest: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
-    pub rustc_commit: ::prost::alloc::string::String,
+    pub sandbox_profile_digest: ::prost::alloc::string::String,
     #[prost(uint32, tag = "7")]
     pub maximum_outstanding_chunks: u32,
     #[prost(uint64, tag = "8")]
     pub maximum_unacknowledged_bytes: u64,
+    #[prost(string, tag = "9")]
+    pub accepted_resource_profile_id: ::prost::alloc::string::String,
+    #[prost(int64, tag = "10")]
+    pub provider_deadline_unix_ms: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PackageTargetIdentity {
@@ -89,6 +97,10 @@ pub struct CompilationBegin {
     pub requested_capability_codes: ::prost::alloc::vec::Vec<u32>,
     #[prost(string, tag = "17")]
     pub context_manifest_digest: ::prost::alloc::string::String,
+    #[prost(string, tag = "18")]
+    pub resource_profile_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "19")]
+    pub toolchain_identity_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CompilationAccepted {
@@ -213,7 +225,7 @@ pub mod extractor_command {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Command {
         #[prost(message, tag = "1")]
-        Begin(super::CompilationBegin),
+        CompilationAccepted(super::CompilationAccepted),
         #[prost(message, tag = "2")]
         ChunkAccepted(super::super::super::provider::v1::ChunkAccepted),
         #[prost(message, tag = "3")]
@@ -224,15 +236,13 @@ pub mod extractor_command {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExtractionEvent {
-    #[prost(oneof = "extraction_event::Event", tags = "1, 2, 3, 4, 5, 6")]
+    #[prost(oneof = "extraction_event::Event", tags = "2, 3, 4, 5, 6")]
     pub event: ::core::option::Option<extraction_event::Event>,
 }
 /// Nested message and enum types in `ExtractionEvent`.
 pub mod extraction_event {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Event {
-        #[prost(message, tag = "1")]
-        CompilationAccepted(super::CompilationAccepted),
         #[prost(message, tag = "2")]
         CompilationBegin(super::CompilationBegin),
         #[prost(message, tag = "3")]
@@ -264,6 +274,11 @@ pub enum ExtractorEnvironmentVariable {
     AnalysisContextId = 4,
     SourceGeneration = 5,
     ContextManifestDigest = 6,
+    ProviderResourceProfileId = 7,
+    SourceSnapshotManifestDigest = 8,
+    CargoMetadataDigest = 9,
+    CargoLockDigest = 10,
+    CargoConfigDigest = 11,
 }
 impl ExtractorEnvironmentVariable {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -279,6 +294,15 @@ impl ExtractorEnvironmentVariable {
             Self::AnalysisContextId => "EXTRACTOR_ENVIRONMENT_VARIABLE_ANALYSIS_CONTEXT_ID",
             Self::SourceGeneration => "EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_GENERATION",
             Self::ContextManifestDigest => "EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST",
+            Self::ProviderResourceProfileId => {
+                "EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RESOURCE_PROFILE_ID"
+            }
+            Self::SourceSnapshotManifestDigest => {
+                "EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_SNAPSHOT_MANIFEST_DIGEST"
+            }
+            Self::CargoMetadataDigest => "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_METADATA_DIGEST",
+            Self::CargoLockDigest => "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_LOCK_DIGEST",
+            Self::CargoConfigDigest => "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_CONFIG_DIGEST",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -293,6 +317,17 @@ impl ExtractorEnvironmentVariable {
             "EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST" => {
                 Some(Self::ContextManifestDigest)
             }
+            "EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RESOURCE_PROFILE_ID" => {
+                Some(Self::ProviderResourceProfileId)
+            }
+            "EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_SNAPSHOT_MANIFEST_DIGEST" => {
+                Some(Self::SourceSnapshotManifestDigest)
+            }
+            "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_METADATA_DIGEST" => {
+                Some(Self::CargoMetadataDigest)
+            }
+            "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_LOCK_DIGEST" => Some(Self::CargoLockDigest),
+            "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_CONFIG_DIGEST" => Some(Self::CargoConfigDigest),
             _ => None,
         }
     }
@@ -458,11 +493,11 @@ pub mod rustc_extractor_client {
             ));
             self.inner.unary(req, path, codec).await
         }
-        pub async fn extract(
+        pub async fn observe(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<Message = super::ExtractorCommand>,
+            request: impl tonic::IntoStreamingRequest<Message = super::ExtractionEvent>,
         ) -> std::result::Result<
-            tonic::Response<tonic::codec::Streaming<super::ExtractionEvent>>,
+            tonic::Response<tonic::codec::Streaming<super::ExtractorCommand>>,
             tonic::Status,
         > {
             self.inner.ready().await.map_err(|e| {
@@ -470,34 +505,13 @@ pub mod rustc_extractor_client {
             })?;
             let codec = tonic_prost::ProstCodec::default();
             let path =
-                http::uri::PathAndQuery::from_static("/codefabric.rustc.v1.RustcExtractor/Extract");
+                http::uri::PathAndQuery::from_static("/codefabric.rustc.v1.RustcExtractor/Observe");
             let mut req = request.into_streaming_request();
             req.extensions_mut().insert(GrpcMethod::new(
                 "codefabric.rustc.v1.RustcExtractor",
-                "Extract",
+                "Observe",
             ));
             self.inner.streaming(req, path, codec).await
-        }
-        pub async fn cancel_compilation(
-            &mut self,
-            request: impl tonic::IntoRequest<super::CancelCompilationRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::super::super::provider::v1::CancelAcknowledgement>,
-            tonic::Status,
-        > {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
-            })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/codefabric.rustc.v1.RustcExtractor/CancelCompilation",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new(
-                "codefabric.rustc.v1.RustcExtractor",
-                "CancelCompilation",
-            ));
-            self.inner.unary(req, path, codec).await
         }
     }
 }
@@ -518,22 +532,15 @@ pub mod rustc_extractor_server {
             &self,
             request: tonic::Request<super::ExtractorHello>,
         ) -> std::result::Result<tonic::Response<super::ExtractorHelloAck>, tonic::Status>;
-        /// Server streaming response type for the Extract method.
-        type ExtractStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<super::ExtractionEvent, tonic::Status>,
+        /// Server streaming response type for the Observe method.
+        type ObserveStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::ExtractorCommand, tonic::Status>,
             > + std::marker::Send
             + 'static;
-        async fn extract(
+        async fn observe(
             &self,
-            request: tonic::Request<tonic::Streaming<super::ExtractorCommand>>,
-        ) -> std::result::Result<tonic::Response<Self::ExtractStream>, tonic::Status>;
-        async fn cancel_compilation(
-            &self,
-            request: tonic::Request<super::CancelCompilationRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::super::super::provider::v1::CancelAcknowledgement>,
-            tonic::Status,
-        >;
+            request: tonic::Request<tonic::Streaming<super::ExtractionEvent>>,
+        ) -> std::result::Result<tonic::Response<Self::ObserveStream>, tonic::Status>;
     }
     #[derive(Debug)]
     pub struct RustcExtractorServer<T> {
@@ -647,21 +654,21 @@ pub mod rustc_extractor_server {
                     };
                     Box::pin(fut)
                 }
-                "/codefabric.rustc.v1.RustcExtractor/Extract" => {
+                "/codefabric.rustc.v1.RustcExtractor/Observe" => {
                     #[allow(non_camel_case_types)]
-                    struct ExtractSvc<T: RustcExtractor>(pub Arc<T>);
-                    impl<T: RustcExtractor> tonic::server::StreamingService<super::ExtractorCommand> for ExtractSvc<T> {
-                        type Response = super::ExtractionEvent;
-                        type ResponseStream = T::ExtractStream;
+                    struct ObserveSvc<T: RustcExtractor>(pub Arc<T>);
+                    impl<T: RustcExtractor> tonic::server::StreamingService<super::ExtractionEvent> for ObserveSvc<T> {
+                        type Response = super::ExtractorCommand;
+                        type ResponseStream = T::ObserveStream;
                         type Future =
                             BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<tonic::Streaming<super::ExtractorCommand>>,
+                            request: tonic::Request<tonic::Streaming<super::ExtractionEvent>>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RustcExtractor>::extract(&inner, request).await
+                                <T as RustcExtractor>::observe(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -672,7 +679,7 @@ pub mod rustc_extractor_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = ExtractSvc(inner);
+                        let method = ObserveSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -684,48 +691,6 @@ pub mod rustc_extractor_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.streaming(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/codefabric.rustc.v1.RustcExtractor/CancelCompilation" => {
-                    #[allow(non_camel_case_types)]
-                    struct CancelCompilationSvc<T: RustcExtractor>(pub Arc<T>);
-                    impl<T: RustcExtractor>
-                        tonic::server::UnaryService<super::CancelCompilationRequest>
-                        for CancelCompilationSvc<T>
-                    {
-                        type Response = super::super::super::provider::v1::CancelAcknowledgement;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::CancelCompilationRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as RustcExtractor>::cancel_compilation(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = CancelCompilationSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

@@ -53,6 +53,11 @@ pub use snapshot_catalog::{
     SnapshotOverlayProviderFactory, SnapshotProviderCatalog, SnapshotProviderRecord,
 };
 
+#[cfg(all(test, feature = "daemon"))]
+pub(crate) fn test_rebase_fault(point: OverlayRebaseFaultPoint) -> Result<(), FabricError> {
+    overlay::inject_rebase_fault(Some(point), point)
+}
+
 const SCHEMA_DIGEST_KEY: &str = "com.codefabric.cpg.schema_digest";
 const TYPE_WIDENING_KEY: &str = "delta.enableTypeWidening";
 const TARGET_FILE_SIZE_BYTES: &str = "134217728";
@@ -503,7 +508,10 @@ fn constraints_for(spec: &TableSpec) -> BTreeMap<String, String> {
     if names.contains(&"start_byte") && names.contains(&"end_byte") {
         constraints.insert(
             "source_span_ordered".into(),
-            "start_byte >= 0 AND end_byte >= start_byte".into(),
+            "((start_byte IS NULL AND end_byte IS NULL) OR \
+             (start_byte IS NOT NULL AND end_byte IS NOT NULL AND \
+              start_byte >= 0 AND end_byte >= start_byte))"
+                .into(),
         );
     }
     for name in names.iter().filter(|name| name.ends_with("_bucket")) {

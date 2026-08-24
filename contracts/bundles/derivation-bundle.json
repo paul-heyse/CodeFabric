@@ -4,7 +4,7 @@
   "artifacts": [
     {
       "artifact_id": "codefabric.registry.derivation-registry",
-      "canonical_digest": "b3:48b4deb6890017b14457f31ad03add128af391c78179d56d3b53697fce90cd60",
+      "canonical_digest": "b3:d2d35dafb2b37e2a5b56f2043bdef5c577b78099d20173a9bc63013dabde31f6",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -24,7 +24,7 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:a93f1f2275141808100999b2f6531c93c4d1ca80ebbaabc7c363267e90364f55",
+  "bundle_digest": "b3:bb76f42b9b7b277599ee448dcdfef53b65885a15b08b072de31dd6f034fd7966",
   "bundle_kind": "derivation",
   "bundle_major": 1,
   "bundle_version": "1.0",

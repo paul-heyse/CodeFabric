@@ -590,6 +590,11 @@ message QueryEvent {
 
 `StartQuery` SHALL return the durable `daemon_query_id` and opaque resume token before a potentially long freshness wait. This gives the adapter a cancellation and reconnection handle immediately. `StreamQuery` consumes that handle for the initial event stream; `AttachQuery` resumes after a caller-provided `uint64` sequence. The first semantic event is `SnapshotPinnedEvent`, emitted after the freshness barrier with the canonical `PublicSnapshotMetadata` record. Every event carries one monotonically increasing `uint64` sequence and exactly one of the five variants above.
 
+`ArtifactReadyEvent` SHALL issue the opaque result `lease_token` alongside the artifact identity,
+checksum, content type, encoding, and expiry. `ReadResult` and `ReleaseResult` accept exactly that
+token. A resume token, artifact ID, checksum, capability token, or derivable value SHALL NOT be
+substituted for the result lease token.
+
 The RPC freshness enum SHALL match the canonical request's top-level freshness policy; a mismatch is `INVALID_REQUEST_SCHEMA`. The Protobuf contract does not duplicate all semantic query-form models.
 
 ## 10. Handshake, workspace binding, and compatibility negotiation

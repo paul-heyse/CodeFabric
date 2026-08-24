@@ -1238,7 +1238,7 @@ fn sql_i64(value: u64) -> Result<i64, SourceImageError> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Seek as _, SeekFrom, Write as _};
+    use std::io::{Seek as _, SeekFrom};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::thread;
 
@@ -1656,6 +1656,8 @@ mod tests {
                  DROP TABLE source_blob_lease;
                  DROP TABLE source_blob_lease_member;
                  DROP TABLE table_mutation_operation;
+                 DROP TABLE operational_dependency_edge;
+                 DROP TABLE git_candidate_cache;
                  PRAGMA user_version=2;",
             )
             .unwrap();

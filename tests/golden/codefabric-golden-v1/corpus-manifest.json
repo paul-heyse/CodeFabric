@@ -1,0 +1,46 @@
+{
+  "corpus_id": "codefabric-golden-v1",
+  "corpus_version": "1.0",
+  "corpus_status": "CANDIDATE",
+  "coverage_profiles": [
+    {
+      "profile_id": "gate-b-v1",
+      "profile_version": "1.0",
+      "profile_status": "RELEASED",
+      "member_roots": [
+        "expected",
+        "scenarios",
+        "workspace"
+      ],
+      "file_count": 39,
+      "canonical_digest": "b3:7801342c4d442992ce63aa5349f1f15cf0292f1669e092c20fe77532385e5f47",
+      "owned_requirements": [
+        "AC-G-78",
+        "READINESS-GATE-B",
+        "RM-W5"
+      ],
+      "acceptance": {
+        "accepted_by": "codefabric-reference-owner",
+        "accepted_at": "2026-08-23",
+        "acceptance_basis": "Owner-authored Wave-5 Gate-B reference profile; answers are reviewed evidence and are never renderer output."
+      }
+    }
+  ],
+  "accepted_profile_digests": [
+    "b3:7801342c4d442992ce63aa5349f1f15cf0292f1669e092c20fe77532385e5f47"
+  ],
+  "source_archive_digest": "b3:7801342c4d442992ce63aa5349f1f15cf0292f1669e092c20fe77532385e5f47",
+  "workspace_registration_digest": "b3:7ba2716655512ea1025366aeb3bb75f61b5cd26011ae9ea71bdeb6800265228d",
+  "context_manifest_digests": [
+    "b3:71473ddf5d6a34d4412dd7cea333145377ac034cbfeb24d40aee9373af26624f"
+  ],
+  "provider_bundle_digests": [
+    "b3:532cc30ba383b2b76e008e37376b9e221b3dda18c823d2839f3e89cecfdbf054"
+  ],
+  "model_pack_bundle_digest": "b3:f032e4c1758fdeb86ed2d54dbecf0dc27048c367ad88240f34ae5a90ffe557e8",
+  "ontology_bundle_digest": "b3:2600bfa644ffd4cfce53d3fa15c41895a404b3327cfcc66782b77fe0f0806fea",
+  "schema_bundle_digest": "b3:841ea8848e151925ded4c45dc739362ff70c441851330a812a610a4b2b6cc0a4",
+  "derivation_bundle_digest": "b3:a93f1f2275141808100999b2f6531c93c4d1ca80ebbaabc7c363267e90364f55",
+  "query_bundle_digest": "b3:f4d3d3f7fff40534c5cbd2e54a7808193cdc82b61034ef525519ba64e14d5e7b",
+  "tool_contract_bundle_digest": "b3:0eabbbeb13c595985d053a886625de7c8f958cfc40c3e61595c46d1e2c0a8798"
+}

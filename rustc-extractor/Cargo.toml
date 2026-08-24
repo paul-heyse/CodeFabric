@@ -4,9 +4,30 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[package.metadata.cargo-machete]
+# The extractor includes root-generated tonic service modules by path; machete does not follow that
+# cross-Cargo-root generated include, but those modules instantiate `tonic_prost::ProstCodec`.
+ignored = ["tonic-prost"]
+
 [lints.rust]
 unsafe_code = "deny"
 
 [lints.clippy]
 all = "warn"
 pedantic = "warn"
+
+[dependencies]
+arrow-array = "=58.4.0"
+arrow-ipc = "=58.4.0"
+arrow-schema = "=58.4.0"
+blake3 = "=1.8.3"
+hyper-util = { version = "=0.1.20", features = ["tokio"] }
+prost = "=0.14.4"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.151"
+tempfile = "=3.27.0"
+tokio = { version = "=1.49.0", features = ["rt-multi-thread", "net", "sync", "time"] }
+tokio-stream = { version = "=0.1.18", features = ["net"] }
+tonic = { version = "=0.14.6", features = ["transport"] }
+tonic-prost = "=0.14.6"
+tower = { version = "=0.5.3", features = ["util"] }

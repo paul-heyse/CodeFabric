@@ -18,14 +18,14 @@
     },
     {
       "artifact_id": "codefabric.registry.provider-registry",
-      "canonical_digest": "b3:b8af9dfda78eea60fa7836fc9b3b08523938829216e71aa5e87e88ba7ddd7d7c",
+      "canonical_digest": "b3:322e949a38e8db51baf1644c9ec1a6723118663bfed4f1abed7733a1380e5657",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     },
     {
       "artifact_id": "codefabric.registry.provider-resource-profile-registry",
-      "canonical_digest": "b3:a8e3d25b71d2767b3ecfe80d40f0e3bcc4fa16a779c895a7861f8a3b8f737bcf",
+      "canonical_digest": "b3:5e54836133b813183c46bfacd05f7fa50bf5c2d643c4c7465a1207e01c1d23bf",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -46,13 +46,13 @@
     },
     {
       "artifact_id": "codefabric.rpc.rustc-extractor",
-      "canonical_digest": "b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62",
+      "canonical_digest": "b3:85928f1a4fc0a3faa4209a76afe97cb4b9fa6123ac9ad9716675f04fe9fea604",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:532cc30ba383b2b76e008e37376b9e221b3dda18c823d2839f3e89cecfdbf054",
+  "bundle_digest": "b3:73f6e70d1bc1e599964e97508c507e859783a85c2ff14d673664ad70b5b5d76f",
   "bundle_kind": "provider",
   "bundle_major": 1,
   "bundle_version": "1.0",

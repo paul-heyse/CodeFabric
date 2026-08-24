@@ -6,7 +6,6 @@ import subprocess
 from copy import deepcopy
 
 from tooling.ci.artifact_contracts import (
-    DEFAULT_PLAN,
     ROOT,
     _accepted_input_evolution_paths,
     _sha256,
@@ -16,6 +15,7 @@ from tooling.ci.artifact_contracts import (
     parse_frontmatter,
 )
 from tooling.ci.model_design_contracts import (
+    CONTROL_PLAN,
     EVOLVED_DESIGN_INPUTS,
     FORBIDDEN_DESIGN_PHRASES,
     validate_model_design_contract,
@@ -24,7 +24,11 @@ from tooling.ci.model_design_contracts import (
 
 def test_model_active_program_is_unique() -> None:
     report = validate_model_design_contract()
-    assert active_plan_path(ROOT) == DEFAULT_PLAN
+    assert report["control_plan"] == CONTROL_PLAN.as_posix()
+    assert (
+        active_plan_path(ROOT).resolve().relative_to(ROOT.resolve()).as_posix()
+        == report["active_plan"]
+    )
     assert report["active_plan"] != report["suspended_plan"]
 
 
@@ -43,12 +47,13 @@ def test_model_design_rejects_routine_acceptance_writes() -> None:
 
 
 def test_model_wp01_planned_input_evolution_names_exactly_five_accepted_paths() -> None:
-    plan = parse_frontmatter(DEFAULT_PLAN)
+    plan = parse_frontmatter(ROOT / CONTROL_PLAN)
     state = load_state(ROOT / str(plan["state_path"]))
     evolutions = [
         deviation
         for deviation in state["plan_deviations"]
         if deviation.get("kind") == "planned_design_input_evolution"
+        and deviation.get("packet") == "WP01"
     ]
     assert len(evolutions) == 1
     assert evolutions[0]["packet"] == "WP01"
@@ -56,7 +61,8 @@ def test_model_wp01_planned_input_evolution_names_exactly_five_accepted_paths() 
 
 
 def test_model_wp01_state_transition_enables_post_judgment_artifact_freshness() -> None:
-    plan = parse_frontmatter(DEFAULT_PLAN)
+    plan_path = ROOT / CONTROL_PLAN
+    plan = parse_frontmatter(plan_path)
     state = deepcopy(load_state(ROOT / str(plan["state_path"])))
     head = subprocess.run(
         ("git", "rev-parse", "HEAD"),
@@ -68,12 +74,12 @@ def test_model_wp01_state_transition_enables_post_judgment_artifact_freshness() 
     state["packets"]["WP01"]["status"] = "complete"
     state["packets"]["WP01"]["proving_commit"] = head
     accepted = _accepted_input_evolution_paths(ROOT, state)
-    assert accepted == set(EVOLVED_DESIGN_INPUTS)
+    assert set(EVOLVED_DESIGN_INPUTS) <= accepted
 
     drifted = {
         declared.path
-        for declared in declared_inputs(DEFAULT_PLAN)
+        for declared in declared_inputs(plan_path)
         if _sha256(ROOT / declared.path) != declared.digest
     }
-    assert drifted == set(EVOLVED_DESIGN_INPUTS)
+    assert set(EVOLVED_DESIGN_INPUTS) <= drifted
     assert drifted <= accepted

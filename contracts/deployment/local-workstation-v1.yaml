@@ -27,6 +27,21 @@ source_image_limits:
   stable_read_retry_count: 3
   orphan_grace_seconds: 300
   garbage_collection_batch_size: 256
+source_admission:
+  binary_sample_bytes: 8192
+  maximum_single_line_bytes: 1048576
+  maximum_path_components: 256
+  maximum_path_bytes: 4096
+  excluded_directory_names: [.git, target, build, dist, out, coverage, cache, node_modules, .venv, virtualenv]
+  vendored_directory_names: [vendor, vendored, third_party]
+  generated_directory_names: [generated]
+  binary_signatures:
+    - {name: png, prefix_hex: "89504e470d0a1a0a"}
+    - {name: jpeg, prefix_hex: "ffd8ff"}
+    - {name: pdf, prefix_hex: "25504446"}
+    - {name: elf, prefix_hex: "7f454c46"}
+    - {name: mach-o-64, prefix_hex: "cffaedfe"}
+    - {name: pe, prefix_hex: "4d5a"}
 inventory_limits:
   maximum_file_count: 1000000
   maximum_directory_count: 100000
@@ -34,6 +49,18 @@ inventory_limits:
   maximum_total_bytes_considered: 17179869184
   maximum_duration_ms: 300000
   maximum_entries_per_directory: 100000
+lifecycle_limits:
+  watch_debounce_timeout_ms: 75
+  watch_tick_rate_ms: 20
+  watch_ingress_capacity: 4096
+  maximum_watch_paths_per_batch: 10000
+  gather_window_ms: 20
+  dirty_path_bulk_threshold: 1000
+  default_await_current_timeout_ms: 2000
+  overlay_flush_maximum_rows: 100000
+  overlay_flush_maximum_bytes: 67108864
+  overlay_flush_maximum_touched_owners: 1000
+  overlay_flush_maximum_generations: 32
 default_query_freshness: REQUIRE_CURRENT_FOR_TARGETS
 provider_sandbox: required-for-untrusted
 follow_directory_symlinks: false

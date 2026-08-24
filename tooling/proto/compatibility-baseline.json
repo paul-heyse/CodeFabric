@@ -1,4 +1,93 @@
 {
+  "accepted_replacements": [
+    {
+      "old_method": "codefabric.rustc.v1.RustcExtractor.Extract",
+      "replacement_method": "codefabric.rustc.v1.RustcExtractor.Observe",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 replaces the pre-production command-to-event Extract stream with the daemon-hosted event-to-command Observe stream before external release."
+    }
+  ],
+  "accepted_method_removals": [
+    {
+      "method": "codefabric.rustc.v1.RustcExtractor.CancelCompilation",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 assigns cancellation exclusively to the daemon-to-wrapper command stream; the pre-production unary client-to-daemon alias must not remain as a second authority."
+    }
+  ],
+  "accepted_field_replacements": [
+    {
+      "message": "codefabric.rustc.v1.ExtractorCommand",
+      "field_number": 1,
+      "old_name": "begin",
+      "new_name": "compilation_accepted",
+      "new_type_name": ".codefabric.rustc.v1.CompilationAccepted",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 makes the daemon response stream carry compilation acceptance rather than echoing the wrapper's begin event."
+    },
+    {
+      "message": "codefabric.rustc.v1.ExtractorHello",
+      "field_number": 5,
+      "old_name": "daemon_build",
+      "new_name": "extractor_build",
+      "new_type_name": "",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 makes the short-lived compiler wrapper the client, so the request identifies the extractor rather than the daemon."
+    },
+    {
+      "message": "codefabric.rustc.v1.ExtractorHello",
+      "field_number": 6,
+      "old_name": "output_schema_bundle_digest",
+      "new_name": "rustc_version",
+      "new_type_name": "",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 binds the client hello to the exact extractor toolchain."
+    },
+    {
+      "message": "codefabric.rustc.v1.ExtractorHello",
+      "field_number": 7,
+      "old_name": "sandbox_profile_digest",
+      "new_name": "rustc_commit",
+      "new_type_name": "",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 binds the client hello to the exact extractor toolchain."
+    },
+    {
+      "message": "codefabric.rustc.v1.ExtractorHelloAck",
+      "field_number": 4,
+      "old_name": "extractor_build",
+      "new_name": "daemon_build",
+      "new_type_name": "",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 makes the daemon the long-lived server, so the acknowledgement identifies the daemon."
+    },
+    {
+      "message": "codefabric.rustc.v1.ExtractorHelloAck",
+      "field_number": 5,
+      "old_name": "rustc_version",
+      "new_name": "output_schema_bundle_digest",
+      "new_type_name": "",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 requires the daemon response to supply the accepted output schema before analysis."
+    },
+    {
+      "message": "codefabric.rustc.v1.ExtractorHelloAck",
+      "field_number": 6,
+      "old_name": "rustc_commit",
+      "new_name": "sandbox_profile_digest",
+      "new_type_name": "",
+      "accepted_by": "codefabric-protocol-owner",
+      "accepted_at": "2026-08-23",
+      "acceptance_basis": "GEN AC-G-31 requires the daemon response to supply the accepted sandbox profile before analysis."
+    }
+  ],
   "files": [
     {
       "dependencies": [],

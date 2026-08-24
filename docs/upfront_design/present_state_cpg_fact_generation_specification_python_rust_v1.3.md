@@ -4307,7 +4307,15 @@ CODEFABRIC_ANALYSIS_CONTEXT_ID
 CODEFABRIC_SOURCE_GENERATION
 CODEFABRIC_CONTEXT_MANIFEST_DIGEST
 CODEFABRIC_PROVIDER_RESOURCE_PROFILE_ID
+CODEFABRIC_SOURCE_SNAPSHOT_MANIFEST_DIGEST
+CODEFABRIC_CARGO_METADATA_DIGEST
+CODEFABRIC_CARGO_LOCK_DIGEST
+CODEFABRIC_CARGO_CONFIG_DIGEST
 ```
+
+The daemon derives these values from the admitted analysis context and immutable source view; the
+wrapper only echoes them into `CompilationBegin`. It never shells out to rediscover Cargo metadata
+or substitutes a digest of a convenient nearby file.
 
 The wrapper passes probe/version invocations through unchanged. For an analysis
 invocation it calls the real compiler through the pinned `rustc_public` callback,
@@ -4316,6 +4324,16 @@ and sends only owned DTOs to the daemon-hosted endpoint. The daemon sends
 `CompilationAccepted`, chunk acknowledgements/rejections, cancellation, and terminal
 protocol decisions on the reverse stream. The wrapper sends `CompilationBegin`, owner
 events, observation chunks, diagnostics, and `CompilationEnd` on the event stream.
+
+The wrapper initiates `Handshake` with its extractor build, exact rustc version/commit,
+toolchain-identity digest, and environment-supplied resource-profile ID. The daemon response
+identifies its build, accepted output-schema bundle and sandbox profile, negotiated limits,
+the accepted resource-profile ID, and the provider deadline. A mismatched toolchain, schema,
+sandbox, or resource profile fails before compiler analysis. This direction is part of the
+daemon-hosted topology; the request never claims to describe the daemon and the response never
+claims to describe the extractor. Cancellation has only one wire authority: the daemon sends
+`CancelCompilationRequest` through the reverse `Observe` stream. There is no unary client-to-daemon
+cancellation alias.
 
 The event sequence is:
 
@@ -4338,11 +4356,13 @@ workspace/context/source generation
 package and target identity
 crate name/type/disambiguator
 exact rustc version/commit
+toolchain-identity digest
 normalized rustc invocation digest
 Cargo metadata/lock/config digests
 build-script/proc-macro output digests
 source snapshot manifest digest
 requested capability set
+resource profile ID
 ```
 
 `OwnerBegin` identifies the canonical compiler owner key, source correspondence, owner kind, and expected observation families. Chunks are Arrow IPC normalized observations with sequence, schema, row count, and digest. `OwnerEnd` closes the owner with family counts and an owner content digest.

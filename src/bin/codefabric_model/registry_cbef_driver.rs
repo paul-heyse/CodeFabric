@@ -2121,7 +2121,7 @@ fn render_rust_registries(enums: &EnumRegistry, flags: &FlagRegistry) -> Vec<u8>
         let name = pascal(&domain.domain);
         writeln!(
             output,
-            "#[derive(Clone, Copy, Debug, Eq, PartialEq)] #[repr(u16)] pub enum {name} {{"
+            "#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)] #[repr(u16)] pub enum {name} {{"
         )
         .unwrap();
         for value in &domain.values {
@@ -2226,7 +2226,11 @@ fn rust_integer(value: u64) -> String {
 
 fn emit_runtime_enum(output: &mut String, name: &str, values: &[EnumValue]) {
     let type_name = runtime_pascal(name);
-    writeln!(output, "#[derive(Clone, Copy, Debug, Eq, PartialEq)]").unwrap();
+    writeln!(
+        output,
+        "#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]"
+    )
+    .unwrap();
     writeln!(output, "#[repr(u16)]").unwrap();
     writeln!(output, "pub enum {type_name} {{").unwrap();
     for value in values {
@@ -2366,6 +2370,30 @@ fn render_rust_runtime_registries(
             )
             .unwrap();
         }
+    }
+    output.push_str("];\n\n");
+    let derivations: Vec<governed::DerivationDefinition> =
+        registry_records(values, "codefabric.registry.derivation-registry")?;
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct DerivationEntry { pub derivation_id: &'static str, pub owner_kind: &'static str, pub input_fact_families: &'static [&'static str], pub output_fact_families: &'static [&'static str], pub projection_id: &'static str, pub precision_profile: &'static str, pub algorithm_version: &'static str, pub replacement_scope: &'static str, pub dependency_rule: &'static str }\n\n\
+         pub const DERIVATION_ENTRIES: &[DerivationEntry] = &[\n",
+    );
+    for derivation in &derivations {
+        writeln!(
+            output,
+            "    DerivationEntry {{ derivation_id: {:?}, owner_kind: {:?}, input_fact_families: &{:?}, output_fact_families: &{:?}, projection_id: {:?}, precision_profile: {:?}, algorithm_version: {:?}, replacement_scope: {:?}, dependency_rule: {:?} }},",
+            derivation.derivation_id,
+            derivation.owner_kind,
+            derivation.input_fact_families,
+            derivation.output_fact_families,
+            derivation.projection_id,
+            derivation.precision_profile,
+            derivation.algorithm_version,
+            derivation.replacement_scope,
+            derivation.dependency_rule,
+        )
+        .unwrap();
     }
     output.push_str("];\n\n");
     output.push_str(

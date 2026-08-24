@@ -282,6 +282,7 @@ message ArtifactReadyEvent {
   string content_type = 4;
   PayloadCompression encoding = 5;
   int64 lease_expires_at_unix_ms = 6;
+  string lease_token = 7;
 }
 
 message TerminalEvent {

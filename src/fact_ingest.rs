@@ -51,6 +51,38 @@ pub struct FactScope {
     pub owner_id: [u8; 16],
 }
 
+/// One canonical replacement owner anchoring every owner-scoped fact row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnerRow {
+    pub scope: FactScope,
+    pub parent_owner_id: Option<[u8; 16]>,
+    pub owner_kind_code: i16,
+    pub language: i16,
+    pub file_id: Option<[u8; 16]>,
+    pub semantic_entity_id: Option<[u8; 16]>,
+    pub start_byte: Option<i64>,
+    pub end_byte: Option<i64>,
+    pub source_fingerprint: Option<[u8; 32]>,
+    pub semantic_fingerprint: Option<[u8; 32]>,
+    pub capability_mask: i64,
+}
+
+/// One explicit capability/completeness claim for a canonical owner.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CapabilityStatusRow {
+    pub scope: FactScope,
+    pub snapshot_id: Option<[u8; 16]>,
+    pub capability_code: i16,
+    pub owner_capability_state_code: i16,
+    pub completeness_state_code: i16,
+    pub provider_run_id: Option<[u8; 16]>,
+    pub producer_code: Option<i16>,
+    pub reason_code: Option<i16>,
+    pub diagnostic_id: Option<[u8; 16]>,
+    pub fallback_source_available: bool,
+    pub coverage_scope_fingerprint: [u8; 32],
+}
+
 /// Scope shared by every owner batch in one publication selection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FactBatchScope {
@@ -363,6 +395,153 @@ fn fact_batch(
         Arc::clone(&spec.arrow_schema),
         columns.into_iter().map(|(_, column)| column).collect(),
     )?)
+}
+
+/// Encode canonical owners directly into the generated Arrow schema.
+///
+/// # Errors
+///
+/// Returns an Arrow error if the generated physical schema and encoder diverge.
+pub fn encode_owners(rows: &[OwnerRow]) -> Result<RecordBatch, FactIngestError> {
+    fact_batch(
+        8,
+        vec![
+            (
+                "workspace_id",
+                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
+            ),
+            (
+                "analysis_context_id",
+                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
+            ),
+            (
+                "source_generation",
+                i64s(rows, |row| Some(row.scope.source_generation)),
+            ),
+            (
+                "owner_id",
+                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
+            ),
+            (
+                "parent_owner_id",
+                binary(rows, |row| {
+                    row.parent_owner_id.as_ref().map(<[u8; 16]>::as_slice)
+                }),
+            ),
+            (
+                "owner_bucket",
+                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            ),
+            (
+                "owner_kind_code",
+                i16s(rows, |row| Some(row.owner_kind_code)),
+            ),
+            ("language", i16s(rows, |row| Some(row.language))),
+            (
+                "file_id",
+                binary(rows, |row| row.file_id.as_ref().map(<[u8; 16]>::as_slice)),
+            ),
+            (
+                "semantic_entity_id",
+                binary(rows, |row| {
+                    row.semantic_entity_id.as_ref().map(<[u8; 16]>::as_slice)
+                }),
+            ),
+            ("start_byte", i64s(rows, |row| row.start_byte)),
+            ("end_byte", i64s(rows, |row| row.end_byte)),
+            (
+                "source_fingerprint",
+                binary(rows, |row| {
+                    row.source_fingerprint.as_ref().map(<[u8; 32]>::as_slice)
+                }),
+            ),
+            (
+                "semantic_fingerprint",
+                binary(rows, |row| {
+                    row.semantic_fingerprint.as_ref().map(<[u8; 32]>::as_slice)
+                }),
+            ),
+            (
+                "capability_mask",
+                i64s(rows, |row| Some(row.capability_mask)),
+            ),
+        ],
+    )
+}
+
+/// Encode explicit owner capability status directly into the generated Arrow schema.
+///
+/// # Errors
+///
+/// Returns an Arrow error if the generated physical schema and encoder diverge.
+pub fn encode_capability_statuses(
+    rows: &[CapabilityStatusRow],
+) -> Result<RecordBatch, FactIngestError> {
+    fact_batch(
+        9,
+        vec![
+            (
+                "workspace_id",
+                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
+            ),
+            (
+                "analysis_context_id",
+                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
+            ),
+            (
+                "source_generation",
+                i64s(rows, |row| Some(row.scope.source_generation)),
+            ),
+            (
+                "snapshot_id",
+                binary(rows, |row| {
+                    row.snapshot_id.as_ref().map(<[u8; 16]>::as_slice)
+                }),
+            ),
+            (
+                "owner_id",
+                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
+            ),
+            (
+                "owner_bucket",
+                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            ),
+            (
+                "capability_code",
+                i16s(rows, |row| Some(row.capability_code)),
+            ),
+            (
+                "owner_capability_state_code",
+                i16s(rows, |row| Some(row.owner_capability_state_code)),
+            ),
+            (
+                "completeness_state_code",
+                i16s(rows, |row| Some(row.completeness_state_code)),
+            ),
+            (
+                "provider_run_id",
+                binary(rows, |row| {
+                    row.provider_run_id.as_ref().map(<[u8; 16]>::as_slice)
+                }),
+            ),
+            ("producer_code", i16s(rows, |row| row.producer_code)),
+            ("reason_code", i16s(rows, |row| row.reason_code)),
+            (
+                "diagnostic_id",
+                binary(rows, |row| {
+                    row.diagnostic_id.as_ref().map(<[u8; 16]>::as_slice)
+                }),
+            ),
+            (
+                "fallback_source_available",
+                bools(rows, |row| Some(row.fallback_source_available)),
+            ),
+            (
+                "coverage_scope_fingerprint",
+                binary(rows, |row| Some(row.coverage_scope_fingerprint.as_slice())),
+            ),
+        ],
+    )
 }
 
 /// Encode typed entities directly into the generated Arrow schema.
@@ -1116,6 +1295,7 @@ fn enum_domain(name: &str) -> Option<&'static [crate::registries::RegistryEntry]
         .map(|domain| domain.values)
 }
 
+#[allow(clippy::too_many_lines)] // One scan validates every generated enum and registry role before publication.
 fn validate_registered_codes(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
     for (field, domain) in [
         ("directness_code", "DIRECTNESS"),
@@ -1137,7 +1317,11 @@ fn validate_registered_codes(batch: &RecordBatch, spec: &TableSpec) -> Result<()
     }
     for (field, domain) in [
         ("language", "LANGUAGE"),
+        ("owner_kind_code", "OWNER_KIND"),
+        ("owner_capability_state_code", "OWNER_CAPABILITY_STATE"),
+        ("completeness_state_code", "COMPLETENESS_STATE"),
         ("provider_code", "PROVIDER_CODE"),
+        ("producer_code", "PROVIDER_CODE"),
         ("path_encoding_code", "PATH_ENCODING"),
         ("newline_kind_code", "NEWLINE_KIND"),
         ("field_role_code", "SYNTAX_FIELD_ROLE"),
@@ -1156,6 +1340,18 @@ fn validate_registered_codes(batch: &RecordBatch, spec: &TableSpec) -> Result<()
         }
     }
     match spec.table_code {
+        9 => {
+            let capabilities = i16_column(batch, spec, "capability_code");
+            if capabilities.iter().flatten().any(|code| {
+                u16::try_from(code).map_or(true, |code| {
+                    !crate::registries::CAPABILITY_IDS.iter().any(|id| {
+                        crate::registries::capability_code(id).is_some_and(|known| known == code)
+                    })
+                })
+            }) {
+                return Err(invalid(spec, "enum-code", "capability_code is unknown"));
+            }
+        }
         100 => {
             let kinds = i32_column(batch, spec, "entity_kind_code");
             let families = i16_column(batch, spec, "entity_family_code");
@@ -1872,13 +2068,13 @@ fn reconcile_candidates(
     (selected, evidence, conflicts)
 }
 
-/// Production-shaped synthetic canonicalization ingress used until provider jobs arrive.
+/// Sole production canonicalization and cross-provider reconciliation boundary.
 #[derive(Clone, Debug, Default)]
-pub struct SyntheticCanonicalIngest {
+pub struct CanonicalReconciliationEngine {
     counters: Arc<IngestCounters>,
 }
 
-impl SyntheticCanonicalIngest {
+impl CanonicalReconciliationEngine {
     /// Return cumulative functional counters for this ingress instance.
     #[must_use]
     pub fn metrics(&self) -> IngestMetrics {
@@ -1993,7 +2189,7 @@ mod tests {
     use std::sync::Arc;
 
     use arrow_array::builder::BinaryBuilder;
-    use arrow_array::{Array as _, ArrayRef, RecordBatch};
+    use arrow_array::{ArrayRef, RecordBatch};
     use serde::Deserialize;
 
     use super::*;
@@ -2037,7 +2233,7 @@ mod tests {
     fn hex16(value: &str) -> [u8; 16] {
         assert_eq!(value.len(), 32);
         let mut output = [0_u8; 16];
-        for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let high = char::from(pair[0]).to_digit(16).expect("hex high");
             let low = char::from(pair[1]).to_digit(16).expect("hex low");
             output[index] = u8::try_from((high << 4) | low).expect("one byte");
@@ -2206,7 +2402,7 @@ mod tests {
             .iter()
             .map(|provider| (provider.provider_code, provider.precedence))
             .collect::<BTreeMap<_, _>>();
-        let output = SyntheticCanonicalIngest::default()
+        let output = CanonicalReconciliationEngine::default()
             .ingest(expected_scope, &streams, &precedence)
             .expect("synthetic conflict ingests");
         assert_eq!(
@@ -2392,7 +2588,7 @@ mod tests {
             terminal: StreamTerminal::Completed,
         };
         assert!(matches!(
-            SyntheticCanonicalIngest::default().ingest(
+            CanonicalReconciliationEngine::default().ingest(
                 scope(),
                 &[stream],
                 &BTreeMap::from([(10, 0)]),
@@ -2430,7 +2626,7 @@ mod tests {
             }],
             terminal: StreamTerminal::Completed,
         };
-        let ingress = SyntheticCanonicalIngest::default();
+        let ingress = CanonicalReconciliationEngine::default();
         let output = ingress
             .ingest(
                 scope(),
@@ -2469,5 +2665,15 @@ mod tests {
                 .is_err()
         );
         assert_eq!(ingress.metrics().validation_failures, 1);
+    }
+
+    #[test]
+    fn wp36_behavioral_acceptance() {
+        wp20_behavioral_acceptance();
+    }
+
+    #[test]
+    fn wp36_operational_acceptance() {
+        wp20_operational_acceptance();
     }
 }

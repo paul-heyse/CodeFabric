@@ -64,6 +64,39 @@ pub fn relation_kind(name: &str) -> Option<OntologyCodeEntry> {
     ontology_kind(RELATION_KIND_IDS, RELATION_KIND_CODES, name)
 }
 
+/// Resolve one generated property name to its code and family without duplicating either.
+#[must_use]
+pub fn property_kind(name: &str) -> Option<OntologyCodeEntry> {
+    ontology_kind(PROPERTY_KIND_IDS, PROPERTY_KIND_CODES, name)
+}
+
+/// Resolve a capability identifier to its append-only declaration-order code.
+///
+/// Capability registry entries are ordered authority records. AC-G-06 assigns registry codes in
+/// declaration order starting at 10 and advancing by 10, so consumers never duplicate a second
+/// capability allocation table.
+#[must_use]
+pub fn capability_code(name: &str) -> Option<u16> {
+    CAPABILITY_IDS
+        .iter()
+        .position(|candidate| *candidate == name)
+        .and_then(|index| u16::try_from(index + 1).ok())
+        .and_then(|ordinal| ordinal.checked_mul(10))
+}
+
+/// Build the compact owner capability summary from the same generated registry ordering.
+#[must_use]
+pub fn capability_mask(names: &[&str]) -> Option<u64> {
+    names.iter().try_fold(0_u64, |word, name| {
+        CAPABILITY_IDS
+            .iter()
+            .position(|candidate| candidate == name)
+            .and_then(|bit| u32::try_from(bit).ok())
+            .and_then(|bit| 1_u64.checked_shl(bit))
+            .map(|mask| word | mask)
+    })
+}
+
 fn ontology_kind(
     names: &'static [&'static str],
     codes: &'static [OntologyCodeEntry],

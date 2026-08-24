@@ -21,6 +21,11 @@ extend-exclude = [
   "docs/library_ref/",
 ]
 
+[default]
+# Generated requirement identifiers are opaque content digests. Their hexadecimal substrings are
+# not prose and must never be rewritten to satisfy spelling heuristics.
+extend-ignore-re = ["MODEL-[0-9a-f]+"]
+
 [default.extend-words]
 # Genuine project/domain vocabulary only. Prefer a narrow word exception here over
 # excluding a whole directory. Seed this from real `typos` findings, not from guesses.

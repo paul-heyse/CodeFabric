@@ -9,13 +9,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tooling.ci.artifact_contracts import (
-    DEFAULT_PLAN,
     ROOT,
     ArtifactContractError,
     active_plan_path,
     load_state,
     parse_frontmatter,
     validate_state,
+)
+
+CONTROL_PLAN = Path(
+    "docs/plans/codefabric_model_driven_artifact_and_assurance_control_plane_implementation_plan_v1_2026-08-22.md"
+)
+SUCCESSOR_PLAN = Path(
+    "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v5_2026-08-22.md"
 )
 
 
@@ -117,12 +123,16 @@ def _active_state(root: Path, plan_path: Path) -> dict[str, object]:
 
 
 def validate_model_design_contract(
-    root: Path = ROOT, plan_path: Path = DEFAULT_PLAN
+    root: Path = ROOT, plan_path: Path = CONTROL_PLAN
 ) -> dict[str, object]:
-    """Validate the accepted WP01 ownership decisions and one active program."""
+    """Validate the accepted WP01 ownership decisions and the sealed active-program handoff."""
     plan_path = plan_path if plan_path.is_absolute() else root / plan_path
-    if active_plan_path(root).resolve() != plan_path.resolve():
-        raise ArtifactContractError("model control plan is not the sole active plan")
+    active = active_plan_path(root)
+    successor_path = root / SUCCESSOR_PLAN
+    if active.resolve() not in {plan_path.resolve(), successor_path.resolve()}:
+        raise ArtifactContractError(
+            "active plan is outside the sealed model-control handoff"
+        )
     plan = parse_frontmatter(plan_path)
     if plan.get("status") != "approved":
         raise ArtifactContractError("active model control plan is not approved")
@@ -137,6 +147,18 @@ def validate_model_design_contract(
         raise ArtifactContractError(
             "active state does not identify the accepted design"
         )
+    if active.resolve() == successor_path.resolve():
+        successor = parse_frontmatter(successor_path)
+        if successor.get("status") != "approved":
+            raise ArtifactContractError("active Waves successor is not approved")
+        if (
+            state.get("status") != "complete"
+            or state.get("current_packet") is not None
+            or state["packets"]["WP15"]["status"] != "complete"
+            or state["milestones"]["M05"]["status"] != "complete"
+            or state["decommission_batches"]["DB06"]["status"] != "complete"
+        ):
+            raise ArtifactContractError("model-control handoff seal is incomplete")
 
     evolutions = [
         deviation
@@ -186,7 +208,8 @@ def validate_model_design_contract(
         )
 
     return {
-        "active_plan": _relative(plan_path, root),
+        "active_plan": _relative(active, root),
+        "control_plan": _relative(plan_path, root),
         "suspended_plan": _relative(suspended_plan, root),
         "evolved_design_inputs": sorted(EVOLVED_DESIGN_INPUTS),
         "rule_ids": [rule.rule_id for rule in RULES],
@@ -197,7 +220,7 @@ def validate_model_design_contract(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--plan", type=Path, default=DEFAULT_PLAN)
+    parser.add_argument("--plan", type=Path, default=CONTROL_PLAN)
     args = parser.parse_args()
     try:
         report = validate_model_design_contract(args.root, args.plan)
