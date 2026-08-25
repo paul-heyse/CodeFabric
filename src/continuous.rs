@@ -99,6 +99,15 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
         self.overlays.current()
     }
 
+    /// Publish source unavailability through the sole workspace freshness barrier.
+    ///
+    /// Daemon lifecycle code calls this when authoritative source capture cannot continue; query
+    /// admission then reports the generated `Unavailable` state instead of implying an empty fact
+    /// set is current.
+    pub fn mark_source_unavailable(&self) {
+        self.scheduler.freshness().mark_unavailable();
+    }
+
     /// Process one normalized final-state batch through candidate selection, authoritative byte
     /// capture, canonical reconciliation, generated-policy overlay staging, and hot publication.
     ///

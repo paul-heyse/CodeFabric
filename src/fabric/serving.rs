@@ -369,6 +369,39 @@ impl ServingQuerySession {
         self.execute_plan(sql, plan).await
     }
 
+    /// Resolve one immutable serving table into an application-owned logical-plan input.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the table is absent from the snapshot-bound catalog.
+    pub async fn table_plan(&self, table: &str) -> Result<LogicalPlan, ServingQueryError> {
+        Ok(self.context.table(table).await?.into_unoptimized_plan())
+    }
+
+    /// Validate and execute a native DataFusion logical plan produced by the semantic compiler.
+    ///
+    /// # Errors
+    ///
+    /// Rejects plans that escape the immutable serving allowlist, fail optimization or physical
+    /// planning, exceed resource limits, or fail during Arrow stream execution.
+    pub async fn query_plan(
+        &self,
+        plan_identity: &str,
+        plan: LogicalPlan,
+    ) -> Result<ServingQueryResult, ServingQueryError> {
+        validate_plan_allowlist(&plan)?;
+        self.execute_plan(plan_identity, plan).await
+    }
+
+    /// Apply the post-lowering structural policy without executing the plan.
+    ///
+    /// # Errors
+    ///
+    /// Rejects unapproved tables, functions, or mutable/external plan families.
+    pub fn validate_query_plan(&self, plan: &LogicalPlan) -> Result<(), ServingQueryError> {
+        validate_plan_allowlist(plan)
+    }
+
     #[allow(clippy::too_many_lines)] // Keeps one execution, metric capture, and result-accounting lifetime explicit.
     async fn execute_plan(
         &self,
@@ -1996,12 +2029,14 @@ mod tests {
         let first = crate::semantic_query::execute_request(
             &session,
             crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
+            crate::registries::FreshnessState::Current,
         )
         .await
         .unwrap();
         let second = crate::semantic_query::execute_request(
             &session,
             crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
+            crate::registries::FreshnessState::Current,
         )
         .await
         .unwrap();
@@ -2015,6 +2050,80 @@ mod tests {
         assert_eq!(
             first.response.query_results[0].resolved_semantics["phrase_id"],
             "Q51_SYNTAX_NODES"
+        );
+    }
+
+    #[tokio::test]
+    async fn wp62_native_relational_execution() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let candidate = candidate([0x62; 16], 1, 2);
+        let session = activate_and_lease_with_config(
+            &mut store,
+            &mut images,
+            &runtime,
+            Arc::clone(&candidate),
+            ServingRuntimeConfig::new(
+                32 * 1024 * 1024,
+                64 * 1024 * 1024,
+                directory.path().join("wp62-spill"),
+                2,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let workspace_id = candidate.manifest().body.workspace_id.clone();
+        let request = format!(
+            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"wp62-native","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":null,"input":null,"where":{{"entity_kind_codes":[1],"relation_kind_codes":[]}},"limit":{{"first":10,"offset":0}}}}],"response_projection":{{"canonical_semantic_identity":true}},"cost_budget":{{"maximum_rows":10}}}}"#
+        );
+        let typed = crate::semantic_query::validate_request(request.as_bytes()).unwrap();
+        let bound = crate::semantic_query::bind_request(&session, &typed)
+            .await
+            .unwrap();
+        assert_eq!(bound.snapshot_id, candidate.manifest().snapshot_id);
+        let plan_text = bound.blocks[0].plan.display_indent().to_string();
+        for native_node in ["Limit", "Sort", "Projection", "Filter", "TableScan"] {
+            assert!(
+                plan_text.contains(native_node),
+                "missing {native_node}: {plan_text}"
+            );
+        }
+        let native = session
+            .query_plan("wp62-native", bound.blocks[0].plan.clone())
+            .await
+            .unwrap();
+        let transition = session
+            .query(
+                "SELECT entity_id FROM entities WHERE entity_kind_code = 1 \
+                 ORDER BY entity_id LIMIT 11",
+            )
+            .await
+            .unwrap();
+        let checksums = |batches: &[RecordBatch]| {
+            batches
+                .iter()
+                .map(|batch| crate::fabric::batch_checksum(batch).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(checksums(&native.batches), checksums(&transition.batches));
+        let response = crate::semantic_query::execute_request(
+            &session,
+            typed,
+            crate::registries::FreshnessState::PotentiallyStale,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response.response.freshness_state,
+            crate::registries::FreshnessState::PotentiallyStale
+        );
+        assert_eq!(response.response.successful_query_count, 1);
+        assert!(
+            response
+                .response
+                .entities
+                .keys()
+                .all(|id| id.starts_with("entity:unknown:"))
         );
     }
 

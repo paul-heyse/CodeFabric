@@ -157,6 +157,7 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
     async fn execute(
         &self,
         request: ValidatedSemanticRequest,
+        freshness: FreshnessState,
     ) -> Result<ExecutedSemanticResponse, SemanticQueryError>;
 
     async fn public_snapshot(
@@ -250,6 +251,32 @@ fn capability_digest(token: &[u8]) -> [u8; 32] {
     local_token_digest(SecurityMacDomain::LocalCapabilityToken, token)
 }
 
+fn limits_profile_digest(values: [u64; 5]) -> String {
+    let mut fingerprint = semantic_fingerprint(SemanticFingerprintDomain::LocalQueryLimits);
+    for value in values {
+        fingerprint.update(&value.to_be_bytes());
+    }
+    frame_digest(fingerprint.finalize())
+}
+
+fn effective_limits_profile() -> EffectiveLimitsProfile {
+    let values = [
+        MAX_CONTROL_MESSAGE_BYTES as u64,
+        MAX_PAYLOAD_CHUNK_BYTES as u64,
+        MAX_PAYLOAD_CHUNK_BYTES as u64,
+        4,
+        300,
+    ];
+    EffectiveLimitsProfile {
+        maximum_control_message_bytes: values[0],
+        maximum_payload_chunk_bytes: values[1],
+        maximum_inline_response_bytes: values[2],
+        maximum_concurrent_queries: u32::try_from(values[3]).expect("constant fits u32"),
+        query_orphan_replay_seconds: u32::try_from(values[4]).expect("constant fits u32"),
+        profile_digest: limits_profile_digest(values),
+    }
+}
+
 fn constant_time_equal(left: &[u8; 32], right: &[u8; 32]) -> bool {
     left.iter()
         .zip(right)
@@ -289,8 +316,9 @@ impl SemanticQueryBackend for ServingQuerySession {
     async fn execute(
         &self,
         request: ValidatedSemanticRequest,
+        freshness: FreshnessState,
     ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
-        execute_request(self, request).await
+        execute_request(self, request, freshness).await
     }
 
     async fn public_snapshot(
@@ -303,7 +331,7 @@ impl SemanticQueryBackend for ServingQuerySession {
                 "status workspace differs from the pinned snapshot".to_owned(),
             ));
         }
-        Ok(snapshot_response(&manifest))
+        Ok(snapshot_response(&manifest, FreshnessState::Current))
     }
 }
 
@@ -382,6 +410,8 @@ impl<B> ProductionQueryService<B> {
         backend: Arc<B>,
         artifacts: ResultArtifactStore,
         authorization: QueryAuthorization,
+        freshness: FreshnessBarrier,
+        freshness_timeout: std::time::Duration,
     ) -> Self {
         Self {
             backend,
@@ -390,22 +420,10 @@ impl<B> ProductionQueryService<B> {
             artifact_records: Arc::new(Mutex::new(BTreeMap::new())),
             handles: Arc::new(Mutex::new(BTreeMap::new())),
             idempotency: Arc::new(Mutex::new(BTreeMap::new())),
-            freshness: FreshnessBarrier::default(),
-            freshness_timeout: std::time::Duration::from_secs(2),
+            freshness,
+            freshness_timeout,
             query_bundle: query_bundle_identity(),
         }
-    }
-
-    /// Attach the sole workspace freshness barrier and deployment-owned wait bound.
-    #[must_use]
-    pub fn with_freshness_barrier(
-        mut self,
-        freshness: FreshnessBarrier,
-        timeout: std::time::Duration,
-    ) -> Self {
-        self.freshness = freshness;
-        self.freshness_timeout = timeout;
-        self
     }
 }
 
@@ -628,8 +646,13 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
             .admit_query(admission, freshness_timeout.min(request_timeout))
             .await
         {
-            Ok(_) => {
-                match tokio::time::timeout(request_timeout, backend.execute(validated)).await {
+            Ok(admitted_freshness) => {
+                match tokio::time::timeout(
+                    request_timeout,
+                    backend.execute(validated, admitted_freshness),
+                )
+                .await
+                {
                     Ok(Ok(executed)) => Ok(executed),
                     Ok(Err(error)) => Err(public_boundary_error(
                         "INTERNAL",
@@ -767,9 +790,24 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                 header: Some(event_header(&query_id, 3, None)),
                 execution_state: QueryExecutionState::Succeeded as i32,
                 availability_state: "AVAILABLE".to_owned(),
-                freshness_state: executed.response.freshness_state.to_owned(),
-                limit_state: "NOT_APPLIED".to_owned(),
-                dependency_state: "SATISFIED".to_owned(),
+                freshness_state: crate::registries::registry_state_name(
+                    crate::registries::FRESHNESS_STATE_VALUES,
+                    executed.response.freshness_state as u16,
+                )
+                .expect("generated freshness state")
+                .to_owned(),
+                limit_state: crate::registries::registry_state_name(
+                    crate::registries::LIMIT_STATE_VALUES,
+                    executed.response.limit_state as u16,
+                )
+                .expect("generated limit state")
+                .to_owned(),
+                dependency_state: crate::registries::registry_state_name(
+                    crate::registries::DEPENDENCY_STATE_VALUES,
+                    crate::registries::DependencyState::Ready as u16,
+                )
+                .expect("generated dependency state")
+                .to_owned(),
                 canonical_response_checksum: Some(artifact.checksum.clone()),
                 canonical_error_record_json: None,
                 artifact_id: Some(artifact.id.clone()),
@@ -833,16 +871,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             negotiated_compression: PayloadCompression::Identity as i32,
             installed_bundles: vec![self.query_bundle.clone()],
             active_schema_fingerprints: Vec::new(),
-            effective_limits: Some(EffectiveLimitsProfile {
-                maximum_control_message_bytes: MAX_CONTROL_MESSAGE_BYTES as u64,
-                maximum_payload_chunk_bytes: MAX_PAYLOAD_CHUNK_BYTES as u64,
-                maximum_inline_response_bytes: MAX_PAYLOAD_CHUNK_BYTES as u64,
-                maximum_concurrent_queries: 4,
-                query_orphan_replay_seconds: 300,
-                profile_digest: frame_digest(
-                    semantic_fingerprint(SemanticFingerprintDomain::LocalQueryLimits).finalize(),
-                ),
-            }),
+            effective_limits: Some(effective_limits_profile()),
             authorized_workspaces: claims,
             server_time_unix_ms: now_millis(),
             readiness: Some(ReadinessSummary {
@@ -1286,6 +1315,45 @@ mod tests {
     }
 
     #[test]
+    fn wp62_operational_acceptance() {
+        use crate::registries::Phase;
+
+        let rejection = public_boundary_error(
+            "INVALID_REQUEST_SCHEMA",
+            Phase::LogicalPlanning,
+            "unapproved table in bound plan",
+        );
+        assert_eq!(rejection.status.code(), tonic::Code::InvalidArgument);
+        let record: serde_json::Value =
+            serde_json::from_str(&rejection.canonical_record_json).unwrap();
+        assert_eq!(record["name"], "INVALID_REQUEST_SCHEMA");
+        assert_eq!(record["phase"], "LOGICAL_PLANNING");
+        assert_eq!(record["grpc_status"], "INVALID_ARGUMENT");
+
+        let profile = effective_limits_profile();
+        assert_eq!(
+            profile.profile_digest,
+            limits_profile_digest([
+                profile.maximum_control_message_bytes,
+                profile.maximum_payload_chunk_bytes,
+                profile.maximum_inline_response_bytes,
+                u64::from(profile.maximum_concurrent_queries),
+                u64::from(profile.query_orphan_replay_seconds),
+            ])
+        );
+        assert_ne!(
+            profile.profile_digest,
+            limits_profile_digest([
+                profile.maximum_control_message_bytes + 1,
+                profile.maximum_payload_chunk_bytes,
+                profile.maximum_inline_response_bytes,
+                u64::from(profile.maximum_concurrent_queries),
+                u64::from(profile.query_orphan_replay_seconds),
+            ])
+        );
+    }
+
+    #[test]
     fn wp56_operational_acceptance() {
         let bundle = query_bundle_identity();
         assert_eq!(bundle.bundle_id, "codefabric.bundles.query-language-bundle");
@@ -1327,7 +1395,7 @@ mod tests {
         .unwrap()
     }
 
-    fn fake_snapshot() -> SemanticSnapshotResponse {
+    fn fake_snapshot(freshness: FreshnessState) -> SemanticSnapshotResponse {
         SemanticSnapshotResponse {
             snapshot_id: "snapshot:00000000000000000000000000000000".to_owned(),
             workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
@@ -1341,7 +1409,7 @@ mod tests {
             overlay_checksum: framed_digest(b"overlay"),
             analysis_context_set_id: "context-set:00000000000000000000000000000000".to_owned(),
             analysis_context_ids: vec!["context:source".to_owned()],
-            freshness_state: "CURRENT",
+            freshness_state: freshness,
             source_trust_state: "CURRENT_BYTES_VERIFIED".to_owned(),
             event_stream_health: "HEALTHY".to_owned(),
             git_acceleration_status: "NOT_REQUIRED".to_owned(),
@@ -1362,20 +1430,21 @@ mod tests {
         async fn execute(
             &self,
             request: ValidatedSemanticRequest,
+            freshness: FreshnessState,
         ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
             let response = SemanticQueryResponse {
                 specification: "composable semantic CPG fact query response",
                 version: "1.3",
                 semantic_request_id: request.request.semantic_request_id,
-                execution_state: "SUCCEEDED",
-                availability_state: "AVAILABLE",
-                completeness_state: "COMPLETE",
-                freshness_state: "CURRENT",
-                limit_state: "NOT_APPLIED",
+                execution_state: crate::registries::QueryExecutionState::Complete,
+                availability_state: crate::registries::QueryAvailabilityState::Available,
+                completeness_state: crate::registries::CompletenessState::Complete,
+                freshness_state: freshness,
+                limit_state: crate::registries::LimitState::NotApplied,
                 successful_query_count: 1,
                 failed_query_count: 0,
                 not_executed_dependency_count: 0,
-                snapshot: fake_snapshot(),
+                snapshot: fake_snapshot(freshness),
                 entities: BTreeMap::new(),
                 facts: BTreeMap::new(),
                 paths: BTreeMap::new(),
@@ -1384,12 +1453,12 @@ mod tests {
                 query_results: vec![QueryResultRecord {
                     query_id: "q1".to_owned(),
                     request: crate::semantic_query::QueryForm::FindEntities,
-                    execution_state: "SUCCEEDED",
-                    availability_state: "AVAILABLE",
-                    completeness_state: "COMPLETE",
-                    freshness_state: "CURRENT",
-                    limit_state: "NOT_APPLIED",
-                    dependency_state: "SATISFIED",
+                    execution_state: crate::registries::QueryExecutionState::Complete,
+                    availability_state: crate::registries::QueryAvailabilityState::Available,
+                    completeness_state: crate::registries::CompletenessState::Complete,
+                    freshness_state: freshness,
+                    limit_state: crate::registries::LimitState::NotApplied,
+                    dependency_state: crate::registries::DependencyState::Ready,
                     resolved_semantics: BTreeMap::new(),
                     entity_ids: Vec::new(),
                     fact_ids: Vec::new(),
@@ -1418,7 +1487,7 @@ mod tests {
             &self,
             workspace_id: &str,
         ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-            let snapshot = fake_snapshot();
+            let snapshot = fake_snapshot(FreshnessState::Current);
             if snapshot.workspace_id != workspace_id {
                 return Err(SemanticQueryError::Invalid("workspace differs".to_owned()));
             }
@@ -1431,10 +1500,11 @@ mod tests {
         async fn execute(
             &self,
             request: ValidatedSemanticRequest,
+            freshness: FreshnessState,
         ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
             self.started.notify_one();
             self.release.notified().await;
-            SemanticQueryBackend::execute(&FakeBackend, request).await
+            SemanticQueryBackend::execute(&FakeBackend, request, freshness).await
         }
 
         async fn public_snapshot(
@@ -1481,6 +1551,8 @@ mod tests {
             Arc::new(FakeBackend),
             ResultArtifactStore::new(root.path().join("results")).unwrap(),
             authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
         );
         let allowed_uid = fs::metadata(root.path()).unwrap().uid();
         let (shutdown, shutdown_receiver) = oneshot::channel();
@@ -1535,6 +1607,8 @@ mod tests {
             Arc::new(FakeBackend),
             ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
             authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
         );
         let canonical = canonical_request();
         let started = service
@@ -1607,6 +1681,8 @@ mod tests {
             Arc::new(FakeBackend),
             ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
             authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
         );
         let canonical = canonical_request();
         let status = service
@@ -1637,6 +1713,8 @@ mod tests {
             Arc::clone(&backend),
             ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
             authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
         );
         let canonical = canonical_request();
         let started = service
@@ -1702,8 +1780,9 @@ mod tests {
             Arc::new(FakeBackend),
             ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
             authorization(),
-        )
-        .with_freshness_barrier(freshness, std::time::Duration::from_millis(50));
+            freshness,
+            std::time::Duration::from_millis(50),
+        );
         let canonical = canonical_current_required_request();
         let started = service
             .start_query(Request::new(StartQueryRequest {
