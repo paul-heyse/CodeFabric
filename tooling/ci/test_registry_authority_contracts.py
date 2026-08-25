@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 
 import yaml
-
 from codefabric_cpg_mcp.contracts import model_registries as python_registries
 
 ROOT = Path(__file__).resolve().parents[2]
