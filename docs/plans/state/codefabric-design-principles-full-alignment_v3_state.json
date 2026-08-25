@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP58",
+  "current_packet": "WP59",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -74,14 +74,17 @@
       "blockers": []
     },
     "WP58": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "9562c235a5c446256d15a1badf6b6d6d6ffb475d",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first staged-schema family run exposed an outdated independent consumer: Arrow 59 exports extension metadata keys through arrow_schema, the field metadata update had a move-order defect, and the strict manifest decoder lacked WP57's semantic fields plus the new golden-instance path. The consumer now compiles independently and validates the complete current manifest.",
+        "The first full root-test run exposed the model artifact index's stale 77-output assertion after the golden-instance projection raised the governed census to 78; the second exposed one source/syntax test that still downcast Id16 values as variable Binary. Both focused regressions were corrected before the final 280-test and doctest pass."
+      ],
       "blockers": []
     },
     "WP59": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -288,6 +291,6 @@
       "summary": "WP74 was implemented and proved before its WP59 dependency was complete. Its code is retained because the work is independently valid, but the packet remains in progress without a proving_commit while execution returns to WP58, WP59, and WP60; WP74 will be certified only after dependency closure."
     }
   ],
-  "next_action": "Execute WP58's truthful provider statistics, pushdown, Id16 extension metadata, and observed-runtime evidence scope with focused provider and serving checks.",
-  "updated_at": "2026-08-25T16:45:00Z"
+  "next_action": "Execute WP59's one-Arrow fact contract and merged ingest pipeline with scope-specific provider, IPC, and canonical reconciliation checks.",
+  "updated_at": "2026-08-25T17:28:42Z"
 }
