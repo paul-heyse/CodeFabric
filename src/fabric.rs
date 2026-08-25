@@ -66,8 +66,8 @@ pub use result_checksum::{
 pub(crate) use serving::logical_plan_template_serialization;
 #[cfg(feature = "daemon")]
 pub use serving::{
-    QueryPlanArtifact, Reproducibility, ServingQueryError, ServingQueryResult, ServingQuerySession,
-    ServingRuntimeConfig, ServingRuntimeEvidence,
+    QueryExecutionContext, QueryPlanArtifact, Reproducibility, ServingQueryError,
+    ServingQueryResult, ServingQuerySession, ServingRuntimeConfig, ServingRuntimeEvidence,
 };
 pub use snapshot_catalog::{
     DeltaAccessProfile, DeltaHandleFactory, DeltaMaterializationPosture, EmptySnapshotOverlay,

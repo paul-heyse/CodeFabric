@@ -33,7 +33,7 @@ use futures::StreamExt as _;
 use rusqlite::types::Value;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{FabricError, SnapshotProviderCatalog};
@@ -206,24 +206,44 @@ pub struct ServingRuntimeEvidence {
     pub observed_repartition_output_rows: u64,
 }
 
+/// Identity allocated by the query boundary before any planning begins.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryExecutionContext {
+    pub execution_id: String,
+    pub semantic_request_id: String,
+    pub mcp_call_id: String,
+}
+
 /// One emitted §110 query proof artifact without non-deterministic timing observations.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct QueryPlanArtifact {
+    pub artifact_schema_version: String,
+    pub execution_id: String,
+    pub semantic_request_id: String,
+    pub mcp_call_id: String,
     pub plan_template_id: String,
     pub bound_query_id: String,
     pub datafusion_version: String,
     pub arrow_version: String,
-    pub schema_bundle_id: String,
+    pub bundle_ids: crate::snapshot::SnapshotBundles,
     pub snapshot_id: String,
     pub publication_id: String,
     pub source_table_versions: BTreeMap<u16, u64>,
+    pub overlay_generation: u64,
+    pub overlay_digest: String,
+    pub overlay_table_versions: BTreeMap<u16, u64>,
+    pub control_schema_generation_fingerprint: String,
     pub logical_plan: String,
     pub optimized_logical_plan: String,
     pub physical_plan: String,
+    pub physical_plan_with_full_metrics: String,
+    pub physical_plan_pg_json: String,
     pub output_schema: Vec<String>,
     pub output_partition_count: usize,
     pub output_row_count: usize,
-    pub result_checksum_version: &'static str,
+    pub result_checksum_version: String,
     pub canonical_output_schema_digest: String,
     pub result_checksum: String,
     pub reproducibility: Reproducibility,
@@ -231,7 +251,7 @@ pub struct QueryPlanArtifact {
 }
 
 /// Machine-derived replay posture for one exact plan and pinned environment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Reproducibility {
     pub deterministic: bool,
@@ -254,6 +274,7 @@ pub struct ServingQuerySession {
     context: SessionContext,
     evidence: RwLock<ServingRuntimeEvidence>,
     _control_reservation: Arc<MemoryReservation>,
+    control_schema_generation_fingerprint: String,
     limits: ServingRuntimeConfig,
 }
 
@@ -311,13 +332,14 @@ impl ServingQuerySession {
             .manifest()
             .raw_workspace_id()
             .map_err(|error| ServingQueryError::Configuration(error.to_string()))?;
-        let (control, control_reservation) = capture_control_schema(
-            operational,
-            workspace_id,
-            &lease,
-            &runtime.memory_pool,
-            &config,
-        )?;
+        let (control, control_reservation, control_schema_generation_fingerprint) =
+            capture_control_schema(
+                operational,
+                workspace_id,
+                &lease,
+                &runtime.memory_pool,
+                &config,
+            )?;
         let providers = snapshot.providers();
         let source_catalog = providers.catalog();
         let base = source_catalog.schema(BASE_SCHEMA).ok_or_else(|| {
@@ -359,6 +381,7 @@ impl ServingQuerySession {
             context,
             evidence: RwLock::new(evidence),
             _control_reservation: Arc::new(control_reservation),
+            control_schema_generation_fingerprint,
             limits: config,
         })
     }
@@ -397,7 +420,12 @@ impl ServingQuerySession {
         let plan = self.context.state().create_logical_plan(sql).await?;
         read_only_options().verify_plan(&plan)?;
         validate_plan_allowlist(&plan)?;
-        self.execute_plan(sql, plan).await
+        let execution = QueryExecutionContext {
+            execution_id: format!("direct:{}", crate::integrity::framed_digest(sql.as_bytes())),
+            semantic_request_id: "direct-sql".to_owned(),
+            mcp_call_id: "not-applicable".to_owned(),
+        };
+        self.execute_plan(sql, plan, &execution).await
     }
 
     /// Resolve one immutable serving table into an application-owned logical-plan input.
@@ -420,8 +448,28 @@ impl ServingQuerySession {
         plan_identity: &str,
         plan: LogicalPlan,
     ) -> Result<ServingQueryResult, ServingQueryError> {
+        let execution = QueryExecutionContext {
+            execution_id: format!("direct:{plan_identity}"),
+            semantic_request_id: plan_identity.to_owned(),
+            mcp_call_id: "not-applicable".to_owned(),
+        };
+        self.query_plan_in_execution(plan_identity, plan, &execution)
+            .await
+    }
+
+    /// Execute a native plan under a boundary-allocated execution identity.
+    ///
+    /// # Errors
+    ///
+    /// Rejects the same plan and execution failures as [`Self::query_plan`].
+    pub async fn query_plan_in_execution(
+        &self,
+        plan_identity: &str,
+        plan: LogicalPlan,
+        execution: &QueryExecutionContext,
+    ) -> Result<ServingQueryResult, ServingQueryError> {
         validate_plan_allowlist(&plan)?;
-        self.execute_plan(plan_identity, plan).await
+        self.execute_plan(plan_identity, plan, execution).await
     }
 
     /// Apply the post-lowering structural policy without executing the plan.
@@ -438,6 +486,7 @@ impl ServingQuerySession {
         &self,
         _request_label: &str,
         plan: LogicalPlan,
+        execution: &QueryExecutionContext,
     ) -> Result<ServingQueryResult, ServingQueryError> {
         let state = self.context.state();
         let logical_plan = format!("{}", plan.display_indent_schema());
@@ -452,7 +501,9 @@ impl ServingQuerySession {
             MemoryConsumer::new("serving-query-result")
                 .register(&self.context.runtime_env().memory_pool),
         );
-        let mut stream = execute_stream(Arc::clone(&physical), self.context.task_ctx())?;
+        let task_context = datafusion::execution::TaskContext::from(&state)
+            .with_task_id(execution.execution_id.clone());
+        let mut stream = execute_stream(Arc::clone(&physical), Arc::new(task_context))?;
         let mut batches = Vec::new();
         let mut output_row_count = 0_usize;
         let mut output_bytes = 0_usize;
@@ -507,6 +558,22 @@ impl ServingQuerySession {
             &execution_config_digest(&self.limits)?,
         );
         let operator_metrics = physical_metrics(physical.as_ref());
+        // Metrics are read only after the exact served stream is exhausted. Rendering this same
+        // physical-plan instance avoids AnalyzeExec and diagnostic re-execution.
+        let physical_plan_with_full_metrics =
+            datafusion::physical_plan::display::DisplayableExecutionPlan::with_full_metrics(
+                physical.as_ref(),
+            )
+            .set_show_schema(true)
+            .indent(true)
+            .to_string();
+        let physical_plan_pg_json =
+            datafusion::physical_plan::display::DisplayableExecutionPlan::with_full_metrics(
+                physical.as_ref(),
+            )
+            .set_show_schema(true)
+            .pgjson(true)
+            .to_string();
         {
             let mut evidence = self
                 .evidence
@@ -527,11 +594,15 @@ impl ServingQuerySession {
                 .saturating_add(operator_metrics.repartition_output_rows);
         }
         let artifact = QueryPlanArtifact {
+            artifact_schema_version: "codefabric.query-plan-artifact.v1".to_owned(),
+            execution_id: execution.execution_id.clone(),
+            semantic_request_id: execution.semantic_request_id.clone(),
+            mcp_call_id: execution.mcp_call_id.clone(),
             plan_template_id,
             bound_query_id,
             datafusion_version: datafusion::DATAFUSION_VERSION.to_owned(),
             arrow_version: arrow::ARROW_VERSION.to_owned(),
-            schema_bundle_id: manifest.body.bundles.schema_bundle_id.clone(),
+            bundle_ids: manifest.body.bundles.clone(),
             snapshot_id: manifest.snapshot_id.clone(),
             publication_id: manifest.body.base_publication.publication_id.clone(),
             source_table_versions: manifest
@@ -541,13 +612,27 @@ impl ServingQuerySession {
                 .iter()
                 .map(|table| (table.table_code, table.delta_version))
                 .collect(),
+            overlay_generation: manifest.body.overlay.overlay_generation,
+            overlay_digest: manifest.body.overlay.overlay_digest.clone(),
+            overlay_table_versions: manifest
+                .body
+                .overlay
+                .tables
+                .iter()
+                .map(|table| (table.table_code, manifest.body.overlay.overlay_generation))
+                .collect(),
+            control_schema_generation_fingerprint: self
+                .control_schema_generation_fingerprint
+                .clone(),
             logical_plan,
             optimized_logical_plan: format!("{}", optimized.display_indent_schema()),
             physical_plan,
+            physical_plan_with_full_metrics,
+            physical_plan_pg_json,
             output_schema,
             output_partition_count,
             output_row_count,
-            result_checksum_version: super::result_checksum::RESULT_CHECKSUM_VERSION,
+            result_checksum_version: super::result_checksum::RESULT_CHECKSUM_VERSION.to_owned(),
             canonical_output_schema_digest: crate::integrity::framed_digest(
                 &result.canonical_schema,
             ),
@@ -607,7 +692,12 @@ impl ServingQuerySession {
         validate_plan_allowlist(&plan)?;
         planned.wait().await;
         resume.wait().await;
-        self.execute_plan(sql, plan).await
+        let execution = QueryExecutionContext {
+            execution_id: format!("direct:{}", crate::integrity::framed_digest(sql.as_bytes())),
+            semantic_request_id: "direct-sql".to_owned(),
+            mcp_call_id: "not-applicable".to_owned(),
+        };
+        self.execute_plan(sql, plan, &execution).await
     }
 
     #[cfg(test)]
@@ -876,7 +966,7 @@ fn capture_control_schema(
     lease: &SnapshotLeaseGuard,
     memory_pool: &Arc<dyn datafusion::execution::memory_pool::MemoryPool>,
     config: &ServingRuntimeConfig,
-) -> Result<(Arc<dyn SchemaProvider>, MemoryReservation), ServingQueryError> {
+) -> Result<(Arc<dyn SchemaProvider>, MemoryReservation, String), ServingQueryError> {
     let reader = factory.open()?;
     let reservation = MemoryConsumer::new("serving-control-capture").register(memory_pool);
     let mut budget = CaptureBudget {
@@ -922,6 +1012,32 @@ fn capture_control_schema(
             }
         }
     })?;
+    let active = active_snapshot_batch(lease)?;
+    let mut fingerprint_input = Vec::new();
+    fingerprint_input.extend_from_slice(
+        &lease
+            .snapshot()
+            .manifest()
+            .body
+            .source
+            .source_generation
+            .to_be_bytes(),
+    );
+    for (name, batches) in &raw {
+        fingerprint_input.extend_from_slice(&(name.len() as u64).to_be_bytes());
+        fingerprint_input.extend_from_slice(name.as_bytes());
+        for batch in batches {
+            fingerprint_input.extend_from_slice(
+                &crate::fabric::batch_checksum(batch)
+                    .map_err(|error| ServingQueryError::Configuration(error.to_string()))?,
+            );
+        }
+    }
+    fingerprint_input.extend_from_slice(
+        &crate::fabric::batch_checksum(&active)
+            .map_err(|error| ServingQueryError::Configuration(error.to_string()))?,
+    );
+    let control_schema_generation_fingerprint = crate::integrity::framed_digest(&fingerprint_input);
     let mut tables = BTreeMap::new();
     for (name, batches) in raw {
         let spec = operational_table_spec(&name).expect("captured generated table");
@@ -931,14 +1047,17 @@ fn capture_control_schema(
         );
     }
     install_derived_control_views(&mut tables)?;
-    let active = active_snapshot_batch(lease)?;
     budget.retain(&active)?;
     for projection in control_projection_specs().iter().filter(|projection| {
         projection.projection_role == ControlProjectionRole::ActiveServingSnapshot
     }) {
         tables.insert(projection.view_name.to_owned(), mem_table(active.clone())?);
     }
-    Ok((Arc::new(ImmutableSchemaProvider { tables }), reservation))
+    Ok((
+        Arc::new(ImmutableSchemaProvider { tables }),
+        reservation,
+        control_schema_generation_fingerprint,
+    ))
 }
 
 struct CaptureBudget<'a> {
@@ -2766,6 +2885,129 @@ mod tests {
         let pinned = query_task.await.unwrap().unwrap();
         assert_eq!(count(&pinned), 1);
         assert_eq!(session.snapshot_id(), predecessor);
+    }
+
+    #[tokio::test]
+    async fn wp65_behavioral_acceptance() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate([0x65; 16], 1, 2),
+            directory.path(),
+        );
+        let plan = LogicalPlanBuilder::from(session.table_plan("entities").await.unwrap())
+            .project(vec![col("entity_id")])
+            .unwrap()
+            .sort(vec![col("entity_id").sort(true, true)])
+            .unwrap()
+            .build()
+            .unwrap();
+        let first_context = QueryExecutionContext {
+            execution_id: "execution:agent-one".to_owned(),
+            semantic_request_id: "semantic-agent-one".to_owned(),
+            mcp_call_id: "mcp-agent-one".to_owned(),
+        };
+        let second_context = QueryExecutionContext {
+            execution_id: "execution:agent-two".to_owned(),
+            semantic_request_id: "semantic-agent-two".to_owned(),
+            mcp_call_id: "mcp-agent-two".to_owned(),
+        };
+        let first = session
+            .query_plan_in_execution("wp65-single-scan", plan.clone(), &first_context)
+            .await
+            .unwrap();
+        let second = session
+            .query_plan_in_execution("wp65-single-scan", plan, &second_context)
+            .await
+            .unwrap();
+
+        assert_eq!(first.artifact.execution_id, first_context.execution_id);
+        assert_eq!(second.artifact.execution_id, second_context.execution_id);
+        assert_ne!(first.artifact.execution_id, second.artifact.execution_id);
+        assert_ne!(
+            first.artifact.semantic_request_id,
+            second.artifact.semantic_request_id
+        );
+        assert_eq!(
+            first.artifact.result_checksum,
+            second.artifact.result_checksum
+        );
+        assert_eq!(session.runtime_evidence().observed_query_count, 2);
+        assert!(!first.artifact.physical_plan.contains("AnalyzeExec"));
+        assert!(
+            !first
+                .artifact
+                .physical_plan_with_full_metrics
+                .contains("AnalyzeExec")
+        );
+    }
+
+    #[tokio::test]
+    async fn wp65_structural_acceptance() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate([0x66; 16], 3, 1),
+            directory.path(),
+        );
+        let plan = LogicalPlanBuilder::from(session.table_plan("entities").await.unwrap())
+            .project(vec![col("entity_id")])
+            .unwrap()
+            .build()
+            .unwrap();
+        let result = session
+            .query_plan_in_execution(
+                "wp65-pins",
+                plan,
+                &QueryExecutionContext {
+                    execution_id: "execution:wp65-pins".to_owned(),
+                    semantic_request_id: "semantic:wp65-pins".to_owned(),
+                    mcp_call_id: "mcp:wp65-pins".to_owned(),
+                },
+            )
+            .await
+            .unwrap();
+        let artifact = &result.artifact;
+        assert_eq!(
+            artifact.artifact_schema_version,
+            "codefabric.query-plan-artifact.v1"
+        );
+        for bundle_id in [
+            &artifact.bundle_ids.ontology_bundle_id,
+            &artifact.bundle_ids.schema_bundle_id,
+            &artifact.bundle_ids.provider_bundle_id,
+            &artifact.bundle_ids.derivation_bundle_id,
+            &artifact.bundle_ids.query_language_bundle_id,
+            &artifact.bundle_ids.model_pack_bundle_id,
+            &artifact.bundle_ids.toolchain_bundle_id,
+        ] {
+            assert!(!bundle_id.is_empty());
+        }
+        assert!(!artifact.source_table_versions.is_empty());
+        assert_eq!(artifact.overlay_generation, 0);
+        assert!(artifact.overlay_table_versions.is_empty());
+        assert!(
+            artifact
+                .control_schema_generation_fingerprint
+                .starts_with("b3:")
+        );
+        assert!(
+            artifact
+                .physical_plan_with_full_metrics
+                .contains("output_rows")
+        );
+        let pg_json: serde_json::Value =
+            serde_json::from_str(&artifact.physical_plan_pg_json).unwrap();
+        assert!(pg_json.is_object() || pg_json.is_array());
+        let round_trip: QueryPlanArtifact =
+            serde_json::from_slice(&serde_json::to_vec(artifact).unwrap()).unwrap();
+        assert_eq!(&round_trip, artifact);
     }
 
     #[tokio::test]

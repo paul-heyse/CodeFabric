@@ -8,19 +8,20 @@ use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures::{Stream, stream};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, RwLock};
 use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
+use tracing::Instrument as _;
 
-use crate::fabric::ServingQuerySession;
+use crate::fabric::{QueryExecutionContext, QueryPlanArtifact, ServingQuerySession};
 use crate::golden_corpus::CoreSourceCoverage;
 use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
 use crate::integrity::{frame_digest, framed_digest};
@@ -34,9 +35,9 @@ use crate::rpc::generated::codefabric::cpgd::v1::{
     CancelQueryResponse, CancellationState, DeliveryPreference, EffectiveLimitsProfile,
     HandshakeRequest, HandshakeResponse, PayloadCompression, QueryEvent, QueryEventHeader,
     QueryExecutionState, ReadResultRequest, ReadinessSummary, ReleaseResultRequest,
-    ReleaseResultResponse, ResultChunk, SnapshotPinnedEvent, StartQueryRequest, StartQueryResponse,
-    StatusRequest, StatusResponse, StreamQueryRequest, TerminalEvent, ValidateQueryRequest,
-    ValidateQueryResponse, WorkspaceClaim, WorkspaceReadiness,
+    ReleaseResultResponse, ResultChunk, SchemaFingerprint, SnapshotPinnedEvent, StartQueryRequest,
+    StartQueryResponse, StatusRequest, StatusResponse, StreamQueryRequest, TerminalEvent,
+    ValidateQueryRequest, ValidateQueryResponse, WorkspaceClaim, WorkspaceReadiness,
 };
 use crate::rpc::{
     AuthorizedUnixStream, MAX_CONTROL_MESSAGE_BYTES, MAX_PAYLOAD_CHUNK_BYTES, SameUserInterceptor,
@@ -48,8 +49,7 @@ use crate::security::{
 use crate::semantic_query::QueryForm;
 use crate::semantic_query::{
     ExecutedSemanticResponse, FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse,
-    ValidatedSemanticRequest, execute_request_with_cancellation, snapshot_response,
-    validate_request,
+    ValidatedSemanticRequest, execute_request_in_context, snapshot_response, validate_request,
 };
 
 const SUPPORTED_FEATURE_BITS: u64 = 0b1111;
@@ -72,6 +72,24 @@ fn opaque_bytes(domain: SemanticFingerprintDomain, value: &str) -> Vec<u8> {
     fingerprint.finalize().to_vec()
 }
 
+fn execution_identity(request: &StartQueryRequest, sequence: u64, accepted_at: i64) -> String {
+    let mut input = Vec::new();
+    for field in [
+        request.agent_instance_id.as_bytes(),
+        request.workspace_id.as_bytes(),
+        request.mcp_call_id.as_bytes(),
+        request.rpc_attempt_id.as_bytes(),
+        request.idempotency_key.as_bytes(),
+        request.request_checksum.as_bytes(),
+    ] {
+        input.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        input.extend_from_slice(field);
+    }
+    input.extend_from_slice(&sequence.to_be_bytes());
+    input.extend_from_slice(&accepted_at.to_be_bytes());
+    format!("execution:{}", &framed_digest(&input)[3..35])
+}
+
 #[derive(Clone, Debug)]
 struct ResultArtifact {
     id: String,
@@ -79,6 +97,29 @@ struct ResultArtifact {
     lease_token: String,
     lease_expires_at_unix_ms: i64,
     bytes: Arc<[u8]>,
+}
+
+/// Durable terminal phase of one query execution artifact bundle.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum QueryArtifactPhase {
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+/// Versioned persisted join between request identity, serving plans, metrics, and result.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersistedQueryArtifactBundle {
+    pub artifact_schema_version: String,
+    pub execution: QueryExecutionContext,
+    pub phase: QueryArtifactPhase,
+    pub plan_artifacts: Vec<QueryPlanArtifact>,
+    pub result_artifact_id: Option<String>,
+    pub public_error_code: Option<String>,
+    pub created_at_unix_ms: i64,
+    pub expires_at_unix_ms: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -96,9 +137,113 @@ impl ResultArtifactStore {
     /// cannot be read.
     pub fn new(root: PathBuf) -> Result<Self, std::io::Error> {
         fs::create_dir_all(&root)?;
+        fs::create_dir_all(root.join("query-plan-artifacts"))?;
         let mut lease_secret = [0_u8; 32];
         fs::File::open("/dev/urandom")?.read_exact(&mut lease_secret)?;
         Ok(Self { root, lease_secret })
+    }
+
+    fn query_artifact_path(&self, execution_id: &str) -> PathBuf {
+        let digest = framed_digest(execution_id.as_bytes());
+        self.root
+            .join("query-plan-artifacts")
+            .join(format!("{}.json", &digest[3..]))
+    }
+
+    fn persist_query_artifact(
+        &self,
+        artifact: &PersistedQueryArtifactBundle,
+    ) -> Result<(), Status> {
+        let value = serde_json::to_value(artifact)
+            .map_err(|_| Status::internal("query artifact serialization failed"))?;
+        let bytes = crate::contracts::jcs::canonicalize_value(&value)
+            .map_err(|_| Status::internal("query artifact canonicalization failed"))?;
+        let final_path = self.query_artifact_path(&artifact.execution.execution_id);
+        if final_path.exists() {
+            let existing = fs::read(&final_path)
+                .map_err(|_| Status::internal("query artifact read failed"))?;
+            if existing == bytes {
+                return Ok(());
+            }
+            return Err(Status::already_exists(
+                "query execution already has a different terminal artifact",
+            ));
+        }
+        let file_name = final_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| Status::internal("query artifact filename is invalid"))?;
+        let temporary =
+            final_path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)
+            .map_err(|_| Status::internal("query artifact staging failed"))?;
+        file.write_all(&bytes)
+            .and_then(|()| file.sync_all())
+            .map_err(|_| Status::internal("query artifact staging write failed"))?;
+        fs::rename(&temporary, &final_path)
+            .map_err(|_| Status::internal("query artifact publication failed"))?;
+        Ok(())
+    }
+
+    /// Read and validate one execution-scoped artifact bundle from durable storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O or data-loss status when the artifact is absent or malformed.
+    pub fn read_query_artifact(
+        &self,
+        execution_id: &str,
+    ) -> Result<PersistedQueryArtifactBundle, Status> {
+        let bytes =
+            fs::read(self.query_artifact_path(execution_id)).map_err(|error| {
+                match error.kind() {
+                    std::io::ErrorKind::NotFound => Status::not_found("query artifact not found"),
+                    _ => Status::internal("query artifact read failed"),
+                }
+            })?;
+        let artifact: PersistedQueryArtifactBundle = serde_json::from_slice(&bytes)
+            .map_err(|_| Status::data_loss("query artifact schema is invalid"))?;
+        if artifact.execution.execution_id != execution_id {
+            return Err(Status::data_loss(
+                "query artifact execution identity differs",
+            ));
+        }
+        Ok(artifact)
+    }
+
+    /// Remove only query artifact bundles whose declared retention lease has expired.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O or data-loss status instead of treating an unreadable artifact as expired.
+    pub fn prune_expired_query_artifacts(&self, observed_at_unix_ms: i64) -> Result<usize, Status> {
+        let mut removed = 0_usize;
+        let entries = fs::read_dir(self.root.join("query-plan-artifacts"))
+            .map_err(|_| Status::internal("query artifact directory read failed"))?;
+        for entry in entries {
+            let entry = entry.map_err(|_| Status::internal("query artifact entry read failed"))?;
+            if !entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                continue;
+            }
+            let bytes = fs::read(entry.path())
+                .map_err(|_| Status::internal("query artifact retention read failed"))?;
+            let artifact: PersistedQueryArtifactBundle = serde_json::from_slice(&bytes)
+                .map_err(|_| Status::data_loss("query artifact retention schema is invalid"))?;
+            if artifact.expires_at_unix_ms <= observed_at_unix_ms {
+                fs::remove_file(entry.path())
+                    .map_err(|_| Status::internal("query artifact retention removal failed"))?;
+                removed = removed.saturating_add(1);
+            }
+        }
+        Ok(removed)
     }
 
     fn insert(
@@ -161,6 +306,7 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
         request: ValidatedSemanticRequest,
         freshness: FreshnessState,
         cancellation: crate::cancellation::Cancellation,
+        execution: QueryExecutionContext,
     ) -> Result<ExecutedSemanticResponse, SemanticQueryError>;
 
     async fn public_snapshot(
@@ -318,8 +464,9 @@ impl SemanticQueryBackend for ServingQuerySession {
         request: ValidatedSemanticRequest,
         freshness: FreshnessState,
         cancellation: crate::cancellation::Cancellation,
+        execution: QueryExecutionContext,
     ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
-        execute_request_with_cancellation(self, request, freshness, cancellation).await
+        execute_request_in_context(self, request, freshness, cancellation, execution).await
     }
 
     async fn public_snapshot(
@@ -382,9 +529,17 @@ impl SemanticQueryBackend for WorkspaceQueryBackend {
         request: ValidatedSemanticRequest,
         freshness: FreshnessState,
         cancellation: crate::cancellation::Cancellation,
+        execution: QueryExecutionContext,
     ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
         let session = self.session(&request.request.workspace_id).await?;
-        execute_request_with_cancellation(session.as_ref(), request, freshness, cancellation).await
+        execute_request_in_context(
+            session.as_ref(),
+            request,
+            freshness,
+            cancellation,
+            execution,
+        )
+        .await
     }
 
     async fn public_snapshot(
@@ -404,6 +559,7 @@ struct QueryHandleState {
 
 #[derive(Debug)]
 struct QueryHandle {
+    execution: QueryExecutionContext,
     resume_token: Vec<u8>,
     cancel_token: Vec<u8>,
     agent_instance_id: String,
@@ -425,6 +581,7 @@ pub struct ProductionQueryService<B> {
     query_bundle: BundleIdentity,
     core_source_coverage: Option<CoreSourceCoverage>,
     tasks: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
+    execution_sequence: AtomicU64,
 }
 
 fn valid_bundle_digest(value: &str) -> bool {
@@ -488,6 +645,7 @@ impl<B> ProductionQueryService<B> {
             query_bundle: query_bundle_identity(),
             core_source_coverage: None,
             tasks: Arc::new(Mutex::new(BTreeMap::new())),
+            execution_sequence: AtomicU64::new(0),
         }
     }
 
@@ -501,6 +659,7 @@ impl<B> ProductionQueryService<B> {
 async fn cancel_active_queries(
     handles: Arc<Mutex<BTreeMap<String, Arc<QueryHandle>>>>,
     tasks: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
+    artifacts: Arc<ResultArtifactStore>,
 ) {
     let active = handles.lock().await.values().cloned().collect::<Vec<_>>();
     for handle in active {
@@ -508,6 +667,13 @@ async fn cancel_active_queries(
             continue;
         }
         handle.cancelled.store(true, Ordering::Release);
+        let _ = artifacts.persist_query_artifact(&terminal_query_artifact(
+            handle.execution.clone(),
+            QueryArtifactPhase::Cancelled,
+            Vec::new(),
+            None,
+            Some("CANCELLED".to_owned()),
+        ));
         append_terminal(
             &handle,
             QueryEvent {
@@ -580,12 +746,13 @@ where
     });
     let handles = Arc::clone(&service.handles);
     let tasks = Arc::clone(&service.tasks);
+    let artifacts = Arc::clone(&service.artifacts);
     let service = CpgQueryServiceServer::new(service)
         .max_decoding_message_size(MAX_CONTROL_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_CONTROL_MESSAGE_BYTES);
     let shutdown = async move {
         shutdown.await;
-        cancel_active_queries(handles, tasks).await;
+        cancel_active_queries(handles, tasks, artifacts).await;
     };
     let result = Server::builder()
         .layer(InterceptorLayer::new(SameUserInterceptor::new(allowed_uid)))
@@ -620,6 +787,7 @@ fn validate_checksum(expected: &str, bytes: &[u8]) -> Result<(), Status> {
 struct PublicBoundaryError {
     status: Status,
     canonical_record_json: String,
+    code: &'static str,
 }
 
 #[derive(serde::Serialize)]
@@ -679,6 +847,28 @@ fn public_boundary_error(
     PublicBoundaryError {
         status: Status::new(grpc_code(entry.grpc_status), entry.public_message_template),
         canonical_record_json,
+        code: entry.name,
+    }
+}
+
+fn terminal_query_artifact(
+    execution: QueryExecutionContext,
+    phase: QueryArtifactPhase,
+    plan_artifacts: Vec<QueryPlanArtifact>,
+    result_artifact_id: Option<String>,
+    public_error_code: Option<String>,
+) -> PersistedQueryArtifactBundle {
+    let created_at_unix_ms = now_millis();
+    PersistedQueryArtifactBundle {
+        artifact_schema_version: "codefabric.query-execution-artifact-bundle.v1".to_owned(),
+        execution,
+        phase,
+        plan_artifacts,
+        result_artifact_id,
+        public_error_code,
+        created_at_unix_ms,
+        expires_at_unix_ms: created_at_unix_ms
+            .saturating_add(RESULT_LEASE_SECONDS.saturating_mul(1_000)),
     }
 }
 
@@ -774,7 +964,12 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                 );
                 match tokio::time::timeout(
                     request_timeout,
-                    backend.execute(validated, admitted_freshness, cancellation),
+                    backend.execute(
+                        validated,
+                        admitted_freshness,
+                        cancellation,
+                        handle.execution.clone(),
+                    ),
                 )
                 .await
                 {
@@ -814,6 +1009,13 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
     let executed = match executed {
         Ok(executed) => executed,
         Err(error) => {
+            let _ = artifacts.persist_query_artifact(&terminal_query_artifact(
+                handle.execution.clone(),
+                QueryArtifactPhase::Failed,
+                Vec::new(),
+                None,
+                Some(error.code.to_owned()),
+            ));
             let execution_state = QueryExecutionState::Failed;
             let freshness_state = match freshness.state() {
                 FreshnessState::Current => "CURRENT",
@@ -887,6 +1089,39 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
     ) else {
         return;
     };
+    if artifacts
+        .persist_query_artifact(&terminal_query_artifact(
+            handle.execution.clone(),
+            QueryArtifactPhase::Succeeded,
+            executed.plan_artifacts.clone(),
+            Some(artifact.id.clone()),
+            None,
+        ))
+        .is_err()
+    {
+        append_terminal(
+            &handle,
+            QueryEvent {
+                event: Some(Event::Terminal(TerminalEvent {
+                    header: Some(event_header(&query_id, 1, Some(snapshot_id))),
+                    execution_state: QueryExecutionState::Failed as i32,
+                    availability_state: "UNAVAILABLE".to_owned(),
+                    freshness_state: "UNKNOWN".to_owned(),
+                    limit_state: "NOT_APPLIED".to_owned(),
+                    dependency_state: "SATISFIED".to_owned(),
+                    canonical_response_checksum: None,
+                    canonical_error_record_json: None,
+                    artifact_id: None,
+                    result_row_count: 0,
+                    result_byte_count: 0,
+                    cleanup_state: "COMPLETE".to_owned(),
+                })),
+            },
+            QueryExecutionState::Failed,
+        )
+        .await;
+        return;
+    }
     artifact_records
         .lock()
         .await
@@ -986,6 +1221,16 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             request.optional_feature_bits,
             SUPPORTED_FEATURE_BITS,
         )?;
+        let active_snapshot = self
+            .backend
+            .public_snapshot(&claims[0].workspace_id)
+            .await
+            .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        let capability_codes = ["SOURCE_BYTES", "SOURCE_INVENTORY"]
+            .into_iter()
+            .filter_map(crate::registries::capability_code)
+            .map(u32::from)
+            .collect::<Vec<_>>();
         Ok(Response::new(HandshakeResponse {
             daemon_instance_id: "codefabric-local-daemon".to_owned(),
             daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -995,17 +1240,21 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             negotiated_feature_bits: negotiated,
             negotiated_compression: PayloadCompression::Identity as i32,
             installed_bundles: vec![self.query_bundle.clone()],
-            active_schema_fingerprints: Vec::new(),
+            active_schema_fingerprints: vec![SchemaFingerprint {
+                schema_id: "codefabric.snapshot.base-table-versions".to_owned(),
+                version: "1".to_owned(),
+                digest: active_snapshot.base_table_version_digest.clone(),
+            }],
             effective_limits: Some(effective_limits_profile()),
             authorized_workspaces: claims,
             server_time_unix_ms: now_millis(),
             readiness: Some(ReadinessSummary {
                 readiness: WorkspaceReadiness::Ready as i32,
                 reason_code: None,
-                active_snapshot_id: None,
+                active_snapshot_id: Some(active_snapshot.snapshot_id),
                 supported_language_codes: vec![10, 20],
                 supported_query_forms: supported_query_forms(),
-                capability_codes: Vec::new(),
+                capability_codes,
             }),
         }))
     }
@@ -1022,6 +1271,41 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             .public_snapshot(&request.workspace_id)
             .await
             .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        let mut capability_statuses = Vec::new();
+        if let Some(coverage) = &self.core_source_coverage {
+            capability_statuses.push(BTreeMap::from([
+                ("capability_code".to_owned(), "CORE_SOURCE_V1".to_owned()),
+                ("capability_state".to_owned(), "CURRENT".to_owned()),
+                ("reason_code".to_owned(), "NOT_APPLICABLE".to_owned()),
+                ("diagnostic_id".to_owned(), "NOT_APPLICABLE".to_owned()),
+                (
+                    "precision_profile".to_owned(),
+                    coverage.precision_profile.to_owned(),
+                ),
+                (
+                    "coverage_profile_id".to_owned(),
+                    coverage.coverage_profile_id.clone(),
+                ),
+                (
+                    "coverage_profile_digest".to_owned(),
+                    coverage.coverage_profile_digest.clone(),
+                ),
+                (
+                    "scenario_count".to_owned(),
+                    coverage.scenario_ids.len().to_string(),
+                ),
+                (
+                    "scenario_ids".to_owned(),
+                    coverage
+                        .scenario_ids
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(","),
+                ),
+            ]));
+        }
+        capability_statuses.extend(snapshot.capability_summaries.clone());
         let status = PublicStatusView {
             ready: true,
             workspace_id: request.workspace_id.clone(),
@@ -1034,39 +1318,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             ]),
             supported_languages: vec!["python".to_owned(), "rust".to_owned()],
             supported_request_forms: supported_query_forms(),
-            capability_statuses: self.core_source_coverage.as_ref().map_or_else(
-                Vec::new,
-                |coverage| {
-                    vec![BTreeMap::from([
-                        ("capability_code".to_owned(), "CORE_SOURCE_V1".to_owned()),
-                        (
-                            "precision_profile".to_owned(),
-                            coverage.precision_profile.to_owned(),
-                        ),
-                        (
-                            "coverage_profile_id".to_owned(),
-                            coverage.coverage_profile_id.clone(),
-                        ),
-                        (
-                            "coverage_profile_digest".to_owned(),
-                            coverage.coverage_profile_digest.clone(),
-                        ),
-                        (
-                            "scenario_count".to_owned(),
-                            coverage.scenario_ids.len().to_string(),
-                        ),
-                        (
-                            "scenario_ids".to_owned(),
-                            coverage
-                                .scenario_ids
-                                .iter()
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .join(","),
-                        ),
-                    ])]
-                },
-            ),
+            capability_statuses,
             freshness_state: match self.freshness.state() {
                 FreshnessState::Current => "CURRENT",
                 FreshnessState::PotentiallyStale => "POTENTIALLY_STALE",
@@ -1180,12 +1432,29 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             ));
         }
         let semantic_request_id = validated.request.semantic_request_id.clone();
-        let query_id = format!("query:{}", &request.request_checksum[3..35]);
+        if request
+            .semantic_request_id
+            .as_ref()
+            .is_some_and(|identity| identity != &semantic_request_id)
+        {
+            return Err(Status::invalid_argument(
+                "RPC semantic request identity differs from canonical request",
+            ));
+        }
+        let accepted_at = now_millis();
+        let sequence = self.execution_sequence.fetch_add(1, Ordering::Relaxed);
+        let query_id = execution_identity(&request, sequence, accepted_at);
+        let execution = QueryExecutionContext {
+            execution_id: query_id.clone(),
+            semantic_request_id: semantic_request_id.clone(),
+            mcp_call_id: request.mcp_call_id.clone(),
+        };
         let resume_token = opaque_bytes(SemanticFingerprintDomain::QueryResume, &query_id);
         // The accepted v1 response exposes one opaque handle token. It therefore
         // authorizes both replay and cancellation; future protocol majors may split it.
         let cancel_token = resume_token.clone();
         let handle = Arc::new(QueryHandle {
+            execution: execution.clone(),
             resume_token: resume_token.clone(),
             cancel_token,
             agent_instance_id: request.agent_instance_id,
@@ -1200,22 +1469,31 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             .insert(query_id.clone(), Arc::clone(&handle));
         idempotency.insert(request.idempotency_key, query_id.clone());
         drop(idempotency);
-        let task = tokio::spawn(execute_accepted_query(
-            Arc::clone(&self.backend),
-            Arc::clone(&self.artifacts),
-            Arc::clone(&self.artifact_records),
-            handle,
-            query_id.clone(),
-            validated,
-            request.deadline_unix_ms,
-            self.freshness.clone(),
-            self.freshness_timeout,
-        ));
+        let span = tracing::info_span!(
+            "query_execution",
+            execution_id = %execution.execution_id,
+            semantic_request_id = %execution.semantic_request_id,
+            mcp_call_id = %execution.mcp_call_id,
+        );
+        let task = tokio::spawn(
+            execute_accepted_query(
+                Arc::clone(&self.backend),
+                Arc::clone(&self.artifacts),
+                Arc::clone(&self.artifact_records),
+                handle,
+                query_id.clone(),
+                validated,
+                request.deadline_unix_ms,
+                self.freshness.clone(),
+                self.freshness_timeout,
+            )
+            .instrument(span),
+        );
         self.tasks.lock().await.insert(query_id.clone(), task);
         Ok(Response::new(StartQueryResponse {
             daemon_query_id: query_id,
             resume_token,
-            accepted_at_unix_ms: now_millis(),
+            accepted_at_unix_ms: accepted_at,
             query_execution_state: QueryExecutionState::Accepted as i32,
             queue_class: "accepted".to_owned(),
             queue_position: None,
@@ -1331,6 +1609,14 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             }));
         }
         handle.cancelled.store(true, Ordering::Release);
+        self.artifacts
+            .persist_query_artifact(&terminal_query_artifact(
+                handle.execution.clone(),
+                QueryArtifactPhase::Cancelled,
+                Vec::new(),
+                None,
+                Some("CANCELLED".to_owned()),
+            ))?;
         append_terminal(
             &handle,
             QueryEvent {
@@ -1596,6 +1882,7 @@ mod tests {
             request: ValidatedSemanticRequest,
             freshness: FreshnessState,
             _cancellation: crate::cancellation::Cancellation,
+            _execution: QueryExecutionContext,
         ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
             let response = SemanticQueryResponse {
                 specification: "composable semantic CPG fact query response",
@@ -1645,6 +1932,7 @@ mod tests {
                 response_digest: framed_digest(&canonical_bytes),
                 response,
                 canonical_bytes,
+                plan_artifacts: Vec::new(),
             })
         }
 
@@ -1667,6 +1955,7 @@ mod tests {
             request: ValidatedSemanticRequest,
             freshness: FreshnessState,
             cancellation: crate::cancellation::Cancellation,
+            execution: QueryExecutionContext,
         ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
             self.started.notify_one();
             loop {
@@ -1680,7 +1969,8 @@ mod tests {
                     }
                 }
             }
-            SemanticQueryBackend::execute(&FakeBackend, request, freshness, cancellation).await
+            SemanticQueryBackend::execute(&FakeBackend, request, freshness, cancellation, execution)
+                .await
         }
 
         async fn public_snapshot(
@@ -1848,6 +2138,137 @@ mod tests {
         let chunks = futures::StreamExt::collect::<Vec<_>>(result).await;
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].as_ref().unwrap().final_chunk);
+    }
+
+    #[tokio::test]
+    async fn wp65_operational_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let service = ProductionQueryService::new(
+            Arc::new(FakeBackend),
+            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+        let canonical = canonical_request();
+        let started = service
+            .start_query(Request::new(StartQueryRequest {
+                agent_instance_id: "artifact-agent".to_owned(),
+                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                mcp_call_id: "mcp-call-65".to_owned(),
+                rpc_attempt_id: "rpc-attempt-65".to_owned(),
+                semantic_request_id: Some("rpc-gate-b".to_owned()),
+                semantic_query_version: "1.3".to_owned(),
+                canonical_request_json: canonical.clone(),
+                request_checksum: framed_digest(&canonical),
+                delivery_preference: DeliveryPreference::Resource as i32,
+                deadline_unix_ms: now_millis() + 60_000,
+                idempotency_key: "wp65-persist".to_owned(),
+                payload_compression: PayloadCompression::Identity as i32,
+                ..StartQueryRequest::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let execution_id = started.daemon_query_id.clone();
+        let events = service
+            .stream_query(Request::new(StreamQueryRequest {
+                daemon_query_id: started.daemon_query_id,
+                resume_token: started.resume_token,
+                after_sequence: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let events = futures::StreamExt::collect::<Vec<_>>(events).await;
+        assert_eq!(events.len(), 3);
+
+        let persisted = service
+            .artifacts
+            .read_query_artifact(&execution_id)
+            .unwrap();
+        assert_eq!(persisted.phase, QueryArtifactPhase::Succeeded);
+        assert_eq!(persisted.execution.semantic_request_id, "rpc-gate-b");
+        assert_eq!(persisted.execution.mcp_call_id, "mcp-call-65");
+        assert!(persisted.result_artifact_id.is_some());
+        assert!(persisted.expires_at_unix_ms > persisted.created_at_unix_ms);
+        assert_eq!(
+            service
+                .artifacts
+                .prune_expired_query_artifacts(persisted.created_at_unix_ms)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            service
+                .artifacts
+                .prune_expired_query_artifacts(persisted.expires_at_unix_ms)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            service
+                .artifacts
+                .read_query_artifact(&execution_id)
+                .unwrap_err()
+                .code(),
+            tonic::Code::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn wp65_negative_zero_state() {
+        let root = tempfile::tempdir().unwrap();
+        let backend = Arc::new(BlockingBackend {
+            started: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+            cancelled: Arc::new(Notify::new()),
+        });
+        let service = ProductionQueryService::new(
+            Arc::clone(&backend),
+            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+        let canonical = canonical_request();
+        let started = service
+            .start_query(Request::new(StartQueryRequest {
+                agent_instance_id: "cancel-agent".to_owned(),
+                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                mcp_call_id: "mcp-cancel-65".to_owned(),
+                semantic_query_version: "1.3".to_owned(),
+                canonical_request_json: canonical.clone(),
+                request_checksum: framed_digest(&canonical),
+                delivery_preference: DeliveryPreference::Resource as i32,
+                deadline_unix_ms: now_millis() + 60_000,
+                idempotency_key: "wp65-cancel".to_owned(),
+                payload_compression: PayloadCompression::Identity as i32,
+                ..StartQueryRequest::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        backend.started.notified().await;
+        service
+            .cancel_query(Request::new(CancelQueryRequest {
+                daemon_query_id: started.daemon_query_id.clone(),
+                cancel_token: started.resume_token,
+                agent_instance_id: "cancel-agent".to_owned(),
+                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                reason: "drop the stream".to_owned(),
+            }))
+            .await
+            .unwrap();
+        let artifact = service
+            .artifacts
+            .read_query_artifact(&started.daemon_query_id)
+            .unwrap();
+        assert_eq!(artifact.phase, QueryArtifactPhase::Cancelled);
+        assert_eq!(artifact.public_error_code.as_deref(), Some("CANCELLED"));
+        assert!(artifact.plan_artifacts.is_empty());
+        assert!(artifact.result_artifact_id.is_none());
+        backend.release.notify_one();
     }
 
     #[tokio::test]

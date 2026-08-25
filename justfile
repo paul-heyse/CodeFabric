@@ -171,7 +171,7 @@ wave4-integration-check:
 [doc("Run the complete Wave-5 vertical golden-slice acceptance surface")]
 [group('test')]
 wave5-integration-check:
-    cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|75)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
+    cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|65|75)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
     cd rustc-extractor && cargo test --locked wp35
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests
 
@@ -189,6 +189,12 @@ semantic-query-conformance-check:
 [group('test')]
 query-determinism-check:
     cargo nextest run --locked --lib -E 'test(/(wp64_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|wp64_production_replay_is_partition_and_batch_independent)/)' --no-tests=fail
+
+[doc("Prove execution-scoped persisted plan artifacts use the exact served plan without diagnostic re-execution")]
+[group('test')]
+query-artifact-single-execution-check:
+    @just packet-oracle-check WP65
+    @if rg -n 'AnalyzeExec::new|LogicalPlan::Analyze|EXPLAIN ANALYZE' src/query_service.rs src/semantic_query.rs src/fabric/serving.rs; then echo 'governed serving must not construct AnalyzeExec or EXPLAIN ANALYZE' >&2; exit 1; fi
 
 [doc("Prove the semantic query path contains no legacy SQL builder, string state fields, or order-sensitive checksum")]
 [group('static')]

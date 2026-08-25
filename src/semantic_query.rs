@@ -11,7 +11,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
 use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice, canonicalize_value};
-use crate::fabric::{ServingQueryError, ServingQuerySession};
+use crate::fabric::{
+    QueryExecutionContext, QueryPlanArtifact, ServingQueryError, ServingQuerySession,
+};
 pub use crate::registries::QueryForm;
 use crate::registries::{
     COMPLETENESS_STATE_VALUES, CompletenessState, DEPENDENCY_STATE_VALUES, DependencyState,
@@ -419,6 +421,7 @@ pub struct ExecutedSemanticResponse {
     pub response: SemanticQueryResponse,
     pub canonical_bytes: Vec<u8>,
     pub response_digest: String,
+    pub plan_artifacts: Vec<QueryPlanArtifact>,
 }
 
 #[derive(Debug, Error)]
@@ -1209,13 +1212,16 @@ fn graph_batch(
 
 async fn load_graph_edges(
     session: &ServingQuerySession,
-) -> Result<Vec<GraphEdge>, SemanticQueryError> {
+    execution: &QueryExecutionContext,
+) -> Result<(Vec<GraphEdge>, QueryPlanArtifact), SemanticQueryError> {
     let plan = LogicalPlanBuilder::from(session.table_plan("relations").await?)
         .project(vec![col("fact_id"), col("source_id"), col("target_id")])?
         .sort(vec![col("fact_id").sort(true, true)])?
         .build()?;
     session.validate_query_plan(&plan)?;
-    let result = session.query_plan("graph-edge-snapshot", plan).await?;
+    let result = session
+        .query_plan_in_execution("graph-edge-snapshot", plan, execution)
+        .await?;
     let mut edges = Vec::new();
     for batch in &result.batches {
         let array = |name: &str| -> Result<&FixedSizeBinaryArray, SemanticQueryError> {
@@ -1254,7 +1260,7 @@ async fn load_graph_edges(
     }
     edges.sort();
     edges.dedup();
-    Ok(edges)
+    Ok((edges, result.artifact))
 }
 
 fn shortest_path(
@@ -1548,8 +1554,31 @@ pub async fn execute_request_with_cancellation(
     freshness: FreshnessState,
     cancellation: crate::cancellation::Cancellation,
 ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
+    let execution = QueryExecutionContext {
+        execution_id: format!("direct:{}", validated.request_digest),
+        semantic_request_id: validated.request.semantic_request_id.clone(),
+        mcp_call_id: "not-applicable".to_owned(),
+    };
+    execute_request_in_context(session, validated, freshness, cancellation, execution).await
+}
+
+/// Execute one request under a boundary-allocated execution identity.
+///
+/// # Errors
+///
+/// Returns the same typed validation, snapshot, graph, execution, and encoding failures as
+/// [`execute_request_with_cancellation`].
+#[allow(clippy::too_many_lines)] // One pinned session keeps all clause results and response identities snapshot-coherent.
+pub async fn execute_request_in_context(
+    session: &ServingQuerySession,
+    validated: ValidatedSemanticRequest,
+    freshness: FreshnessState,
+    cancellation: crate::cancellation::Cancellation,
+    execution: QueryExecutionContext,
+) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
     let manifest = session.snapshot_manifest();
     let bound = bind_request(session, &validated).await?;
+    let mut plan_artifacts = Vec::new();
     let mut results = Vec::with_capacity(validated.request.queries.len());
     let mut entities = BTreeMap::new();
     let mut facts = BTreeMap::new();
@@ -1568,7 +1597,9 @@ pub async fn execute_request_with_cancellation(
         .iter()
         .any(|block| matches!(block.operator, BoundOperator::Graph(_)))
     {
-        load_graph_edges(session).await?
+        let (edges, artifact) = load_graph_edges(session, &execution).await?;
+        plan_artifacts.push(artifact);
+        edges
     } else {
         Vec::new()
     };
@@ -1599,8 +1630,9 @@ pub async fn execute_request_with_cancellation(
                 plan,
             } => {
                 let result = session
-                    .query_plan(&block.typed.block_id, plan.clone())
+                    .query_plan_in_execution(&block.typed.block_id, plan.clone(), &execution)
                     .await?;
+                plan_artifacts.push(result.artifact.clone());
                 let produced_rows = result.artifact.output_row_count;
                 let mut ids = response_ids(&result.batches, query.request)?;
                 let limit_reached = produced_rows > block.typed.limit.first;
@@ -1838,6 +1870,7 @@ pub async fn execute_request_with_cancellation(
         response_digest: b3(&canonical_bytes),
         response,
         canonical_bytes,
+        plan_artifacts,
     })
 }
 
@@ -1942,7 +1975,44 @@ pub(crate) fn snapshot_response(
         provider_bundle_version: bundle_version(&manifest.body.bundles.provider_bundle_id),
         derivation_bundle_version: bundle_version(&manifest.body.bundles.derivation_bundle_id),
         query_language_version: bundle_version(&manifest.body.bundles.query_language_bundle_id),
-        capability_summaries: Vec::new(),
+        capability_summaries: manifest
+            .body
+            .contexts
+            .records
+            .iter()
+            .map(|record| {
+                let (capability_state, reason_code, diagnostic_id) = match freshness {
+                    FreshnessState::Current => ("CURRENT", "NOT_APPLICABLE", "NOT_APPLICABLE"),
+                    FreshnessState::PotentiallyStale => (
+                        "UNKNOWN",
+                        "CURRENT_FACTS_UNAVAILABLE",
+                        "diagnostic:potentially-stale",
+                    ),
+                    FreshnessState::Unavailable => (
+                        "UNKNOWN",
+                        "CURRENT_FACTS_UNAVAILABLE",
+                        "diagnostic:source-unavailable",
+                    ),
+                };
+                BTreeMap::from([
+                    (
+                        "capability_code".to_owned(),
+                        "ANALYSIS_CONTEXT_FACTS".to_owned(),
+                    ),
+                    (
+                        "analysis_context_id".to_owned(),
+                        record.analysis_context_id.clone(),
+                    ),
+                    (
+                        "capability_partition_fingerprint".to_owned(),
+                        record.capability_partition_digest.clone(),
+                    ),
+                    ("capability_state".to_owned(), capability_state.to_owned()),
+                    ("reason_code".to_owned(), reason_code.to_owned()),
+                    ("diagnostic_id".to_owned(), diagnostic_id.to_owned()),
+                ])
+            })
+            .collect(),
         diagnostic_references: Vec::new(),
     }
 }
