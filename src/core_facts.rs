@@ -22,7 +22,7 @@ use crate::fact_ingest::{
     FactEvidenceRow, FactIngestError, FactScope, OwnerRow, PropertyFactRow, PropertyValue,
     ProviderFactBatch, ProviderFactManifest, ProviderFactStream, StreamTerminal,
     decode_validated_arrow_ipc_chunks, encode_capability_statuses, encode_entities,
-    encode_evidence, encode_owners, encode_properties,
+    encode_evidence, encode_owners, encode_properties, encode_relations,
 };
 use crate::identity::{
     semantic_entity_identity, semantic_owner_identity, text_property_fact_identity,
@@ -872,6 +872,10 @@ impl CoreFactEngine {
                 ProviderFactBatch {
                     table_code: 100,
                     batch: encode_entities(&[entity])?,
+                },
+                ProviderFactBatch {
+                    table_code: 110,
+                    batch: encode_relations(&[])?,
                 },
                 ProviderFactBatch {
                     table_code: 120,
