@@ -24,7 +24,9 @@ See [`README.md §2`](./README.md#2-citation-convention) for spec tags.
 | `df-plan` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | §41–§56 | `datafusion-pyarrow-rust-ref` |
 | `df-schema` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | S1–S15 | `datafusion-pyarrow-rust-ref` |
 | `df-calc` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | C1–C13 | `datafusion-pyarrow-rust-ref` |
-| `arrow` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | Arrow/Parquet integration throughout §0–§40A, S1–S15, and C1–C13 | `datafusion-pyarrow-rust-ref` |
+| `arrow` | `arrow_rust_59_datafusion55_advanced_reference_2026-08-23.md` | §0–§28 (its topic map lists §29–§30, but the body ends at §28) | `datafusion-pyarrow-rust-ref` |
+| `principles` | `full_data_fabric_design_principles.md` | Principles 1–25 + §27–§31 | `datafusion-pyarrow-rust-ref` |
+| `align` | `datafusion55_arrow59_design_principle_alignment_manual_2026-08-24.md` | P1–P25 · pattern families MOD…TST · flows §4–§11 · App. A | `datafusion-pyarrow-rust-ref` |
 | `delta` | `deltalake_rust_1.0.0_43a0cf10_datafusion55_arrow59_advanced_reference_2026-08-23.md` | §0, §2–§13 (no §1) | `deltalake-rust-ref` |
 | `gix` | `gix_rust_advanced_reference.md` | §0–§50 + §1A + App. A–F | `gix-notify-ref` |
 | `notify` | `notify_debouncer_full_rust_reference.md` | §0–§40 | `gix-notify-ref` |
@@ -45,10 +47,15 @@ The skills already carry dense per-document section indexes with line numbers in
 The last two rows are agent tooling rather than dependencies: no spec section cites them, so
 they appear in this table and nowhere else in this file.
 
-The target DataFusion/Arrow document consolidates the former engine, planning, schema,
-calculation, and Arrow routes. Its source-verified §40A and Part III upgrade gate take precedence
-over stale illustrative version strings in its imported deep dives. Navigate it with
-`just lib-outline <ref>.md --match '^30\)' --view expanded`.
+The target DataFusion document consolidates the former engine, planning, schema, and
+calculation routes; the Arrow route has its own refreshed document (`arrow` above), whose
+chapter numbering is what every `arrow §N` citation below resolves against. The DataFusion
+document's source-verified §40A and Part III upgrade gates V1–V6 take precedence over stale
+illustrative version strings in its imported deep dives; the Arrow document's own version
+matrix plays the same role there. `principles` and `align` are the design constitution and
+its Arrow/DataFusion alignment manual — `align` cites only its internal P-numbers and
+pattern IDs, and the skill's `REFERENCE.md` §2 binds those IDs to `df`/`arrow` sections.
+Navigate the big documents with `just lib-outline <ref>.md --view names`.
 
 ## 2. `LIFE` — watcher, Git state, scheduling
 

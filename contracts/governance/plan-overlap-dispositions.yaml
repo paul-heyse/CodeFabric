@@ -1,0 +1,37 @@
+schema_version: 1
+records:
+  - resource: rustc-extractor/src/wrapper.rs
+    packets: [WP60, WP61]
+    left_phase: WP60 owns extractor transport consolidation and removal of the bespoke JSON protocol.
+    right_phase: WP61 owns the phase-carrying wrapper error type and public error-code projection.
+    rationale: The protocol seam and error representation are separately testable; WP60 lands transport behavior before WP61 changes failure representation.
+  - resource: src/fabric/serving.rs
+    packets: [WP58, WP62]
+    left_phase: WP58 owns TableProvider statistics, pushdown truth, and Id16 metadata preservation.
+    right_phase: WP62 owns typed semantic-request lowering and runtime-state derivation at the query boundary.
+    rationale: Provider contract metadata is established independently of the semantic compiler that consumes the provider.
+  - resource: src/fabric/serving.rs
+    packets: [WP58, WP64]
+    left_phase: WP58 owns provider statistics, physical-plan evidence, and Arrow extension metadata.
+    right_phase: WP64 owns deterministic plan serialization and result checksum construction.
+    rationale: Provider truth and reproducibility serialization have independent acceptance suites and no shared authority field.
+  - resource: src/fabric/serving.rs
+    packets: [WP58, WP65]
+    left_phase: WP58 owns provider metadata and observations from the served physical plan.
+    right_phase: WP65 owns execution-scoped artifact capture after consuming that exact served plan.
+    rationale: WP58 establishes truthful observations; WP65 persists them without changing provider behavior or re-executing the plan.
+  - resource: src/operational_store.rs
+    packets: [WP65, WP69]
+    left_phase: WP69 first removes SQL-text schema parsing and establishes typed generated operational-store specifications.
+    right_phase: WP65 then adds execution-artifact persistence through the resulting typed store interface.
+    rationale: The execution order is intentionally WP69 before WP65; model-spec consumption and artifact CRUD remain separately proved phases.
+  - resource: src/operational_store.rs
+    packets: [WP66, WP69]
+    left_phase: WP69 first establishes typed generated store specifications and removes shadow parsing authority.
+    right_phase: WP66 then adds provenance closure queries and explain-version traversal through the typed store.
+    rationale: Model authority lands before provenance consumers; each phase has distinct schema-authority and traversal oracles.
+  - resource: src/query_service.rs
+    packets: [WP63, WP64]
+    left_phase: WP64 first establishes deterministic result ordering, checksums, and reproducibility records.
+    right_phase: WP63 then activates the daemon query vertical using the already deterministic query-service contract.
+    rationale: Reproducibility behavior is proved below the daemon activation seam, so activation does not redefine result identity.

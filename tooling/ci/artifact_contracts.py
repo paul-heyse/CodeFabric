@@ -150,6 +150,7 @@ REVIEW_VERDICTS = {
         "framework-unowned",
     },
 }
+REVIEW_ARTIFACT_ROW = re.compile(r"^\|\s*`([^`]+)`\s*\|", re.MULTILINE)
 TARGET_PATH = re.compile(rb"(?:^|/)target(?:/|$)")
 STABLE_HEADING_ID = re.compile(
     r"^#{2,6}\s+(?P<id>WP\d+[a-z]?|M\d+|DB\d+|D-\d+|I-\d+|"
@@ -169,6 +170,19 @@ JUST_RECIPE = re.compile(r"\bjust\s+([a-z][a-z0-9-]*)")
 
 class ArtifactContractError(ValueError):
     """An artifact or a derived trust assertion is invalid."""
+
+
+def documented_review_artifacts(root: Path = ROOT) -> set[str]:
+    """Return the review artifact vocabulary documented by schema section 7."""
+    path = root / ".claude/skills/_shared/artifact-schemas.md"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ArtifactContractError(f"cannot read {path}: {error}") from error
+    section = source.partition("## 7. Review-artifact frontmatter")[2].partition(
+        "\n## "
+    )[0]
+    return set(REVIEW_ARTIFACT_ROW.findall(section)) - {"artifact"}
 
 
 def active_plan_path(root: Path = ROOT) -> Path:

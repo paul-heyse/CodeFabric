@@ -428,6 +428,24 @@ alignment-detector-check detector_id="":
 audit-baseline-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py baseline-check
 
+[doc("Validate governed oracle criteria, substantive definitions, and zero-match-safe selectors")]
+[group('gate')]
+oracle-substance-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_plan_assurance.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py oracle-substance-check
+    @just packet-oracle-check WP73
+    @just packet-oracle-check WP54
+
+[doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
+[group('gate')]
+plan-dependency-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py dependency-check
+
+[doc("Execute exactly four substantive acceptance oracles for one implementation packet")]
+[group('test')]
+packet-oracle-check packet:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check "{{packet}}"
+
 [doc("Derive active-plan input freshness and proving-commit trust")]
 [group('gate')]
 plan-status:

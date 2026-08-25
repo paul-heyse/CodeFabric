@@ -12,6 +12,7 @@ import pytest
 
 from tooling.ci.artifact_contracts import (
     DEFAULT_PLAN,
+    REVIEW_REQUIREMENTS,
     ROOT,
     ArtifactContractError,
     _accepted_gate_substitutions,
@@ -22,6 +23,7 @@ from tooling.ci.artifact_contracts import (
     commit_trust,
     declared_inputs,
     derive_plan_status,
+    documented_review_artifacts,
     load_just_recipes,
     load_state,
     parse_frontmatter,
@@ -32,6 +34,10 @@ from tooling.ci.artifact_contracts import (
 )
 
 STATE = ROOT / str(parse_frontmatter(DEFAULT_PLAN)["state_path"])
+
+
+def test_review_artifact_vocabulary_matches_documented_schema() -> None:
+    assert documented_review_artifacts() == set(REVIEW_REQUIREMENTS)
 
 
 def _git(root: Path, *args: str) -> str:
