@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP62",
+  "current_packet": "WP65",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -112,31 +112,33 @@
       "blockers": []
     },
     "WP62": {
-      "status": "ready",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "f51ed2a1625869a85a27626626f6775f2773a827",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP75": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "3ebe45f95defffed2cac6e8620109adc8639e435",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP63": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "7d3a710235290923258ea3d15023fb604f1a6b3f",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP64": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dcf30b6eaa8c34c85557ecba563d1618cffadb25",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first M11 full-root run exposed checksum working bytes being charged to the delivered Arrow output-byte limit, which made an exact-boundary WP25 result fail after WP64. The checksum encoder is now bounded by the remaining session memory while the output-byte contract remains inclusive; the focused regression and complete root suite passed."
+      ],
       "blockers": []
     },
     "WP65": {
@@ -225,8 +227,8 @@
       "blockers": []
     },
     "M11": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "dcf30b6eaa8c34c85557ecba563d1618cffadb25",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -323,6 +325,6 @@
       "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
     }
   ],
-  "next_action": "Implement WP62 typed semantic request IR, native DataFusion relational lowering, truthful runtime states, and four exact oracles with proportional packet validation.",
-  "updated_at": "2026-08-25T21:17:47Z"
+  "next_action": "Complete DB10 query-plane legacy removal and its focused zero-state proof, then implement WP65 execution identity and the persisted single-execution artifact bundle.",
+  "updated_at": "2026-08-25T22:56:24Z"
 }
