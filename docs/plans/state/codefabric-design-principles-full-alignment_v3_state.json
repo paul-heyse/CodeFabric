@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP60",
+  "current_packet": "WP61",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -98,8 +98,8 @@
       "blockers": []
     },
     "WP60": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "59e39d2b8f03d5e1c6ded66744f8b76b4656dba3",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -218,8 +218,8 @@
       "blockers": []
     },
     "M10": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "59e39d2b8f03d5e1c6ded66744f8b76b4656dba3",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -262,8 +262,8 @@
       "blockers": []
     },
     "DB11": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "59e39d2b8f03d5e1c6ded66744f8b76b4656dba3",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -323,6 +323,6 @@
       "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
     }
   ],
-  "next_action": "Complete WP60 against its four substantive oracles: generated field-role authority, domain provider DTO and real adapter contract, single cancellation propagation, extractor protocol cutover, and admission eviction.",
-  "updated_at": "2026-08-25T20:23:10Z"
+  "next_action": "Implement WP61 lifecycle phases, generated error vocabulary, guard/state truth, and four exact oracles with proportional packet validation.",
+  "updated_at": "2026-08-25T20:51:56Z"
 }
