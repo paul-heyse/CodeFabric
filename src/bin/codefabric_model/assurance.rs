@@ -5,6 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use codefabric::contracts::models::{
+    OwnerAcceptance, RequirementRecord, RequirementStatus, RequirementTraces,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -69,20 +72,6 @@ pub struct RuleEvidence {
     pub rule_test: String,
 }
 
-/// Model-derived requirement declaration whose verifier names are live Just capabilities.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RequirementEvidence {
-    pub requirement_id: String,
-    pub source_artifact: String,
-    pub source_path: String,
-    pub normative_text: String,
-    pub normative_text_digest: String,
-    pub implements: Vec<String>,
-    pub verified_by: Vec<String>,
-    pub status: String,
-}
-
 /// Complete recomputed evidence inventory. It is diagnostic and is never persisted as a verdict.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -92,7 +81,7 @@ pub struct AssuranceInventory {
     pub python_tests: BTreeSet<String>,
     pub rules: Vec<RuleEvidence>,
     pub fixtures: BTreeSet<String>,
-    pub requirements: Vec<RequirementEvidence>,
+    pub requirements: Vec<RequirementRecord>,
     pub package_capabilities: BTreeSet<String>,
     pub collector_fallback_reasons: Vec<String>,
 }
@@ -448,9 +437,7 @@ fn collect_rules(repository_root: &Path) -> Result<Vec<RuleEvidence>, AssuranceE
     Ok(pairs)
 }
 
-fn collect_requirements(
-    repository_root: &Path,
-) -> Result<Vec<RequirementEvidence>, AssuranceError> {
+fn collect_requirements(repository_root: &Path) -> Result<Vec<RequirementRecord>, AssuranceError> {
     let path = repository_root.join("contracts/generated/model/governance/requirements.jsonl");
     let bytes = fs::read(&path).map_err(|source| AssuranceError::Io {
         path: path.clone(),
@@ -463,8 +450,10 @@ fn collect_requirements(
     let mut requirements = Vec::new();
     let mut ids = BTreeSet::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
-        let requirement: RequirementEvidence = serde_json::from_str(line)?;
-        if requirement.status != "active" || !ids.insert(requirement.requirement_id.clone()) {
+        let requirement: RequirementRecord = serde_json::from_str(line)?;
+        if requirement.status != RequirementStatus::Active
+            || !ids.insert(requirement.requirement_id.clone())
+        {
             return Err(AssuranceError::InvalidCollector("requirements"));
         }
         requirements.push(requirement);
@@ -612,15 +601,30 @@ mod tests {
                 rule_test: "rule-tests/a-test.yml".to_owned(),
             }],
             fixtures: BTreeSet::from(["contracts/fixtures/a.json".to_owned()]),
-            requirements: vec![RequirementEvidence {
+            requirements: vec![RequirementRecord {
                 requirement_id: "REQ-1".to_owned(),
                 source_artifact: "artifact:a".to_owned(),
-                source_path: "authority/a.md".to_owned(),
+                source_section: "AC-G-01".to_owned(),
                 normative_text: "requirement".to_owned(),
                 normative_text_digest: "b3:requirement".to_owned(),
                 implements: vec!["output:a".to_owned()],
+                traces_to: RequirementTraces {
+                    ontology_kinds: Vec::new(),
+                    capability_codes: Vec::new(),
+                    table_fields: Vec::new(),
+                    query_phrase_ids: Vec::new(),
+                    response_fields: Vec::new(),
+                    error_codes: Vec::new(),
+                },
+                trace_selectors: BTreeSet::new(),
                 verified_by: vec!["just leaf".to_owned()],
-                status: "active".to_owned(),
+                owner_acceptance: OwnerAcceptance {
+                    approver: "owner".to_owned(),
+                    accepted_at: "2026-08-23".to_owned(),
+                    construction_rule: "test".to_owned(),
+                    source_digest: "b3:source".to_owned(),
+                },
+                status: RequirementStatus::Active,
             }],
             package_capabilities: BTreeSet::from(["adapter-wheel-test".to_owned()]),
             collector_fallback_reasons: Vec::new(),
