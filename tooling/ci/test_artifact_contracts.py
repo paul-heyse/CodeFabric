@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from copy import deepcopy
@@ -15,6 +16,7 @@ from tooling.ci.artifact_contracts import (
     ArtifactContractError,
     _accepted_gate_substitutions,
     _accepted_input_evolution_paths,
+    activate_plan,
     active_plan_path,
     check_tracked_target_zero_state,
     commit_trust,
@@ -25,6 +27,7 @@ from tooling.ci.artifact_contracts import (
     parse_frontmatter,
     plan_ids,
     validate_artifacts,
+    validate_plan,
     validate_state,
 )
 
@@ -66,11 +69,105 @@ def _force_commit_target(root: Path, relative: str) -> None:
     _git(root, "commit", "-q", "-m", "track forbidden target output")
 
 
+def _write_activation_fixture(root: Path, *, status: str) -> Path:
+    design = root / "design.md"
+    design.write_text("design\n", encoding="utf-8")
+    declared = root / "input.md"
+    declared.write_text("input\n", encoding="utf-8")
+    digest = hashlib.sha256(declared.read_bytes()).hexdigest()
+    baseline = _git(root, "rev-parse", "HEAD")
+    plan = root / "plan.md"
+    plan.write_text(
+        f"""---
+artifact: implementation-plan
+plan_id: fixture
+version: v1
+date: 2026-08-25
+status: {status}
+design_path: design.md
+design_version: v1
+baseline_commit: {baseline}
+state_path: state.json
+cutover: true
+---
+
+## 1. Outcome and non-goals
+
+## 2. Source design and declared inputs
+
+| path | sha256 |
+|---|---|
+| input.md | {digest} |
+
+## 3. Global target invariants
+
+## 4. Work packets
+
+### WP01 — Fixture packet
+
+Executable oracle: `fixture_behavioral`
+Executable oracle: `fixture_structural`
+Executable oracle: `fixture_negative`
+Executable oracle: `fixture_operational`
+
+## 5. Integration milestones
+
+### M01 — Fixture milestone
+
+## 6. Cross-packet decommission batches
+
+### DB01 — Fixture decommission
+""",
+        encoding="utf-8",
+    )
+    return plan
+
+
 def test_state_schema_v2_round_trips_judgment_only(tmp_path: Path) -> None:
     state = load_state(STATE)
     state_path = tmp_path / "state.json"
     _write_state(state_path, state)
     assert validate_state(ROOT, state_path) == state
+
+
+def test_inactive_draft_may_declare_future_state(tmp_path: Path) -> None:
+    _init_repository(tmp_path)
+    plan = _write_activation_fixture(tmp_path, status="draft")
+    assert validate_plan(tmp_path, plan)["status"] == "draft"
+    assert not (tmp_path / "state.json").exists()
+
+
+def test_activation_creates_valid_state_before_pointer_cutover(tmp_path: Path) -> None:
+    _init_repository(tmp_path)
+    plan = _write_activation_fixture(tmp_path, status="approved")
+    with pytest.raises(ArtifactContractError, match="unresolved state_path"):
+        validate_plan(tmp_path, plan)
+
+    report = activate_plan(tmp_path, plan)
+    assert report["plan"] == "plan.md"
+    pointer = json.loads((tmp_path / "docs/plans/active-plan.json").read_text())
+    assert pointer == {"schema_version": 1, "plan_path": "plan.md"}
+    state = validate_state(
+        tmp_path,
+        tmp_path / "state.json",
+        expected_ids=plan_ids(plan),
+    )
+    assert state["plan_path"] == "plan.md"
+
+
+def test_failed_activation_preserves_prior_pointer(tmp_path: Path) -> None:
+    _init_repository(tmp_path)
+    pointer_path = tmp_path / "docs/plans/active-plan.json"
+    pointer_path.parent.mkdir(parents=True)
+    prior = {"schema_version": 1, "plan_path": "prior.md"}
+    pointer_path.write_text(json.dumps(prior) + "\n", encoding="utf-8")
+    (tmp_path / "prior.md").write_text("prior\n", encoding="utf-8")
+    plan = _write_activation_fixture(tmp_path, status="draft")
+
+    with pytest.raises(ArtifactContractError, match="only an approved plan"):
+        activate_plan(tmp_path, plan)
+    assert json.loads(pointer_path.read_text()) == prior
+    assert not (tmp_path / "state.json").exists()
 
 
 def test_packet_trust_requires_ancestor_commit(tmp_path: Path) -> None:

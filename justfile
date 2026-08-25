@@ -617,6 +617,12 @@ profile-build:
 # impact, rerun the relevant validation, and disclose what the tool changed
 # (spec section 63).
 
+[confirm("Create schema-2 state and activate the approved plan atomically. Continue?")]
+[doc("MUTATES: create validated execution state before switching the active-plan pointer")]
+[group('mutating')]
+plan-activate plan:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py activate-plan --plan "{{plan}}"
+
 [doc("MUTATES: rewrite Rust formatting in place")]
 [group('mutating')]
 root-fmt-write:

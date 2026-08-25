@@ -106,6 +106,13 @@ cutover: true|false
 ---
 ```
 
+An inactive `draft` or `audited` plan may declare its future `state_path`
+before that file exists. Activation is a confirm-gated transaction: it accepts
+only an `approved` plan, writes and validates a new schema-version-2 state file,
+and only then atomically replaces `docs/plans/active-plan.json`. It never
+overwrites an existing state file, and a failed activation leaves the prior
+active pointer unchanged. An active plan must always resolve its state path.
+
 Body:
 
 1. Outcome and non-goals
@@ -278,6 +285,8 @@ Common required keys: `artifact`, `date`, `version` (`vN`), and
 | `library-capability-research` | `topic` |
 | `lib-leverage` | `library` |
 | `skill-eval` | — |
+| `design-principles-conformance` | `principles_path`, `principles_digest`, `baseline_commit`; `verdict: conformant\|conformant-with-findings\|divergent\|framework-unowned` |
+| `design-principles-remediation-proposal` | `principles_path`, `principles_digest`, `conformance_review_path`, `conformance_review_digest`, `baseline_commit` |
 
 ## 8. Validation and derivation
 

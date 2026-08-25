@@ -10,11 +10,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +121,13 @@ REVIEW_REQUIREMENTS = {
         "principles_digest",
         "baseline_commit",
         "verdict",
+    },
+    "design-principles-remediation-proposal": {
+        "principles_path",
+        "principles_digest",
+        "conformance_review_path",
+        "conformance_review_digest",
+        "baseline_commit",
     },
 }
 REVIEW_VERDICTS = {
@@ -270,7 +280,13 @@ def parse_frontmatter(path: Path) -> dict[str, Any]:
     return values
 
 
-def _validate_paths(root: Path, artifact_path: Path, values: Mapping[str, Any]) -> None:
+def _validate_paths(
+    root: Path,
+    artifact_path: Path,
+    values: Mapping[str, Any],
+    *,
+    allow_missing: frozenset[str] = frozenset(),
+) -> None:
     for key, value in values.items():
         if not key.endswith("_path") or not isinstance(value, str):
             continue
@@ -279,7 +295,7 @@ def _validate_paths(root: Path, artifact_path: Path, values: Mapping[str, Any]) 
             raise ArtifactContractError(
                 f"{_relative(artifact_path, root)}: {key} must be repository-relative"
             )
-        if not (root / referenced).is_file():
+        if key not in allow_missing and not (root / referenced).is_file():
             raise ArtifactContractError(
                 f"{_relative(artifact_path, root)}: unresolved {key}={value}"
             )
@@ -425,6 +441,7 @@ def validate_plan(
     plan_path: Path,
     *,
     verify_declared_inputs: bool = True,
+    _allow_missing_state: bool = False,
 ) -> dict[str, Any]:
     """Validate implementation-plan structure and immutable inputs."""
     values = parse_frontmatter(plan_path)
@@ -445,13 +462,122 @@ def validate_plan(
         raise ArtifactContractError(
             f"{_relative(plan_path, root)}: cutover must be bool"
         )
-    _validate_paths(root, plan_path, values)
+    try:
+        inactive = active_plan_path(root).resolve() != plan_path.resolve()
+    except ArtifactContractError:
+        inactive = True
+    future_state_is_valid = inactive and values["status"] in {"draft", "audited"}
+    allow_missing = (
+        frozenset({"state_path"})
+        if _allow_missing_state or future_state_is_valid
+        else frozenset()
+    )
+    _validate_paths(root, plan_path, values, allow_missing=allow_missing)
     _validate_digest_pairs(root, plan_path, values)
     identifiers = plan_ids(plan_path)
     _validate_oracle_catalog(plan_path)
     if verify_declared_inputs:
         _validate_declared_inputs(root, plan_path, set())
     return {**values, "ids": identifiers}
+
+
+def _initial_state(
+    plan_path: Path, plan: Mapping[str, Any], root: Path
+) -> dict[str, Any]:
+    """Construct the judgment-only state created by an activation transaction."""
+
+    def entry() -> dict[str, Any]:
+        return {
+            "status": "not_started",
+            "proving_commit": None,
+            "deviations": [],
+            "failed_approaches": [],
+            "blockers": [],
+        }
+
+    identifiers = plan["ids"]
+    return {
+        "schema_version": 2,
+        "plan_path": _relative(plan_path, root),
+        "design_path": plan["design_path"],
+        "baseline_commit": plan["baseline_commit"],
+        "status": "not_started",
+        "current_packet": None,
+        "packets": {identifier: entry() for identifier in identifiers["packets"]},
+        "milestones": {identifier: entry() for identifier in identifiers["milestones"]},
+        "decommission_batches": {
+            identifier: entry() for identifier in identifiers["decommission_batches"]
+        },
+        "baseline_failures": [],
+        "discovered_obligations": [],
+        "plan_deviations": [],
+        "next_action": "Reconcile dependency readiness before the first packet edit.",
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _stage_json(path: Path, value: Mapping[str, Any]) -> Path:
+    """Write and fsync JSON beside its destination without publishing it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        json.dump(value, handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+        return Path(handle.name)
+
+
+def activate_plan(root: Path, plan_path: Path) -> dict[str, Any]:
+    """Create validated state before atomically switching the active-plan pointer."""
+    plan_path = plan_path if plan_path.is_absolute() else root / plan_path
+    try:
+        plan_path.resolve().relative_to(root.resolve())
+    except ValueError as error:
+        raise ArtifactContractError(
+            "activation plan must be inside the repository"
+        ) from error
+    plan = validate_plan(
+        root,
+        plan_path,
+        verify_declared_inputs=True,
+        _allow_missing_state=True,
+    )
+    if plan["status"] != "approved":
+        raise ArtifactContractError("only an approved plan can become active")
+
+    state_path = root / str(plan["state_path"])
+    if state_path.exists():
+        raise ArtifactContractError(
+            f"{_relative(state_path, root)}: activation refuses to overwrite state"
+        )
+
+    state = _initial_state(plan_path, plan, root)
+    staged_state = _stage_json(state_path, state)
+    pointer_path = root / ACTIVE_PLAN_POINTER
+    staged_pointer = _stage_json(
+        pointer_path,
+        {"schema_version": 1, "plan_path": _relative(plan_path, root)},
+    )
+    try:
+        validate_state(root, staged_state, expected_ids=plan["ids"])
+        os.replace(staged_state, state_path)
+        os.replace(staged_pointer, pointer_path)
+    finally:
+        staged_state.unlink(missing_ok=True)
+        staged_pointer.unlink(missing_ok=True)
+
+    return {
+        "plan": _relative(plan_path, root),
+        "state": _relative(state_path, root),
+        "active_plan_pointer": ACTIVE_PLAN_POINTER.as_posix(),
+    }
 
 
 def _accepted_input_evolution_paths(root: Path, state: Mapping[str, Any]) -> set[str]:
@@ -936,14 +1062,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command",
-        choices=("artifacts-check", "plan-status", "tracked-target-zero-state-check"),
+        choices=(
+            "activate-plan",
+            "artifacts-check",
+            "plan-status",
+            "tracked-target-zero-state-check",
+        ),
     )
     parser.add_argument("--plan", type=_plan_argument, default=DEFAULT_PLAN)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.command == "artifacts-check":
+        if args.command == "activate-plan":
+            report = activate_plan(args.root, args.plan)
+        elif args.command == "artifacts-check":
             report = validate_artifacts(args.root, args.plan)
         elif args.command == "plan-status":
             report = derive_plan_status(args.root, args.plan)
