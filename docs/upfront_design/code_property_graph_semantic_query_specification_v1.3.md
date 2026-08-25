@@ -6065,6 +6065,16 @@ Semantic request JSON
 
 The unbound `PlanSpec` may retain semantic entity selectors. `BoundPlanSpec` replaces them with snapshot/context-partitioned entity sets and includes capability/coverage prerequisites. Both forms are canonicalizable and inspectable.
 
+Lowering produces a typed semantic execution DAG. Relational nodes contain
+built-in DataFusion `LogicalPlan` values constructed from typed expressions;
+transitive traversal, bounded/shortest path, conjunctive pattern, and other
+graph-semantic nodes contain inspectable application-owned
+`GraphOperatorPlan` values over the governed graph substrate. Typed Arrow
+batches cross the relational/graph boundary. SQL text, opaque graph semantics,
+custom DataFusion `LogicalPlan::Extension` nodes, custom physical nodes, UDFs,
+or planner hooks are not permitted on this path without an accepted
+`ExtensionDecisionRecord` and a reopened design decision.
+
 Lowering SHALL preserve query-node identity, typed role, source JSON pointer, and cost attribution so errors and progress can refer to the originating block.
 
 A plan node cannot read a result not declared by a typed input edge. Cycles are rejected before snapshot work. Every physical operator must declare output schema, ordering, boundedness, memory estimate, cancellation behavior, and coverage effect.

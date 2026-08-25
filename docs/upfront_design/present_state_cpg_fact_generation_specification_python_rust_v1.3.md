@@ -726,6 +726,14 @@ normalized occurrence family/kind, normalized role, structural parent/field/ordi
 anchor, and owner. Path display text, provider-local node handles, provider identity,
 and reconciliation disposition SHALL not participate.
 
+`file_id` identifies the exact workspace-relative file identity within one
+source snapshot; it is not by itself a source-occurrence or fact identity. A
+source-occurrence identity additionally includes the source digest and
+half-open byte range, normalized occurrence family/kind and role, structural
+parent/field/ordinal anchor, and owner. The serving manifest pins the workspace,
+snapshot, path-identity recipe, and source digest required to resolve that
+occurrence. Location equality never implies fact equality.
+
 Providers construct occurrence and relation identities only through the generated
 recipe-aware CBEF builders owned by AC-G-13. The builder encodes occurrence structure
 inside the released `ENTITY.semantic_key` and occurrence-specific relation structure

@@ -412,6 +412,22 @@ model-design-contract-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_model_design_contracts.py
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/model_design_contracts.py
 
+[doc("Validate P1-P25 normative ownership and DP-001-DP-124 packet traceability")]
+[group('gate')]
+design-principle-traceability-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_design_principle_alignment.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py traceability-check
+
+[doc("Execute all current design-principle detectors, or one DP-NNN detector")]
+[group('gate')]
+alignment-detector-check detector_id="":
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py detector-check "{{detector_id}}"
+
+[doc("Reject any dirty, deleted, or untracked path without an explicit owner disposition")]
+[group('gate')]
+audit-baseline-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py baseline-check
+
 [doc("Derive active-plan input freshness and proving-commit trust")]
 [group('gate')]
 plan-status:

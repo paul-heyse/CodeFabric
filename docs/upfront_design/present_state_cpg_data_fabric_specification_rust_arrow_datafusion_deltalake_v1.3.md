@@ -1053,6 +1053,17 @@ Where an integrity obligation requires enumerating active files or reading fact 
 
 Once durable publication validation has succeeded, the provider set MAY defer file and statistics replay until a query needs it. Correctness is established eagerly; materialization stays lazy.
 
+### 12.10 Provenance closure and retention
+
+From every retained durable served result or pinned Delta table version, the
+daemon SHALL resolve the Delta commit and publication manifest, execution ID,
+semantic request identity, versioned plan artifact, schema/specification/input
+versions, and source snapshot/blob references. Commit properties and
+application transaction metadata carry the durable joins; mutable operational
+rows are not substitutes. Retention and garbage collection SHALL preserve every
+node reachable from a retained result. A missing or expired link is an explicit
+capability/provenance gap and never a silently shortened chain.
+
 ## 13. Control-plane schemas and operational-state store
 
 Durable fact/publication metadata is stored in Delta. High-churn lifecycle state is stored in one embedded **SQLite WAL operational database** per daemon repository/worktree group. The daemon exposes transactionally captured read-only Arrow/DataFusion views of that database under `cpg_control`. The operational database is not a semantic-history store; retention is bounded and current/recovery oriented.
@@ -2733,6 +2744,15 @@ The daemon data-fabric `ReconciliationEngine` is the sole canonical reconciliati
 
 DataFusion `Expr`, `LogicalPlanBuilder`, joins, windows, and custom operators MAY implement reconciliation plan families, but the module/API boundary and output schemas are those of `ReconciliationEngine`.
 
+Every non-built-in execution mechanism SHALL have a versioned
+`ExtensionDecisionRecord` naming required semantics, the highest viable
+extension level, rejected alternatives, optimizer and observability effects,
+owner, and executable proof. Relational semantics use built-in DataFusion
+expressions and logical/physical nodes. Query-required graph semantics use the
+typed application-owned `GraphOperatorPlan`; introducing a custom DataFusion
+logical or physical extension reopens the design and may not be accepted as an
+implementation-local deviation.
+
 ## 73. Reconciliation plan families
 
 ### 73.1 Source-range reconciliation
@@ -4293,6 +4313,14 @@ The source-trust, event-stream-health, Git, and admitted/reconciled sequence val
 ### Decision
 
 Overlay rows use the exact canonical table schema. Overlay control metadata is held in immutable per-table manifests and typed tombstone indexes rather than appended to canonical query columns.
+
+Every metadata field SHALL be classified as exactly one of `enforced`,
+`planner_consumed`, `contractual`, `governance`, `lineage`, or `advisory`.
+Every non-advisory field names its authoritative consumer and enforcement or
+validation point. Metadata presence alone never implies planner, cast,
+constraint, security, or runtime behavior. The application enforces Arrow
+extension metadata such as `codefabric.id16`; DataFusion extension registration
+may be used only for behavior its pinned implementation actually supplies.
 
 ### Contract
 

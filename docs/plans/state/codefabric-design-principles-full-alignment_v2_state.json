@@ -3,15 +3,17 @@
   "plan_path": "docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v2_2026-08-25.md",
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "f2dfcfe25dbfe46f0ca779a2fc4273787e18a445",
-  "status": "not_started",
-  "current_packet": null,
+  "status": "blocked",
+  "current_packet": "WP73",
   "packets": {
     "WP73": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP73 requires accountable repository-owner acceptance of the exact SUITE/FAB/QRY/LIFE/GEN normative amendment diff before the packet can complete and a v3 plan may declare the accepted digests."
+      ]
     },
     "WP54": {
       "status": "not_started",
@@ -235,9 +237,25 @@
       "blockers": []
     }
   },
-  "baseline_failures": [],
-  "discovered_obligations": [],
+  "baseline_failures": [
+    {
+      "command": "just ci-fast",
+      "classification": "pre_existing",
+      "fingerprint": "Typos rejects citation-placeholder notation and a mixed-case SQL-nullability mnemonic in the immutable v1 plan/proposal after Rust checks, 265 nextest cases, and doctests pass.",
+      "owner": "WP73/WP54 baseline disposition"
+    }
+  ],
+  "discovered_obligations": [
+    {
+      "packet": "WP73",
+      "summary": "The historical register has 124 DP headings but labels only 16 Detector clauses and one Verified command; create a substantive executable detector registry instead of claiming 124 historical commands were replayed."
+    },
+    {
+      "packet": "WP73",
+      "summary": "Accepted changes to five declared normative inputs require a v3 implementation plan with their new digests before WP54 or any finding-driven implementation packet begins."
+    }
+  ],
   "plan_deviations": [],
-  "next_action": "Reconcile dependency readiness before the first packet edit.",
-  "updated_at": "2026-08-25T07:11:17.477134+00:00"
+  "next_action": "Repository owner reviews and accepts or rejects the exact WP73 normative amendment diff; on acceptance, finish WP73 with a proving commit and activate a v3 plan declaring the accepted spec digests.",
+  "updated_at": "2026-08-25T11:40:00Z"
 }

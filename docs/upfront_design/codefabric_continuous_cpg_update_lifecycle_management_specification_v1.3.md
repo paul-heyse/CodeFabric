@@ -4514,6 +4514,14 @@ diagnostic_references
 
 Query execution, availability, completeness, freshness, limit, and dependency states are separate fields. Git object IDs are operational and omitted unless required to explain currentness/conflict.
 
+Every governed execution allocates an execution ID before planning and records
+the versioned semantic query identity, plan identity, input snapshot and Delta
+versions, configuration fingerprint, software/library domain, output checksum
+contract, and modeled reproducibility status. Unsupported volatility or
+environment capture is explicit. Plan text and collected metrics are
+diagnostics associated with that execution; neither is semantic identity, and
+diagnostic collection SHALL NOT re-execute the query.
+
 ## 127. Empty-result semantics
 
 The service SHALL distinguish:
@@ -4663,6 +4671,13 @@ Retention is bounded. Cleanup preserves:
 - current source/Git/context state required for recovery;
 - in-flight waves/provider jobs/cancellation records;
 - active snapshot and result-artifact leases.
+
+Cleanup additionally preserves the complete provenance closure reachable from
+every retained result or publication: execution and semantic request records,
+plan artifacts, schema/specification/input identities, Delta commit metadata,
+and source snapshot/blob references. A retention policy may expire a complete
+closure only as one governed unit; it may not leave a retained result whose
+lineage silently terminates.
 
 Retained operational Git IDs or prior wave rows do not authorize historical source querying.
 
