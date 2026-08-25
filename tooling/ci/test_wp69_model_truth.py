@@ -57,7 +57,7 @@ def test_wp69_structural_acceptance() -> None:
     requirements = _json_lines(GOVERNANCE / "requirements.jsonl")
     traces = _json_lines(GOVERNANCE / "traceability.jsonl")
 
-    assert len(outputs) == len(set(paths)) == validation["output_count"] == 75
+    assert len(outputs) == len(set(paths)) == validation["output_count"] == 78
     assert adapter_index["outputs"] == outputs
     assert len(requirements) == len(traces) == 84
     assert len({record["requirement_id"] for record in requirements}) == 84
