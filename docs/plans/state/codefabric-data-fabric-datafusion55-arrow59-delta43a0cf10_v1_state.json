@@ -3,8 +3,8 @@
   "plan_path": "docs/plans/codefabric_data_fabric_datafusion55_arrow59_delta43a0cf10_implementation_plan_v1_2026-08-23.md",
   "design_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
   "baseline_commit": "d89cc90cd2e51c4b716b2a4da2c0a8d6f79d5409",
-  "status": "executing",
-  "current_packet": "WP06",
+  "status": "complete",
+  "current_packet": null,
   "packets": {
     "WP01": {
       "status": "complete",
@@ -97,10 +97,42 @@
       "blockers": []
     },
     "WP06": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "6e97732f8332533c276fc1e866c62a56b33a34f2",
+      "deviations": [
+        {
+          "summary": "The cross-revision benchmark uses an ephemeral benchmark target because repository doctrine permits exactly one permanent top-level Rust integration-test target; the stable recipe creates, measures, and removes that temporary target without expanding the committed test topology."
+        },
+        {
+          "summary": "The activation-recorded golden-corpus failure was a stale metadata digest rather than changed corpus bytes. WP06 corrected the generated profile metadata through the sole model writer, then proved clean rebuild equivalence and an empty fact differential instead of accepting changed facts."
+        },
+        {
+          "summary": "Cross-worktree model reproduction exposed path-bearing compiler-tool identities. The model compiler now derives worktree-relative source identity and builds its two Rust tools with path remapping, disabled debug data, and non-incremental compilation; exact generated artifacts match across isolated worktrees."
+        },
+        {
+          "summary": "The exact revision comparator now invokes revision-driver tests with --include-ignored so the same driver covers the WP01 baseline, where tests were ordinary, and the target, where environment-driven tests are ignored by routine suites."
+        },
+        {
+          "summary": "The first full benchmark comparison reported one noisy checkpoint-reopen regression while all correctness and resource checks passed. A controlled rerun with no concurrent gates and unchanged thresholds/statistics passed all six workloads; target peak RSS was 79478784 bytes against the 1073741824-byte ceiling."
+        },
+        {
+          "summary": "The operational rollback window remains OPEN. No production namespace was deployed or mutated during this repository implementation; preserved revision fixtures and exact commit identities remain the rollback evidence described by the operational handoff."
+        }
+      ],
+      "failed_approaches": [
+        {
+          "summary": "The first benchmark output serialized workload maps in lexical rather than declared workload order, which made the comparator reject semantically complete results; serialization was corrected to retain the predeclared workload order."
+        },
+        {
+          "summary": "The initial cross-revision driver used --ignored and selected zero baseline tests because the WP01 tests were not ignored. The driver now uses --include-ignored and proves both historical and target revisions."
+        },
+        {
+          "summary": "An intermediate attempt removed macOS linker UUIDs to suppress nondeterministic model-tool identity, but binaries without LC_UUID could not be executed by dyld. The final implementation retains runnable binaries and removes nondeterministic path/debug inputs with -Cdebuginfo=0 and path remapping."
+        },
+        {
+          "summary": "One advisory-policy invocation observed a transient RustSec database update race. A subsequent exact-policy run completed without repository changes and confirmed the three registered, owner-bound exceptions."
+        }
+      ],
       "blockers": []
     }
   },
@@ -150,25 +182,37 @@
       "blockers": []
     },
     "M05": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "6e97732f8332533c276fc1e866c62a56b33a34f2",
+      "deviations": [
+        {
+          "summary": "All final certification families are green at the target proving commit and exact HEAD, including bidirectional persisted-format compatibility, the six-workload performance comparator, model reproduction/release, empty Gate B differential, decommission zero state, dependency policy, CI-fast, and CI-pr. The rollback window remains explicitly open pending a separate operational activation decision."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     }
   },
   "decommission_batches": {
     "DB01": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "6e97732f8332533c276fc1e866c62a56b33a34f2",
+      "deviations": [
+        {
+          "summary": "Tracked live authorities resolve only DataFusion 55.0.0, Arrow/Parquet 59.2.0, object_store 0.13.2, and delta-rs 43a0cf10. Historical plans, states, reviews, legacy references, the WP01 persisted fixture, explicit comparisons, and pre-existing untracked user material remain reviewed exclusions."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "DB02": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "6e97732f8332533c276fc1e866c62a56b33a34f2",
+      "deviations": [
+        {
+          "summary": "Current repository routing and navigation point target-stack work to the DataFusion 55/Arrow 59 and delta-rs 43a0cf10 references. Legacy version-pinned documents remain directly addressable only as historical references."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     }
@@ -222,6 +266,6 @@
       "summary": "WP02 intentionally evolved the declared FAB v1.3 input in place from the predecessor dependency baseline to DataFusion 55.0.0, Arrow and Parquet 59.2.0, object_store 0.13.2, and delta-rs 43a0cf10; proving commit 5d81f7bb6fdbc9206229b9b11b45caeb91348f47 contains the corresponding generated digest restamp."
     }
   ],
-  "next_action": "Execute WP06 by extending the revision comparator to the full declared workload, reconciling the inherited golden-corpus digest without blind acceptance, proving live old-authority zero state, running the final gate matrix, and preparing the owner-reviewed rollback handoff.",
-  "updated_at": "2026-08-24T08:44:39Z"
+  "next_action": "Implementation is complete. Keep the rollback window OPEN and do not mutate or vacuum a production namespace until the repository owner separately authorizes operational activation using the recorded handoff.",
+  "updated_at": "2026-08-25T02:36:15Z"
 }
