@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP65",
+  "current_packet": "WP66",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -152,14 +152,16 @@
       "blockers": []
     },
     "WP65": {
-      "status": "ready",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "2137fb3da500d43168163349209a271a1fa6ddea",
+      "deviations": [
+        "The versioned execution bundle is persisted as a private canonical JSON artifact beside immutable result artifacts rather than as a SQLite payload row. This preserves the operational store's single-writer ownership while retaining execution-keyed readback and lease-based expiry."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP66": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -246,8 +248,8 @@
       "blockers": []
     },
     "M12": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "2137fb3da500d43168163349209a271a1fa6ddea",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -357,6 +359,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Begin WP65 preflight and implement execution identity plus the persisted single-execution QueryPlanArtifact bundle and its four substantive oracles.",
-  "updated_at": "2026-08-25T23:34:41Z"
+  "next_action": "Implement WP66 durable provenance closure, typed mutation scope joins, source-blob manifest links, reachability-aware retention, and explain_version.",
+  "updated_at": "2026-08-25T23:58:01Z"
 }
