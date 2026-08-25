@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP69",
+  "current_packet": "WP57",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -51,7 +51,7 @@
       "blockers": []
     },
     "WP57": {
-      "status": "ready",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -149,10 +149,16 @@
       "blockers": []
     },
     "WP69": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "cc6985fe5a9260a46daca54fde4b42e8b0a3e98f",
+      "deviations": [
+        "WP69 release certification expanded beyond the packet's known-touch list to close two pre-existing narrow-feature defects: fact-generation and repository-state now explicitly depend on the contract-model substrate their activated identity, snapshot, and generated-registry modules require; stable-graph-check enforces both exact closures."
+      ],
+      "failed_approaches": [
+        "The first release-profile passes exposed stale proof harness assumptions in stable-graph-check and model-inventory-check; the graph oracle now includes the approved model-compiler substrate, and the inventory fixture proves current-byte semantics without invoking governed-plan compilation on a deliberately minimal repository.",
+        "The release feature matrix first failed fact-generation and then repository-state because each activated canonical identity modules without declaring contract-models; both closures were repaired, model-owned tool identities were reconciled transactionally, and the full 16-configuration matrix was rerun green.",
+        "Early model-family and release runs exposed legacy count, Proto-version, generated-lint, packaged-index, detector-semantics, and vacuous-oracle assumptions; each was replaced with typed current-tree assertions before selecting the final proving commit."
+      ],
       "blockers": []
     },
     "WP70": {
@@ -186,8 +192,8 @@
   },
   "milestones": {
     "M09": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "cc6985fe5a9260a46daca54fde4b42e8b0a3e98f",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -244,8 +250,8 @@
       "blockers": []
     },
     "DB12": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "cc6985fe5a9260a46daca54fde4b42e8b0a3e98f",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -264,6 +270,6 @@
       "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
     }
   ],
-  "next_action": "Execute WP69's current-tree model-plane census, remove shadow plan and stale Derived authorities, distinguish traceability from requirements, and bind runtime vocabularies to generated contracts.",
-  "updated_at": "2026-08-25T10:57:23Z"
+  "next_action": "Execute WP57's current-tree schema-contract census, classify all schema metadata semantics, generate FK and row-encoder contracts, author the exact-pin evolution policy, and enforce authenticated table constraints on serving open.",
+  "updated_at": "2026-08-25T14:01:22Z"
 }
