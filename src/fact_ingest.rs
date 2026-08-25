@@ -16,6 +16,7 @@ use arrow_schema::{ArrowError, DataType};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
+use crate::registries::ValueKind;
 use crate::schema_registry::{DurableMutationClass, TableSpec, table_spec};
 
 const MAX_STREAMS: usize = 64;
@@ -162,13 +163,13 @@ pub enum PropertyValue {
 impl PropertyValue {
     const fn code(&self) -> i16 {
         match self {
-            Self::Entity(_) => 10,
-            Self::Boolean(_) => 20,
-            Self::Integer(_) => 30,
-            Self::Float(_) => 40,
-            Self::Text(_) => 50,
-            Self::Bytes(_) => 60,
-            Self::Type(_) => 70,
+            Self::Entity(_) => ValueKind::Entity as i16,
+            Self::Boolean(_) => ValueKind::Boolean as i16,
+            Self::Integer(_) => ValueKind::Integer as i16,
+            Self::Float(_) => ValueKind::Float as i16,
+            Self::Text(_) => ValueKind::Text as i16,
+            Self::Bytes(_) => ValueKind::Bytes as i16,
+            Self::Type(_) => ValueKind::Type as i16,
         }
     }
 }
@@ -374,793 +375,18 @@ fn i64_lists<T>(
     Arc::new(builder.finish())
 }
 
-fn fact_batch(
+fn generated_fact_batch(
     table_code: i16,
-    columns: Vec<(&'static str, ArrayRef)>,
+    columns: Vec<ArrayRef>,
 ) -> Result<RecordBatch, FactIngestError> {
     let spec = table_spec(table_code).expect("generated universal fact table");
-    if columns.len() != spec.arrow_schema.fields().len()
-        || columns
-            .iter()
-            .zip(spec.arrow_schema.fields())
-            .any(|((name, _), field)| *name != field.name())
-    {
-        return Err(invalid(
-            spec,
-            "encoder-columns",
-            "typed encoder columns differ from generated TableSpec",
-        ));
-    }
     Ok(RecordBatch::try_new(
         Arc::clone(&spec.arrow_schema),
-        columns.into_iter().map(|(_, column)| column).collect(),
+        columns,
     )?)
 }
 
-/// Encode canonical owners directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_owners(rows: &[OwnerRow]) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        8,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "parent_owner_id",
-                binary(rows, |row| {
-                    row.parent_owner_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            (
-                "owner_kind_code",
-                i16s(rows, |row| Some(row.owner_kind_code)),
-            ),
-            ("language", i16s(rows, |row| Some(row.language))),
-            (
-                "file_id",
-                binary(rows, |row| row.file_id.as_ref().map(<[u8; 16]>::as_slice)),
-            ),
-            (
-                "semantic_entity_id",
-                binary(rows, |row| {
-                    row.semantic_entity_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            ("start_byte", i64s(rows, |row| row.start_byte)),
-            ("end_byte", i64s(rows, |row| row.end_byte)),
-            (
-                "source_fingerprint",
-                binary(rows, |row| {
-                    row.source_fingerprint.as_ref().map(<[u8; 32]>::as_slice)
-                }),
-            ),
-            (
-                "semantic_fingerprint",
-                binary(rows, |row| {
-                    row.semantic_fingerprint.as_ref().map(<[u8; 32]>::as_slice)
-                }),
-            ),
-            (
-                "capability_mask",
-                i64s(rows, |row| Some(row.capability_mask)),
-            ),
-        ],
-    )
-}
-
-/// Encode explicit owner capability status directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_capability_statuses(
-    rows: &[CapabilityStatusRow],
-) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        9,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            (
-                "snapshot_id",
-                binary(rows, |row| {
-                    row.snapshot_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            (
-                "capability_code",
-                i16s(rows, |row| Some(row.capability_code)),
-            ),
-            (
-                "owner_capability_state_code",
-                i16s(rows, |row| Some(row.owner_capability_state_code)),
-            ),
-            (
-                "completeness_state_code",
-                i16s(rows, |row| Some(row.completeness_state_code)),
-            ),
-            (
-                "provider_run_id",
-                binary(rows, |row| {
-                    row.provider_run_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            ("producer_code", i16s(rows, |row| row.producer_code)),
-            ("reason_code", i16s(rows, |row| row.reason_code)),
-            (
-                "diagnostic_id",
-                binary(rows, |row| {
-                    row.diagnostic_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            (
-                "fallback_source_available",
-                bools(rows, |row| Some(row.fallback_source_available)),
-            ),
-            (
-                "coverage_scope_fingerprint",
-                binary(rows, |row| Some(row.coverage_scope_fingerprint.as_slice())),
-            ),
-        ],
-    )
-}
-
-/// Encode typed entities directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_entities(rows: &[EntityRow]) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        100,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            (
-                "entity_id",
-                binary(rows, |row| Some(row.entity_id.as_slice())),
-            ),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            ("language", i16s(rows, |row| Some(row.language))),
-            (
-                "entity_family_code",
-                i16s(rows, |row| Some(row.entity_family_code)),
-            ),
-            (
-                "entity_kind_code",
-                i32s(rows, |row| Some(row.entity_kind_code)),
-            ),
-            ("raw_kind_code", i32s(rows, |row| row.raw_kind_code)),
-            (
-                "file_id",
-                binary(rows, |row| row.file_id.as_ref().map(<[u8; 16]>::as_slice)),
-            ),
-            ("start_byte", i64s(rows, |row| row.start_byte)),
-            ("end_byte", i64s(rows, |row| row.end_byte)),
-            ("name", utf8(rows, |row| row.name.as_deref())),
-            (
-                "qualified_name",
-                utf8(rows, |row| row.qualified_name.as_deref()),
-            ),
-            (
-                "parent_entity_id",
-                binary(rows, |row| {
-                    row.parent_entity_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            (
-                "type_id",
-                binary(rows, |row| row.type_id.as_ref().map(<[u8; 16]>::as_slice)),
-            ),
-            ("flags", i64s(rows, |row| Some(row.flags))),
-            ("fact_hash64", i64s(rows, |row| Some(row.fact_hash64))),
-        ],
-    )
-}
-
-/// Encode typed relations directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_relations(rows: &[RelationRow]) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        110,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            ("fact_id", binary(rows, |row| Some(row.fact_id.as_slice()))),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            ("language", i16s(rows, |row| Some(row.language))),
-            (
-                "relation_family_code",
-                i16s(rows, |row| Some(row.relation_family_code)),
-            ),
-            (
-                "relation_kind_code",
-                i32s(rows, |row| Some(row.relation_kind_code)),
-            ),
-            (
-                "source_id",
-                binary(rows, |row| Some(row.source_id.as_slice())),
-            ),
-            (
-                "target_id",
-                binary(rows, |row| Some(row.target_id.as_slice())),
-            ),
-            (
-                "source_bucket",
-                i16s(rows, |row| Some(i16::from(row.source_id[0]))),
-            ),
-            (
-                "target_bucket",
-                i16s(rows, |row| Some(i16::from(row.target_id[0]))),
-            ),
-            ("ordinal", i32s(rows, |row| row.ordinal)),
-            ("role_code", i16s(rows, |row| row.role_code)),
-            ("distance", i32s(rows, |row| row.distance)),
-            (
-                "directness_code",
-                i16s(rows, |row| Some(row.directness_code)),
-            ),
-            (
-                "file_id",
-                binary(rows, |row| row.file_id.as_ref().map(<[u8; 16]>::as_slice)),
-            ),
-            ("start_byte", i64s(rows, |row| row.start_byte)),
-            ("end_byte", i64s(rows, |row| row.end_byte)),
-            ("certainty_code", i16s(rows, |row| Some(row.certainty_code))),
-            (
-                "resolution_code",
-                i16s(rows, |row| Some(row.resolution_code)),
-            ),
-            ("producer_code", i16s(rows, |row| Some(row.producer_code))),
-            ("derivation_code", i16s(rows, |row| row.derivation_code)),
-            ("flags", i64s(rows, |row| Some(row.flags))),
-            ("fact_hash64", i64s(rows, |row| Some(row.fact_hash64))),
-        ],
-    )
-}
-
-/// Encode typed property facts directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_properties(rows: &[PropertyFactRow]) -> Result<RecordBatch, FactIngestError> {
-    let mut columns = vec![
-        (
-            "workspace_id",
-            binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-        ),
-        (
-            "analysis_context_id",
-            binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-        ),
-        (
-            "source_generation",
-            i64s(rows, |row| Some(row.scope.source_generation)),
-        ),
-        ("fact_id", binary(rows, |row| Some(row.fact_id.as_slice()))),
-        (
-            "owner_id",
-            binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-        ),
-        (
-            "owner_bucket",
-            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-        ),
-        (
-            "subject_entity_id",
-            binary(rows, |row| Some(row.subject_entity_id.as_slice())),
-        ),
-        (
-            "property_kind_code",
-            i32s(rows, |row| Some(row.property_kind_code)),
-        ),
-        (
-            "program_point_entity_id",
-            binary(rows, |row| {
-                row.program_point_entity_id
-                    .as_ref()
-                    .map(<[u8; 16]>::as_slice)
-            }),
-        ),
-        ("value_kind_code", i16s(rows, |row| Some(row.value.code()))),
-    ];
-    columns.extend(property_value_columns(rows));
-    columns.extend([
-        (
-            "directness_code",
-            i16s(rows, |row| Some(row.directness_code)),
-        ),
-        ("certainty_code", i16s(rows, |row| Some(row.certainty_code))),
-        (
-            "resolution_code",
-            i16s(rows, |row| Some(row.resolution_code)),
-        ),
-        ("producer_code", i16s(rows, |row| Some(row.producer_code))),
-        ("derivation_code", i16s(rows, |row| row.derivation_code)),
-        (
-            "file_id",
-            binary(rows, |row| row.file_id.as_ref().map(<[u8; 16]>::as_slice)),
-        ),
-        ("start_byte", i64s(rows, |row| row.start_byte)),
-        ("end_byte", i64s(rows, |row| row.end_byte)),
-        ("fact_hash64", i64s(rows, |row| Some(row.fact_hash64))),
-    ]);
-    fact_batch(120, columns)
-}
-
-fn property_value_columns(rows: &[PropertyFactRow]) -> Vec<(&'static str, ArrayRef)> {
-    vec![
-        (
-            "value_entity_id",
-            binary(rows, |row| match &row.value {
-                PropertyValue::Entity(value) => Some(value.as_slice()),
-                _ => None,
-            }),
-        ),
-        (
-            "value_bool",
-            bools(rows, |row| match row.value {
-                PropertyValue::Boolean(value) => Some(value),
-                _ => None,
-            }),
-        ),
-        (
-            "value_int64",
-            i64s(rows, |row| match row.value {
-                PropertyValue::Integer(value) => Some(value),
-                _ => None,
-            }),
-        ),
-        (
-            "value_float64",
-            f64s(rows, |row| match row.value {
-                PropertyValue::Float(value) => Some(value),
-                _ => None,
-            }),
-        ),
-        (
-            "value_text",
-            utf8(rows, |row| match &row.value {
-                PropertyValue::Text(value) => Some(value.as_str()),
-                _ => None,
-            }),
-        ),
-        (
-            "value_bytes",
-            binary(rows, |row| match &row.value {
-                PropertyValue::Bytes(value) => Some(value.as_slice()),
-                _ => None,
-            }),
-        ),
-        (
-            "value_type_id",
-            binary(rows, |row| match &row.value {
-                PropertyValue::Type(value) => Some(value.as_slice()),
-                _ => None,
-            }),
-        ),
-    ]
-}
-
-/// Encode typed evidence directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_evidence(rows: &[FactEvidenceRow]) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        130,
-        vec![
-            (
-                "evidence_id",
-                binary(rows, |row| Some(row.evidence_id.as_slice())),
-            ),
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            ("fact_id", binary(rows, |row| Some(row.fact_id.as_slice()))),
-            ("fact_form_code", i16s(rows, |row| Some(row.fact_form_code))),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            ("provider_code", i16s(rows, |row| Some(row.provider_code))),
-            (
-                "provider_version",
-                utf8(rows, |row| Some(row.provider_version.as_str())),
-            ),
-            (
-                "provider_run_id",
-                binary(rows, |row| Some(row.provider_run_id.as_slice())),
-            ),
-            (
-                "observation_id",
-                binary(rows, |row| Some(row.observation_id.as_slice())),
-            ),
-            ("raw_kind_code", i32s(rows, |row| row.raw_kind_code)),
-            (
-                "file_id",
-                binary(rows, |row| row.file_id.as_ref().map(<[u8; 16]>::as_slice)),
-            ),
-            ("start_byte", i64s(rows, |row| row.start_byte)),
-            ("end_byte", i64s(rows, |row| row.end_byte)),
-            ("certainty_code", i16s(rows, |row| Some(row.certainty_code))),
-            (
-                "resolution_code",
-                i16s(rows, |row| Some(row.resolution_code)),
-            ),
-            (
-                "conflict_disposition_code",
-                i16s(rows, |row| Some(row.conflict_disposition_code)),
-            ),
-            (
-                "cold_payload",
-                binary(rows, |row| row.cold_payload.as_deref()),
-            ),
-        ],
-    )
-}
-
-/// Encode authoritative source images directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_source_files(rows: &[SourceFileRow]) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        140,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            ("file_id", binary(rows, |row| Some(row.file_id.as_slice()))),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            (
-                "path_bytes",
-                binary(rows, |row| Some(row.path_bytes.as_slice())),
-            ),
-            (
-                "path_display",
-                utf8(rows, |row| Some(row.path_display.as_str())),
-            ),
-            (
-                "path_encoding_code",
-                i16s(rows, |row| Some(row.path_encoding_code)),
-            ),
-            (
-                "path_case_key",
-                binary(rows, |row| row.path_case_key.as_deref()),
-            ),
-            (
-                "path_display_is_lossy",
-                bools(rows, |row| Some(row.path_display_is_lossy)),
-            ),
-            ("language", i16s(rows, |row| Some(row.language))),
-            (
-                "source_digest",
-                binary(rows, |row| Some(row.source_digest.as_slice())),
-            ),
-            ("byte_len", i64s(rows, |row| Some(row.byte_len))),
-            ("line_count", i32s(rows, |row| Some(row.line_count))),
-            (
-                "encoding_name",
-                utf8(rows, |row| row.encoding_name.as_deref()),
-            ),
-            (
-                "newline_kind_code",
-                i16s(rows, |row| Some(row.newline_kind_code)),
-            ),
-            (
-                "source_bytes",
-                binary(rows, |row| Some(row.source_bytes.as_slice())),
-            ),
-            (
-                "decoded_text",
-                utf8(rows, |row| row.decoded_text.as_deref()),
-            ),
-            (
-                "line_start_offsets",
-                i64_lists(140, "line_start_offsets", rows, |row| {
-                    row.line_start_offsets.as_slice()
-                }),
-            ),
-            (
-                "module_entity_id",
-                binary(rows, |row| {
-                    row.module_entity_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            ("is_stub", bools(rows, |row| Some(row.is_stub))),
-            ("flags", i64s(rows, |row| Some(row.flags))),
-        ],
-    )
-}
-
-/// Encode source tokens directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_source_tokens(rows: &[SourceTokenRow]) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        150,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            (
-                "token_id",
-                binary(rows, |row| Some(row.token_id.as_slice())),
-            ),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            ("file_id", binary(rows, |row| Some(row.file_id.as_slice()))),
-            ("ordinal", i32s(rows, |row| Some(row.ordinal))),
-            (
-                "token_kind_code",
-                i32s(rows, |row| Some(row.token_kind_code)),
-            ),
-            ("start_byte", i64s(rows, |row| Some(row.start_byte))),
-            ("end_byte", i64s(rows, |row| Some(row.end_byte))),
-            (
-                "normalized_value",
-                utf8(rows, |row| row.normalized_value.as_deref()),
-            ),
-            ("flags", i64s(rows, |row| Some(row.flags))),
-        ],
-    )
-}
-
-/// Encode source annotations directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_source_annotations(
-    rows: &[SourceAnnotationRow],
-) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        160,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            (
-                "annotation_id",
-                binary(rows, |row| Some(row.annotation_id.as_slice())),
-            ),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            ("file_id", binary(rows, |row| Some(row.file_id.as_slice()))),
-            (
-                "annotation_kind_code",
-                i32s(rows, |row| Some(row.annotation_kind_code)),
-            ),
-            ("start_byte", i64s(rows, |row| Some(row.start_byte))),
-            ("end_byte", i64s(rows, |row| Some(row.end_byte))),
-            (
-                "target_entity_id",
-                binary(rows, |row| {
-                    row.target_entity_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            ("text", utf8(rows, |row| row.text.as_deref())),
-            ("diagnostic_code", i32s(rows, |row| row.diagnostic_code)),
-            ("flags", i64s(rows, |row| Some(row.flags))),
-        ],
-    )
-}
-
-/// Encode syntax extensions directly into the generated Arrow schema.
-///
-/// # Errors
-///
-/// Returns an Arrow error if the generated physical schema and encoder diverge.
-pub fn encode_syntax_details(rows: &[SyntaxDetailRow]) -> Result<RecordBatch, FactIngestError> {
-    fact_batch(
-        170,
-        vec![
-            (
-                "workspace_id",
-                binary(rows, |row| Some(row.scope.workspace_id.as_slice())),
-            ),
-            (
-                "analysis_context_id",
-                binary(rows, |row| Some(row.scope.analysis_context_id.as_slice())),
-            ),
-            (
-                "source_generation",
-                i64s(rows, |row| Some(row.scope.source_generation)),
-            ),
-            (
-                "entity_id",
-                binary(rows, |row| Some(row.entity_id.as_slice())),
-            ),
-            (
-                "owner_id",
-                binary(rows, |row| Some(row.scope.owner_id.as_slice())),
-            ),
-            (
-                "owner_bucket",
-                i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
-            ),
-            ("raw_kind_code", i32s(rows, |row| Some(row.raw_kind_code))),
-            (
-                "occurrence_family_code",
-                i16s(rows, |row| Some(row.occurrence_family_code)),
-            ),
-            (
-                "reconciliation_step_code",
-                i16s(rows, |row| Some(row.reconciliation_step_code)),
-            ),
-            (
-                "raw_kind_disposition_code",
-                i16s(rows, |row| Some(row.raw_kind_disposition_code)),
-            ),
-            (
-                "normalized_kind_code",
-                i32s(rows, |row| Some(row.normalized_kind_code)),
-            ),
-            (
-                "parent_syntax_id",
-                binary(rows, |row| {
-                    row.parent_syntax_id.as_ref().map(<[u8; 16]>::as_slice)
-                }),
-            ),
-            ("field_role_code", i16s(rows, |row| row.field_role_code)),
-            ("ordinal", i32s(rows, |row| row.ordinal)),
-            ("named", bools(rows, |row| Some(row.named))),
-            ("extra", bools(rows, |row| Some(row.extra))),
-            ("error", bools(rows, |row| Some(row.error))),
-            ("missing", bools(rows, |row| Some(row.missing))),
-            (
-                "explicitly_parenthesized",
-                bools(rows, |row| Some(row.explicitly_parenthesized)),
-            ),
-            (
-                "provider_node_flags",
-                i64s(rows, |row| Some(row.provider_node_flags)),
-            ),
-        ],
-    )
-}
-
+include!("generated/fact_row_encoders.rs");
 fn invalid(spec: &TableSpec, check: &'static str, detail: impl Into<String>) -> FactIngestError {
     FactIngestError::BatchInvalid {
         table: spec.name.into(),
@@ -1295,63 +521,119 @@ fn enum_domain(name: &str) -> Option<&'static [crate::registries::RegistryEntry]
         .map(|domain| domain.values)
 }
 
-#[allow(clippy::too_many_lines)] // One scan validates every generated enum and registry role before publication.
-fn validate_registered_codes(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
-    for (field, domain) in [
-        ("directness_code", "DIRECTNESS"),
-        ("certainty_code", "EVIDENCE_CERTAINTY"),
-        ("resolution_code", "RESOLUTION_CLASS"),
-    ] {
-        if spec.arrow_schema.index_of(field).is_err() {
-            continue;
+fn semantic_code_registered(
+    binding: &crate::schema_registry::SemanticTypeBindingSpec,
+    code: i64,
+) -> bool {
+    use crate::schema_registry::SemanticAuthority;
+
+    match binding.authority {
+        SemanticAuthority::EnumRegistry => u16::try_from(code).is_ok_and(|code| {
+            binding
+                .domain
+                .and_then(enum_domain)
+                .is_some_and(|values| values.iter().any(|entry| entry.code == code))
+        }),
+        SemanticAuthority::OntologyEntityRegistry => match binding.domain {
+            Some("ENTITY_KIND") => i32::try_from(code).is_ok_and(|code| {
+                crate::registries::ENTITY_KIND_CODES
+                    .iter()
+                    .any(|entry| entry.code == code)
+            }),
+            Some("ENTITY_FAMILY") => i16::try_from(code).is_ok_and(|code| {
+                crate::registries::ENTITY_KIND_CODES
+                    .iter()
+                    .any(|entry| entry.family_code == code)
+            }),
+            _ => false,
+        },
+        SemanticAuthority::OntologyRelationRegistry => match binding.domain {
+            Some("RELATION_KIND") => i32::try_from(code).is_ok_and(|code| {
+                crate::registries::RELATION_KIND_CODES
+                    .iter()
+                    .any(|entry| entry.code == code)
+            }),
+            Some("RELATION_FAMILY") => i16::try_from(code).is_ok_and(|code| {
+                crate::registries::RELATION_KIND_CODES
+                    .iter()
+                    .any(|entry| entry.family_code == code)
+            }),
+            _ => false,
+        },
+        SemanticAuthority::OntologyPropertyRegistry => {
+            binding.domain == Some("PROPERTY_KIND")
+                && i32::try_from(code).is_ok_and(|code| {
+                    crate::registries::PROPERTY_KIND_CODES
+                        .iter()
+                        .any(|entry| entry.code == code)
+                })
         }
-        let values = i16_column(batch, spec, field);
-        let registered = enum_domain(domain).expect("generated enum domain");
-        if values.iter().flatten().any(|code| {
-            !registered
-                .iter()
-                .any(|entry| entry.code == code.cast_unsigned())
-        }) {
-            return Err(invalid(spec, "enum-code", format!("{field} is unknown")));
+        SemanticAuthority::OntologyFactRegistry => {
+            binding.domain == Some("FACT_KIND")
+                && i32::try_from(code).is_ok_and(|code| {
+                    crate::registries::FACT_KIND_CODES
+                        .iter()
+                        .any(|entry| entry.code == code)
+                })
         }
-    }
-    for (field, domain) in [
-        ("language", "LANGUAGE"),
-        ("owner_kind_code", "OWNER_KIND"),
-        ("owner_capability_state_code", "OWNER_CAPABILITY_STATE"),
-        ("completeness_state_code", "COMPLETENESS_STATE"),
-        ("provider_code", "PROVIDER_CODE"),
-        ("producer_code", "PROVIDER_CODE"),
-        ("path_encoding_code", "PATH_ENCODING"),
-        ("newline_kind_code", "NEWLINE_KIND"),
-        ("field_role_code", "SYNTAX_FIELD_ROLE"),
-    ] {
-        if spec.arrow_schema.index_of(field).is_err() {
-            continue;
-        }
-        let values = i16_column(batch, spec, field);
-        let registered = enum_domain(domain).expect("generated enum domain");
-        if values.iter().flatten().any(|code| {
-            !registered
-                .iter()
-                .any(|entry| entry.code == code.cast_unsigned())
-        }) {
-            return Err(invalid(spec, "enum-code", format!("{field} is unknown")));
-        }
-    }
-    match spec.table_code {
-        9 => {
-            let capabilities = i16_column(batch, spec, "capability_code");
-            if capabilities.iter().flatten().any(|code| {
-                u16::try_from(code).map_or(true, |code| {
-                    !crate::registries::CAPABILITY_IDS.iter().any(|id| {
+        SemanticAuthority::CapabilityRegistry => {
+            binding.domain == Some("CAPABILITY")
+                && u16::try_from(code).is_ok_and(|code| {
+                    crate::registries::CAPABILITY_IDS.iter().any(|id| {
                         crate::registries::capability_code(id).is_some_and(|known| known == code)
                     })
                 })
-            }) {
-                return Err(invalid(spec, "enum-code", "capability_code is unknown"));
+        }
+        SemanticAuthority::SchemaIr => {
+            i16::try_from(code).is_ok_and(|table_code| table_spec(table_code).is_some())
+        }
+        SemanticAuthority::Intrinsic
+        | SemanticAuthority::ProviderCatalog
+        | SemanticAuthority::DiagnosticProtocol => true,
+    }
+}
+
+fn validate_registered_codes(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
+    for field in spec.arrow_schema.fields() {
+        let Some(semantic_type) = field.metadata().get("com.codefabric.cpg.semantic_type") else {
+            continue;
+        };
+        let binding = crate::schema_registry::semantic_type_binding(semantic_type)
+            .expect("schema generator resolves every semantic type");
+        if matches!(
+            binding.authority,
+            crate::schema_registry::SemanticAuthority::Intrinsic
+                | crate::schema_registry::SemanticAuthority::ProviderCatalog
+                | crate::schema_registry::SemanticAuthority::DiagnosticProtocol
+        ) {
+            continue;
+        }
+        let array = column(batch, spec, field.name());
+        for row in 0..batch.num_rows() {
+            if array.is_null(row) {
+                continue;
+            }
+            let code = if let Some(values) = array.as_any().downcast_ref::<Int16Array>() {
+                i64::from(values.value(row))
+            } else if let Some(values) = array.as_any().downcast_ref::<Int32Array>() {
+                i64::from(values.value(row))
+            } else {
+                continue;
+            };
+            if !semantic_code_registered(binding, code) {
+                return Err(invalid(
+                    spec,
+                    "semantic-code",
+                    format!(
+                        "{} value {code} is absent from {}",
+                        field.name(),
+                        semantic_type
+                    ),
+                ));
             }
         }
+    }
+    match spec.table_code {
         100 => {
             let kinds = i32_column(batch, spec, "entity_kind_code");
             let families = i16_column(batch, spec, "entity_family_code");
@@ -1384,42 +666,10 @@ fn validate_registered_codes(batch: &RecordBatch, spec: &TableSpec) -> Result<()
                 }
             }
         }
-        120 => {
-            let kinds = i32_column(batch, spec, "property_kind_code");
-            if kinds.iter().flatten().any(|code| {
-                !crate::registries::PROPERTY_KIND_CODES
-                    .iter()
-                    .any(|entry| entry.code == code)
-            }) {
-                return Err(invalid(spec, "ontology-code", "property kind is unknown"));
-            }
-        }
-        150 => validate_code32_domain(batch, spec, "token_kind_code", "TOKEN_KIND")?,
-        160 => validate_code32_domain(batch, spec, "annotation_kind_code", "ANNOTATION_KIND")?,
-        170 => validate_code32_domain(batch, spec, "normalized_kind_code", "SYNTAX_KIND")?,
         _ => {}
     }
     Ok(())
 }
-
-fn validate_code32_domain(
-    batch: &RecordBatch,
-    spec: &TableSpec,
-    field: &str,
-    domain: &str,
-) -> Result<(), FactIngestError> {
-    let values = i32_column(batch, spec, field);
-    let registered = enum_domain(domain).expect("generated enum domain");
-    if values.iter().flatten().any(|code| {
-        u16::try_from(code).map_or(true, |code| {
-            !registered.iter().any(|entry| entry.code == code)
-        })
-    }) {
-        return Err(invalid(spec, "enum-code", format!("{field} is unknown")));
-    }
-    Ok(())
-}
-
 fn validate_source_file(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
     if spec.table_code != 140 {
         return Ok(());
@@ -1641,12 +891,15 @@ impl CanonicalFact {
         }
     }
 
-    const fn fact_form_code(&self) -> i16 {
-        match self {
-            Self::Entity(_) => 10,
-            Self::Relation(_) => 20,
-            Self::Property(_) => 30,
-        }
+    fn fact_form_code(&self) -> i16 {
+        let name = match self {
+            Self::Entity(_) => "ENTITY_EXISTENCE",
+            Self::Relation(_) => "RELATION",
+            Self::Property(_) => "PROPERTY",
+        };
+        crate::registries::fact_kind_code(name)
+            .and_then(|code| i16::try_from(code).ok())
+            .expect("generated ontology fact-form code")
     }
 
     const fn scope(&self) -> FactScope {

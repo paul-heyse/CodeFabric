@@ -33,7 +33,7 @@ pub enum EvidenceCertainty {
 }
 impl TryFrom<u16> for EvidenceCertainty {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::SourceExact),
             20 => Ok(Self::CompilerExact),
@@ -102,7 +102,7 @@ pub enum ResolutionClass {
 }
 impl TryFrom<u16> for ResolutionClass {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Exact),
             20 => Ok(Self::StaticallyResolved),
@@ -178,7 +178,7 @@ pub enum Directness {
 }
 impl TryFrom<u16> for Directness {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Direct),
             20 => Ok(Self::Transitive),
@@ -225,7 +225,7 @@ pub enum Completeness {
 }
 impl TryFrom<u16> for Completeness {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Complete),
             20 => Ok(Self::Partial),
@@ -285,7 +285,7 @@ pub enum OwnerCapabilityState {
 }
 impl TryFrom<u16> for OwnerCapabilityState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Current),
             20 => Ok(Self::Pending),
@@ -387,7 +387,7 @@ pub enum ProviderRunState {
 }
 impl TryFrom<u16> for ProviderRunState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Queued),
             20 => Ok(Self::Running),
@@ -484,7 +484,7 @@ pub enum QueryExecutionState {
 }
 impl TryFrom<u16> for QueryExecutionState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Accepted),
             20 => Ok(Self::Running),
@@ -552,7 +552,7 @@ pub enum QueryForm {
 }
 impl TryFrom<u16> for QueryForm {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::FindEntities),
             20 => Ok(Self::RetrieveFacts),
@@ -622,7 +622,7 @@ pub enum QueryAvailabilityState {
 }
 impl TryFrom<u16> for QueryAvailabilityState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Available),
             20 => Ok(Self::Partial),
@@ -669,7 +669,7 @@ pub enum CompletenessState {
 }
 impl TryFrom<u16> for CompletenessState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Complete),
             20 => Ok(Self::Partial),
@@ -720,7 +720,7 @@ pub enum FreshnessState {
 }
 impl TryFrom<u16> for FreshnessState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Current),
             20 => Ok(Self::PotentiallyStale),
@@ -759,7 +759,7 @@ pub enum LimitState {
 }
 impl TryFrom<u16> for LimitState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::NotApplied),
             20 => Ok(Self::ExplicitLimitReached),
@@ -798,7 +798,7 @@ pub enum DependencyState {
 }
 impl TryFrom<u16> for DependencyState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Ready),
             20 => Ok(Self::FailedDependency),
@@ -841,7 +841,7 @@ pub enum DurablePublicationState {
 }
 impl TryFrom<u16> for DurablePublicationState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Staging),
             20 => Ok(Self::Validating),
@@ -907,7 +907,7 @@ pub enum ServingActivationState {
 }
 impl TryFrom<u16> for ServingActivationState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Building),
             20 => Ok(Self::Validating),
@@ -965,7 +965,7 @@ pub enum SnapshotLeaseKind {
 }
 impl TryFrom<u16> for SnapshotLeaseKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Query),
             20 => Ok(Self::ResultArtifact),
@@ -1012,7 +1012,7 @@ pub enum SnapshotLeaseState {
 }
 impl TryFrom<u16> for SnapshotLeaseState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Active),
             20 => Ok(Self::Releasing),
@@ -1065,7 +1065,7 @@ pub enum SourceTrustState {
 }
 impl TryFrom<u16> for SourceTrustState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Unverified),
             20 => Ok(Self::Verifying),
@@ -1117,7 +1117,7 @@ pub enum EventStreamHealth {
 }
 impl TryFrom<u16> for EventStreamHealth {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Healthy),
             20 => Ok(Self::RescanRequired),
@@ -1167,7 +1167,7 @@ pub enum GitAccelerationStatus {
 }
 impl TryFrom<u16> for GitAccelerationStatus {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::NotAGitWorktree),
             20 => Ok(Self::GitUnavailable),
@@ -1270,7 +1270,7 @@ pub enum EffectKind {
 }
 impl TryFrom<u16> for EffectKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::ReadMemory),
             20 => Ok(Self::WriteMemory),
@@ -1520,7 +1520,7 @@ pub enum ResourceKind {
 }
 impl TryFrom<u16> for ResourceKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::FileHandle),
             20 => Ok(Self::SocketOrConnection),
@@ -1604,7 +1604,7 @@ pub enum ProviderCode {
 }
 impl TryFrom<u16> for ProviderCode {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::TreeSitter),
             20 => Ok(Self::RuffPython),
@@ -1666,7 +1666,7 @@ pub enum TokenKind {
 }
 impl TryFrom<u16> for TokenKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Identifier),
             20 => Ok(Self::Keyword),
@@ -1737,7 +1737,7 @@ pub enum AnnotationKind {
 }
 impl TryFrom<u16> for AnnotationKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Comment),
             20 => Ok(Self::Documentation),
@@ -1809,7 +1809,7 @@ pub enum SyntaxKind {
 }
 impl TryFrom<u16> for SyntaxKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::SyntaxNode),
             20 => Ok(Self::Statement),
@@ -1988,7 +1988,7 @@ pub enum SyntaxFieldRole {
 }
 impl TryFrom<u16> for SyntaxFieldRole {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Name),
             20 => Ok(Self::Parameters),
@@ -2116,7 +2116,7 @@ pub enum OwnerKind {
 }
 impl TryFrom<u16> for OwnerKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::SourceFile),
             20 => Ok(Self::Module),
@@ -2186,7 +2186,7 @@ pub enum Language {
 }
 impl TryFrom<u16> for Language {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Common),
             20 => Ok(Self::Python),
@@ -2231,7 +2231,7 @@ pub enum PathEncoding {
 }
 impl TryFrom<u16> for PathEncoding {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::UnixBytes),
             20 => Ok(Self::MacosBytes),
@@ -2271,7 +2271,7 @@ pub enum UpdateCandidateStrategy {
 }
 impl TryFrom<u16> for UpdateCandidateStrategy {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::IsolatedPaths),
             20 => Ok(Self::GitStatusIndex),
@@ -2318,7 +2318,7 @@ pub enum UpdateWaveItemState {
 }
 impl TryFrom<u16> for UpdateWaveItemState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Pending),
             20 => Ok(Self::Captured),
@@ -2370,7 +2370,7 @@ pub enum OperationalDependencyEdgeKind {
 }
 impl TryFrom<u16> for OperationalDependencyEdgeKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Syntax),
             20 => Ok(Self::Semantic),
@@ -2414,7 +2414,7 @@ pub enum GitHashAlgorithm {
 }
 impl TryFrom<u16> for GitHashAlgorithm {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Sha1),
             20 => Ok(Self::Sha256),
@@ -2447,7 +2447,7 @@ pub enum GitRepositoryKind {
 }
 impl TryFrom<u16> for GitRepositoryKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Common),
             20 => Ok(Self::LinkedWorktree),
@@ -2486,7 +2486,7 @@ pub enum GitHeadKind {
 }
 impl TryFrom<u16> for GitHeadKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Symbolic),
             20 => Ok(Self::Detached),
@@ -2531,7 +2531,7 @@ pub enum GitOperationState {
 }
 impl TryFrom<u16> for GitOperationState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Clean),
             20 => Ok(Self::Merge),
@@ -2611,7 +2611,7 @@ pub enum GitInventoryClassification {
 }
 impl TryFrom<u16> for GitInventoryClassification {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Tracked),
             20 => Ok(Self::UntrackedNotIgnored),
@@ -2681,7 +2681,7 @@ pub enum InventoryInclusionState {
 }
 impl TryFrom<u16> for InventoryInclusionState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Included),
             20 => Ok(Self::ExcludedPolicy),
@@ -2726,7 +2726,7 @@ pub enum InventoryFileKind {
 }
 impl TryFrom<u16> for InventoryFileKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Regular),
             20 => Ok(Self::Symlink),
@@ -2765,7 +2765,7 @@ pub enum GitCandidateOrigin {
 }
 impl TryFrom<u16> for GitCandidateOrigin {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::IndexWorktree),
             20 => Ok(Self::HeadIndex),
@@ -2803,7 +2803,7 @@ pub enum GitCandidateMode {
 }
 impl TryFrom<u16> for GitCandidateMode {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Status),
             20 => Ok(Self::HeadTree),
@@ -2836,7 +2836,7 @@ pub enum OverlayTombstoneReason {
 }
 impl TryFrom<u16> for OverlayTombstoneReason {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::OwnerReplacedEmpty),
             20 => Ok(Self::SourceRemoved),
@@ -2877,7 +2877,7 @@ pub enum NewlineKind {
 }
 impl TryFrom<u16> for NewlineKind {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::None),
             20 => Ok(Self::Lf),
@@ -2928,7 +2928,7 @@ pub enum OccurrenceFamily {
 }
 impl TryFrom<u16> for OccurrenceFamily {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Token),
             20 => Ok(Self::Annotation),
@@ -2965,7 +2965,7 @@ pub enum ProviderObservationFamily {
 }
 impl TryFrom<u16> for ProviderObservationFamily {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             120 => Ok(Self::RustMirOwner),
             _ => Err(UnknownRegistryCode {
@@ -2992,7 +2992,7 @@ pub enum RangeReconciliationStep {
 }
 impl TryFrom<u16> for RangeReconciliationStep {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::ExactRangeAndKind),
             20 => Ok(Self::ExactDeclarationName),
@@ -3043,7 +3043,7 @@ pub enum RawKindDisposition {
 }
 impl TryFrom<u16> for RawKindDisposition {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Normalize),
             20 => Ok(Self::Ignore),
@@ -3075,6 +3075,190 @@ pub const RAW_KIND_DISPOSITION_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
+pub enum WorkspaceKind {
+    NonGitRoot = 10,
+    GitWorktree = 20,
+}
+impl TryFrom<u16> for WorkspaceKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::NonGitRoot),
+            20 => Ok(Self::GitWorktree),
+            _ => Err(UnknownRegistryCode {
+                domain: "WORKSPACE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const WORKSPACE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "NON_GIT_ROOT",
+        slug: "non-git-root",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "GIT_WORKTREE",
+        slug: "git-worktree",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum AnalysisContextKind {
+    Source = 10,
+    Python = 20,
+    Rust = 30,
+}
+impl TryFrom<u16> for AnalysisContextKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Source),
+            20 => Ok(Self::Python),
+            30 => Ok(Self::Rust),
+            _ => Err(UnknownRegistryCode {
+                domain: "ANALYSIS_CONTEXT_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const ANALYSIS_CONTEXT_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SOURCE",
+        slug: "source",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "PYTHON",
+        slug: "python",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "RUST",
+        slug: "rust",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum ValueKind {
+    Entity = 10,
+    Boolean = 20,
+    Integer = 30,
+    Float = 40,
+    Text = 50,
+    Bytes = 60,
+    Type = 70,
+}
+impl TryFrom<u16> for ValueKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Entity),
+            20 => Ok(Self::Boolean),
+            30 => Ok(Self::Integer),
+            40 => Ok(Self::Float),
+            50 => Ok(Self::Text),
+            60 => Ok(Self::Bytes),
+            70 => Ok(Self::Type),
+            _ => Err(UnknownRegistryCode {
+                domain: "VALUE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const VALUE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "ENTITY",
+        slug: "entity",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "BOOLEAN",
+        slug: "boolean",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "INTEGER",
+        slug: "integer",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "FLOAT",
+        slug: "float",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "TEXT",
+        slug: "text",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "BYTES",
+        slug: "bytes",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "TYPE",
+        slug: "type",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum Severity {
+    Info = 10,
+    Warning = 20,
+    Error = 30,
+    Fatal = 40,
+}
+impl TryFrom<u16> for Severity {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Info),
+            20 => Ok(Self::Warning),
+            30 => Ok(Self::Error),
+            40 => Ok(Self::Fatal),
+            _ => Err(UnknownRegistryCode {
+                domain: "SEVERITY",
+                code,
+            }),
+        }
+    }
+}
+pub const SEVERITY_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "INFO",
+        slug: "info",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "WARNING",
+        slug: "warning",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "ERROR",
+        slug: "error",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "FATAL",
+        slug: "fatal",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
 pub enum WorkspaceLifecycle {
     Bootstrapping = 10,
     Ready = 20,
@@ -3084,7 +3268,7 @@ pub enum WorkspaceLifecycle {
 }
 impl TryFrom<u16> for WorkspaceLifecycle {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Bootstrapping),
             20 => Ok(Self::Ready),
@@ -3152,7 +3336,7 @@ pub enum UpdateWaveState {
 }
 impl TryFrom<u16> for UpdateWaveState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Collecting),
             20 => Ok(Self::Snapshotting),
@@ -3295,7 +3479,7 @@ pub enum ArtifactState {
 }
 impl TryFrom<u16> for ArtifactState {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Building),
             20 => Ok(Self::Ready),
@@ -3353,7 +3537,7 @@ pub enum WorkspaceRegistryLifecycle {
 }
 impl TryFrom<u16> for WorkspaceRegistryLifecycle {
     type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, Self::Error> {
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
             10 => Ok(Self::Registering),
             20 => Ok(Self::Disabled),
@@ -3437,290 +3621,314 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
     RegistryDomainEntry {
         domain: "EVIDENCE_CERTAINTY",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: EVIDENCE_CERTAINTY_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOLUTION_CLASS",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: RESOLUTION_CLASS_VALUES,
     },
     RegistryDomainEntry {
         domain: "DIRECTNESS",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: DIRECTNESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: COMPLETENESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_CAPABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: OWNER_CAPABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_RUN_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: PROVIDER_RUN_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_EXECUTION_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: QUERY_EXECUTION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_FORM",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: QUERY_FORM_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_AVAILABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: QUERY_AVAILABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: COMPLETENESS_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "FRESHNESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: FRESHNESS_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "LIMIT_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: LIMIT_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "DEPENDENCY_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: DEPENDENCY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "DURABLE_PUBLICATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: DURABLE_PUBLICATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SERVING_ACTIVATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: SERVING_ACTIVATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: SNAPSHOT_LEASE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: SNAPSHOT_LEASE_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SOURCE_TRUST_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: SOURCE_TRUST_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "EVENT_STREAM_HEALTH",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: EVENT_STREAM_HEALTH_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_ACCELERATION_STATUS",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_ACCELERATION_STATUS_VALUES,
     },
     RegistryDomainEntry {
         domain: "EFFECT_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: EFFECT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOURCE_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: RESOURCE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_CODE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: PROVIDER_CODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "TOKEN_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: TOKEN_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "ANNOTATION_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: ANNOTATION_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: SYNTAX_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_FIELD_ROLE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: SYNTAX_FIELD_ROLE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: OWNER_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "LANGUAGE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: LANGUAGE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PATH_ENCODING",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: PATH_ENCODING_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_CANDIDATE_STRATEGY",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: UPDATE_CANDIDATE_STRATEGY_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_WAVE_ITEM_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: UPDATE_WAVE_ITEM_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HASH_ALGORITHM",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_HASH_ALGORITHM_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_REPOSITORY_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_REPOSITORY_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HEAD_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_HEAD_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_OPERATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_OPERATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_INVENTORY_CLASSIFICATION",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_INVENTORY_CLASSIFICATION_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_INCLUSION_STATE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: INVENTORY_INCLUSION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_FILE_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: INVENTORY_FILE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_ORIGIN",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_CANDIDATE_ORIGIN_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_MODE",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: GIT_CANDIDATE_MODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OVERLAY_TOMBSTONE_REASON",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: OVERLAY_TOMBSTONE_REASON_VALUES,
     },
     RegistryDomainEntry {
         domain: "NEWLINE_KIND",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: NEWLINE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "OCCURRENCE_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: OCCURRENCE_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_OBSERVATION_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: PROVIDER_OBSERVATION_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "RANGE_RECONCILIATION_STEP",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: RANGE_RECONCILIATION_STEP_VALUES,
     },
     RegistryDomainEntry {
         domain: "RAW_KIND_DISPOSITION",
         version: "1.0",
-        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
         values: RAW_KIND_DISPOSITION_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "WORKSPACE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+        values: WORKSPACE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "ANALYSIS_CONTEXT_KIND",
+        version: "1.0",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+        values: ANALYSIS_CONTEXT_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "VALUE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+        values: VALUE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "SEVERITY",
+        version: "1.0",
+        canonical_digest: "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+        values: SEVERITY_VALUES,
     },
     RegistryDomainEntry {
         domain: "WORKSPACE_LIFECYCLE",

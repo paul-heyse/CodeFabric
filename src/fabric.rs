@@ -20,7 +20,14 @@ use thiserror::Error;
 use url::Url;
 
 use crate::identity::{IdentityDomain, SOURCE_CONTEXT_ID, context_set_identity, encode_public_id};
-use crate::schema_registry::{TableSpec, table_spec, table_specs};
+use crate::registries::{
+    AnalysisContextKind as AnalysisContextKindCode, PathEncoding, WorkspaceKind,
+};
+#[cfg(test)]
+use crate::schema_registry::table_specs;
+use crate::schema_registry::{
+    TableSpec, schema_evolution_policy, table_dependency_order, table_spec,
+};
 use crate::workspace_registry::WorkspaceRecord;
 
 mod mutation;
@@ -60,6 +67,8 @@ pub(crate) fn test_rebase_fault(point: OverlayRebaseFaultPoint) -> Result<(), Fa
 
 const SCHEMA_DIGEST_KEY: &str = "com.codefabric.cpg.schema_digest";
 const TYPE_WIDENING_KEY: &str = "delta.enableTypeWidening";
+const ZORDER_COLUMNS_KEY: &str = "com.codefabric.cpg.zorder_columns";
+const TABLE_DEPENDENCIES_KEY: &str = "com.codefabric.cpg.dependencies";
 const TARGET_FILE_SIZE_BYTES: &str = "134217728";
 const CHECKPOINT_INTERVAL: &str = "10";
 const LOG_RETENTION: &str = "interval 30 days";
@@ -411,13 +420,15 @@ pub async fn bootstrap_workspace_with_repository(
         })?;
     }
     let mut tables = BTreeMap::new();
-    for spec in table_specs() {
+    for table_code in table_dependency_order() {
+        let spec = table_spec(*table_code).expect("generated dependency order names a table");
         let path = namespace.table_path(spec)?;
         std::fs::create_dir_all(&path).map_err(|source| FabricError::Io {
             path: path.clone(),
             source,
         })?;
         let mut table = create_or_open(&path, spec, DeltaAccessProfile::OptimizeDml).await?;
+        authenticate_open_table(&table, spec)?;
         table = install_constraints(table, spec).await?;
         validate_open_table(&table, spec)?;
         let provider = exact_provider(&table, spec, DeltaAccessProfile::QueryServing).await?;
@@ -457,7 +468,10 @@ async fn create_or_open(
             "delta.enableChangeDataFeed".to_owned(),
             Some("false".to_owned()),
         ),
-        (TYPE_WIDENING_KEY.to_owned(), Some("false".to_owned())),
+        (
+            TYPE_WIDENING_KEY.to_owned(),
+            Some(schema_evolution_policy().allow_type_widening.to_string()),
+        ),
         (
             "delta.enableDeletionVectors".to_owned(),
             Some("false".to_owned()),
@@ -477,6 +491,20 @@ async fn create_or_open(
         (
             "delta.targetFileSize".to_owned(),
             Some(TARGET_FILE_SIZE_BYTES.to_owned()),
+        ),
+        (
+            ZORDER_COLUMNS_KEY.to_owned(),
+            Some(spec.zorder_columns.join(",")),
+        ),
+        (
+            TABLE_DEPENDENCIES_KEY.to_owned(),
+            Some(
+                spec.dependencies
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
         ),
     ]);
     configuration.extend(
@@ -506,16 +534,30 @@ fn constraints_for(spec: &TableSpec) -> BTreeMap<String, String> {
         .collect::<Vec<_>>();
     let mut constraints = BTreeMap::new();
     if names.contains(&"start_byte") && names.contains(&"end_byte") {
-        constraints.insert(
-            "source_span_ordered".into(),
-            "((start_byte IS NULL AND end_byte IS NULL) OR \
-             (start_byte IS NOT NULL AND end_byte IS NOT NULL AND \
-              start_byte >= 0 AND end_byte >= start_byte))"
-                .into(),
-        );
+        let start_nullable = spec
+            .arrow_schema
+            .field_with_name("start_byte")
+            .expect("generated start-byte field")
+            .is_nullable();
+        let end_nullable = spec
+            .arrow_schema
+            .field_with_name("end_byte")
+            .expect("generated end-byte field")
+            .is_nullable();
+        let expression = if start_nullable && end_nullable {
+            "start_byte IS NULL AND end_byte IS NULL OR \
+             start_byte IS NOT NULL AND end_byte IS NOT NULL AND \
+             start_byte >= 0 AND start_byte <= end_byte"
+        } else {
+            "start_byte >= 0 AND start_byte <= end_byte"
+        };
+        constraints.insert("source_span_ordered".into(), expression.into());
     }
     for name in names.iter().filter(|name| name.ends_with("_bucket")) {
-        constraints.insert(format!("{name}_range"), format!("{name} BETWEEN 0 AND 255"));
+        constraints.insert(
+            format!("{name}_range"),
+            format!("{name} >= 0 AND {name} <= 255"),
+        );
     }
     for name in names.iter().filter(|name| name.ends_with("_count")) {
         constraints.insert(format!("{name}_nonnegative"), format!("{name} >= 0"));
@@ -544,6 +586,11 @@ async fn install_constraints(
 }
 
 fn validate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), FabricError> {
+    authenticate_open_table(table, spec)?;
+    validate_constraint_configuration(table.snapshot()?.metadata().configuration(), spec)
+}
+
+fn authenticate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), FabricError> {
     let state = table.snapshot()?;
     let metadata = state.metadata();
     let configuration = metadata.configuration();
@@ -553,11 +600,17 @@ fn validate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), Fabri
         &spec.schema_digest,
         state.table_config().column_mapping_mode.is_some(),
     )?;
+    let evolution = schema_evolution_policy();
     if configuration
         .get("delta.enableChangeDataFeed")
         .map(String::as_str)
         != Some("false")
-        || configuration.get(TYPE_WIDENING_KEY).map(String::as_str) != Some("false")
+        || configuration.get(TYPE_WIDENING_KEY).map(String::as_str)
+            != Some(if evolution.allow_type_widening {
+                "true"
+            } else {
+                "false"
+            })
         || configuration
             .get("delta.enableDeletionVectors")
             .map(String::as_str)
@@ -566,6 +619,24 @@ fn validate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), Fabri
         return Err(FabricError::TableInvariant {
             table: spec.name.into(),
             detail: "CDF, deletion vectors, and type widening must remain disabled".into(),
+        });
+    }
+    let expected_zorder = spec.zorder_columns.join(",");
+    let expected_dependencies = spec
+        .dependencies
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    if configuration.get(ZORDER_COLUMNS_KEY).map(String::as_str) != Some(expected_zorder.as_str())
+        || configuration
+            .get(TABLE_DEPENDENCIES_KEY)
+            .map(String::as_str)
+            != Some(expected_dependencies.as_str())
+    {
+        return Err(FabricError::TableInvariant {
+            table: spec.name.into(),
+            detail: "generated Z-order or dependency property drifted".into(),
         });
     }
     validate_protocol_feature_posture(
@@ -604,6 +675,27 @@ fn validate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), Fabri
         return Err(FabricError::TableInvariant {
             table: spec.name.into(),
             detail: "Delta StructType round trip changed Arrow fields".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_constraint_configuration(
+    configuration: &HashMap<String, String>,
+    spec: &TableSpec,
+) -> Result<(), FabricError> {
+    let actual = configuration
+        .iter()
+        .filter_map(|(key, value)| {
+            key.strip_prefix("delta.constraints.")
+                .map(|name| (name.to_owned(), value.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let expected = constraints_for(spec);
+    if actual != expected {
+        return Err(FabricError::TableInvariant {
+            table: spec.name.into(),
+            detail: format!("Delta constraints differ (expected={expected:?}, actual={actual:?})"),
         });
     }
     Ok(())
@@ -697,9 +789,9 @@ fn millis_to_micros(value: &str, field: &str) -> Result<i64, FabricError> {
 fn workspace_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricError> {
     let spec = table_spec(1).expect("generated workspace table");
     let workspace_kind = if record.repository_id.is_some() {
-        2_i16
+        WorkspaceKind::GitWorktree as i16
     } else {
-        1_i16
+        WorkspaceKind::NonGitRoot as i16
     };
     let revision =
         i64::try_from(record.registration_revision).map_err(|_| FabricError::TableInvariant {
@@ -722,7 +814,7 @@ fn workspace_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricError>
             record.root_path_bytes.as_slice(),
         )])),
         Arc::new(StringArray::from(vec![record.root_path_display.as_str()])),
-        Arc::new(Int16Array::from(vec![1_i16])),
+        Arc::new(Int16Array::from(vec![platform_path_encoding()])),
         Arc::new(BinaryArray::from(vec![Some(
             record.authorization_fingerprint.as_slice(),
         )])),
@@ -735,6 +827,21 @@ fn workspace_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricError>
         Arc::clone(&spec.arrow_schema),
         columns,
     )?)
+}
+
+#[cfg(target_os = "macos")]
+const fn platform_path_encoding() -> i16 {
+    PathEncoding::MacosBytes as i16
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const fn platform_path_encoding() -> i16 {
+    PathEncoding::UnixBytes as i16
+}
+
+#[cfg(windows)]
+const fn platform_path_encoding() -> i16 {
+    PathEncoding::WindowsWtf8 as i16
 }
 
 fn common_repository_batch(record: &CommonRepositoryRecord) -> Result<RecordBatch, FabricError> {
@@ -769,7 +876,9 @@ fn source_context_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricE
             record.workspace_id.as_slice(),
         )])),
         Arc::new(BinaryArray::from(vec![Some(SOURCE_CONTEXT_ID.as_slice())])),
-        Arc::new(Int16Array::from(vec![1_i16])),
+        Arc::new(Int16Array::from(vec![
+            AnalysisContextKindCode::Source as i16,
+        ])),
         Arc::new(BinaryArray::from(vec![Some(
             record.context_fingerprint.as_slice(),
         )])),
@@ -916,6 +1025,11 @@ mod tests {
     use datafusion::logical_expr::{JoinType, LogicalPlanBuilder};
 
     use super::*;
+    use crate::fact_ingest::{
+        encode_capability_statuses, encode_entities, encode_evidence, encode_owners,
+        encode_properties, encode_relations, encode_source_annotations, encode_source_files,
+        encode_source_tokens, encode_syntax_details,
+    };
     use crate::registries::WorkspaceRegistryLifecycle;
 
     struct TestRoot(PathBuf);
@@ -960,6 +1074,74 @@ mod tests {
             created_at: "00000000000000001000".into(),
             updated_at: format!("{revision:020}"),
         }
+    }
+
+    #[test]
+    fn wp57_behavioral_acceptance() {
+        for (table_code, batch) in [
+            (8, encode_owners(&[]).unwrap()),
+            (9, encode_capability_statuses(&[]).unwrap()),
+            (100, encode_entities(&[]).unwrap()),
+            (110, encode_relations(&[]).unwrap()),
+            (120, encode_properties(&[]).unwrap()),
+            (130, encode_evidence(&[]).unwrap()),
+            (140, encode_source_files(&[]).unwrap()),
+            (150, encode_source_tokens(&[]).unwrap()),
+            (160, encode_source_annotations(&[]).unwrap()),
+            (170, encode_syntax_details(&[]).unwrap()),
+        ] {
+            assert_eq!(batch.schema(), table_spec(table_code).unwrap().arrow_schema);
+        }
+
+        let order = table_dependency_order();
+        assert_eq!(order.len(), table_specs().len());
+        let positions = order
+            .iter()
+            .enumerate()
+            .map(|(index, table_code)| (*table_code, index))
+            .collect::<BTreeMap<_, _>>();
+        for table_code in order {
+            let spec = table_spec(*table_code).unwrap();
+            for dependency in spec.dependencies {
+                assert!(positions[dependency] < positions[&spec.table_code]);
+            }
+        }
+
+        let foreign_keys = crate::schema_registry::foreign_key_contracts();
+        assert!(!foreign_keys.is_empty());
+        for contract in foreign_keys {
+            let source = table_spec(contract.source_table_code).unwrap();
+            let target = table_spec(contract.target_table_code).unwrap();
+            assert_eq!(
+                source
+                    .arrow_schema
+                    .field(contract.source_column_index)
+                    .name(),
+                contract.source_column
+            );
+            assert_eq!(
+                target
+                    .arrow_schema
+                    .field(contract.target_column_index)
+                    .name(),
+                contract.target_column
+            );
+        }
+
+        let spec = table_spec(100).unwrap();
+        let mut configuration = constraints_for(spec)
+            .into_iter()
+            .map(|(name, expression)| (format!("delta.constraints.{name}"), expression))
+            .collect::<HashMap<_, _>>();
+        validate_constraint_configuration(&configuration, spec).unwrap();
+        let dropped = configuration.keys().next().unwrap().clone();
+        configuration.remove(&dropped);
+        assert!(validate_constraint_configuration(&configuration, spec).is_err());
+
+        let evolution = schema_evolution_policy();
+        assert!(evolution.require_schema_digest_equality);
+        assert!(!evolution.allow_type_widening);
+        assert_eq!(evolution.column_mapping_mode, "none");
     }
 
     #[tokio::test]

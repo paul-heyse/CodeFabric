@@ -1554,7 +1554,9 @@ fn evidence_row(
         evidence_id: evidence_id(input.provider_run_id, input.observation_id, input.fact_id),
         scope,
         fact_id: input.fact_id,
-        fact_form_code: 10,
+        fact_form_code: crate::registries::fact_kind_code("ENTITY_EXISTENCE")
+            .and_then(|code| i16::try_from(code).ok())
+            .expect("generated entity-existence fact-form code"),
         provider_code: input.provider_code,
         provider_version: input.provider_version,
         provider_run_id: input.provider_run_id,

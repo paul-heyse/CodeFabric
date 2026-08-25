@@ -1876,13 +1876,20 @@ mod tests {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();
         let candidate = candidate([0x38; 16], 1, 1);
-        let session = activate_and_lease(
+        let session = activate_and_lease_with_config(
             &mut store,
             &mut images,
             &runtime,
             Arc::clone(&candidate),
-            directory.path(),
-        );
+            ServingRuntimeConfig::new(
+                32 * 1024 * 1024,
+                64 * 1024 * 1024,
+                directory.path().join("query-spill"),
+                2,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let workspace_id = candidate.manifest().body.workspace_id.clone();
         let request = format!(
             r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"response-kat","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":"syntax nodes","input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":30}}}}"#

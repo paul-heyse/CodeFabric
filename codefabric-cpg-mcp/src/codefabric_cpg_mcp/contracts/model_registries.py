@@ -496,6 +496,34 @@ class RawKindDisposition(IntEnum):
     UNSUPPORTED = 30
 
 
+class WorkspaceKind(IntEnum):
+    NON_GIT_ROOT = 10
+    GIT_WORKTREE = 20
+
+
+class AnalysisContextKind(IntEnum):
+    SOURCE = 10
+    PYTHON = 20
+    RUST = 30
+
+
+class ValueKind(IntEnum):
+    ENTITY = 10
+    BOOLEAN = 20
+    INTEGER = 30
+    FLOAT = 40
+    TEXT = 50
+    BYTES = 60
+    TYPE = 70
+
+
+class Severity(IntEnum):
+    INFO = 10
+    WARNING = 20
+    ERROR = 30
+    FATAL = 40
+
+
 class WorkspaceLifecycle(IntEnum):
     BOOTSTRAPPING = 10
     READY = 20
@@ -973,6 +1001,30 @@ ENUM_TRIPLES = MappingProxyType({
         (10, "NORMALIZE", "normalize"),
         (20, "IGNORE", "ignore"),
         (30, "UNSUPPORTED", "unsupported"),
+    ),
+    "WORKSPACE_KIND": (
+        (10, "NON_GIT_ROOT", "non-git-root"),
+        (20, "GIT_WORKTREE", "git-worktree"),
+    ),
+    "ANALYSIS_CONTEXT_KIND": (
+        (10, "SOURCE", "source"),
+        (20, "PYTHON", "python"),
+        (30, "RUST", "rust"),
+    ),
+    "VALUE_KIND": (
+        (10, "ENTITY", "entity"),
+        (20, "BOOLEAN", "boolean"),
+        (30, "INTEGER", "integer"),
+        (40, "FLOAT", "float"),
+        (50, "TEXT", "text"),
+        (60, "BYTES", "bytes"),
+        (70, "TYPE", "type"),
+    ),
+    "SEVERITY": (
+        (10, "INFO", "info"),
+        (20, "WARNING", "warning"),
+        (30, "ERROR", "error"),
+        (40, "FATAL", "fatal"),
     ),
     "WORKSPACE_LIFECYCLE": (
         (10, "BOOTSTRAPPING", "bootstrapping"),

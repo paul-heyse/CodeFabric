@@ -24,7 +24,15 @@ const TABLE_MANIFEST_PATH: &str = "contracts/generated/model/schema/table-specs.
 const DDL_PATH: &str = "contracts/generated/model/schema/operational-store.sql";
 const RUST_BINDINGS_PATH: &str = "src/generated/model_schema_tables.rs";
 const RUST_RUNTIME_BINDINGS_PATH: &str = "src/generated/table_specs.rs";
+const RUST_ROW_ENCODERS_PATH: &str = "src/generated/fact_row_encoders.rs";
 const VALIDATION_PATH: &str = "contracts/generated/model/schema/schema-validation.json";
+const EVOLUTION_POLICY_PATH: &str = "contracts/generated/model/schema/schema-evolution-policy.json";
+const ENUM_REGISTRY_PATH: &str = "contracts/registry/enum-registry.yaml";
+const ENTITY_REGISTRY_PATH: &str = "contracts/registry/ontology-entity-registry.yaml";
+const RELATION_REGISTRY_PATH: &str = "contracts/registry/ontology-relation-registry.yaml";
+const PROPERTY_REGISTRY_PATH: &str = "contracts/registry/ontology-property-registry.yaml";
+const FACT_REGISTRY_PATH: &str = "contracts/registry/ontology-fact-registry.yaml";
+const CAPABILITY_REGISTRY_PATH: &str = "contracts/registry/capability-registry.yaml";
 const MAX_AUTHORITY_BYTES: usize = 16 * 1024 * 1024;
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -102,6 +110,141 @@ enum PublicationPinRole {
     NotPublished,
 }
 
+/// Closed implementation kinds whose typed encoders are emitted from table columns.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RowEncoderKind {
+    Owners,
+    CapabilityStatuses,
+    Entities,
+    Relations,
+    Properties,
+    Evidence,
+    SourceFiles,
+    SourceTokens,
+    SourceAnnotations,
+    SyntaxDetails,
+}
+
+impl RowEncoderKind {
+    const fn rust_function(self) -> &'static str {
+        match self {
+            Self::Owners => "encode_owners",
+            Self::CapabilityStatuses => "encode_capability_statuses",
+            Self::Entities => "encode_entities",
+            Self::Relations => "encode_relations",
+            Self::Properties => "encode_properties",
+            Self::Evidence => "encode_evidence",
+            Self::SourceFiles => "encode_source_files",
+            Self::SourceTokens => "encode_source_tokens",
+            Self::SourceAnnotations => "encode_source_annotations",
+            Self::SyntaxDetails => "encode_syntax_details",
+        }
+    }
+
+    const fn rust_row_type(self) -> &'static str {
+        match self {
+            Self::Owners => "OwnerRow",
+            Self::CapabilityStatuses => "CapabilityStatusRow",
+            Self::Entities => "EntityRow",
+            Self::Relations => "RelationRow",
+            Self::Properties => "PropertyFactRow",
+            Self::Evidence => "FactEvidenceRow",
+            Self::SourceFiles => "SourceFileRow",
+            Self::SourceTokens => "SourceTokenRow",
+            Self::SourceAnnotations => "SourceAnnotationRow",
+            Self::SyntaxDetails => "SyntaxDetailRow",
+        }
+    }
+}
+
+/// P21's exhaustive six-class disposition for schema-IR annotations.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum MetadataClass {
+    Enforced,
+    PlannerConsumed,
+    Contractual,
+    Governance,
+    Lineage,
+    Advisory,
+}
+
+/// One annotation classification and its concrete non-advisory consumer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetadataAnnotationContract {
+    annotation: String,
+    class: MetadataClass,
+    #[serde(default)]
+    consumer_path: Option<String>,
+    #[serde(default)]
+    consumer_symbol: Option<String>,
+}
+
+/// Registry or contract authority that gives a semantic type its meaning.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum SemanticAuthority {
+    EnumRegistry,
+    OntologyEntityRegistry,
+    OntologyRelationRegistry,
+    OntologyPropertyRegistry,
+    OntologyFactRegistry,
+    CapabilityRegistry,
+    SchemaIr,
+    Intrinsic,
+    ProviderCatalog,
+    DiagnosticProtocol,
+}
+
+/// Digest-pinned link from the schema IR to one external semantic authority.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SemanticAuthorityContract {
+    authority: SemanticAuthority,
+    artifact_id: String,
+    path: String,
+    canonical_digest: String,
+}
+
+/// Resolution rule for one distinct `semantic_type` value.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SemanticTypeBindingContract {
+    semantic_type: String,
+    authority: SemanticAuthority,
+    #[serde(default)]
+    domain: Option<String>,
+}
+
+/// Explicit compatibility class for the versioned schema-evolution policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum SchemaCompatibilityClass {
+    ExactPin,
+}
+
+/// SQLite cannot enforce references whose target rows live in Delta candidate state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum SqliteForeignKeyPosture {
+    NotEmittedCrossStore,
+}
+
+/// Versioned migration and acceptance contract; the IR remains its sole authority.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SchemaEvolutionPolicyContract {
+    policy_id: String,
+    version: String,
+    compatibility_class: SchemaCompatibilityClass,
+    require_schema_digest_equality: bool,
+    allow_type_widening: bool,
+    column_mapping_mode: String,
+    migration_route: Vec<String>,
+}
+
 /// One ordered physical field. `field_id` is derived as `<table>.<name>`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -126,6 +269,8 @@ struct TableContract {
     family: String,
     grain: String,
     schema_version: String,
+    #[serde(default)]
+    row_encoder: Option<RowEncoderKind>,
     columns: Vec<ColumnContract>,
     primary_key: Vec<String>,
     partition_columns: Vec<String>,
@@ -296,6 +441,11 @@ struct SchemaContractIr {
     schema_version: u16,
     ontology_version: String,
     compatibility_mode: String,
+    metadata_dictionary: Vec<MetadataAnnotationContract>,
+    semantic_authorities: Vec<SemanticAuthorityContract>,
+    semantic_type_bindings: Vec<SemanticTypeBindingContract>,
+    schema_evolution_policy: SchemaEvolutionPolicyContract,
+    sqlite_foreign_key_posture: SqliteForeignKeyPosture,
     owner_bucket_count: u16,
     tables: Vec<TableContract>,
     table_scopes: Vec<TableScopeContract>,
@@ -322,9 +472,145 @@ impl SchemaContractIr {
         if self.tables.is_empty() {
             return invalid("$.tables", "at least one TableSpec is required");
         }
+        let expected_annotations = BTreeSet::from([
+            "compatibility_mode",
+            "dependencies",
+            "durable_mutation",
+            "family",
+            "foreign_key",
+            "grain",
+            "hidden_operational",
+            "logical_type",
+            "materialization_role",
+            "name",
+            "nullable",
+            "ontology_version",
+            "overlay_mutation",
+            "partition_columns",
+            "primary_key",
+            "publication_pin_role",
+            "required_for_publication",
+            "row_encoder",
+            "schema_version",
+            "semantic_type",
+            "sqlite_foreign_key_posture",
+            "table_code",
+            "zorder_columns",
+        ]);
+        let mut annotation_names = BTreeSet::new();
+        let mut metadata_classes = BTreeSet::new();
+        for (index, annotation) in self.metadata_dictionary.iter().enumerate() {
+            if !identifier(&annotation.annotation)
+                || !annotation_names.insert(annotation.annotation.as_str())
+            {
+                return invalid(
+                    &format!("$.metadata_dictionary[{index}].annotation"),
+                    "duplicate or invalid annotation name",
+                );
+            }
+            metadata_classes.insert(annotation.class);
+            let has_consumer = annotation
+                .consumer_path
+                .as_deref()
+                .is_some_and(|path| path.starts_with("src/") && path.ends_with(".rs"))
+                && annotation
+                    .consumer_symbol
+                    .as_deref()
+                    .is_some_and(|symbol| !symbol.trim().is_empty());
+            if (annotation.class == MetadataClass::Advisory) == has_consumer {
+                return invalid(
+                    &format!("$.metadata_dictionary[{index}]"),
+                    "advisory annotations omit consumers; every other class names one",
+                );
+            }
+        }
+        if annotation_names != expected_annotations
+            || metadata_classes
+                != BTreeSet::from([
+                    MetadataClass::Enforced,
+                    MetadataClass::PlannerConsumed,
+                    MetadataClass::Contractual,
+                    MetadataClass::Governance,
+                    MetadataClass::Lineage,
+                    MetadataClass::Advisory,
+                ])
+        {
+            return invalid(
+                "$.metadata_dictionary",
+                "annotation census or six-class coverage differs",
+            );
+        }
+        if self.schema_evolution_policy.policy_id != "codefabric.schema.evolution-policy"
+            || self.schema_evolution_policy.version != "1.0"
+            || self.schema_evolution_policy.compatibility_class
+                != SchemaCompatibilityClass::ExactPin
+            || !self.schema_evolution_policy.require_schema_digest_equality
+            || self.schema_evolution_policy.allow_type_widening
+            || self.schema_evolution_policy.column_mapping_mode != "none"
+            || self.schema_evolution_policy.migration_route.len() < 4
+            || self
+                .schema_evolution_policy
+                .migration_route
+                .iter()
+                .any(|step| step.trim().is_empty())
+        {
+            return invalid(
+                "$.schema_evolution_policy",
+                "exact-pin evolution and migration contract differs",
+            );
+        }
+        if self.sqlite_foreign_key_posture != SqliteForeignKeyPosture::NotEmittedCrossStore {
+            return invalid(
+                "$.sqlite_foreign_key_posture",
+                "cross-store foreign keys must not claim SQLite enforcement",
+            );
+        }
+        let expected_authorities = BTreeMap::from([
+            (SemanticAuthority::EnumRegistry, ENUM_REGISTRY_PATH),
+            (
+                SemanticAuthority::OntologyEntityRegistry,
+                ENTITY_REGISTRY_PATH,
+            ),
+            (
+                SemanticAuthority::OntologyRelationRegistry,
+                RELATION_REGISTRY_PATH,
+            ),
+            (
+                SemanticAuthority::OntologyPropertyRegistry,
+                PROPERTY_REGISTRY_PATH,
+            ),
+            (SemanticAuthority::OntologyFactRegistry, FACT_REGISTRY_PATH),
+            (
+                SemanticAuthority::CapabilityRegistry,
+                CAPABILITY_REGISTRY_PATH,
+            ),
+        ]);
+        let mut authorities = BTreeMap::new();
+        for (index, authority) in self.semantic_authorities.iter().enumerate() {
+            if expected_authorities.get(&authority.authority).copied()
+                != Some(authority.path.as_str())
+                || !authority.canonical_digest.starts_with("b3:")
+                || authority.canonical_digest.len() != 67
+                || authority.artifact_id.trim().is_empty()
+                || authorities.insert(authority.authority, authority).is_some()
+            {
+                return invalid(
+                    &format!("$.semantic_authorities[{index}]"),
+                    "semantic authority path, digest, or identity is invalid",
+                );
+            }
+        }
+        if authorities.len() != expected_authorities.len() {
+            return invalid(
+                "$.semantic_authorities",
+                "external semantic-authority census differs",
+            );
+        }
         let mut codes = BTreeSet::new();
         let mut names = BTreeSet::new();
         let mut tables = BTreeMap::new();
+        let mut semantic_types = BTreeSet::new();
+        let mut encoders = BTreeMap::new();
         for (table_index, table) in self.tables.iter().enumerate() {
             let path = format!("$.tables[{table_index}]");
             if !identifier(&table.name)
@@ -344,6 +630,14 @@ impl SchemaContractIr {
                         "duplicate or invalid field name",
                     );
                 }
+                if let Some(semantic_type) = column.semantic_type.as_deref() {
+                    semantic_types.insert(semantic_type);
+                }
+            }
+            if let Some(encoder) = table.row_encoder
+                && encoders.insert(encoder, table.table_code).is_some()
+            {
+                return invalid(&format!("{path}.row_encoder"), "duplicate row encoder kind");
             }
             for key in table
                 .primary_key
@@ -356,6 +650,65 @@ impl SchemaContractIr {
                 }
             }
             tables.insert(table.name.as_str(), table);
+        }
+        let expected_encoders = BTreeMap::from([
+            (RowEncoderKind::Owners, 8),
+            (RowEncoderKind::CapabilityStatuses, 9),
+            (RowEncoderKind::Entities, 100),
+            (RowEncoderKind::Relations, 110),
+            (RowEncoderKind::Properties, 120),
+            (RowEncoderKind::Evidence, 130),
+            (RowEncoderKind::SourceFiles, 140),
+            (RowEncoderKind::SourceTokens, 150),
+            (RowEncoderKind::SourceAnnotations, 160),
+            (RowEncoderKind::SyntaxDetails, 170),
+        ]);
+        if encoders != expected_encoders {
+            return invalid(
+                "$.tables[*].row_encoder",
+                "generated fact-row encoder census differs",
+            );
+        }
+        let mut bindings = BTreeMap::new();
+        for (index, binding) in self.semantic_type_bindings.iter().enumerate() {
+            if binding.semantic_type.trim().is_empty()
+                || bindings
+                    .insert(binding.semantic_type.as_str(), binding)
+                    .is_some()
+            {
+                return invalid(
+                    &format!("$.semantic_type_bindings[{index}]"),
+                    "duplicate or empty semantic-type binding",
+                );
+            }
+            let external = expected_authorities.contains_key(&binding.authority);
+            if external
+                != binding.domain.as_deref().is_some_and(|domain| {
+                    !domain.is_empty()
+                        && domain.bytes().all(|byte| {
+                            byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                        })
+                })
+            {
+                return invalid(
+                    &format!("$.semantic_type_bindings[{index}].domain"),
+                    "external bindings require one UPPER_SNAKE domain",
+                );
+            }
+            if binding.semantic_type.starts_with("enum:")
+                != (binding.authority == SemanticAuthority::EnumRegistry)
+            {
+                return invalid(
+                    &format!("$.semantic_type_bindings[{index}]"),
+                    "only enum-registry bindings may use the enum namespace",
+                );
+            }
+        }
+        if bindings.keys().copied().collect::<BTreeSet<_>>() != semantic_types {
+            return invalid(
+                "$.semantic_type_bindings",
+                "semantic-type bindings do not exactly cover schema fields",
+            );
         }
         for (table_index, table) in self.tables.iter().enumerate() {
             for (column_index, column) in table.columns.iter().enumerate() {
@@ -393,6 +746,22 @@ impl SchemaContractIr {
                         format!("unknown table dependency {dependency}"),
                     );
                 }
+            }
+        }
+        let mut dependency_order = BTreeSet::new();
+        while dependency_order.len() < self.tables.len() {
+            let before = dependency_order.len();
+            for table in &self.tables {
+                if table
+                    .dependencies
+                    .iter()
+                    .all(|dependency| dependency_order.contains(dependency))
+                {
+                    dependency_order.insert(table.table_code);
+                }
+            }
+            if before == dependency_order.len() {
+                return invalid("$.tables[*].dependencies", "table dependency cycle");
             }
         }
         let syntax = tables
@@ -607,6 +976,98 @@ impl SchemaContractIr {
     }
 }
 
+fn validate_semantic_authorities(
+    repository_root: &Path,
+    ir: &SchemaContractIr,
+) -> Result<(), SchemaDriverError> {
+    let mut enum_domains = BTreeSet::new();
+    for authority in &ir.semantic_authorities {
+        let path = repository_root.join(&authority.path);
+        let bytes = read_stable(&path, MAX_AUTHORITY_BYTES)?;
+        let yaml: serde_yaml_ng::Value =
+            serde_yaml_ng::from_slice(&bytes).map_err(|source| SchemaDriverError::Io {
+                path: path.clone(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+            })?;
+        let value = serde_json::to_value(yaml)?;
+        let actual_artifact = value.get("artifact_id").and_then(Value::as_str);
+        let actual_digest = value.get("canonical_digest").and_then(Value::as_str);
+        let detached =
+            super::registry_cbef_driver::detached_registry_identity(&authority.artifact_id, &bytes)
+                .map_err(|error| SchemaDriverError::Invalid {
+                    path: authority.path.clone(),
+                    detail: error.to_string(),
+                })?;
+        if actual_artifact != Some(authority.artifact_id.as_str())
+            || actual_digest != Some(authority.canonical_digest.as_str())
+            || detached.as_deref() != Some(authority.canonical_digest.as_str())
+        {
+            return invalid(
+                "$.semantic_authorities",
+                format!(
+                    "digest-pinned semantic authority {} drifted",
+                    authority.path
+                ),
+            );
+        }
+        if authority.authority == SemanticAuthority::EnumRegistry {
+            enum_domains.extend(
+                value["records"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|record| record["domain"].as_str().map(str::to_owned)),
+            );
+        } else if value["records"].as_array().is_none_or(Vec::is_empty) {
+            return invalid(
+                "$.semantic_authorities",
+                format!("semantic authority {} has no records", authority.path),
+            );
+        }
+    }
+    for binding in &ir.semantic_type_bindings {
+        let valid_domain = match binding.authority {
+            SemanticAuthority::EnumRegistry => binding
+                .domain
+                .as_deref()
+                .is_some_and(|domain| enum_domains.contains(domain)),
+            SemanticAuthority::OntologyEntityRegistry => {
+                matches!(
+                    binding.domain.as_deref(),
+                    Some("ENTITY_KIND" | "ENTITY_FAMILY")
+                )
+            }
+            SemanticAuthority::OntologyRelationRegistry => matches!(
+                binding.domain.as_deref(),
+                Some("RELATION_KIND" | "RELATION_FAMILY")
+            ),
+            SemanticAuthority::OntologyPropertyRegistry => {
+                binding.domain.as_deref() == Some("PROPERTY_KIND")
+            }
+            SemanticAuthority::OntologyFactRegistry => {
+                binding.domain.as_deref() == Some("FACT_KIND")
+            }
+            SemanticAuthority::CapabilityRegistry => {
+                binding.domain.as_deref() == Some("CAPABILITY")
+            }
+            SemanticAuthority::SchemaIr
+            | SemanticAuthority::Intrinsic
+            | SemanticAuthority::ProviderCatalog
+            | SemanticAuthority::DiagnosticProtocol => binding.domain.is_none(),
+        };
+        if !valid_domain {
+            return invalid(
+                "$.semantic_type_bindings",
+                format!(
+                    "semantic type {} does not resolve in its authority",
+                    binding.semantic_type
+                ),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Resolved, source-fenced schema plan.
 pub struct SchemaPlan {
     descriptor: DriverDescriptor,
@@ -646,7 +1107,12 @@ impl SchemaDriver {
                 safe(RUST_RUNTIME_BINDINGS_PATH)?,
                 rustfmt_source(&render_runtime_rust(&plan.ir, &plan.source_digest))?,
             ),
+            (
+                safe(RUST_ROW_ENCODERS_PATH)?,
+                rustfmt_source(&render_row_encoders(&plan.ir, &plan.source_digest)?)?,
+            ),
             (safe(VALIDATION_PATH)?, render_validation(plan)?),
+            (safe(EVOLUTION_POLICY_PATH)?, render_evolution_policy(plan)?),
         ];
         for schema in &plan.ir.public_schemas {
             outputs.push((
@@ -663,7 +1129,6 @@ impl ModelDriver for SchemaDriver {
     type Plan = SchemaPlan;
 
     fn describe(&self) -> Result<DriverDescriptor, DriverProtocolError> {
-        let source = safe_protocol(SCHEMA_IR_PATH)?;
         let outputs = vec![
             Self::output(
                 "output:model-schema-tables",
@@ -686,9 +1151,19 @@ impl ModelDriver for SchemaDriver {
                 DriverOutputRole::RustBinding,
             )?,
             Self::output(
+                "output:model-schema-row-encoders-rust",
+                RUST_ROW_ENCODERS_PATH,
+                DriverOutputRole::RustBinding,
+            )?,
+            Self::output(
                 "output:model-schema-validation",
                 VALIDATION_PATH,
                 DriverOutputRole::ValidationReport,
+            )?,
+            Self::output(
+                "output:model-schema-evolution-policy",
+                EVOLUTION_POLICY_PATH,
+                DriverOutputRole::CanonicalProjection,
             )?,
         ];
         let descriptor = DriverDescriptor {
@@ -697,7 +1172,18 @@ impl ModelDriver for SchemaDriver {
             family: StableId::parse("family:schemas".to_owned())
                 .map_err(|_| DriverProtocolError::InvalidDescriptor)?,
             rule_version: "schema-contract-driver-v1".to_owned(),
-            sources: vec![source],
+            sources: [
+                SCHEMA_IR_PATH,
+                ENUM_REGISTRY_PATH,
+                ENTITY_REGISTRY_PATH,
+                RELATION_REGISTRY_PATH,
+                PROPERTY_REGISTRY_PATH,
+                FACT_REGISTRY_PATH,
+                CAPABILITY_REGISTRY_PATH,
+            ]
+            .into_iter()
+            .map(safe_protocol)
+            .collect::<Result<Vec<_>, _>>()?,
             output_roots: vec![
                 safe_protocol("contracts/schema")?,
                 safe_protocol("contracts/query")?,
@@ -720,6 +1206,8 @@ impl ModelDriver for SchemaDriver {
         let ir = decode_ir(&bytes)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         ir.validate()
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        validate_semantic_authorities(repository_root, &ir)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         for schema in &ir.public_schemas {
             let output = Self::output(
@@ -872,6 +1360,7 @@ fn render_table_manifest(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError
                 "family": table.family,
                 "grain": table.grain,
                 "schema_version": table.schema_version,
+                "row_encoder": table.row_encoder,
                 "columns": columns,
                 "primary_key": table.primary_key,
                 "partition_columns": table.partition_columns,
@@ -890,6 +1379,11 @@ fn render_table_manifest(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError
         "source": {"artifact_id": plan.ir.header.artifact_id, "source_digest": plan.source_digest},
         "ontology_version": plan.ir.ontology_version,
         "compatibility_mode": plan.ir.compatibility_mode,
+        "metadata_dictionary": plan.ir.metadata_dictionary,
+        "semantic_authorities": plan.ir.semantic_authorities,
+        "semantic_type_bindings": plan.ir.semantic_type_bindings,
+        "schema_evolution_policy": plan.ir.schema_evolution_policy,
+        "sqlite_foreign_key_posture": plan.ir.sqlite_foreign_key_posture,
         "owner_bucket_count": plan.ir.owner_bucket_count,
         "tables": tables,
         "table_scopes": plan.ir.table_scopes,
@@ -949,7 +1443,7 @@ fn render_public_schema(
 
 fn render_ddl(plan: &SchemaPlan) -> Vec<u8> {
     let mut output = format!(
-        "-- @generated from codefabric.schema.contract-ir semantic={} source={}; schema-contract-driver-v1; do not edit.\nPRAGMA foreign_keys = ON;\n\n",
+        "-- @generated from codefabric.schema.contract-ir semantic={} source={}; schema-contract-driver-v1; do not edit.\n-- Cross-store Arrow/Delta foreign keys are generated as application contracts, not SQLite reference clauses.\n\n",
         plan.semantic_digest, plan.source_digest
     );
     for table in &plan.ir.operational_tables {
@@ -1100,8 +1594,77 @@ fn provider_observation_descriptor(schema: &ProviderObservationSchemaContract) -
 #[allow(clippy::too_many_lines)] // One linear pass keeps the complete runtime view tied to one IR.
 fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
     let mut output = format!(
-        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\nconst GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[\n"
+        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\npub const GENERATED_ONTOLOGY_VERSION: &str = {:?};\npub const GENERATED_COMPATIBILITY_MODE: &str = {:?};\nconst GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY: bool = {};\nconst GENERATED_ALLOW_TYPE_WIDENING: bool = {};\nconst GENERATED_COLUMN_MAPPING_MODE: &str = {:?};\n\nconst GENERATED_METADATA_DICTIONARY: &[MetadataAnnotationSpec] = &[\n",
+        ir.ontology_version,
+        ir.compatibility_mode,
+        ir.schema_evolution_policy.require_schema_digest_equality,
+        ir.schema_evolution_policy.allow_type_widening,
+        ir.schema_evolution_policy.column_mapping_mode,
     );
+    for annotation in &ir.metadata_dictionary {
+        writeln!(
+            output,
+            "    MetadataAnnotationSpec {{ annotation: {:?}, class: MetadataClass::{:?}, consumer_path: {:?}, consumer_symbol: {:?} }},",
+            annotation.annotation,
+            annotation.class,
+            annotation.consumer_path.as_deref(),
+            annotation.consumer_symbol.as_deref(),
+        )
+        .unwrap();
+    }
+    output.push_str(
+        "]\n;\n\nconst GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[\n",
+    );
+    for binding in &ir.semantic_type_bindings {
+        let authority = ir
+            .semantic_authorities
+            .iter()
+            .find(|authority| authority.authority == binding.authority);
+        writeln!(
+            output,
+            "    SemanticTypeBindingSpec {{ semantic_type: {:?}, authority: SemanticAuthority::{:?}, domain: {:?}, authority_artifact_id: {:?}, authority_digest: {:?} }},",
+            binding.semantic_type,
+            binding.authority,
+            binding.domain.as_deref(),
+            authority.map(|authority| authority.artifact_id.as_str()),
+            authority.map(|authority| authority.canonical_digest.as_str()),
+        )
+        .unwrap();
+    }
+    output.push_str("]\n;\n\nconst GENERATED_FOREIGN_KEY_CONTRACTS: &[ForeignKeyContract] = &[\n");
+    let by_name = ir
+        .tables
+        .iter()
+        .map(|table| (table.name.as_str(), table))
+        .collect::<BTreeMap<_, _>>();
+    for table in &ir.tables {
+        for (source_column_index, column) in table.columns.iter().enumerate() {
+            let Some(foreign_key) = column.foreign_key.as_deref() else {
+                continue;
+            };
+            let (target_table_name, target_column_name) = foreign_key
+                .split_once('.')
+                .expect("validated foreign-key syntax");
+            let target_table = by_name[target_table_name];
+            let target_column_index = target_table
+                .columns
+                .iter()
+                .position(|candidate| candidate.name == target_column_name)
+                .expect("validated foreign-key target");
+            writeln!(
+                output,
+                "    ForeignKeyContract {{ source_table_code: {}, source_column_index: {}, source_column: {:?}, target_table_code: {}, target_column_index: {}, target_column: {:?} }},",
+                table.table_code,
+                source_column_index,
+                column.name,
+                target_table.table_code,
+                target_column_index,
+                target_column_name,
+            )
+            .unwrap();
+        }
+    }
+    output.push_str("]\n;\n\nconst GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[\n");
     for table in &ir.tables {
         writeln!(output, "    GeneratedTableSpec {{").unwrap();
         writeln!(
@@ -1248,6 +1811,134 @@ fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
     output.into_bytes()
 }
 
+fn render_row_encoders(
+    ir: &SchemaContractIr,
+    source_digest: &str,
+) -> Result<Vec<u8>, SchemaDriverError> {
+    let mut output = format!(
+        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\n"
+    );
+    for table in ir.tables.iter().filter(|table| table.row_encoder.is_some()) {
+        let encoder = table.row_encoder.expect("filtered generated row encoder");
+        writeln!(
+            output,
+            "/// Encode `{}` rows in the exact generated schema order.\n///\n/// # Errors\n///\n/// Returns an Arrow error if a typed accessor and its generated physical field diverge.\npub fn {}(rows: &[{}]) -> Result<RecordBatch, FactIngestError> {{\n    generated_fact_batch(\n        {},\n        vec![",
+            table.name,
+            encoder.rust_function(),
+            encoder.rust_row_type(),
+            table.table_code,
+        )
+        .unwrap();
+        for column in &table.columns {
+            writeln!(
+                output,
+                "            {},",
+                render_encoder_column(table.table_code, column)?
+            )
+            .unwrap();
+        }
+        output.push_str("        ],\n    )\n}\n\n");
+    }
+    Ok(output.into_bytes())
+}
+
+fn render_encoder_column(
+    table_code: i16,
+    column: &ColumnContract,
+) -> Result<String, SchemaDriverError> {
+    let name = column.name.as_str();
+    let direct = match name {
+        "workspace_id" | "analysis_context_id" | "source_generation" | "owner_id" => {
+            format!("row.scope.{name}")
+        }
+        _ => format!("row.{name}"),
+    };
+    let expression = match name {
+        "owner_bucket" => "i16s(rows, |row| Some(i16::from(row.scope.owner_id[0])))".into(),
+        "source_bucket" => "i16s(rows, |row| Some(i16::from(row.source_id[0])))".into(),
+        "target_bucket" => "i16s(rows, |row| Some(i16::from(row.target_id[0])))".into(),
+        "value_kind_code" => "i16s(rows, |row| Some(row.value.code()))".into(),
+        "value_entity_id" => "binary(rows, |row| match &row.value { PropertyValue::Entity(value) => Some(value.as_slice()), _ => None })".into(),
+        "value_bool" => "bools(rows, |row| match row.value { PropertyValue::Boolean(value) => Some(value), _ => None })".into(),
+        "value_int64" => "i64s(rows, |row| match row.value { PropertyValue::Integer(value) => Some(value), _ => None })".into(),
+        "value_float64" => "f64s(rows, |row| match row.value { PropertyValue::Float(value) => Some(value), _ => None })".into(),
+        "value_text" => "utf8(rows, |row| match &row.value { PropertyValue::Text(value) => Some(value.as_str()), _ => None })".into(),
+        "value_bytes" => "binary(rows, |row| match &row.value { PropertyValue::Bytes(value) => Some(value.as_slice()), _ => None })".into(),
+        "value_type_id" => "binary(rows, |row| match &row.value { PropertyValue::Type(value) => Some(value.as_slice()), _ => None })".into(),
+        _ => match column.logical_type {
+            LogicalType::Id16 | LogicalType::Hash32 => {
+                if column.nullable {
+                    format!("binary(rows, |row| {direct}.as_ref().map(<[u8; {}]>::as_slice))", if column.logical_type == LogicalType::Id16 { 16 } else { 32 })
+                } else {
+                    format!("binary(rows, |row| Some({direct}.as_slice()))")
+                }
+            }
+            LogicalType::Binary => {
+                if column.nullable {
+                    format!("binary(rows, |row| {direct}.as_deref())")
+                } else {
+                    format!("binary(rows, |row| Some({direct}.as_slice()))")
+                }
+            }
+            LogicalType::Utf8 => {
+                if column.nullable {
+                    format!("utf8(rows, |row| {direct}.as_deref())")
+                } else {
+                    format!("utf8(rows, |row| Some({direct}.as_str()))")
+                }
+            }
+            LogicalType::Code16 | LogicalType::Bucket16 | LogicalType::Int16 => {
+                if column.nullable {
+                    format!("i16s(rows, |row| {direct})")
+                } else {
+                    format!("i16s(rows, |row| Some({direct}))")
+                }
+            }
+            LogicalType::Code32 | LogicalType::Int32 => {
+                if column.nullable {
+                    format!("i32s(rows, |row| {direct})")
+                } else {
+                    format!("i32s(rows, |row| Some({direct}))")
+                }
+            }
+            LogicalType::Int64 => {
+                if column.nullable {
+                    format!("i64s(rows, |row| {direct})")
+                } else {
+                    format!("i64s(rows, |row| Some({direct}))")
+                }
+            }
+            LogicalType::Float64 => {
+                if column.nullable {
+                    format!("f64s(rows, |row| {direct})")
+                } else {
+                    format!("f64s(rows, |row| Some({direct}))")
+                }
+            }
+            LogicalType::Boolean => {
+                if column.nullable {
+                    format!("bools(rows, |row| {direct})")
+                } else {
+                    format!("bools(rows, |row| Some({direct}))")
+                }
+            }
+            LogicalType::Int64List if !column.nullable => format!(
+                "i64_lists({table_code}, {name:?}, rows, |row| {direct}.as_slice())"
+            ),
+            LogicalType::TimestampUtc
+            | LogicalType::IdList
+            | LogicalType::Int64List
+            | LogicalType::StringMap => {
+                return invalid(
+                    "$.tables[*].row_encoder",
+                    format!("unsupported generated encoder field {table_code}.{name}"),
+                );
+            }
+        },
+    };
+    Ok(expression)
+}
+
 fn rust_strings(values: &[String]) -> String {
     format!(
         "&[{}]",
@@ -1289,6 +1980,20 @@ fn rust_usize_literal(value: usize) -> String {
 }
 
 fn render_validation(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
+    let compatibility_cases = [
+        ("exact-schema", "unchanged", true),
+        ("nullable-change", "change-nullability", false),
+        ("logical-type-change", "change-logical-type", false),
+        ("field-order-change", "reorder-fields", false),
+        ("field-addition", "add-field", false),
+        ("field-removal", "remove-field", false),
+        ("metadata-change", "change-contract-metadata", false),
+    ]
+    .into_iter()
+    .map(|(case_id, mutation, accepted)| {
+        json!({"case_id": case_id, "mutation": mutation, "accepted": accepted})
+    })
+    .collect::<Vec<_>>();
     pretty(&json!({
         "schema_version": 1,
         "family": "schemas",
@@ -1297,8 +2002,26 @@ fn render_validation(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
         "operational_table_count": plan.ir.operational_tables.len(),
         "public_schema_count": plan.ir.public_schemas.len(),
         "stable_field_id_rule": "<table-name>.<field-name>",
-        "compatibility_acceptance_generated": false,
+        "compatibility_acceptance_generated": true,
+        "compatibility_class": plan.ir.schema_evolution_policy.compatibility_class,
+        "compatibility_cases": compatibility_cases,
         "native_validators": ["arrow-schema-59.2.0", "datafusion-55.0.0", "sqlite-strict", "jsonschema-draft-2020-12"],
+    }))
+}
+
+fn render_evolution_policy(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
+    pretty(&json!({
+        "artifact_id": plan.ir.schema_evolution_policy.policy_id,
+        "artifact_kind": "schema-evolution-policy",
+        "version": plan.ir.schema_evolution_policy.version,
+        "source_artifact_id": plan.ir.header.artifact_id,
+        "source_digest": plan.source_digest,
+        "compatibility_class": plan.ir.schema_evolution_policy.compatibility_class,
+        "require_schema_digest_equality": plan.ir.schema_evolution_policy.require_schema_digest_equality,
+        "allow_type_widening": plan.ir.schema_evolution_policy.allow_type_widening,
+        "column_mapping_mode": plan.ir.schema_evolution_policy.column_mapping_mode,
+        "migration_route": plan.ir.schema_evolution_policy.migration_route,
+        "acceptance_suite": VALIDATION_PATH,
     }))
 }
 
@@ -1420,6 +2143,34 @@ mod tests {
     }
 
     #[test]
+    fn model_schema_semantic_authority_digests_are_exact() {
+        for path in [
+            ENUM_REGISTRY_PATH,
+            ENTITY_REGISTRY_PATH,
+            RELATION_REGISTRY_PATH,
+            PROPERTY_REGISTRY_PATH,
+            FACT_REGISTRY_PATH,
+            CAPABILITY_REGISTRY_PATH,
+        ] {
+            let bytes = read_stable(Path::new(path), MAX_AUTHORITY_BYTES).unwrap();
+            let value: Value = serde_yaml_ng::from_slice(&bytes).unwrap();
+            let artifact_id = value["artifact_id"].as_str().unwrap();
+            let computed =
+                super::super::registry_cbef_driver::detached_registry_identity(artifact_id, &bytes)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(computed, value["canonical_digest"], "{path}");
+        }
+    }
+
+    #[test]
+    fn model_schema_semantic_identity_is_exact() {
+        let bytes = read_stable(Path::new(SCHEMA_IR_PATH), MAX_AUTHORITY_BYTES).unwrap();
+        let computed = detached_schema_identity(&bytes).unwrap();
+        assert_eq!(computed, authority().header.canonical_digest);
+    }
+
+    #[test]
     fn model_tablespec_projects_equivalent_arrow_json_schema_and_ddl() {
         let ir = authority();
         ir.validate().unwrap();
@@ -1530,18 +2281,114 @@ mod tests {
                 .count(),
             8
         );
-        assert_eq!(descriptor.sources.len(), 1);
+        assert_eq!(descriptor.sources.len(), 7);
         assert_eq!(descriptor.output_roots.len(), 2);
     }
 
     #[test]
-    fn model_driver_cannot_generate_compatibility_acceptance() {
+    fn model_driver_generates_compatibility_acceptance() {
         let descriptor = SchemaDriver.describe().unwrap();
-        assert!(descriptor.outputs.iter().all(|output| {
-            let path = output.path.display();
-            !path.contains("acceptance")
-                && !path.contains("compatibility-baseline")
-                && !path.contains("signature")
-        }));
+        assert!(
+            descriptor
+                .outputs
+                .iter()
+                .any(|output| { output.path.display() == VALIDATION_PATH })
+        );
+        assert!(
+            descriptor
+                .outputs
+                .iter()
+                .any(|output| { output.path.display() == EVOLUTION_POLICY_PATH })
+        );
+    }
+
+    #[test]
+    fn wp57_structural_acceptance() {
+        let ir = authority();
+        ir.validate().unwrap();
+        assert_eq!(ir.metadata_dictionary.len(), 23);
+        assert_eq!(
+            ir.metadata_dictionary
+                .iter()
+                .map(|entry| entry.class)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                MetadataClass::Enforced,
+                MetadataClass::PlannerConsumed,
+                MetadataClass::Contractual,
+                MetadataClass::Governance,
+                MetadataClass::Lineage,
+                MetadataClass::Advisory,
+            ])
+        );
+        for entry in &ir.metadata_dictionary {
+            let (Some(path), Some(symbol)) = (&entry.consumer_path, &entry.consumer_symbol) else {
+                assert_eq!(entry.class, MetadataClass::Advisory);
+                continue;
+            };
+            let source = fs::read_to_string(path).unwrap();
+            assert!(source.contains(symbol), "{path} lacks {symbol}");
+        }
+        let declared = ir
+            .semantic_type_bindings
+            .iter()
+            .map(|binding| binding.semantic_type.as_str())
+            .collect::<BTreeSet<_>>();
+        let used = ir
+            .tables
+            .iter()
+            .flat_map(|table| &table.columns)
+            .filter_map(|column| column.semantic_type.as_deref())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(declared, used);
+    }
+
+    #[test]
+    fn wp57_negative_zero_state() {
+        let mut unknown_semantic_type = authority();
+        unknown_semantic_type.tables[0].columns[0].semantic_type =
+            Some("enum:not_registered".to_owned());
+        assert!(unknown_semantic_type.validate().is_err());
+
+        let mut widened = authority();
+        widened.schema_evolution_policy.allow_type_widening = true;
+        assert!(widened.validate().is_err());
+
+        let ddl =
+            String::from_utf8(render_ddl(&SchemaDriver.plan(Path::new(".")).unwrap())).unwrap();
+        assert!(!ddl.contains("PRAGMA foreign_keys=ON"));
+        assert!(ddl.contains("foreign keys are generated as application contracts"));
+    }
+
+    #[test]
+    fn wp57_operational_acceptance() {
+        let plan = SchemaDriver.plan(Path::new(".")).unwrap();
+        let outputs = SchemaDriver::outputs(&plan).unwrap();
+        let paths = outputs
+            .iter()
+            .map(|(path, _)| path.display())
+            .collect::<BTreeSet<_>>();
+        assert!(paths.contains(RUST_ROW_ENCODERS_PATH));
+        assert!(paths.contains(EVOLUTION_POLICY_PATH));
+        assert!(paths.contains(VALIDATION_PATH));
+
+        let first = render_row_encoders(&plan.ir, &plan.source_digest).unwrap();
+        let second = render_row_encoders(&plan.ir, &plan.source_digest).unwrap();
+        assert_eq!(first, second);
+        let rendered = String::from_utf8(first).unwrap();
+        for function in [
+            "encode_owners",
+            "encode_capability_statuses",
+            "encode_entities",
+            "encode_relations",
+            "encode_properties",
+            "encode_evidence",
+            "encode_source_files",
+            "encode_source_tokens",
+            "encode_source_annotations",
+            "encode_syntax_details",
+        ] {
+            assert!(rendered.contains(function), "missing {function}");
+        }
     }
 }

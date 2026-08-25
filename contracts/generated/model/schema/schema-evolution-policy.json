@@ -1,0 +1,19 @@
+{
+  "acceptance_suite": "contracts/generated/model/schema/schema-validation.json",
+  "allow_type_widening": false,
+  "artifact_id": "codefabric.schema.evolution-policy",
+  "artifact_kind": "schema-evolution-policy",
+  "column_mapping_mode": "none",
+  "compatibility_class": "EXACT_PIN",
+  "migration_route": [
+    "author a versioned schema Contract IR revision",
+    "generate and review the complete candidate DesiredTree",
+    "run the generated compatibility acceptance suite and data-fabric migration probes",
+    "migrate a complete manifest-pinned candidate snapshot before activation",
+    "record owner acceptance before changing the active schema bundle"
+  ],
+  "require_schema_digest_equality": true,
+  "source_artifact_id": "codefabric.schema.contract-ir",
+  "source_digest": "b3:5ddf04aecf81011498aa7b35acc84466b648541eb2e9249fbc89633048d4a1e2",
+  "version": "1.0"
+}

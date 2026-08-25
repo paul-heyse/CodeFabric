@@ -1173,6 +1173,15 @@ pub fn validate_enum_domains(records: &[EnumDomain]) -> Result<(), String> {
             &["UNIX_BYTES", "MACOS_BYTES", "WINDOWS_WTF8"],
         ),
         ("NEWLINE_KIND", &["NONE", "LF", "CRLF", "CR", "MIXED"]),
+        ("WORKSPACE_KIND", &["NON_GIT_ROOT", "GIT_WORKTREE"]),
+        ("ANALYSIS_CONTEXT_KIND", &["SOURCE", "PYTHON", "RUST"]),
+        (
+            "VALUE_KIND",
+            &[
+                "ENTITY", "BOOLEAN", "INTEGER", "FLOAT", "TEXT", "BYTES", "TYPE",
+            ],
+        ),
+        ("SEVERITY", &["INFO", "WARNING", "ERROR", "FATAL"]),
     ];
     if records.len() != EXPECTED.len() {
         return Err("enum registry must contain every §62, effect, and resource domain".into());

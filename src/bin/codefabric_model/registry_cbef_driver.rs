@@ -2418,7 +2418,7 @@ fn emit_runtime_enum(output: &mut String, name: &str, values: &[EnumValue]) {
     writeln!(output, "    type Error = UnknownRegistryCode;").unwrap();
     writeln!(
         output,
-        "    fn try_from(code: u16) -> Result<Self, Self::Error> {{"
+        "    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {{"
     )
     .unwrap();
     output.push_str("        match code {\n");

@@ -184,7 +184,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "object_format_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: Some("enum:git_object_format"),
+                semantic_type: Some("enum:git_hash_algorithm"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -536,7 +536,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "table_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: Some("enum:table"),
+                semantic_type: Some("schema:table-code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -840,7 +840,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "capability_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: Some("enum:capability"),
+                semantic_type: Some("registry:capability"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -872,7 +872,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "producer_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: true,
-                semantic_type: Some("enum:producer"),
+                semantic_type: Some("enum:provider_code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -965,7 +965,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "diagnostic_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: false,
-                semantic_type: Some("enum:diagnostic"),
+                semantic_type: Some("opaque:diagnostic-code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1117,7 +1117,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "entity_family_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: Some("enum:entity_family"),
+                semantic_type: Some("ontology:entity-family"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1125,7 +1125,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "entity_kind_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: false,
-                semantic_type: Some("enum:entity_kind"),
+                semantic_type: Some("ontology:entity-kind"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1133,7 +1133,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "raw_kind_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: true,
-                semantic_type: Some("enum:raw_kind"),
+                semantic_type: Some("opaque:provider-raw-kind"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1277,7 +1277,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "relation_family_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: Some("enum:relation_family"),
+                semantic_type: Some("ontology:relation-family"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1285,7 +1285,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "relation_kind_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: false,
-                semantic_type: Some("enum:relation_kind"),
+                semantic_type: Some("ontology:relation-kind"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1349,7 +1349,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "directness_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:directness"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1381,7 +1381,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "certainty_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:evidence_certainty"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1389,7 +1389,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "resolution_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:resolution_class"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1397,7 +1397,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "producer_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:provider_code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1493,7 +1493,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "property_kind_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("ontology:property-kind"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1573,7 +1573,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "directness_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:directness"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1581,7 +1581,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "certainty_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:evidence_certainty"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1589,7 +1589,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "resolution_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:resolution_class"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1597,7 +1597,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "producer_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:provider_code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1693,7 +1693,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "fact_form_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("ontology:fact-kind"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1717,7 +1717,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "provider_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:provider_code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1749,7 +1749,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "raw_kind_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: true,
-                semantic_type: None,
+                semantic_type: Some("opaque:provider-raw-kind"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1781,7 +1781,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "certainty_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:evidence_certainty"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -1789,7 +1789,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "resolution_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("enum:resolution_class"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -2221,7 +2221,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "diagnostic_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: true,
-                semantic_type: None,
+                semantic_type: Some("opaque:diagnostic-code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -2293,7 +2293,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "raw_kind_code",
                 logical_type: ModelLogicalType::Code32,
                 nullable: false,
-                semantic_type: None,
+                semantic_type: Some("opaque:provider-raw-kind"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -2445,7 +2445,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "table_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: Some("enum:table"),
+                semantic_type: Some("schema:table-code"),
                 foreign_key: None,
             },
             ModelColumn {
@@ -2531,7 +2531,7 @@ pub const MODEL_TABLES: &[ModelTable] = &[
                 name: "table_code",
                 logical_type: ModelLogicalType::Code16,
                 nullable: false,
-                semantic_type: Some("enum:table"),
+                semantic_type: Some("schema:table-code"),
                 foreign_key: None,
             },
             ModelColumn {

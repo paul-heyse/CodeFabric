@@ -1,5 +1,43 @@
 {
-  "compatibility_acceptance_generated": false,
+  "compatibility_acceptance_generated": true,
+  "compatibility_cases": [
+    {
+      "accepted": true,
+      "case_id": "exact-schema",
+      "mutation": "unchanged"
+    },
+    {
+      "accepted": false,
+      "case_id": "nullable-change",
+      "mutation": "change-nullability"
+    },
+    {
+      "accepted": false,
+      "case_id": "logical-type-change",
+      "mutation": "change-logical-type"
+    },
+    {
+      "accepted": false,
+      "case_id": "field-order-change",
+      "mutation": "reorder-fields"
+    },
+    {
+      "accepted": false,
+      "case_id": "field-addition",
+      "mutation": "add-field"
+    },
+    {
+      "accepted": false,
+      "case_id": "field-removal",
+      "mutation": "remove-field"
+    },
+    {
+      "accepted": false,
+      "case_id": "metadata-change",
+      "mutation": "change-contract-metadata"
+    }
+  ],
+  "compatibility_class": "EXACT_PIN",
   "family": "schemas",
   "native_validators": [
     "arrow-schema-59.2.0",
@@ -10,7 +48,7 @@
   "operational_table_count": 26,
   "public_schema_count": 8,
   "schema_version": 1,
-  "source_digest": "b3:33ae78a663002316f4675b9adb18ac582aee60e911ffc95944d14cd802592bd7",
+  "source_digest": "b3:5ddf04aecf81011498aa7b35acc84466b648541eb2e9249fbc89633048d4a1e2",
   "stable_field_id_rule": "<table-name>.<field-name>",
   "table_count": 21
 }

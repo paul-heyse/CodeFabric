@@ -44,6 +44,70 @@ pub enum PublicationPinRole {
     NotPublished,
 }
 
+/// Exhaustive P21 classification of one schema-IR annotation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MetadataClass {
+    Enforced,
+    PlannerConsumed,
+    Contractual,
+    Governance,
+    Lineage,
+    Advisory,
+}
+
+/// Generated metadata classification and its concrete non-advisory consumer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MetadataAnnotationSpec {
+    pub annotation: &'static str,
+    pub class: MetadataClass,
+    pub consumer_path: Option<&'static str>,
+    pub consumer_symbol: Option<&'static str>,
+}
+
+/// Authority kind that gives one semantic field type its governed meaning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SemanticAuthority {
+    EnumRegistry,
+    OntologyEntityRegistry,
+    OntologyRelationRegistry,
+    OntologyPropertyRegistry,
+    OntologyFactRegistry,
+    CapabilityRegistry,
+    SchemaIr,
+    Intrinsic,
+    ProviderCatalog,
+    DiagnosticProtocol,
+}
+
+/// Generated semantic-type resolution and authority digest link.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SemanticTypeBindingSpec {
+    pub semantic_type: &'static str,
+    pub authority: SemanticAuthority,
+    pub domain: Option<&'static str>,
+    pub authority_artifact_id: Option<&'static str>,
+    pub authority_digest: Option<&'static str>,
+}
+
+/// Typed cross-table contract. Enforcement belongs to complete candidate publication state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ForeignKeyContract {
+    pub source_table_code: i16,
+    pub source_column_index: usize,
+    pub source_column: &'static str,
+    pub target_table_code: i16,
+    pub target_column_index: usize,
+    pub target_column: &'static str,
+}
+
+/// Generated exact-pin schema-evolution policy consumed by Delta table authentication.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SchemaEvolutionPolicy {
+    pub require_schema_digest_equality: bool,
+    pub allow_type_widening: bool,
+    pub column_mapping_mode: &'static str,
+}
+
 /// One immutable generated schema contract.
 #[derive(Clone, Debug)]
 pub struct TableSpec {
@@ -177,6 +241,16 @@ impl TableSpec {
     pub fn validate_delta_compatibility(&self) -> Result<(), arrow_schema::ArrowError> {
         crate::fabric::validate_delta_schema(&self.arrow_schema)
     }
+
+    /// Report whether a candidate Arrow schema satisfies the generated exact-pin policy.
+    #[must_use]
+    pub fn accepts_schema(&self, candidate: &SchemaRef) -> bool {
+        let policy = schema_evolution_policy();
+        policy.require_schema_digest_equality
+            && !policy.allow_type_widening
+            && policy.column_mapping_mode == "none"
+            && candidate == &self.arrow_schema
+    }
 }
 
 fn schema_digest(schema: &SchemaRef) -> String {
@@ -252,6 +326,48 @@ struct GeneratedOperationalTableSpec {
 }
 
 include!("generated/table_specs.rs");
+
+/// Return the IR-owned ontology version projected into every table schema.
+#[must_use]
+pub const fn ontology_version() -> &'static str {
+    GENERATED_ONTOLOGY_VERSION
+}
+
+/// Return the IR-owned compatibility mode projected into every table schema.
+#[must_use]
+pub const fn compatibility_mode() -> &'static str {
+    GENERATED_COMPATIBILITY_MODE
+}
+
+/// Return the generated six-class metadata dictionary.
+#[must_use]
+pub const fn metadata_dictionary() -> &'static [MetadataAnnotationSpec] {
+    GENERATED_METADATA_DICTIONARY
+}
+
+/// Resolve one semantic-type annotation to its governed authority.
+#[must_use]
+pub fn semantic_type_binding(semantic_type: &str) -> Option<&'static SemanticTypeBindingSpec> {
+    GENERATED_SEMANTIC_TYPE_BINDINGS
+        .iter()
+        .find(|binding| binding.semantic_type == semantic_type)
+}
+
+/// Return every generated typed foreign-key contract.
+#[must_use]
+pub const fn foreign_key_contracts() -> &'static [ForeignKeyContract] {
+    GENERATED_FOREIGN_KEY_CONTRACTS
+}
+
+/// Return the exact-pin schema evolution policy.
+#[must_use]
+pub const fn schema_evolution_policy() -> SchemaEvolutionPolicy {
+    SchemaEvolutionPolicy {
+        require_schema_digest_equality: GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY,
+        allow_type_widening: GENERATED_ALLOW_TYPE_WIDENING,
+        column_mapping_mode: GENERATED_COLUMN_MAPPING_MODE,
+    }
+}
 
 fn physical_type(logical: LogicalType) -> DataType {
     match logical {
@@ -434,7 +550,7 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         ),
         (
             "com.codefabric.cpg.ontology_version".to_owned(),
-            "1.3".to_owned(),
+            ontology_version().to_owned(),
         ),
         (
             "com.codefabric.cpg.primary_key".to_owned(),
@@ -462,7 +578,7 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         ),
         (
             "com.codefabric.cpg.compatibility_mode".to_owned(),
-            "suite-major-1".to_owned(),
+            compatibility_mode().to_owned(),
         ),
     ]);
     let fields = model
@@ -497,6 +613,34 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
 pub fn table_specs() -> &'static [TableSpec] {
     static TABLE_SPECS: OnceLock<Vec<TableSpec>> = OnceLock::new();
     TABLE_SPECS.get_or_init(|| GENERATED_TABLE_SPECS.iter().copied().map(build).collect())
+}
+
+/// Return the deterministic dependency-closed table order used for creation and publication.
+#[must_use]
+pub fn table_dependency_order() -> &'static [i16] {
+    static ORDER: OnceLock<Vec<i16>> = OnceLock::new();
+    ORDER.get_or_init(|| {
+        let mut ordered = Vec::with_capacity(table_specs().len());
+        while ordered.len() < table_specs().len() {
+            let before = ordered.len();
+            for spec in table_specs() {
+                if !ordered.contains(&spec.table_code)
+                    && spec
+                        .dependencies
+                        .iter()
+                        .all(|dependency| ordered.contains(dependency))
+                {
+                    ordered.push(spec.table_code);
+                }
+            }
+            assert_ne!(
+                before,
+                ordered.len(),
+                "generated table dependency graph must be acyclic"
+            );
+        }
+        ordered
+    })
 }
 
 /// Resolve a table by stable numeric code.

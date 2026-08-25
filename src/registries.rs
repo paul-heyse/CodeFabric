@@ -70,6 +70,13 @@ pub fn property_kind(name: &str) -> Option<OntologyCodeEntry> {
     ontology_kind(PROPERTY_KIND_IDS, PROPERTY_KIND_CODES, name)
 }
 
+/// Resolve one universal fact-form name to its governed code.
+#[must_use]
+pub fn fact_kind_code(name: &str) -> Option<u16> {
+    ontology_kind(FACT_KIND_IDS, FACT_KIND_CODES, name)
+        .and_then(|entry| u16::try_from(entry.code).ok())
+}
+
 /// Resolve a capability identifier to its append-only declaration-order code.
 ///
 /// Capability registry entries are ordered authority records. AC-G-06 assigns registry codes in

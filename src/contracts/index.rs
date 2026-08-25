@@ -236,7 +236,7 @@ mod tests {
     fn packaged_model_index_is_typed_canonical_and_sorted() {
         let index = model_artifact_index().unwrap();
         assert!(index.artifacts.len() > 100);
-        assert_eq!(index.outputs.len(), 75);
+        assert_eq!(index.outputs.len(), 77);
         assert!(
             index
                 .artifacts

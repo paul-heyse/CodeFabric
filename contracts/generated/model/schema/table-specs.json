@@ -116,6 +116,146 @@
       "view_name": "active_serving_snapshot"
     }
   ],
+  "metadata_dictionary": [
+    {
+      "annotation": "compatibility_mode",
+      "class": "CONTRACTUAL",
+      "consumer_path": "src/schema_registry.rs",
+      "consumer_symbol": "compatibility_mode"
+    },
+    {
+      "annotation": "dependencies",
+      "class": "PLANNER_CONSUMED",
+      "consumer_path": "src/schema_registry.rs",
+      "consumer_symbol": "table_dependency_order"
+    },
+    {
+      "annotation": "durable_mutation",
+      "class": "ENFORCED",
+      "consumer_path": "src/fabric/mutation.rs",
+      "consumer_symbol": "durable_mutation"
+    },
+    {
+      "annotation": "family",
+      "class": "LINEAGE",
+      "consumer_path": "src/schema_registry.rs",
+      "consumer_symbol": "TableSpec"
+    },
+    {
+      "annotation": "foreign_key",
+      "class": "CONTRACTUAL",
+      "consumer_path": "src/schema_registry.rs",
+      "consumer_symbol": "foreign_key_contracts"
+    },
+    {
+      "annotation": "grain",
+      "class": "ADVISORY",
+      "consumer_path": null,
+      "consumer_symbol": null
+    },
+    {
+      "annotation": "hidden_operational",
+      "class": "GOVERNANCE",
+      "consumer_path": "src/fabric/serving.rs",
+      "consumer_symbol": "hidden_operational"
+    },
+    {
+      "annotation": "logical_type",
+      "class": "ENFORCED",
+      "consumer_path": "src/fact_ingest.rs",
+      "consumer_symbol": "generated_fact_batch"
+    },
+    {
+      "annotation": "materialization_role",
+      "class": "PLANNER_CONSUMED",
+      "consumer_path": "src/fabric/serving.rs",
+      "consumer_symbol": "materialization_role"
+    },
+    {
+      "annotation": "name",
+      "class": "PLANNER_CONSUMED",
+      "consumer_path": "src/fabric/snapshot_catalog.rs",
+      "consumer_symbol": "register_schema"
+    },
+    {
+      "annotation": "nullable",
+      "class": "ENFORCED",
+      "consumer_path": "src/fact_ingest.rs",
+      "consumer_symbol": "validate_fact_batch"
+    },
+    {
+      "annotation": "ontology_version",
+      "class": "CONTRACTUAL",
+      "consumer_path": "src/schema_registry.rs",
+      "consumer_symbol": "ontology_version"
+    },
+    {
+      "annotation": "overlay_mutation",
+      "class": "ENFORCED",
+      "consumer_path": "src/fabric/overlay.rs",
+      "consumer_symbol": "overlay_mutation"
+    },
+    {
+      "annotation": "partition_columns",
+      "class": "ENFORCED",
+      "consumer_path": "src/fabric.rs",
+      "consumer_symbol": "authenticate_open_table"
+    },
+    {
+      "annotation": "primary_key",
+      "class": "ENFORCED",
+      "consumer_path": "src/fact_ingest.rs",
+      "consumer_symbol": "validate_primary_key"
+    },
+    {
+      "annotation": "publication_pin_role",
+      "class": "PLANNER_CONSUMED",
+      "consumer_path": "src/fabric/publication.rs",
+      "consumer_symbol": "publication_pin_role"
+    },
+    {
+      "annotation": "required_for_publication",
+      "class": "PLANNER_CONSUMED",
+      "consumer_path": "src/fabric/publication.rs",
+      "consumer_symbol": "required_for_publication"
+    },
+    {
+      "annotation": "row_encoder",
+      "class": "CONTRACTUAL",
+      "consumer_path": "src/fact_ingest.rs",
+      "consumer_symbol": "fact_row_encoders"
+    },
+    {
+      "annotation": "schema_version",
+      "class": "CONTRACTUAL",
+      "consumer_path": "src/schema_registry.rs",
+      "consumer_symbol": "schema_version"
+    },
+    {
+      "annotation": "semantic_type",
+      "class": "ENFORCED",
+      "consumer_path": "src/fact_ingest.rs",
+      "consumer_symbol": "validate_registered_codes"
+    },
+    {
+      "annotation": "sqlite_foreign_key_posture",
+      "class": "GOVERNANCE",
+      "consumer_path": "src/bin/codefabric_model/schema_driver.rs",
+      "consumer_symbol": "render_ddl"
+    },
+    {
+      "annotation": "table_code",
+      "class": "PLANNER_CONSUMED",
+      "consumer_path": "src/schema_registry.rs",
+      "consumer_symbol": "table_spec"
+    },
+    {
+      "annotation": "zorder_columns",
+      "class": "PLANNER_CONSUMED",
+      "consumer_path": "src/fabric.rs",
+      "consumer_symbol": "ZORDER_COLUMNS_KEY"
+    }
+  ],
   "model_version": 1,
   "ontology_version": "1.3",
   "operational_tables": [
@@ -1770,6 +1910,241 @@
       "title": "Semantic query PlanSpec"
     }
   ],
+  "schema_evolution_policy": {
+    "allow_type_widening": false,
+    "column_mapping_mode": "none",
+    "compatibility_class": "EXACT_PIN",
+    "migration_route": [
+      "author a versioned schema Contract IR revision",
+      "generate and review the complete candidate DesiredTree",
+      "run the generated compatibility acceptance suite and data-fabric migration probes",
+      "migrate a complete manifest-pinned candidate snapshot before activation",
+      "record owner acceptance before changing the active schema bundle"
+    ],
+    "policy_id": "codefabric.schema.evolution-policy",
+    "require_schema_digest_equality": true,
+    "version": "1.0"
+  },
+  "semantic_authorities": [
+    {
+      "artifact_id": "codefabric.registry.enum-registry",
+      "authority": "ENUM_REGISTRY",
+      "canonical_digest": "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+      "path": "contracts/registry/enum-registry.yaml"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-entity-registry",
+      "authority": "ONTOLOGY_ENTITY_REGISTRY",
+      "canonical_digest": "b3:1aef53a170d4a00b4549dda8b9fe67ac7644976669b8db3f6e29380ab2b9064f",
+      "path": "contracts/registry/ontology-entity-registry.yaml"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-relation-registry",
+      "authority": "ONTOLOGY_RELATION_REGISTRY",
+      "canonical_digest": "b3:d6605d0f4bc7b3f374f3a7547d965e261e9e544ffb6d7705eba84ca89623aa77",
+      "path": "contracts/registry/ontology-relation-registry.yaml"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-property-registry",
+      "authority": "ONTOLOGY_PROPERTY_REGISTRY",
+      "canonical_digest": "b3:05b14e4de007611d241113f336378fd5040defe3e2c0d7d056fbfce1466a79c7",
+      "path": "contracts/registry/ontology-property-registry.yaml"
+    },
+    {
+      "artifact_id": "codefabric.registry.ontology-fact-registry",
+      "authority": "ONTOLOGY_FACT_REGISTRY",
+      "canonical_digest": "b3:77d21f5ff81e0202d753bdd7fc2a606bdb31503a4f2c1880db2f04e0e4aa6ba2",
+      "path": "contracts/registry/ontology-fact-registry.yaml"
+    },
+    {
+      "artifact_id": "codefabric.registry.capability-registry",
+      "authority": "CAPABILITY_REGISTRY",
+      "canonical_digest": "b3:1bb7395ee44b7c263e27ea087875555374f1e2e7e253891949c0ff13876da8dc",
+      "path": "contracts/registry/capability-registry.yaml"
+    }
+  ],
+  "semantic_type_bindings": [
+    {
+      "authority": "INTRINSIC",
+      "domain": null,
+      "semantic_type": "byte_offset"
+    },
+    {
+      "authority": "INTRINSIC",
+      "domain": null,
+      "semantic_type": "hash32"
+    },
+    {
+      "authority": "INTRINSIC",
+      "domain": null,
+      "semantic_type": "id16"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "ANALYSIS_CONTEXT_KIND",
+      "semantic_type": "enum:analysis_context_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "ANNOTATION_KIND",
+      "semantic_type": "enum:annotation_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "COMPLETENESS_STATE",
+      "semantic_type": "enum:completeness_state"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "DIRECTNESS",
+      "semantic_type": "enum:directness"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "DURABLE_PUBLICATION_STATE",
+      "semantic_type": "enum:durable_publication_state"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "EVIDENCE_CERTAINTY",
+      "semantic_type": "enum:evidence_certainty"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "GIT_HASH_ALGORITHM",
+      "semantic_type": "enum:git_hash_algorithm"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "LANGUAGE",
+      "semantic_type": "enum:language"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "NEWLINE_KIND",
+      "semantic_type": "enum:newline_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "OCCURRENCE_FAMILY",
+      "semantic_type": "enum:occurrence_family"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "OWNER_CAPABILITY_STATE",
+      "semantic_type": "enum:owner_capability_state"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "OWNER_KIND",
+      "semantic_type": "enum:owner_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "PATH_ENCODING",
+      "semantic_type": "enum:path_encoding"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "PROVIDER_CODE",
+      "semantic_type": "enum:provider_code"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "RANGE_RECONCILIATION_STEP",
+      "semantic_type": "enum:range_reconciliation_step"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "RAW_KIND_DISPOSITION",
+      "semantic_type": "enum:raw_kind_disposition"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "RESOLUTION_CLASS",
+      "semantic_type": "enum:resolution_class"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "SEVERITY",
+      "semantic_type": "enum:severity"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "SYNTAX_FIELD_ROLE",
+      "semantic_type": "enum:syntax_field_role"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "SYNTAX_KIND",
+      "semantic_type": "enum:syntax_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "TOKEN_KIND",
+      "semantic_type": "enum:token_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "VALUE_KIND",
+      "semantic_type": "enum:value_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "WORKSPACE_KIND",
+      "semantic_type": "enum:workspace_kind"
+    },
+    {
+      "authority": "ONTOLOGY_ENTITY_REGISTRY",
+      "domain": "ENTITY_FAMILY",
+      "semantic_type": "ontology:entity-family"
+    },
+    {
+      "authority": "ONTOLOGY_ENTITY_REGISTRY",
+      "domain": "ENTITY_KIND",
+      "semantic_type": "ontology:entity-kind"
+    },
+    {
+      "authority": "ONTOLOGY_FACT_REGISTRY",
+      "domain": "FACT_KIND",
+      "semantic_type": "ontology:fact-kind"
+    },
+    {
+      "authority": "ONTOLOGY_PROPERTY_REGISTRY",
+      "domain": "PROPERTY_KIND",
+      "semantic_type": "ontology:property-kind"
+    },
+    {
+      "authority": "ONTOLOGY_RELATION_REGISTRY",
+      "domain": "RELATION_FAMILY",
+      "semantic_type": "ontology:relation-family"
+    },
+    {
+      "authority": "ONTOLOGY_RELATION_REGISTRY",
+      "domain": "RELATION_KIND",
+      "semantic_type": "ontology:relation-kind"
+    },
+    {
+      "authority": "DIAGNOSTIC_PROTOCOL",
+      "domain": null,
+      "semantic_type": "opaque:diagnostic-code"
+    },
+    {
+      "authority": "PROVIDER_CATALOG",
+      "domain": null,
+      "semantic_type": "opaque:provider-raw-kind"
+    },
+    {
+      "authority": "CAPABILITY_REGISTRY",
+      "domain": "CAPABILITY",
+      "semantic_type": "registry:capability"
+    },
+    {
+      "authority": "SCHEMA_IR",
+      "domain": null,
+      "semantic_type": "schema:table-code"
+    }
+  ],
   "serving_projections": [
     {
       "availability_wave": 3,
@@ -1822,8 +2197,9 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:33ae78a663002316f4675b9adb18ac582aee60e911ffc95944d14cd802592bd7"
+    "source_digest": "b3:5ddf04aecf81011498aa7b35acc84466b648541eb2e9249fbc89633048d4a1e2"
   },
+  "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [
     {
       "analysis_context_column": null,
@@ -2172,6 +2548,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 1,
       "table_id": "table:workspace",
@@ -2232,7 +2609,7 @@
           "logical_type": "code16",
           "name": "object_format_code",
           "nullable": false,
-          "semantic_type": "enum:git_object_format"
+          "semantic_type": "enum:git_hash_algorithm"
         },
         {
           "arrow_type": {
@@ -2277,6 +2654,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 2,
       "table_id": "table:common_repository",
@@ -2410,6 +2788,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 3,
       "table_id": "table:analysis_context",
@@ -2512,6 +2891,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 4,
       "table_id": "table:analysis_context_set",
@@ -2838,6 +3218,7 @@
       ],
       "publication_pin_role": "MANIFEST_CONTROL",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 5,
       "table_id": "table:publication",
@@ -2887,7 +3268,7 @@
           "logical_type": "code16",
           "name": "table_code",
           "nullable": false,
-          "semantic_type": "enum:table"
+          "semantic_type": "schema:table-code"
         },
         {
           "arrow_type": {
@@ -3026,6 +3407,7 @@
       ],
       "publication_pin_role": "MANIFEST_CONTROL",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 6,
       "table_id": "table:publication_table",
@@ -3108,6 +3490,7 @@
       ],
       "publication_pin_role": "POINTER_CONTROL",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 7,
       "table_id": "table:current_publication",
@@ -3341,6 +3724,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "owners",
       "schema_version": "1.0",
       "table_code": 8,
       "table_id": "table:owner",
@@ -3445,7 +3829,7 @@
           "logical_type": "code16",
           "name": "capability_code",
           "nullable": false,
-          "semantic_type": "enum:capability"
+          "semantic_type": "registry:capability"
         },
         {
           "arrow_type": {
@@ -3498,7 +3882,7 @@
           "logical_type": "code16",
           "name": "producer_code",
           "nullable": true,
-          "semantic_type": "enum:producer"
+          "semantic_type": "enum:provider_code"
         },
         {
           "arrow_type": {
@@ -3575,6 +3959,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "capability_statuses",
       "schema_version": "1.0",
       "table_code": 9,
       "table_id": "table:capability_status",
@@ -3666,7 +4051,7 @@
           "logical_type": "code32",
           "name": "diagnostic_code",
           "nullable": false,
-          "semantic_type": "enum:diagnostic"
+          "semantic_type": "opaque:diagnostic-code"
         },
         {
           "arrow_type": {
@@ -3738,6 +4123,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 10,
       "table_id": "table:diagnostic",
@@ -3829,6 +4215,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 11,
       "table_id": "table:enum_catalog",
@@ -3945,7 +4332,7 @@
           "logical_type": "code16",
           "name": "entity_family_code",
           "nullable": false,
-          "semantic_type": "enum:entity_family"
+          "semantic_type": "ontology:entity-family"
         },
         {
           "arrow_type": {
@@ -3958,7 +4345,7 @@
           "logical_type": "code32",
           "name": "entity_kind_code",
           "nullable": false,
-          "semantic_type": "enum:entity_kind"
+          "semantic_type": "ontology:entity-kind"
         },
         {
           "arrow_type": {
@@ -3971,7 +4358,7 @@
           "logical_type": "code32",
           "name": "raw_kind_code",
           "nullable": true,
-          "semantic_type": "enum:raw_kind"
+          "semantic_type": "opaque:provider-raw-kind"
         },
         {
           "arrow_type": {
@@ -4114,6 +4501,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "entities",
       "schema_version": "1.0",
       "table_code": 100,
       "table_id": "table:entity",
@@ -4231,7 +4619,7 @@
           "logical_type": "code16",
           "name": "relation_family_code",
           "nullable": false,
-          "semantic_type": "enum:relation_family"
+          "semantic_type": "ontology:relation-family"
         },
         {
           "arrow_type": {
@@ -4244,7 +4632,7 @@
           "logical_type": "code32",
           "name": "relation_kind_code",
           "nullable": false,
-          "semantic_type": "enum:relation_kind"
+          "semantic_type": "ontology:relation-kind"
         },
         {
           "arrow_type": {
@@ -4350,7 +4738,7 @@
           "logical_type": "code16",
           "name": "directness_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:directness"
         },
         {
           "arrow_type": {
@@ -4403,7 +4791,7 @@
           "logical_type": "code16",
           "name": "certainty_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:evidence_certainty"
         },
         {
           "arrow_type": {
@@ -4416,7 +4804,7 @@
           "logical_type": "code16",
           "name": "resolution_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:resolution_class"
         },
         {
           "arrow_type": {
@@ -4429,7 +4817,7 @@
           "logical_type": "code16",
           "name": "producer_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:provider_code"
         },
         {
           "arrow_type": {
@@ -4492,6 +4880,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "relations",
       "schema_version": "1.0",
       "table_code": 110,
       "table_id": "table:relation",
@@ -4611,7 +5000,7 @@
           "logical_type": "code32",
           "name": "property_kind_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "ontology:property-kind"
         },
         {
           "arrow_type": {
@@ -4744,7 +5133,7 @@
           "logical_type": "code16",
           "name": "directness_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:directness"
         },
         {
           "arrow_type": {
@@ -4757,7 +5146,7 @@
           "logical_type": "code16",
           "name": "certainty_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:evidence_certainty"
         },
         {
           "arrow_type": {
@@ -4770,7 +5159,7 @@
           "logical_type": "code16",
           "name": "resolution_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:resolution_class"
         },
         {
           "arrow_type": {
@@ -4783,7 +5172,7 @@
           "logical_type": "code16",
           "name": "producer_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:provider_code"
         },
         {
           "arrow_type": {
@@ -4872,6 +5261,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "properties",
       "schema_version": "1.0",
       "table_code": 120,
       "table_id": "table:property_fact",
@@ -4964,7 +5354,7 @@
           "logical_type": "code16",
           "name": "fact_form_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "ontology:fact-kind"
         },
         {
           "arrow_type": {
@@ -5004,7 +5394,7 @@
           "logical_type": "code16",
           "name": "provider_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:provider_code"
         },
         {
           "arrow_type": {
@@ -5058,7 +5448,7 @@
           "logical_type": "code32",
           "name": "raw_kind_code",
           "nullable": true,
-          "semantic_type": null
+          "semantic_type": "opaque:provider-raw-kind"
         },
         {
           "arrow_type": {
@@ -5111,7 +5501,7 @@
           "logical_type": "code16",
           "name": "certainty_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:evidence_certainty"
         },
         {
           "arrow_type": {
@@ -5124,7 +5514,7 @@
           "logical_type": "code16",
           "name": "resolution_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "enum:resolution_class"
         },
         {
           "arrow_type": {
@@ -5172,6 +5562,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "evidence",
       "schema_version": "1.0",
       "table_code": 130,
       "table_id": "table:fact_evidence",
@@ -5512,6 +5903,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "source_files",
       "schema_version": "1.0",
       "table_code": 140,
       "table_id": "table:source_file",
@@ -5715,6 +6107,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "source_tokens",
       "schema_version": "1.0",
       "table_code": 150,
       "table_id": "table:source_token",
@@ -5899,7 +6292,7 @@
           "logical_type": "code32",
           "name": "diagnostic_code",
           "nullable": true,
-          "semantic_type": null
+          "semantic_type": "opaque:diagnostic-code"
         },
         {
           "arrow_type": {
@@ -5933,6 +6326,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "source_annotations",
       "schema_version": "1.0",
       "table_code": 160,
       "table_id": "table:source_annotation",
@@ -6037,7 +6431,7 @@
           "logical_type": "code32",
           "name": "raw_kind_code",
           "nullable": false,
-          "semantic_type": null
+          "semantic_type": "opaque:provider-raw-kind"
         },
         {
           "arrow_type": {
@@ -6229,6 +6623,7 @@
       ],
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
+      "row_encoder": "syntax_details",
       "schema_version": "1.0",
       "table_code": 170,
       "table_id": "table:syntax_detail",
@@ -6306,7 +6701,7 @@
           "logical_type": "code16",
           "name": "table_code",
           "nullable": false,
-          "semantic_type": "enum:table"
+          "semantic_type": "schema:table-code"
         },
         {
           "arrow_type": {
@@ -6384,6 +6779,7 @@
       ],
       "publication_pin_role": "NOT_PUBLISHED",
       "required_for_publication": false,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 900,
       "table_id": "table:owner_tombstone",
@@ -6461,7 +6857,7 @@
           "logical_type": "code16",
           "name": "table_code",
           "nullable": false,
-          "semantic_type": "enum:table"
+          "semantic_type": "schema:table-code"
         },
         {
           "arrow_type": {
@@ -6522,6 +6918,7 @@
       ],
       "publication_pin_role": "NOT_PUBLISHED",
       "required_for_publication": false,
+      "row_encoder": null,
       "schema_version": "1.0",
       "table_code": 901,
       "table_id": "table:primary_key_tombstone",

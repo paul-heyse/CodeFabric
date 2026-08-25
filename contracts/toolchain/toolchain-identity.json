@@ -26,7 +26,7 @@
   },
   "families": [
     {
-      "action_key": "b3:c8c33d026c4ee09f86dabc7db6698551ad5625698648ddb2d33257204d282aa9",
+      "action_key": "b3:126f68ba0812afbbda9a25a545d4d6a08fac0646381c8df3c5b1ce38753f5215",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -61,10 +61,11 @@
       }
     },
     {
-      "action_key": "b3:dee56cf087eccd2562e9a84f6b533de46d1fa1585ea96c524cb71ad122983e82",
+      "action_key": "b3:196a74fc4b425bab7548f5219fbc78aad05e5414c601889cd726c98fe3bca8b1",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",
+        "contracts/generated/model/schema/schema-evolution-policy.json",
         "contracts/generated/model/schema/schema-validation.json",
         "contracts/generated/model/schema/table-specs.json",
         "contracts/query/planspec.schema.json",
@@ -75,6 +76,7 @@
         "contracts/schema/public-status.schema.json",
         "contracts/schema/serving-snapshot.schema.json",
         "contracts/schema/source-context.schema.json",
+        "src/generated/fact_row_encoders.rs",
         "src/generated/model_schema_tables.rs",
         "src/generated/table_specs.rs"
       ],
@@ -90,7 +92,7 @@
       }
     },
     {
-      "action_key": "b3:2520e96af831e21a39bb7cf4f1c3130eb38addfce987b85a2551653ad43dd80e",
+      "action_key": "b3:c34e0f9730ee4ca0f50a28a4d6ba98529ac978f3da579bc16b0b8395e2d99f2c",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -123,7 +125,7 @@
       }
     },
     {
-      "action_key": "b3:235982620ccd66fd57c7b830d7a3a599c562cd6420326d7f5c7b5a72d3cf9ccb",
+      "action_key": "b3:76d8bf3909518e76815ef1c0a6c5eb790ea27d3e75a32c2de353c247112c4d46",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
