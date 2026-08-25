@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP55",
+  "current_packet": null,
   "packets": {
     "WP73": {
       "status": "complete",
@@ -29,14 +29,18 @@
       "blockers": []
     },
     "WP55": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "57d0c5530e6d64463633ef1d534873afd2dd6330",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first aggregate oracle-substance rerun exposed WP54 test assertions that hard-coded eight active oracle definitions; the correction derives four definitions per complete or in-progress packet from schema-2 state.",
+        "The first post-migration detector census showed DP-078's raw-hash probe had been removed as a side effect of the purpose split; its disposition is now partial with a positive keyed-authority probe because WP67 still owns cancel-token separation and stream authorization.",
+        "Freshly linked macOS test binaries twice slept in dyld during nextest discovery; terminating only the stalled discovery and rerunning against the stable binaries completed 268 tests and doctests without a test failure."
+      ],
       "blockers": []
     },
     "WP56": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -256,6 +260,6 @@
       "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
     }
   ],
-  "next_action": "Execute WP55's semantic fingerprint-domain census, converge application identity construction through crate::identity, and prove persisted compatibility before cutover.",
-  "updated_at": "2026-08-25T17:10:00Z"
+  "next_action": "Begin WP56 and replace the remaining cross-language and wire registry duplicates with generated projections from one authority.",
+  "updated_at": "2026-08-25T10:03:37Z"
 }
