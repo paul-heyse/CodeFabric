@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": null,
+  "current_packet": "WP69",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -149,7 +149,7 @@
       "blockers": []
     },
     "WP69": {
-      "status": "ready",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -264,6 +264,6 @@
       "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
     }
   ],
-  "next_action": "Begin WP69 and repair the model compiler's shadow-plan, derived-output census, traceability, and vocabulary ownership before certifying M09 and DB12.",
-  "updated_at": "2026-08-25T10:56:48Z"
+  "next_action": "Execute WP69's current-tree model-plane census, remove shadow plan and stale Derived authorities, distinguish traceability from requirements, and bind runtime vocabularies to generated contracts.",
+  "updated_at": "2026-08-25T10:57:23Z"
 }
