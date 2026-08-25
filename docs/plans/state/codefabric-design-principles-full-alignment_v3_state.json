@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": null,
+  "current_packet": "WP56",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -40,7 +40,7 @@
       "blockers": []
     },
     "WP56": {
-      "status": "ready",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -260,6 +260,6 @@
       "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
     }
   ],
-  "next_action": "Begin WP56 and replace the remaining cross-language and wire registry duplicates with generated projections from one authority.",
-  "updated_at": "2026-08-25T10:03:37Z"
+  "next_action": "Execute WP56's current-tree registry census, collapse the Rust and Python duplicates, and generate wire-safe registry projections without renumbering.",
+  "updated_at": "2026-08-25T10:04:28Z"
 }
