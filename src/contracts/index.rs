@@ -80,7 +80,7 @@ pub struct ModelOutputProjection {
     pub public_identity: Option<String>,
 }
 
-/// One complete DesiredTree output with its producer and consumers.
+/// One complete `DesiredTree` output with its producer and consumers.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelOutputIndexRecord {
@@ -114,7 +114,7 @@ pub struct ModelArtifactIndex {
     pub source: String,
     /// Records sorted by stable artifact identity.
     pub artifacts: Vec<ModelArtifactIndexRecord>,
-    /// Complete DesiredTree output census sorted by repository-relative path.
+    /// Complete `DesiredTree` output census sorted by repository-relative path.
     pub outputs: Vec<ModelOutputIndexRecord>,
 }
 
