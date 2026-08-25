@@ -85,7 +85,7 @@
         },
         {
           "artifact_id": "codefabric.registry.enum-registry",
-          "canonical_digest": "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+          "canonical_digest": "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -133,7 +133,7 @@
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:17454d0e985766a2461ea33ccf77dea2af95c21e9a5f1480f3b0e9925e70ab6b",
+      "bundle_digest": "b3:ad6b26009d2ce5463dd9a81e1cc6287e61725c75ec683ff304deeae38478e084",
       "bundle_kind": "ontology",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -222,7 +222,7 @@
         },
         {
           "artifact_id": "codefabric.query.planspec.schema",
-          "canonical_digest": "b3:f6dc2acb28b1fbce8de02962c7b5d123f750d6befc21b6f7c3e14b898a79723e",
+          "canonical_digest": "b3:dcc423335c0ab792cdcb8e760ee3cecbb74090ee90623d705bde6eb79d489c7b",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -250,20 +250,20 @@
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
-          "canonical_digest": "b3:63c95355b6553b830538232656765ee75e0854ae8da4c0b93d93d2560ee8e27e",
+          "canonical_digest": "b3:396fcb9f5dcf2cb2dff4ba3a7fc69d3fa5f3635ab38c199d9e2b1272cad6c3c3",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
-          "canonical_digest": "b3:a47dda20c0892b4325200ed39effcc8c8ca7e5f639e938c7377b8c1003e2c000",
+          "canonical_digest": "b3:47922e0eeefa211d4a1367e26fefc430c46407d46a22ebe7ad85827fce9c30e2",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:cafc863112ec695d0a1d7fb9efab499f2c6c1fba40f920077b548ca88a49df92",
+      "bundle_digest": "b3:d856f8962d33debc32ca35331183fa172413884607825f01e9a827b5ffdcc04e",
       "bundle_kind": "query-language",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -280,62 +280,62 @@
       "artifacts": [
         {
           "artifact_id": "codefabric.schema.analysis-context.schema",
-          "canonical_digest": "b3:30d77fe9ab5c0071159295d34dc747d789234645c7eb5dad85eead6555141078",
+          "canonical_digest": "b3:c08b7c4db85222aaf8f291f64b87aedf9b10d37ab27cb82e028a93847fc96a6f",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.contract-ir",
-          "canonical_digest": "b3:8269406f9fefe2cad662da9d5542e21eabff2a3875e00d86dfa6198eabe77e48",
+          "canonical_digest": "b3:45e46f3e16c4b031f74f48e8a5aa2d24aef66ca83f950d3ef813ac18caff708f",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
-          "canonical_digest": "b3:63c95355b6553b830538232656765ee75e0854ae8da4c0b93d93d2560ee8e27e",
+          "canonical_digest": "b3:396fcb9f5dcf2cb2dff4ba3a7fc69d3fa5f3635ab38c199d9e2b1272cad6c3c3",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
-          "canonical_digest": "b3:a47dda20c0892b4325200ed39effcc8c8ca7e5f639e938c7377b8c1003e2c000",
+          "canonical_digest": "b3:47922e0eeefa211d4a1367e26fefc430c46407d46a22ebe7ad85827fce9c30e2",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
-          "canonical_digest": "b3:c4533886463805a4cde84a9cde8a5aa02dc797f5f638aa1fde2a01f2d81d2733",
+          "canonical_digest": "b3:7ffbe8da9cac97d92d526a33daf743ff6c33693905d405a1e4b8321cb350b83e",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.public-status.schema",
-          "canonical_digest": "b3:52ded00428de09e9971ea0aabb5e74eda372af68e1d4edbb0d2b38c5c30801a4",
+          "canonical_digest": "b3:fc51d31e6d59aba67082be6fcf64ea1e3cca992654e9835f44d1edf6926d7c53",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.serving-snapshot.schema",
-          "canonical_digest": "b3:58723705ce942aafb4382e83baaff666add0364509d91a25a5062d47ba984f1c",
+          "canonical_digest": "b3:463241d16915231ecd1ce2af99f020915c5e13e1f10b8684099d0714d9c2d72e",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.source-context.schema",
-          "canonical_digest": "b3:7b66022fa677ee5de8139290647c17113041e9249d36611dbd13ceeae935a97c",
+          "canonical_digest": "b3:6d9784b28b93fb83b1462f1eac333f898ec5efb0dc3c5f98a5b2f1d3909b33f4",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:a1254d65eb897c2165efd628093f0837bffb853e6b21be6db4469c651537c007",
+      "bundle_digest": "b3:d2fa007376f2fa165f5aa4668bed5ecabdae15a05d7b805e3d4086ce081fb898",
       "bundle_kind": "schema",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -415,13 +415,13 @@
         },
         {
           "artifact_id": "codefabric.schema.public-status.schema",
-          "canonical_digest": "b3:52ded00428de09e9971ea0aabb5e74eda372af68e1d4edbb0d2b38c5c30801a4",
+          "canonical_digest": "b3:fc51d31e6d59aba67082be6fcf64ea1e3cca992654e9835f44d1edf6926d7c53",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:f01fe1d688ce209a5debd900a790b6b8a4ddd6e5edbed6e86b4478c00d08d31b",
+      "bundle_digest": "b3:1fff4f8cab6c37e8a7915c3e8bfb10e7a1763f894d340a4a057c3d2e8916d86d",
       "bundle_kind": "tool-contract",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -438,13 +438,13 @@
       "artifacts": [
         {
           "artifact_id": "codefabric.toolchain.identity",
-          "canonical_digest": "b3:2b51b05e98c0cf6728e684c17935794320a2671c2d33702dc6c17feb7a3ca05a",
+          "canonical_digest": "b3:664ab7972ec9bda9dc491a65c809af6f5b0fb4f1389735faac99276a47c63f99",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:0ec7398b71776ff72c5f429c39a7cb36cce1e5c616cab90bc633233f93d58e83",
+      "bundle_digest": "b3:1eb7f0bdb8de246028aa6735d81443adc63cef818048eaabf6ed93f59b2c9adc",
       "bundle_kind": "toolchain",
       "bundle_major": 1,
       "bundle_version": "1.0",

@@ -38,6 +38,9 @@ use deltalake::{DeltaTable, DeltaTableBuilder};
 use futures::StreamExt as _;
 use std::num::NonZeroUsize;
 
+use crate::error::ErrorEnvelope;
+use crate::registries::Phase;
+
 const CATALOG_SCHEMA: &str = "cpg_base";
 
 /// Closed purpose for every Delta handle constructed by CodeFabric.
@@ -380,6 +383,24 @@ pub enum SnapshotConstructionStage {
     Freeze,
 }
 
+/// Phase-carrying candidate-construction failure with the attempted stage trace.
+pub type SnapshotConstructionError = ErrorEnvelope<FabricError, SnapshotConstructionStage>;
+
+fn fabric_public_code(error: &FabricError) -> &'static str {
+    match error {
+        FabricError::SchemaDigestMismatch { .. } => "SCHEMA_DIGEST_MISMATCH",
+        FabricError::CurrentPointerConflict(_) => "CURRENT_POINTER_CONFLICT",
+        FabricError::OverlayGenerationConflict(_) | FabricError::MutationConflict(_) => {
+            "OVERLAY_GENERATION_CONFLICT"
+        }
+        FabricError::OverlayMemoryReservation(_) => "QUERY_HARD_LIMIT_EXCEEDED",
+        FabricError::LocalProfile(_) | FabricError::OverlayPolicyViolation(_) => {
+            "INVALID_REQUEST_SCHEMA"
+        }
+        _ => "INTERNAL_INVARIANT_VIOLATION",
+    }
+}
+
 /// Non-timing construction evidence emitted for each frozen candidate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SnapshotConstructionMetrics {
@@ -665,9 +686,26 @@ impl SnapshotProviderCatalog {
     pub async fn build(
         publication: &PublicationOutcome,
         overlay: &dyn SnapshotOverlayProviderFactory,
+    ) -> Result<Self, SnapshotConstructionError> {
+        let mut trace = vec![SnapshotConstructionStage::ResolveVersions];
+        Self::build_unphased(publication, overlay, &mut trace)
+            .await
+            .map_err(|source| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotConstruction,
+                    fabric_public_code(&source),
+                    trace,
+                    source,
+                )
+            })
+    }
+
+    async fn build_unphased(
+        publication: &PublicationOutcome,
+        overlay: &dyn SnapshotOverlayProviderFactory,
+        trace: &mut Vec<SnapshotConstructionStage>,
     ) -> Result<Self, FabricError> {
         validate_publication_census(publication)?;
-        let mut trace = vec![SnapshotConstructionStage::ResolveVersions];
         let mut opened = BTreeMap::new();
         trace.push(SnapshotConstructionStage::ConstructProviders);
         for (&table_code, record) in &publication.tables {
@@ -750,7 +788,7 @@ impl SnapshotProviderCatalog {
             overlay_tables: overlay.table_manifests().into(),
             providers: wrapped,
             catalog,
-            trace,
+            trace: trace.clone(),
             metrics: SnapshotConstructionMetrics {
                 provider_count,
                 exact_version_count: provider_count,
@@ -1531,7 +1569,11 @@ mod tests {
         wrong_schema.tables.get_mut(&1).unwrap().schema_fingerprint = [99; 32];
         assert!(matches!(
             SnapshotProviderCatalog::build(&wrong_schema, &EmptySnapshotOverlay).await,
-            Err(FabricError::SnapshotProviderIntegrity(_))
+            Err(error)
+                if matches!(
+                    error.source_error(),
+                    FabricError::SnapshotProviderIntegrity(_)
+                )
         ));
 
         let mut corrected_evidence = publication.clone();

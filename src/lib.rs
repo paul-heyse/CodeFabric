@@ -27,6 +27,14 @@ pub mod core_facts;
 pub mod daemon;
 #[cfg(feature = "daemon")]
 pub mod derivation;
+#[cfg(any(
+    all(feature = "contract-models", not(feature = "model-compiler")),
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
+pub mod error;
 #[cfg(feature = "daemon")]
 pub mod golden_corpus;
 #[cfg(any(

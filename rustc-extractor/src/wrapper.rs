@@ -42,6 +42,36 @@ include!("generated/digest_frames.rs");
 
 const MAX_CHUNK_BYTES: usize = 16 * 1024 * 1024;
 
+/// Typed failure at the compiler-wrapper process boundary.
+#[derive(Debug)]
+pub(crate) struct WrapperError {
+    phase: &'static str,
+    detail: String,
+}
+
+impl WrapperError {
+    fn protocol(detail: impl Into<String>) -> Self {
+        Self {
+            phase: "execution",
+            detail: detail.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for WrapperError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "INTERNAL:{}:{}", self.phase, self.detail)
+    }
+}
+
+impl std::error::Error for WrapperError {}
+
+impl From<String> for WrapperError {
+    fn from(detail: String) -> Self {
+        Self::protocol(detail)
+    }
+}
+
 fn rust_mir_capability_code() -> Result<u32, String> {
     CAPABILITY_IDS
         .iter()
@@ -670,9 +700,9 @@ pub(crate) fn run(
     real_rustc: &OsStr,
     arguments: &[OsString],
     identity_bytes: &[u8],
-) -> Result<i32, String> {
+) -> Result<i32, WrapperError> {
     let Some(environment) = WrapperEnvironment::resolve()? else {
-        return passthrough(real_rustc, arguments);
+        return passthrough(real_rustc, arguments).map_err(WrapperError::from);
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -680,6 +710,7 @@ pub(crate) fn run(
         .build()
         .map_err(|error| format!("failed to create extractor runtime: {error}"))?;
     run_protocol(&runtime, environment, real_rustc, arguments, identity_bytes)
+        .map_err(WrapperError::from)
 }
 
 #[cfg(test)]

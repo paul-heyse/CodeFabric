@@ -287,6 +287,11 @@ pub enum DaemonError {
     LeaseHeld,
     #[error("administrative protocol failure: {0}")]
     Admin(String),
+    #[error("joined shutdown failed after {completed_steps:?}: {detail}")]
+    Shutdown {
+        completed_steps: Vec<&'static str>,
+        detail: String,
+    },
     #[error(transparent)]
     OperationalStore(#[from] OperationalStoreError),
     #[error(transparent)]
@@ -295,6 +300,23 @@ pub enum DaemonError {
     WorkspaceRegistry(#[from] WorkspaceRegistryError),
     #[error(transparent)]
     Fabric(#[from] FabricError),
+}
+
+fn record_shutdown_step<E: std::fmt::Display>(
+    completed_steps: &mut Vec<&'static str>,
+    step: &'static str,
+    outcome: Result<(), E>,
+) -> Result<(), DaemonError> {
+    outcome.map_err(|error| DaemonError::Shutdown {
+        completed_steps: completed_steps.clone(),
+        detail: error.to_string(),
+    })?;
+    completed_steps.push(step);
+    tracing::info!(
+        shutdown_step = step,
+        "joined daemon shutdown step completed"
+    );
+    Ok(())
 }
 
 fn private_directory(path: &Path) -> Result<(), DaemonError> {
@@ -879,30 +901,48 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
         }
     };
 
-    let steps = [
+    let mut steps = Vec::new();
+    record_shutdown_step(
+        &mut steps,
         "mark-stopping",
-        "close-ingress",
-        "await-workers",
-        "close-durable-stores",
-        "retire-endpoint-metadata",
-        "release-singleton-lease",
-    ];
-    for step in steps {
-        tracing::info!(shutdown_step = step, "joined daemon shutdown");
-    }
-    coordinators.shutdown_all().await?;
-    if drained {
-        operational_store.lock().await.checkpoint()?;
-    }
+        Ok::<(), std::convert::Infallible>(()),
+    )?;
     drop(listener);
-    fs::remove_file(&config.static_config.socket_endpoint).map_err(|source| DaemonError::Io {
-        path: config.static_config.socket_endpoint.clone(),
-        source,
-    })?;
+    record_shutdown_step(
+        &mut steps,
+        "close-ingress",
+        Ok::<(), std::convert::Infallible>(()),
+    )?;
+    record_shutdown_step(
+        &mut steps,
+        "await-workers",
+        coordinators.shutdown_all().await,
+    )?;
+    let durable_close = if drained {
+        operational_store
+            .lock()
+            .await
+            .checkpoint()
+            .map_err(|error| error.to_string())
+    } else {
+        Ok(())
+    };
+    record_shutdown_step(&mut steps, "close-durable-stores", durable_close)?;
     drop(operational_store);
+    record_shutdown_step(
+        &mut steps,
+        "retire-endpoint-metadata",
+        fs::remove_file(&config.static_config.socket_endpoint),
+    )?;
+    drop(lease);
+    record_shutdown_step(
+        &mut steps,
+        "release-singleton-lease",
+        Ok::<(), std::convert::Infallible>(()),
+    )?;
     Ok(DaemonExit {
         drained,
-        shutdown_steps: steps.to_vec(),
+        shutdown_steps: steps,
     })
 }
 
@@ -990,6 +1030,28 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[test]
+    fn wp61_operational_acceptance() {
+        let mut completed = Vec::new();
+        record_shutdown_step(&mut completed, "stop-admission", Ok::<_, &str>(())).unwrap();
+        record_shutdown_step(&mut completed, "drain-queries", Ok::<_, &str>(())).unwrap();
+        let error = record_shutdown_step(
+            &mut completed,
+            "flush-publications",
+            Err::<(), _>("injected flush failure"),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DaemonError::Shutdown {
+                completed_steps,
+                detail,
+            } if completed_steps == ["stop-admission", "drain-queries"]
+                && detail == "injected flush failure"
+        ));
+        assert_eq!(completed, ["stop-admission", "drain-queries"]);
+    }
 
     fn config(root: &Path) -> DaemonConfig {
         DaemonConfig {

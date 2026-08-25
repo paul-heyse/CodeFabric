@@ -33,6 +33,22 @@ pub struct ContinuousWorkspaceConfig {
     pub git_observations: GitStateObservations,
     pub prior_git_vector: Option<GitStateVector>,
     pub overlay_memory_limit_bytes: usize,
+    /// Whether the selected analysis contract requires semantic-provider completion.
+    pub semantic_capabilities_required: bool,
+}
+
+fn semantic_lane_required<'a>(
+    config: &ContinuousWorkspaceConfig,
+    languages: impl IntoIterator<Item = &'a crate::source_image::SourceLanguage>,
+) -> bool {
+    config.semantic_capabilities_required
+        && languages.into_iter().any(|language| {
+            matches!(
+                language,
+                crate::source_image::SourceLanguage::Python
+                    | crate::source_image::SourceLanguage::Rust
+            )
+        })
 }
 
 /// One successfully published source wave.
@@ -282,6 +298,21 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
             "fast-output-valid",
             "fast-contracts-satisfied",
         )?;
+        if semantic_lane_required(
+            &self.config,
+            wave.items
+                .iter()
+                .filter_map(|item| item.captured.as_deref())
+                .map(|source| &source.language),
+        ) {
+            self.scheduler.transition(
+                store,
+                &mut wave,
+                "semantic-work-required",
+                "semantic-capabilities-applicable",
+            )?;
+            return Ok(None);
+        }
         self.scheduler.transition(
             store,
             &mut wave,
@@ -491,6 +522,84 @@ mod tests {
     }
 
     #[test]
+    fn wp61_negative_zero_state() {
+        let directory = tempfile::tempdir().expect("semantic guard fixture");
+        let root = directory.path().join("workspace");
+        std::fs::create_dir(&root).expect("workspace root");
+        std::fs::write(root.join("lib.rs"), b"pub fn answer() -> u32 { 42 }\n")
+            .expect("Rust source");
+        let mut store = OperationalStore::open(&directory.path().join("operational.sqlite"))
+            .expect("operational store");
+        let workspace_id = WorkspaceRegistry::new(&mut store)
+            .add(&root, WorkspaceSourceRegistration::Directory)
+            .expect("workspace registration")
+            .workspace_id;
+        let lifecycle = lifecycle_config();
+        let scheduler = UpdateWaveScheduler::new(workspace_id, &root, 0, 0, 0, lifecycle).unwrap();
+        let source_images = SourceImageStore::open(
+            &directory.path().join("source-blobs"),
+            SourceCapturePolicy {
+                maximum_bytes: lifecycle.maximum_capture_bytes,
+                stable_read_retries: lifecycle.stable_read_retry_count,
+                lease_ttl: lifecycle.source_blob_lease_ttl,
+            },
+        )
+        .unwrap();
+        let mut engine = ContinuousWorkspaceEngine::new(
+            scheduler,
+            source_images,
+            GitCandidatePlanner::without_cache(GixGitStateAdapter),
+            ContinuousWorkspaceConfig {
+                analysis_context_id: crate::identity::SOURCE_CONTEXT_ID,
+                registered_git_identity: None,
+                git_observations: GitStateObservations {
+                    inclusion_policy_fingerprint: [0x41; 32],
+                    attributes_fingerprint: [0x42; 32],
+                    worktree_inventory_digest: [0; 32],
+                },
+                prior_git_vector: None,
+                overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: true,
+            },
+        );
+        let published = engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: vec![WatchHint {
+                        path_bytes: b"lib.rs".to_vec(),
+                        kind: WatchHintKind::CreateOrModify,
+                    }],
+                    rescan_required: false,
+                },
+                &BTreeMap::new(),
+            )
+            .expect("guard evaluation");
+        assert!(published.is_none());
+        let (state_code, terminal_at): (i64, Option<String>) = store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT state_code,terminal_at FROM update_wave WHERE workspace_id=?1 ORDER BY source_generation DESC LIMIT 1",
+                    [workspace_id.as_slice()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            state_code,
+            i64::from(crate::registries::UpdateWaveState::SemanticAnalyzing as u16)
+        );
+        assert!(terminal_at.is_none());
+        assert_eq!(
+            engine.scheduler().freshness().state(),
+            FreshnessState::PotentiallyStale
+        );
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)] // One oracle proves the coupled rebase, publication, and recovery invariants.
     fn wp48_behavioral_acceptance() {
         let directory = tempfile::tempdir().expect("continuous fixture");
@@ -529,6 +638,7 @@ mod tests {
                 },
                 prior_git_vector: None,
                 overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: false,
             },
         );
 
@@ -644,6 +754,7 @@ mod tests {
                 },
                 prior_git_vector: None,
                 overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: false,
             },
         );
 
@@ -759,6 +870,7 @@ mod tests {
                 },
                 prior_git_vector: None,
                 overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: false,
             },
         );
         let replayed = restarted

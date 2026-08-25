@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:f48030163a07e50f186079f97db7467d7c7a57184dcc8de5153defee9f0e7431; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:f5b92afb26c3c02f40a0f0a85e5bd47d2a8c378550aa12b8a3bbe782fa0a738b; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
@@ -175,7 +175,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("ANALYSIS_CONTEXT_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -184,7 +184,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("ANNOTATION_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -193,7 +193,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("COMPLETENESS_STATE"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -202,7 +202,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("DIRECTNESS"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -211,7 +211,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("DURABLE_PUBLICATION_STATE"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -220,7 +220,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("EVIDENCE_CERTAINTY"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -229,7 +229,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("GIT_HASH_ALGORITHM"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -238,7 +238,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("LANGUAGE"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -247,7 +247,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("NEWLINE_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -256,7 +256,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("OCCURRENCE_FAMILY"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -265,7 +265,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("OWNER_CAPABILITY_STATE"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -274,7 +274,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("OWNER_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -283,7 +283,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("PATH_ENCODING"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -292,7 +292,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("PROVIDER_CODE"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -301,7 +301,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("RANGE_RECONCILIATION_STEP"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -310,7 +310,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("RAW_KIND_DISPOSITION"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -319,7 +319,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("RESOLUTION_CLASS"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -328,7 +328,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("SEVERITY"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -337,7 +337,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("SYNTAX_FIELD_ROLE"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -346,7 +346,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("SYNTAX_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -355,7 +355,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("TOKEN_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -364,7 +364,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("VALUE_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {
@@ -373,7 +373,7 @@ const GENERATED_SEMANTIC_TYPE_BINDINGS: &[SemanticTypeBindingSpec] = &[
         domain: Some("WORKSPACE_KIND"),
         authority_artifact_id: Some("codefabric.registry.enum-registry"),
         authority_digest: Some(
-            "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+            "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
         ),
     },
     SemanticTypeBindingSpec {

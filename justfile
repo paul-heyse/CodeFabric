@@ -312,7 +312,7 @@ model-explain target:
 
 [doc("Run repository structural governance rules")]
 [group('gate')]
-governance-scan:
+governance-scan: public-error-closure-check
     ast-grep test --skip-snapshot-tests
     ast-grep scan \
       --globs '!contracts/generated/**' \
@@ -320,6 +320,12 @@ governance-scan:
       --globs '!codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/**' \
       --globs '!rustc-extractor/src/generated/**' \
       --globs '!pyrefly-sidecar/src/generated/**'
+
+[doc("Reject public Rust error prefixes outside the generated error registry")]
+[group('gate')]
+public-error-closure-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_error_registry_closure.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/error_registry_closure.py
 
 [doc("The routine stable-root gate")]
 [group('gate')]

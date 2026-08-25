@@ -524,6 +524,20 @@ class Severity(IntEnum):
     FATAL = 40
 
 
+class Phase(IntEnum):
+    INPUT_VALIDATION = 10
+    SCHEMA_BINDING = 20
+    LOGICAL_PLANNING = 30
+    POLICY_VALIDATION = 40
+    PHYSICAL_PLANNING = 50
+    EXECUTION = 60
+    WRITE_VALIDATION = 70
+    COMMIT = 80
+    SNAPSHOT_CONSTRUCTION = 90
+    SNAPSHOT_ACTIVATION = 100
+    SHUTDOWN = 110
+
+
 class WorkspaceLifecycle(IntEnum):
     BOOTSTRAPPING = 10
     READY = 20
@@ -1025,6 +1039,19 @@ ENUM_TRIPLES = MappingProxyType({
         (20, "WARNING", "warning"),
         (30, "ERROR", "error"),
         (40, "FATAL", "fatal"),
+    ),
+    "PHASE": (
+        (10, "INPUT_VALIDATION", "input-validation"),
+        (20, "SCHEMA_BINDING", "schema-binding"),
+        (30, "LOGICAL_PLANNING", "logical-planning"),
+        (40, "POLICY_VALIDATION", "policy-validation"),
+        (50, "PHYSICAL_PLANNING", "physical-planning"),
+        (60, "EXECUTION", "execution"),
+        (70, "WRITE_VALIDATION", "write-validation"),
+        (80, "COMMIT", "commit"),
+        (90, "SNAPSHOT_CONSTRUCTION", "snapshot-construction"),
+        (100, "SNAPSHOT_ACTIVATION", "snapshot-activation"),
+        (110, "SHUTDOWN", "shutdown"),
     ),
     "WORKSPACE_LIFECYCLE": (
         (10, "BOOTSTRAPPING", "bootstrapping"),

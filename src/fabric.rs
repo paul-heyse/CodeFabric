@@ -65,9 +65,16 @@ pub use serving::{
 };
 pub use snapshot_catalog::{
     DeltaAccessProfile, DeltaHandleFactory, DeltaMaterializationPosture, EmptySnapshotOverlay,
-    ProfiledDeltaHandle, SnapshotConstructionMetrics, SnapshotConstructionStage,
-    SnapshotOverlayProviderFactory, SnapshotProviderCatalog, SnapshotProviderRecord,
+    ProfiledDeltaHandle, SnapshotConstructionError, SnapshotConstructionMetrics,
+    SnapshotConstructionStage, SnapshotOverlayProviderFactory, SnapshotProviderCatalog,
+    SnapshotProviderRecord,
 };
+
+impl From<SnapshotConstructionError> for FabricError {
+    fn from(error: SnapshotConstructionError) -> Self {
+        error.into_source()
+    }
+}
 
 #[cfg(all(test, feature = "daemon"))]
 pub(crate) fn test_rebase_fault(point: OverlayRebaseFaultPoint) -> Result<(), FabricError> {
@@ -102,35 +109,35 @@ pub(crate) fn id16_array<'a>(values: impl IntoIterator<Item = Option<&'a [u8; 16
 pub enum FabricError {
     #[error("SCHEMA_DIGEST_MISMATCH:{table}")]
     SchemaDigestMismatch { table: String },
-    #[error("FABRIC_TABLE_INVARIANT:{table}:{detail}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:FABRIC_TABLE_INVARIANT:{table}:{detail}")]
     TableInvariant { table: String, detail: String },
-    #[error("LOCAL_STORAGE_PROFILE_REJECTED:{0}")]
+    #[error("INVALID_REQUEST_SCHEMA:LOCAL_STORAGE_PROFILE_REJECTED:{0}")]
     LocalProfile(String),
-    #[error("MUTATION_CONFLICT:{0}")]
+    #[error("OVERLAY_GENERATION_CONFLICT:MUTATION_CONFLICT:{0}")]
     MutationConflict(String),
-    #[error("MUTATION_JOURNAL:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:MUTATION_JOURNAL:{0}")]
     MutationJournal(String),
-    #[error("MUTATION_FAULT:{0:?}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:MUTATION_FAULT:{0:?}")]
     MutationFault(MutationFaultPoint),
-    #[error("PUBLICATION_INTEGRITY:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:PUBLICATION_INTEGRITY:{0}")]
     PublicationIntegrity(String),
     #[error(transparent)]
     PublicationReference(Box<PublicationReferenceViolation>),
     #[error("CURRENT_POINTER_CONFLICT:{0}")]
     CurrentPointerConflict(String),
-    #[error("PUBLICATION_FAULT:{0:?}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:PUBLICATION_FAULT:{0:?}")]
     PublicationFault(PublicationFaultPoint),
-    #[error("SNAPSHOT_PROVIDER_INTEGRITY:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:SNAPSHOT_PROVIDER_INTEGRITY:{0}")]
     SnapshotProviderIntegrity(String),
-    #[error("SNAPSHOT_CATALOG_FROZEN:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:SNAPSHOT_CATALOG_FROZEN:{0}")]
     SnapshotCatalogFrozen(String),
-    #[error("OVERLAY_POLICY_VIOLATION:{0}")]
+    #[error("INVALID_REQUEST_SCHEMA:OVERLAY_POLICY_VIOLATION:{0}")]
     OverlayPolicyViolation(String),
     #[error("OVERLAY_GENERATION_CONFLICT:{0}")]
     OverlayGenerationConflict(String),
-    #[error("OVERLAY_MEMORY_RESERVATION:{0}")]
+    #[error("QUERY_HARD_LIMIT_EXCEEDED:OVERLAY_MEMORY_RESERVATION:{0}")]
     OverlayMemoryReservation(String),
-    #[error("OVERLAY_REBASE_RESTART_REQUIRED:{0}")]
+    #[error("CURRENT_FACTS_UNAVAILABLE:OVERLAY_REBASE_RESTART_REQUIRED:{0}")]
     OverlayRebaseRestartRequired(String),
     #[error("fabric I/O at {path}: {source}")]
     Io {

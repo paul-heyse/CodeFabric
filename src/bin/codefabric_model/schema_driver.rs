@@ -1009,8 +1009,8 @@ fn validate_semantic_authorities(
             return invalid(
                 "$.semantic_authorities",
                 format!(
-                    "digest-pinned semantic authority {} drifted",
-                    authority.path
+                    "digest-pinned semantic authority {} drifted: header={actual_digest:?}, expected={:?}, detached={detached:?}",
+                    authority.path, authority.canonical_digest,
                 ),
             );
         }

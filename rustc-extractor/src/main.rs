@@ -48,7 +48,8 @@ fn run(args: impl IntoIterator<Item = OsString>, stderr: &mut impl Write) -> Res
         Command::Wrapper {
             real_rustc,
             arguments,
-        } => wrapper::run(&real_rustc, &arguments, IDENTITY.as_bytes()),
+        } => wrapper::run(&real_rustc, &arguments, IDENTITY.as_bytes())
+            .map_err(|error| error.to_string()),
     }
 }
 

@@ -1738,7 +1738,7 @@ impl ConsolidatedOverlay {
                 request.now,
                 None,
             )
-            .map_err(|error| snapshot_runtime_error(&error))?;
+            .map_err(|error| snapshot_runtime_error(error.source_error()))?;
         Ok(OverlayRebaseOutcome {
             publication,
             overlay,

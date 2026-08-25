@@ -838,7 +838,7 @@ pub enum GitStateError {
     TrustPolicy,
     #[error("GIT_OPERATION_CANCELLED")]
     Cancelled,
-    #[error("GIT_STATE_UNAVAILABLE: {0}")]
+    #[error("CAPABILITY_UNAVAILABLE:GIT_STATE_UNAVAILABLE:{0}")]
     Unavailable(&'static str),
 }
 

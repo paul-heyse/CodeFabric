@@ -67,13 +67,13 @@ const ALLOWED_AGGREGATE_FUNCTIONS: [&str; 7] =
 /// Stable failures at the leased serving-query boundary.
 #[derive(Debug, Error)]
 pub enum ServingQueryError {
-    #[error("SERVING_CONFIGURATION:{0}")]
+    #[error("INVALID_REQUEST_SCHEMA:SERVING_CONFIGURATION:{0}")]
     Configuration(String),
-    #[error("SERVING_PLAN_REJECTED:{0}")]
+    #[error("INVALID_REQUEST_SCHEMA:SERVING_PLAN_REJECTED:{0}")]
     PlanRejected(String),
-    #[error("SERVING_OPERATIONAL_CAPTURE:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:SERVING_OPERATIONAL_CAPTURE:{0}")]
     OperationalCapture(String),
-    #[error("SERVING_RESOURCE_LIMIT:{0}")]
+    #[error("QUERY_HARD_LIMIT_EXCEEDED:SERVING_RESOURCE_LIMIT:{0}")]
     ResourceLimit(String),
     #[error("serving I/O at {path}: {source}")]
     Io {

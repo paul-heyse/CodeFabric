@@ -8,13 +8,15 @@ use arc_swap::ArcSwapOption;
 use rusqlite::{OptionalExtension as _, params};
 use thiserror::Error;
 
+use crate::error::ErrorEnvelope;
 use crate::fabric::SnapshotProviderCatalog;
 use crate::identity::{
     IdentityDomain, decode_public_id, encode_public_id, random_registration_nonce,
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::registries::{
-    ServingActivationState, SnapshotLeaseKind, SnapshotLeaseState, WorkspaceRegistryLifecycle,
+    Phase, ServingActivationState, SnapshotLeaseKind, SnapshotLeaseState,
+    WorkspaceRegistryLifecycle,
 };
 use crate::snapshot::{
     ServingSnapshotManifest, ServingSnapshotManifestBody, SnapshotBasePublication,
@@ -42,13 +44,13 @@ pub enum SnapshotRuntimeError {
     Identity(#[from] crate::identity::IdentityError),
     #[error(transparent)]
     SourceImage(#[from] SourceImageError),
-    #[error("SNAPSHOT_CANDIDATE_INVALID:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:SNAPSHOT_CANDIDATE_INVALID:{0}")]
     Candidate(String),
     #[error("CURRENT_POINTER_CONFLICT:{0}")]
     PointerConflict(String),
-    #[error("SNAPSHOT_LEASE_INVALID:{0}")]
+    #[error("RESOURCE_EXPIRED:SNAPSHOT_LEASE_INVALID:{0}")]
     Lease(String),
-    #[error("SNAPSHOT_ACTIVATION_FAULT:{0:?}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:SNAPSHOT_ACTIVATION_FAULT:{0:?}")]
     InjectedFault(SnapshotActivationFaultPoint),
 }
 
@@ -69,6 +71,17 @@ pub enum SnapshotActivationStage {
     CandidateActivated,
     DurablePointerCommitted,
     MemoryPointerSwapped,
+}
+
+/// Phase-carrying activation failure with every stage attempted before the failure.
+pub type SnapshotActivationError = ErrorEnvelope<SnapshotRuntimeError, SnapshotActivationStage>;
+
+fn snapshot_runtime_public_code(error: &SnapshotRuntimeError) -> &'static str {
+    match error {
+        SnapshotRuntimeError::PointerConflict(_) => "CURRENT_POINTER_CONFLICT",
+        SnapshotRuntimeError::Lease(_) => "RESOURCE_EXPIRED",
+        _ => "INTERNAL_INVARIANT_VIOLATION",
+    }
 }
 
 /// A fully validated WP26 provider set bound to one immutable AC-G-19 manifest.
@@ -249,9 +262,42 @@ impl ServingSnapshotRuntime {
         observed_durable_pointer_generation: u64,
         now: u64,
         fault: Option<SnapshotActivationFaultPoint>,
+    ) -> Result<Vec<SnapshotActivationStage>, SnapshotActivationError> {
+        let mut trace = vec![SnapshotActivationStage::CandidateValidated];
+        self.activate_unphased(
+            store,
+            candidate,
+            expected_predecessor,
+            expected_active_pointer_generation,
+            observed_durable_pointer_generation,
+            now,
+            fault,
+            &mut trace,
+        )
+        .map_err(|source| {
+            ErrorEnvelope::new(
+                Phase::SnapshotActivation,
+                snapshot_runtime_public_code(&source),
+                trace,
+                source,
+            )
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
+    fn activate_unphased(
+        &self,
+        store: &mut OperationalStore,
+        candidate: Arc<ServingSnapshotCandidate>,
+        expected_predecessor: Option<[u8; 16]>,
+        expected_active_pointer_generation: u64,
+        observed_durable_pointer_generation: u64,
+        now: u64,
+        fault: Option<SnapshotActivationFaultPoint>,
+        trace: &mut Vec<SnapshotActivationStage>,
     ) -> Result<Vec<SnapshotActivationStage>, SnapshotRuntimeError> {
         candidate.manifest.validate()?;
-        let mut trace = vec![SnapshotActivationStage::CandidateValidated];
         let snapshot_id = candidate.manifest.raw_snapshot_id()?;
         let workspace_id = candidate.manifest.raw_workspace_id()?;
         let publication_id = candidate.manifest.raw_publication_id()?;
@@ -265,7 +311,8 @@ impl ServingSnapshotRuntime {
         })?;
         let observed_generation = sql_u64(observed_durable_pointer_generation)?;
         let now_sql = sql_u64(now)?;
-        let transaction_trace = store.write_transaction(|transaction| {
+        store.write_transaction(|transaction| {
+            trace.push(SnapshotActivationStage::ReadyInserted);
             transaction.execute(
                 "INSERT INTO serving_snapshot_manifest(snapshot_id, workspace_id,
                  publication_id, state_code, manifest_body_bytes, manifest_json_bytes,
@@ -282,6 +329,7 @@ impl ServingSnapshotRuntime {
                     now_sql,
                 ],
             )?;
+            trace.push(SnapshotActivationStage::PredecessorVerified);
             let current = transaction
                 .query_row(
                     "SELECT snapshot_id, active_pointer_generation FROM active_snapshot
@@ -300,6 +348,7 @@ impl ServingSnapshotRuntime {
                     ));
                 }
             }
+            trace.push(SnapshotActivationStage::PriorRetired);
             if let Some(predecessor) = expected_predecessor {
                 let retired = transaction.execute(
                     "UPDATE serving_snapshot_manifest SET state_code=?2, retired_at=?3
@@ -317,6 +366,7 @@ impl ServingSnapshotRuntime {
                     ));
                 }
             }
+            trace.push(SnapshotActivationStage::CandidateActivated);
             let activated = transaction.execute(
                 "UPDATE serving_snapshot_manifest SET state_code=?2, activated_at=?3
                  WHERE snapshot_id=?1 AND state_code=?4",
@@ -381,14 +431,8 @@ impl ServingSnapshotRuntime {
                     SnapshotActivationFaultPoint::BeforeSqlCommit,
                 ));
             }
-            Ok::<_, SnapshotRuntimeError>(vec![
-                SnapshotActivationStage::ReadyInserted,
-                SnapshotActivationStage::PredecessorVerified,
-                SnapshotActivationStage::PriorRetired,
-                SnapshotActivationStage::CandidateActivated,
-            ])
+            Ok::<_, SnapshotRuntimeError>(())
         })?;
-        trace.extend(transaction_trace);
         trace.push(SnapshotActivationStage::DurablePointerCommitted);
         if fault == Some(SnapshotActivationFaultPoint::AfterSqlCommitBeforeMemorySwap) {
             return Err(SnapshotRuntimeError::InjectedFault(
@@ -397,7 +441,7 @@ impl ServingSnapshotRuntime {
         }
         self.active.store(Some(candidate));
         trace.push(SnapshotActivationStage::MemoryPointerSwapped);
-        Ok(trace)
+        Ok(trace.clone())
     }
 
     /// Reconstruct the process-local pointer only from matching, fully validating durable state.
@@ -1526,7 +1570,8 @@ mod tests {
         let first = candidate(1);
         assert!(matches!(
             runtime.activate(&mut store, Arc::clone(&first), None, 1, 1, 9, None),
-            Err(SnapshotRuntimeError::PointerConflict(_))
+            Err(error)
+                if matches!(error.source_error(), SnapshotRuntimeError::PointerConflict(_))
         ));
         assert!(runtime.active().is_none());
         runtime
@@ -1544,7 +1589,8 @@ mod tests {
                 18,
                 None,
             ),
-            Err(SnapshotRuntimeError::PointerConflict(_))
+            Err(error)
+                if matches!(error.source_error(), SnapshotRuntimeError::PointerConflict(_))
         ));
         assert!(matches!(
             runtime.activate(
@@ -1556,7 +1602,8 @@ mod tests {
                 19,
                 None,
             ),
-            Err(SnapshotRuntimeError::PointerConflict(_))
+            Err(error)
+                if matches!(error.source_error(), SnapshotRuntimeError::PointerConflict(_))
         ));
         assert!(matches!(
             runtime.activate(
@@ -1568,9 +1615,13 @@ mod tests {
                 20,
                 Some(SnapshotActivationFaultPoint::BeforeSqlCommit),
             ),
-            Err(SnapshotRuntimeError::InjectedFault(
-                SnapshotActivationFaultPoint::BeforeSqlCommit
-            ))
+            Err(error)
+                if matches!(
+                    error.source_error(),
+                    SnapshotRuntimeError::InjectedFault(
+                        SnapshotActivationFaultPoint::BeforeSqlCommit
+                    )
+                )
         ));
         assert_eq!(
             runtime.active().unwrap().manifest().snapshot_id,
@@ -1586,9 +1637,13 @@ mod tests {
                 21,
                 Some(SnapshotActivationFaultPoint::AfterSqlCommitBeforeMemorySwap),
             ),
-            Err(SnapshotRuntimeError::InjectedFault(
-                SnapshotActivationFaultPoint::AfterSqlCommitBeforeMemorySwap
-            ))
+            Err(error)
+                if matches!(
+                    error.source_error(),
+                    SnapshotRuntimeError::InjectedFault(
+                        SnapshotActivationFaultPoint::AfterSqlCommitBeforeMemorySwap
+                    )
+                )
         ));
         assert_eq!(
             runtime.active().unwrap().manifest().snapshot_id,

@@ -52,6 +52,12 @@ pub fn registry_state_name(values: &[RegistryEntry], code: u16) -> Option<&'stat
         .map(|entry| entry.name)
 }
 
+/// Resolve one public error solely from the generated registry projection.
+#[must_use]
+pub fn public_error(name: &str) -> Option<&'static PublicErrorEntry> {
+    PUBLIC_ERROR_ENTRIES.iter().find(|entry| entry.name == name)
+}
+
 /// Resolve one generated entity name to its code and family without duplicating either.
 #[must_use]
 pub fn entity_kind(name: &str) -> Option<OntologyCodeEntry> {

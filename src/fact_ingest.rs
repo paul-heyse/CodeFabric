@@ -35,15 +35,15 @@ const MAX_IPC_BYTES_PER_STREAM: usize = 16 * 1_024 * 1_024;
 pub enum FactIngestError {
     #[error("SOURCE_SNAPSHOT_MISMATCH:{0}")]
     SourceSnapshotMismatch(String),
-    #[error("STALE_RESULT:{0}")]
+    #[error("SOURCE_SNAPSHOT_MISMATCH:STALE_RESULT:{0}")]
     StaleResult(String),
-    #[error("FACT_BATCH_INVALID:{table}:{check}:{detail}")]
+    #[error("PROVIDER_PROTOCOL_ERROR:FACT_BATCH_INVALID:{table}:{check}:{detail}")]
     BatchInvalid {
         table: String,
         check: &'static str,
         detail: String,
     },
-    #[error("OBSERVATION_PROTOCOL_INVALID:{0}")]
+    #[error("PROVIDER_PROTOCOL_ERROR:OBSERVATION_PROTOCOL_INVALID:{0}")]
     Protocol(String),
     #[error(transparent)]
     Identity(#[from] crate::identity::IdentityError),

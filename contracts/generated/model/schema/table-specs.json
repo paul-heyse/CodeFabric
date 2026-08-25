@@ -1930,7 +1930,7 @@
     {
       "artifact_id": "codefabric.registry.enum-registry",
       "authority": "ENUM_REGISTRY",
-      "canonical_digest": "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+      "canonical_digest": "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
       "path": "contracts/registry/enum-registry.yaml"
     },
     {
@@ -2198,7 +2198,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:f48030163a07e50f186079f97db7467d7c7a57184dcc8de5153defee9f0e7431"
+    "source_digest": "b3:f5b92afb26c3c02f40a0f0a85e5bd47d2a8c378550aa12b8a3bbe782fa0a738b"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [

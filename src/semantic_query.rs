@@ -266,7 +266,7 @@ pub struct ExecutedSemanticResponse {
 
 #[derive(Debug, Error)]
 pub enum SemanticQueryError {
-    #[error("SEMANTIC_QUERY_INVALID:{0}")]
+    #[error("INVALID_REQUEST_SCHEMA:SEMANTIC_QUERY_INVALID:{0}")]
     Invalid(String),
     #[error(transparent)]
     Canonical(#[from] CanonicalJsonError),

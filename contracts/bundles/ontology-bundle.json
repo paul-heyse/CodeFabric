@@ -25,7 +25,7 @@
     },
     {
       "artifact_id": "codefabric.registry.enum-registry",
-      "canonical_digest": "b3:a8ed37d8944244efc83678525dddfe7c3b6a2681f193a044b9fdb18d5f1ce9e8",
+      "canonical_digest": "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -73,7 +73,7 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:17454d0e985766a2461ea33ccf77dea2af95c21e9a5f1480f3b0e9925e70ab6b",
+  "bundle_digest": "b3:ad6b26009d2ce5463dd9a81e1cc6287e61725c75ec683ff304deeae38478e084",
   "bundle_kind": "ontology",
   "bundle_major": 1,
   "bundle_version": "1.0",

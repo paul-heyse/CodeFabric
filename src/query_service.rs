@@ -478,6 +478,71 @@ fn validate_checksum(expected: &str, bytes: &[u8]) -> Result<(), Status> {
     Ok(())
 }
 
+struct PublicBoundaryError {
+    status: Status,
+    canonical_record_json: String,
+}
+
+#[derive(serde::Serialize)]
+struct PublicErrorRecord<'a> {
+    code: u16,
+    name: &'a str,
+    phase: &'a str,
+    severity: &'a str,
+    retryability: &'a str,
+    grpc_status: &'a str,
+    mcp_mapping: &'a str,
+    detail: &'a str,
+}
+
+fn grpc_code(name: &str) -> tonic::Code {
+    match name {
+        "ABORTED" => tonic::Code::Aborted,
+        "ALREADY_EXISTS" => tonic::Code::AlreadyExists,
+        "CANCELLED" => tonic::Code::Cancelled,
+        "DATA_LOSS" => tonic::Code::DataLoss,
+        "DEADLINE_EXCEEDED" => tonic::Code::DeadlineExceeded,
+        "FAILED_PRECONDITION" => tonic::Code::FailedPrecondition,
+        "INTERNAL" => tonic::Code::Internal,
+        "INVALID_ARGUMENT" => tonic::Code::InvalidArgument,
+        "NOT_FOUND" => tonic::Code::NotFound,
+        "OUT_OF_RANGE" => tonic::Code::OutOfRange,
+        "PERMISSION_DENIED" => tonic::Code::PermissionDenied,
+        "RESOURCE_EXHAUSTED" => tonic::Code::ResourceExhausted,
+        "UNAUTHENTICATED" => tonic::Code::Unauthenticated,
+        "UNAVAILABLE" => tonic::Code::Unavailable,
+        "UNIMPLEMENTED" => tonic::Code::Unimplemented,
+        _ => tonic::Code::Internal,
+    }
+}
+
+fn public_boundary_error(
+    name: &'static str,
+    phase: crate::registries::Phase,
+    detail: &str,
+) -> PublicBoundaryError {
+    let entry = crate::registries::public_error(name)
+        .expect("RPC boundary error identity must be registry generated");
+    let phase =
+        crate::registries::registry_state_name(crate::registries::PHASE_VALUES, phase as u16)
+            .expect("generated phase has a registry name");
+    let canonical_record_json = serde_json::to_string(&PublicErrorRecord {
+        code: entry.code,
+        name: entry.name,
+        phase,
+        severity: entry.severity,
+        retryability: entry.retryability,
+        grpc_status: entry.grpc_status,
+        mcp_mapping: entry.mcp_mapping,
+        detail,
+    })
+    .expect("public error record contains only JSON-safe strings");
+    PublicBoundaryError {
+        status: Status::new(grpc_code(entry.grpc_status), entry.public_message_template),
+        canonical_record_json,
+    }
+}
+
 fn event_header(query_id: &str, sequence: u64, snapshot_id: Option<String>) -> QueryEventHeader {
     QueryEventHeader {
         daemon_query_id: query_id.to_owned(),
@@ -547,7 +612,11 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
 ) {
     let remaining = deadline_unix_ms.saturating_sub(now_millis());
     let executed = if remaining <= 0 {
-        Err(Status::deadline_exceeded("query deadline elapsed"))
+        Err(public_boundary_error(
+            "FRESHNESS_DEADLINE_EXCEEDED",
+            crate::registries::Phase::Execution,
+            "query deadline elapsed",
+        ))
     } else {
         let request_timeout = std::time::Duration::from_millis(remaining.cast_unsigned());
         let admission = match validated.request.freshness_policy {
@@ -562,17 +631,33 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
             Ok(_) => {
                 match tokio::time::timeout(request_timeout, backend.execute(validated)).await {
                     Ok(Ok(executed)) => Ok(executed),
-                    Ok(Err(error)) => Err(Status::internal(error.to_string())),
-                    Err(_) => Err(Status::deadline_exceeded("query deadline elapsed")),
+                    Ok(Err(error)) => Err(public_boundary_error(
+                        "INTERNAL",
+                        crate::registries::Phase::Execution,
+                        &error.to_string(),
+                    )),
+                    Err(_) => Err(public_boundary_error(
+                        "FRESHNESS_DEADLINE_EXCEEDED",
+                        crate::registries::Phase::Execution,
+                        "query deadline elapsed",
+                    )),
                 }
             }
-            Err(crate::lifecycle::LifecycleError::Stale) => Err(Status::failed_precondition(
+            Err(crate::lifecycle::LifecycleError::Stale) => Err(public_boundary_error(
+                "CURRENT_FACTS_UNAVAILABLE",
+                crate::registries::Phase::PolicyValidation,
                 "current source state is not available",
             )),
-            Err(crate::lifecycle::LifecycleError::Unavailable) => {
-                Err(Status::unavailable("workspace source is unavailable"))
-            }
-            Err(error) => Err(Status::internal(error.to_string())),
+            Err(crate::lifecycle::LifecycleError::Unavailable) => Err(public_boundary_error(
+                "CURRENT_FACTS_UNAVAILABLE",
+                crate::registries::Phase::PolicyValidation,
+                "workspace source is unavailable",
+            )),
+            Err(error) => Err(public_boundary_error(
+                "INTERNAL",
+                crate::registries::Phase::PolicyValidation,
+                &error.to_string(),
+            )),
         }
     };
     if handle.cancelled.load(Ordering::Acquire) {
@@ -580,7 +665,7 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
     }
     let executed = match executed {
         Ok(executed) => executed,
-        Err(_status) => {
+        Err(error) => {
             let execution_state = QueryExecutionState::Failed;
             let freshness_state = match freshness.state() {
                 FreshnessState::Current => "CURRENT",
@@ -593,12 +678,17 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                     event: Some(Event::Terminal(TerminalEvent {
                         header: Some(event_header(&query_id, 1, None)),
                         execution_state: execution_state as i32,
-                        availability_state: "UNAVAILABLE".to_owned(),
+                        availability_state: if error.status.code() == tonic::Code::Unavailable {
+                            "UNAVAILABLE"
+                        } else {
+                            "FAILED"
+                        }
+                        .to_owned(),
                         freshness_state: freshness_state.to_owned(),
                         limit_state: "NOT_APPLIED".to_owned(),
                         dependency_state: "NOT_EXECUTED".to_owned(),
                         canonical_response_checksum: None,
-                        canonical_error_record_json: None,
+                        canonical_error_record_json: Some(error.canonical_record_json.into_bytes()),
                         artifact_id: None,
                         result_row_count: 0,
                         result_byte_count: 0,
@@ -1175,6 +1265,25 @@ mod tests {
     use tower::service_fn;
 
     use super::*;
+
+    #[test]
+    fn wp61_structural_acceptance() {
+        use crate::registries::{PUBLIC_ERROR_ENTRIES, PUBLIC_ERROR_IDS, Phase};
+
+        assert_eq!(PUBLIC_ERROR_ENTRIES.len(), PUBLIC_ERROR_IDS.len());
+        for (entry, name) in PUBLIC_ERROR_ENTRIES.iter().zip(PUBLIC_ERROR_IDS) {
+            assert_eq!(entry.name, *name);
+            let boundary = public_boundary_error(entry.name, Phase::Execution, "fixture");
+            assert_eq!(boundary.status.code(), grpc_code(entry.grpc_status));
+            let record: serde_json::Value =
+                serde_json::from_str(&boundary.canonical_record_json).unwrap();
+            assert_eq!(record["code"], entry.code);
+            assert_eq!(record["severity"], entry.severity);
+            assert_eq!(record["retryability"], entry.retryability);
+            assert_eq!(record["grpc_status"], entry.grpc_status);
+            assert_eq!(record["mcp_mapping"], entry.mcp_mapping);
+        }
+    }
 
     #[test]
     fn wp56_operational_acceptance() {

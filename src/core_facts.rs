@@ -1036,7 +1036,11 @@ impl CoreFactEngine {
         body: ServingSnapshotManifestBody,
         source_blob_digests: &[[u8; 32]],
     ) -> Result<ServingSnapshotCandidate, CoreFactError> {
-        let providers = Arc::new(SnapshotProviderCatalog::build(publication, overlay).await?);
+        let providers = Arc::new(
+            SnapshotProviderCatalog::build(publication, overlay)
+                .await
+                .map_err(FabricError::from)?,
+        );
         Ok(ServingSnapshotCandidate::build(
             body,
             providers,
@@ -1284,9 +1288,9 @@ fn coverage_fingerprint(scope: FactScope, chunk_digest: &str) -> [u8; 32] {
 /// Stable Wave-4 boundary errors.
 #[derive(Debug, Error)]
 pub enum CoreFactError {
-    #[error("SOURCE_ADMISSION_POLICY:{0}")]
+    #[error("INVALID_REQUEST_SCHEMA:SOURCE_ADMISSION_POLICY:{0}")]
     Policy(String),
-    #[error("UNKNOWN_CAPABILITY:{0}")]
+    #[error("CAPABILITY_UNAVAILABLE:UNKNOWN_CAPABILITY:{0}")]
     UnknownCapability(String),
     #[error("UNKNOWN_EVIDENCE_UNREGISTERED")]
     UnknownEvidence,
@@ -1296,9 +1300,9 @@ pub enum CoreFactError {
     ProviderTextUnavailable,
     #[error("UNSUPPORTED_SOURCE_LANGUAGE")]
     UnsupportedLanguage,
-    #[error("FACT_TABLE_MISSING:{0}")]
+    #[error("PROVIDER_PROTOCOL_ERROR:FACT_TABLE_MISSING:{0}")]
     MissingFactTable(i16),
-    #[error("DUPLICATE_OWNER_TABLE:{table_code}:{owner_id:?}")]
+    #[error("PROVIDER_PROTOCOL_ERROR:DUPLICATE_OWNER_TABLE:{table_code}:{owner_id:?}")]
     DuplicateOwnerTable { table_code: i16, owner_id: [u8; 16] },
     #[error(transparent)]
     TreeSitter(#[from] TreeSitterAdapterError),

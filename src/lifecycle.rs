@@ -2234,33 +2234,33 @@ impl CanonicalState {
 
 #[derive(Debug, Error)]
 pub enum LifecycleError {
-    #[error("LIFECYCLE_CONFIGURATION_INVALID:{0}")]
+    #[error("INVALID_REQUEST_SCHEMA:LIFECYCLE_CONFIGURATION_INVALID:{0}")]
     Configuration(String),
-    #[error("LIFECYCLE_PATH_INVALID:{0}")]
+    #[error("PATH_OUTSIDE_AUTHORIZED_ROOT:LIFECYCLE_PATH_INVALID:{0}")]
     Path(String),
     #[error("LIFECYCLE_SOURCE_DRIFT")]
     SourceDrift,
-    #[error("LIFECYCLE_GRAPH_INVALID:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:LIFECYCLE_GRAPH_INVALID:{0}")]
     Graph(String),
-    #[error("LIFECYCLE_GRAPH_CYCLE:{0:?}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:LIFECYCLE_GRAPH_CYCLE:{0:?}")]
     Cycle(DependencyCycleWitness),
     #[error("LIFECYCLE_STALE")]
     Stale,
     #[error("LIFECYCLE_UNAVAILABLE")]
     Unavailable,
-    #[error("LIFECYCLE_WATCHER:{0}")]
+    #[error("CAPABILITY_UNAVAILABLE:LIFECYCLE_WATCHER:{0}")]
     Watcher(String),
     #[error("LIFECYCLE_WATCHER_CLOSED")]
     WatcherClosed,
     #[error("LIFECYCLE_AUTHORITATIVE_INVENTORY_REQUIRED")]
     AuthoritativeInventoryRequired,
-    #[error("LIFECYCLE_TRANSITION_INVALID:{0}")]
+    #[error("STATE_TRANSITION_VIOLATION:LIFECYCLE_TRANSITION_INVALID:{0}")]
     Transition(String),
     #[error("LIFECYCLE_REBUILD_MISMATCH")]
     RebuildMismatch,
-    #[error("LIFECYCLE_REBUILD_EXTRACTION:{0}")]
+    #[error("COMPARATOR_ERROR:LIFECYCLE_REBUILD_EXTRACTION:{0}")]
     RebuildExtraction(String),
-    #[error("LIFECYCLE_RECOVERY_INVALID:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:LIFECYCLE_RECOVERY_INVALID:{0}")]
     Recovery(String),
     #[error("lifecycle I/O failed for {path}: {source}")]
     Io {
@@ -2288,7 +2288,7 @@ pub enum LifecycleError {
     Fabric(#[from] FabricError),
     #[error(transparent)]
     Serving(#[from] ServingQueryError),
-    #[error("LIFECYCLE_OVERLAY_REBASE:{0}")]
+    #[error("CURRENT_FACTS_UNAVAILABLE:LIFECYCLE_OVERLAY_REBASE:{0}")]
     OverlayRebase(String),
 }
 

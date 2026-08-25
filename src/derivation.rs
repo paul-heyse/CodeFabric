@@ -48,9 +48,9 @@ pub struct DerivationOutput {
 
 #[derive(Debug, Error)]
 pub enum DerivationError {
-    #[error("DERIVATION_REGISTRY_MISSING:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:DERIVATION_REGISTRY_MISSING:{0}")]
     RegistryMissing(&'static str),
-    #[error("DERIVATION_INPUT_INVALID:{0}")]
+    #[error("INTERNAL_INVARIANT_VIOLATION:DERIVATION_INPUT_INVALID:{0}")]
     InputInvalid(String),
 }
 
