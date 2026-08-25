@@ -15,7 +15,11 @@ def _json_lines(path: Path) -> list[dict[str, object]]:
 
 
 def test_wp69_behavioral_acceptance() -> None:
-    subprocess.run(
+    desired_tree_source = (ROOT / "src/bin/codefabric_model/desired_tree.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "fn model_plan_real_drift_fails_read_only_check()" in desired_tree_source
+    completed = subprocess.run(
         [
             "cargo",
             "test",
@@ -31,7 +35,10 @@ def test_wp69_behavioral_acceptance() -> None:
         ],
         cwd=ROOT,
         check=True,
+        capture_output=True,
+        text=True,
     )
+    assert "1 passed; 0 failed" in completed.stdout
 
 
 def test_wp69_structural_acceptance() -> None:
