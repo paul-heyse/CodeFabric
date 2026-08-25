@@ -341,7 +341,7 @@ impl ServingQuerySession {
     pub fn runtime_evidence(&self) -> ServingRuntimeEvidence {
         self.evidence
             .read()
-            .expect("serving runtime evidence lock is not poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -369,6 +369,7 @@ impl ServingQuerySession {
         self.execute_plan(sql, plan).await
     }
 
+    #[allow(clippy::too_many_lines)] // Keeps one execution, metric capture, and result-accounting lifetime explicit.
     async fn execute_plan(
         &self,
         sql: &str,
@@ -2263,6 +2264,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One operational scenario proves the complete resource lifecycle.
     async fn wp25_operational_acceptance() {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();

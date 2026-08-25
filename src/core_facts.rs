@@ -1065,7 +1065,7 @@ fn decode_rustc_owner(owner: &AcceptedRustcOwner) -> Result<RustcMirObservation,
     }
     let expected_schema = Arc::new(provider_observation_arrow_schema(contract));
     let batches = decode_validated_arrow_ipc_chunks(
-        Arc::clone(&expected_schema),
+        &expected_schema,
         usize::try_from(chunk.row_count)
             .map_err(|_| FactIngestError::Protocol("MIR row count exceeds usize".into()))?,
         chunk.arrow_ipc.len(),

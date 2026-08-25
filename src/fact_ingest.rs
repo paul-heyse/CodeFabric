@@ -1174,7 +1174,7 @@ where
         ));
     }
     let batches = decode_validated_arrow_ipc_chunks(
-        Arc::clone(&spec.arrow_schema),
+        &spec.arrow_schema,
         contract.declared_rows,
         contract.declared_bytes,
         chunks,
@@ -1201,7 +1201,7 @@ where
 ///
 /// Rejects resource overflow, malformed/truncated IPC, schema mismatch, and row/byte drift.
 pub fn decode_validated_arrow_ipc_chunks<I, B>(
-    expected_schema: SchemaRef,
+    expected_schema: &SchemaRef,
     declared_rows: usize,
     declared_bytes: usize,
     chunks: I,
@@ -1221,7 +1221,7 @@ where
 }
 
 fn decode_validated_arrow_ipc_buffers<I>(
-    expected_schema: SchemaRef,
+    expected_schema: &SchemaRef,
     declared_rows: usize,
     declared_bytes: usize,
     chunks: I,
@@ -1247,7 +1247,7 @@ where
         }
         while !buffer.is_empty() {
             if let Some(batch) = decoder.decode(&mut buffer)? {
-                if batch.schema() != expected_schema {
+                if batch.schema().as_ref() != expected_schema.as_ref() {
                     return Err(FactIngestError::SourceSnapshotMismatch(
                         "external IPC schema".into(),
                     ));
@@ -1597,6 +1597,7 @@ fn collect_candidates(
     Ok((candidates, present_tables))
 }
 
+#[allow(clippy::too_many_lines)] // One ordered pass keeps precedence, evidence, and conflict selection auditable.
 fn reconcile_candidates(
     candidates: CandidateGroups,
     present_tables: &BTreeSet<i16>,
@@ -1850,15 +1851,15 @@ impl CanonicalReconciliationEngine {
                 let schema_fingerprints = batches
                     .iter()
                     .map(|batch| {
-                        (
-                            batch.table_code,
-                            table_spec(batch.table_code)
-                                .expect("projected generated table")
-                                .schema_digest
-                                .clone(),
-                        )
+                        let spec = table_spec(batch.table_code).ok_or_else(|| {
+                            FactIngestError::Protocol(format!(
+                                "projected table {} is not generated",
+                                batch.table_code
+                            ))
+                        })?;
+                        Ok((batch.table_code, spec.schema_digest.clone()))
                     })
-                    .collect();
+                    .collect::<Result<BTreeMap<_, _>, FactIngestError>>()?;
                 let stream = ProviderFactStream {
                     manifest: ProviderFactManifest {
                         stream_id: source.lease.lease_id,
@@ -2623,32 +2624,25 @@ mod tests {
         let bytes = ipc_bytes(&batch);
         let schema = batch.schema();
         let one_byte_chunks = bytes.chunks(1);
-        let decoded =
-            decode_validated_arrow_ipc_chunks(Arc::clone(&schema), 1, bytes.len(), one_byte_chunks)
-                .expect("one-byte chunk splits decode");
-        assert_eq!(decoded, [batch.clone()]);
+        let decoded = decode_validated_arrow_ipc_chunks(&schema, 1, bytes.len(), one_byte_chunks)
+            .expect("one-byte chunk splits decode");
+        assert_eq!(decoded.as_slice(), std::slice::from_ref(&batch));
 
         let mut prefixed = Vec::with_capacity(bytes.len() + 1);
         prefixed.push(0xff);
         prefixed.extend_from_slice(&bytes);
         let unaligned = Buffer::from(prefixed).slice(1);
-        let decoded =
-            decode_validated_arrow_ipc_buffers(Arc::clone(&schema), 1, bytes.len(), [unaligned])
-                .expect("valid unaligned IPC is repaired by decoder policy");
+        let decoded = decode_validated_arrow_ipc_buffers(&schema, 1, bytes.len(), [unaligned])
+            .expect("valid unaligned IPC is repaired by decoder policy");
         assert_eq!(decoded, [batch]);
 
         assert!(
-            decode_validated_arrow_ipc_chunks(
-                Arc::clone(&schema),
-                1,
-                bytes.len() - 1,
-                [bytes.as_slice()],
-            )
-            .is_err()
+            decode_validated_arrow_ipc_chunks(&schema, 1, bytes.len() - 1, [bytes.as_slice()],)
+                .is_err()
         );
         assert!(
             decode_validated_arrow_ipc_chunks(
-                Arc::clone(&schema),
+                &schema,
                 1,
                 bytes.len() - 1,
                 [&bytes[..bytes.len() - 1]],
@@ -2657,12 +2651,12 @@ mod tests {
         );
         let relation_schema = Arc::clone(&table_spec(110).unwrap().arrow_schema);
         assert!(matches!(
-            decode_validated_arrow_ipc_chunks(relation_schema, 1, bytes.len(), [bytes.as_slice()],),
+            decode_validated_arrow_ipc_chunks(&relation_schema, 1, bytes.len(), [bytes.as_slice()],),
             Err(FactIngestError::SourceSnapshotMismatch(_))
         ));
         assert!(
             decode_validated_arrow_ipc_chunks(
-                schema,
+                &schema,
                 MAX_ROWS_PER_STREAM + 1,
                 bytes.len(),
                 [bytes.as_slice()],

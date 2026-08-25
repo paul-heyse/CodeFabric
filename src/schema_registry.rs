@@ -689,6 +689,11 @@ pub fn table_specs() -> &'static [TableSpec] {
 }
 
 /// Return the deterministic dependency-closed table order used for creation and publication.
+///
+/// # Panics
+///
+/// Panics if the generated table dependency graph contains a cycle. Model assurance rejects
+/// such a graph before runtime artifacts are released.
 #[must_use]
 pub fn table_dependency_order() -> &'static [i16] {
     static ORDER: OnceLock<Vec<i16>> = OnceLock::new();

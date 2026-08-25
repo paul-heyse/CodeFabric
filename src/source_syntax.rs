@@ -592,7 +592,9 @@ pub(crate) fn project(
                 && let Some((start, end)) = name_spans.get(&fact.id).copied()
             {
                 let provider_name = source_text(source, start, end);
-                entities[entity_index[&entity_id]].name = provider_name.clone();
+                entities[entity_index[&entity_id]]
+                    .name
+                    .clone_from(&provider_name);
                 syntax_details[syntax_index[&entity_id]].provider_name = provider_name;
             }
             evidence_inputs.push(EvidenceInput {

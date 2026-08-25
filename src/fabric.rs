@@ -115,7 +115,7 @@ pub enum FabricError {
     #[error("PUBLICATION_INTEGRITY:{0}")]
     PublicationIntegrity(String),
     #[error(transparent)]
-    PublicationReference(#[from] PublicationReferenceViolation),
+    PublicationReference(Box<PublicationReferenceViolation>),
     #[error("CURRENT_POINTER_CONFLICT:{0}")]
     CurrentPointerConflict(String),
     #[error("PUBLICATION_FAULT:{0:?}")]
@@ -146,6 +146,12 @@ pub enum FabricError {
     DataFusion(#[from] datafusion::error::DataFusionError),
     #[error(transparent)]
     Identity(#[from] crate::identity::IdentityError),
+}
+
+impl From<PublicationReferenceViolation> for FabricError {
+    fn from(violation: PublicationReferenceViolation) -> Self {
+        Self::PublicationReference(Box::new(violation))
+    }
 }
 
 /// Closed provider request validated before any object-store construction.
@@ -446,7 +452,10 @@ pub async fn bootstrap_workspace_with_repository(
     }
     let mut tables = BTreeMap::new();
     for table_code in table_dependency_order() {
-        let spec = table_spec(*table_code).expect("generated dependency order names a table");
+        let spec = table_spec(*table_code).ok_or_else(|| FabricError::TableInvariant {
+            table: table_code.to_string(),
+            detail: "generated dependency order names an unknown table".into(),
+        })?;
         let path = namespace.table_path(spec)?;
         std::fs::create_dir_all(&path).map_err(|source| FabricError::Io {
             path: path.clone(),

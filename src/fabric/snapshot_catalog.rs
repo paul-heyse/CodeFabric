@@ -234,7 +234,7 @@ struct OverlayIdentityProvider {
     checksum: [u8; 32],
 }
 
-/// Closed WP58 posture: query-aware StatisticsRequest is not advertised or consumed.
+/// Closed WP58 posture: query-aware `StatisticsRequest` is not advertised or consumed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatisticsRequestPosture {
     Declined,
@@ -961,6 +961,7 @@ fn authenticated_statistics(spec: &TableSpec, row_count: i64) -> Result<Statisti
     })
 }
 
+#[allow(clippy::too_many_lines)] // One scan owns the observed metrics and checksum accounting lifecycle.
 async fn stream_provider_evidence(
     provider: Arc<dyn TableProvider>,
     spec: &TableSpec,
