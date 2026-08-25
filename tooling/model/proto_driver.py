@@ -150,7 +150,10 @@ def apply_wire_enums(
         enum_name = projection["enum_name"]
         values = projection["values"]
         if (
-            not all(isinstance(item, str) for item in (registry_domain, proto_path, enum_name))
+            not all(
+                isinstance(item, str)
+                for item in (registry_domain, proto_path, enum_name)
+            )
             or not re.fullmatch(r"[A-Z][A-Z0-9_]*", registry_domain)
             or not re.fullmatch(r"[A-Z][A-Za-z0-9]*", enum_name)
             or proto_path not in by_path
@@ -165,7 +168,9 @@ def apply_wire_enums(
         numbers: set[int] = set()
         for value_index, raw_value in enumerate(values):
             value = exact_object(
-                raw_value, {"number", "name"}, f"wire_enums[{index}].values[{value_index}]"
+                raw_value,
+                {"number", "name"},
+                f"wire_enums[{index}].values[{value_index}]",
             )
             number = value["number"]
             name = value["name"]
