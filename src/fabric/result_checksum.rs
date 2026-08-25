@@ -29,7 +29,7 @@ pub enum ResultChecksumError {
     NullableMapKey,
     #[error("RESULT_CHECKSUM_RESOURCE_LIMIT")]
     ResourceLimit,
-    #[error("RESULT_CHECKSUM_CANONICAL_SCHEMA:{0}")]
+    #[error("result checksum canonical schema: {0}")]
     CanonicalSchema(String),
 }
 
