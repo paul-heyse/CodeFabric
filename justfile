@@ -437,6 +437,7 @@ oracle-substance-check:
     @just packet-oracle-check WP54
     @just packet-oracle-check WP55
     @just packet-oracle-check WP56
+    @just packet-oracle-check WP69
 
 [doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
 [group('gate')]

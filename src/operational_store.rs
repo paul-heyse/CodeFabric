@@ -1058,6 +1058,25 @@ mod tests {
     }
 
     #[test]
+    fn wp69_operational_acceptance() {
+        let specs = crate::schema_registry::operational_table_specs();
+        let names = generated_table_names();
+        let shapes = generated_column_shapes().unwrap();
+        assert_eq!(names.len(), specs.len());
+        assert_eq!(shapes.len(), specs.len());
+        for spec in specs {
+            assert!(names.contains(spec.name));
+            assert_eq!(generated_table_ddl(spec.name).unwrap(), spec.sqlite_ddl);
+            assert!(
+                spec.sqlite_ddl
+                    .starts_with(&format!("CREATE TABLE {} (", spec.name))
+            );
+            assert!(spec.sqlite_ddl.ends_with(") STRICT;\n"));
+            assert_eq!(shapes[spec.name].len(), spec.arrow_schema.fields().len());
+        }
+    }
+
+    #[test]
     fn wp13_behavioral_acceptance() {
         let (_directory, path) = database();
         let mut store = OperationalStore::open(&path).unwrap();

@@ -934,6 +934,70 @@ mod tests {
         assert!(!input.path.is_empty());
     }
 
+    #[test]
+    fn model_plan_real_drift_fails_read_only_check() {
+        let root = tempfile::tempdir().unwrap();
+        let planned = output("src/generated/drift.rs");
+        let action_id = planned.producer.clone();
+        let mut desired_tree = DesiredTree::default();
+        desired_tree
+            .insert(DesiredTreeEntry {
+                output: planned.clone(),
+                lineage: Vec::new(),
+                bytes: b"desired".to_vec(),
+                content_digest: digest_bytes(b"desired"),
+            })
+            .unwrap();
+        let current_outputs =
+            BTreeMap::from([(planned.path.clone(), b"current-different-bytes".to_vec())]);
+        let changes = desired_tree.compare(&current_outputs);
+        let graph = ModelGraph::compile(
+            vec![
+                NodeDeclaration {
+                    id: action_id.clone(),
+                    kind: NodeKind::Action,
+                },
+                NodeDeclaration {
+                    id: planned.output_id.clone(),
+                    kind: NodeKind::Output,
+                },
+            ],
+            vec![EdgeDeclaration {
+                prerequisite: action_id.clone(),
+                dependent: planned.output_id.clone(),
+                kind: EdgeKind::Produces,
+            }],
+            ResourceBounds::new(8, 8, 4).unwrap(),
+        )
+        .unwrap();
+        let plan = ModelPlan {
+            actions: BTreeMap::from([(
+                action_id.clone(),
+                PlannedAction {
+                    action_id,
+                    action_key: digest_bytes(b"real-action-key"),
+                    inputs: Vec::new(),
+                    upstream_output_digests: BTreeMap::new(),
+                    outputs: vec![planned],
+                },
+            )]),
+            desired_tree,
+            current_outputs,
+            changes,
+            source_fence: SourceFence {
+                sources: BTreeMap::new(),
+            },
+            graph,
+        };
+        assert!(matches!(
+            plan.check(root.path()),
+            Err(DesiredTreeError::NonZeroPlan {
+                kind: ChangeKind::Replace,
+                ..
+            })
+        ));
+    }
+
     fn dag(node_count: usize, parents: &[usize]) -> (ModelGraph, Vec<StableId>) {
         let ids: Vec<_> = (0..node_count)
             .map(|index| id(&format!("node:{index}")))
