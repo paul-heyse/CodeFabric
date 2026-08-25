@@ -230,4 +230,47 @@ mod tests {
                 .all(|entries| { entries[0].owner_section + 1 == entries[1].owner_section })
         );
     }
+
+    #[test]
+    fn wp56_behavioral_acceptance() {
+        assert_eq!(
+            crate::identity::IdentityDomain::RootAuthorization as u16,
+            17
+        );
+        assert_eq!(
+            QUERY_FORM_VALUES
+                .iter()
+                .map(|entry| entry.slug)
+                .collect::<Vec<_>>(),
+            vec![
+                "find code entities",
+                "retrieve facts about code",
+                "follow code relationships",
+                "find connecting fact paths",
+                "match a code fact pattern",
+                "combine result sets",
+                "summarize objective facts",
+                "retrieve source and syntax context",
+            ]
+        );
+        assert_eq!(NewlineKind::Crlf as u16, 30);
+        assert_eq!(FreshnessState::PotentiallyStale as u16, 20);
+        assert_eq!(capability_code("RUST_MIR"), Some(120));
+    }
+
+    #[test]
+    fn wp56_structural_acceptance() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(!root.join("src/generated/model_registries.rs").exists());
+        assert!(
+            !root
+                .join("codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/registries.py")
+                .exists()
+        );
+        assert_eq!(
+            include_bytes!("generated/digest_frames.rs"),
+            include_bytes!("../rustc-extractor/src/generated/digest_frames.rs")
+        );
+        assert_eq!(CAPABILITY_IDS.len(), CAPABILITY_CODES.len());
+    }
 }

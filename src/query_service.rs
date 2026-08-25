@@ -1175,6 +1175,21 @@ mod tests {
     use tower::service_fn;
 
     use super::*;
+
+    #[test]
+    fn wp56_operational_acceptance() {
+        let bundle = query_bundle_identity();
+        assert_eq!(bundle.bundle_id, "codefabric.bundles.query-language-bundle");
+        assert_eq!(bundle.bundle_version, "1.0");
+        assert_eq!(
+            supported_query_forms(),
+            vec![
+                "find code entities",
+                "retrieve facts about code",
+                "follow code relationships",
+            ]
+        );
+    }
     use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_client::CpgQueryServiceClient;
     use crate::rpc::generated::codefabric::cpgd::v1::{CredentialProof, VersionRange};
     use crate::semantic_query::{

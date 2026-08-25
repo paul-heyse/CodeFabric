@@ -3519,7 +3519,7 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:8b5c0b30b8ff1ebe4ccf8a59f65c2c2e766029d895d3318d2bf4c62a0818aa24",
+      "content_digest": "b3:ef078e126df4aeaff08fae01a10fa1104b32473ad0ea70b5ecb4f340233ce515",
       "lineage": [
         "action:registry-cbef"
       ],

@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
-from tooling.model.proto_driver import compile_once, output_plan, source_model
+from tooling.model.proto_driver import (
+    apply_wire_enums,
+    compile_once,
+    output_plan,
+    source_model,
+)
 
 
 def proto_source(
@@ -39,6 +45,43 @@ def proto_source(
 
 def request(*sources: dict[str, str]) -> dict[str, object]:
     return {"sources": list(sources)}
+
+
+def test_wp56_negative_zero_state() -> None:
+    from blake3 import blake3
+
+    path = "contracts/rpc/cpg_query_service.proto"
+    contents = Path(path).read_text(encoding="utf-8")
+    source = {
+        "path": path,
+        "contents": contents,
+        "source_digest": f"b3:{blake3(contents.encode()).hexdigest()}",
+    }
+    projection = {
+        "registry_domain": "QUERY_EXECUTION_STATE",
+        "proto_path": path,
+        "enum_name": "QueryExecutionState",
+        "values": [
+            {"number": number, "name": name}
+            for number, name in enumerate(
+                (
+                    "QUERY_EXECUTION_STATE_UNSPECIFIED",
+                    "QUERY_EXECUTION_STATE_ACCEPTED",
+                    "QUERY_EXECUTION_STATE_WAITING_FOR_FRESHNESS",
+                    "QUERY_EXECUTION_STATE_RUNNING",
+                    "QUERY_EXECUTION_STATE_SUCCEEDED",
+                    "QUERY_EXECUTION_STATE_FAILED",
+                    "QUERY_EXECUTION_STATE_CANCELLED",
+                    "QUERY_EXECUTION_STATE_LOST",
+                )
+            )
+        ],
+    }
+    assert apply_wire_enums(source_model(request(source)), [projection])
+    mutated = deepcopy(projection)
+    mutated["values"][-1]["number"] = 8
+    with pytest.raises(RuntimeError, match="diverge"):
+        apply_wire_enums(source_model(request(source)), [mutated])
 
 
 def test_model_proto_plan_is_source_and_package_derived() -> None:
