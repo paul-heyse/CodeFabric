@@ -1,12 +1,12 @@
 //! Bounded descriptor-relative source inventory and Merkle root construction.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use rusqlite::{OptionalExtension as _, params};
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
 use crate::identity::{IdentityError, WorkspacePath, source_file_identity};
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::secure_path::{
@@ -35,21 +35,6 @@ impl Default for InventoryLimits {
             maximum_duration: Duration::from_mins(5),
             maximum_entries_per_directory: 100_000,
         }
-    }
-}
-
-/// Cooperative cancellation observed at every directory entry.
-#[derive(Debug, Default)]
-pub struct InventoryCancellation(AtomicBool);
-
-impl InventoryCancellation {
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
     }
 }
 
@@ -155,7 +140,7 @@ impl InventoryWalker {
         root: &SecureRoot,
         store: &mut OperationalStore,
         source_generation: u64,
-        cancellation: &InventoryCancellation,
+        cancellation: &Cancellation,
     ) -> Result<SourceInventory, InventoryError> {
         require_source_generation(store, root.workspace_id(), source_generation)?;
         let started = Instant::now();
@@ -333,7 +318,7 @@ impl InventoryWalker {
     fn check_progress(
         &self,
         started: Instant,
-        cancellation: &InventoryCancellation,
+        cancellation: &Cancellation,
     ) -> Result<(), InventoryError> {
         if cancellation.is_cancelled() {
             return Err(InventoryError::Cancelled);
@@ -760,7 +745,7 @@ mod tests {
         let root = open_workspace_root(&mut store, workspace_id).unwrap();
         let mut walker = InventoryWalker::new(InventoryLimits::default());
         let first = walker
-            .walk_and_persist(&root, &mut store, 0, &InventoryCancellation::default())
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
             .unwrap();
         assert_eq!(first.records.len(), 2);
         assert!(
@@ -785,7 +770,7 @@ mod tests {
 
         fs::write(root_path.join("src/lib.rs"), b"fn two() {}\n").unwrap();
         let second = walker
-            .walk_and_persist(&root, &mut store, 0, &InventoryCancellation::default())
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
             .unwrap();
         assert_ne!(first.digest, second.digest);
         assert_ne!(
@@ -795,7 +780,7 @@ mod tests {
 
         fs::rename(root_path.join("README.md"), root_path.join("RENAMED.md")).unwrap();
         let renamed = walker
-            .walk_and_persist(&root, &mut store, 0, &InventoryCancellation::default())
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
             .unwrap();
         let old = second
             .records
@@ -816,7 +801,7 @@ mod tests {
                 &root,
                 &mut store,
                 1,
-                &InventoryCancellation::default()
+                &Cancellation::default()
             ),
             Err(InventoryError::SourceChanged)
         ));
@@ -829,7 +814,7 @@ mod tests {
         let root = open_workspace_root(&mut store, workspace_id).unwrap();
         let mut walker = InventoryWalker::new(InventoryLimits::default());
         let inventory = walker
-            .walk_and_persist(&root, &mut store, 0, &InventoryCancellation::default())
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
             .unwrap();
         assert_eq!(inventory.records.len(), 1);
         let persisted = store
@@ -900,7 +885,7 @@ mod tests {
         drop(oversized);
         let root = open_workspace_root(&mut store, workspace_id).unwrap();
 
-        let cancelled = InventoryCancellation::default();
+        let cancelled = Cancellation::default();
         cancelled.cancel();
         assert!(matches!(
             InventoryWalker::new(InventoryLimits::default())
@@ -937,13 +922,13 @@ mod tests {
         for limits in cases {
             assert!(
                 InventoryWalker::new(limits)
-                    .walk_and_persist(&root, &mut store, 0, &InventoryCancellation::default())
+                    .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
                     .is_err()
             );
         }
 
         let inventory = InventoryWalker::new(InventoryLimits::default())
-            .walk_and_persist(&root, &mut store, 0, &InventoryCancellation::default())
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
             .unwrap();
         let symlink_record = inventory
             .records
@@ -974,7 +959,7 @@ mod tests {
         let root = open_workspace_root(&mut store, workspace_id).unwrap();
         let mut walker = InventoryWalker::new(InventoryLimits::default());
         walker
-            .walk_and_persist(&root, &mut store, 0, &InventoryCancellation::default())
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
             .unwrap();
         let metrics = walker.metrics();
         assert_eq!(metrics.files, 1);

@@ -8,14 +8,15 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+use codefabric::cancellation::Cancellation;
 use codefabric::git_state::{
-    GitBlockingExecutor, GitCancellation, GitCandidateCache, GitCandidateMode, GitCandidateOrigin,
+    GitBlockingExecutor, GitCandidateCache, GitCandidateMode, GitCandidateOrigin,
     GitCandidatePlanner, GitCandidatePlanningRequest, GitHashAlgorithm, GitInventoryClassification,
     GitOperationState, GitStateAdapter, GitStateError, GitStateObservations, GitTrustPolicy,
     GixGitStateAdapter, HeadKind, RegisteredGitIdentity, apply_to_source_inventory,
     candidate_cache_key, supported_hash_algorithms, topology_digest,
 };
-use codefabric::inventory::{InventoryCancellation, InventoryLimits, InventoryWalker};
+use codefabric::inventory::{InventoryLimits, InventoryWalker};
 use codefabric::operational_store::OperationalStore;
 use codefabric::registries::GIT_INVENTORY_CLASSIFICATION_VALUES;
 use codefabric::registries::{GitAccelerationStatus, UpdateCandidateStrategy};
@@ -244,7 +245,7 @@ fn wp17_behavioral_acceptance() {
         .inventory(
             &snapshot.selected_worktree,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("Git-native inventory");
     let classification = |path: &[u8]| {
@@ -351,7 +352,7 @@ fn wp17_structural_acceptance() {
         .status_candidates(
             &snapshot.selected_worktree,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("status candidates");
     assert!(status.candidates.is_empty());
@@ -361,7 +362,7 @@ fn wp17_structural_acceptance() {
             &snapshot.selected_worktree,
             &vector,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("tree candidates");
     assert!(tree.candidates.is_empty());
@@ -380,18 +381,13 @@ fn wp17_structural_acceptance() {
     let secure_root =
         open_workspace_root(&mut store, workspace.workspace_id).expect("authorized source root");
     let mut source = InventoryWalker::new(InventoryLimits::default())
-        .walk_and_persist(
-            &secure_root,
-            &mut store,
-            0,
-            &InventoryCancellation::default(),
-        )
+        .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
         .expect("authoritative inventory");
     let git = adapter
         .inventory(
             &snapshot.selected_worktree,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("detached Git classification");
     apply_to_source_inventory(&git, &mut source, &mut store)
@@ -420,7 +416,7 @@ fn wp51_behavioral_acceptance() {
         .status_candidates(
             &snapshot.selected_worktree,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("status candidates");
 
@@ -459,7 +455,7 @@ fn wp52_behavioral_acceptance() {
             &snapshot.selected_worktree,
             &before,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("tree diff candidates");
     assert!(candidates.candidates.iter().any(|candidate| {
@@ -476,7 +472,7 @@ fn wp52_behavioral_acceptance() {
             &snapshot.selected_worktree,
             &stale,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         ),
         Err(GitStateError::Unavailable("stale-state-vector-identity"))
     ));
@@ -497,7 +493,7 @@ fn wp53_behavioral_acceptance() {
         .status_candidates(
             &snapshot.selected_worktree,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("status candidates");
     let key = candidate_cache_key(
@@ -571,7 +567,7 @@ fn wp53_operational_acceptance() {
             cache_fence_verified: false,
         },
         None,
-        &GitCancellation::default(),
+        &Cancellation::default(),
     );
     assert_eq!(isolated.strategy, UpdateCandidateStrategy::IsolatedPaths);
     assert_eq!(
@@ -607,7 +603,7 @@ fn wp53_operational_acceptance() {
             cache_fence_verified: false,
         },
         None,
-        &GitCancellation::default(),
+        &Cancellation::default(),
     );
     assert_eq!(status.strategy, UpdateCandidateStrategy::GitStatusIndex);
     assert!(status.candidate_paths.contains(b"tracked.rs".as_slice()));
@@ -630,7 +626,7 @@ fn wp53_operational_acceptance() {
             cache_fence_verified: false,
         },
         None,
-        &GitCancellation::default(),
+        &Cancellation::default(),
     );
     assert_eq!(head.strategy, UpdateCandidateStrategy::HeadTreeAndStatus);
     assert!(head.candidate_paths.contains(b"new.rs".as_slice()));
@@ -652,7 +648,7 @@ fn wp53_operational_acceptance() {
             cache_fence_verified: false,
         },
         None,
-        &GitCancellation::default(),
+        &Cancellation::default(),
     );
     assert_eq!(fallback.strategy, UpdateCandidateStrategy::GenericInventory);
     assert!(fallback.requires_generic_inventory());
@@ -681,7 +677,7 @@ fn wp17_negative_zero_state() {
         .inventory(
             &snapshot.selected_worktree,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("read-only inventory");
     assert_eq!(before, snapshot_path(&root.join(".git")));
@@ -714,8 +710,8 @@ fn wp17_negative_zero_state() {
 #[tokio::test]
 async fn wp17_operational_acceptance() {
     let executor = GitBlockingExecutor::new(1);
-    let first_cancel = GitCancellation::default();
-    let second_cancel = GitCancellation::default();
+    let first_cancel = Cancellation::default();
+    let second_cancel = Cancellation::default();
     let first = executor.run(first_cancel, |_| {
         thread::sleep(Duration::from_millis(25));
         Ok(1_u8)
@@ -758,7 +754,7 @@ fn wp49_negative_zero_state() {
 #[tokio::test]
 async fn wp49_operational_acceptance() {
     let executor = GitBlockingExecutor::new(1);
-    let cancellation = GitCancellation::default();
+    let cancellation = Cancellation::default();
     assert_eq!(
         executor
             .run(cancellation, |_| Ok::<_, GitStateError>(49_u8))
@@ -796,7 +792,7 @@ fn wp50_negative_zero_state() {
     let snapshot = adapter
         .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
         .expect("open fixture");
-    let cancellation = GitCancellation::default();
+    let cancellation = Cancellation::default();
     cancellation.cancel();
     assert!(matches!(
         adapter.inventory(&snapshot.selected_worktree, OBSERVATIONS, &cancellation),
@@ -819,7 +815,7 @@ fn wp50_operational_acceptance() {
         .inventory(
             &snapshot.selected_worktree,
             OBSERVATIONS,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )
         .expect("Git inventory");
     let git_paths = git
@@ -848,7 +844,7 @@ fn wp51_structural_acceptance() {
 
 #[test]
 fn wp51_negative_zero_state() {
-    let cancellation = GitCancellation::default();
+    let cancellation = Cancellation::default();
     cancellation.cancel();
     let fixture = tempfile::tempdir().expect("status cancel fixture");
     let root = fixture.path().join("repository");
@@ -883,7 +879,7 @@ fn wp51_operational_acceptance() {
             cache_fence_verified: false,
         },
         None,
-        &GitCancellation::default(),
+        &Cancellation::default(),
     );
     assert_eq!(plan.strategy, UpdateCandidateStrategy::IsolatedPaths);
     assert_eq!(
@@ -904,7 +900,7 @@ fn wp52_structural_acceptance() {
 
 #[test]
 fn wp52_negative_zero_state() {
-    let cancellation = GitCancellation::default();
+    let cancellation = Cancellation::default();
     cancellation.cancel();
     let fixture = tempfile::tempdir().expect("tree cancel fixture");
     let root = fixture.path().join("repository");
@@ -975,7 +971,7 @@ fn wp53_negative_zero_state() {
             cache_fence_verified: false,
         },
         None,
-        &GitCancellation::default(),
+        &Cancellation::default(),
     );
     assert!(plan.requires_generic_inventory());
     assert_eq!(plan.acceleration, GitAccelerationStatus::NotAGitWorktree);

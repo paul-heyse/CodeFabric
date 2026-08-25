@@ -98,7 +98,7 @@
       "blockers": []
     },
     "WP60": {
-      "status": "ready",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -323,6 +323,6 @@
       "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
     }
   ],
-  "next_action": "Begin WP60 preflight and implement the provider hierarchy, single cancellation handle, generated field-role crosswalk, and single extractor protocol without starting WP61.",
-  "updated_at": "2026-08-25T20:04:04Z"
+  "next_action": "Complete WP60 against its four substantive oracles: generated field-role authority, domain provider DTO and real adapter contract, single cancellation propagation, extractor protocol cutover, and admission eviction.",
+  "updated_at": "2026-08-25T20:23:10Z"
 }

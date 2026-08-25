@@ -22,6 +22,7 @@ use petgraph::visit::EdgeRef as _;
 use thiserror::Error;
 use tokio::sync::{Notify, mpsc};
 
+use crate::cancellation::Cancellation;
 use crate::contracts::models::DeploymentProfileDocument;
 use crate::core_facts::{CoreFactEngine, CoreFactError};
 use crate::fabric::{
@@ -40,7 +41,7 @@ use crate::registries::{
     UpdateCandidateStrategy, UpdateWaveItemState, UpdateWaveState, generated_transition,
     registry_state_name,
 };
-use crate::ruff_adapter::{NeverRuffCancelled, RuffAdapter, RuffSnapshot};
+use crate::ruff_adapter::{RuffAdapter, RuffSnapshot};
 use crate::schema_registry::{
     MaterializationRole, OverlayMutationPolicy, serving_projection_specs, table_spec, table_specs,
 };
@@ -49,9 +50,9 @@ use crate::source_image::{
     CaptureOutcome, CaptureRequest, SourceBlobHolderKind, SourceCapturePolicy, SourceImage,
     SourceImageError, SourceImageStore, SourceLanguage,
 };
-use crate::source_syntax::SourceSyntaxProviderRuns;
+use crate::source_syntax::SourceSyntaxAdapterOutput;
 use crate::tree_sitter_adapter::{
-    NeverCancelled, TreeSitterAdapter, TreeSitterAdapterError, TreeSitterEdit, TreeSitterLanguage,
+    TreeSitterAdapter, TreeSitterAdapterError, TreeSitterEdit, TreeSitterLanguage,
     TreeSitterSnapshot,
 };
 
@@ -1539,16 +1540,21 @@ impl FastSyntaxLane {
             std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
         };
         if let Some(edit) = edit {
-            match parser.parse_incremental(revision, provider_text.clone(), edit, &NeverCancelled) {
+            match parser.parse_incremental(
+                revision,
+                provider_text.clone(),
+                edit,
+                &Cancellation::default(),
+            ) {
                 Ok(snapshot) => Ok(snapshot),
                 Err(TreeSitterAdapterError::InvalidEdit(_)) => parser
-                    .parse_full(revision, provider_text, &NeverCancelled)
+                    .parse_full(revision, provider_text, &Cancellation::default())
                     .map_err(Into::into),
                 Err(error) => Err(error.into()),
             }
         } else {
             parser
-                .parse_full(revision, provider_text, &NeverCancelled)
+                .parse_full(revision, provider_text, &Cancellation::default())
                 .map_err(Into::into)
         }
     }
@@ -1621,7 +1627,7 @@ impl FastSyntaxReconciler {
                     source.source_generation,
                     provider_text,
                     &tree_sitter,
-                    &NeverRuffCancelled,
+                    &Cancellation::default(),
                 )?)
             } else {
                 None
@@ -1629,12 +1635,24 @@ impl FastSyntaxReconciler {
             let source_generation = i64::try_from(source.source_generation).map_err(|_| {
                 LifecycleError::Configuration("source generation exceeds i64".into())
             })?;
-            let runs = SourceSyntaxProviderRuns {
-                tree_sitter: provider_run_identity(wave.wave_id, &item.path_bytes, b"tree-sitter"),
-                ruff_python: ruff_python
-                    .as_ref()
-                    .map(|_| provider_run_identity(wave.wave_id, &item.path_bytes, b"ruff-python")),
-            };
+            let mut provider_outputs = vec![SourceSyntaxAdapterOutput::TreeSitter {
+                provider_run_id: provider_run_identity(
+                    wave.wave_id,
+                    &item.path_bytes,
+                    b"tree-sitter",
+                ),
+                snapshot: &tree_sitter,
+            }];
+            if let Some(ruff) = ruff_python.as_ref() {
+                provider_outputs.push(SourceSyntaxAdapterOutput::RuffPython {
+                    provider_run_id: provider_run_identity(
+                        wave.wave_id,
+                        &item.path_bytes,
+                        b"ruff-python",
+                    ),
+                    snapshot: ruff,
+                });
+            }
             let canonical = self.core.reconcile_source_syntax(
                 FactScope {
                     workspace_id: source.workspace_id,
@@ -1643,9 +1661,7 @@ impl FastSyntaxReconciler {
                     owner_id: source.file_id,
                 },
                 source,
-                &tree_sitter,
-                ruff_python.as_ref(),
-                runs,
+                &provider_outputs,
             )?;
             outputs.push(FastSyntaxFactOutput {
                 path_bytes: item.path_bytes.clone(),

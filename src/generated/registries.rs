@@ -6139,6 +6139,314 @@ pub const PROVIDER_ENTRIES: &[ProviderEntry] = &[
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderFieldRoleEntry {
+    pub raw_catalog_id: &'static str,
+    pub raw_role: &'static str,
+    pub field_role_code: u16,
+}
+
+pub const PROVIDER_FIELD_ROLE_CROSSWALK: &[ProviderFieldRoleEntry] = &[
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "alternative",
+        field_role_code: 50,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "arguments",
+        field_role_code: 110,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "body",
+        field_role_code: 50,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "condition",
+        field_role_code: 60,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "consequence",
+        field_role_code: 50,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "decorator",
+        field_role_code: 30,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "finally",
+        field_role_code: 170,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "function",
+        field_role_code: 100,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "guard",
+        field_role_code: 140,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "handler",
+        field_role_code: 160,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "iterable",
+        field_role_code: 130,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "left",
+        field_role_code: 70,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "name",
+        field_role_code: 10,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "object",
+        field_role_code: 90,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "parameters",
+        field_role_code: 20,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "pattern",
+        field_role_code: 150,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "return_type",
+        field_role_code: 40,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "right",
+        field_role_code: 80,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "target",
+        field_role_code: 70,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "type_parameters",
+        field_role_code: 20,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-python-0-25-0",
+        raw_role: "value",
+        field_role_code: 80,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "alternative",
+        field_role_code: 50,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "arguments",
+        field_role_code: 110,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "body",
+        field_role_code: 50,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "condition",
+        field_role_code: 60,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "consequence",
+        field_role_code: 50,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "decorator",
+        field_role_code: 30,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "finally",
+        field_role_code: 170,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "function",
+        field_role_code: 100,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "guard",
+        field_role_code: 140,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "handler",
+        field_role_code: 160,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "iterable",
+        field_role_code: 130,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "left",
+        field_role_code: 70,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "name",
+        field_role_code: 10,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "object",
+        field_role_code: 90,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "parameters",
+        field_role_code: 20,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "pattern",
+        field_role_code: 150,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "return_type",
+        field_role_code: 40,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "right",
+        field_role_code: 80,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "target",
+        field_role_code: 70,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "type_parameters",
+        field_role_code: 20,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "tree-sitter-rust-0-24-2",
+        raw_role: "value",
+        field_role_code: 80,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Annotation",
+        field_role_code: 40,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Argument",
+        field_role_code: 110,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Body",
+        field_role_code: 50,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Callee",
+        field_role_code: 100,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Clause",
+        field_role_code: 170,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Condition",
+        field_role_code: 60,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Decorator",
+        field_role_code: 30,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Handler",
+        field_role_code: 160,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Iterable",
+        field_role_code: 130,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "KeywordArgument",
+        field_role_code: 120,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Name",
+        field_role_code: 10,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Parameter",
+        field_role_code: 20,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Pattern",
+        field_role_code: 150,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Target",
+        field_role_code: 70,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "TypeParameter",
+        field_role_code: 20,
+    },
+    ProviderFieldRoleEntry {
+        raw_catalog_id: "ruff-python-0-0-7",
+        raw_role: "Value",
+        field_role_code: 80,
+    },
+];
+
+#[must_use]
+pub fn provider_field_role_code(raw_catalog_id: &str, raw_role: &str) -> Option<u16> {
+    PROVIDER_FIELD_ROLE_CROSSWALK
+        .iter()
+        .find(|entry| entry.raw_catalog_id == raw_catalog_id && entry.raw_role == raw_role)
+        .map(|entry| entry.field_role_code)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderResourceProfileEntry {
     pub profile_id: &'static str,
     pub provider_ids: &'static [&'static str],

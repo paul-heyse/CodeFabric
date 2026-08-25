@@ -11,7 +11,7 @@
     },
     {
       "artifact_id": "codefabric.registry.provider-normalization-registry",
-      "canonical_digest": "b3:79e12dbe7adbe5407041c5b464132c58c563653e802a5f0825c2ac1c08888beb",
+      "canonical_digest": "b3:b0e1ca4b743b44af18186092505b892633476f3621cd73307e2444776a116552",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -52,7 +52,7 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:73f6e70d1bc1e599964e97508c507e859783a85c2ff14d673664ad70b5b5d76f",
+  "bundle_digest": "b3:8d26e0eca49472825b3931936f0343ac634a5e1809cb7840fe1080660f1a6576",
   "bundle_kind": "provider",
   "bundle_major": 1,
   "bundle_version": "1.0",

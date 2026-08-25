@@ -11,6 +11,7 @@ use arrow_array::{Array as _, BooleanArray, ListArray, StringArray, UInt64Array}
 use arrow_schema::{DataType, Field, Schema};
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
 use crate::contracts::models::DeploymentProfileDocument;
 use crate::fabric::{
     EmptySnapshotOverlay, FabricError, MutationJournal, OwnerMutationRequest,
@@ -39,16 +40,15 @@ use crate::registries::{
     capability_code, capability_mask, entity_kind, property_kind,
 };
 use crate::ruff_adapter::RuffSnapshot;
-use crate::ruff_adapter::{NeverRuffCancelled, RuffAdapter, RuffAdapterError};
+use crate::ruff_adapter::{RuffAdapter, RuffAdapterError};
 use crate::rustc_service::{AcceptedRustcCompilation, AcceptedRustcOwner};
 use crate::schema_registry::table_spec;
 use crate::snapshot::ServingSnapshotManifestBody;
 use crate::snapshot_runtime::{ServingSnapshotCandidate, SnapshotRuntimeError};
 use crate::source_image::{SourceImage, SourceLanguage};
-use crate::source_syntax::SourceSyntaxProviderRuns;
+use crate::source_syntax::SourceSyntaxAdapterOutput;
 use crate::tree_sitter_adapter::{
-    NeverCancelled, TreeSitterAdapter, TreeSitterAdapterError, TreeSitterLanguage,
-    TreeSitterSnapshot,
+    TreeSitterAdapter, TreeSitterAdapterError, TreeSitterLanguage, TreeSitterSnapshot,
 };
 
 const DEPLOYMENT_PROFILE: &[u8] =
@@ -591,7 +591,7 @@ impl CoreFactEngine {
         &self,
         scope: FactScope,
         source: &SourceImage,
-        runs: SourceSyntaxProviderRuns,
+        provider_runs: &BTreeMap<&str, [u8; 16]>,
     ) -> Result<CoreSourceAnalysis, CoreFactError> {
         let text = source
             .provider_text
@@ -604,15 +604,31 @@ impl CoreFactEngine {
         };
         let revision = source.source_generation;
         let mut tree_adapter = TreeSitterAdapter::new(language)?;
-        let tree_sitter = tree_adapter.parse_full(revision, text.clone(), &NeverCancelled)?;
+        let tree_sitter =
+            tree_adapter.parse_full(revision, text.clone(), &Cancellation::default())?;
         let ruff_python = if source.language == SourceLanguage::Python {
             let mut ruff = RuffAdapter::new()?;
-            Some(ruff.parse(revision, text, &tree_sitter, &NeverRuffCancelled)?)
+            Some(ruff.parse(revision, text, &tree_sitter, &Cancellation::default())?)
         } else {
             None
         };
-        let canonical =
-            self.reconcile_source_syntax(scope, source, &tree_sitter, ruff_python.as_ref(), runs)?;
+        let tree_run = *provider_runs.get("tree-sitter").ok_or_else(|| {
+            FactIngestError::Protocol("Tree-sitter provider run is not registered".into())
+        })?;
+        let mut outputs = vec![SourceSyntaxAdapterOutput::TreeSitter {
+            provider_run_id: tree_run,
+            snapshot: &tree_sitter,
+        }];
+        if let Some(ruff) = ruff_python.as_ref() {
+            let ruff_run = *provider_runs.get("ruff-python").ok_or_else(|| {
+                FactIngestError::Protocol("Ruff provider run is not registered".into())
+            })?;
+            outputs.push(SourceSyntaxAdapterOutput::RuffPython {
+                provider_run_id: ruff_run,
+                snapshot: ruff,
+            });
+        }
+        let canonical = self.reconcile_source_syntax(scope, source, &outputs)?;
         Ok(CoreSourceAnalysis {
             tree_sitter,
             ruff_python,
@@ -629,13 +645,11 @@ impl CoreFactEngine {
         &self,
         scope: FactScope,
         source: &SourceImage,
-        tree: &TreeSitterSnapshot,
-        ruff: Option<&RuffSnapshot>,
-        runs: SourceSyntaxProviderRuns,
+        provider_outputs: &[SourceSyntaxAdapterOutput<'_>],
     ) -> Result<CanonicalIngestOutput, CoreFactError> {
         Ok(self
             .reconciliation
-            .ingest_source_syntax(scope, source, tree, ruff, runs)?)
+            .ingest_source_syntax(scope, source, provider_outputs)?)
     }
 
     /// Reconcile arbitrary typed provider streams through the same canonical authority.
@@ -1804,15 +1818,12 @@ mod tests {
             source_generation: 7,
             owner_id: source.file_id,
         };
-        let runs = SourceSyntaxProviderRuns {
-            tree_sitter: [10; 16],
-            ruff_python: Some([20; 16]),
-        };
+        let runs = BTreeMap::from([("tree-sitter", [10; 16]), ("ruff-python", [20; 16])]);
         let first = CoreFactEngine::default()
-            .analyze_source(scope, &source, runs)
+            .analyze_source(scope, &source, &runs)
             .unwrap();
         let second = CoreFactEngine::default()
-            .analyze_source(scope, &source, runs)
+            .analyze_source(scope, &source, &runs)
             .unwrap();
         assert!(first.ruff_python.is_some());
         assert_eq!(first.canonical.batches.len(), 10);
@@ -1847,10 +1858,7 @@ mod tests {
             .analyze_source(
                 scope,
                 &source,
-                SourceSyntaxProviderRuns {
-                    tree_sitter: [10; 16],
-                    ruff_python: Some([20; 16]),
-                },
+                &BTreeMap::from([("tree-sitter", [10; 16]), ("ruff-python", [20; 16])]),
             )
             .unwrap();
         let mut fact_digest = crate::integrity::IntegrityHasher::for_domain(

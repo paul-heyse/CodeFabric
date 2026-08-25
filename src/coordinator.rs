@@ -13,16 +13,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{Mutex, Semaphore, mpsc, oneshot};
 
+use crate::cancellation::Cancellation;
 use crate::contracts::models::DeploymentProfileDocument;
 use crate::git_state::{
-    GitCancellation, GitHashAlgorithm, GitOperationState, GitStateAdapter, GitStateError,
-    GitStateObservations, GitStateSnapshot, GitStateVector, GitTrustPolicy, GixGitStateAdapter,
-    HeadKind, RegisteredGitIdentity, apply_to_source_inventory, encode_object_id,
+    GitHashAlgorithm, GitOperationState, GitStateAdapter, GitStateError, GitStateObservations,
+    GitStateSnapshot, GitStateVector, GitTrustPolicy, GixGitStateAdapter, HeadKind,
+    RegisteredGitIdentity, apply_to_source_inventory, encode_object_id,
 };
 use crate::identity::{IdentityDomain, encode_public_id};
-use crate::inventory::{
-    InventoryCancellation, InventoryError, InventoryLimits, InventoryWalker, SourceInventory,
-};
+use crate::inventory::{InventoryError, InventoryLimits, InventoryWalker, SourceInventory};
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::registries::{
     EVENT_STREAM_HEALTH_TRANSITIONS, EVENT_STREAM_HEALTH_VALUES, EventStreamHealth,
@@ -547,7 +546,7 @@ fn capture_pass(
         root,
         store,
         source_generation,
-        &InventoryCancellation::default(),
+        &Cancellation::default(),
     )?;
     let (git_state, acceleration) = if let Some(git) = git {
         let (inclusion, attributes) = policy_fingerprints(record, &inventory);
@@ -560,7 +559,7 @@ fn capture_pass(
         let git_inventory = adapter.inventory(
             &git.selected_worktree,
             observations,
-            &GitCancellation::default(),
+            &Cancellation::default(),
         )?;
         apply_to_source_inventory(&git_inventory, &mut inventory, store)?;
         let observations = GitStateObservations {

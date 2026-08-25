@@ -881,23 +881,40 @@ mod tests {
         let runtime = Runtime::new().unwrap();
         let exit = run_protocol(
             &runtime,
-            environment,
+            environment.clone(),
             OsStr::new("rustc"),
             &arguments,
             include_bytes!("../toolchain-identity.json"),
         )
         .unwrap();
         assert_eq!(exit, 0);
+        let replay_exit = run_protocol(
+            &runtime,
+            environment,
+            OsStr::new("rustc"),
+            &arguments,
+            include_bytes!("../toolchain-identity.json"),
+        )
+        .unwrap();
+        assert_eq!(replay_exit, 0);
 
         for _ in 0..100 {
-            if matches!(
-                events
-                    .lock()
-                    .unwrap()
-                    .last()
-                    .and_then(|event| event.event.as_ref()),
-                Some(Event::CompilationEnd(_))
-            ) {
+            if events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event.event, Some(Event::CompilationEnd(_))))
+                .count()
+                == 2
+                && matches!(
+                    events
+                        .lock()
+                        .unwrap()
+                        .last()
+                        .and_then(|event| event.event.as_ref()),
+                    Some(Event::CompilationEnd(_))
+                )
+            {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -911,14 +928,17 @@ mod tests {
             observed.last().and_then(|event| event.event.as_ref()),
             Some(Event::CompilationEnd(_))
         ));
-        let chunk = observed
+        let chunks = observed
             .iter()
-            .find_map(|event| match event.event.as_ref() {
+            .filter_map(|event| match event.event.as_ref() {
                 Some(Event::OwnerObservationChunk(chunk)) => Some(chunk),
                 _ => None,
             })
-            .unwrap();
-        let mut reader = StreamReader::try_new(Cursor::new(&chunk.arrow_ipc), None).unwrap();
+            .collect::<Vec<_>>();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].arrow_ipc, chunks[1].arrow_ipc);
+        assert_eq!(chunks[0].chunk_digest, chunks[1].chunk_digest);
+        let mut reader = StreamReader::try_new(Cursor::new(&chunks[0].arrow_ipc), None).unwrap();
         let batch = reader.next().unwrap().unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.num_columns(), 9);

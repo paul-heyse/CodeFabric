@@ -157,7 +157,7 @@
         },
         {
           "artifact_id": "codefabric.registry.provider-normalization-registry",
-          "canonical_digest": "b3:79e12dbe7adbe5407041c5b464132c58c563653e802a5f0825c2ac1c08888beb",
+          "canonical_digest": "b3:b0e1ca4b743b44af18186092505b892633476f3621cd73307e2444776a116552",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -198,7 +198,7 @@
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:73f6e70d1bc1e599964e97508c507e859783a85c2ff14d673664ad70b5b5d76f",
+      "bundle_digest": "b3:8d26e0eca49472825b3931936f0343ac634a5e1809cb7840fe1080660f1a6576",
       "bundle_kind": "provider",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -438,13 +438,13 @@
       "artifacts": [
         {
           "artifact_id": "codefabric.toolchain.identity",
-          "canonical_digest": "b3:974b20899d10ad98f7f3e1c51db989ddd6891f20b149fd0a2783c8fde0a000f8",
+          "canonical_digest": "b3:2b51b05e98c0cf6728e684c17935794320a2671c2d33702dc6c17feb7a3ca05a",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:b62aebda044d815210b96b571e30e470f848855d27df768ca388371e19150f7e",
+      "bundle_digest": "b3:0ec7398b71776ff72c5f429c39a7cb36cce1e5c616cab90bc633233f93d58e83",
       "bundle_kind": "toolchain",
       "bundle_major": 1,
       "bundle_version": "1.0",

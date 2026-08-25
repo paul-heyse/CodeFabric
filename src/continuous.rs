@@ -5,14 +5,15 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
 use crate::fabric::ConsolidatedOverlay;
 use crate::git_state::{
-    GitCancellation, GitCandidatePlan, GitCandidatePlanner, GitCandidatePlanningRequest,
-    GitStateAdapter, GitStateError, GitStateObservations, GitStateVector, RegisteredGitIdentity,
+    GitCandidatePlan, GitCandidatePlanner, GitCandidatePlanningRequest, GitStateAdapter,
+    GitStateError, GitStateObservations, GitStateVector, RegisteredGitIdentity,
 };
 use crate::inventory::{
-    InclusionState, InventoryCancellation, InventoryError, InventoryFileUpsert, InventoryLimits,
-    InventoryWalker, advance_inventory_generation,
+    InclusionState, InventoryError, InventoryFileUpsert, InventoryLimits, InventoryWalker,
+    advance_inventory_generation,
 };
 use crate::lifecycle::{
     AcceptedUpdateWave, AuthoritativeCandidateSelection, ContinuousOverlayState,
@@ -136,7 +137,7 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
                             cache_fence_verified: false,
                         },
                         Some(store),
-                        &GitCancellation::default(),
+                        &Cancellation::default(),
                     )
                 });
             match plan {
@@ -232,7 +233,7 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
             && !self.git_candidates.verify_current(
                 plan,
                 self.config.git_observations,
-                &GitCancellation::default(),
+                &Cancellation::default(),
             )?
         {
             self.scheduler.reject_candidate_fence(store, &mut wave)?;
@@ -329,7 +330,7 @@ fn generic_inventory_selection(
         &root,
         store,
         source_generation,
-        &InventoryCancellation::default(),
+        &Cancellation::default(),
     )?;
     let mut paths = prior_paths;
     paths.extend(

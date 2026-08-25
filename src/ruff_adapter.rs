@@ -19,6 +19,7 @@ use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
 use crate::provider_raw_kinds::{
     ProviderRawKindDisposition, RUFF_PYTHON_FRONTEND, RuffPythonInventory,
     ruff_python_node_kind_entry, ruff_python_token_kind_entry,
@@ -137,6 +138,34 @@ pub enum RuffChildRole {
     Item,
     Segment,
     Child,
+}
+
+impl RuffChildRole {
+    /// Exact provider-normalization registry key for this application-owned role.
+    #[must_use]
+    pub const fn registry_name(self) -> &'static str {
+        match self {
+            Self::Body => "Body",
+            Self::Decorator => "Decorator",
+            Self::Name => "Name",
+            Self::TypeParameter => "TypeParameter",
+            Self::Parameter => "Parameter",
+            Self::Argument => "Argument",
+            Self::KeywordArgument => "KeywordArgument",
+            Self::Callee => "Callee",
+            Self::Condition => "Condition",
+            Self::Target => "Target",
+            Self::Value => "Value",
+            Self::Annotation => "Annotation",
+            Self::Iterable => "Iterable",
+            Self::Pattern => "Pattern",
+            Self::Handler => "Handler",
+            Self::Clause => "Clause",
+            Self::Item => "Item",
+            Self::Segment => "Segment",
+            Self::Child => "Child",
+        }
+    }
 }
 
 /// Closed lexical category derived from Ruff's exact token enum.
@@ -325,37 +354,6 @@ pub struct RuffSnapshot {
     pub metrics: RuffRunMetrics,
 }
 
-/// Cooperative cancellation boundary for the in-process Ruff adapter.
-pub trait RuffCancellation {
-    fn is_cancelled(&self) -> bool;
-    fn check_interval(&self) -> u32;
-}
-
-/// Cancellation probe for direct adapter use.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NeverRuffCancelled;
-
-impl RuffCancellation for NeverRuffCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-
-    fn check_interval(&self) -> u32 {
-        u32::MAX
-    }
-}
-
-#[cfg(feature = "daemon")]
-impl RuffCancellation for crate::provider_runtime::ProviderCancellation {
-    fn is_cancelled(&self) -> bool {
-        self.is_cancelled()
-    }
-
-    fn check_interval(&self) -> u32 {
-        self.check_interval()
-    }
-}
-
 /// Closed adapter errors; no Ruff-owned error escapes this module.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum RuffAdapterError {
@@ -490,7 +488,7 @@ impl RuffAdapter {
         revision: u64,
         text: ProviderText,
         tree_sitter: &TreeSitterSnapshot,
-        cancellation: &impl RuffCancellation,
+        cancellation: &Cancellation,
     ) -> Result<RuffSnapshot, RuffAdapterError> {
         if self
             .retained
@@ -740,7 +738,7 @@ impl RuffAdapter {
         &mut self,
         started: Instant,
         work_units: u64,
-        cancellation: &impl RuffCancellation,
+        cancellation: &Cancellation,
     ) -> Result<(), RuffAdapterError> {
         let effective_interval = self
             .limits
@@ -765,6 +763,61 @@ impl RuffAdapter {
             self.metrics.cancelled_runs = self.metrics.cancelled_runs.saturating_add(1);
         }
         Err(error)
+    }
+}
+
+#[cfg(feature = "daemon")]
+impl crate::provider_runtime::ProviderAdapter for RuffAdapter {
+    fn run(
+        &self,
+        job: crate::provider_runtime::ProviderJob,
+        events: crate::provider_runtime::ProviderEventSink,
+        cancellation: Cancellation,
+    ) -> Result<
+        crate::provider_runtime::ProviderCompletion,
+        crate::provider_runtime::ProviderRuntimeError,
+    > {
+        let crate::provider_runtime::ProviderDirectWork::RuffPython {
+            revision,
+            text,
+            tree_sitter,
+        } = job.direct_work
+        else {
+            return Err(crate::provider_runtime::ProviderRuntimeError::Adapter {
+                code: "RUFF_DIRECT_WORK_ABSENT".into(),
+            });
+        };
+        let mut direct = Self::new().map_err(|error| {
+            crate::provider_runtime::ProviderRuntimeError::Adapter {
+                code: error.to_string(),
+            }
+        })?;
+        let snapshot = direct
+            .parse(revision, text, &tree_sitter, &cancellation)
+            .map_err(
+                |error| crate::provider_runtime::ProviderRuntimeError::Adapter {
+                    code: error.to_string(),
+                },
+            )?;
+        events.begin_provider_facts(
+            format!("{};{}", snapshot.catalog_id, snapshot.provider_version),
+            std::collections::BTreeMap::new(),
+            0,
+        )?;
+        events.send_progress(
+            snapshot.metrics.output_records,
+            snapshot.metrics.output_records,
+            "ruff-complete",
+        )?;
+        let mut fingerprint = Vec::new();
+        fingerprint.extend_from_slice(snapshot.source.provider_image_fingerprint.as_bytes());
+        fingerprint.extend_from_slice(snapshot.catalog_id.as_bytes());
+        fingerprint.extend_from_slice(&snapshot.metrics.output_records.to_be_bytes());
+        Ok(crate::provider_runtime::ProviderCompletion {
+            state: crate::registries::ProviderRunState::Succeeded,
+            output_fingerprint: crate::integrity::digest_bytes(&fingerprint),
+            diagnostic_code: None,
+        })
     }
 }
 
@@ -802,7 +855,7 @@ fn project_tokens(
     work_units: &mut u64,
     limits: RuffLimits,
     started: Instant,
-    cancellation: &impl RuffCancellation,
+    cancellation: &Cancellation,
 ) -> Result<Vec<RuffTokenFact>, RuffAdapterError> {
     let mut output = Vec::with_capacity(parsed.tokens().len());
     let interval = limits
@@ -990,7 +1043,7 @@ fn evaluation_ordinals(parsed: &Parsed<ruff_python_ast::ModModule>) -> BTreeMap<
     visitor.ordinals
 }
 
-struct AstProjectionVisitor<'a, C> {
+struct AstProjectionVisitor<'a> {
     trivia: &'a TriviaRanges,
     line_index: &'a LineIndex,
     boundary_map: &'a ProviderBoundaryMap,
@@ -998,7 +1051,7 @@ struct AstProjectionVisitor<'a, C> {
     evaluation_ordinals: &'a BTreeMap<NodeKey, u32>,
     limits: RuffLimits,
     started: Instant,
-    cancellation: &'a C,
+    cancellation: &'a Cancellation,
     stack: Vec<RuffOccurrenceId>,
     parent_nodes: Vec<AnyNodeRef<'a>>,
     child_counts: Vec<u32>,
@@ -1007,7 +1060,7 @@ struct AstProjectionVisitor<'a, C> {
     error: Option<RuffAdapterError>,
 }
 
-impl<'a, C: RuffCancellation> AstProjectionVisitor<'a, C> {
+impl<'a> AstProjectionVisitor<'a> {
     #[allow(clippy::too_many_arguments)] // The visitor borrows the complete one-run projection context without cloning it.
     fn new(
         trivia: &'a TriviaRanges,
@@ -1017,7 +1070,7 @@ impl<'a, C: RuffCancellation> AstProjectionVisitor<'a, C> {
         evaluation_ordinals: &'a BTreeMap<NodeKey, u32>,
         limits: RuffLimits,
         started: Instant,
-        cancellation: &'a C,
+        cancellation: &'a Cancellation,
         work_units: u64,
     ) -> Self {
         Self {
@@ -1051,7 +1104,7 @@ impl<'a, C: RuffCancellation> AstProjectionVisitor<'a, C> {
     }
 }
 
-impl<'a, C: RuffCancellation> SourceOrderVisitor<'a> for AstProjectionVisitor<'a, C> {
+impl<'a> SourceOrderVisitor<'a> for AstProjectionVisitor<'a> {
     fn enter_node(&mut self, node: AnyNodeRef<'a>) -> TraversalSignal {
         if self.error.is_some() {
             return TraversalSignal::Skip;
@@ -1745,10 +1798,9 @@ const fn elapsed_exceeds_deadline(elapsed: Duration, max_wall_millis: u64) -> bo
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::tree_sitter_adapter::{NeverCancelled, TreeSitterAdapter, TreeSitterLanguage};
+    use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterLanguage};
 
     type ConfigureBound = fn(&mut RuffLimits);
 
@@ -1778,7 +1830,7 @@ mod tests {
     fn tree_snapshot(revision: u64, source: &ProviderText) -> TreeSitterSnapshot {
         TreeSitterAdapter::new(TreeSitterLanguage::Python)
             .unwrap()
-            .parse_full(revision, source.clone(), &NeverCancelled)
+            .parse_full(revision, source.clone(), &Cancellation::default())
             .unwrap()
     }
 
@@ -1816,7 +1868,7 @@ mod tests {
     ) -> Result<RuffSnapshot, RuffAdapterError> {
         let mut adapter = RuffAdapter::new().unwrap();
         configure(&mut adapter.limits);
-        adapter.parse(1, source.clone(), tree, &NeverRuffCancelled)
+        adapter.parse(1, source.clone(), tree, &Cancellation::default())
     }
 
     fn has_parent_role(
@@ -2032,7 +2084,7 @@ mod tests {
             let tree = tree_snapshot(revision, &text);
             let snapshot = RuffAdapter::new()
                 .unwrap()
-                .parse(revision, text, &tree, &NeverRuffCancelled)
+                .parse(revision, text, &tree, &Cancellation::default())
                 .unwrap();
             projection_digests.push((
                 case["case_id"].as_str().unwrap().to_owned(),
@@ -2079,7 +2131,9 @@ mod tests {
         let text = provider_text(RICH_SOURCE);
         let tree = tree_snapshot(1, &text);
         let mut adapter = RuffAdapter::new().unwrap();
-        let snapshot = adapter.parse(1, text, &tree, &NeverRuffCancelled).unwrap();
+        let snapshot = adapter
+            .parse(1, text, &tree, &Cancellation::default())
+            .unwrap();
 
         assert_eq!(snapshot.catalog_id, "ruff-python-0-0-7");
         assert!(snapshot.provider_version.ends_with("python-target=3.14"));
@@ -2190,7 +2244,7 @@ mod tests {
         let tree = tree_snapshot(1, &text);
         let snapshot = RuffAdapter::new()
             .unwrap()
-            .parse(1, text, &tree, &NeverRuffCancelled)
+            .parse(1, text, &tree, &Cancellation::default())
             .unwrap();
 
         assert!(snapshot.tokens.iter().all(|fact| {
@@ -2263,7 +2317,7 @@ mod tests {
         let latin1_tree = tree_snapshot(1, &latin1);
         let latin1_snapshot = RuffAdapter::new()
             .unwrap()
-            .parse(1, latin1, &latin1_tree, &NeverRuffCancelled)
+            .parse(1, latin1, &latin1_tree, &Cancellation::default())
             .unwrap();
         assert!(
             latin1_snapshot
@@ -2319,7 +2373,7 @@ mod tests {
         let tree = tree_snapshot(1, &text);
         let snapshot = RuffAdapter::new()
             .unwrap()
-            .parse(1, text, &tree, &NeverRuffCancelled)
+            .parse(1, text, &tree, &Cancellation::default())
             .unwrap();
         for (parent, child, role) in [
             ("StmtAugAssign", "ExprName", RuffChildRole::Target),
@@ -2428,7 +2482,7 @@ mod tests {
         let doc_tree = tree_snapshot(1, &doc_text);
         let doc_snapshot = RuffAdapter::new()
             .unwrap()
-            .parse(1, doc_text.clone(), &doc_tree, &NeverRuffCancelled)
+            .parse(1, doc_text.clone(), &doc_tree, &Cancellation::default())
             .unwrap();
         let parsed = parse_unchecked(
             &doc_text.text,
@@ -2472,7 +2526,7 @@ mod tests {
         let tree = tree_snapshot(1, &source);
         let baseline = RuffAdapter::new()
             .unwrap()
-            .parse(1, source.clone(), &tree, &NeverRuffCancelled)
+            .parse(1, source.clone(), &tree, &Cancellation::default())
             .unwrap();
         let input_bytes = u64::try_from(source.text.len()).unwrap();
         assert!(
@@ -2520,7 +2574,7 @@ mod tests {
                     1,
                     source.clone(),
                     &evidence,
-                    &NeverRuffCancelled
+                    &Cancellation::default()
                 ),
                 Err(RuffAdapterError::MismatchedTreeSitterEvidence)
             );
@@ -2529,14 +2583,15 @@ mod tests {
         let mut progress = RuffAdapter::new().unwrap();
         progress.limits.max_work_units = 5;
         assert_eq!(
-            progress.check_progress(Instant::now(), 5, &NeverRuffCancelled),
+            progress.check_progress(Instant::now(), 5, &Cancellation::default()),
             Ok(())
         );
         assert_eq!(
-            progress.check_progress(Instant::now(), 6, &NeverRuffCancelled),
+            progress.check_progress(Instant::now(), 6, &Cancellation::default()),
             Err(RuffAdapterError::WorkLimit)
         );
-        let cancellation = CancelAtInterval(2);
+        let cancellation = Cancellation::with_check_interval(2);
+        cancellation.cancel();
         let mut interval = RuffAdapter::new().unwrap();
         interval.limits.cancellation_check_interval = 2;
         assert_eq!(
@@ -2573,33 +2628,6 @@ mod tests {
         ));
     }
 
-    struct CancelAfter {
-        checks: AtomicUsize,
-        after: usize,
-    }
-
-    impl RuffCancellation for CancelAfter {
-        fn is_cancelled(&self) -> bool {
-            self.checks.fetch_add(1, Ordering::Relaxed) >= self.after
-        }
-
-        fn check_interval(&self) -> u32 {
-            1
-        }
-    }
-
-    struct CancelAtInterval(u32);
-
-    impl RuffCancellation for CancelAtInterval {
-        fn is_cancelled(&self) -> bool {
-            true
-        }
-
-        fn check_interval(&self) -> u32 {
-            self.0
-        }
-    }
-
     #[test]
     #[allow(clippy::too_many_lines)] // One negative oracle isolates every independent publication and resource boundary.
     fn wp31_negative_zero_state() {
@@ -2624,7 +2652,7 @@ mod tests {
         let malformed_tree = tree_snapshot(1, &malformed);
         let malformed_snapshot = RuffAdapter::new()
             .unwrap()
-            .parse(1, malformed, &malformed_tree, &NeverRuffCancelled)
+            .parse(1, malformed, &malformed_tree, &Cancellation::default())
             .unwrap();
         assert!(!malformed_snapshot.diagnostics.is_empty());
         assert!(
@@ -2646,7 +2674,7 @@ mod tests {
         let good_tree = tree_snapshot(1, &good);
         let mut adapter = RuffAdapter::new().unwrap();
         let accepted = adapter
-            .parse(1, good, &good_tree, &NeverRuffCancelled)
+            .parse(1, good, &good_tree, &Cancellation::default())
             .unwrap();
         let replacement = provider_text("value = 2\n");
         let replacement_tree = tree_snapshot(2, &replacement);
@@ -2657,7 +2685,7 @@ mod tests {
                 2,
                 replacement.clone(),
                 &wrong_image_tree,
-                &NeverRuffCancelled
+                &Cancellation::default()
             ),
             Err(RuffAdapterError::MismatchedTreeSitterEvidence)
         );
@@ -2667,16 +2695,14 @@ mod tests {
                 1,
                 replacement.clone(),
                 &replacement_tree,
-                &NeverRuffCancelled
+                &Cancellation::default()
             ),
             Err(RuffAdapterError::StaleRevision)
         );
         assert_eq!(adapter.active_snapshot(), Some(&accepted));
 
-        let cancelled = CancelAfter {
-            checks: AtomicUsize::new(0),
-            after: 1,
-        };
+        let cancelled = Cancellation::with_check_interval(1);
+        cancelled.cancel();
         assert_eq!(
             adapter.parse(2, replacement.clone(), &replacement_tree, &cancelled),
             Err(RuffAdapterError::Cancelled)
@@ -2686,7 +2712,7 @@ mod tests {
         let mut bounded = RuffAdapter::new().unwrap();
         bounded.limits.max_output_records = 1;
         assert_eq!(
-            bounded.parse(2, replacement, &replacement_tree, &NeverRuffCancelled),
+            bounded.parse(2, replacement, &replacement_tree, &Cancellation::default()),
             Err(RuffAdapterError::OutputRecordLimit)
         );
         assert!(bounded.active_snapshot().is_none());
@@ -2719,7 +2745,7 @@ mod tests {
             let mut bounded = RuffAdapter::new().unwrap();
             configure(&mut bounded.limits);
             assert_eq!(
-                bounded.parse(1, source, &tree, &NeverRuffCancelled),
+                bounded.parse(1, source, &tree, &Cancellation::default()),
                 Err(expected)
             );
             assert!(bounded.active_snapshot().is_none());
@@ -2730,7 +2756,7 @@ mod tests {
         let mut diagnostic_bounded = RuffAdapter::new().unwrap();
         diagnostic_bounded.limits.max_diagnostics = 0;
         assert_eq!(
-            diagnostic_bounded.parse(1, source, &tree, &NeverRuffCancelled),
+            diagnostic_bounded.parse(1, source, &tree, &Cancellation::default()),
             Err(RuffAdapterError::DiagnosticLimit)
         );
     }
@@ -2740,7 +2766,9 @@ mod tests {
         let text = provider_text(RICH_SOURCE);
         let tree = tree_snapshot(1, &text);
         let mut adapter = RuffAdapter::new().unwrap();
-        let snapshot = adapter.parse(1, text, &tree, &NeverRuffCancelled).unwrap();
+        let snapshot = adapter
+            .parse(1, text, &tree, &Cancellation::default())
+            .unwrap();
         assert_eq!(adapter.metrics().completed_runs, 1);
         assert_eq!(adapter.metrics().rejected_runs, 0);
         assert_eq!(snapshot.metrics.visited_nodes, snapshot.ast.len() as u64);
@@ -2757,7 +2785,7 @@ mod tests {
         let tree = tree_snapshot(1, &repetitive);
         let repetitive_snapshot = RuffAdapter::new()
             .unwrap()
-            .parse(1, repetitive, &tree, &NeverRuffCancelled)
+            .parse(1, repetitive, &tree, &Cancellation::default())
             .unwrap();
         assert!(repetitive_snapshot.tokens.len() > 10_000);
         assert!(repetitive_snapshot.ast.len() > 8_000);

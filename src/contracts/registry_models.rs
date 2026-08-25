@@ -411,6 +411,8 @@ pub struct ProviderNormalization {
     pub provider_version: String,
     pub language: String,
     pub canonical_kind_names: BTreeMap<String, String>,
+    /// Provider-native child/field role to generated language-neutral role name.
+    pub field_role_names: BTreeMap<String, String>,
     #[serde(default)]
     pub canonical_kind_prefixes: BTreeMap<String, String>,
     #[serde(default)]
@@ -1648,6 +1650,7 @@ pub fn validate_provider_normalizations(records: &[ProviderNormalization]) -> Re
             || record.provider_version.is_empty()
             || !matches!(record.language.as_str(), "python" | "rust")
             || record.canonical_kind_names.is_empty()
+            || record.field_role_names.is_empty()
             || record
                 .canonical_kind_names
                 .keys()
@@ -1656,6 +1659,10 @@ pub fn validate_provider_normalizations(records: &[ProviderNormalization]) -> Re
                 .canonical_kind_names
                 .values()
                 .any(|name| !upper_snake(name))
+            || record
+                .field_role_names
+                .iter()
+                .any(|(raw_role, name)| raw_role.is_empty() || !upper_snake(name))
             || record
                 .canonical_kind_prefixes
                 .iter()

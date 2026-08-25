@@ -2799,6 +2799,52 @@ fn render_rust_runtime_registries(
         .unwrap();
     }
     output.push_str("];\n\n");
+    let normalizations: Vec<governed::ProviderNormalization> = registry_records(
+        values,
+        "codefabric.registry.provider-normalization-registry",
+    )?;
+    let field_role_codes = enums
+        .records
+        .iter()
+        .find(|domain| domain.domain == "SYNTAX_FIELD_ROLE")
+        .ok_or_else(|| RegistryCbefError::RegistryModel("SYNTAX_FIELD_ROLE domain".to_owned()))?
+        .values
+        .iter()
+        .map(|value| (value.name.as_str(), value.code))
+        .collect::<BTreeMap<_, _>>();
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct ProviderFieldRoleEntry { pub raw_catalog_id: &'static str, pub raw_role: &'static str, pub field_role_code: u16 }\n\n\
+         pub const PROVIDER_FIELD_ROLE_CROSSWALK: &[ProviderFieldRoleEntry] = &[\n",
+    );
+    for normalization in &normalizations {
+        for (raw_role, canonical_role) in &normalization.field_role_names {
+            let code = u16::try_from(*field_role_codes.get(canonical_role.as_str()).ok_or_else(
+                || {
+                    RegistryCbefError::RegistryModel(format!(
+                        "unknown syntax field role {canonical_role} in {}",
+                        normalization.mapping_id
+                    ))
+                },
+            )?)
+            .map_err(|_| {
+                RegistryCbefError::RegistryModel("syntax field role exceeds u16".to_owned())
+            })?;
+            writeln!(
+                output,
+                "    ProviderFieldRoleEntry {{ raw_catalog_id: {:?}, raw_role: {:?}, field_role_code: {code} }},",
+                normalization.raw_catalog_id, raw_role,
+            )
+            .unwrap();
+        }
+    }
+    output.push_str(
+        "];\n\n\
+         #[must_use]\n\
+         pub fn provider_field_role_code(raw_catalog_id: &str, raw_role: &str) -> Option<u16> {\n\
+             PROVIDER_FIELD_ROLE_CROSSWALK.iter().find(|entry| entry.raw_catalog_id == raw_catalog_id && entry.raw_role == raw_role).map(|entry| entry.field_role_code)\n\
+         }\n\n",
+    );
     let profiles: Vec<governed::ProviderResourceProfile> = registry_records(
         values,
         "codefabric.registry.provider-resource-profile-registry",

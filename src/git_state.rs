@@ -10,7 +10,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 #[cfg(feature = "daemon")]
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 #[cfg(feature = "daemon")]
@@ -22,6 +22,7 @@ use gix::object::tree::diff::ChangeDetached;
 #[cfg(feature = "daemon")]
 use rusqlite::OptionalExtension as _;
 
+use crate::cancellation::Cancellation;
 use crate::registries::GitAccelerationStatus;
 #[cfg(feature = "daemon")]
 use crate::registries::UpdateCandidateStrategy;
@@ -472,7 +473,7 @@ impl GitCandidatePlan {
         &self,
         adapter: &A,
         observations: GitStateObservations,
-        cancellation: &GitCancellation,
+        cancellation: &Cancellation,
     ) -> Result<bool, GitStateError> {
         let Some(expected) = self.state_vector.as_ref() else {
             return Ok(true);
@@ -567,7 +568,7 @@ impl<A: GitStateAdapter> GitCandidatePlanner<A> {
         &self,
         plan: &GitCandidatePlan,
         observations: GitStateObservations,
-        cancellation: &GitCancellation,
+        cancellation: &Cancellation,
     ) -> Result<bool, GitStateError> {
         plan.verify_current(&self.adapter, observations, cancellation)
     }
@@ -582,7 +583,7 @@ impl<A: GitStateAdapter> GitCandidatePlanner<A> {
         root: &Path,
         request: &GitCandidatePlanningRequest,
         store: Option<&mut crate::operational_store::OperationalStore>,
-        cancellation: &GitCancellation,
+        cancellation: &Cancellation,
     ) -> GitCandidatePlan {
         if !request.rescan_required
             && request.watcher_paths.len() < request.dirty_path_bulk_threshold
@@ -826,21 +827,6 @@ impl GitTrustPolicy {
     }
 }
 
-/// Cooperative cancellation shared with gix's native interrupt surface.
-#[derive(Clone, Debug, Default)]
-pub struct GitCancellation(Arc<AtomicBool>);
-
-impl GitCancellation {
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-}
-
 /// Stable adapter failures without host paths, config values, or source bytes.
 #[derive(Debug, Error)]
 pub enum GitStateError {
@@ -890,7 +876,7 @@ pub trait GitStateAdapter: Send + Sync {
         &self,
         identity: &GitWorktreeIdentity,
         observations: GitStateObservations,
-        cancel: &GitCancellation,
+        cancel: &Cancellation,
     ) -> Result<GitInventoryResult, GitStateError>;
 
     /// Produce status/index candidates, fenced by a fresh state vector.
@@ -901,7 +887,7 @@ pub trait GitStateAdapter: Send + Sync {
         &self,
         identity: &GitWorktreeIdentity,
         observations: GitStateObservations,
-        cancel: &GitCancellation,
+        cancel: &Cancellation,
     ) -> Result<GitCandidateSet, GitStateError>;
 
     /// Wave-7 tree-diff-candidate seam.
@@ -913,7 +899,7 @@ pub trait GitStateAdapter: Send + Sync {
         identity: &GitWorktreeIdentity,
         prior: &GitStateVector,
         observations: GitStateObservations,
-        cancel: &GitCancellation,
+        cancel: &Cancellation,
     ) -> Result<GitCandidateSet, GitStateError>;
 }
 
@@ -990,7 +976,7 @@ impl GitStateAdapter for GixGitStateAdapter {
         &self,
         identity: &GitWorktreeIdentity,
         observations: GitStateObservations,
-        cancel: &GitCancellation,
+        cancel: &Cancellation,
     ) -> Result<GitInventoryResult, GitStateError> {
         inventory(identity, observations, cancel)
     }
@@ -999,7 +985,7 @@ impl GitStateAdapter for GixGitStateAdapter {
         &self,
         identity: &GitWorktreeIdentity,
         observations: GitStateObservations,
-        cancel: &GitCancellation,
+        cancel: &Cancellation,
     ) -> Result<GitCandidateSet, GitStateError> {
         status_candidates(identity, observations, cancel)
     }
@@ -1009,7 +995,7 @@ impl GitStateAdapter for GixGitStateAdapter {
         identity: &GitWorktreeIdentity,
         prior: &GitStateVector,
         observations: GitStateObservations,
-        cancel: &GitCancellation,
+        cancel: &Cancellation,
     ) -> Result<GitCandidateSet, GitStateError> {
         tree_diff_candidates(identity, prior, observations, cancel)
     }
@@ -1018,7 +1004,7 @@ impl GitStateAdapter for GixGitStateAdapter {
 fn status_candidates(
     identity: &GitWorktreeIdentity,
     observations: GitStateObservations,
-    cancel: &GitCancellation,
+    cancel: &Cancellation,
 ) -> Result<GitCandidateSet, GitStateError> {
     if cancel.is_cancelled() {
         return Err(GitStateError::Cancelled);
@@ -1061,7 +1047,7 @@ fn tree_diff_candidates(
     identity: &GitWorktreeIdentity,
     prior: &GitStateVector,
     observations: GitStateObservations,
-    cancel: &GitCancellation,
+    cancel: &Cancellation,
 ) -> Result<GitCandidateSet, GitStateError> {
     if cancel.is_cancelled() {
         return Err(GitStateError::Cancelled);
@@ -1135,7 +1121,7 @@ fn tree_diff_candidates(
 fn inventory(
     identity: &GitWorktreeIdentity,
     observations: GitStateObservations,
-    cancel: &GitCancellation,
+    cancel: &Cancellation,
 ) -> Result<GitInventoryResult, GitStateError> {
     if cancel.is_cancelled() {
         return Err(GitStateError::Cancelled);
@@ -1190,7 +1176,7 @@ fn index_inventory_entries(
 fn overlay_dirwalk_entries(
     repository: &gix::Repository,
     index: &gix::worktree::Index,
-    cancel: &GitCancellation,
+    cancel: &Cancellation,
     paths: &mut BTreeMap<Vec<u8>, GitInventoryEntry>,
 ) -> Result<(), GitStateError> {
     let options = repository
@@ -1206,7 +1192,7 @@ fn overlay_dirwalk_entries(
         .dirwalk(
             index,
             [] as [gix::bstr::BString; 0],
-            cancel.0.as_ref(),
+            cancel.interrupt_flag(),
             options,
             &mut collect,
         )
@@ -1643,10 +1629,10 @@ impl GitBlockingExecutor {
     /// # Errors
     ///
     /// Returns cancellation, semaphore closure, join failure, or the job error.
-    pub async fn run<T, F>(&self, cancellation: GitCancellation, job: F) -> Result<T, GitStateError>
+    pub async fn run<T, F>(&self, cancellation: Cancellation, job: F) -> Result<T, GitStateError>
     where
         T: Send + 'static,
-        F: FnOnce(GitCancellation) -> Result<T, GitStateError> + Send + 'static,
+        F: FnOnce(Cancellation) -> Result<T, GitStateError> + Send + 'static,
     {
         self.counters.queued.fetch_add(1, Ordering::AcqRel);
         let permit = self

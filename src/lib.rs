@@ -12,6 +12,7 @@
     feature = "repository-state"
 ))]
 pub mod analysis_context;
+pub mod cancellation;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
 #[cfg(feature = "daemon")]

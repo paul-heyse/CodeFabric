@@ -26,6 +26,28 @@ records:
       raise_statement: RAISE_OR_PANIC_SYNTAX
       import_statement: IMPORT_OR_USE_SYNTAX
       import_from_statement: IMPORT_OR_USE_SYNTAX
+    field_role_names: &tree_field_roles
+      name: NAME
+      parameters: PARAMETERS
+      type_parameters: PARAMETERS
+      decorator: DECORATOR
+      return_type: RETURNS
+      body: BODY
+      consequence: BODY
+      alternative: BODY
+      condition: CONDITION
+      left: TARGET
+      target: TARGET
+      right: VALUE
+      value: VALUE
+      object: RECEIVER
+      function: CALLEE
+      arguments: ARGUMENT
+      iterable: ITERABLE
+      guard: GUARD
+      pattern: PATTERN
+      handler: HANDLER
+      finally: FINALLY_BODY
     ignored_raw_keys: [comment]
     default_disposition: UNSUPPORTED
     introduced: "1.3"
@@ -50,6 +72,7 @@ records:
       await_expression: AWAIT
       use_declaration: IMPORT_OR_USE_SYNTAX
       macro_invocation: OPERATION
+    field_role_names: *tree_field_roles
     ignored_raw_keys: [line_comment, block_comment]
     default_disposition: UNSUPPORTED
     introduced: "1.3"
@@ -106,6 +129,23 @@ records:
       Arguments: ARGUMENT_SYNTAX
       Keyword: ARGUMENT_SYNTAX
       TypeParams: TYPE_SYNTAX
+    field_role_names:
+      Body: BODY
+      Decorator: DECORATOR
+      Name: NAME
+      TypeParameter: PARAMETERS
+      Parameter: PARAMETERS
+      Argument: ARGUMENT
+      KeywordArgument: KEYWORD_ARGUMENT
+      Callee: CALLEE
+      Condition: CONDITION
+      Target: TARGET
+      Value: VALUE
+      Annotation: RETURNS
+      Iterable: ITERABLE
+      Pattern: PATTERN
+      Handler: HANDLER
+      Clause: FINALLY_BODY
     canonical_kind_prefixes:
       Mod: BLOCK
       Stmt: STATEMENT

@@ -360,7 +360,7 @@ impl BlobStore {
     }
 }
 
-/// Coordinator-owned source capture, lease, and garbage-collection service.
+/// Daemon lifecycle-owned source capture, lease, and garbage-collection service.
 pub struct SourceImageStore {
     blobs: BlobStore,
     policy: SourceCapturePolicy,

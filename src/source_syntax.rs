@@ -18,8 +18,8 @@ use crate::identity::{
 use crate::provider_raw_kinds::ProviderRawKindDisposition;
 use crate::registries::{
     AnnotationKind, CompletenessState, Language, OwnerCapabilityState, OwnerKind, PathEncoding,
-    ProviderCode, SYNTAX_KIND_VALUES, SyntaxFieldRole, SyntaxKind, TokenKind, capability_code,
-    capability_mask, entity_kind, registry_state_name, relation_kind,
+    ProviderCode, SYNTAX_KIND_VALUES, SyntaxKind, TokenKind, capability_code, capability_mask,
+    entity_kind, provider_field_role_code, registry_state_name, relation_kind,
 };
 use crate::registries::{OccurrenceFamily, ProviderNodeFlags, RawKindDisposition};
 use crate::ruff_adapter::{
@@ -33,11 +33,23 @@ use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSn
 
 const SOURCE_PROVIDER_VERSION: &str = "source-image-v1";
 
-/// Runtime provider-run identities associated with one complete source projection.
+/// One registry-selected provider output supplied to source/syntax reconciliation.
+#[derive(Clone, Copy, Debug)]
+pub enum SourceSyntaxAdapterOutput<'a> {
+    TreeSitter {
+        provider_run_id: [u8; 16],
+        snapshot: &'a TreeSitterSnapshot,
+    },
+    RuffPython {
+        provider_run_id: [u8; 16],
+        snapshot: &'a RuffSnapshot,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SourceSyntaxProviderRuns {
-    pub tree_sitter: [u8; 16],
-    pub ruff_python: Option<[u8; 16]>,
+struct ResolvedSyntaxRuns {
+    tree_sitter: [u8; 16],
+    ruff_python: Option<[u8; 16]>,
 }
 
 /// Unadmitted source/syntax projection passed to the one generic fact-ingress boundary.
@@ -280,10 +292,9 @@ struct EvidenceInput {
 pub(crate) fn project(
     expected_scope: FactScope,
     source: &SourceImage,
-    tree: &TreeSitterSnapshot,
-    ruff: Option<&RuffSnapshot>,
-    runs: SourceSyntaxProviderRuns,
+    outputs: &[SourceSyntaxAdapterOutput<'_>],
 ) -> Result<ProjectedFactOutput, FactIngestError> {
+    let (tree, ruff, runs) = resolve_adapter_outputs(outputs)?;
     validate_inputs(expected_scope, source, tree, ruff, runs)?;
     let language = language_code(source.language);
     let byte_len = source.byte_length;
@@ -340,7 +351,10 @@ pub(crate) fn project(
         let parent_id = fact
             .parent
             .and_then(|parent| tree_entity.get(&parent).copied());
-        let role = tree_field_role(fact.field_name.as_deref());
+        let role = fact
+            .field_name
+            .as_deref()
+            .and_then(|role| provider_field_role_code(tree.catalog_id, role));
         let kind = syntax_entity_kind(fact.normalized_kind.0, fact.error, fact.missing)?;
         let identity = source_occurrence_identity(SourceOccurrenceIdentityInput {
             workspace_id: source.workspace_id,
@@ -487,7 +501,9 @@ pub(crate) fn project(
                 let parent_id = fact
                     .parent
                     .and_then(|parent| ruff_entity.get(&parent).copied());
-                let role = ruff_field_role(fact.child_role);
+                let role = fact.child_role.and_then(|role| {
+                    provider_field_role_code(ruff.catalog_id, role.registry_name())
+                });
                 let kind = syntax_entity_kind(fact.category.registry_code(), false, false)?;
                 let identity = source_occurrence_identity(SourceOccurrenceIdentityInput {
                     workspace_id: source.workspace_id,
@@ -778,12 +794,58 @@ fn capability_scope_fingerprint(scope: FactScope, capability: &str) -> [u8; 32] 
     )
 }
 
+fn resolve_adapter_outputs<'a>(
+    outputs: &'a [SourceSyntaxAdapterOutput<'a>],
+) -> Result<
+    (
+        &'a TreeSitterSnapshot,
+        Option<&'a RuffSnapshot>,
+        ResolvedSyntaxRuns,
+    ),
+    FactIngestError,
+> {
+    let mut tree = None;
+    let mut ruff = None;
+    for output in outputs {
+        match output {
+            SourceSyntaxAdapterOutput::TreeSitter {
+                provider_run_id,
+                snapshot,
+            } if tree.is_none() => tree = Some((*snapshot, *provider_run_id)),
+            SourceSyntaxAdapterOutput::RuffPython {
+                provider_run_id,
+                snapshot,
+            } if ruff.is_none() => ruff = Some((*snapshot, *provider_run_id)),
+            SourceSyntaxAdapterOutput::TreeSitter { .. } => {
+                return Err(FactIngestError::Protocol(
+                    "duplicate Tree-sitter adapter output".into(),
+                ));
+            }
+            SourceSyntaxAdapterOutput::RuffPython { .. } => {
+                return Err(FactIngestError::Protocol(
+                    "duplicate Ruff adapter output".into(),
+                ));
+            }
+        }
+    }
+    let (tree, tree_run) =
+        tree.ok_or_else(|| FactIngestError::Protocol("Tree-sitter adapter output absent".into()))?;
+    Ok((
+        tree,
+        ruff.map(|(snapshot, _)| snapshot),
+        ResolvedSyntaxRuns {
+            tree_sitter: tree_run,
+            ruff_python: ruff.map(|(_, run)| run),
+        },
+    ))
+}
+
 fn validate_inputs(
     scope: FactScope,
     source: &SourceImage,
     tree: &TreeSitterSnapshot,
     ruff: Option<&RuffSnapshot>,
-    runs: SourceSyntaxProviderRuns,
+    runs: ResolvedSyntaxRuns,
 ) -> Result<(), FactIngestError> {
     if scope.analysis_context_id != SOURCE_CONTEXT_ID {
         return Err(FactIngestError::SourceSnapshotMismatch(
@@ -1689,49 +1751,6 @@ fn ruff_name_spans(facts: &[RuffAstFact]) -> BTreeMap<RuffOccurrenceId, (u64, u6
         .collect()
 }
 
-fn tree_field_role(field: Option<&str>) -> Option<u16> {
-    Some(match field? {
-        "name" => SyntaxFieldRole::Name,
-        "parameters" | "type_parameters" => SyntaxFieldRole::Parameters,
-        "decorator" => SyntaxFieldRole::Decorator,
-        "return_type" => SyntaxFieldRole::Returns,
-        "body" | "consequence" | "alternative" => SyntaxFieldRole::Body,
-        "condition" => SyntaxFieldRole::Condition,
-        "left" | "target" => SyntaxFieldRole::Target,
-        "right" | "value" => SyntaxFieldRole::Value,
-        "object" => SyntaxFieldRole::Receiver,
-        "function" => SyntaxFieldRole::Callee,
-        "arguments" => SyntaxFieldRole::Argument,
-        "iterable" => SyntaxFieldRole::Iterable,
-        "guard" => SyntaxFieldRole::Guard,
-        "pattern" => SyntaxFieldRole::Pattern,
-        "handler" => SyntaxFieldRole::Handler,
-        "finally" => SyntaxFieldRole::FinallyBody,
-        _ => return None,
-    } as u16)
-}
-
-fn ruff_field_role(role: Option<RuffChildRole>) -> Option<u16> {
-    Some(match role? {
-        RuffChildRole::Body => SyntaxFieldRole::Body,
-        RuffChildRole::Decorator => SyntaxFieldRole::Decorator,
-        RuffChildRole::Name => SyntaxFieldRole::Name,
-        RuffChildRole::TypeParameter | RuffChildRole::Parameter => SyntaxFieldRole::Parameters,
-        RuffChildRole::Argument => SyntaxFieldRole::Argument,
-        RuffChildRole::KeywordArgument => SyntaxFieldRole::KeywordArgument,
-        RuffChildRole::Callee => SyntaxFieldRole::Callee,
-        RuffChildRole::Condition => SyntaxFieldRole::Condition,
-        RuffChildRole::Target => SyntaxFieldRole::Target,
-        RuffChildRole::Value => SyntaxFieldRole::Value,
-        RuffChildRole::Annotation => SyntaxFieldRole::Returns,
-        RuffChildRole::Iterable => SyntaxFieldRole::Iterable,
-        RuffChildRole::Pattern => SyntaxFieldRole::Pattern,
-        RuffChildRole::Handler => SyntaxFieldRole::Handler,
-        RuffChildRole::Clause => SyntaxFieldRole::FinallyBody,
-        RuffChildRole::Item | RuffChildRole::Segment | RuffChildRole::Child => return None,
-    } as u16)
-}
-
 fn token_kind(token: &RuffTokenFact) -> TokenKind {
     RUFF_TOKEN_NORMALIZATION
         .iter()
@@ -1930,17 +1949,16 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+    use crate::cancellation::Cancellation;
     use crate::fact_ingest::{
         CanonicalIngestOutput, CanonicalReconciliationEngine, validate_fact_batch,
     };
     use crate::identity::{CaseSensitivityMode, WorkspacePath};
     use crate::provider_types::ProviderText;
-    use crate::ruff_adapter::{NeverRuffCancelled, RuffAdapter};
+    use crate::ruff_adapter::RuffAdapter;
     use crate::secure_path::StableFileMetadata;
     use crate::source_image::{BlobReference, LineIndex, SourceBlobLease, SourceFileKind};
-    use crate::tree_sitter_adapter::{
-        NeverCancelled, NormalizedSyntaxKind, TreeSitterAdapter, TreeSitterLanguage,
-    };
+    use crate::tree_sitter_adapter::{NormalizedSyntaxKind, TreeSitterAdapter, TreeSitterLanguage};
 
     fn provider_text(text: &str) -> ProviderText {
         ProviderText {
@@ -2040,10 +2058,32 @@ mod tests {
     fn snapshots(source: &SourceImage) -> (TreeSitterSnapshot, RuffSnapshot) {
         let text = source.provider_text.clone().unwrap();
         let mut tree = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
-        let tree = tree.parse_full(1, text.clone(), &NeverCancelled).unwrap();
+        let tree = tree
+            .parse_full(1, text.clone(), &Cancellation::default())
+            .unwrap();
         let mut ruff = RuffAdapter::new().unwrap();
-        let ruff = ruff.parse(1, text, &tree, &NeverRuffCancelled).unwrap();
+        let ruff = ruff
+            .parse(1, text, &tree, &Cancellation::default())
+            .unwrap();
         (tree, ruff)
+    }
+
+    fn provider_outputs<'a>(
+        tree: &'a TreeSitterSnapshot,
+        ruff: Option<&'a RuffSnapshot>,
+        runs: ResolvedSyntaxRuns,
+    ) -> Vec<SourceSyntaxAdapterOutput<'a>> {
+        let mut outputs = vec![SourceSyntaxAdapterOutput::TreeSitter {
+            provider_run_id: runs.tree_sitter,
+            snapshot: tree,
+        }];
+        if let Some(ruff) = ruff {
+            outputs.push(SourceSyntaxAdapterOutput::RuffPython {
+                provider_run_id: runs.ruff_python.expect("Ruff output has a run identity"),
+                snapshot: ruff,
+            });
+        }
+        outputs
     }
 
     fn output(
@@ -2055,12 +2095,14 @@ mod tests {
             .ingest_source_syntax(
                 scope(source),
                 source,
-                tree,
-                Some(ruff),
-                SourceSyntaxProviderRuns {
-                    tree_sitter: [10; 16],
-                    ruff_python: Some([20; 16]),
-                },
+                &provider_outputs(
+                    tree,
+                    Some(ruff),
+                    ResolvedSyntaxRuns {
+                        tree_sitter: [10; 16],
+                        ruff_python: Some([20; 16]),
+                    },
+                ),
             )
             .unwrap()
     }
@@ -2489,19 +2531,21 @@ mod tests {
             CanonicalReconciliationEngine::default().ingest_source_syntax(
                 wrong_scope,
                 &source,
-                &tree,
-                Some(&ruff),
-                SourceSyntaxProviderRuns {
-                    tree_sitter: [10; 16],
-                    ruff_python: Some([20; 16])
-                },
+                &provider_outputs(
+                    &tree,
+                    Some(&ruff),
+                    ResolvedSyntaxRuns {
+                        tree_sitter: [10; 16],
+                        ruff_python: Some([20; 16])
+                    }
+                ),
             ),
             Err(FactIngestError::SourceSnapshotMismatch(_))
         ));
 
         let admission_source = source_image("value = 1\n");
         let (admission_tree, admission_ruff) = snapshots(&admission_source);
-        let valid_runs = SourceSyntaxProviderRuns {
+        let valid_runs = ResolvedSyntaxRuns {
             tree_sitter: [10; 16],
             ruff_python: Some([20; 16]),
         };
@@ -2527,9 +2571,7 @@ mod tests {
             CanonicalReconciliationEngine::default().ingest_source_syntax(
                 scope(&unicode_source),
                 &unicode_source,
-                &non_boundary_tree,
-                Some(&unicode_ruff),
-                valid_runs,
+                &provider_outputs(&non_boundary_tree, Some(&unicode_ruff), valid_runs),
             ),
             Err(FactIngestError::Protocol(detail)) if detail.contains("non-boundary")
         ));
@@ -2550,9 +2592,7 @@ mod tests {
             CanonicalReconciliationEngine::default().ingest_source_syntax(
                 scope(&admission_source),
                 &admission_source,
-                &admission_tree,
-                Some(&overlapping_ruff),
-                valid_runs,
+                &provider_outputs(&admission_tree, Some(&overlapping_ruff), valid_runs),
             ),
             Err(FactIngestError::Protocol(detail)) if detail.contains("overlapping token")
         ));
@@ -2582,9 +2622,7 @@ mod tests {
             CanonicalReconciliationEngine::default().ingest_source_syntax(
                 scope(&admission_source),
                 &admission_source,
-                &ambiguous_tree,
-                Some(&ambiguous_ruff),
-                valid_runs,
+                &provider_outputs(&ambiguous_tree, Some(&ambiguous_ruff), valid_runs),
             ),
             Err(FactIngestError::Protocol(detail)) if detail.contains("ambiguous")
         ));
@@ -2631,7 +2669,7 @@ mod tests {
                 &unclassified,
                 &admission_tree,
                 None,
-                SourceSyntaxProviderRuns {
+                ResolvedSyntaxRuns {
                     tree_sitter: [10; 16],
                     ruff_python: None,
                 },
@@ -2658,7 +2696,7 @@ mod tests {
                 &admission_source,
                 &admission_tree,
                 Some(&drifted_ruff),
-                SourceSyntaxProviderRuns {
+                ResolvedSyntaxRuns {
                     tree_sitter: [10; 16],
                     ruff_python: Some([20; 16]),
                 },
@@ -2671,7 +2709,7 @@ mod tests {
                 &admission_source,
                 &admission_tree,
                 Some(&admission_ruff),
-                SourceSyntaxProviderRuns {
+                ResolvedSyntaxRuns {
                     tree_sitter: [10; 16],
                     ruff_python: None,
                 },
@@ -2709,7 +2747,7 @@ mod tests {
             .parse_full(
                 1,
                 rust_source.provider_text.clone().unwrap(),
-                &NeverCancelled,
+                &Cancellation::default(),
             )
             .unwrap();
         let mut wrong_rust_catalog = rust_tree.clone();
@@ -2720,7 +2758,7 @@ mod tests {
                 &rust_source,
                 &wrong_rust_catalog,
                 None,
-                SourceSyntaxProviderRuns {
+                ResolvedSyntaxRuns {
                     tree_sitter: [30; 16],
                     ruff_python: None,
                 },
@@ -2731,12 +2769,14 @@ mod tests {
             .ingest_source_syntax(
                 scope(&rust_source),
                 &rust_source,
-                &rust_tree,
-                None,
-                SourceSyntaxProviderRuns {
-                    tree_sitter: [30; 16],
-                    ruff_python: None,
-                },
+                &provider_outputs(
+                    &rust_tree,
+                    None,
+                    ResolvedSyntaxRuns {
+                        tree_sitter: [30; 16],
+                        ruff_python: None,
+                    },
+                ),
             )
             .unwrap();
         assert!(rust_output.batches[&170].num_rows() > 0);
@@ -2751,19 +2791,21 @@ mod tests {
             .parse_full(
                 1,
                 rust_recovery_source.provider_text.clone().unwrap(),
-                &NeverCancelled,
+                &Cancellation::default(),
             )
             .unwrap();
         let rust_recovery = CanonicalReconciliationEngine::default()
             .ingest_source_syntax(
                 scope(&rust_recovery_source),
                 &rust_recovery_source,
-                &rust_recovery_tree,
-                None,
-                SourceSyntaxProviderRuns {
-                    tree_sitter: [31; 16],
-                    ruff_python: None,
-                },
+                &provider_outputs(
+                    &rust_recovery_tree,
+                    None,
+                    ResolvedSyntaxRuns {
+                        tree_sitter: [31; 16],
+                        ruff_python: None,
+                    },
+                ),
             )
             .unwrap();
         let rust_annotation_kinds = rust_recovery.batches[&160]
@@ -2933,12 +2975,14 @@ mod tests {
             .ingest_source_syntax(
                 scope(&source),
                 &source,
-                &tree,
-                Some(&ruff),
-                SourceSyntaxProviderRuns {
-                    tree_sitter: [10; 16],
-                    ruff_python: Some([20; 16]),
-                },
+                &provider_outputs(
+                    &tree,
+                    Some(&ruff),
+                    ResolvedSyntaxRuns {
+                        tree_sitter: [10; 16],
+                        ruff_python: Some([20; 16]),
+                    },
+                ),
             )
             .unwrap();
         assert_eq!(ingress.metrics(), output.metrics);

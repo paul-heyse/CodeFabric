@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use arrow::ipc::reader::StreamDecoder;
 use arrow_array::builder::{
@@ -20,6 +21,7 @@ use arrow_select::concat::concat_batches;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
+use crate::cancellation::Cancellation;
 use crate::registries::ValueKind;
 use crate::schema_registry::{DurableMutationClass, TableSpec, table_spec};
 
@@ -1027,12 +1029,28 @@ pub fn bounded_provider_fact_channel(
 /// missing terminal state, row-limit overflow, and a closed channel before completion.
 pub async fn receive_provider_fact_stream(
     receiver: &mut mpsc::Receiver<ProviderFactMessage>,
+    cancellation: &Cancellation,
 ) -> Result<ProviderFactStream, FactIngestError> {
     let mut manifest = None;
     let mut batches = Vec::new();
     let mut rows = 0_usize;
     let mut terminal = None;
-    while let Some(message) = receiver.recv().await {
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(FactIngestError::Protocol(
+                "provider fact stream cancelled".into(),
+            ));
+        }
+        let message = match tokio::time::timeout(Duration::from_millis(10), receiver.recv()).await {
+            Ok(Some(message)) => message,
+            Ok(None) => break,
+            Err(_) => continue,
+        };
+        if cancellation.is_cancelled() {
+            return Err(FactIngestError::Protocol(
+                "provider fact stream cancelled".into(),
+            ));
+        }
         if terminal.is_some() {
             return Err(FactIngestError::Protocol(
                 "message after terminal state".into(),
@@ -1832,12 +1850,10 @@ impl CanonicalReconciliationEngine {
         &self,
         expected_scope: FactScope,
         source: &crate::source_image::SourceImage,
-        tree: &crate::tree_sitter_adapter::TreeSitterSnapshot,
-        ruff: Option<&crate::ruff_adapter::RuffSnapshot>,
-        runs: crate::source_syntax::SourceSyntaxProviderRuns,
+        outputs: &[crate::source_syntax::SourceSyntaxAdapterOutput<'_>],
     ) -> Result<CanonicalIngestOutput, FactIngestError> {
-        let result = crate::source_syntax::project(expected_scope, source, tree, ruff, runs)
-            .and_then(|projected| {
+        let result =
+            crate::source_syntax::project(expected_scope, source, outputs).and_then(|projected| {
                 let provider_code = crate::registries::ProviderCode::SourceSubstrate as i16;
                 let batches = projected
                     .batches
@@ -2439,8 +2455,9 @@ mod tests {
                 .is_err()
         );
         drop(sender);
+        let cancellation = Cancellation::default();
         assert!(matches!(
-            receive_provider_fact_stream(&mut receiver).await,
+            receive_provider_fact_stream(&mut receiver, &cancellation).await,
             Err(FactIngestError::Protocol(message)) if message == "batch preceded manifest"
         ));
 
@@ -2699,7 +2716,8 @@ mod tests {
                 .await
                 .unwrap();
         });
-        let stream = receive_provider_fact_stream(&mut receiver)
+        let cancellation = Cancellation::default();
+        let stream = receive_provider_fact_stream(&mut receiver, &cancellation)
             .await
             .expect("bounded provider stream completes");
         task.await.unwrap();

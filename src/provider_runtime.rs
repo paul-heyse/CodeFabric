@@ -6,11 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use prost::Message as _;
 use rayon::ThreadPool;
 use thiserror::Error;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
+use crate::cancellation::Cancellation;
 use crate::fact_ingest::{ProviderFactMessage, StreamTerminal, bounded_provider_fact_channel};
 use crate::identity::{IdentityDomain, decode_public_id};
 use crate::operational_store::{OperationalReaderFactory, OperationalStore, ProviderRunRecord};
@@ -21,7 +21,7 @@ use crate::registries::{
 };
 use crate::rpc::generated::codefabric::provider::v1 as wire;
 use crate::rpc::generated::codefabric::provider::v1::{
-    CancelAcknowledgement, CancelAcknowledgementState, ProviderJobSpec, ProviderScopeKind,
+    CancelAcknowledgement, CancelAcknowledgementState, ProviderScopeKind,
 };
 
 const EVENT_CHANNEL_CAPACITY: usize = 32;
@@ -31,6 +31,168 @@ const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
 const INTENT_NONE: u8 = 0;
 const INTENT_CANCEL: u8 = 1;
 const INTENT_SUPERSEDE: u8 = 2;
+
+/// Domain-owned immutable blob reference used by provider admission.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProviderBlobReference {
+    pub blob_id: String,
+    pub content_digest: String,
+    pub byte_length: u64,
+    pub read_only_uri: String,
+}
+
+/// Domain-owned source snapshot lease; no Protobuf type crosses this seam.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProviderSourceSnapshotLease {
+    pub lease_id: String,
+    pub workspace_id: String,
+    pub source_generation: u64,
+    pub source_manifest_digest: String,
+    pub expires_at_unix_ms: i64,
+    pub blobs: Vec<ProviderBlobReference>,
+}
+
+/// Domain-owned provider resource estimate.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProviderResourceEstimate {
+    pub input_bytes: u64,
+    pub expected_output_bytes: u64,
+    pub cpu_weight: u32,
+    pub memory_mib: u32,
+}
+
+/// Domain-owned provider scope. Numeric values retain the governed wire allocation.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProviderScope {
+    pub scope_kind: u16,
+    pub scope_id: String,
+}
+
+/// In-process payload selected only after the common wire job has crossed the RPC adapter.
+#[derive(Clone, Debug, Default)]
+pub enum ProviderDirectWork {
+    #[default]
+    None,
+    TreeSitter {
+        revision: u64,
+        text: crate::provider_types::ProviderText,
+    },
+    RuffPython {
+        revision: u64,
+        text: crate::provider_types::ProviderText,
+        tree_sitter: crate::tree_sitter_adapter::TreeSitterSnapshot,
+    },
+}
+
+/// Application-owned accepted-provider job. Protobuf conversion lives in [`rpc_adapter`].
+#[derive(Clone, Debug, Default)]
+pub struct ProviderJob {
+    pub provider_run_id: String,
+    pub workspace_id: String,
+    pub analysis_context_id: String,
+    pub source_generation: u64,
+    pub source_snapshot_lease: Option<ProviderSourceSnapshotLease>,
+    pub requested_capability_codes: Vec<u32>,
+    pub scopes: Vec<ProviderScope>,
+    pub priority_class: u16,
+    pub resource_estimate: Option<ProviderResourceEstimate>,
+    pub deadline_unix_ms: i64,
+    pub supersession_key: String,
+    pub required_bundle_digests: Vec<String>,
+    pub required_schema_digests: Vec<String>,
+    pub idempotency_key: String,
+    pub resource_profile_id: String,
+    pub direct_work: ProviderDirectWork,
+}
+
+impl ProviderJob {
+    fn fingerprint(&self) -> [u8; 32] {
+        let mut bytes = Vec::new();
+        for value in [
+            self.provider_run_id.as_bytes(),
+            self.workspace_id.as_bytes(),
+            self.analysis_context_id.as_bytes(),
+            self.supersession_key.as_bytes(),
+            self.idempotency_key.as_bytes(),
+            self.resource_profile_id.as_bytes(),
+        ] {
+            bytes.extend_from_slice(&u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+            bytes.extend_from_slice(value);
+        }
+        bytes.extend_from_slice(&self.source_generation.to_be_bytes());
+        bytes.extend_from_slice(&self.deadline_unix_ms.to_be_bytes());
+        for capability in &self.requested_capability_codes {
+            bytes.extend_from_slice(&capability.to_be_bytes());
+        }
+        if let Some(estimate) = self.resource_estimate {
+            bytes.extend_from_slice(&estimate.input_bytes.to_be_bytes());
+            bytes.extend_from_slice(&estimate.expected_output_bytes.to_be_bytes());
+            bytes.extend_from_slice(&estimate.cpu_weight.to_be_bytes());
+            bytes.extend_from_slice(&estimate.memory_mib.to_be_bytes());
+        }
+        crate::integrity::digest_bytes(&bytes)
+    }
+}
+
+/// The only Protobuf-to-domain provider job conversion boundary.
+pub mod rpc_adapter {
+    use super::*;
+
+    /// Decode an admitted wire job without retaining generated message types.
+    #[must_use]
+    pub fn decode_job(spec: wire::ProviderJobSpec) -> ProviderJob {
+        ProviderJob {
+            provider_run_id: spec.provider_run_id,
+            workspace_id: spec.workspace_id,
+            analysis_context_id: spec.analysis_context_id,
+            source_generation: spec.source_generation,
+            source_snapshot_lease: spec.source_snapshot_lease.map(|lease| {
+                ProviderSourceSnapshotLease {
+                    lease_id: lease.lease_id,
+                    workspace_id: lease.workspace_id,
+                    source_generation: lease.source_generation,
+                    source_manifest_digest: lease.source_manifest_digest,
+                    expires_at_unix_ms: lease.expires_at_unix_ms,
+                    blobs: lease
+                        .blobs
+                        .into_iter()
+                        .map(|blob| ProviderBlobReference {
+                            blob_id: blob.blob_id,
+                            content_digest: blob.content_digest,
+                            byte_length: blob.byte_length,
+                            read_only_uri: blob.read_only_uri,
+                        })
+                        .collect(),
+                }
+            }),
+            requested_capability_codes: spec.requested_capability_codes,
+            scopes: spec
+                .scopes
+                .into_iter()
+                .map(|scope| ProviderScope {
+                    scope_kind: u16::try_from(scope.scope_kind).unwrap_or_default(),
+                    scope_id: scope.scope_id,
+                })
+                .collect(),
+            priority_class: u16::try_from(spec.priority_class).unwrap_or_default(),
+            resource_estimate: spec
+                .resource_estimate
+                .map(|estimate| ProviderResourceEstimate {
+                    input_bytes: estimate.input_bytes,
+                    expected_output_bytes: estimate.expected_output_bytes,
+                    cpu_weight: estimate.cpu_weight,
+                    memory_mib: estimate.memory_mib,
+                }),
+            deadline_unix_ms: spec.deadline_unix_ms,
+            supersession_key: spec.supersession_key,
+            required_bundle_digests: spec.required_bundle_digests,
+            required_schema_digests: spec.required_schema_digests,
+            idempotency_key: spec.idempotency_key,
+            resource_profile_id: spec.resource_profile_id,
+            direct_work: ProviderDirectWork::None,
+        }
+    }
+}
 
 /// Stable provider-runtime failures.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -151,6 +313,10 @@ pub enum ProviderEvent {
         total_units: u64,
         phase: String,
     },
+    ScopeBegin {
+        identity: ProviderEventIdentity,
+        scope: ProviderScope,
+    },
     ArrowIpcChunk {
         identity: ProviderEventIdentity,
         observation_family_code: u32,
@@ -158,6 +324,12 @@ pub enum ProviderEvent {
         schema_digest: String,
         row_count: u64,
         chunk_digest: String,
+    },
+    ScopeEnd {
+        identity: ProviderEventIdentity,
+        scope: ProviderScope,
+        family_counts: BTreeMap<u32, u64>,
+        scope_digest: String,
     },
     Diagnostic {
         identity: ProviderEventIdentity,
@@ -186,27 +358,7 @@ pub struct AcceptedProviderJob {
     pub accepted_generation: u64,
     pub events: mpsc::Receiver<ProviderEvent>,
     pub provider_facts: mpsc::Receiver<ProviderFactMessage>,
-}
-
-/// Cooperative cancellation signal available to synchronous provider adapters.
-#[derive(Clone, Debug)]
-pub struct ProviderCancellation {
-    cancelled: Arc<AtomicBool>,
-    check_interval: u32,
-}
-
-impl ProviderCancellation {
-    /// Whether the runtime has requested cancellation or supersession.
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-
-    /// Registry-defined work interval at which a provider must poll cancellation.
-    #[must_use]
-    pub const fn check_interval(&self) -> u32 {
-        self.check_interval
-    }
+    pub cancellation: Cancellation,
 }
 
 /// Bounded sink used only by provider adapters running on dedicated CPU capacity.
@@ -306,6 +458,34 @@ impl ProviderEventSink {
             }
         }
     }
+
+    /// Begin the common direct provider-fact stream with runtime-owned identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same bounded-channel and identity failures as [`Self::send_provider_fact`].
+    pub fn begin_provider_facts(
+        &self,
+        provider_version: impl Into<String>,
+        schema_fingerprints: BTreeMap<i16, String>,
+        declared_rows: usize,
+    ) -> Result<(), ProviderRuntimeError> {
+        self.send_provider_fact(ProviderFactMessage::Manifest(
+            crate::fact_ingest::ProviderFactManifest {
+                stream_id: self.validated_ids.run,
+                workspace_id: self.validated_ids.workspace,
+                analysis_context_id: self.validated_ids.context,
+                source_generation: i64::try_from(self.identity.source_generation)
+                    .unwrap_or(i64::MAX),
+                provider_code: self.provider_code,
+                provider_version: provider_version.into(),
+                provider_run_id: self.validated_ids.run,
+                emitted_at_micros: system_now_unix_millis().saturating_mul(1_000),
+                schema_fingerprints,
+                declared_rows,
+            },
+        ))
+    }
 }
 
 /// Terminal result returned by a provider adapter.
@@ -326,9 +506,9 @@ pub trait ProviderAdapter: Send + Sync {
     /// state and a bounded diagnostic.
     fn run(
         &self,
-        spec: ProviderJobSpec,
+        spec: ProviderJob,
         events: ProviderEventSink,
-        cancellation: ProviderCancellation,
+        cancellation: Cancellation,
     ) -> Result<ProviderCompletion, ProviderRuntimeError>;
 }
 
@@ -468,6 +648,32 @@ impl AdmissionController {
                 .or_insert_with(|| Arc::new(Semaphore::new(self.context_limit))),
         )
     }
+
+    fn evict_workspace(&self, workspace_id: &str) {
+        self.workspaces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(workspace_id);
+        self.contexts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(workspace, _), _| workspace != workspace_id);
+    }
+
+    #[cfg(test)]
+    fn scope_counts(&self) -> (usize, usize) {
+        let workspaces = self
+            .workspaces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
+        let contexts = self
+            .contexts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
+        (workspaces, contexts)
+    }
 }
 
 struct RunControl {
@@ -587,11 +793,14 @@ pub fn map_wire_event(
             let scope = event
                 .scope
                 .ok_or_else(|| ProviderRuntimeError::Protocol("scope absent".into()))?;
-            Ok(ProviderEvent::Progress {
+            Ok(ProviderEvent::ScopeBegin {
                 identity: wire_identity(event.header, context)?,
-                completed_units: 0,
-                total_units: 0,
-                phase: format!("scope-begin:{}:{}", scope.scope_kind, scope.scope_id),
+                scope: ProviderScope {
+                    scope_kind: u16::try_from(scope.scope_kind).map_err(|_| {
+                        ProviderRuntimeError::Protocol("scope kind exceeds domain range".into())
+                    })?,
+                    scope_id: scope.scope_id,
+                },
             })
         }
         wire::provider_event::Event::ObservationChunk(event) => {
@@ -618,11 +827,16 @@ pub fn map_wire_event(
             let scope = event
                 .scope
                 .ok_or_else(|| ProviderRuntimeError::Protocol("scope absent".into()))?;
-            Ok(ProviderEvent::Progress {
+            Ok(ProviderEvent::ScopeEnd {
                 identity: wire_identity(event.header, context)?,
-                completed_units: event.family_counts.values().copied().sum(),
-                total_units: event.family_counts.values().copied().sum(),
-                phase: format!("scope-end:{}:{}", scope.scope_kind, scope.scope_id),
+                scope: ProviderScope {
+                    scope_kind: u16::try_from(scope.scope_kind).map_err(|_| {
+                        ProviderRuntimeError::Protocol("scope kind exceeds domain range".into())
+                    })?,
+                    scope_id: scope.scope_id,
+                },
+                family_counts: event.family_counts.into_iter().collect(),
+                scope_digest: event.scope_digest,
             })
         }
         wire::provider_event::Event::Terminal(event) => {
@@ -791,10 +1005,16 @@ impl ProviderRuntime {
             .collect()
     }
 
-    fn validate_job(
-        &self,
-        spec: &ProviderJobSpec,
-    ) -> Result<ValidatedJobIds, ProviderRuntimeError> {
+    /// Evict bounded admission state when the workspace lifecycle closes.
+    pub fn evict_workspace(&self, workspace_id: &str) {
+        self.admission.evict_workspace(workspace_id);
+        self.supersession
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|key, _| !key.contains(workspace_id));
+    }
+
+    fn validate_job(&self, spec: &ProviderJob) -> Result<ValidatedJobIds, ProviderRuntimeError> {
         if spec.supersession_key.is_empty() {
             return Err(ProviderRuntimeError::InvalidJob(
                 "supersession identity is required".into(),
@@ -891,7 +1111,7 @@ impl ProviderRuntime {
         Ok(validated_ids)
     }
 
-    fn supersession_key(&self, spec: &ProviderJobSpec) -> String {
+    fn supersession_key(&self, spec: &ProviderJob) -> String {
         format!(
             "{}\0{}\0{}\0{}",
             spec.workspace_id,
@@ -903,19 +1123,19 @@ impl ProviderRuntime {
 
     fn initial_record(
         &self,
-        spec: &ProviderJobSpec,
+        spec: &ProviderJob,
         ids: ValidatedJobIds,
         accepted_at: i64,
     ) -> ProviderRunRecord {
         let owner_id = spec
             .scopes
             .iter()
-            .find(|scope| scope.scope_kind == ProviderScopeKind::SemanticOwner as i32)
+            .find(|scope| scope.scope_kind == ProviderScopeKind::SemanticOwner as u16)
             .map(|scope| scope.scope_id.as_bytes().to_vec());
         let build_unit_id = spec
             .scopes
             .iter()
-            .find(|scope| scope.scope_kind == ProviderScopeKind::BuildUnit as i32)
+            .find(|scope| scope.scope_kind == ProviderScopeKind::BuildUnit as u16)
             .map(|scope| scope.scope_id.as_bytes().to_vec());
         ProviderRunRecord {
             provider_run_id: ids.run.to_vec(),
@@ -926,7 +1146,7 @@ impl ProviderRuntime {
             owner_id,
             build_unit_id,
             source_generation: i64::try_from(spec.source_generation).unwrap_or(i64::MAX),
-            input_fingerprint: crate::integrity::digest_bytes(&spec.encode_to_vec()).to_vec(),
+            input_fingerprint: spec.fingerprint().to_vec(),
             output_fingerprint: None,
             state_code: i64::from(ProviderRunState::Queued as u16),
             accepted_at: accepted_at.to_string(),
@@ -1014,11 +1234,7 @@ impl ProviderRuntime {
         }
     }
 
-    async fn acquire_all(
-        &self,
-        spec: &ProviderJobSpec,
-        control: &RunControl,
-    ) -> Result<PermitSet, u8> {
+    async fn acquire_all(&self, spec: &ProviderJob, control: &RunControl) -> Result<PermitSet, u8> {
         let global = Self::acquire(Arc::clone(&self.admission.global), control).await?;
         let workspace =
             Self::acquire(self.admission.workspace(&spec.workspace_id), control).await?;
@@ -1087,7 +1303,7 @@ impl ProviderRuntime {
 
     fn spawn_adapter(
         &self,
-        spec: &ProviderJobSpec,
+        spec: &ProviderJob,
         control: &RunControl,
         sink: &ProviderEventSink,
     ) -> oneshot::Receiver<Result<ProviderCompletion, ProviderRuntimeError>> {
@@ -1095,10 +1311,10 @@ impl ProviderRuntime {
         let adapter = Arc::clone(&self.adapter);
         let adapter_spec = spec.clone();
         let adapter_sink = sink.clone();
-        let cancellation = ProviderCancellation {
-            cancelled: Arc::clone(&control.cancelled),
-            check_interval: self.profile.cancellation_check_interval,
-        };
+        let cancellation = Cancellation::from_shared(
+            Arc::clone(&control.cancelled),
+            self.profile.cancellation_check_interval,
+        );
         self.cpu_pool.spawn(move || {
             let _ = result_sender.send(adapter.run(adapter_spec, adapter_sink, cancellation));
         });
@@ -1107,7 +1323,7 @@ impl ProviderRuntime {
 
     async fn await_completion(
         &self,
-        spec: &ProviderJobSpec,
+        spec: &ProviderJob,
         control: &RunControl,
         result_receiver: &mut oneshot::Receiver<Result<ProviderCompletion, ProviderRuntimeError>>,
     ) -> RunCompletion {
@@ -1172,12 +1388,7 @@ impl ProviderRuntime {
         }
     }
 
-    async fn run_job(
-        self,
-        spec: ProviderJobSpec,
-        control: Arc<RunControl>,
-        sink: ProviderEventSink,
-    ) {
+    async fn run_job(self, spec: ProviderJob, control: Arc<RunControl>, sink: ProviderEventSink) {
         let permits = match self.acquire_all(&spec, &control).await {
             Ok(permits) => permits,
             Err(intent) => {
@@ -1222,7 +1433,7 @@ impl ProviderRuntime {
 
     async fn finish_adapter_result(
         &self,
-        spec: &ProviderJobSpec,
+        spec: &ProviderJob,
         control: &RunControl,
         sink: &ProviderEventSink,
         result: Result<ProviderCompletion, ProviderRuntimeError>,
@@ -1306,10 +1517,7 @@ impl ProviderRuntime {
 
 #[async_trait]
 pub trait ProviderExecutor: Send + Sync {
-    async fn submit(
-        &self,
-        spec: ProviderJobSpec,
-    ) -> Result<AcceptedProviderJob, ProviderRuntimeError>;
+    async fn submit(&self, spec: ProviderJob) -> Result<AcceptedProviderJob, ProviderRuntimeError>;
     async fn cancel(
         &self,
         run_id: &str,
@@ -1319,10 +1527,7 @@ pub trait ProviderExecutor: Send + Sync {
 
 #[async_trait]
 impl ProviderExecutor for ProviderRuntime {
-    async fn submit(
-        &self,
-        spec: ProviderJobSpec,
-    ) -> Result<AcceptedProviderJob, ProviderRuntimeError> {
+    async fn submit(&self, spec: ProviderJob) -> Result<AcceptedProviderJob, ProviderRuntimeError> {
         let validated_ids = self.validate_job(&spec)?;
         let accepted_at = self.clock.now_unix_millis();
         let record = self.initial_record(&spec, validated_ids, accepted_at);
@@ -1396,6 +1601,10 @@ impl ProviderExecutor for ProviderRuntime {
             accepted_generation: spec.source_generation,
             events,
             provider_facts,
+            cancellation: Cancellation::from_shared(
+                Arc::clone(&control.cancelled),
+                self.profile.cancellation_check_interval,
+            ),
         };
         tokio::spawn(self.clone().run_job(spec, control, sink));
         Ok(accepted)
@@ -1496,7 +1705,7 @@ fn decode_lower_hex_id16(value: &str) -> Result<[u8; 16], ()> {
     Ok(output)
 }
 
-fn validated_job_ids(spec: &ProviderJobSpec) -> Result<ValidatedJobIds, ProviderRuntimeError> {
+fn validated_job_ids(spec: &ProviderJob) -> Result<ValidatedJobIds, ProviderRuntimeError> {
     let run = decode_lower_hex_id16(&spec.provider_run_id).map_err(|()| {
         ProviderRuntimeError::InvalidJob(
             "provider_run_id must be exactly 32 lowercase hexadecimal characters".into(),
@@ -1544,7 +1753,6 @@ mod tests {
 
     use super::*;
     use crate::fact_ingest::{ProviderFactManifest, receive_provider_fact_stream};
-    use crate::rpc::generated::codefabric::provider::v1::{ResourceEstimate, SourceSnapshotLease};
 
     const TEST_NOW: i64 = 1_800_000_000_000;
 
@@ -1564,9 +1772,9 @@ mod tests {
     impl ProviderAdapter for FakeAdapter {
         fn run(
             &self,
-            spec: ProviderJobSpec,
+            spec: ProviderJob,
             events: ProviderEventSink,
-            cancellation: ProviderCancellation,
+            cancellation: Cancellation,
         ) -> Result<ProviderCompletion, ProviderRuntimeError> {
             assert_eq!(cancellation.check_interval(), 1_024);
             if !matches!(self.mode, FakeMode::Slow) {
@@ -1640,14 +1848,21 @@ mod tests {
     }
 
     fn fixture(mode: FakeMode) -> RuntimeFixture {
+        fixture_with_adapter("tree-sitter", Arc::new(FakeAdapter { mode }))
+    }
+
+    fn fixture_with_adapter(
+        provider_id: &str,
+        adapter: Arc<dyn ProviderAdapter>,
+    ) -> RuntimeFixture {
         let directory = tempdir().unwrap();
         let store = OperationalStore::open(&directory.path().join("operational.sqlite")).unwrap();
         let reader = store.reader_factory();
         let generation = Arc::new(Generation(AtomicU64::new(7)));
         let runtime = ProviderRuntime::new_with_clock(
-            "tree-sitter",
+            provider_id,
             [5; 16].to_vec(),
-            Arc::new(FakeAdapter { mode }),
+            adapter,
             generation.clone(),
             Arc::new(OperationalProviderRunJournal::new(store)),
             Arc::new(FixedClock),
@@ -1661,6 +1876,19 @@ mod tests {
         }
     }
 
+    fn provider_text(source: &str) -> crate::provider_types::ProviderText {
+        crate::provider_types::ProviderText {
+            text: Arc::from(source),
+            original_byte_offsets: Arc::from(
+                source
+                    .char_indices()
+                    .map(|(offset, _)| u64::try_from(offset).unwrap())
+                    .chain(std::iter::once(u64::try_from(source.len()).unwrap()))
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+
     fn run_id(label: &str) -> String {
         let digest = crate::identity::unframed_semantic_id(label.as_bytes());
         let mut encoded = String::with_capacity(32);
@@ -1670,15 +1898,15 @@ mod tests {
         encoded
     }
 
-    fn job(run_label: &str, supersession_key: &str) -> ProviderJobSpec {
+    fn job(run_label: &str, supersession_key: &str) -> ProviderJob {
         let workspace_id =
             crate::identity::encode_public_id(IdentityDomain::Workspace, None, [2; 16]).unwrap();
-        ProviderJobSpec {
+        ProviderJob {
             provider_run_id: run_id(run_label),
             workspace_id: workspace_id.clone(),
             analysis_context_id: "context:source".into(),
             source_generation: 7,
-            source_snapshot_lease: Some(SourceSnapshotLease {
+            source_snapshot_lease: Some(ProviderSourceSnapshotLease {
                 lease_id: "lease:test".into(),
                 workspace_id,
                 source_generation: 7,
@@ -1686,7 +1914,7 @@ mod tests {
                 expires_at_unix_ms: TEST_NOW + 120_000,
                 blobs: Vec::new(),
             }),
-            resource_estimate: Some(ResourceEstimate {
+            resource_estimate: Some(ProviderResourceEstimate {
                 input_bytes: 128,
                 expected_output_bytes: 256,
                 cpu_weight: 1,
@@ -1695,7 +1923,7 @@ mod tests {
             deadline_unix_ms: TEST_NOW + 1_000,
             supersession_key: supersession_key.into(),
             resource_profile_id: "in-process-syntax-standard".into(),
-            ..ProviderJobSpec::default()
+            ..ProviderJob::default()
         }
     }
 
@@ -1751,9 +1979,9 @@ mod tests {
             .as_mut()
             .unwrap()
             .blobs
-            .push(wire::BlobReference {
+            .push(ProviderBlobReference {
                 byte_length: 16_777_217,
-                ..wire::BlobReference::default()
+                ..ProviderBlobReference::default()
             });
         let mut expired_lease = job("run:lease-expired", "scope:limits");
         expired_lease
@@ -1812,9 +2040,10 @@ mod tests {
         .expect("RUNNING transition must be observable before terminal");
         assert_eq!(fixture.runtime.metrics().started, 1);
         assert_eq!(fixture.runtime.metrics().terminal, 0);
-        let provider_facts = receive_provider_fact_stream(&mut accepted.provider_facts)
-            .await
-            .unwrap();
+        let provider_facts =
+            receive_provider_fact_stream(&mut accepted.provider_facts, &accepted.cancellation)
+                .await
+                .unwrap();
         assert_eq!(provider_facts.terminal, StreamTerminal::Completed);
         let (state, terminal_identity) = terminal_event_with_identity(&mut accepted.events).await;
         assert_eq!(state, ProviderRunState::Succeeded);
@@ -2205,5 +2434,181 @@ mod tests {
             map_wire_event(mismatched, &context),
             Err(ProviderRuntimeError::Protocol(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn wp60_behavioral_acceptance() {
+        fn implements_common_contract<T: ProviderAdapter>() {}
+
+        implements_common_contract::<crate::tree_sitter_adapter::TreeSitterAdapter>();
+        implements_common_contract::<crate::ruff_adapter::RuffAdapter>();
+        let in_process = PROVIDER_ENTRIES
+            .iter()
+            .filter(|provider| provider.placement == "IN_PROCESS")
+            .map(|provider| provider.provider_id)
+            .collect::<Vec<_>>();
+        assert!(in_process.contains(&"tree-sitter"));
+        assert!(in_process.contains(&"ruff-python"));
+
+        let text = provider_text("value = 1\n");
+        let tree_fixture = fixture_with_adapter(
+            "tree-sitter",
+            Arc::new(
+                crate::tree_sitter_adapter::TreeSitterAdapter::new(
+                    crate::tree_sitter_adapter::TreeSitterLanguage::Python,
+                )
+                .unwrap(),
+            ),
+        );
+        let mut tree_job = job("run:wp60-tree", "scope:wp60-tree");
+        tree_job.direct_work = ProviderDirectWork::TreeSitter {
+            revision: 7,
+            text: text.clone(),
+        };
+        let mut accepted = tree_fixture.runtime.submit(tree_job).await.unwrap();
+        let tree_stream =
+            receive_provider_fact_stream(&mut accepted.provider_facts, &accepted.cancellation)
+                .await
+                .unwrap();
+        assert_eq!(tree_stream.manifest.provider_code, 10);
+        assert_eq!(tree_stream.manifest.declared_rows, 0);
+        assert_eq!(
+            terminal_event(&mut accepted.events).await,
+            ProviderRunState::Succeeded
+        );
+
+        let mut parser = crate::tree_sitter_adapter::TreeSitterAdapter::new(
+            crate::tree_sitter_adapter::TreeSitterLanguage::Python,
+        )
+        .unwrap();
+        let tree = parser
+            .parse_full(7, text.clone(), &Cancellation::default())
+            .unwrap();
+        let ruff_fixture = fixture_with_adapter(
+            "ruff-python",
+            Arc::new(crate::ruff_adapter::RuffAdapter::new().unwrap()),
+        );
+        let mut ruff_job = job("run:wp60-ruff", "scope:wp60-ruff");
+        ruff_job.direct_work = ProviderDirectWork::RuffPython {
+            revision: 7,
+            text,
+            tree_sitter: tree,
+        };
+        let mut accepted = ruff_fixture.runtime.submit(ruff_job).await.unwrap();
+        let ruff_stream =
+            receive_provider_fact_stream(&mut accepted.provider_facts, &accepted.cancellation)
+                .await
+                .unwrap();
+        assert_eq!(ruff_stream.manifest.provider_code, 20);
+        assert_eq!(
+            terminal_event(&mut accepted.events).await,
+            ProviderRunState::Succeeded
+        );
+    }
+
+    #[test]
+    fn wp60_structural_acceptance() {
+        use crate::registries::SyntaxFieldRole;
+
+        assert_eq!(
+            crate::registries::provider_field_role_code("tree-sitter-python-0-25-0", "name"),
+            Some(SyntaxFieldRole::Name as u16)
+        );
+        assert_eq!(
+            crate::registries::provider_field_role_code("ruff-python-0-0-7", "Callee"),
+            Some(SyntaxFieldRole::Callee as u16)
+        );
+        assert!(
+            PROVIDER_ENTRIES
+                .iter()
+                .all(|provider| !provider.provider_id.is_empty())
+        );
+        let fixture = fixture(FakeMode::Immediate);
+        let workspace = job("run:wp60-evict", "scope:wp60-evict").workspace_id;
+        fixture.runtime.admission.workspace(&workspace);
+        fixture
+            .runtime
+            .admission
+            .context(&workspace, "context:source");
+        assert_eq!(fixture.runtime.admission.scope_counts(), (1, 1));
+        fixture.runtime.evict_workspace(&workspace);
+        assert_eq!(fixture.runtime.admission.scope_counts(), (0, 0));
+    }
+
+    #[test]
+    fn wp60_negative_zero_state() {
+        let provider_runtime = include_str!("provider_runtime.rs");
+        let source_syntax = include_str!("source_syntax.rs");
+        let extractor = include_str!("../rustc-extractor/src/main.rs");
+        let cancellation_sources = [
+            include_str!("cancellation.rs"),
+            provider_runtime,
+            include_str!("tree_sitter_adapter.rs"),
+            include_str!("ruff_adapter.rs"),
+            include_str!("inventory.rs"),
+            include_str!("git_state.rs"),
+        ];
+        let cancellation_declaration = ["struct", "Cancellation"].join(" ");
+        assert_eq!(
+            cancellation_sources
+                .iter()
+                .map(|source| source.matches(&cancellation_declaration).count())
+                .sum::<usize>(),
+            1
+        );
+        for retired in [
+            ["TreeSitter", "Cancellation"].concat(),
+            ["Ruff", "Cancellation"].concat(),
+            ["Provider", "Cancellation"].concat(),
+            ["Inventory", "Cancellation"].concat(),
+            ["Git", "Cancellation"].concat(),
+        ] {
+            assert!(
+                !cancellation_sources
+                    .iter()
+                    .any(|source| source.contains(&retired))
+            );
+        }
+        let retired_extractor_mode = ["extract", "json"].join("-");
+        assert!(!extractor.contains(&retired_extractor_mode));
+        let wire_job_signature = ["spec: Provider", "JobSpec"].concat();
+        assert!(!provider_runtime.contains(&wire_job_signature));
+        assert!(!source_syntax.contains("fn tree_field_role"));
+        assert!(!source_syntax.contains("fn ruff_field_role"));
+    }
+
+    #[tokio::test]
+    async fn wp60_operational_acceptance() {
+        let fixture = fixture(FakeMode::Slow);
+        let mut accepted = fixture
+            .runtime
+            .submit(job("run:wp60-cancel", "scope:wp60-cancel"))
+            .await
+            .unwrap();
+        let receive =
+            receive_provider_fact_stream(&mut accepted.provider_facts, &accepted.cancellation);
+        let cancel = async {
+            tokio::task::yield_now().await;
+            fixture
+                .runtime
+                .cancel(&run_id("run:wp60-cancel"), "stream-poll")
+                .await
+                .unwrap()
+        };
+        let (stream_result, acknowledgement) = tokio::join!(receive, cancel);
+        assert!(matches!(
+            stream_result,
+            Err(crate::fact_ingest::FactIngestError::Protocol(message))
+                if message == "provider fact stream cancelled"
+        ));
+        assert_eq!(
+            acknowledgement.terminal_state,
+            Some(ProviderRunState::Cancelled as i32)
+        );
+        assert_eq!(
+            terminal_event(&mut accepted.events).await,
+            ProviderRunState::Cancelled
+        );
+        assert_eq!(fixture.runtime.metrics().cancelled, 1);
     }
 }

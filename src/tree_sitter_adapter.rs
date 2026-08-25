@@ -15,6 +15,7 @@ use tree_sitter::{
     StreamingIterator as _, Tree,
 };
 
+use crate::cancellation::Cancellation;
 use crate::provider_raw_kinds::{
     ProviderGrammarInventory, ProviderRawKindDisposition, TREE_SITTER_PYTHON_GRAMMAR,
     TREE_SITTER_RECOVERY_QUERY, TREE_SITTER_RUST_GRAMMAR,
@@ -131,37 +132,6 @@ pub struct TreeSitterSnapshot {
     pub facts: Arc<[RawSyntaxFact]>,
     pub changed_ranges: Arc<[ChangedRange]>,
     pub metrics: TreeSitterRunMetrics,
-}
-
-/// Cooperative cancellation boundary accepted by the in-process adapter.
-pub trait TreeSitterCancellation {
-    fn is_cancelled(&self) -> bool;
-    fn check_interval(&self) -> u32;
-}
-
-/// Cancellation probe for direct, non-runtime adapter use.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NeverCancelled;
-
-impl TreeSitterCancellation for NeverCancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-
-    fn check_interval(&self) -> u32 {
-        u32::MAX
-    }
-}
-
-#[cfg(feature = "daemon")]
-impl TreeSitterCancellation for crate::provider_runtime::ProviderCancellation {
-    fn is_cancelled(&self) -> bool {
-        self.is_cancelled()
-    }
-
-    fn check_interval(&self) -> u32 {
-        self.check_interval()
-    }
 }
 
 /// Closed adapter failures; no parser-owned error type escapes this boundary.
@@ -374,7 +344,7 @@ impl TreeSitterAdapter {
         &mut self,
         revision: u64,
         text: ProviderText,
-        cancellation: &impl TreeSitterCancellation,
+        cancellation: &Cancellation,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
         self.parse_candidate(revision, text, None, cancellation)
     }
@@ -391,7 +361,7 @@ impl TreeSitterAdapter {
         revision: u64,
         text: ProviderText,
         edit: TreeSitterEdit,
-        cancellation: &impl TreeSitterCancellation,
+        cancellation: &Cancellation,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
         let prior = self
             .retained
@@ -446,7 +416,7 @@ impl TreeSitterAdapter {
         revision: u64,
         text: ProviderText,
         edited_old_tree: Option<&Tree>,
-        cancellation: &impl TreeSitterCancellation,
+        cancellation: &Cancellation,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
         if self
             .retained
@@ -597,6 +567,64 @@ impl TreeSitterAdapter {
     }
 }
 
+#[cfg(feature = "daemon")]
+impl crate::provider_runtime::ProviderAdapter for TreeSitterAdapter {
+    fn run(
+        &self,
+        job: crate::provider_runtime::ProviderJob,
+        events: crate::provider_runtime::ProviderEventSink,
+        cancellation: Cancellation,
+    ) -> Result<
+        crate::provider_runtime::ProviderCompletion,
+        crate::provider_runtime::ProviderRuntimeError,
+    > {
+        let crate::provider_runtime::ProviderDirectWork::TreeSitter { revision, text } =
+            job.direct_work
+        else {
+            return Err(crate::provider_runtime::ProviderRuntimeError::Adapter {
+                code: "TREE_SITTER_DIRECT_WORK_ABSENT".into(),
+            });
+        };
+        let language = match self.inventory.catalog_id {
+            "tree-sitter-python-0-25-0" => TreeSitterLanguage::Python,
+            "tree-sitter-rust-0-24-2" => TreeSitterLanguage::Rust,
+            _ => {
+                return Err(crate::provider_runtime::ProviderRuntimeError::Adapter {
+                    code: "TREE_SITTER_CATALOG_UNSUPPORTED".into(),
+                });
+            }
+        };
+        let mut direct = Self::new(language).map_err(|error| {
+            crate::provider_runtime::ProviderRuntimeError::Adapter {
+                code: error.to_string(),
+            }
+        })?;
+        let snapshot = direct
+            .parse_full(revision, text, &cancellation)
+            .map_err(
+                |error| crate::provider_runtime::ProviderRuntimeError::Adapter {
+                    code: error.to_string(),
+                },
+            )?;
+        events.begin_provider_facts(
+            format!("{};{}", snapshot.catalog_id, snapshot.grammar_fingerprint),
+            std::collections::BTreeMap::new(),
+            0,
+        )?;
+        let output_records = u64::try_from(snapshot.facts.len()).unwrap_or(u64::MAX);
+        events.send_progress(output_records, output_records, "tree-sitter-complete")?;
+        let mut fingerprint = Vec::new();
+        fingerprint.extend_from_slice(snapshot.provider_image_fingerprint.as_bytes());
+        fingerprint.extend_from_slice(snapshot.catalog_id.as_bytes());
+        fingerprint.extend_from_slice(&output_records.to_be_bytes());
+        Ok(crate::provider_runtime::ProviderCompletion {
+            state: crate::registries::ProviderRunState::Succeeded,
+            output_fingerprint: crate::integrity::digest_bytes(&fingerprint),
+            diagnostic_code: None,
+        })
+    }
+}
+
 fn validate_runtime_inventory(
     language: &Language,
     node_types: &str,
@@ -656,7 +684,7 @@ fn walk_tree(
     inventory: &ProviderGrammarInventory,
     boundaries: &ProviderBoundaryMap,
     limits: TreeSitterLimits,
-    cancellation: &impl TreeSitterCancellation,
+    cancellation: &Cancellation,
     started: Instant,
     initial_work_units: u64,
 ) -> Result<
@@ -809,7 +837,7 @@ fn run_recovery_query(
     text: &str,
     expected: &BTreeSet<RecoveryNode>,
     limits: TreeSitterLimits,
-    cancellation: &impl TreeSitterCancellation,
+    cancellation: &Cancellation,
     started: Instant,
     work_units: &mut u64,
 ) -> Result<(), TreeSitterAdapterError> {
@@ -935,7 +963,6 @@ fn point_at(text: &str, byte: usize) -> Result<Point, TreeSitterAdapterError> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
 
@@ -1026,21 +1053,6 @@ mod tests {
         crate::integrity::frame_digest(hasher.finalize())
     }
 
-    struct CancelAfter {
-        checks: AtomicUsize,
-        after: usize,
-    }
-
-    impl TreeSitterCancellation for CancelAfter {
-        fn is_cancelled(&self) -> bool {
-            self.checks.fetch_add(1, Ordering::Relaxed) >= self.after
-        }
-
-        fn check_interval(&self) -> u32 {
-            1
-        }
-    }
-
     #[test]
     fn wp30_behavioral_acceptance() {
         for case in fixture()["cases"].as_array().unwrap() {
@@ -1051,7 +1063,7 @@ mod tests {
                 .parse_full(
                     1,
                     provider_text(case["source"].as_str().unwrap()),
-                    &NeverCancelled,
+                    &Cancellation::default(),
                 )
                 .unwrap();
             assert_eq!(
@@ -1118,7 +1130,7 @@ mod tests {
             assert_eq!(start, new.rfind(new_fragment).unwrap());
             let mut incremental = TreeSitterAdapter::new(language).unwrap();
             incremental
-                .parse_full(1, provider_text(old), &NeverCancelled)
+                .parse_full(1, provider_text(old), &Cancellation::default())
                 .unwrap();
             let incrementally_parsed = incremental
                 .parse_incremental(
@@ -1129,12 +1141,12 @@ mod tests {
                         old_end_byte: start + old_fragment.len(),
                         new_end_byte: start + new_fragment.len(),
                     },
-                    &NeverCancelled,
+                    &Cancellation::default(),
                 )
                 .unwrap();
             let fully_parsed = TreeSitterAdapter::new(language)
                 .unwrap()
-                .parse_full(2, provider_text(new), &NeverCancelled)
+                .parse_full(2, provider_text(new), &Cancellation::default())
                 .unwrap();
             assert_eq!(incrementally_parsed.facts, fully_parsed.facts);
             assert!(!incrementally_parsed.changed_ranges.is_empty());
@@ -1148,7 +1160,7 @@ mod tests {
 
         let latin1 = TreeSitterAdapter::new(TreeSitterLanguage::Python)
             .unwrap()
-            .parse_full(1, latin1_provider_text(), &NeverCancelled)
+            .parse_full(1, latin1_provider_text(), &Cancellation::default())
             .unwrap();
         assert_eq!(latin1.facts.first().unwrap().end_byte, 29);
         assert!(latin1.facts.iter().all(|fact| fact.end_byte <= 29));
@@ -1347,7 +1359,7 @@ mod tests {
                 "def broken(:\n",
                 &BTreeSet::new(),
                 limits,
-                &NeverCancelled,
+                &Cancellation::default(),
                 Instant::now(),
                 &mut work_units,
             ),
@@ -1364,7 +1376,7 @@ mod tests {
                 "def broken(:\n",
                 &BTreeSet::new(),
                 query_limited,
-                &NeverCancelled,
+                &Cancellation::default(),
                 Instant::now(),
                 &mut work_units,
             ),
@@ -1377,7 +1389,7 @@ mod tests {
                 TreeSitterAdapter::new(language).unwrap().parse_full(
                     1,
                     provider_text(&malformed),
-                    &NeverCancelled,
+                    &Cancellation::default(),
                 )
             });
             assert!(result.is_ok());
@@ -1385,7 +1397,7 @@ mod tests {
         }
         let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Rust).unwrap();
         adapter
-            .parse_full(1, provider_text("fn main() {}\n"), &NeverCancelled)
+            .parse_full(1, provider_text("fn main() {}\n"), &Cancellation::default())
             .unwrap();
         let active = adapter.active_snapshot().unwrap().clone();
         assert!(matches!(
@@ -1397,7 +1409,7 @@ mod tests {
                     old_end_byte: 6,
                     new_end_byte: 10,
                 },
-                &NeverCancelled,
+                &Cancellation::default(),
             ),
             Err(TreeSitterAdapterError::InvalidEdit(_))
         ));
@@ -1434,12 +1446,10 @@ mod tests {
 
         let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
         let complete = adapter
-            .parse_full(1, provider_text("value = 1\n"), &NeverCancelled)
+            .parse_full(1, provider_text("value = 1\n"), &Cancellation::default())
             .unwrap();
-        let cancellation = CancelAfter {
-            checks: AtomicUsize::new(0),
-            after: 1,
-        };
+        let cancellation = Cancellation::with_check_interval(1);
+        cancellation.cancel();
         let cancelled_source = "value = 2\n".repeat(10_000);
         assert_eq!(
             adapter.parse_full(2, provider_text(&cancelled_source), &cancellation),
@@ -1451,7 +1461,7 @@ mod tests {
 
         let deep = format!("{}value{}\n", "(".repeat(300), ")".repeat(300));
         assert_eq!(
-            adapter.parse_full(3, provider_text(&deep), &NeverCancelled),
+            adapter.parse_full(3, provider_text(&deep), &Cancellation::default()),
             Err(TreeSitterAdapterError::DepthLimit)
         );
         assert_eq!(adapter.active_snapshot(), Some(&complete));
@@ -1462,60 +1472,60 @@ mod tests {
         exact_input_adapter.limits.max_input_bytes = u64::try_from(exact_input.len()).unwrap();
         assert!(
             exact_input_adapter
-                .parse_full(1, provider_text(exact_input), &NeverCancelled)
+                .parse_full(1, provider_text(exact_input), &Cancellation::default())
                 .is_ok()
         );
         let mut over_input_adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
         over_input_adapter.limits.max_input_bytes =
             u64::try_from(exact_input.len().saturating_sub(1)).unwrap();
         assert_eq!(
-            over_input_adapter.parse_full(1, provider_text(exact_input), &NeverCancelled),
+            over_input_adapter.parse_full(1, provider_text(exact_input), &Cancellation::default()),
             Err(TreeSitterAdapterError::InputLimit)
         );
         adapter.limits.max_input_bytes = 1;
         assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &NeverCancelled),
+            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
             Err(TreeSitterAdapterError::InputLimit)
         );
         adapter.limits = standard_limits;
         adapter.limits.max_work_units = 0;
         assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &NeverCancelled),
+            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
             Err(TreeSitterAdapterError::WorkLimit)
         );
         adapter.limits = standard_limits;
         adapter.limits.max_visited_nodes = 1;
         assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &NeverCancelled),
+            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
             Err(TreeSitterAdapterError::NodeLimit)
         );
         adapter.limits = standard_limits;
         adapter.limits.max_output_records = 1;
         assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &NeverCancelled),
+            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
             Err(TreeSitterAdapterError::OutputRecordLimit)
         );
         adapter.limits = standard_limits;
         adapter.limits.max_output_bytes = 1;
         assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &NeverCancelled),
+            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
             Err(TreeSitterAdapterError::OutputByteLimit)
         );
         adapter.limits = standard_limits;
         adapter.limits.max_diagnostics = 0;
         assert_eq!(
-            adapter.parse_full(4, provider_text("def broken(:\n"), &NeverCancelled),
+            adapter.parse_full(4, provider_text("def broken(:\n"), &Cancellation::default()),
             Err(TreeSitterAdapterError::DiagnosticLimit)
         );
         adapter.limits = standard_limits;
         assert_eq!(adapter.active_snapshot(), Some(&complete));
 
         adapter
-            .parse_full(4, provider_text("value = 4\n"), &NeverCancelled)
+            .parse_full(4, provider_text("value = 4\n"), &Cancellation::default())
             .unwrap();
         let measured_source = "value = 5\n".repeat(10_000);
         adapter
-            .parse_full(5, provider_text(&measured_source), &NeverCancelled)
+            .parse_full(5, provider_text(&measured_source), &Cancellation::default())
             .unwrap();
         assert_eq!(adapter.metrics().retained_revisions, 2);
         let metrics = adapter.metrics().last_run.unwrap();
