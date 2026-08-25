@@ -98,7 +98,7 @@
       "blockers": []
     },
     "WP60": {
-      "status": "in_progress",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -305,8 +305,24 @@
         "src/fact_ingest.rs"
       ],
       "summary": "WP59 dependency closure at 75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47 resolves the earlier sequencing correction; WP74 retains 77ff920657f3a4c4bcb760074f87e95730678492 as its substantive proving commit after its focused acceptance and referential-integrity checks passed again at the dependency-closed HEAD."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP57",
+      "paths": [
+        "contracts/registry/design-principle-detector-registry.yaml"
+      ],
+      "summary": "Implemented-scope closeout corrected DP-038 from counting handwritten encoder functions in src/fact_ingest.rs to asserting the single generated src/generated/fact_row_encoders.rs artifact. The detector is closed because WP57's generated encoder family and generation/reproduction oracles replace the legacy drift surface."
+    },
+    {
+      "kind": "execution_state_correction",
+      "packet": "WP60",
+      "paths": [
+        "docs/plans/state/codefabric-design-principles-full-alignment_v3_state.json"
+      ],
+      "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
     }
   ],
-  "next_action": "Complete the requested implemented-scope closeout and implementation-status reconstruction, then resume active WP60 at its external provider adapter and lifecycle boundary.",
-  "updated_at": "2026-08-25T19:31:55Z"
+  "next_action": "Complete implemented-scope closeout and implementation-status reconstruction, then begin WP60 preflight at the external provider adapter and lifecycle boundary.",
+  "updated_at": "2026-08-25T19:53:14Z"
 }
