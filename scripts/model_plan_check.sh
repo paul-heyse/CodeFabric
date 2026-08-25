@@ -11,7 +11,7 @@ cargo nextest run \
   --no-default-features \
   --features model-compiler \
   --bin codefabric-model \
-  -E 'test(model_action_key) | test(model_affected_closure) | test(model_desired_tree) | test(model_planned_output) | test(model_rejects_duplicate_output) | test(model_cache_entry) | test(model_plan_is_insertion) | test(model_explain_reports) | test(model_cycles_project) | test(model_transaction_preview)'
+  -E 'test(model_cache_manifest_contains_complete_action_identity_and_output_census) | test(model_affected_closure) | test(model_desired_tree) | test(model_plan_real_drift_fails_read_only_check) | test(model_planned_output) | test(model_rejects_duplicate_output) | test(model_plan_is_insertion) | test(model_explain_reports) | test(model_cycles_project) | test(model_transaction_preview)'
 
 plan_json="$("$repo_root/scripts/model_exec.sh" plan --root "$repo_root")"
 jq -e '
