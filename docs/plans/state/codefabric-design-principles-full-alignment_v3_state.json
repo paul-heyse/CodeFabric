@@ -1,22 +1,22 @@
 {
   "schema_version": 2,
-  "plan_path": "docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v2_2026-08-25.md",
+  "plan_path": "docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v3_2026-08-25.md",
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
-  "baseline_commit": "f2dfcfe25dbfe46f0ca779a2fc4273787e18a445",
-  "status": "superseded",
-  "current_packet": null,
+  "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
+  "status": "executing",
+  "current_packet": "WP54",
   "packets": {
     "WP73": {
       "status": "complete",
       "proving_commit": "c133c9ed7ce2e5af293d6693da1509428d0be747",
       "deviations": [
-        "Repository owner explicitly accepted the exact WP73 normative amendment candidate in commit c6db86e on 2026-08-25."
+        "Inherited from the trusted v2 WP73 checkpoint after explicit repository-owner acceptance; v3 changes only declared-input provenance."
       ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP54": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -237,38 +237,9 @@
       "blockers": []
     }
   },
-  "baseline_failures": [
-    {
-      "command": "just ci-fast",
-      "classification": "pre_existing",
-      "fingerprint": "Typos rejects citation-placeholder notation and a mixed-case SQL-nullability mnemonic in the immutable v1 plan/proposal after Rust checks, 265 nextest cases, and doctests pass.",
-      "owner": "WP73/WP54 baseline disposition"
-    }
-  ],
-  "discovered_obligations": [
-    {
-      "packet": "WP73",
-      "summary": "The historical register has 124 DP headings but labels only 16 Detector clauses and one Verified command; create a substantive executable detector registry instead of claiming 124 historical commands were replayed."
-    },
-    {
-      "packet": "WP73",
-      "summary": "Accepted changes to five declared normative inputs require a v3 implementation plan with their new digests before WP54 or any finding-driven implementation packet begins."
-    }
-  ],
-  "plan_deviations": [
-    {
-      "kind": "planned_design_input_evolution",
-      "packet": "WP73",
-      "paths": [
-        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
-        "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
-        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
-        "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md",
-        "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md"
-      ],
-      "summary": "The repository owner accepted the exact WP73 P2/P10/P14/P19/P21/DP-051 and AC-G-79 normative amendments in commit c6db86e. V2 planning-time digests remain immutable; v3 must declare the accepted current digests before WP54 begins."
-    }
-  ],
-  "next_action": "Execution continues under the active v3 plan; this state remains immutable WP73 history.",
+  "baseline_failures": [],
+  "discovered_obligations": [],
+  "plan_deviations": [],
+  "next_action": "Execute WP54 baseline canonicalization, oracle-substance, artifact registration, and legacy tree disposition against the accepted WP73 authorities.",
   "updated_at": "2026-08-25T12:45:00Z"
 }
