@@ -45,7 +45,12 @@ class OracleDefinition:
 
 def _active(root: Path = ROOT) -> tuple[Path, Mapping[str, Any], Mapping[str, Any]]:
     path = artifact_contracts.active_plan_path(root)
-    plan = artifact_contracts.validate_plan(root, path)
+    artifact_contracts.validate_artifacts(root, path)
+    plan = artifact_contracts.validate_plan(
+        root,
+        path,
+        verify_declared_inputs=False,
+    )
     state = artifact_contracts.validate_state(
         root,
         root / str(plan["state_path"]),
@@ -153,10 +158,21 @@ def _load_overlap_dispositions(
     if not path.is_file():
         return {}
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    expected_keys = {
+        "artifact_id",
+        "artifact_kind",
+        "version",
+        "compatible_suite_major",
+        "status",
+        "schema_version",
+        "records",
+    }
     if (
         not isinstance(document, Mapping)
         or document.get("schema_version") != 1
-        or set(document) != {"schema_version", "records"}
+        or set(document) != expected_keys
+        or document.get("artifact_id")
+        != "codefabric.governance.plan-overlap-dispositions"
         or not isinstance(document.get("records"), list)
     ):
         raise PlanAssuranceError(f"{OVERLAP_DISPOSITIONS} has an invalid root")
