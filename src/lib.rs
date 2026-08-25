@@ -1,8 +1,8 @@
 //! Stable CodeFabric daemon and data-plane library.
 //!
-//! Wave 0 establishes the production dependency and build boundary. Domain behavior
-//! arrives in later packets; [`compatibility`] is the executable contract that keeps
-//! the selected library APIs and feature graph honest until those modules replace it.
+//! Wave 0 establishes the production dependency and build boundary. Domain behavior lives in the
+//! production modules; [`compatibility`] is a compile- and test-only pinned-library probe tier,
+//! never a runtime application contract.
 
 #[cfg(feature = "canonical-json")]
 pub mod analysis_context;

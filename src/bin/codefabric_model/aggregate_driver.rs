@@ -1360,62 +1360,56 @@ fn bundle_digest(bundle: &ModelBundleRecord) -> Result<String, AggregateError> {
 }
 
 fn bundle_membership(artifact: &ModelArtifactRecord) -> BTreeSet<&'static str> {
-    let path = artifact.authority_path.as_str();
-    let mut kinds = BTreeSet::new();
-    if artifact.artifact_kind == "bundle-manifest" || path.starts_with("contracts/bundles/") {
-        return kinds;
+    declared_bundle_assignments(artifact.artifact_id.as_str())
+        .iter()
+        .copied()
+        .collect()
+}
+
+fn declared_bundle_assignments(artifact_id: &str) -> &'static [&'static str] {
+    match artifact_id {
+        "codefabric.registry.derivation-registry"
+        | "codefabric.registry.projection-registry"
+        | "codefabric.registry.summary-registry" => &["derivation"],
+        "codefabric.registry.model-pack.schema" => &["model-pack"],
+        "codefabric.identity.cbef-v1"
+        | "codefabric.identity.path-canonicalization-v1"
+        | "codefabric.identity.type-algebra-v1"
+        | "codefabric.registry.enum-registry"
+        | "codefabric.registry.flag-registry"
+        | "codefabric.registry.ontology-entity-registry"
+        | "codefabric.registry.ontology-fact-registry"
+        | "codefabric.registry.ontology-property-registry"
+        | "codefabric.registry.ontology-relation-registry"
+        | "codefabric.registry.unknown-registry" => &["ontology"],
+        "codefabric.registry.provider-normalization-registry"
+        | "codefabric.registry.provider-registry"
+        | "codefabric.registry.provider-resource-profile-registry"
+        | "codefabric.rpc.pyrefly-sidecar"
+        | "codefabric.rpc.rustc-extractor" => &["provider"],
+        "codefabric.registry.capability-registry" => &["provider", "tool-contract"],
+        "codefabric.rpc.feature-registry" => &["provider", "query-language", "tool-contract"],
+        "codefabric.query.english-controlled-v1"
+        | "codefabric.query.planspec.schema"
+        | "codefabric.registry.phrase-registry" => &["query-language"],
+        "codefabric.schema.cpg-semantic-query-request.schema"
+        | "codefabric.schema.cpg-semantic-query-response.schema" => &["query-language", "schema"],
+        "codefabric.rpc.cpg-query-service" => &["query-language", "tool-contract"],
+        "codefabric.schema.analysis-context.schema"
+        | "codefabric.schema.contract-ir"
+        | "codefabric.schema.public-snapshot-metadata.schema"
+        | "codefabric.schema.serving-snapshot.schema"
+        | "codefabric.schema.source-context.schema" => &["schema"],
+        "codefabric.schema.public-status.schema" => &["schema", "tool-contract"],
+        "codefabric.adapter.fastmcp-input.schema"
+        | "codefabric.adapter.fastmcp-output.schema"
+        | "codefabric.adapter.fastmcp-public-meta.schema"
+        | "codefabric.adapter.model-ir"
+        | "codefabric.registry.error-registry"
+        | "codefabric.registry.state-machine-registry" => &["tool-contract"],
+        "codefabric.toolchain.identity" => &["toolchain"],
+        _ => &[],
     }
-    if path.starts_with("contracts/identity/")
-        || path.starts_with("contracts/registry/ontology-")
-        || path.ends_with("/enum-registry.yaml")
-        || path.ends_with("/flag-registry.yaml")
-        || path.ends_with("/unknown-registry.yaml")
-    {
-        kinds.insert("ontology");
-    }
-    if path.starts_with("contracts/schema/") {
-        kinds.insert("schema");
-    }
-    if path.starts_with("contracts/providers/")
-        || path.contains("/provider-")
-        || path.ends_with("/capability-registry.yaml")
-        || path.ends_with("/feature-registry.yaml")
-        || path.ends_with("/pyrefly_sidecar.proto")
-        || path.ends_with("/rustc_extractor.proto")
-    {
-        kinds.insert("provider");
-    }
-    if path.starts_with("contracts/query/")
-        || path.ends_with("/phrase-registry.yaml")
-        || path.ends_with("/cpg_query_service.proto")
-        || path.ends_with("/feature-registry.yaml")
-        || path.contains("/cpg-semantic-query-")
-    {
-        kinds.insert("query-language");
-    }
-    if path.starts_with("contracts/adapter/")
-        || path.ends_with("/capability-registry.yaml")
-        || path.ends_with("/error-registry.yaml")
-        || path.ends_with("/state-machine-registry.yaml")
-        || path.ends_with("/cpg_query_service.proto")
-        || path.ends_with("/feature-registry.yaml")
-        || path.ends_with("/public-status.schema.json")
-    {
-        kinds.insert("tool-contract");
-    }
-    if path.ends_with("/derivation-registry.yaml")
-        || path.ends_with("/projection-registry.yaml")
-        || path.ends_with("/summary-registry.yaml")
-    {
-        kinds.insert("derivation");
-    }
-    if path.ends_with("/model-pack.schema.json") {
-        kinds.insert("model-pack");
-    }
-    if path.starts_with("contracts/toolchain/") {
-        kinds.insert("toolchain");
-    }
-    kinds
 }
 
 fn is_aggregate_meta_projection(path: &str) -> bool {

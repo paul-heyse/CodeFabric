@@ -1,8 +1,9 @@
-//! Compile- and behavior-level probes for load-bearing production dependencies.
+//! Compile- and test-only probes for the exact pinned dependency graph.
 //!
-//! This is deliberately narrow: it proves that the exact pinned versions expose the
-//! APIs assumed by the accepted design. Production modules replace these probes as the
-//! corresponding capabilities land.
+//! This module is a library-compatibility assurance tier: it proves that selected public APIs
+//! compile and that small known-answer behaviors remain available. It is not a CodeFabric runtime
+//! contract, does not own production behavior, and must not be called from daemon request paths.
+//! Production modules and their acceptance tests remain authoritative for application semantics.
 
 use std::sync::Arc;
 
