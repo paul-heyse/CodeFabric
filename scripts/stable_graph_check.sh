@@ -89,6 +89,7 @@ printf '%s' "$root_shape" | jq -e '
   and (.features | has("contracts-tooling") | not)
   and .features["contract-models"] == ["canonical-json", "dep:serde_yaml_ng"]
   and (.features["model-compiler"] | sort) == ([
+    "contract-models",
     "dep:blake3", "dep:gix", "dep:notify-debouncer-full", "dep:petgraph",
     "dep:rustix", "dep:serde", "dep:serde_json",
     "dep:serde_json_canonicalizer", "dep:serde_yaml_ng", "dep:tempfile",
