@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:5ddf04aecf81011498aa7b35acc84466b648541eb2e9249fbc89633048d4a1e2; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:f48030163a07e50f186079f97db7467d7c7a57184dcc8de5153defee9f0e7431; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
@@ -2970,7 +2970,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
         name: "syntax_detail",
         family: "syntax",
         grain: "one normalized syntax entity",
-        schema_version: "1.0",
+        schema_version: "1.1",
         columns: &[
             GeneratedColumn {
                 name: "workspace_id",
@@ -3079,6 +3079,54 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
             GeneratedColumn {
                 name: "ordinal",
                 logical_type: LogicalType::Int32,
+                nullable: true,
+                semantic_type: None,
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "source_ordinal",
+                logical_type: LogicalType::Int32,
+                nullable: true,
+                semantic_type: None,
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "evaluation_ordinal",
+                logical_type: LogicalType::Int32,
+                nullable: true,
+                semantic_type: None,
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "line",
+                logical_type: LogicalType::Int32,
+                nullable: true,
+                semantic_type: None,
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "column",
+                logical_type: LogicalType::Int32,
+                nullable: true,
+                semantic_type: None,
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "depth",
+                logical_type: LogicalType::Int32,
+                nullable: true,
+                semantic_type: None,
+                foreign_key: None,
+                hidden_operational: false,
+            },
+            GeneratedColumn {
+                name: "provider_name",
+                logical_type: LogicalType::Utf8,
                 nullable: true,
                 semantic_type: None,
                 foreign_key: None,

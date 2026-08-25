@@ -2198,7 +2198,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:5ddf04aecf81011498aa7b35acc84466b648541eb2e9249fbc89633048d4a1e2"
+    "source_digest": "b3:f48030163a07e50f186079f97db7467d7c7a57184dcc8de5153defee9f0e7431"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [
@@ -6872,6 +6872,84 @@
         },
         {
           "arrow_type": {
+            "name": "int32"
+          },
+          "field_id": "syntax_detail.source_ordinal",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int32",
+          "name": "source_ordinal",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int32"
+          },
+          "field_id": "syntax_detail.evaluation_ordinal",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int32",
+          "name": "evaluation_ordinal",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int32"
+          },
+          "field_id": "syntax_detail.line",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int32",
+          "name": "line",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int32"
+          },
+          "field_id": "syntax_detail.column",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int32",
+          "name": "column",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int32"
+          },
+          "field_id": "syntax_detail.depth",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int32",
+          "name": "depth",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "syntax_detail.provider_name",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "provider_name",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
             "name": "boolean"
           },
           "field_id": "syntax_detail.named",
@@ -6969,7 +7047,7 @@
       "publication_pin_role": "PINNED_DATA",
       "required_for_publication": true,
       "row_encoder": "syntax_details",
-      "schema_version": "1.0",
+      "schema_version": "1.1",
       "table_code": 170,
       "table_id": "table:syntax_detail",
       "zorder_columns": [

@@ -11,7 +11,7 @@ use rayon::ThreadPool;
 use thiserror::Error;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use crate::fact_ingest::{ObservationMessage, StreamTerminal, bounded_observation_channel};
+use crate::fact_ingest::{ProviderFactMessage, StreamTerminal, bounded_provider_fact_channel};
 use crate::identity::{IdentityDomain, decode_public_id};
 use crate::operational_store::{OperationalReaderFactory, OperationalStore, ProviderRunRecord};
 use crate::registries::{
@@ -185,7 +185,7 @@ pub struct AcceptedProviderJob {
     pub run_id: String,
     pub accepted_generation: u64,
     pub events: mpsc::Receiver<ProviderEvent>,
-    pub observations: mpsc::Receiver<ObservationMessage>,
+    pub provider_facts: mpsc::Receiver<ProviderFactMessage>,
 }
 
 /// Cooperative cancellation signal available to synchronous provider adapters.
@@ -213,7 +213,7 @@ impl ProviderCancellation {
 #[derive(Clone)]
 pub struct ProviderEventSink {
     events: mpsc::Sender<ProviderEvent>,
-    observations: mpsc::Sender<ObservationMessage>,
+    provider_facts: mpsc::Sender<ProviderFactMessage>,
     counters: Arc<RuntimeCounters>,
     identity: ProviderEventIdentity,
     validated_ids: ValidatedJobIds,
@@ -275,11 +275,11 @@ impl ProviderEventSink {
     /// # Errors
     ///
     /// Returns `EventReceiverClosed` after the observation consumer is dropped.
-    pub fn send_observation(
+    pub fn send_provider_fact(
         &self,
-        message: ObservationMessage,
+        message: ProviderFactMessage,
     ) -> Result<(), ProviderRuntimeError> {
-        if let ObservationMessage::Manifest(manifest) = &message
+        if let ProviderFactMessage::Manifest(manifest) = &message
             && (manifest.workspace_id != self.validated_ids.workspace
                 || manifest.analysis_context_id != self.validated_ids.context
                 || manifest.provider_run_id != self.validated_ids.run
@@ -291,13 +291,13 @@ impl ProviderEventSink {
                 "observation manifest identity differs from accepted job".into(),
             ));
         }
-        match self.observations.try_send(message) {
+        match self.provider_facts.try_send(message) {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Full(message)) => {
                 self.counters
                     .backpressure_waits
                     .fetch_add(1, Ordering::Relaxed);
-                self.observations
+                self.provider_facts
                     .blocking_send(message)
                     .map_err(|_| ProviderRuntimeError::EventReceiverClosed)
             }
@@ -1282,8 +1282,8 @@ impl ProviderRuntime {
             }
         };
         let _ = sink
-            .observations
-            .send(ObservationMessage::Terminal(stream_terminal))
+            .provider_facts
+            .send(ProviderFactMessage::Terminal(stream_terminal))
             .await;
         let diagnostic = completion.diagnostic_code.as_deref();
         if let Ok(state) = self.transition(
@@ -1365,8 +1365,8 @@ impl ProviderExecutor for ProviderRuntime {
             prior.request(INTENT_SUPERSEDE);
         }
         let (events_sender, events) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-        let (observations_sender, observations) =
-            bounded_observation_channel(OBSERVATION_CHANNEL_CAPACITY);
+        let (provider_facts_sender, provider_facts) =
+            bounded_provider_fact_channel(OBSERVATION_CHANNEL_CAPACITY);
         let identity = ProviderEventIdentity {
             provider_run_id: spec.provider_run_id.clone(),
             workspace_id: spec.workspace_id.clone(),
@@ -1383,7 +1383,7 @@ impl ProviderExecutor for ProviderRuntime {
             .map_err(|_| ProviderRuntimeError::EventReceiverClosed)?;
         let sink = ProviderEventSink {
             events: events_sender,
-            observations: observations_sender,
+            provider_facts: provider_facts_sender,
             counters: Arc::clone(&self.counters),
             identity,
             validated_ids,
@@ -1395,7 +1395,7 @@ impl ProviderExecutor for ProviderRuntime {
             run_id: spec.provider_run_id.clone(),
             accepted_generation: spec.source_generation,
             events,
-            observations,
+            provider_facts,
         };
         tokio::spawn(self.clone().run_job(spec, control, sink));
         Ok(accepted)
@@ -1543,7 +1543,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::fact_ingest::{ObservationManifest, receive_observation_stream};
+    use crate::fact_ingest::{ProviderFactManifest, receive_provider_fact_stream};
     use crate::rpc::generated::codefabric::provider::v1::{ResourceEstimate, SourceSnapshotLease};
 
     const TEST_NOW: i64 = 1_800_000_000_000;
@@ -1572,7 +1572,7 @@ mod tests {
             if !matches!(self.mode, FakeMode::Slow) {
                 assert!(!cancellation.is_cancelled());
             }
-            events.send_observation(ObservationMessage::Manifest(ObservationManifest {
+            events.send_provider_fact(ProviderFactMessage::Manifest(ProviderFactManifest {
                 stream_id: [1; 16],
                 workspace_id: decode_public_id(IdentityDomain::Workspace, None, &spec.workspace_id)
                     .unwrap(),
@@ -1586,6 +1586,7 @@ mod tests {
                 provider_code: 10,
                 provider_version: "test".into(),
                 provider_run_id: decode_lower_hex_id16(&spec.provider_run_id).unwrap(),
+                emitted_at_micros: TEST_NOW,
                 schema_fingerprints: BTreeMap::new(),
                 declared_rows: 0,
             }))?;
@@ -1811,10 +1812,10 @@ mod tests {
         .expect("RUNNING transition must be observable before terminal");
         assert_eq!(fixture.runtime.metrics().started, 1);
         assert_eq!(fixture.runtime.metrics().terminal, 0);
-        let observations = receive_observation_stream(&mut accepted.observations)
+        let provider_facts = receive_provider_fact_stream(&mut accepted.provider_facts)
             .await
             .unwrap();
-        assert_eq!(observations.terminal, StreamTerminal::Completed);
+        assert_eq!(provider_facts.terminal, StreamTerminal::Completed);
         let (state, terminal_identity) = terminal_event_with_identity(&mut accepted.events).await;
         assert_eq!(state, ProviderRunState::Succeeded);
         assert_eq!(terminal_identity.sequence, 1);
@@ -1848,8 +1849,8 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            first.observations.recv().await,
-            Some(ObservationMessage::Manifest(_))
+            first.provider_facts.recv().await,
+            Some(ProviderFactMessage::Manifest(_))
         ));
         let mut second = fixture
             .runtime
@@ -1959,12 +1960,12 @@ mod tests {
         assert_eq!(fixture.runtime.metrics().rejected, 15);
 
         let (events, _event_receiver) = mpsc::channel(1);
-        let (observations, _observation_receiver) = bounded_observation_channel(1);
+        let (provider_facts, _provider_fact_receiver) = bounded_provider_fact_channel(1);
         let valid = job("run:manifest-fence", "scope:required");
         let validated_ids = fixture.runtime.validate_job(&valid).unwrap();
         let sink = ProviderEventSink {
             events,
-            observations,
+            provider_facts,
             counters: Arc::new(RuntimeCounters::default()),
             identity: ProviderEventIdentity {
                 provider_run_id: valid.provider_run_id,
@@ -1978,7 +1979,7 @@ mod tests {
             provider_code: 10,
             next_sequence: Arc::new(AtomicU64::new(1)),
         };
-        let mismatched = ObservationManifest {
+        let mismatched = ProviderFactManifest {
             stream_id: [1; 16],
             workspace_id: [9; 16],
             analysis_context_id: validated_ids.context,
@@ -1986,11 +1987,12 @@ mod tests {
             provider_code: 10,
             provider_version: "test".into(),
             provider_run_id: validated_ids.run,
+            emitted_at_micros: TEST_NOW,
             schema_fingerprints: BTreeMap::new(),
             declared_rows: 0,
         };
         assert!(matches!(
-            sink.send_observation(ObservationMessage::Manifest(mismatched)),
+            sink.send_provider_fact(ProviderFactMessage::Manifest(mismatched)),
             Err(ProviderRuntimeError::Protocol(_))
         ));
     }
@@ -2004,8 +2006,8 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            cancelled.observations.recv().await,
-            Some(ObservationMessage::Manifest(_))
+            cancelled.provider_facts.recv().await,
+            Some(ProviderFactMessage::Manifest(_))
         ));
         let started = Instant::now();
         let acknowledgement = fixture

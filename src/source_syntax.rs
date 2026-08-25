@@ -2,12 +2,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use arrow_array::RecordBatch;
+
 use crate::fact_ingest::{
-    CanonicalIngestOutput, CapabilityStatusRow, ConflictRecord, EntityRow, FactEvidenceRow,
-    FactIngestError, FactScope, IngestDiagnostic, IngestMetrics, OwnerRow, PropertyFactRow,
-    RelationRow, SourceAnnotationRow, SourceFileRow, SourceTokenRow, SyntaxDetailRow,
-    ValidatedFactBatch, encode_capability_statuses, encode_entities, encode_evidence,
-    encode_owners, encode_properties, encode_relations, encode_source_annotations,
+    CapabilityStatusRow, ConflictRecord, EntityRow, FactEvidenceRow, FactIngestError, FactScope,
+    IngestDiagnostic, IngestMetrics, OwnerRow, PropertyFactRow, RelationRow, SourceAnnotationRow,
+    SourceFileRow, SourceTokenRow, SyntaxDetailRow, encode_capability_statuses, encode_entities,
+    encode_evidence, encode_owners, encode_properties, encode_relations, encode_source_annotations,
     encode_source_files, encode_source_tokens, encode_syntax_details,
 };
 use crate::identity::{
@@ -37,6 +38,15 @@ const SOURCE_PROVIDER_VERSION: &str = "source-image-v1";
 pub struct SourceSyntaxProviderRuns {
     pub tree_sitter: [u8; 16],
     pub ruff_python: Option<[u8; 16]>,
+}
+
+/// Unadmitted source/syntax projection passed to the one generic fact-ingress boundary.
+#[derive(Debug)]
+pub(crate) struct ProjectedFactOutput {
+    pub batches: BTreeMap<i16, RecordBatch>,
+    pub conflicts: Vec<ConflictRecord>,
+    pub diagnostics: Vec<IngestDiagnostic>,
+    pub metrics: IngestMetrics,
 }
 
 /// The exact GEN §80 rule that selected a canonical syntax anchor.
@@ -273,7 +283,7 @@ pub(crate) fn project(
     tree: &TreeSitterSnapshot,
     ruff: Option<&RuffSnapshot>,
     runs: SourceSyntaxProviderRuns,
-) -> Result<CanonicalIngestOutput, FactIngestError> {
+) -> Result<ProjectedFactOutput, FactIngestError> {
     validate_inputs(expected_scope, source, tree, ruff, runs)?;
     let language = language_code(source.language);
     let byte_len = source.byte_length;
@@ -380,6 +390,12 @@ pub(crate) fn project(
             parent_syntax_id: parent_id,
             field_role_code: role.map(u16::cast_signed),
             ordinal: Some(to_i32(u64::from(fact.ordinal), "syntax ordinal")?),
+            source_ordinal: Some(to_i32(fact.id.0, "Tree-sitter source ordinal")?),
+            evaluation_ordinal: None,
+            line: None,
+            column: None,
+            depth: Some(i32::from(fact.depth)),
+            provider_name: None,
             named: fact.named,
             extra: fact.extra,
             error: fact.error,
@@ -406,6 +422,7 @@ pub(crate) fn project(
     let anchors = reconciliation_anchors(&tree.facts, &tree_entity, &tree_name_spans);
     let mut ruff_entity = BTreeMap::new();
     let mut ruff_observation = BTreeMap::new();
+    let mut ruff_depth = BTreeMap::new();
     if let Some(ruff) = ruff {
         let run_id = runs.ruff_python.expect("validated Ruff run identity");
         let name_spans = ruff_name_spans(&ruff.ast);
@@ -434,10 +451,26 @@ pub(crate) fn project(
             }
             let observed = observation_id(run_id, 3, fact.id.0);
             ruff_observation.insert(fact.id, observed);
+            let depth = fact
+                .parent
+                .and_then(|parent| ruff_depth.get(&parent).copied())
+                .unwrap_or(0_i32)
+                .saturating_add(i32::from(fact.parent.is_some()));
             let entity_id = if let Some(entity_id) = reconciled.entity_id {
                 let detail = &mut syntax_details[syntax_index[&entity_id]];
                 detail.explicitly_parenthesized |= fact.explicit_parenthesized;
                 detail.reconciliation_step_code = reconciled.step as i16;
+                detail.source_ordinal = Some(to_i32(
+                    u64::from(fact.source_ordinal),
+                    "Ruff source ordinal",
+                )?);
+                detail.evaluation_ordinal = fact
+                    .evaluation_ordinal
+                    .map(|ordinal| to_i32(u64::from(ordinal), "Ruff evaluation ordinal"))
+                    .transpose()?;
+                detail.line = Some(to_i32(u64::from(fact.line), "Ruff line")?);
+                detail.column = Some(to_i32(u64::from(fact.column), "Ruff column")?);
+                detail.depth = Some(depth);
                 if detail.normalized_kind_code == i32::from(SyntaxKind::SyntaxNode as u16)
                     && fact.category.registry_code() != SyntaxKind::SyntaxNode as u16
                 {
@@ -503,6 +536,18 @@ pub(crate) fn project(
                     parent_syntax_id: parent_id,
                     field_role_code: role.map(u16::cast_signed),
                     ordinal: Some(to_i32(u64::from(fact.child_ordinal), "Ruff child ordinal")?),
+                    source_ordinal: Some(to_i32(
+                        u64::from(fact.source_ordinal),
+                        "Ruff source ordinal",
+                    )?),
+                    evaluation_ordinal: fact
+                        .evaluation_ordinal
+                        .map(|ordinal| to_i32(u64::from(ordinal), "Ruff evaluation ordinal"))
+                        .transpose()?,
+                    line: Some(to_i32(u64::from(fact.line), "Ruff line")?),
+                    column: Some(to_i32(u64::from(fact.column), "Ruff column")?),
+                    depth: Some(depth),
+                    provider_name: None,
                     named: true,
                     extra: false,
                     error: false,
@@ -542,10 +587,13 @@ pub(crate) fn project(
                 entity_id
             };
             ruff_entity.insert(fact.id, entity_id);
+            ruff_depth.insert(fact.id, depth);
             if fact.category == RuffAstCategory::DeclarationSyntax
                 && let Some((start, end)) = name_spans.get(&fact.id).copied()
             {
-                entities[entity_index[&entity_id]].name = source_text(source, start, end);
+                let provider_name = source_text(source, start, end);
+                entities[entity_index[&entity_id]].name = provider_name.clone();
+                syntax_details[syntax_index[&entity_id]].provider_name = provider_name;
             }
             evidence_inputs.push(EvidenceInput {
                 fact_id: entity_id,
@@ -681,14 +729,6 @@ pub(crate) fn project(
     source_annotations.sort_by_key(|row| row.annotation_id);
     syntax_details.sort_by_key(|row| row.entity_id);
     evidence.sort_by_key(|row| row.evidence_id);
-    ensure_row_budgets(&[
-        entities.len(),
-        relations.len(),
-        evidence.len(),
-        source_tokens.len(),
-        source_annotations.len(),
-        syntax_details.len(),
-    ])?;
     let batches = [
         (8, encode_owners(&owners)?),
         (9, encode_capability_statuses(&capability_statuses)?),
@@ -702,13 +742,10 @@ pub(crate) fn project(
         (170, encode_syntax_details(&syntax_details)?),
     ]
     .into_iter()
-    .map(|(code, batch)| {
-        ValidatedFactBatch::validate(code, batch, expected_scope).map(|batch| (code, batch))
-    })
-    .collect::<Result<BTreeMap<_, _>, _>>()?;
+    .collect::<BTreeMap<_, _>>();
     let rows_encoded = batches
         .values()
-        .map(ValidatedFactBatch::num_rows)
+        .map(RecordBatch::num_rows)
         .map(|rows| u64::try_from(rows).unwrap_or(u64::MAX))
         .sum();
     let rows_received = 1_u64
@@ -721,7 +758,7 @@ pub(crate) fn project(
         validation_failures: 0,
         conflicts: u64::try_from(conflicts.len()).unwrap_or(u64::MAX),
     };
-    Ok(CanonicalIngestOutput {
+    Ok(ProjectedFactOutput {
         batches,
         conflicts,
         diagnostics,
@@ -1434,6 +1471,7 @@ fn insert_relation(
     role_code: Option<u16>,
     span: Option<(i64, i64)>,
 ) -> Result<(), FactIngestError> {
+    const SYNTAX_TREE_V1_DERIVATION_CODE: i16 = 10;
     let kind = relation_kind(name)
         .ok_or_else(|| FactIngestError::Protocol(format!("relation kind {name} is absent")))?;
     let identity = source_relation_identity(SourceRelationIdentityInput {
@@ -1463,7 +1501,7 @@ fn insert_relation(
         certainty_code: 10,
         resolution_code: 10,
         producer_code: ProviderCode::CodefabricDerivation as i16,
-        derivation_code: None,
+        derivation_code: Some(SYNTAX_TREE_V1_DERIVATION_CODE),
         flags: 0,
         fact_hash64: hash64(identity.id),
     });
@@ -1693,38 +1731,98 @@ fn ruff_field_role(role: Option<RuffChildRole>) -> Option<u16> {
 }
 
 fn token_kind(token: &RuffTokenFact) -> TokenKind {
-    match token.class {
-        RuffTokenClass::Identifier => TokenKind::Identifier,
-        RuffTokenClass::Keyword => TokenKind::Keyword,
-        RuffTokenClass::Literal if token.raw_kind.contains("String") => TokenKind::String,
-        RuffTokenClass::Literal if matches!(token.raw_kind, "Int" | "Float" | "Complex") => {
-            TokenKind::Number
-        }
-        RuffTokenClass::Literal => TokenKind::Literal,
-        RuffTokenClass::Operator if punctuation(token.raw_kind) => TokenKind::Punctuation,
-        RuffTokenClass::Operator => TokenKind::Operator,
-        RuffTokenClass::Newline | RuffTokenClass::Indentation | RuffTokenClass::EndOfFile => {
-            TokenKind::Punctuation
-        }
-        RuffTokenClass::Comment | RuffTokenClass::Unknown => TokenKind::Unknown,
-    }
+    RUFF_TOKEN_NORMALIZATION
+        .iter()
+        .find(|rule| {
+            rule.class == token.class
+                && (rule.raw_kinds.is_empty() || rule.raw_kinds.contains(&token.raw_kind))
+        })
+        .map(|rule| rule.normalized)
+        .expect("declared Ruff token normalization is exhaustive")
 }
 
-fn punctuation(raw: &str) -> bool {
-    matches!(
-        raw,
-        "Lpar"
-            | "Rpar"
-            | "Lsqb"
-            | "Rsqb"
-            | "Lbrace"
-            | "Rbrace"
-            | "Colon"
-            | "Comma"
-            | "Semi"
-            | "Dot"
-    )
+#[derive(Clone, Copy)]
+struct RuffTokenNormalizationRule {
+    class: RuffTokenClass,
+    raw_kinds: &'static [&'static str],
+    normalized: TokenKind,
 }
+
+const RUFF_STRING_TOKENS: &[&str] = &[
+    "String",
+    "FStringStart",
+    "FStringMiddle",
+    "FStringEnd",
+    "TStringStart",
+    "TStringMiddle",
+    "TStringEnd",
+];
+const RUFF_NUMBER_TOKENS: &[&str] = &["Int", "Float", "Complex"];
+const RUFF_PUNCTUATION_TOKENS: &[&str] = &[
+    "Lpar", "Rpar", "Lsqb", "Rsqb", "Lbrace", "Rbrace", "Colon", "Comma", "Semi", "Dot",
+];
+const RUFF_TOKEN_NORMALIZATION: &[RuffTokenNormalizationRule] = &[
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Identifier,
+        raw_kinds: &[],
+        normalized: TokenKind::Identifier,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Keyword,
+        raw_kinds: &[],
+        normalized: TokenKind::Keyword,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Literal,
+        raw_kinds: RUFF_STRING_TOKENS,
+        normalized: TokenKind::String,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Literal,
+        raw_kinds: RUFF_NUMBER_TOKENS,
+        normalized: TokenKind::Number,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Literal,
+        raw_kinds: &[],
+        normalized: TokenKind::Literal,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Operator,
+        raw_kinds: RUFF_PUNCTUATION_TOKENS,
+        normalized: TokenKind::Punctuation,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Operator,
+        raw_kinds: &[],
+        normalized: TokenKind::Operator,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Newline,
+        raw_kinds: &[],
+        normalized: TokenKind::Punctuation,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Indentation,
+        raw_kinds: &[],
+        normalized: TokenKind::Punctuation,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::EndOfFile,
+        raw_kinds: &[],
+        normalized: TokenKind::Punctuation,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Comment,
+        raw_kinds: &[],
+        normalized: TokenKind::Unknown,
+    },
+    RuffTokenNormalizationRule {
+        class: RuffTokenClass::Unknown,
+        raw_kinds: &[],
+        normalized: TokenKind::Unknown,
+    },
+];
 
 const fn token_entity_kind(kind: TokenKind) -> &'static str {
     match kind {
@@ -1821,25 +1919,18 @@ fn batch_error(table_code: i16, check: &'static str, detail: &str) -> FactIngest
     }
 }
 
-fn ensure_row_budgets(counts: &[usize]) -> Result<(), FactIngestError> {
-    if counts.iter().any(|count| *count > 65_536) {
-        return Err(FactIngestError::Protocol(
-            "source/syntax owner batch exceeds 65,536 rows".into(),
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use arrow::ipc::writer::StreamWriter;
-    use arrow_array::{Array as _, FixedSizeBinaryArray, Int32Array};
+    use arrow_array::{Array as _, FixedSizeBinaryArray, Int16Array, Int32Array};
     use serde::Deserialize;
 
     use super::*;
-    use crate::fact_ingest::{CanonicalReconciliationEngine, validate_fact_batch};
+    use crate::fact_ingest::{
+        CanonicalIngestOutput, CanonicalReconciliationEngine, validate_fact_batch,
+    };
     use crate::identity::{CaseSensitivityMode, WorkspacePath};
     use crate::provider_types::ProviderText;
     use crate::ruff_adapter::{NeverRuffCancelled, RuffAdapter};
@@ -2024,6 +2115,23 @@ mod tests {
             actual_output.batches[&160].num_rows() >= ruff.comments.len() + ruff.docstrings.len()
         );
         assert!(actual_output.batches[&170].num_rows() >= tree.facts.len());
+        let syntax_batch = actual_output.batches[&170].batch();
+        for name in [
+            "source_ordinal",
+            "evaluation_ordinal",
+            "line",
+            "column",
+            "depth",
+            "provider_name",
+        ] {
+            let values = syntax_batch
+                .column_by_name(name)
+                .unwrap_or_else(|| panic!("syntax_detail is missing provider field {name}"));
+            assert!(
+                values.null_count() < values.len(),
+                "syntax_detail provider field {name} was not preserved"
+            );
+        }
 
         let relation_spec = crate::schema_registry::table_spec(110).unwrap();
         let kinds = actual_output.batches[&110]
@@ -2037,6 +2145,57 @@ mod tests {
             .as_any()
             .downcast_ref::<Int32Array>()
             .unwrap();
+        let producers = actual_output.batches[&110]
+            .batch()
+            .column_by_name("producer_code")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        let derivations = actual_output.batches[&110]
+            .batch()
+            .column_by_name("derivation_code")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        assert!(
+            producers
+                .iter()
+                .flatten()
+                .all(|code| code == ProviderCode::CodefabricDerivation as i16)
+        );
+        assert!(derivations.iter().flatten().all(|code| code == 10));
+        let relation_ids = actual_output.batches[&110]
+            .batch()
+            .column_by_name("fact_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap()
+            .iter()
+            .flatten()
+            .map(<[u8]>::to_vec)
+            .collect::<BTreeSet<_>>();
+        let evidence_batch = actual_output.batches[&130].batch();
+        let evidence_fact_ids = evidence_batch
+            .column_by_name("fact_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap();
+        let evidence_producers = evidence_batch
+            .column_by_name("provider_code")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        for relation_id in relation_ids {
+            assert!((0..evidence_batch.num_rows()).any(|row| {
+                evidence_fact_ids.value(row) == relation_id
+                    && evidence_producers.value(row) == ProviderCode::CodefabricDerivation as i16
+            }));
+        }
         for required in [
             "CONTAINS_SPAN",
             "TOKEN_OF",
@@ -2682,6 +2841,12 @@ mod tests {
             parent_syntax_id: None,
             field_role_code: None,
             ordinal: None,
+            source_ordinal: None,
+            evaluation_ordinal: None,
+            line: None,
+            column: None,
+            depth: None,
+            provider_name: None,
             named: true,
             extra: false,
             error: false,
@@ -2778,8 +2943,6 @@ mod tests {
         assert_eq!(output.metrics.streams_received, 3);
         assert!(output.metrics.rows_received > 0);
         assert!(output.metrics.rows_encoded > output.metrics.rows_received);
-        assert!(ensure_row_budgets(&[65_536]).is_ok());
-        assert!(ensure_row_budgets(&[65_537]).is_err());
         for (code, batch) in &output.batches {
             validate_fact_batch(batch.batch(), *code, scope(&source)).unwrap();
             assert!(batch.num_rows() <= 65_536);

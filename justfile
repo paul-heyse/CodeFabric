@@ -150,6 +150,13 @@ id16-extension-contract-check:
 provider-statistics-contract-check:
     cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract)/)' --no-tests=fail
 
+[doc("Prove the common direct/IPC provider fact protocol, schema census, and rejection posture")]
+[group('test')]
+provider-protocol-check:
+    cargo nextest run --locked --lib -E 'test(/wp59_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail
+    @if rg -n 'ObservationMessage|CanonicalFact|encode_selected|with_skip_validation' src/ rustc-extractor/src/; then echo 'provider protocol legacy or unsafe IPC validation bypass remains' >&2; exit 1; fi
+    @rg -n 'StreamDecoder::new\(\)\.with_require_alignment\(false\)' src/fact_ingest.rs >/dev/null
+
 [doc("Prove predecessor data-fabric identities survive only in reviewed historical locations")]
 [group('static')]
 data-fabric-old-authority-check:

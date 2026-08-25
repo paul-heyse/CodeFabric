@@ -5,10 +5,8 @@
 //! data that drives admission and completeness.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Cursor;
 use std::sync::Arc;
 
-use arrow::ipc::reader::StreamReader;
 use arrow_array::{Array as _, BooleanArray, ListArray, StringArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use thiserror::Error;
@@ -20,10 +18,11 @@ use crate::fabric::{
     SnapshotProviderCatalog, WorkspaceFabric,
 };
 use crate::fact_ingest::{
-    CanonicalFact, CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow,
-    EntityRow, FactIngestError, FactScope, ObservationEvidence, ObservationManifest,
-    ObservationStream, ObservedFact, OwnerRow, PropertyFactRow, PropertyValue, StreamTerminal,
-    ValidatedFactBatch, encode_capability_statuses, encode_owners,
+    CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow, EntityRow,
+    FactEvidenceRow, FactIngestError, FactScope, OwnerRow, PropertyFactRow, PropertyValue,
+    ProviderFactBatch, ProviderFactManifest, ProviderFactStream, StreamTerminal,
+    decode_validated_arrow_ipc_chunks, encode_capability_statuses, encode_entities,
+    encode_evidence, encode_owners, encode_properties,
 };
 use crate::identity::{
     semantic_entity_identity, semantic_owner_identity, text_property_fact_identity,
@@ -647,7 +646,7 @@ impl CoreFactEngine {
     pub fn reconcile_observations(
         &self,
         scope: FactScope,
-        streams: &[ObservationStream],
+        streams: &[ProviderFactStream],
         provider_precedence: &BTreeMap<i16, u16>,
     ) -> Result<CanonicalIngestOutput, CoreFactError> {
         Ok(self
@@ -743,81 +742,98 @@ impl CoreFactEngine {
                     .concat()
                     .as_slice(),
             );
-            let stream = ObservationStream {
-                manifest: ObservationManifest {
-                    stream_id: digest_id16(&owner.end.owner_content_digest)?,
-                    workspace_id: scope.workspace_id,
-                    analysis_context_id: scope.analysis_context_id,
-                    source_generation,
+            let entity = EntityRow {
+                scope,
+                entity_id: entity_identity.id,
+                language: Language::Rust as i16,
+                entity_family_code: callable.family_code,
+                entity_kind_code: callable.code,
+                raw_kind_code: None,
+                file_id: None,
+                start_byte: None,
+                end_byte: None,
+                name: Some(mir.name.clone()),
+                qualified_name: Some(mir.name.clone()),
+                parent_entity_id: None,
+                type_id: None,
+                flags: 0,
+                fact_hash64: digest_hash64(entity_identity.full_digest),
+            };
+            let property = PropertyFactRow {
+                scope,
+                fact_id: property_identity.id,
+                subject_entity_id: entity_identity.id,
+                property_kind_code: name_property.code,
+                program_point_entity_id: None,
+                value: PropertyValue::Text(mir.name.clone()),
+                directness_code: Directness::Direct as i16,
+                certainty_code: EvidenceCertainty::CompilerExact as i16,
+                resolution_code: ResolutionClass::NotApplicable as i16,
+                producer_code: provider_code,
+                derivation_code: None,
+                file_id: None,
+                start_byte: None,
+                end_byte: None,
+                fact_hash64: digest_hash64(property_identity.full_digest),
+            };
+            let entity_form = crate::registries::fact_kind_code("ENTITY_EXISTENCE")
+                .and_then(|code| i16::try_from(code).ok())
+                .ok_or_else(|| FactIngestError::Protocol("entity fact form is absent".into()))?;
+            let property_form = crate::registries::fact_kind_code("PROPERTY")
+                .and_then(|code| i16::try_from(code).ok())
+                .ok_or_else(|| FactIngestError::Protocol("property fact form is absent".into()))?;
+            let evidence = vec![
+                FactEvidenceRow {
+                    evidence_id: crate::identity::fact_evidence_id(
+                        provider_run_id,
+                        entity_observation,
+                        entity_identity.id,
+                    ),
+                    scope,
+                    fact_id: entity_identity.id,
+                    fact_form_code: entity_form,
                     provider_code,
                     provider_version: format!(
                         "{}+{}",
                         compilation.begin.rustc_version, compilation.begin.rustc_commit
                     ),
                     provider_run_id,
-                    schema_fingerprints: BTreeMap::from([
-                        (100, required_table_digest(100)?),
-                        (120, required_table_digest(120)?),
-                    ]),
-                    declared_rows: 2,
+                    observation_id: entity_observation,
+                    raw_kind_code: None,
+                    file_id: None,
+                    start_byte: None,
+                    end_byte: None,
+                    certainty_code: EvidenceCertainty::CompilerExact as i16,
+                    resolution_code: ResolutionClass::NotApplicable as i16,
+                    conflict_disposition_code: 10,
+                    cold_payload: Some(mir.arrow_ipc.clone()),
                 },
-                observations: vec![
-                    ObservedFact {
-                        fact: CanonicalFact::Entity(EntityRow {
-                            scope,
-                            entity_id: entity_identity.id,
-                            language: Language::Rust as i16,
-                            entity_family_code: callable.family_code,
-                            entity_kind_code: callable.code,
-                            raw_kind_code: None,
-                            file_id: None,
-                            start_byte: None,
-                            end_byte: None,
-                            name: Some(mir.name.clone()),
-                            qualified_name: Some(mir.name.clone()),
-                            parent_entity_id: None,
-                            type_id: None,
-                            flags: 0,
-                            fact_hash64: digest_hash64(entity_identity.full_digest),
-                        }),
-                        evidence: ObservationEvidence {
-                            observation_id: entity_observation,
-                            raw_kind_code: None,
-                            certainty_code: EvidenceCertainty::CompilerExact as i16,
-                            resolution_code: ResolutionClass::NotApplicable as i16,
-                            cold_payload: Some(mir.arrow_ipc.clone()),
-                        },
-                    },
-                    ObservedFact {
-                        fact: CanonicalFact::Property(PropertyFactRow {
-                            scope,
-                            fact_id: property_identity.id,
-                            subject_entity_id: entity_identity.id,
-                            property_kind_code: name_property.code,
-                            program_point_entity_id: None,
-                            value: PropertyValue::Text(mir.name),
-                            directness_code: Directness::Direct as i16,
-                            certainty_code: EvidenceCertainty::CompilerExact as i16,
-                            resolution_code: ResolutionClass::NotApplicable as i16,
-                            producer_code: provider_code,
-                            derivation_code: None,
-                            file_id: None,
-                            start_byte: None,
-                            end_byte: None,
-                            fact_hash64: digest_hash64(property_identity.full_digest),
-                        }),
-                        evidence: ObservationEvidence {
-                            observation_id: property_observation,
-                            raw_kind_code: None,
-                            certainty_code: EvidenceCertainty::CompilerExact as i16,
-                            resolution_code: ResolutionClass::NotApplicable as i16,
-                            cold_payload: None,
-                        },
-                    },
-                ],
-                terminal: StreamTerminal::Completed,
-            };
-            let mut output = self.reconciliation.ingest(scope, &[stream], &precedence)?;
+                FactEvidenceRow {
+                    evidence_id: crate::identity::fact_evidence_id(
+                        provider_run_id,
+                        property_observation,
+                        property_identity.id,
+                    ),
+                    scope,
+                    fact_id: property_identity.id,
+                    fact_form_code: property_form,
+                    provider_code,
+                    provider_version: format!(
+                        "{}+{}",
+                        compilation.begin.rustc_version, compilation.begin.rustc_commit
+                    ),
+                    provider_run_id,
+                    observation_id: property_observation,
+                    raw_kind_code: None,
+                    file_id: None,
+                    start_byte: None,
+                    end_byte: None,
+                    certainty_code: EvidenceCertainty::CompilerExact as i16,
+                    resolution_code: ResolutionClass::NotApplicable as i16,
+                    conflict_disposition_code: 10,
+                    cold_payload: None,
+                },
+            ];
             let owner_batch = encode_owners(&[OwnerRow {
                 scope,
                 parent_owner_id: None,
@@ -844,13 +860,54 @@ impl CoreFactEngine {
                 fallback_source_available: true,
                 coverage_scope_fingerprint: coverage_fingerprint(scope, &mir.chunk_digest),
             }])?;
-            output
-                .batches
-                .insert(8, ValidatedFactBatch::validate(8, owner_batch, scope)?);
-            output
-                .batches
-                .insert(9, ValidatedFactBatch::validate(9, capability_batch, scope)?);
-            output.metrics.rows_encoded = output.metrics.rows_encoded.saturating_add(2);
+            let batches = vec![
+                ProviderFactBatch {
+                    table_code: 8,
+                    batch: owner_batch,
+                },
+                ProviderFactBatch {
+                    table_code: 9,
+                    batch: capability_batch,
+                },
+                ProviderFactBatch {
+                    table_code: 100,
+                    batch: encode_entities(&[entity])?,
+                },
+                ProviderFactBatch {
+                    table_code: 120,
+                    batch: encode_properties(&[property])?,
+                },
+                ProviderFactBatch {
+                    table_code: 130,
+                    batch: encode_evidence(&evidence)?,
+                },
+            ];
+            let stream = ProviderFactStream {
+                manifest: ProviderFactManifest {
+                    stream_id: digest_id16(&owner.end.owner_content_digest)?,
+                    workspace_id: scope.workspace_id,
+                    analysis_context_id: scope.analysis_context_id,
+                    source_generation,
+                    provider_code,
+                    provider_version: format!(
+                        "{}+{}",
+                        compilation.begin.rustc_version, compilation.begin.rustc_commit
+                    ),
+                    provider_run_id,
+                    emitted_at_micros: 0,
+                    schema_fingerprints: batches
+                        .iter()
+                        .map(|batch| {
+                            required_table_digest(batch.table_code)
+                                .map(|digest| (batch.table_code, digest))
+                        })
+                        .collect::<Result<BTreeMap<_, _>, _>>()?,
+                    declared_rows: 6,
+                },
+                batches,
+                terminal: StreamTerminal::Completed,
+            };
+            let output = self.reconciliation.ingest(scope, &[stream], &precedence)?;
             outputs.push(output);
         }
         Ok(outputs)
@@ -1002,16 +1059,16 @@ fn decode_rustc_owner(owner: &AcceptedRustcOwner) -> Result<RustcMirObservation,
             "WP35 MIR chunk profile differs".into(),
         ));
     }
-    let expected_schema = provider_observation_arrow_schema(contract);
-    let mut reader = StreamReader::try_new(Cursor::new(&chunk.arrow_ipc), None)?;
+    let expected_schema = Arc::new(provider_observation_arrow_schema(contract));
+    let batches = decode_validated_arrow_ipc_chunks(
+        Arc::clone(&expected_schema),
+        usize::try_from(chunk.row_count)
+            .map_err(|_| FactIngestError::Protocol("MIR row count exceeds usize".into()))?,
+        chunk.arrow_ipc.len(),
+        [chunk.arrow_ipc.as_slice()],
+    )?;
     let mut rows = Vec::new();
-    for batch in &mut reader {
-        let batch = batch?;
-        if batch.schema().as_ref() != &expected_schema {
-            return Err(FactIngestError::Protocol(
-                "WP35 MIR Arrow schema differs from Contract IR".into(),
-            ));
-        }
+    for batch in batches {
         let names = batch
             .column(0)
             .as_any()

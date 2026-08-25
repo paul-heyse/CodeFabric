@@ -61,7 +61,7 @@
       }
     },
     {
-      "action_key": "b3:9d7dc18f31f658c7842e9a7a30132a542b13c874ced2ba7378fa7aaeeb8f817e",
+      "action_key": "b3:7ce6c65dc938d5c3a0b7ab87d4d20ad7ca3dbded7fdd2a1da0f719885874141d",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",

@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:5ddf04aecf81011498aa7b35acc84466b648541eb2e9249fbc89633048d4a1e2; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:f48030163a07e50f186079f97db7467d7c7a57184dcc8de5153defee9f0e7431; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -342,6 +342,12 @@ pub fn encode_syntax_details(rows: &[SyntaxDetailRow]) -> Result<RecordBatch, Fa
             id16s(rows, |row| row.parent_syntax_id.as_ref()),
             i16s(rows, |row| row.field_role_code),
             i32s(rows, |row| row.ordinal),
+            i32s(rows, |row| row.source_ordinal),
+            i32s(rows, |row| row.evaluation_ordinal),
+            i32s(rows, |row| row.line),
+            i32s(rows, |row| row.column),
+            i32s(rows, |row| row.depth),
+            utf8(rows, |row| row.provider_name.as_deref()),
             bools(rows, |row| Some(row.named)),
             bools(rows, |row| Some(row.extra)),
             bools(rows, |row| Some(row.error)),
