@@ -257,8 +257,8 @@
   },
   "decommission_batches": {
     "DB10": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "c1da2820b184827bc2c8946a58c549d54fe700b3",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -325,6 +325,6 @@
       "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
     }
   ],
-  "next_action": "Complete DB10 query-plane legacy removal and its focused zero-state proof, then implement WP65 execution identity and the persisted single-execution artifact bundle.",
-  "updated_at": "2026-08-25T22:56:24Z"
+  "next_action": "Implement WP65 execution identity and the persisted single-execution artifact bundle with exact packet oracles and proportional validation.",
+  "updated_at": "2026-08-25T22:58:06Z"
 }
