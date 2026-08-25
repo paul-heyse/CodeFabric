@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP56",
+  "current_packet": null,
   "packets": {
     "WP73": {
       "status": "complete",
@@ -40,14 +40,18 @@
       "blockers": []
     },
     "WP56": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "974cb78c03c6047ce0da090ff22d540a5f6d1fb6",
+      "deviations": [
+        "The purpose-aware digest census classifies the model compiler's digest-frame template as the WP56 generator authority; the two emitted Cargo-root helpers remain byte-identical generated outputs rather than independent authorities."
+      ],
+      "failed_approaches": [
+        "The first proving boundary was created after formatting the Proto driver but before refreshing its model-owned identity closure; model-check correctly reported model_artifact_index.json as Replace, so the derived outputs were regenerated and the full zero-drift and reproduction gates were rerun before selecting the final proving commit."
+      ],
       "blockers": []
     },
     "WP57": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -145,7 +149,7 @@
       "blockers": []
     },
     "WP69": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -260,6 +264,6 @@
       "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
     }
   ],
-  "next_action": "Execute WP56's current-tree registry census, collapse the Rust and Python duplicates, and generate wire-safe registry projections without renumbering.",
-  "updated_at": "2026-08-25T10:04:28Z"
+  "next_action": "Begin WP69 and repair the model compiler's shadow-plan, derived-output census, traceability, and vocabulary ownership before certifying M09 and DB12.",
+  "updated_at": "2026-08-25T10:56:48Z"
 }
