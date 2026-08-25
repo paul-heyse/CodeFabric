@@ -1,5 +1,5 @@
 {
-  "artifact_count": 116,
+  "artifact_count": 120,
   "bundle_count": 8,
   "family": "aggregate",
   "fixture_count": 51,
@@ -21,5 +21,5 @@
     "tooling/proto"
   ],
   "schema_version": 1,
-  "tree_digest": "b3:6dd2d7ae66b1ef91d4e8bf1ee956e2ad62b58a6fe4ee377132a2406b7693a12e"
+  "tree_digest": "b3:984d84315c8980da6e9da31497b93ffeaa767b54ada1c8de23ed499a291abe66"
 }

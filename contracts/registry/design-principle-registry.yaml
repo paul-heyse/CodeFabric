@@ -1,3 +1,8 @@
+artifact_id: codefabric.governance.design-principle-registry
+artifact_kind: registry
+version: "1.0"
+compatible_suite_major: 1
+canonical_digest: "b3:4deb5e6b9a94f1fefa9436c031e929ef0c915aca99788418f58bf198a5c41c29"
 schema_version: 1
 authority: AC-G-05
 status: accepted
@@ -153,3 +158,8 @@ records:
     normative_authorities: [{path: docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md, anchor: "## AC-G-79 — Canonical clean-rebuild comparator"}]
     proof_recipes: [alignment-detector-check]
     findings: [DP-004, DP-008, DP-057, DP-058, DP-059, DP-060, DP-061, DP-062, DP-063, DP-064, DP-068, DP-071, DP-073, DP-075, DP-082, DP-099, DP-100, DP-101, DP-102, DP-103, DP-104, DP-106, DP-108, DP-113, DP-115, DP-116, DP-124]
+owner_acceptance:
+  approver: repository-owner
+  accepted_at: "2026-08-25"
+  construction_rule: WP73 owner-accepted P1-P25 authority and finding projection
+  source_digest: "b3:7f2f9c01d85f452d939c4078b67fc6c359fc6284d76095517dc1db00c8ea1614"

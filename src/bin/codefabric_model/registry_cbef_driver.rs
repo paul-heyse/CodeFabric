@@ -41,6 +41,27 @@ const TREE_SITTER_RECOVERY_QUERY: &str = "(ERROR) @error\n(MISSING) @missing\n";
 const MAX_AUTHORITY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PROVIDER_PROBE_BYTES: usize = 32 * 1024 * 1024;
 
+/// Governed alignment registries retain their alignment-specific envelope while receiving the
+/// standard repository-model identity header. Python owns record-level P/DP validation; this
+/// strict model prevents either authority from becoming an unclaimed YAML source.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct DesignPrincipleGovernanceRegistry {
+    artifact_id: String,
+    artifact_kind: String,
+    version: String,
+    compatible_suite_major: u64,
+    canonical_digest: String,
+    schema_version: u64,
+    authority: String,
+    status: String,
+    accepted_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    coverage_defaults: Option<Value>,
+    records: Vec<Value>,
+    owner_acceptance: OwnerAcceptance,
+}
+
 /// Compile one governed registry through the same closed family-native records used by runtime
 /// validation, returning its detached semantic identity. Unknown non-registry families return
 /// `None` so their owning driver can select another native model.
@@ -131,6 +152,12 @@ pub fn detached_registry_identity(
                 ));
             }
             Some(detached_typed_digest(&document)?)
+        }
+        "codefabric.governance.design-principle-registry"
+        | "codefabric.governance.design-principle-detector-registry" => {
+            Some(detached_typed_digest(&decode_yaml::<
+                DesignPrincipleGovernanceRegistry,
+            >(bytes)?)?)
         }
         _ => None,
     };
@@ -2911,6 +2938,30 @@ mod tests {
 
     fn plan() -> RegistryCbefPlan {
         driver().plan(Path::new(".")).unwrap()
+    }
+
+    #[test]
+    fn model_design_principle_registries_are_claimed_with_exact_detached_identity() {
+        for (artifact_id, bytes) in [
+            (
+                "codefabric.governance.design-principle-registry",
+                include_bytes!("../../../contracts/registry/design-principle-registry.yaml")
+                    .as_slice(),
+            ),
+            (
+                "codefabric.governance.design-principle-detector-registry",
+                include_bytes!(
+                    "../../../contracts/registry/design-principle-detector-registry.yaml"
+                )
+                .as_slice(),
+            ),
+        ] {
+            let computed = detached_registry_identity(artifact_id, bytes)
+                .unwrap()
+                .unwrap();
+            let source: Value = serde_yaml_ng::from_slice(bytes).unwrap();
+            assert_eq!(computed, source["canonical_digest"]);
+        }
     }
 
     #[test]

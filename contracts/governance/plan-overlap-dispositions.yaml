@@ -1,3 +1,8 @@
+artifact_id: codefabric.governance.plan-overlap-dispositions
+artifact_kind: governance-ledger
+version: "1.0"
+compatible_suite_major: 1
+status: accepted
 schema_version: 1
 records:
   - resource: rustc-extractor/src/wrapper.rs

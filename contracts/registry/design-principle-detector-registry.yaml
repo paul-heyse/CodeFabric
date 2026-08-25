@@ -1,3 +1,8 @@
+artifact_id: codefabric.governance.design-principle-detector-registry
+artifact_kind: registry
+version: "1.0"
+compatible_suite_major: 1
+canonical_digest: "b3:d2b16d6ed600a35af102fed7d474f95fa573bc04c9d5155a65396def9cfca5a7"
 schema_version: 1
 authority: AC-G-05
 status: accepted
@@ -129,3 +134,8 @@ records:
   - {detector_id: DP-122, principles: [P3], severity: minor, disposition: open, owning_packets: [WP56], command: "just alignment-detector-check DP-122", coverage: *coverage, probe: {kind: contains, paths: [src/semantic_query.rs], pattern: "(find code entities|retrieve facts|follow relationships)", min_matches: 3}}
   - {detector_id: DP-123, principles: [P20], severity: minor, disposition: open, owning_packets: [WP62], command: "just alignment-detector-check DP-123", coverage: *coverage, probe: {kind: contains, paths: [src/semantic_query.rs], pattern: filter, min_matches: 1}}
   - {detector_id: DP-124, principles: [P25], severity: major, disposition: changed, owning_packets: [WP54, WP72], command: "just alignment-detector-check DP-124", coverage: *coverage, probe: {kind: contains, paths: [contracts/registry/design-principle-detector-registry.yaml], pattern: "docs/reviews/\\*\\*", min_matches: 1}}
+owner_acceptance:
+  approver: repository-owner
+  accepted_at: "2026-08-25"
+  construction_rule: WP73 owner-accepted DP-001-DP-124 detector projection
+  source_digest: "b3:98ab2509599aae6c5f2ee9e34bd2cb2252ac79bca1c910b2e9a84ea765f12d32"

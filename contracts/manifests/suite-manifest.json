@@ -32,7 +32,7 @@
       "artifact_id": "codefabric-composable-semantic-cpg-query",
       "artifact_kind": "normative-document",
       "authority_path": "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md",
-      "canonical_digest": "b3:ff54cbda55a4b6192b17ed2acfc5a52df29c36098cf7f9dd235472e97a10c683",
+      "canonical_digest": "b3:be3786b067d70dbc4ff70700265a1400d2f3954fd31b83c474bc6be3f83faff9",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -49,7 +49,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:ff54cbda55a4b6192b17ed2acfc5a52df29c36098cf7f9dd235472e97a10c683",
+      "source_digest": "b3:be3786b067d70dbc4ff70700265a1400d2f3954fd31b83c474bc6be3f83faff9",
       "source_role": "authority",
       "status": "released",
       "version": "1.3"
@@ -58,7 +58,7 @@
       "artifact_id": "codefabric-continuous-cpg-lifecycle",
       "artifact_kind": "normative-document",
       "authority_path": "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
-      "canonical_digest": "b3:96384bff97276f55ad35489ec39381aeb5525f696a7671fc54e99cf571ba85a2",
+      "canonical_digest": "b3:719a481f4bcd91ef9752f73adac126e3aa619108f81a90fc8fdd5d9998e9ae16",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -75,7 +75,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:96384bff97276f55ad35489ec39381aeb5525f696a7671fc54e99cf571ba85a2",
+      "source_digest": "b3:719a481f4bcd91ef9752f73adac126e3aa619108f81a90fc8fdd5d9998e9ae16",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -110,7 +110,7 @@
       "artifact_id": "codefabric-present-state-cpg-data-fabric",
       "artifact_kind": "normative-document",
       "authority_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
-      "canonical_digest": "b3:17c039dc6d939589eb6d0b79a2c028a16e411297c7ae21cebeeba14c3c456dab",
+      "canonical_digest": "b3:20cc5c7e20e3b8c5dd27bed2e976cefb48fdd04bced1eb22e01ba0990c0e1de0",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -127,7 +127,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:17c039dc6d939589eb6d0b79a2c028a16e411297c7ae21cebeeba14c3c456dab",
+      "source_digest": "b3:20cc5c7e20e3b8c5dd27bed2e976cefb48fdd04bced1eb22e01ba0990c0e1de0",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -136,7 +136,7 @@
       "artifact_id": "codefabric-present-state-cpg-fact-generation",
       "artifact_kind": "normative-document",
       "authority_path": "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
-      "canonical_digest": "b3:48cae33e5d7e1a20e697ba7932e5d370c8de87ecc716771df89b531d8644c685",
+      "canonical_digest": "b3:0a0a6c4e4b8964f268c84dde414b2ced0c2a84c2450c917cea8a9bcc7f643a92",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -153,7 +153,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:48cae33e5d7e1a20e697ba7932e5d370c8de87ecc716771df89b531d8644c685",
+      "source_digest": "b3:0a0a6c4e4b8964f268c84dde414b2ced0c2a84c2450c917cea8a9bcc7f643a92",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -214,7 +214,7 @@
       "artifact_id": "codefabric-present-state-cpg-suite-manifest",
       "artifact_kind": "normative-document",
       "authority_path": "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
-      "canonical_digest": "b3:41ac72e8e40cfc6d714d0992c0f07106705f298cdeb2eab07037d0edf4f2f97d",
+      "canonical_digest": "b3:bc3c7f6ecbbee749064ce49dc2098ca2360229f2ce8e33b9b9bd35529b4f78db",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -231,7 +231,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:41ac72e8e40cfc6d714d0992c0f07106705f298cdeb2eab07037d0edf4f2f97d",
+      "source_digest": "b3:bc3c7f6ecbbee749064ce49dc2098ca2360229f2ce8e33b9b9bd35529b4f78db",
       "source_role": "authority",
       "status": "released",
       "version": "1.3"
@@ -662,6 +662,114 @@
       "source_digest": "b3:cb6b3fe0a31dc59168125c748d5fa0934ad8c5d751c9241299c8f86ce748097b",
       "source_role": "authority",
       "status": "released",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.governance.design-principle-baseline",
+      "artifact_kind": "governance-ledger",
+      "authority_path": "contracts/governance/design-principle-baseline.yaml",
+      "canonical_digest": "b3:6ae6c0809730c3eefb628d5473b8f1b70d68e934008613958bf59d3d208c03bf",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "consumers": [
+        "contract-verifier"
+      ],
+      "owner": "contracts",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:e85e8f7f6395c548164f45f0ab156d673ae7d4edf7434c22a143c8afe7da40ca",
+      "source_role": "authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.governance.design-principle-detector-registry",
+      "artifact_kind": "registry",
+      "authority_path": "contracts/registry/design-principle-detector-registry.yaml",
+      "canonical_digest": "b3:d2b16d6ed600a35af102fed7d474f95fa573bc04c9d5155a65396def9cfca5a7",
+      "compatible_suite_major": 1,
+      "compilation_unit": "registry-cbef",
+      "consumers": [
+        "contract-verifier"
+      ],
+      "owner": "contracts",
+      "projection_profile": "registry-family-typed-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "max_output_bytes": 4194304,
+        "max_outputs": 12,
+        "max_source_bytes": 8388608
+      },
+      "source_digest": "b3:9cf57c74cf1f18dc4ae31c1879fdfd058d87ba0666d5f9b6836e1178cf100075",
+      "source_role": "authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.governance.design-principle-registry",
+      "artifact_kind": "registry",
+      "authority_path": "contracts/registry/design-principle-registry.yaml",
+      "canonical_digest": "b3:4deb5e6b9a94f1fefa9436c031e929ef0c915aca99788418f58bf198a5c41c29",
+      "compatible_suite_major": 1,
+      "compilation_unit": "registry-cbef",
+      "consumers": [
+        "contract-verifier"
+      ],
+      "owner": "contracts",
+      "projection_profile": "registry-family-typed-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "max_output_bytes": 4194304,
+        "max_outputs": 12,
+        "max_source_bytes": 8388608
+      },
+      "source_digest": "b3:fa02af5108ed942ee6e378ecc9b0860e8cc8a646294ab6a87370d742458f104a",
+      "source_role": "authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.governance.plan-overlap-dispositions",
+      "artifact_kind": "governance-ledger",
+      "authority_path": "contracts/governance/plan-overlap-dispositions.yaml",
+      "canonical_digest": "b3:83a29451e09e2532c00f312bccb4c1111c04baee8826215ea1452a298d483916",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "consumers": [
+        "contract-verifier"
+      ],
+      "owner": "contracts",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:da2a47809ea4161771213b5997a122f40bc219a39d6c7c9e7f0732953482cb20",
+      "source_role": "authority",
+      "status": "accepted",
       "version": "1.0"
     },
     {
