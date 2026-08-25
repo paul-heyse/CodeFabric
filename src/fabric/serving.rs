@@ -481,10 +481,22 @@ impl ServingQuerySession {
             reservation.try_grow(batch.get_array_memory_size())?;
             batches.push(batch);
         }
+        // The output-byte limit governs delivered Arrow data. Checksum encoding is a distinct,
+        // bounded working set, so charge it against the remaining session memory instead of
+        // making exact-boundary result delivery fail because canonical schema bytes are additive.
+        let checksum_encoding_budget = self
+            .limits
+            .memory_limit_bytes
+            .checked_sub(output_bytes)
+            .ok_or_else(|| {
+                ServingQueryError::ResourceLimit(
+                    "query output exhausts checksum working memory".to_owned(),
+                )
+            })?;
         let result = super::result_checksum::result_checksum_v1(
             physical.schema().as_ref(),
             &batches,
-            self.limits.max_output_bytes,
+            checksum_encoding_budget,
         )?;
         let snapshot = self.lease.snapshot();
         let manifest = snapshot.manifest();
