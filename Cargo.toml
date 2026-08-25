@@ -95,6 +95,7 @@ fact-generation = [
 ]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = [
+    "contract-models",
     "dep:blake3",
     "dep:gix",
     "dep:rusqlite",

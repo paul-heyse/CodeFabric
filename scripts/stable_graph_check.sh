@@ -101,6 +101,10 @@ printf '%s' "$root_shape" | jq -e '
     "dep:ruff_source_file", "dep:ruff_text_size", "dep:tree-sitter",
     "dep:tree-sitter-python", "dep:tree-sitter-rust", "dep:thiserror"
   ] | sort)
+  and (.features["repository-state"] | sort) == ([
+    "contract-models", "dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix",
+    "dep:thiserror", "dep:url"
+  ] | sort)
   and .features.default == ["local-workstation"]
 ' >/dev/null || fail "root package boundary drifted: $root_shape"
 rg -q '^resolver = "3"$' Cargo.toml || fail 'Cargo resolver 3 is not declared'
