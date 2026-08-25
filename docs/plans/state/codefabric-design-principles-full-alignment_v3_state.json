@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP59",
+  "current_packet": "WP60",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -65,10 +65,11 @@
       "blockers": []
     },
     "WP74": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "77ff920657f3a4c4bcb760074f87e95730678492",
       "deviations": [
-        "Substantive implementation and all WP74 packet gates proved at 77ff920657f3a4c4bcb760074f87e95730678492 before the inherited execution state exposed WP59 as an unmet dependency; formal completion and detector closure are intentionally withheld until WP59 is complete."
+        "Substantive implementation and all WP74 packet gates proved at 77ff920657f3a4c4bcb760074f87e95730678492 before the inherited execution state exposed WP59 as an unmet dependency; formal completion and detector closure are intentionally withheld until WP59 is complete.",
+        "WP59 dependency closure was proved at 75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47; all four WP74 oracles and publication-referential-integrity-check were rerun at that HEAD before certification."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -84,14 +85,20 @@
       "blockers": []
     },
     "WP59": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47",
+      "deviations": [
+        "The substantive one-Arrow ingress implementation landed at e6f9ca53a64e9ea5a28fd7611e8cdde835ea100b; the proving commit is the follow-up census fix at 75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47 because packet and root acceptance are green only with both commits in history."
+      ],
+      "failed_approaches": [
+        "The first generic reconciliation pass discarded declared zero-row tables; preserving every present generated table code restored source/syntax and compiler fact-census equivalence.",
+        "The first clean full-root run exposed the compiler-Arrow path omitting its zero-row relation batch; adding the generated empty relation batch restored the schema-driven census and the focused regression plus complete root suite passed.",
+        "One Wave-4 doctest attempt was invalidated when a concurrent user-requested cargo clean removed dependency metadata; it was rerun after cleanup and passed without a code change."
+      ],
       "blockers": []
     },
     "WP60": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -211,7 +218,7 @@
       "blockers": []
     },
     "M10": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -289,8 +296,17 @@
         "contracts/registry/error-registry.yaml"
       ],
       "summary": "WP74 was implemented and proved before its WP59 dependency was complete. Its code is retained because the work is independently valid, but the packet remains in progress without a proving_commit while execution returns to WP58, WP59, and WP60; WP74 will be certified only after dependency closure."
+    },
+    {
+      "kind": "execution_sequence_correction_resolved",
+      "packet": "WP74",
+      "paths": [
+        "src/fabric/publication.rs",
+        "src/fact_ingest.rs"
+      ],
+      "summary": "WP59 dependency closure at 75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47 resolves the earlier sequencing correction; WP74 retains 77ff920657f3a4c4bcb760074f87e95730678492 as its substantive proving commit after its focused acceptance and referential-integrity checks passed again at the dependency-closed HEAD."
     }
   ],
-  "next_action": "Execute WP59's one-Arrow fact contract and merged ingest pipeline with scope-specific provider, IPC, and canonical reconciliation checks.",
-  "updated_at": "2026-08-25T17:28:42Z"
+  "next_action": "Complete the requested implemented-scope closeout and implementation-status reconstruction, then resume active WP60 at its external provider adapter and lifecycle boundary.",
+  "updated_at": "2026-08-25T19:31:55Z"
 }
