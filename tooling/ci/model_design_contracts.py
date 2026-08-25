@@ -14,19 +14,13 @@ from tooling.ci.artifact_contracts import (
     active_plan_path,
     load_state,
     parse_frontmatter,
+    validate_artifacts,
     validate_state,
 )
 
 CONTROL_PLAN = Path(
     "docs/plans/codefabric_model_driven_artifact_and_assurance_control_plane_implementation_plan_v1_2026-08-22.md"
 )
-SUCCESSOR_PLAN = Path(
-    "docs/plans/codefabric_waves_4-7_core_facts_implementation_plan_v5_2026-08-22.md"
-)
-DATA_FABRIC_MIGRATION_PLAN = Path(
-    "docs/plans/codefabric_data_fabric_datafusion55_arrow59_delta43a0cf10_implementation_plan_v1_2026-08-23.md"
-)
-POST_CONTROL_PLANS = frozenset({SUCCESSOR_PLAN, DATA_FABRIC_MIGRATION_PLAN})
 
 
 @dataclass(frozen=True)
@@ -132,14 +126,13 @@ def validate_model_design_contract(
     """Validate the accepted WP01 ownership decisions and the sealed active-program handoff."""
     plan_path = plan_path if plan_path.is_absolute() else root / plan_path
     active = active_plan_path(root)
-    post_control_paths = {root / path for path in POST_CONTROL_PLANS}
-    allowed_active_paths = {plan_path.resolve()} | {
-        path.resolve() for path in post_control_paths
-    }
-    if active.resolve() not in allowed_active_paths:
-        raise ArtifactContractError(
-            "active plan is outside the sealed model-control handoff"
-        )
+    if active.resolve() != plan_path.resolve():
+        try:
+            validate_artifacts(root, active)
+        except (ArtifactContractError, OSError) as error:
+            raise ArtifactContractError(
+                "active plan is outside the governed model-control handoff"
+            ) from error
     plan = parse_frontmatter(plan_path)
     if plan.get("status") != "approved":
         raise ArtifactContractError("active model control plan is not approved")

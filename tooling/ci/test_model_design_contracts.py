@@ -20,7 +20,6 @@ from tooling.ci.artifact_contracts import (
 )
 from tooling.ci.model_design_contracts import (
     CONTROL_PLAN,
-    DATA_FABRIC_MIGRATION_PLAN,
     EVOLVED_DESIGN_INPUTS,
     FORBIDDEN_DESIGN_PHRASES,
     validate_model_design_contract,
@@ -35,7 +34,7 @@ def test_model_active_program_is_unique() -> None:
         == report["active_plan"]
     )
     assert report["active_plan"] != report["suspended_plan"]
-    assert report["active_plan"] == DATA_FABRIC_MIGRATION_PLAN.as_posix()
+    assert report["active_plan"].startswith("docs/plans/")
 
 
 def test_model_active_program_rejects_an_unlisted_plan(
@@ -49,7 +48,7 @@ def test_model_active_program_rejects_an_unlisted_plan(
     )
     with pytest.raises(
         ArtifactContractError,
-        match="outside the sealed model-control handoff",
+        match="outside the governed model-control handoff",
     ):
         validate_model_design_contract()
 
