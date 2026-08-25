@@ -190,6 +190,14 @@ semantic-query-conformance-check:
 query-determinism-check:
     cargo nextest run --locked --lib -E 'test(/(wp64_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|wp64_production_replay_is_partition_and_batch_independent)/)' --no-tests=fail
 
+[doc("Prove the semantic query path contains no legacy SQL builder, string state fields, or order-sensitive checksum")]
+[group('static')]
+query-legacy-zero-state-check:
+    @if rg -n 'SELECT ' src/semantic_query.rs src/query_service.rs; then echo 'legacy SQL remains on the semantic query path' >&2; exit 1; fi
+    @if rg -n 'fn query_sql|f\(sql, snapshot\)|order_sensitive_checksum' src/semantic_query.rs src/query_service.rs src/fabric/; then echo 'legacy query identity or checksum remains' >&2; exit 1; fi
+    @just alignment-detector-check DP-110
+    cargo nextest run --locked --lib -E 'test(/(wp62_negative_zero_state|wp75_negative_zero_state|wp64_negative_zero_state)/)' --no-tests=fail
+
 [doc("Prove Readiness Gate B across all eleven accepted golden artifacts")]
 [group('test')]
 gate-b-check: wave5-integration-check adapter-wheel-test model-release-census-check

@@ -1126,21 +1126,6 @@ pub async fn bind_request(
     })
 }
 
-#[cfg(test)]
-fn query_sql(query: &SemanticQueryClause) -> Result<String, SemanticQueryError> {
-    let limit = query.limit.unwrap_or(QueryLimit {
-        first: 100,
-        offset: 0,
-    });
-    Ok(format!(
-        "SELECT * FROM {} ORDER BY {} LIMIT {} OFFSET {}",
-        query.request.table()?,
-        query.request.order_key()?,
-        limit.first,
-        limit.offset
-    ))
-}
-
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct GraphEdge {
     fact_id: [u8; 16],
@@ -2054,10 +2039,6 @@ mod tests {
         let validated = validate_request(&request()).unwrap();
         assert_eq!(validated.request.queries.len(), 3);
         assert!(validated.request_digest.starts_with("b3:"));
-        assert_eq!(
-            query_sql(&validated.request.queries[0]).unwrap(),
-            "SELECT * FROM entities ORDER BY entity_id LIMIT 10 OFFSET 0"
-        );
     }
 
     #[test]
