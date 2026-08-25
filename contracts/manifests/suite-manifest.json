@@ -430,7 +430,7 @@
       "artifact_id": "codefabric.bundles.ontology-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/ontology-bundle.json",
-      "canonical_digest": "b3:ad5a97aef69a5251a13c47a54a0a5d6bb0964bbacef070f07036285a2c0879e0",
+      "canonical_digest": "b3:b63c8c24c249102c55f6b5192dabd34e1e74a49116e7f9019769953c3b483ccb",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -447,7 +447,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:344aa45af327322558f6492ef6d1362770e9cd451fd1015e098d27bb167cd07f",
+      "source_digest": "b3:641a5f33436a881f08fd1a29370259e0e37ed99d1f5031936ad140fd387bedb3",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -560,7 +560,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:19ecf7a46c65617aae3df06e31c1b9ed8a66f9a16a49f1c1c42a4b93504e9cbb",
+      "canonical_digest": "b3:f556bc3d8288590a2903f515e02af2921a0166c9bccb3f78162b69c2a1a34edb",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -577,7 +577,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:01888e9d2c5cc6e9ca49f8be2a7727eecd4d01465774c7f0b2b8535b220733fb",
+      "source_digest": "b3:62ae010f2dc751ef259578715509d9eb0b384b4827a02ba2d1294f19128ac728",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1052,7 +1052,7 @@
       "artifact_id": "codefabric.registry.enum-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/enum-registry.yaml",
-      "canonical_digest": "b3:ec3601a29fbb8af7094c883bee85745f21da58af5f436f66e073035da7fcde5d",
+      "canonical_digest": "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "consumers": [
@@ -1071,7 +1071,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:5e54ca9d6f16b70a5b9289cf6728bc9726c0765abfc7f3869ae7a1559ad8e78e",
+      "source_digest": "b3:a32e8644d5b0b739a42d0df1f08bf8e6ad0796370c95c16638e412b786987e7e",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -1890,7 +1890,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:17bbdcd037256ad87a4d0f4d5b49f96b1da323cf1d54f130df2835c55a2f59e6",
+      "canonical_digest": "b3:6224fb748a72d61f94f10f1b0ee6df736967de0e6b1d5d9e6bfb21d1ba39f607",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "consumers": [
@@ -1907,7 +1907,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:a786dbaeeaf235bfef63067c25ab76cef5cf1fc74d173b7d618c041f473f0f0e",
+      "source_digest": "b3:4d1bcb2f5c3ed4649ab9e59640c203ade60a00dbf193fc495ba97b4cf2970e89",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -3249,8 +3249,9 @@
         "contracts/generated/provider-raw-kinds/ruff-python-0-0-7.json",
         "contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json",
         "contracts/generated/provider-raw-kinds/tree-sitter-rust-0-24-2.json",
+        "rustc-extractor/src/generated/digest_frames.rs",
+        "src/generated/digest_frames.rs",
         "src/generated/model_identity_recipes.rs",
-        "src/generated/model_registries.rs",
         "src/generated/provider_raw_kinds.rs",
         "src/generated/registries.rs"
       ],
@@ -3375,7 +3376,7 @@
           "protoc": "libprotoc 35.1",
           "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
           "python_version": "3.14.7",
-          "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
+          "script_digest": "b3:99a5f045792bcadd87f04b8da49e547abc913578823ba901b8bd6933d285e686"
         },
         "rust": {
           "action_key": "b3:4c8d6bf22d182a483433ec68aa6aa8eb99bd966303b7c86a4d8c5c65ae503119",
@@ -3518,7 +3519,7 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:8b223c9cda4cd91c928975f9836838e0fedf9752eb1507a464d5012c15298671",
+      "content_digest": "b3:8b5c0b30b8ff1ebe4ccf8a59f65c2c2e766029d895d3318d2bf4c62a0818aa24",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4020,7 +4021,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:344aa45af327322558f6492ef6d1362770e9cd451fd1015e098d27bb167cd07f",
+      "content_digest": "b3:641a5f33436a881f08fd1a29370259e0e37ed99d1f5031936ad140fd387bedb3",
       "lineage": [
         "action:governance"
       ],
@@ -4140,7 +4141,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:01888e9d2c5cc6e9ca49f8be2a7727eecd4d01465774c7f0b2b8535b220733fb",
+      "content_digest": "b3:62ae010f2dc751ef259578715509d9eb0b384b4827a02ba2d1294f19128ac728",
       "lineage": [
         "action:governance"
       ],
@@ -4190,7 +4191,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:67df617fe06379979d9488fa2e7dea3fbc7d27d3b6a7a0d2ec22d6c8ce392c75",
+      "content_digest": "b3:73494dea7a8f0cfbeb23c541e8d4a52fc884f28583b1da67781fa2222634ec51",
       "lineage": [
         "action:governance"
       ],
@@ -4214,7 +4215,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:eaaafad7a26b0fab8cf0d9c21a31e24c43a5d0f5e17d39e2a5a2d8bbc1c684e7",
+      "content_digest": "b3:d5f4532272b98e5d64ea0a71d824fbbf15ee22bf2c473c643e5daa6acb77300d",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4604,7 +4605,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:a786dbaeeaf235bfef63067c25ab76cef5cf1fc74d173b7d618c041f473f0f0e",
+      "content_digest": "b3:4d1bcb2f5c3ed4649ab9e59640c203ade60a00dbf193fc495ba97b4cf2970e89",
       "lineage": [
         "action:governance"
       ],
@@ -4622,6 +4623,32 @@
       "validators": [
         "exact-bytes",
         "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "rust-core",
+        "contract-verifier"
+      ],
+      "content_digest": "b3:2e47496f46971e63f1e3d1e293cb9885c6d641702d399519d608b20c71ba02aa",
+      "lineage": [
+        "action:registry-cbef"
+      ],
+      "output_id": "output:274f43624915d2197fbe0e75955d1ec103aa60701bdf4848a2aa7ff259beb1ab",
+      "path": "rustc-extractor/src/generated/digest_frames.rs",
+      "producer": "action:registry-cbef",
+      "projection": {
+        "projection_kind": "rust-source"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "max_output_bytes": 4194304,
+        "max_outputs": 12,
+        "max_source_bytes": 8388608
+      },
+      "validators": [
+        "exact-bytes",
+        "rust-consumer"
       ]
     },
     {
@@ -4733,12 +4760,12 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:8f6e438951020a8399eef9ef8c3bce7d6602bac84406d395c922478b9a1ab6bc",
+      "content_digest": "b3:2e47496f46971e63f1e3d1e293cb9885c6d641702d399519d608b20c71ba02aa",
       "lineage": [
         "action:registry-cbef"
       ],
-      "output_id": "output:5c6f4e167d7e438de5730c7559e22306649fde3438ebd3fe22bd9c00ba9bd478",
-      "path": "src/generated/model_identity_recipes.rs",
+      "output_id": "output:bae001b29322c3bcad0fcb196c7573ac99c44d407ca8741b066f1a259aba04ec",
+      "path": "src/generated/digest_frames.rs",
       "producer": "action:registry-cbef",
       "projection": {
         "projection_kind": "rust-source"
@@ -4759,12 +4786,12 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:1dbb5aab8e6c66e67c8c755bff91c5befe99c4b2ba49b2ce09818c0901d7b0e9",
+      "content_digest": "b3:8f6e438951020a8399eef9ef8c3bce7d6602bac84406d395c922478b9a1ab6bc",
       "lineage": [
         "action:registry-cbef"
       ],
-      "output_id": "output:8d137f1f94fe2a36209ced783cf13fb0160ff59dcb97e1d946cbf0e48f5fa3b3",
-      "path": "src/generated/model_registries.rs",
+      "output_id": "output:5c6f4e167d7e438de5730c7559e22306649fde3438ebd3fe22bd9c00ba9bd478",
+      "path": "src/generated/model_identity_recipes.rs",
       "producer": "action:registry-cbef",
       "projection": {
         "projection_kind": "rust-source"
@@ -4837,7 +4864,7 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:ca1140b347e897ff687915f8179352422270018c0b4c2a59fc014213c4402bff",
+      "content_digest": "b3:9f41567c0fb78cf630d7e9bcc7f175dcb3744c51c388f1d7579923599f7eb621",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4940,7 +4967,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:a7f803742d370d3e06a298f09a29bba9b93db090210079ebc3d3b437d7591902",
+      "content_digest": "b3:bd8e7fe7359990ca8064f85d35eca32b4f0dd145e5aa3fd4c1d16982d8311105",
       "lineage": [
         "action:proto"
       ],

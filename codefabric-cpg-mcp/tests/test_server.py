@@ -25,8 +25,8 @@ def _handshake() -> SimpleNamespace:
         readiness=SimpleNamespace(
             supported_query_forms=[
                 "find code entities",
-                "retrieve facts",
-                "follow relationships",
+                "retrieve facts about code",
+                "follow code relationships",
             ]
         ),
         effective_limits=SimpleNamespace(

@@ -19,6 +19,7 @@ use crate::identity::{
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 pub use crate::provider_types::ProviderText;
+pub use crate::registries::NewlineKind;
 use crate::secure_path::{
     PlatformPath, SecurePathError, StableFileMetadata, StableFileRead, StableReadError,
     open_workspace_root,
@@ -65,17 +66,6 @@ impl SourceEncoding {
             Self::Unsupported { .. } => 40,
         }
     }
-}
-
-/// Newline profile derived from exact authoritative bytes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u16)]
-pub enum NewlineKind {
-    None = 10,
-    Lf = 20,
-    CrLf = 30,
-    Cr = 40,
-    Mixed = 50,
 }
 
 /// Little-endian `u64` line-start artifact and its content identity.
@@ -1103,7 +1093,7 @@ fn build_line_index(bytes: &[u8]) -> LineIndex {
     let newline_kind = match (kinds, saw_lf, saw_crlf, saw_cr) {
         (0, _, _, _) => NewlineKind::None,
         (1, true, _, _) => NewlineKind::Lf,
-        (1, _, true, _) => NewlineKind::CrLf,
+        (1, _, true, _) => NewlineKind::Crlf,
         (1, _, _, true) => NewlineKind::Cr,
         _ => NewlineKind::Mixed,
     };

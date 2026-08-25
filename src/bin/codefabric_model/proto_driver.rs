@@ -21,7 +21,7 @@ use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
 use super::repository_model::{RepositoryModelError, read_stable};
 
-const PROTOCOL_VERSION: &str = "codefabric-external-proto-driver-v1";
+const PROTOCOL_VERSION: &str = "codefabric-external-proto-driver-v2";
 const DRIVER_PATH: &str = "tooling/model/proto_driver.py";
 const PROTO_CONTRACT_LIBRARY_PATH: &str = "tooling/model/proto_contract.py";
 const RUST_GENERATOR_PATH: &str = "tooling/proto/generate.rs";
@@ -30,6 +30,7 @@ const PYPROJECT_PATH: &str = "codefabric-cpg-mcp/pyproject.toml";
 const UV_LOCK_PATH: &str = "codefabric-cpg-mcp/uv.lock";
 const CARGO_MANIFEST_PATH: &str = "Cargo.toml";
 const CARGO_LOCK_PATH: &str = "Cargo.lock";
+const ENUM_REGISTRY_PATH: &str = "contracts/registry/enum-registry.yaml";
 const MAX_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
@@ -116,6 +117,7 @@ struct ExternalRequest<'a> {
     protocol_version: &'static str,
     operation: &'static str,
     sources: &'a [ExternalProtoSource],
+    wire_enums: &'a [Value],
     planned_outputs: &'a [ExternalOutputPlan],
 }
 
@@ -151,6 +153,7 @@ pub struct ProtoPlan {
     repository_root: PathBuf,
     descriptor: DriverDescriptor,
     sources: Vec<ExternalProtoSource>,
+    wire_enums: Vec<Value>,
     outputs: Vec<ExternalOutputPlan>,
     source_fence: DriverSourceFence,
     python_identity: ProtoPythonToolIdentity,
@@ -210,6 +213,40 @@ impl ProtoDriver {
             return Err(ProtoDriverError::Protocol);
         }
         Ok(paths)
+    }
+
+    fn wire_enum_projections(&self) -> Result<Vec<Value>, ProtoDriverError> {
+        let path = self.repository_root.join(ENUM_REGISTRY_PATH);
+        let bytes = read_stable(&path, MAX_SOURCE_BYTES).map_err(ProtoDriverError::Repository)?;
+        let yaml: serde_yaml_ng::Value =
+            serde_yaml_ng::from_slice(&bytes).map_err(|_| ProtoDriverError::Protocol)?;
+        let value = serde_json::to_value(yaml).map_err(ProtoDriverError::Json)?;
+        let records = value["records"]
+            .as_array()
+            .ok_or(ProtoDriverError::Protocol)?;
+        let mut projections = Vec::new();
+        for record in records {
+            let Some(wire) = record.get("wire") else {
+                continue;
+            };
+            let mut wire = wire
+                .as_object()
+                .cloned()
+                .ok_or(ProtoDriverError::Protocol)?;
+            let domain = record["domain"]
+                .as_str()
+                .ok_or(ProtoDriverError::Protocol)?;
+            wire.insert(
+                "registry_domain".to_owned(),
+                Value::String(domain.to_owned()),
+            );
+            projections.push(Value::Object(wire));
+        }
+        projections.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+        if projections.is_empty() {
+            return Err(ProtoDriverError::Protocol);
+        }
+        Ok(projections)
     }
 
     fn invoke<T: DeserializeOwned>(
@@ -320,6 +357,7 @@ impl ModelDriver for ProtoDriver {
             UV_LOCK_PATH,
             CARGO_MANIFEST_PATH,
             CARGO_LOCK_PATH,
+            ENUM_REGISTRY_PATH,
         ]
         .into_iter()
         .map(safe)
@@ -376,11 +414,15 @@ impl ModelDriver for ProtoDriver {
             })
             .collect::<Result<Vec<_>, RepositoryModelError>>()
             .map_err(DriverProtocolError::from)?;
+        let wire_enums = self
+            .wire_enum_projections()
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         let response: ExternalPlanResponse = self
             .invoke(&ExternalRequest {
                 protocol_version: PROTOCOL_VERSION,
                 operation: "plan",
                 sources: &sources,
+                wire_enums: &wire_enums,
                 planned_outputs: &[],
             })
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
@@ -400,6 +442,7 @@ impl ModelDriver for ProtoDriver {
             repository_root: repository_root.to_owned(),
             descriptor,
             sources,
+            wire_enums,
             outputs: response.outputs,
             source_fence,
             python_identity: response.tool_identity,
@@ -425,6 +468,7 @@ fn render_plan(
         protocol_version: PROTOCOL_VERSION,
         operation: "render",
         sources: &plan.sources,
+        wire_enums: &plan.wire_enums,
         planned_outputs: &plan.outputs,
     })?;
     if response.protocol_version != PROTOCOL_VERSION

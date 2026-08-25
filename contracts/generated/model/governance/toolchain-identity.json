@@ -30,8 +30,9 @@
         "contracts/generated/provider-raw-kinds/ruff-python-0-0-7.json",
         "contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json",
         "contracts/generated/provider-raw-kinds/tree-sitter-rust-0-24-2.json",
+        "rustc-extractor/src/generated/digest_frames.rs",
+        "src/generated/digest_frames.rs",
         "src/generated/model_identity_recipes.rs",
-        "src/generated/model_registries.rs",
         "src/generated/provider_raw_kinds.rs",
         "src/generated/registries.rs"
       ],
@@ -156,7 +157,7 @@
           "protoc": "libprotoc 35.1",
           "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
           "python_version": "3.14.7",
-          "script_digest": "b3:03e5fbc6469dbcb57d925c36df9058869b7035ceaad3dda6e859752dfc074c2f"
+          "script_digest": "b3:99a5f045792bcadd87f04b8da49e547abc913578823ba901b8bd6933d285e686"
         },
         "rust": {
           "action_key": "b3:4c8d6bf22d182a483433ec68aa6aa8eb99bd966303b7c86a4d8c5c65ae503119",

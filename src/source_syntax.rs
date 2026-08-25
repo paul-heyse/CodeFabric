@@ -14,19 +14,20 @@ use crate::identity::{
     PlatformCode, SOURCE_CONTEXT_ID, SourceOccurrenceIdentityInput, SourceRelationIdentityInput,
     source_file_identity, source_occurrence_identity, source_relation_identity,
 };
-use crate::model_generated::registries::{OccurrenceFamily, ProviderNodeFlags, RawKindDisposition};
 use crate::provider_raw_kinds::ProviderRawKindDisposition;
 use crate::registries::{
-    AnnotationKind, CompletenessState, Language, NewlineKind as RegistryNewlineKind,
-    OwnerCapabilityState, OwnerKind, PathEncoding, ProviderCode, SYNTAX_KIND_VALUES,
-    SyntaxFieldRole, SyntaxKind, TokenKind, capability_code, capability_mask, entity_kind,
-    registry_state_name, relation_kind,
+    AnnotationKind, CompletenessState, Language, OwnerCapabilityState, OwnerKind, PathEncoding,
+    ProviderCode, SYNTAX_KIND_VALUES, SyntaxFieldRole, SyntaxKind, TokenKind, capability_code,
+    capability_mask, entity_kind, registry_state_name, relation_kind,
 };
+use crate::registries::{OccurrenceFamily, ProviderNodeFlags, RawKindDisposition};
 use crate::ruff_adapter::{
     RuffAstCategory, RuffAstFact, RuffChildRole, RuffDirectiveKind, RuffOccurrenceId, RuffSnapshot,
     RuffTokenClass, RuffTokenFact, RuffTokenSpelling,
 };
-use crate::source_image::{NewlineKind, SourceEncoding, SourceImage, SourceLanguage};
+#[cfg(test)]
+use crate::source_image::NewlineKind;
+use crate::source_image::{SourceEncoding, SourceImage, SourceLanguage};
 use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSnapshot};
 
 const SOURCE_PROVIDER_VERSION: &str = "source-image-v1";
@@ -39,7 +40,7 @@ pub struct SourceSyntaxProviderRuns {
 }
 
 /// The exact GEN §80 rule that selected a canonical syntax anchor.
-pub use crate::model_generated::registries::RangeReconciliationStep as ReconciliationStep;
+pub use crate::registries::RangeReconciliationStep as ReconciliationStep;
 
 /// Provider-independent candidate supplied to the five-step range ladder.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -952,7 +953,7 @@ fn source_file_row(
             "line count",
         )?,
         encoding_name,
-        newline_kind_code: newline_kind(source.line_index.newline_kind),
+        newline_kind_code: source.line_index.newline_kind as i16,
         source_bytes: source.bytes.to_vec(),
         decoded_text: source
             .provider_text
@@ -1598,16 +1599,6 @@ fn path_encoding(platform: PlatformCode) -> i16 {
         PlatformCode::Unix => PathEncoding::UnixBytes as i16,
         PlatformCode::MacOs => PathEncoding::MacosBytes as i16,
         PlatformCode::WindowsWtf8 => PathEncoding::WindowsWtf8 as i16,
-    }
-}
-
-fn newline_kind(kind: NewlineKind) -> i16 {
-    match kind {
-        NewlineKind::None => RegistryNewlineKind::None as i16,
-        NewlineKind::Lf => RegistryNewlineKind::Lf as i16,
-        NewlineKind::CrLf => RegistryNewlineKind::Crlf as i16,
-        NewlineKind::Cr => RegistryNewlineKind::Cr as i16,
-        NewlineKind::Mixed => RegistryNewlineKind::Mixed as i16,
     }
 }
 

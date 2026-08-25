@@ -79,9 +79,8 @@ pub fn property_kind(name: &str) -> Option<OntologyCodeEntry> {
 pub fn capability_code(name: &str) -> Option<u16> {
     CAPABILITY_IDS
         .iter()
-        .position(|candidate| *candidate == name)
-        .and_then(|index| u16::try_from(index + 1).ok())
-        .and_then(|ordinal| ordinal.checked_mul(10))
+        .zip(CAPABILITY_CODES)
+        .find_map(|(candidate, code)| (*candidate == name).then_some(*code))
 }
 
 /// Build the compact owner capability summary from the same generated registry ordering.

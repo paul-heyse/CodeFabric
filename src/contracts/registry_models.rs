@@ -98,6 +98,8 @@ pub struct EnumDomain {
     pub domain: String,
     pub width_bits: u8,
     pub values: Vec<EnumValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

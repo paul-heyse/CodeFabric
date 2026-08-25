@@ -85,7 +85,7 @@
         },
         {
           "artifact_id": "codefabric.registry.enum-registry",
-          "canonical_digest": "b3:ec3601a29fbb8af7094c883bee85745f21da58af5f436f66e073035da7fcde5d",
+          "canonical_digest": "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -133,7 +133,7 @@
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:2a4f365fe444377b71676238cf331cb92a8747ff6cadb31c3d4886ec7ab175ca",
+      "bundle_digest": "b3:acafff6267956e11f28fa0d65cebd495c079f8e66fa21cd727540cd02e6cded4",
       "bundle_kind": "ontology",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -438,13 +438,13 @@
       "artifacts": [
         {
           "artifact_id": "codefabric.toolchain.identity",
-          "canonical_digest": "b3:17bbdcd037256ad87a4d0f4d5b49f96b1da323cf1d54f130df2835c55a2f59e6",
+          "canonical_digest": "b3:6224fb748a72d61f94f10f1b0ee6df736967de0e6b1d5d9e6bfb21d1ba39f607",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:33df620f6b93d2d0d807811c9fe9f606d6daaf8e80fc157820071327db16a156",
+      "bundle_digest": "b3:4d2ef4edca676c310c36596a43d6bc228515e1a2b9fb9a88e3389b53172e9fd8",
       "bundle_kind": "toolchain",
       "bundle_major": 1,
       "bundle_version": "1.0",

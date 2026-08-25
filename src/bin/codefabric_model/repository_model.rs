@@ -831,7 +831,7 @@ fn role_for(policy: ClaimPolicy, path: &[u8], suffix: &str) -> ArtifactRole {
         }
         ClaimPolicy::AdapterContractViews => {
             if path.ends_with(b".json")
-                || path.ends_with(b"/registries.py")
+                || path.ends_with(b"/model_registries.py")
                 || path.ends_with(b"/wire_models.py")
             {
                 ArtifactRole::Derived
@@ -1438,6 +1438,22 @@ mod tests {
             role_for(
                 ClaimPolicy::AdapterContractViews,
                 b"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/identity.py",
+                ".py"
+            ),
+            ArtifactRole::Ignored
+        );
+        assert_eq!(
+            role_for(
+                ClaimPolicy::AdapterContractViews,
+                b"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
+                ".py"
+            ),
+            ArtifactRole::Derived
+        );
+        assert_eq!(
+            role_for(
+                ClaimPolicy::AdapterContractViews,
+                b"codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/registries.py",
                 ".py"
             ),
             ArtifactRole::Ignored

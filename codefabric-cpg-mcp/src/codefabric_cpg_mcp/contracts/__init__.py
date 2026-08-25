@@ -1,5 +1,7 @@
 """Machine-contract encoding helpers shared with the Rust daemon."""
 
+from . import model_registries as registries
+
 from .identity import (
     SOURCE_CONTEXT_ID,
     CbefField,
@@ -76,4 +78,5 @@ __all__ = [
     "validate_lowercase_public",
     "validate_uint64",
     "validate_workspace_paths",
+    "registries",
 ]

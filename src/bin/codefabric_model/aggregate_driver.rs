@@ -1970,14 +1970,13 @@ mod tests {
         let mut tree = AggregateTree::new();
         for path in [
             "src/generated/model_identity_recipes.rs",
-            "src/generated/model_registries.rs",
             "src/generated/model_schema_tables.rs",
         ] {
             tree.insert(path, "action:test", Vec::new(), true).unwrap();
         }
         let aggregator = String::from_utf8(rust_module_aggregator(&tree)).unwrap();
         assert!(aggregator.contains("model_identity_recipes.rs"));
-        assert!(aggregator.contains("model_registries.rs"));
+        assert!(!aggregator.contains("model_registries.rs"));
         assert!(aggregator.contains("model_schema_tables.rs"));
     }
 

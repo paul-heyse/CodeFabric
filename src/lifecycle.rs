@@ -33,6 +33,7 @@ use crate::git_state::{GitCandidatePlan, GitStateVector};
 use crate::identity::PlatformCode;
 use crate::operational_store::{OperationalReader, OperationalStore, OperationalStoreError};
 use crate::provider_types::ProviderText;
+pub use crate::registries::FreshnessState;
 use crate::registries::{
     EventStreamHealth, OperationalDependencyEdgeKind, OverlayTombstoneReason, PathEncoding,
     SourceTrustState, UPDATE_WAVE_STATE_TRANSITIONS, UPDATE_WAVE_STATE_VALUES,
@@ -1388,14 +1389,6 @@ fn exact_bytes<const N: usize>(value: Vec<u8>, label: &str) -> Result<[u8; N], L
     value
         .try_into()
         .map_err(|_| LifecycleError::Graph(format!("{label} has invalid width")))
-}
-
-/// Public freshness state derived only from monotonic admitted/reconciled counters.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FreshnessState {
-    Current,
-    PotentiallyStale,
-    Unavailable,
 }
 
 /// Query-side admission policy.

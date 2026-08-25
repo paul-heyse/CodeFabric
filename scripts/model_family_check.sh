@@ -148,9 +148,6 @@ case "$family" in
       "$stage_root/src/generated/model_identity_recipes.rs" \
       -o "$stage_root/model_identity_recipes.rlib"
     rustc --edition=2024 --crate-type lib \
-      "$stage_root/src/generated/model_registries.rs" \
-      -o "$stage_root/model_registries.rlib"
-    rustc --edition=2024 --crate-type lib \
       "$stage_root/src/generated/registries.rs" \
       -o "$stage_root/runtime_registries.rlib"
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT \

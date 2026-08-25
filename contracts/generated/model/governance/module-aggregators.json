@@ -17,12 +17,13 @@
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/rustc_extractor_pb2_grpc.py"
   ],
   "rust": [
+    "rustc-extractor/src/generated/digest_frames.rs",
     "src/generated/codefabric.cpgd.v1.rs",
     "src/generated/codefabric.provider.v1.rs",
     "src/generated/codefabric.pyrefly.v1.rs",
     "src/generated/codefabric.rustc.v1.rs",
+    "src/generated/digest_frames.rs",
     "src/generated/model_identity_recipes.rs",
-    "src/generated/model_registries.rs",
     "src/generated/model_schema_tables.rs",
     "src/generated/provider_raw_kinds.rs",
     "src/generated/registries.rs",

@@ -27,7 +27,7 @@ from tooling.model.proto_contract import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-PROTOCOL_VERSION = "codefabric-external-proto-driver-v1"
+PROTOCOL_VERSION = "codefabric-external-proto-driver-v2"
 PYTHON_OUTPUT_ROOT = "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated"
 RUST_OUTPUT_ROOT = "src/generated"
 MAX_SOURCE_COUNT = 64
@@ -128,6 +128,84 @@ def source_model(request: dict[str, Any]) -> list[dict[str, str]]:
                 fail(
                     f"Proto import escapes or is missing from the unit: {source['path']} -> {imported}"
                 )
+    return sources
+
+
+def apply_wire_enums(
+    sources: list[dict[str, str]], raw_projections: object
+) -> list[dict[str, str]]:
+    """Render registry-owned wire enums after proving the checked-in source is identical."""
+    if not isinstance(raw_projections, list) or not raw_projections:
+        fail("wire enum projection set is empty")
+    by_path = {source["path"]: source for source in sources}
+    seen: set[tuple[str, str]] = set()
+    for index, raw in enumerate(raw_projections):
+        projection = exact_object(
+            raw,
+            {"registry_domain", "proto_path", "enum_name", "values"},
+            f"wire_enums[{index}]",
+        )
+        registry_domain = projection["registry_domain"]
+        proto_path = projection["proto_path"]
+        enum_name = projection["enum_name"]
+        values = projection["values"]
+        if (
+            not all(isinstance(item, str) for item in (registry_domain, proto_path, enum_name))
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]*", registry_domain)
+            or not re.fullmatch(r"[A-Z][A-Za-z0-9]*", enum_name)
+            or proto_path not in by_path
+            or (proto_path, enum_name) in seen
+            or not isinstance(values, list)
+            or not values
+        ):
+            fail("wire enum projection identity is invalid")
+        seen.add((proto_path, enum_name))
+        rendered_values: list[tuple[str, int]] = []
+        names: set[str] = set()
+        numbers: set[int] = set()
+        for value_index, raw_value in enumerate(values):
+            value = exact_object(
+                raw_value, {"number", "name"}, f"wire_enums[{index}].values[{value_index}]"
+            )
+            number = value["number"]
+            name = value["name"]
+            if (
+                not isinstance(number, int)
+                or isinstance(number, bool)
+                or not 0 <= number <= 2_147_483_647
+                or not isinstance(name, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]*", name)
+                or name in names
+                or number in numbers
+            ):
+                fail("wire enum value allocation is invalid")
+            names.add(name)
+            numbers.add(number)
+            rendered_values.append((name, number))
+        if rendered_values[0][1] != 0:
+            fail("Proto enum zero allocation is absent")
+        source = by_path[proto_path]
+        pattern = re.compile(
+            rf"(?ms)^enum\s+{re.escape(enum_name)}\s*\{{\n(?P<body>.*?)^\}}"
+        )
+        matches = list(pattern.finditer(source["contents"]))
+        if len(matches) != 1:
+            fail("registry-owned Proto enum is absent or ambiguous")
+        observed = [
+            (name, int(number))
+            for name, number in re.findall(
+                r"(?m)^\s*([A-Z][A-Z0-9_]*)\s*=\s*([0-9]+)\s*;\s*$",
+                matches[0].group("body"),
+            )
+        ]
+        if observed != rendered_values:
+            fail("registry and Proto wire enum values diverge")
+        rendered = "\n".join(
+            [f"enum {enum_name} {{"]
+            + [f"  {name} = {number};" for name, number in rendered_values]
+            + ["}"]
+        )
+        source["contents"] = pattern.sub(rendered, source["contents"], count=1)
     return sources
 
 
@@ -262,7 +340,7 @@ def compile_once(
 def main() -> int:
     request = exact_object(
         json.load(sys.stdin),
-        {"protocol_version", "operation", "sources", "planned_outputs"},
+        {"protocol_version", "operation", "sources", "wire_enums", "planned_outputs"},
         "request",
     )
     if request["protocol_version"] != PROTOCOL_VERSION or request["operation"] not in {
@@ -270,7 +348,7 @@ def main() -> int:
         "render",
     }:
         fail("unsupported Proto driver protocol or operation")
-    sources = source_model(request)
+    sources = apply_wire_enums(source_model(request), request["wire_enums"])
     planned = output_plan(sources)
     supplied = request["planned_outputs"]
     if request["operation"] == "plan":

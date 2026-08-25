@@ -540,6 +540,80 @@ pub const QUERY_EXECUTION_STATE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
+pub enum QueryForm {
+    FindEntities = 10,
+    RetrieveFacts = 20,
+    FollowRelationships = 30,
+    FindPaths = 40,
+    MatchPattern = 50,
+    CombineResults = 60,
+    SummarizeFacts = 70,
+    RetrieveSourceContext = 80,
+}
+impl TryFrom<u16> for QueryForm {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            10 => Ok(Self::FindEntities),
+            20 => Ok(Self::RetrieveFacts),
+            30 => Ok(Self::FollowRelationships),
+            40 => Ok(Self::FindPaths),
+            50 => Ok(Self::MatchPattern),
+            60 => Ok(Self::CombineResults),
+            70 => Ok(Self::SummarizeFacts),
+            80 => Ok(Self::RetrieveSourceContext),
+            _ => Err(UnknownRegistryCode {
+                domain: "QUERY_FORM",
+                code,
+            }),
+        }
+    }
+}
+pub const QUERY_FORM_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "FIND_ENTITIES",
+        slug: "find code entities",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RETRIEVE_FACTS",
+        slug: "retrieve facts about code",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "FOLLOW_RELATIONSHIPS",
+        slug: "follow code relationships",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "FIND_PATHS",
+        slug: "find connecting fact paths",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "MATCH_PATTERN",
+        slug: "match a code fact pattern",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "COMBINE_RESULTS",
+        slug: "combine result sets",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "SUMMARIZE_FACTS",
+        slug: "summarize objective facts",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "RETRIEVE_SOURCE_CONTEXT",
+        slug: "retrieve source and syntax context",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
 pub enum QueryAvailabilityState {
     Available = 10,
     Partial = 20,
@@ -3363,283 +3437,289 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
     RegistryDomainEntry {
         domain: "EVIDENCE_CERTAINTY",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: EVIDENCE_CERTAINTY_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOLUTION_CLASS",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: RESOLUTION_CLASS_VALUES,
     },
     RegistryDomainEntry {
         domain: "DIRECTNESS",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: DIRECTNESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: COMPLETENESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_CAPABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: OWNER_CAPABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_RUN_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: PROVIDER_RUN_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_EXECUTION_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: QUERY_EXECUTION_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "QUERY_FORM",
+        version: "1.0",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
+        values: QUERY_FORM_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_AVAILABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: QUERY_AVAILABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: COMPLETENESS_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "FRESHNESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: FRESHNESS_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "LIMIT_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: LIMIT_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "DEPENDENCY_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: DEPENDENCY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "DURABLE_PUBLICATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: DURABLE_PUBLICATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SERVING_ACTIVATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: SERVING_ACTIVATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: SNAPSHOT_LEASE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: SNAPSHOT_LEASE_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SOURCE_TRUST_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: SOURCE_TRUST_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "EVENT_STREAM_HEALTH",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: EVENT_STREAM_HEALTH_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_ACCELERATION_STATUS",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_ACCELERATION_STATUS_VALUES,
     },
     RegistryDomainEntry {
         domain: "EFFECT_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: EFFECT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOURCE_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: RESOURCE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_CODE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: PROVIDER_CODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "TOKEN_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: TOKEN_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "ANNOTATION_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: ANNOTATION_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: SYNTAX_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_FIELD_ROLE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: SYNTAX_FIELD_ROLE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: OWNER_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "LANGUAGE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: LANGUAGE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PATH_ENCODING",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: PATH_ENCODING_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_CANDIDATE_STRATEGY",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: UPDATE_CANDIDATE_STRATEGY_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_WAVE_ITEM_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: UPDATE_WAVE_ITEM_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HASH_ALGORITHM",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_HASH_ALGORITHM_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_REPOSITORY_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_REPOSITORY_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HEAD_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_HEAD_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_OPERATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_OPERATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_INVENTORY_CLASSIFICATION",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_INVENTORY_CLASSIFICATION_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_INCLUSION_STATE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: INVENTORY_INCLUSION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_FILE_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: INVENTORY_FILE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_ORIGIN",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_CANDIDATE_ORIGIN_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_MODE",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: GIT_CANDIDATE_MODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OVERLAY_TOMBSTONE_REASON",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: OVERLAY_TOMBSTONE_REASON_VALUES,
     },
     RegistryDomainEntry {
         domain: "NEWLINE_KIND",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: NEWLINE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "OCCURRENCE_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: OCCURRENCE_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_OBSERVATION_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: PROVIDER_OBSERVATION_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "RANGE_RECONCILIATION_STEP",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: RANGE_RECONCILIATION_STEP_VALUES,
     },
     RegistryDomainEntry {
         domain: "RAW_KIND_DISPOSITION",
         version: "1.0",
-        canonical_digest: "b3:175c9502533b02e25751d7346284d1da53a5a7a03b42be9d688a5c5996c014f5",
+        canonical_digest: "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
         values: RAW_KIND_DISPOSITION_VALUES,
     },
     RegistryDomainEntry {
@@ -4994,6 +5074,31 @@ pub const WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS: &[StateTransitionEntry] = &[
     },
 ];
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FactFlags(u64);
+impl FactFlags {
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+    pub const GENERATED: Self = Self(0x0000_0000_0000_0001);
+    pub const LOWERED: Self = Self(0x0000_0000_0000_0002);
+    pub const EXTERNAL: Self = Self(0x0000_0000_0000_0004);
+    pub const UNKNOWN_REMAINDER: Self = Self(0x0000_0000_0000_0008);
+    pub const PYTHON_PROFILE: Self = Self(0x0000_0001_0000_0000);
+    pub const RUST_PROFILE: Self = Self(0x0000_0002_0000_0000);
+    pub const COMPILER_SYNTHETIC: Self = Self(0x0001_0000_0000_0000);
+    pub const fn from_bits(bits: u64) -> Option<Self> {
+        if bits & !0x0001_0003_0000_000f == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+}
+
 pub const FACT_FLAGS_FLAGS: &[FlagEntry] = &[
     FlagEntry {
         mask: 1_u64 << 0,
@@ -5031,6 +5136,24 @@ pub const FACT_FLAGS_FLAGS: &[FlagEntry] = &[
         slug: "compiler-synthetic",
     },
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderNodeFlags(u64);
+impl ProviderNodeFlags {
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+    pub const fn from_bits(bits: u64) -> Option<Self> {
+        if bits & !0x0000_0000_0000_0000 == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+}
 
 pub const PROVIDER_NODE_FLAGS_FLAGS: &[FlagEntry] = &[];
 
@@ -5573,6 +5696,11 @@ pub const CAPABILITY_IDS: &[&str] = &[
     "EFFECTS",
     "CONCURRENCY",
     "CALLABLE_SUMMARIES",
+];
+
+pub const CAPABILITY_CODES: &[u16] = &[
+    10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210,
+    220,
 ];
 
 pub const PROVIDER_IDS: &[&str] = &[

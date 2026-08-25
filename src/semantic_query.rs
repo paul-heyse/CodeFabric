@@ -3,12 +3,13 @@
 use std::collections::BTreeMap;
 
 use arrow_array::{Array as _, BinaryArray};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
 use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice, canonicalize_value};
 use crate::fabric::{ServingQueryError, ServingQuerySession};
-use crate::registries::{PHRASE_ENTRIES, PhraseEntry};
+pub use crate::registries::QueryForm;
+use crate::registries::{PHRASE_ENTRIES, PhraseEntry, QUERY_FORM_VALUES};
 
 const SPECIFICATION: &str = "composable semantic CPG fact query";
 const VERSION: &str = "1.3";
@@ -24,38 +25,78 @@ pub enum FreshnessPolicy {
     BestAvailableSnapshot,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub enum QueryForm {
-    #[serde(rename = "find code entities")]
-    FindEntities,
-    #[serde(rename = "retrieve facts")]
-    RetrieveFacts,
-    #[serde(rename = "follow relationships")]
-    FollowRelationships,
+impl QueryForm {
+    pub(crate) const fn currently_supported(self) -> bool {
+        matches!(
+            self,
+            Self::FindEntities | Self::RetrieveFacts | Self::FollowRelationships
+        )
+    }
+
+    pub(crate) fn registry_slug(self) -> &'static str {
+        QUERY_FORM_VALUES
+            .iter()
+            .find(|entry| entry.code == self as u16)
+            .expect("generated QueryForm and QUERY_FORM_VALUES are one authority")
+            .slug
+    }
+
+    fn table(self) -> Result<&'static str, SemanticQueryError> {
+        match self {
+            Self::FindEntities => Ok("entities"),
+            Self::RetrieveFacts => Ok("properties"),
+            Self::FollowRelationships => Ok("relations"),
+            _ => Err(SemanticQueryError::Invalid(
+                "query form is registered but not active in the current execution profile"
+                    .to_owned(),
+            )),
+        }
+    }
+
+    fn order_key(self) -> Result<&'static str, SemanticQueryError> {
+        match self {
+            Self::FindEntities => Ok("entity_id"),
+            Self::RetrieveFacts | Self::FollowRelationships => Ok("fact_id"),
+            _ => Err(SemanticQueryError::Invalid(
+                "query form is registered but not active in the current execution profile"
+                    .to_owned(),
+            )),
+        }
+    }
+
+    fn plan_node_kind(self) -> Result<&'static str, SemanticQueryError> {
+        match self {
+            Self::FindEntities => Ok("find-entities"),
+            Self::RetrieveFacts => Ok("retrieve-facts"),
+            Self::FollowRelationships => Ok("follow-relationships"),
+            _ => Err(SemanticQueryError::Invalid(
+                "query form is registered but not active in the current execution profile"
+                    .to_owned(),
+            )),
+        }
+    }
 }
 
-impl QueryForm {
-    const fn table(self) -> &'static str {
-        match self {
-            Self::FindEntities => "entities",
-            Self::RetrieveFacts => "properties",
-            Self::FollowRelationships => "relations",
-        }
+impl Serialize for QueryForm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.registry_slug())
     }
+}
 
-    const fn order_key(self) -> &'static str {
-        match self {
-            Self::FindEntities => "entity_id",
-            Self::RetrieveFacts | Self::FollowRelationships => "fact_id",
-        }
-    }
-
-    const fn plan_node_kind(self) -> &'static str {
-        match self {
-            Self::FindEntities => "find-entities",
-            Self::RetrieveFacts => "retrieve-facts",
-            Self::FollowRelationships => "follow-relationships",
-        }
+impl<'de> Deserialize<'de> for QueryForm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let slug = String::deserialize(deserializer)?;
+        let entry = QUERY_FORM_VALUES
+            .iter()
+            .find(|entry| entry.slug == slug)
+            .ok_or_else(|| D::Error::custom("unknown governed query form"))?;
+        Self::try_from(entry.code).map_err(|_| D::Error::custom("invalid governed query form"))
     }
 }
 
@@ -257,9 +298,10 @@ fn resolve_phrase(
             "semantic phrase is empty or exceeds its bound".to_owned(),
         ));
     }
+    let plan_node_kind = form.plan_node_kind()?;
     let mut matches = PHRASE_ENTRIES.iter().filter(|entry| {
         (entry.canonical_text == label || entry.accepted_aliases.contains(&label))
-            && entry.plan_node_kind == form.plan_node_kind()
+            && entry.plan_node_kind == plan_node_kind
     });
     let resolved = matches.next().ok_or_else(|| {
         SemanticQueryError::Invalid(
@@ -305,6 +347,12 @@ pub fn validate_request(bytes: &[u8]) -> Result<ValidatedSemanticRequest, Semant
         if !valid_id(&query.query_id, 128) || !ids.insert(query.query_id.as_str()) {
             return Err(SemanticQueryError::Invalid(
                 "query IDs must be unique bounded identifiers".to_owned(),
+            ));
+        }
+        if !query.request.currently_supported() {
+            return Err(SemanticQueryError::Invalid(
+                "query form is registered but not active in the current execution profile"
+                    .to_owned(),
             ));
         }
         resolve_phrase(query.request, query.label.as_deref())?;
@@ -357,18 +405,18 @@ pub fn validate_request(bytes: &[u8]) -> Result<ValidatedSemanticRequest, Semant
     })
 }
 
-fn query_sql(query: &SemanticQueryClause) -> String {
+fn query_sql(query: &SemanticQueryClause) -> Result<String, SemanticQueryError> {
     let limit = query.limit.unwrap_or(QueryLimit {
         first: 100,
         offset: 0,
     });
-    format!(
+    Ok(format!(
         "SELECT * FROM {} ORDER BY {} LIMIT {} OFFSET {}",
-        query.request.table(),
-        query.request.order_key(),
+        query.request.table()?,
+        query.request.order_key()?,
         limit.first,
         limit.offset
-    )
+    ))
 }
 
 /// Execute all clauses through the existing immutable DataFusion snapshot session.
@@ -387,11 +435,16 @@ pub async fn execute_request(
     let mut entities = BTreeMap::new();
     let mut facts = BTreeMap::new();
     for query in &validated.request.queries {
-        let result = session.query(&query_sql(query)).await?;
+        let result = session.query(&query_sql(query)?).await?;
         let ids = response_ids(&result.batches, query.request)?;
         let (entity_ids, fact_ids) = match query.request {
             QueryForm::FindEntities => (ids, Vec::new()),
             QueryForm::RetrieveFacts | QueryForm::FollowRelationships => (Vec::new(), ids),
+            _ => {
+                return Err(SemanticQueryError::Invalid(
+                    "inactive query form reached execution".to_owned(),
+                ));
+            }
         };
         for entity_id in &entity_ids {
             entities.insert(
@@ -407,8 +460,11 @@ pub async fn execute_request(
         }
         let phrase = resolve_phrase(query.request, query.label.as_deref())?;
         let mut resolved_semantics = BTreeMap::from([
-            ("table".to_owned(), query.request.table().to_owned()),
-            ("order_key".to_owned(), query.request.order_key().to_owned()),
+            ("table".to_owned(), query.request.table()?.to_owned()),
+            (
+                "order_key".to_owned(),
+                query.request.order_key()?.to_owned(),
+            ),
         ]);
         if let Some(phrase) = phrase {
             resolved_semantics.insert("phrase_id".to_owned(), phrase.phrase_id.to_owned());
@@ -505,11 +561,16 @@ fn response_ids(
     batches: &[arrow_array::RecordBatch],
     form: QueryForm,
 ) -> Result<Vec<String>, SemanticQueryError> {
-    let column_name = form.order_key();
+    let column_name = form.order_key()?;
     let prefix = match form {
         QueryForm::FindEntities => "entity:unknown:",
         QueryForm::RetrieveFacts => "fact:property:",
         QueryForm::FollowRelationships => "fact:relation:",
+        _ => {
+            return Err(SemanticQueryError::Invalid(
+                "inactive query form reached response decoding".to_owned(),
+            ));
+        }
     };
     let mut ids = Vec::new();
     for batch in batches {
@@ -619,8 +680,8 @@ mod tests {
           "freshness_policy":"best_available_snapshot",
           "queries":[
             {"query_id":"q1","request":"find code entities","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
-            {"query_id":"q2","request":"retrieve facts","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
-            {"query_id":"q3","request":"follow relationships","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}}
+            {"query_id":"q2","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
+            {"query_id":"q3","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}}
           ],
           "response_projection":null,
           "cost_budget":{"maximum_rows":30}
@@ -634,7 +695,7 @@ mod tests {
         assert_eq!(validated.request.queries.len(), 3);
         assert!(validated.request_digest.starts_with("b3:"));
         assert_eq!(
-            query_sql(&validated.request.queries[0]),
+            query_sql(&validated.request.queries[0]).unwrap(),
             "SELECT * FROM entities ORDER BY entity_id LIMIT 10 OFFSET 0"
         );
     }

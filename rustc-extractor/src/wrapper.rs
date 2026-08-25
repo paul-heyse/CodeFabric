@@ -35,17 +35,18 @@ use crate::protocol::generated::codefabric::rustc::v1::{
 use crate::protocol::generated::observation_schema::{
     PROVIDER_OBSERVATION_SCHEMAS, ProviderObservationLogicalType, ProviderObservationSchema,
 };
-use crate::protocol::generated::registries::CAPABILITY_IDS;
+use crate::protocol::generated::registries::{CAPABILITY_CODES, CAPABILITY_IDS};
 use crate::rustc_link::OwnedMirItem;
+
+include!("generated/digest_frames.rs");
 
 const MAX_CHUNK_BYTES: usize = 16 * 1024 * 1024;
 
 fn rust_mir_capability_code() -> Result<u32, String> {
     CAPABILITY_IDS
         .iter()
-        .position(|candidate| *candidate == "RUST_MIR")
-        .and_then(|index| u32::try_from(index + 1).ok())
-        .and_then(|ordinal| ordinal.checked_mul(10))
+        .zip(CAPABILITY_CODES)
+        .find_map(|(candidate, code)| (*candidate == "RUST_MIR").then_some(u32::from(*code)))
         .ok_or_else(|| "generated RUST_MIR capability allocation is absent".to_owned())
 }
 
@@ -87,16 +88,6 @@ struct ToolchainIdentity {
 
 fn b3(bytes: &[u8]) -> String {
     format!("b3:{}", blake3::hash(bytes).to_hex())
-}
-
-fn digest_frames(domain: &[u8], fields: impl IntoIterator<Item = Vec<u8>>) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(domain);
-    for field in fields {
-        hasher.update(&(field.len() as u64).to_be_bytes());
-        hasher.update(&field);
-    }
-    format!("b3:{}", hasher.finalize().to_hex())
 }
 
 fn valid_digest(value: &str) -> bool {

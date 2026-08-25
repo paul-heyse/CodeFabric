@@ -24,6 +24,7 @@ use crate::fabric::ServingQuerySession;
 use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
 use crate::integrity::{frame_digest, framed_digest};
 use crate::lifecycle::{FreshnessAdmission, FreshnessBarrier, FreshnessState};
+use crate::registries::QUERY_FORM_VALUES;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryService;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryServiceServer;
 use crate::rpc::generated::codefabric::cpgd::v1::query_event::Event;
@@ -43,6 +44,7 @@ use crate::rpc::{
 use crate::security::{
     KeyedAuthenticator, SecurityMacDomain, authenticator_hex, local_token_digest,
 };
+use crate::semantic_query::QueryForm;
 use crate::semantic_query::{
     ExecutedSemanticResponse, FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse,
     ValidatedSemanticRequest, execute_request, snapshot_response, validate_request,
@@ -331,6 +333,48 @@ pub struct ProductionQueryService<B> {
     idempotency: Arc<Mutex<BTreeMap<String, String>>>,
     freshness: FreshnessBarrier,
     freshness_timeout: std::time::Duration,
+    query_bundle: BundleIdentity,
+}
+
+fn valid_bundle_digest(value: &str) -> bool {
+    value.len() == 67
+        && value.starts_with("b3:")
+        && value[3..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn query_bundle_identity() -> BundleIdentity {
+    let authority: serde_json::Value = serde_json::from_str(include_str!(
+        "../contracts/bundles/query-language-bundle.json"
+    ))
+    .expect("generated query-language bundle must be valid JSON");
+    let string = |field: &str| {
+        authority[field]
+            .as_str()
+            .unwrap_or_else(|| panic!("query-language bundle is missing {field}"))
+            .to_owned()
+    };
+    let bundle = BundleIdentity {
+        bundle_id: string("artifact_id"),
+        bundle_version: string("bundle_version"),
+        bundle_digest: string("bundle_digest"),
+    };
+    assert_eq!(
+        bundle.bundle_id, "codefabric.bundles.query-language-bundle",
+        "query-language bundle identity is unexpected"
+    );
+    assert!(valid_bundle_digest(&bundle.bundle_digest));
+    bundle
+}
+
+fn supported_query_forms() -> Vec<String> {
+    QUERY_FORM_VALUES
+        .iter()
+        .filter_map(|entry| QueryForm::try_from(entry.code).ok())
+        .filter(|form| form.currently_supported())
+        .map(|form| form.registry_slug().to_owned())
+        .collect()
 }
 
 impl<B> ProductionQueryService<B> {
@@ -348,6 +392,7 @@ impl<B> ProductionQueryService<B> {
             idempotency: Arc::new(Mutex::new(BTreeMap::new())),
             freshness: FreshnessBarrier::default(),
             freshness_timeout: std::time::Duration::from_secs(2),
+            query_bundle: query_bundle_identity(),
         }
     }
 
@@ -696,12 +741,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             negotiated_semantic_query_version: "1.3".to_owned(),
             negotiated_feature_bits: negotiated,
             negotiated_compression: PayloadCompression::Identity as i32,
-            installed_bundles: vec![BundleIdentity {
-                bundle_id: "codefabric.bundles.query-language-bundle".to_owned(),
-                bundle_version: "1.0".to_owned(),
-                bundle_digest:
-                    "b3:f4d3d3f7fff40534c5cbd2e54a7808193cdc82b61034ef525519ba64e14d5e7b".to_owned(),
-            }],
+            installed_bundles: vec![self.query_bundle.clone()],
             active_schema_fingerprints: Vec::new(),
             effective_limits: Some(EffectiveLimitsProfile {
                 maximum_control_message_bytes: MAX_CONTROL_MESSAGE_BYTES as u64,
@@ -720,11 +760,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 reason_code: None,
                 active_snapshot_id: None,
                 supported_language_codes: vec![10, 20],
-                supported_query_forms: vec![
-                    "find code entities".to_owned(),
-                    "retrieve facts".to_owned(),
-                    "follow relationships".to_owned(),
-                ],
+                supported_query_forms: supported_query_forms(),
                 capability_codes: Vec::new(),
             }),
         }))
@@ -753,11 +789,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 ("semantic_query".to_owned(), "1.3".to_owned()),
             ]),
             supported_languages: vec!["python".to_owned(), "rust".to_owned()],
-            supported_request_forms: vec![
-                "find code entities".to_owned(),
-                "retrieve facts".to_owned(),
-                "follow relationships".to_owned(),
-            ],
+            supported_request_forms: supported_query_forms(),
             capability_statuses: Vec::new(),
             freshness_state: match self.freshness.state() {
                 FreshnessState::Current => "CURRENT",

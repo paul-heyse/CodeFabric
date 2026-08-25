@@ -1885,7 +1885,7 @@ mod tests {
         );
         let workspace_id = candidate.manifest().body.workspace_id.clone();
         let request = format!(
-            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"response-kat","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":"syntax nodes","input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":30}}}}"#
+            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"response-kat","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":"syntax nodes","input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":30}}}}"#
         );
         let first = crate::semantic_query::execute_request(
             &session,

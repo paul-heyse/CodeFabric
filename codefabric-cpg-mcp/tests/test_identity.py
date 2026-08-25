@@ -141,7 +141,8 @@ def test_wp07_behavioral_acceptance() -> None:
 
 
 def test_wp07_structural_acceptance() -> None:
-    assert [domain.value for domain in IdentityDomain] == list(range(1, 17))
+    assert [domain.value for domain in IdentityDomain] == list(range(1, 18))
+    assert IdentityDomain.ROOT_AUTHORIZATION.value == 17
     assert [type_code.value for type_code in TypeCode] == list(range(13))
     assert len(_load("cbef-v1-vectors.json")["cases"]) == 16
     assert len(_load("type-algebra-v1-vectors.json")["cases"]) >= 4

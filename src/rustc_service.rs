@@ -32,6 +32,8 @@ use crate::rpc::generated::codefabric::rustc::v1::{
 };
 use crate::rpc::{AuthorizedUnixStream, SameUserInterceptor, negotiate_feature_bits};
 
+include!("generated/digest_frames.rs");
+
 /// AC-G-31 maximum number of chunks a wrapper may have in flight.
 pub const MAX_OUTSTANDING_CHUNKS: u32 = 4;
 /// AC-G-31 maximum unacknowledged payload bytes per compilation.
@@ -50,16 +52,6 @@ fn now_millis() -> i64 {
 
 fn digest(bytes: &[u8]) -> String {
     format!("b3:{}", blake3::hash(bytes).to_hex())
-}
-
-fn digest_frames(domain: &[u8], fields: impl IntoIterator<Item = Vec<u8>>) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(domain);
-    for field in fields {
-        hasher.update(&(field.len() as u64).to_be_bytes());
-        hasher.update(&field);
-    }
-    format!("b3:{}", hasher.finalize().to_hex())
 }
 
 fn valid_digest(value: &str) -> bool {
