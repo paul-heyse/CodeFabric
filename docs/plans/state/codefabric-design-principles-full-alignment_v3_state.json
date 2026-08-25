@@ -17,13 +17,14 @@
     },
     "WP54": {
       "status": "complete",
-      "proving_commit": "6297e2a4838d1e46a8f353cad01f405be974c89d",
+      "proving_commit": "d336544418840bf825fcea4a7a1eca293ff3ae21",
       "deviations": [
         "The two WP73 registry record sets are unchanged; WP54 adds the repository-model identity envelope and detached semantic identity required for those accepted authorities to participate in governance."
       ],
       "failed_approaches": [
         "The first governance rerun exposed a stale post-control active-plan whitelist; the correction validates any atomically activated schema-2 plan while retaining the malformed-plan negative oracle.",
-        "The first model-assurance rerun rejected the new governance YAML files as headerless or unclaimed; standard identity headers and explicit detached registry identities replace that split authority."
+        "The first model-assurance rerun rejected the new governance YAML files as headerless or unclaimed; standard identity headers and explicit detached registry identities replace that split authority.",
+        "The first oracle rerun called raw validate_plan and therefore ignored the state-governed accepted input evolution; the assurance loader now validates the active plan and state as one artifact packet."
       ],
       "blockers": []
     },
@@ -255,6 +256,6 @@
       "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
     }
   ],
-  "next_action": "Re-run all WP54 gates against proving commit 6297e2a; if green, start dependency-ready WP55.",
-  "updated_at": "2026-08-25T16:45:00Z"
+  "next_action": "Re-run all WP54 gates against proving commit d336544; if green, start dependency-ready WP55.",
+  "updated_at": "2026-08-25T16:55:00Z"
 }
