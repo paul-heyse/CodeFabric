@@ -1011,7 +1011,7 @@ fn audit(
     now: &str,
 ) -> Result<(), WorkspaceRegistryError> {
     let event_id = random_registration_nonce()?;
-    let details_digest = *blake3::hash(event_name.as_bytes()).as_bytes();
+    let details_digest = crate::integrity::digest_bytes(event_name.as_bytes());
     transaction.execute(
         "INSERT INTO audit_event(event_id, workspace_id, event_code, actor_id, occurred_at, details_digest, diagnostic_id) VALUES (?1, ?2, ?3, 'local-admin', ?4, ?5, NULL)",
         params![event_id.as_slice(), workspace_id.as_ref().map(<[u8; 16]>::as_slice), event_code, now, details_digest.as_slice()],

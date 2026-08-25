@@ -71,8 +71,8 @@ pub fn utility_probe() -> Result<(), Box<dyn std::error::Error>> {
         return Err(std::io::Error::other("serde round-trip changed the record").into());
     }
 
-    let digest = blake3::hash(&encoded);
-    if digest.as_bytes() == &[0_u8; 32] {
+    let digest = crate::integrity::digest_bytes(&encoded);
+    if digest == [0_u8; 32] {
         return Err(std::io::Error::other("BLAKE3 returned the reserved zero digest").into());
     }
     let parsed = url::Url::parse("file:///tmp/codefabric")?;

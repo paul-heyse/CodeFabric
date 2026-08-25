@@ -753,7 +753,7 @@ fn walk_family(
                 role: claim_role,
                 parser,
                 header,
-                source_digest: format!("b3:{}", blake3::hash(&bytes).to_hex()),
+                source_digest: codefabric::integrity::framed_digest(&bytes),
                 byte_length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
                 git_states: states,
             },
@@ -1180,7 +1180,11 @@ fn normalize_kind(value: &str) -> String {
 }
 
 pub(super) fn output_id(path: &[u8]) -> Result<StableId, RepositoryModelError> {
-    StableId::parse(format!("output:{}", blake3::hash(path).to_hex())).map_err(Into::into)
+    StableId::parse(format!(
+        "output:{}",
+        codefabric::integrity::digest_hex(path)
+    ))
+    .map_err(Into::into)
 }
 
 pub(super) fn read_stable(path: &Path, maximum: usize) -> Result<Vec<u8>, RepositoryModelError> {
@@ -1228,7 +1232,7 @@ fn same_file_version(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 fn canonical_digest(value: &impl Serialize) -> Result<String, RepositoryModelError> {
     let value = serde_json::to_value(value).map_err(RepositoryModelError::Json)?;
     let bytes = serde_json_canonicalizer::to_vec(&value).map_err(RepositoryModelError::Json)?;
-    Ok(format!("b3:{}", blake3::hash(&bytes).to_hex()))
+    Ok(codefabric::integrity::framed_digest(&bytes))
 }
 
 fn bounded(message: impl std::fmt::Display) -> String {

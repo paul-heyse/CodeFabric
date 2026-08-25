@@ -260,7 +260,7 @@ impl InventoryWalker {
             .read_stable_file(&path, ORDINARY_SOURCE_MAXIMUM_BYTES)
         {
             Ok(read) => (
-                Some(*blake3::hash(&read.bytes).as_bytes()),
+                Some(crate::integrity::digest_bytes(&read.bytes)),
                 Some(filesystem_identity(
                     read.metadata.device,
                     read.metadata.inode,
@@ -656,29 +656,31 @@ fn inventory_leaf_fields_digest(
     classification: u16,
     inclusion: u16,
 ) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.inventory.file.v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::InventoryFile,
+    );
     hash_length_prefixed(&mut hasher, path);
     hasher.update(&content_digest.unwrap_or([0; 32]));
     hasher.update(&byte_length.to_be_bytes());
     hasher.update(&file_kind.to_be_bytes());
     hasher.update(&classification.to_be_bytes());
     hasher.update(&inclusion.to_be_bytes());
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn inventory_directory_digest(children: &[(Vec<u8>, u8, [u8; 32])]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.inventory.directory.v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::InventoryDirectory,
+    );
     for (name, kind, digest) in children {
         hash_length_prefixed(&mut hasher, name);
         hasher.update(&[*kind]);
         hasher.update(digest);
     }
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
-fn hash_length_prefixed(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+fn hash_length_prefixed(hasher: &mut crate::integrity::IntegrityHasher, bytes: &[u8]) {
     hasher.update(&u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_be_bytes());
     hasher.update(bytes);
 }

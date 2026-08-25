@@ -729,14 +729,13 @@ pub(crate) fn project(
 }
 
 fn capability_scope_fingerprint(scope: FactScope, capability: &str) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-capability-scope-v1\0");
-    hasher.update(&scope.workspace_id);
-    hasher.update(&scope.analysis_context_id);
-    hasher.update(&scope.owner_id);
-    hasher.update(&scope.source_generation.to_be_bytes());
-    hasher.update(capability.as_bytes());
-    *hasher.finalize().as_bytes()
+    crate::identity::capability_scope_fingerprint(
+        scope.workspace_id,
+        scope.analysis_context_id,
+        scope.owner_id,
+        scope.source_generation,
+        capability,
+    )
 }
 
 fn validate_inputs(
@@ -764,7 +763,7 @@ fn validate_inputs(
         return Err(FactIngestError::StaleResult("source image".into()));
     }
     if source.file_id != source_file_identity(&source.path)?.id
-        || source.digest != *blake3::hash(&source.bytes).as_bytes()
+        || source.digest != crate::integrity::digest_bytes(&source.bytes)
         || source.byte_length != u64::try_from(source.bytes.len()).unwrap_or(u64::MAX)
     {
         return Err(FactIngestError::SourceSnapshotMismatch(
@@ -1575,26 +1574,11 @@ fn evidence_row(
 }
 
 fn evidence_id(run: [u8; 16], observation: [u8; 16], fact: [u8; 16]) -> [u8; 16] {
-    digest16(&[b"codefabric-fact-evidence-v1\0", &run, &observation, &fact])
+    crate::identity::fact_evidence_id(run, observation, fact)
 }
 
 fn observation_id(run: [u8; 16], family: u8, ordinal: u64) -> [u8; 16] {
-    digest16(&[
-        b"codefabric-source-observation-v1\0",
-        &run,
-        &[family],
-        &ordinal.to_be_bytes(),
-    ])
-}
-
-fn digest16(parts: &[&[u8]]) -> [u8; 16] {
-    let mut hasher = blake3::Hasher::new();
-    for part in parts {
-        hasher.update(part);
-    }
-    let mut output = [0; 16];
-    output.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
-    output
+    crate::identity::source_observation_id(run, family, ordinal)
 }
 
 fn hash64(id: [u8; 16]) -> i64 {
@@ -1894,7 +1878,7 @@ mod tests {
         )
         .unwrap();
         let bytes = text.as_bytes().to_vec();
-        let digest = *blake3::hash(&bytes).as_bytes();
+        let digest = crate::integrity::digest_bytes(&bytes);
         let mut offsets = vec![0_u64];
         offsets.extend(
             bytes
@@ -1933,7 +1917,7 @@ mod tests {
             line_index: LineIndex {
                 offsets: offsets.into(),
                 serialized: Arc::from(serialized.clone()),
-                digest: *blake3::hash(&serialized).as_bytes(),
+                digest: crate::integrity::digest_bytes(&serialized),
                 format_version: 1,
                 newline_kind: if text.contains('\n') {
                     NewlineKind::Lf
@@ -2002,7 +1986,7 @@ mod tests {
             writer.write(batch).unwrap();
             writer.finish().unwrap();
         }
-        format!("b3:{}", blake3::hash(&encoded).to_hex())
+        crate::integrity::framed_digest(&encoded)
     }
 
     #[derive(Debug, Deserialize)]

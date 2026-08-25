@@ -21,6 +21,8 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 use crate::fabric::ServingQuerySession;
+use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
+use crate::integrity::{frame_digest, framed_digest};
 use crate::lifecycle::{FreshnessAdmission, FreshnessBarrier, FreshnessState};
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryService;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryServiceServer;
@@ -37,6 +39,9 @@ use crate::rpc::generated::codefabric::cpgd::v1::{
 use crate::rpc::{
     AuthorizedUnixStream, MAX_CONTROL_MESSAGE_BYTES, MAX_PAYLOAD_CHUNK_BYTES, SameUserInterceptor,
     negotiate_feature_bits,
+};
+use crate::security::{
+    KeyedAuthenticator, SecurityMacDomain, authenticator_hex, local_token_digest,
 };
 use crate::semantic_query::{
     ExecutedSemanticResponse, FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse,
@@ -57,15 +62,10 @@ fn now_millis() -> i64 {
         })
 }
 
-fn digest(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
-}
-
-fn opaque_bytes(domain: &[u8], value: &str) -> Vec<u8> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(domain);
-    hasher.update(value.as_bytes());
-    hasher.finalize().as_bytes().to_vec()
+fn opaque_bytes(domain: SemanticFingerprintDomain, value: &str) -> Vec<u8> {
+    let mut fingerprint = semantic_fingerprint(domain);
+    fingerprint.update(value.as_bytes());
+    fingerprint.finalize().to_vec()
 }
 
 #[derive(Clone, Debug)]
@@ -104,14 +104,14 @@ impl ResultArtifactStore {
         workspace_id: &str,
         snapshot_id: &str,
     ) -> Result<ResultArtifact, Status> {
-        let checksum = digest(&bytes);
-        let mut identity = blake3::Hasher::new();
-        identity.update(b"codefabric.result-artifact.v1\0");
+        let checksum = framed_digest(&bytes);
+        let mut identity = semantic_fingerprint(SemanticFingerprintDomain::ResultArtifact);
         for field in [workspace_id, agent_id, snapshot_id, checksum.as_str()] {
             identity.update(&(field.len() as u64).to_be_bytes());
             identity.update(field.as_bytes());
         }
-        let id = format!("result:{}", &identity.finalize().to_hex()[..32]);
+        let identity = identity.finalize();
+        let id = format!("result:{}", &frame_digest(identity)[3..35]);
         let final_path = self.root.join(format!("{}.json", &checksum[3..]));
         if final_path.exists() {
             let existing = fs::read(&final_path)
@@ -135,12 +135,11 @@ impl ResultArtifactStore {
             fs::rename(&temporary, &final_path)
                 .map_err(|_| Status::internal("result artifact publication failed"))?;
         }
-        let mut lease = blake3::Hasher::new_keyed(&self.lease_secret);
-        lease.update(b"codefabric.result-lease.v1\0");
+        let mut lease = KeyedAuthenticator::new(&self.lease_secret, SecurityMacDomain::ResultLease);
         lease.update(id.as_bytes());
         lease.update(agent_id.as_bytes());
         lease.update(workspace_id.as_bytes());
-        let lease_token = format!("lease:{}", lease.finalize().to_hex());
+        let lease_token = format!("lease:{}", authenticator_hex(lease.finalize()));
         Ok(ResultArtifact {
             id,
             checksum,
@@ -246,10 +245,7 @@ impl QueryAuthorization {
 }
 
 fn capability_digest(token: &[u8]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.local-capability-token.v1\0");
-    hasher.update(token);
-    *hasher.finalize().as_bytes()
+    local_token_digest(SecurityMacDomain::LocalCapabilityToken, token)
 }
 
 fn constant_time_equal(left: &[u8; 32], right: &[u8; 32]) -> bool {
@@ -431,7 +427,7 @@ pub enum QueryTransportError {
 }
 
 fn validate_checksum(expected: &str, bytes: &[u8]) -> Result<(), Status> {
-    if expected != digest(bytes) {
+    if expected != framed_digest(bytes) {
         return Err(Status::invalid_argument("request checksum differs"));
     }
     Ok(())
@@ -443,7 +439,7 @@ fn event_header(query_id: &str, sequence: u64, snapshot_id: Option<String>) -> Q
         sequence,
         snapshot_id,
         event_at_unix_ms: now_millis(),
-        event_checksum: digest(format!("{query_id}:{sequence}").as_bytes()),
+        event_checksum: framed_digest(format!("{query_id}:{sequence}").as_bytes()),
     }
 }
 
@@ -616,7 +612,7 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
         QueryEvent {
             event: Some(Event::SnapshotPinned(SnapshotPinnedEvent {
                 header: Some(event_header(&query_id, 1, Some(snapshot_id.clone()))),
-                metadata_checksum: digest(&snapshot_bytes),
+                metadata_checksum: framed_digest(&snapshot_bytes),
                 canonical_public_snapshot_metadata_json: snapshot_bytes,
             })),
         },
@@ -713,7 +709,9 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 maximum_inline_response_bytes: MAX_PAYLOAD_CHUNK_BYTES as u64,
                 maximum_concurrent_queries: 4,
                 query_orphan_replay_seconds: 300,
-                profile_digest: digest(b"codefabric.local-query-limits.v1"),
+                profile_digest: frame_digest(
+                    semantic_fingerprint(SemanticFingerprintDomain::LocalQueryLimits).finalize(),
+                ),
             }),
             authorized_workspaces: claims,
             server_time_unix_ms: now_millis(),
@@ -781,7 +779,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         Ok(Response::new(StatusResponse {
             workspace_id: request.workspace_id,
             readiness: WorkspaceReadiness::Ready as i32,
-            status_checksum: digest(&canonical),
+            status_checksum: framed_digest(&canonical),
             canonical_public_status_json: canonical,
             observed_at_unix_ms: now_millis(),
         }))
@@ -875,7 +873,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         }
         let semantic_request_id = validated.request.semantic_request_id.clone();
         let query_id = format!("query:{}", &request.request_checksum[3..35]);
-        let resume_token = opaque_bytes(b"codefabric.query.resume.v1\0", &query_id);
+        let resume_token = opaque_bytes(SemanticFingerprintDomain::QueryResume, &query_id);
         // The accepted v1 response exposes one opaque handle token. It therefore
         // authorizes both replay and cancellation; future protocol majors may split it.
         let cancel_token = resume_token.clone();
@@ -1101,7 +1099,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             artifact_id: artifact.id.clone(),
             offset: request.offset,
             uncompressed_length: payload.len() as u64,
-            payload_checksum: digest(&payload),
+            payload_checksum: framed_digest(&payload),
             payload,
             artifact_checksum: artifact.checksum.clone(),
             content_type: "application/json".to_owned(),
@@ -1180,11 +1178,11 @@ mod tests {
             repository_id: None,
             worktree_id: None,
             source_generation: 1,
-            source_inventory_digest: digest(b"inventory"),
+            source_inventory_digest: framed_digest(b"inventory"),
             durable_base_publication: "publication:00000000000000000000000000000000".to_owned(),
-            base_table_version_digest: digest(b"tables"),
+            base_table_version_digest: framed_digest(b"tables"),
             overlay_generation: 0,
-            overlay_checksum: digest(b"overlay"),
+            overlay_checksum: framed_digest(b"overlay"),
             analysis_context_set_id: "context-set:00000000000000000000000000000000".to_owned(),
             analysis_context_ids: vec!["context:source".to_owned()],
             freshness_state: "CURRENT",
@@ -1246,7 +1244,7 @@ mod tests {
                     errors: Vec::new(),
                     notices: Vec::new(),
                     output_row_count: 1,
-                    result_checksum: digest(b"row"),
+                    result_checksum: framed_digest(b"row"),
                 }],
                 errors: Vec::new(),
             };
@@ -1254,7 +1252,7 @@ mod tests {
                 &serde_json::to_value(&response).unwrap(),
             )?;
             Ok(ExecutedSemanticResponse {
-                response_digest: digest(&canonical_bytes),
+                response_digest: framed_digest(&canonical_bytes),
                 response,
                 canonical_bytes,
             })
@@ -1389,7 +1387,7 @@ mod tests {
                 workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
                 semantic_query_version: "1.3".to_owned(),
                 canonical_request_json: canonical.clone(),
-                request_checksum: digest(&canonical),
+                request_checksum: framed_digest(&canonical),
                 delivery_preference: DeliveryPreference::Resource as i32,
                 deadline_unix_ms: now_millis() + 60_000,
                 idempotency_key: "same-request".to_owned(),
@@ -1460,7 +1458,7 @@ mod tests {
                 agent_instance_id: "test-agent".to_owned(),
                 workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
                 canonical_request_json: canonical,
-                request_checksum: digest(b"wrong"),
+                request_checksum: framed_digest(b"wrong"),
                 delivery_preference: DeliveryPreference::Inline as i32,
                 deadline_unix_ms: now_millis() - 1,
                 idempotency_key: "expired".to_owned(),
@@ -1491,7 +1489,7 @@ mod tests {
                 workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
                 semantic_query_version: "1.3".to_owned(),
                 canonical_request_json: canonical.clone(),
-                request_checksum: digest(&canonical),
+                request_checksum: framed_digest(&canonical),
                 delivery_preference: DeliveryPreference::Resource as i32,
                 deadline_unix_ms: now_millis() + 60_000,
                 idempotency_key: "cancel-request".to_owned(),
@@ -1557,7 +1555,7 @@ mod tests {
                 workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
                 semantic_query_version: "1.3".to_owned(),
                 canonical_request_json: canonical.clone(),
-                request_checksum: digest(&canonical),
+                request_checksum: framed_digest(&canonical),
                 delivery_preference: DeliveryPreference::Resource as i32,
                 deadline_unix_ms: now_millis() + 1_000,
                 idempotency_key: "strict-stale".to_owned(),

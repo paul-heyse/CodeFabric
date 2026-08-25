@@ -447,13 +447,6 @@ impl CapabilityEvidence {
         if !CAPABILITY_IDS.contains(&capability_code) {
             return Err(CoreFactError::UnknownCapability(capability_code.to_owned()));
         }
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"codefabric-capability-scope-v1\0");
-        hasher.update(&scope.workspace_id);
-        hasher.update(&scope.analysis_context_id);
-        hasher.update(&scope.owner_id);
-        hasher.update(&scope.source_generation.to_be_bytes());
-        hasher.update(capability_code.as_bytes());
         Ok(Self {
             workspace_id: scope.workspace_id,
             analysis_context_id: scope.analysis_context_id,
@@ -467,7 +460,13 @@ impl CapabilityEvidence {
             reason_code,
             diagnostic_id: None,
             fallback_source_available: true,
-            coverage_scope_fingerprint: *hasher.finalize().as_bytes(),
+            coverage_scope_fingerprint: crate::identity::capability_scope_fingerprint(
+                scope.workspace_id,
+                scope.analysis_context_id,
+                scope.owner_id,
+                scope.source_generation,
+                capability_code,
+            ),
             external_remainder,
             unknown_remainder,
         })
@@ -698,7 +697,7 @@ impl CoreFactEngine {
         for owner in &compilation.owners {
             let mir = decode_rustc_owner(owner)?;
             let owner_key = semantic_key(
-                b"codefabric.rustc.canonical-owner.v1\0",
+                crate::identity::SemanticFingerprintDomain::RustcCanonicalOwner,
                 &[
                     compilation.begin.compilation_unit_id.as_bytes(),
                     mir.protocol_owner_id.as_bytes(),
@@ -995,7 +994,7 @@ fn decode_rustc_owner(owner: &AcceptedRustcOwner) -> Result<RustcMirObservation,
     let contract = rustc_mir_observation_contract()?;
     if chunk.observation_family_code != u32::from(ProviderObservationFamily::RustMirOwner as u16)
         || chunk.schema_digest != contract.schema_digest
-        || chunk.chunk_digest != format!("b3:{}", blake3::hash(&chunk.arrow_ipc).to_hex())
+        || chunk.chunk_digest != crate::integrity::framed_digest(&chunk.arrow_ipc)
         || chunk.payload_reference.is_some()
         || chunk.arrow_ipc.is_empty()
     {
@@ -1148,21 +1147,17 @@ fn required_table_digest(table_code: i16) -> Result<String, FactIngestError> {
         .ok_or_else(|| FactIngestError::Protocol(format!("table {table_code} is absent")))
 }
 
-fn semantic_key(domain: &[u8], fields: &[&[u8]]) -> Vec<u8> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(domain);
+fn semantic_key(domain: crate::identity::SemanticFingerprintDomain, fields: &[&[u8]]) -> Vec<u8> {
+    let mut hasher = crate::identity::semantic_fingerprint(domain);
     for field in fields {
         hasher.update(&(field.len() as u64).to_be_bytes());
         hasher.update(field);
     }
-    hasher.finalize().as_bytes().to_vec()
+    hasher.finalize().to_vec()
 }
 
 fn stable_id16(bytes: &[u8]) -> [u8; 16] {
-    let digest = blake3::hash(bytes);
-    let mut id = [0; 16];
-    id.copy_from_slice(&digest.as_bytes()[..16]);
-    id
+    crate::identity::unframed_semantic_id(bytes)
 }
 
 fn digest32(value: &str) -> Result<[u8; 32], FactIngestError> {
@@ -1202,14 +1197,13 @@ const fn digest_hash64(digest: [u8; 32]) -> i64 {
 }
 
 fn coverage_fingerprint(scope: FactScope, chunk_digest: &str) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.rustc.capability-scope.v1\0");
-    hasher.update(&scope.workspace_id);
-    hasher.update(&scope.analysis_context_id);
-    hasher.update(&scope.source_generation.to_be_bytes());
-    hasher.update(&scope.owner_id);
-    hasher.update(chunk_digest.as_bytes());
-    *hasher.finalize().as_bytes()
+    crate::identity::rustc_capability_scope_fingerprint(
+        scope.workspace_id,
+        scope.analysis_context_id,
+        scope.source_generation,
+        scope.owner_id,
+        chunk_digest,
+    )
 }
 
 /// Stable Wave-4 boundary errors.
@@ -1298,7 +1292,7 @@ mod tests {
         )
         .unwrap();
         let bytes = text.as_bytes().to_vec();
-        let digest = *blake3::hash(&bytes).as_bytes();
+        let digest = crate::integrity::digest_bytes(&bytes);
         let offsets = text
             .char_indices()
             .map(|(offset, _)| u64::try_from(offset).unwrap())
@@ -1346,7 +1340,7 @@ mod tests {
             line_index: LineIndex {
                 offsets: Arc::from(line_offsets),
                 serialized: Arc::from(serialized.clone()),
-                digest: *blake3::hash(&serialized).as_bytes(),
+                digest: crate::integrity::digest_bytes(&serialized),
                 format_version: 1,
                 newline_kind: NewlineKind::Lf,
             },
@@ -1500,7 +1494,7 @@ mod tests {
                     sequence: 2,
                     owner_id: "owner:wp36".to_owned(),
                     observation_family_code: family,
-                    chunk_digest: format!("b3:{}", blake3::hash(&arrow_ipc).to_hex()),
+                    chunk_digest: crate::integrity::framed_digest(&arrow_ipc),
                     arrow_ipc,
                     payload_reference: None,
                     schema_digest: contract.schema_digest.to_owned(),
@@ -1798,8 +1792,9 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut fact_digest = blake3::Hasher::new();
-        fact_digest.update(b"codefabric.wave4.canonical-state.v1\0");
+        let mut fact_digest = crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::Wave4CanonicalState,
+        );
         for (table_code, batch) in &analysis.canonical.batches {
             fact_digest.update(&table_code.to_be_bytes());
             fact_digest.update(&batch_checksum(batch.batch()).unwrap());
@@ -1826,7 +1821,7 @@ mod tests {
                 analysis_context_ids: contexts,
                 git_state_fingerprint: None,
                 inclusion_policy_fingerprint: [0x22; 32],
-                base_fact_digest: *fact_digest.finalize().as_bytes(),
+                base_fact_digest: fact_digest.finalize(),
                 derived_fact_digest: None,
                 ontology_version: "1.3".into(),
                 schema_bundle_version: "1.0".into(),

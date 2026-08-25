@@ -234,7 +234,7 @@ pub enum SemanticQueryError {
 }
 
 fn b3(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
+    crate::integrity::framed_digest(bytes)
 }
 
 fn valid_id(value: &str, maximum: usize) -> bool {
@@ -544,8 +544,9 @@ fn response_ids(
 pub(crate) fn snapshot_response(
     manifest: &crate::snapshot::ServingSnapshotManifest,
 ) -> SemanticSnapshotResponse {
-    let mut versions = blake3::Hasher::new();
-    versions.update(b"codefabric.snapshot.base-table-versions.v1\0");
+    let mut versions = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::SnapshotBaseTableVersions,
+    );
     for table in &manifest.body.base_publication.tables {
         versions.update(&table.table_code.to_be_bytes());
         versions.update(&table.delta_version.to_be_bytes());
@@ -564,7 +565,7 @@ pub(crate) fn snapshot_response(
         source_generation: manifest.body.source.source_generation,
         source_inventory_digest: manifest.body.source.inventory_digest.clone(),
         durable_base_publication: manifest.body.base_publication.publication_id.clone(),
-        base_table_version_digest: format!("b3:{}", versions.finalize().to_hex()),
+        base_table_version_digest: crate::integrity::frame_digest(versions.finalize()),
         overlay_generation: manifest.body.overlay.overlay_generation,
         overlay_checksum: manifest.body.overlay.overlay_digest.clone(),
         analysis_context_set_id: manifest.body.contexts.context_set_id.clone(),

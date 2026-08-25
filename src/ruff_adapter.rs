@@ -849,17 +849,17 @@ fn token_spelling(class: RuffTokenClass, spelling: &str) -> Option<RuffTokenSpel
             Some(RuffTokenSpelling::Slice(spelling.to_owned()))
         }
         RuffTokenClass::Literal => {
-            let mut hasher = blake3::Hasher::new();
-            hasher.update(b"codefabric:python-literal-token-spelling:v1\0");
+            let mut hasher = crate::identity::semantic_fingerprint(
+                crate::identity::SemanticFingerprintDomain::PythonLiteralTokenSpelling,
+            );
             hasher.update(
                 &u64::try_from(spelling.len())
                     .unwrap_or(u64::MAX)
                     .to_le_bytes(),
             );
             hasher.update(spelling.as_bytes());
-            Some(RuffTokenSpelling::Blake3(format!(
-                "b3:{}",
-                hasher.finalize()
+            Some(RuffTokenSpelling::Blake3(crate::integrity::frame_digest(
+                hasher.finalize(),
             )))
         }
         _ => None,
@@ -1846,11 +1846,11 @@ mod tests {
 
     #[allow(clippy::too_many_lines)] // The KAT frames every public semantic field explicitly.
     fn snapshot_digest(snapshot: &RuffSnapshot) -> String {
-        fn frame(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+        fn frame(hasher: &mut crate::integrity::IntegrityHasher, bytes: &[u8]) {
             hasher.update(&u64::try_from(bytes.len()).unwrap().to_le_bytes());
             hasher.update(bytes);
         }
-        fn option_u64(hasher: &mut blake3::Hasher, value: Option<u64>) {
+        fn option_u64(hasher: &mut crate::integrity::IntegrityHasher, value: Option<u64>) {
             match value {
                 Some(value) => {
                     hasher.update(&[1]);
@@ -1862,8 +1862,9 @@ mod tests {
             }
         }
 
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"codefabric:ruff-python-frontend-projection:v1\0");
+        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::RuffFrontendProjection,
+        );
         hasher.update(&snapshot.revision.to_le_bytes());
         frame(&mut hasher, snapshot.catalog_id.as_bytes());
         frame(&mut hasher, snapshot.provider_version.as_bytes());
@@ -1999,7 +2000,7 @@ mod tests {
             hasher.update(&edge.ruff_id.0.to_le_bytes());
             hasher.update(&edge.tree_sitter_id.0.to_le_bytes());
         }
-        format!("b3:{}", hasher.finalize())
+        crate::integrity::frame_digest(hasher.finalize())
     }
 
     const RICH_SOURCE: &str = concat!(

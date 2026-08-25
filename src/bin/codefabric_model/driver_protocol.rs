@@ -6,6 +6,7 @@ use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use codefabric::integrity::framed_digest as digest_bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -493,10 +494,6 @@ pub fn configure_reproducible_cargo_build(command: &mut Command, repository_root
                 repository_root.display()
             ),
         );
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
 }
 
 /// Driver protocol failures.

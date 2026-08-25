@@ -170,12 +170,12 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn owner_fingerprint(owners: &[[u8; 16]]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-owner-set-v1\0");
+    let mut hasher =
+        crate::identity::semantic_fingerprint(crate::identity::SemanticFingerprintDomain::OwnerSet);
     for owner in owners {
         hasher.update(owner);
     }
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 /// Stable schema-and-row checksum independent of input row order.
@@ -195,8 +195,9 @@ pub fn batch_checksum(batch: &RecordBatch) -> Result<[u8; 32], FabricError> {
     let rows = converter.convert_columns(batch.columns())?;
     let mut ordered = rows.iter().map(|row| row.data()).collect::<Vec<_>>();
     ordered.sort_unstable();
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-arrow-batch-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::ArrowBatch,
+    );
     if let Some(digest) = batch
         .schema()
         .metadata()
@@ -209,7 +210,7 @@ pub fn batch_checksum(batch: &RecordBatch) -> Result<[u8; 32], FabricError> {
         hasher.update(&(row.len() as u64).to_be_bytes());
         hasher.update(row);
     }
-    Ok(*hasher.finalize().as_bytes())
+    Ok(hasher.finalize())
 }
 
 /// Stable checksum of the generated primary-key projection for one table batch.

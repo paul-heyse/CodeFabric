@@ -399,8 +399,9 @@ impl ServingQuerySession {
         let mut batches = Vec::new();
         let mut output_row_count = 0_usize;
         let mut output_bytes = 0_usize;
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"codefabric-query-result-stream-v1\0");
+        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::QueryResultStream,
+        );
         let converter = output_row_converter(physical.as_ref())?;
         while let Some(batch) = stream.next().await.transpose()? {
             output_row_count = output_row_count
@@ -433,7 +434,7 @@ impl ServingQuerySession {
             batches.push(batch);
         }
         hasher.update(&(output_row_count as u64).to_be_bytes());
-        let result_checksum = framed_digest(*hasher.finalize().as_bytes());
+        let result_checksum = framed_digest(hasher.finalize());
         let snapshot = self.lease.snapshot();
         let manifest = snapshot.manifest();
         let operator_metrics = physical_metrics(physical.as_ref());
@@ -1230,15 +1231,16 @@ fn table_spec_by_name(name: &str) -> Option<&'static TableSpec> {
 }
 
 fn query_id(sql: &str, snapshot_id: [u8; 16]) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-serving-query-v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::ServingQuery,
+    );
     hasher.update(&snapshot_id);
     hasher.update(sql.as_bytes());
-    format!("b3:{}", hasher.finalize().to_hex())
+    crate::integrity::frame_digest(hasher.finalize())
 }
 
 fn framed_digest(digest: [u8; 32]) -> String {
-    format!("b3:{}", blake3::Hash::from_bytes(digest).to_hex())
+    crate::integrity::frame_digest(digest)
 }
 
 #[cfg(test)]

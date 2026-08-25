@@ -694,7 +694,7 @@
       "artifact_id": "codefabric.governance.design-principle-detector-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/design-principle-detector-registry.yaml",
-      "canonical_digest": "b3:d2b16d6ed600a35af102fed7d474f95fa573bc04c9d5155a65396def9cfca5a7",
+      "canonical_digest": "b3:324e2a9fb7d24cb7e4fa4d39f43bb53c0b3870b968bae9df2195bfe9740f5dbe",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "consumers": [
@@ -713,7 +713,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:9cf57c74cf1f18dc4ae31c1879fdfd058d87ba0666d5f9b6836e1178cf100075",
+      "source_digest": "b3:a8f590b5f252a326db7d44c8065aac020cf0e8489647574445359d18ecd4077a",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -796,6 +796,34 @@
         "max_source_bytes": 8388608
       },
       "source_digest": "b3:cb1ec76e6dbdf433092a7d8c340a431d6d68853b6004a7f52fa90b586de41199",
+      "source_role": "authority",
+      "status": "released",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "codefabric.identity.fingerprint-domain-registry",
+      "artifact_kind": "registry",
+      "authority_path": "contracts/identity/fingerprint-domain-registry.yaml",
+      "canonical_digest": "b3:3fff0400b3d14b1602815944b26cdfc5947c99867fcd36827757e4ceb89d93ec",
+      "compatible_suite_major": 1,
+      "compilation_unit": "registry-cbef",
+      "consumers": [
+        "contract-verifier"
+      ],
+      "owner": "contracts",
+      "projection_profile": "registry-family-typed-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "max_output_bytes": 4194304,
+        "max_outputs": 12,
+        "max_source_bytes": 8388608
+      },
+      "source_digest": "b3:de63078430b3e47a3586252c7fbfc3ae19cefb7523e90a498c2238b65e856830",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -4186,7 +4214,7 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:622e1acf466591935ca12430e2be582cfc90b11a806a60bdbce8ec1f8eebd9ec",
+      "content_digest": "b3:eaaafad7a26b0fab8cf0d9c21a31e24c43a5d0f5e17d39e2a5a2d8bbc1c684e7",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4705,7 +4733,7 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:cc81af3593563afda195a85c969ddc8424d7a39dfdc1195357d23785f09a6d88",
+      "content_digest": "b3:8f6e438951020a8399eef9ef8c3bce7d6602bac84406d395c922478b9a1ab6bc",
       "lineage": [
         "action:registry-cbef"
       ],

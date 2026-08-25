@@ -764,7 +764,7 @@ fn mark_source_verifying(
         .map_err(|_| SecurePathError::OperatingSystem)?
         .as_millis()
         .to_string();
-    let details = *blake3::hash(diagnostic.name.as_bytes()).as_bytes();
+    let details = crate::integrity::digest_bytes(diagnostic.name.as_bytes());
     store.write_transaction(|transaction| {
         let updated = transaction.execute(
             "UPDATE worktree_state SET source_trust_state_code=?2, reconcile_required=1, updated_at=?3 WHERE workspace_id=?1",

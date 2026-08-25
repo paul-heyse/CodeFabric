@@ -926,7 +926,7 @@ impl ProviderRuntime {
             owner_id,
             build_unit_id,
             source_generation: i64::try_from(spec.source_generation).unwrap_or(i64::MAX),
-            input_fingerprint: blake3::hash(&spec.encode_to_vec()).as_bytes().to_vec(),
+            input_fingerprint: crate::integrity::digest_bytes(&spec.encode_to_vec()).to_vec(),
             output_fingerprint: None,
             state_code: i64::from(ProviderRunState::Queued as u16),
             accepted_at: accepted_at.to_string(),
@@ -1530,7 +1530,7 @@ fn diagnostic_id(value: &str) -> Vec<u8> {
         .as_bytes()
         .get(..MAX_DIAGNOSTIC_BYTES)
         .unwrap_or(value.as_bytes());
-    blake3::hash(bounded).as_bytes()[..16].to_vec()
+    crate::identity::unframed_semantic_id(bounded).to_vec()
 }
 
 #[cfg(test)]
@@ -1661,9 +1661,9 @@ mod tests {
     }
 
     fn run_id(label: &str) -> String {
-        let digest = blake3::hash(label.as_bytes());
+        let digest = crate::identity::unframed_semantic_id(label.as_bytes());
         let mut encoded = String::with_capacity(32);
-        for byte in &digest.as_bytes()[..16] {
+        for byte in &digest {
             write!(&mut encoded, "{byte:02x}").unwrap();
         }
         encoded

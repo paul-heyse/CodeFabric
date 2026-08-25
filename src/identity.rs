@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model_generated::identity_recipes as recipes;
+pub use crate::model_generated::identity_recipes::SemanticFingerprintDomain;
 use unicode_casefold::UnicodeCaseFold as _;
 use unicode_normalization::UnicodeNormalization as _;
 
@@ -596,6 +597,108 @@ pub fn derive_identity(record: &CbefRecord) -> Result<DerivedIdentity, IdentityE
     })
 }
 
+/// Registry-selected semantic fingerprint construction. The domain bytes are
+/// generated from the governed fingerprint-domain registry; callers may add
+/// only the record's declared fields in their declared order.
+pub struct SemanticFingerprintBuilder(blake3::Hasher);
+
+impl SemanticFingerprintBuilder {
+    /// Add exact bytes to the registered semantic preimage.
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    /// Finish as the full persisted semantic fingerprint.
+    #[must_use]
+    pub fn finalize(self) -> [u8; 32] {
+        *self.0.finalize().as_bytes()
+    }
+
+    /// Finish as the canonical first-16-byte semantic identifier.
+    #[must_use]
+    pub fn finalize_id16(self) -> [u8; 16] {
+        let digest = self.finalize();
+        digest[..16].try_into().expect("exact identity prefix")
+    }
+}
+
+/// Begin a semantic fingerprint for one generated registry domain.
+#[must_use]
+pub fn semantic_fingerprint(domain: SemanticFingerprintDomain) -> SemanticFingerprintBuilder {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(domain.bytes());
+    SemanticFingerprintBuilder(hasher)
+}
+
+/// Derive the shared source-provider capability-scope fingerprint.
+#[must_use]
+pub fn capability_scope_fingerprint(
+    workspace_id: [u8; 16],
+    analysis_context_id: [u8; 16],
+    owner_id: [u8; 16],
+    source_generation: i64,
+    capability_code: &str,
+) -> [u8; 32] {
+    let mut fingerprint = semantic_fingerprint(SemanticFingerprintDomain::CapabilityScope);
+    fingerprint.update(&workspace_id);
+    fingerprint.update(&analysis_context_id);
+    fingerprint.update(&owner_id);
+    fingerprint.update(&source_generation.to_be_bytes());
+    fingerprint.update(capability_code.as_bytes());
+    fingerprint.finalize()
+}
+
+/// Derive the Rust compiler capability coverage fingerprint.
+#[must_use]
+pub fn rustc_capability_scope_fingerprint(
+    workspace_id: [u8; 16],
+    analysis_context_id: [u8; 16],
+    source_generation: i64,
+    owner_id: [u8; 16],
+    chunk_digest: &str,
+) -> [u8; 32] {
+    let mut fingerprint = semantic_fingerprint(SemanticFingerprintDomain::RustcCapabilityScope);
+    fingerprint.update(&workspace_id);
+    fingerprint.update(&analysis_context_id);
+    fingerprint.update(&source_generation.to_be_bytes());
+    fingerprint.update(&owner_id);
+    fingerprint.update(chunk_digest.as_bytes());
+    fingerprint.finalize()
+}
+
+/// Derive the canonical fact-evidence identity used by every ingest lane.
+#[must_use]
+pub fn fact_evidence_id(
+    provider_run_id: [u8; 16],
+    observation_id: [u8; 16],
+    fact_id: [u8; 16],
+) -> [u8; 16] {
+    let mut fingerprint = semantic_fingerprint(SemanticFingerprintDomain::FactEvidence);
+    fingerprint.update(&provider_run_id);
+    fingerprint.update(&observation_id);
+    fingerprint.update(&fact_id);
+    fingerprint.finalize_id16()
+}
+
+/// Derive the canonical source observation identity.
+#[must_use]
+pub fn source_observation_id(provider_run_id: [u8; 16], family: u8, ordinal: u64) -> [u8; 16] {
+    let mut fingerprint = semantic_fingerprint(SemanticFingerprintDomain::SourceObservation);
+    fingerprint.update(&provider_run_id);
+    fingerprint.update(&[family]);
+    fingerprint.update(&ordinal.to_be_bytes());
+    fingerprint.finalize_id16()
+}
+
+/// Preserve a legacy unframed semantic ID preimage under its explicit registry
+/// record. New semantic domains must use a non-empty domain separator.
+#[must_use]
+pub fn unframed_semantic_id(preimage: &[u8]) -> [u8; 16] {
+    let mut fingerprint = semantic_fingerprint(SemanticFingerprintDomain::UnframedId16);
+    fingerprint.update(preimage);
+    fingerprint.finalize_id16()
+}
+
 /// Generate one operating-system-random 128-bit registration nonce.
 ///
 /// # Errors
@@ -749,7 +852,7 @@ pub fn semantic_owner_identity(
     let record = recipes::owner(recipes::OwnerFields {
         workspace_id: recipes::RecipeValue::Id(workspace_id),
         analysis_context_id: recipes::RecipeValue::Id(analysis_context_id),
-        owner_kind: recipes::RecipeValue::Utf8(owner_kind.to_ascii_lowercase()),
+        owner_kind: recipes::RecipeValue::Utf8(owner_kind.to_owned()),
         semantic_key: recipes::RecipeValue::Bytes(semantic_key),
     })
     .map_err(|_| IdentityError::Scalar)?;
@@ -947,20 +1050,33 @@ fn derive_recipe_identity(record: recipes::RecipeRecord) -> Result<DerivedIdenti
         .map(|field| {
             Ok(CbefField {
                 tag: field.tag,
-                value: recipe_value(field.value)?,
+                value: recipe_value(field.value, field.normalization)?,
             })
         })
         .collect::<Result<Vec<_>, IdentityError>>()?;
     derive_identity(&CbefRecord { domain, fields })
 }
 
-fn recipe_value(value: recipes::RecipeValue) -> Result<CbefValue, IdentityError> {
+fn recipe_value(
+    value: recipes::RecipeValue,
+    normalization: recipes::RecipeNormalization,
+) -> Result<CbefValue, IdentityError> {
+    let string_normalization = match normalization {
+        recipes::RecipeNormalization::None => StringNormalization::None,
+        recipes::RecipeNormalization::Nfc => StringNormalization::Nfc,
+        recipes::RecipeNormalization::Nfkc => StringNormalization::Nfkc,
+        recipes::RecipeNormalization::AsciiLower => StringNormalization::AsciiLower,
+        recipes::RecipeNormalization::PythonIdentifierNfkc => {
+            StringNormalization::PythonIdentifierNfkc
+        }
+        recipes::RecipeNormalization::RustCanonical => StringNormalization::RustCanonical,
+    };
     Ok(match value {
         recipes::RecipeValue::Absent => CbefValue::Absent,
         recipes::RecipeValue::Bytes(value) => CbefValue::Bytes(value),
         recipes::RecipeValue::Utf8(value) => CbefValue::Utf8 {
             value,
-            normalization: StringNormalization::None,
+            normalization: string_normalization,
         },
         recipes::RecipeValue::RawPath(platform_code, bytes) => CbefValue::RawPath {
             platform_code,
@@ -974,24 +1090,29 @@ fn recipe_value(value: recipes::RecipeValue) -> Result<CbefValue, IdentityError>
         recipes::RecipeValue::OrderedList(values) => CbefValue::OrderedList(
             values
                 .into_iter()
-                .map(recipe_value)
+                .map(|value| recipe_value(value, recipes::RecipeNormalization::None))
                 .collect::<Result<_, _>>()?,
         ),
         recipes::RecipeValue::Set(values) => CbefValue::Set(
             values
                 .into_iter()
-                .map(recipe_value)
+                .map(|value| recipe_value(value, recipes::RecipeNormalization::None))
                 .collect::<Result<_, _>>()?,
         ),
         recipes::RecipeValue::Map(values) => CbefValue::Map(
             values
                 .into_iter()
-                .map(|(key, value)| Ok((recipe_value(key)?, recipe_value(value)?)))
+                .map(|(key, value)| {
+                    Ok((
+                        recipe_value(key, recipes::RecipeNormalization::None)?,
+                        recipe_value(value, recipes::RecipeNormalization::None)?,
+                    ))
+                })
                 .collect::<Result<_, IdentityError>>()?,
         ),
         recipes::RecipeValue::TaggedUnion(variant, value) => CbefValue::TaggedUnion {
             variant,
-            value: Box::new(recipe_value(*value)?),
+            value: Box::new(recipe_value(*value, recipes::RecipeNormalization::None)?),
         },
     })
 }
@@ -1796,6 +1917,62 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn wp55_behavioral_acceptance() {
+        let workspace_id = [0x11; 16];
+        let analysis_context_id = [0x22; 16];
+        let owner_id = [0x33; 16];
+        let provider_run_id = [0x44; 16];
+        let observation_id = [0x55; 16];
+        let fact_id = [0x66; 16];
+
+        let mut legacy_capability = blake3::Hasher::new();
+        legacy_capability.update(b"codefabric-capability-scope-v1\0");
+        legacy_capability.update(&workspace_id);
+        legacy_capability.update(&analysis_context_id);
+        legacy_capability.update(&owner_id);
+        legacy_capability.update(&7_i64.to_be_bytes());
+        legacy_capability.update(b"SEMANTIC_TYPES");
+        assert_eq!(
+            capability_scope_fingerprint(
+                workspace_id,
+                analysis_context_id,
+                owner_id,
+                7,
+                "SEMANTIC_TYPES",
+            ),
+            *legacy_capability.finalize().as_bytes()
+        );
+
+        let mut legacy_evidence = blake3::Hasher::new();
+        legacy_evidence.update(b"codefabric-fact-evidence-v1\0");
+        legacy_evidence.update(&provider_run_id);
+        legacy_evidence.update(&observation_id);
+        legacy_evidence.update(&fact_id);
+        assert_eq!(
+            fact_evidence_id(provider_run_id, observation_id, fact_id),
+            legacy_evidence.finalize().as_bytes()[..16]
+        );
+
+        let mut legacy_observation = blake3::Hasher::new();
+        legacy_observation.update(b"codefabric-source-observation-v1\0");
+        legacy_observation.update(&provider_run_id);
+        legacy_observation.update(&[9]);
+        legacy_observation.update(&42_u64.to_be_bytes());
+        assert_eq!(
+            source_observation_id(provider_run_id, 9, 42),
+            legacy_observation.finalize().as_bytes()[..16]
+        );
+
+        let uppercase =
+            semantic_owner_identity(workspace_id, analysis_context_id, "MIR-BODY", vec![0xaa])
+                .unwrap();
+        let normalized =
+            semantic_owner_identity(workspace_id, analysis_context_id, "mir-body", vec![0xaa])
+                .unwrap();
+        assert_eq!(uppercase, normalized);
     }
 
     #[test]

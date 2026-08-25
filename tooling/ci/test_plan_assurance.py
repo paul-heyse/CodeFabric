@@ -97,7 +97,14 @@ def test_wp54_behavioral_acceptance(tmp_path: Path) -> None:
     assert json.loads(pointer.read_text(encoding="utf-8")) == prior
     assert not (failure / "state.json").exists()
 
-    assert assurance.validate_oracle_substance() == (92, 8)
+    declared, implemented = assurance.validate_oracle_substance()
+    state = assurance._active()[2]
+    required_packets = sum(
+        entry["status"] in {"in_progress", "complete"}
+        for entry in state["packets"].values()
+    )
+    assert declared == 92
+    assert implemented == required_packets * 4
     requirements = set(artifact_contracts.REVIEW_REQUIREMENTS)
     documented = artifact_contracts.documented_review_artifacts()
     assert documented == requirements
@@ -174,5 +181,11 @@ def test_wp54_negative_zero_state(tmp_path: Path) -> None:
 
 
 def test_wp54_operational_acceptance() -> None:
-    assert assurance.validate_oracle_substance()[1] == 8
+    implemented = assurance.validate_oracle_substance()[1]
+    state = assurance._active()[2]
+    required_packets = sum(
+        entry["status"] in {"in_progress", "complete"}
+        for entry in state["packets"].values()
+    )
+    assert implemented == required_packets * 4
     assert assurance.validate_dependencies()[0] == 23

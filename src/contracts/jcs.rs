@@ -294,7 +294,7 @@ pub fn canonicalize_value(value: &Value) -> Result<Vec<u8>, CanonicalJsonError> 
 /// Compute the AC-G-53 BLAKE3-256 checksum form over canonical bytes.
 #[must_use]
 pub fn checksum(canonical_bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(canonical_bytes).to_hex())
+    crate::integrity::framed_digest(canonical_bytes)
 }
 
 /// Validate the exact AC-G-53 BLAKE3-256 checksum frame.

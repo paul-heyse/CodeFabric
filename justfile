@@ -435,11 +435,18 @@ oracle-substance-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py oracle-substance-check
     @just packet-oracle-check WP73
     @just packet-oracle-check WP54
+    @just packet-oracle-check WP55
 
 [doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
 [group('gate')]
 plan-dependency-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py dependency-check
+
+[doc("Validate purpose-classified hash APIs and the semantic fingerprint registry")]
+[group('gate')]
+digest-domain-contract-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_digest_domain_contracts.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/digest_domain_contracts.py check
 
 [doc("Execute exactly four substantive acceptance oracles for one implementation packet")]
 [group('test')]

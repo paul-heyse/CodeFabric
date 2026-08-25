@@ -812,7 +812,7 @@ fn source_context_set_batch(record: &WorkspaceRecord) -> Result<RecordBatch, Fab
     )?)
 }
 
-fn digest_bytes(value: &str) -> Result<[u8; 32], FabricError> {
+fn parse_digest_bytes(value: &str) -> Result<[u8; 32], FabricError> {
     let payload = value
         .strip_prefix("b3:")
         .filter(|payload| payload.len() == 64)
@@ -844,7 +844,7 @@ fn enum_catalog_batch() -> Result<RecordBatch, FabricError> {
     let mut versions = Vec::with_capacity(row_count);
     let mut digests = Vec::with_capacity(row_count);
     for domain in crate::registries::REGISTRY_DOMAINS {
-        let digest = digest_bytes(domain.canonical_digest)?;
+        let digest = parse_digest_bytes(domain.canonical_digest)?;
         for entry in domain.values {
             domains.push(domain.domain);
             codes.push(i32::from(entry.code));

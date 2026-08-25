@@ -6,6 +6,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use codefabric::integrity::framed_digest as digest_bytes;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
@@ -437,10 +438,6 @@ pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriv
         cache_lookup,
         stage_root: stage_path.to_string_lossy().into_owned(),
     })
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
 }
 
 fn digest_file(path: &Path) -> Result<String, AdapterDriverError> {

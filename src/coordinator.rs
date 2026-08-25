@@ -605,11 +605,13 @@ fn policy_fingerprints(
     record: &WorkspaceRecord,
     inventory: &SourceInventory,
 ) -> ([u8; 32], [u8; 32]) {
-    let mut inclusion = blake3::Hasher::new();
-    inclusion.update(b"codefabric.inclusion-policy.v1\0");
+    let mut inclusion = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::InclusionPolicy,
+    );
     inclusion.update(&record.authorization_fingerprint);
-    let mut attributes = blake3::Hasher::new();
-    attributes.update(b"codefabric.attributes-policy.v1\0");
+    let mut attributes = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::AttributesPolicy,
+    );
     for source in &inventory.records {
         let path = source.path.raw_relative_path_bytes.as_slice();
         if path == b".gitignore" || path.ends_with(b"/.gitignore") {
@@ -619,13 +621,14 @@ fn policy_fingerprints(
             hash_policy_record(&mut attributes, path, source.content_digest);
         }
     }
-    (
-        *inclusion.finalize().as_bytes(),
-        *attributes.finalize().as_bytes(),
-    )
+    (inclusion.finalize(), attributes.finalize())
 }
 
-fn hash_policy_record(hasher: &mut blake3::Hasher, path: &[u8], digest: Option<[u8; 32]>) {
+fn hash_policy_record(
+    hasher: &mut crate::identity::SemanticFingerprintBuilder,
+    path: &[u8],
+    digest: Option<[u8; 32]>,
+) {
     hasher.update(&u64::try_from(path.len()).unwrap_or(u64::MAX).to_be_bytes());
     hasher.update(path);
     hasher.update(&digest.unwrap_or([0; 32]));
@@ -990,5 +993,8 @@ const fn object_format_code(format: GitHashAlgorithm) -> u16 {
 }
 
 fn trust_policy_fingerprint() -> [u8; 32] {
-    *blake3::hash(b"codefabric.git-trust-policy.local-read-only.v1").as_bytes()
+    crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::GitTrustPolicy,
+    )
+    .finalize()
 }

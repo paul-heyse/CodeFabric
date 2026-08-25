@@ -39,7 +39,7 @@ pub struct RegisteredGitIdentity {
 
 impl GitHashAlgorithm {
     #[must_use]
-    pub const fn digest_bytes(self) -> usize {
+    pub const fn digest_width_bytes(self) -> usize {
         match self {
             Self::Sha1 => 20,
             Self::Sha256 => 32,
@@ -210,7 +210,7 @@ pub fn candidate_cache_key(
 #[cfg(feature = "daemon")]
 #[must_use]
 pub fn topology_digest(snapshot: &GitStateSnapshot) -> [u8; 32] {
-    fn hash_path(hasher: &mut blake3::Hasher, path: &GitNativePath) {
+    fn hash_path(hasher: &mut crate::identity::SemanticFingerprintBuilder, path: &GitNativePath) {
         hasher.update(
             &u64::try_from(path.raw_bytes.len())
                 .unwrap_or(u64::MAX)
@@ -219,8 +219,9 @@ pub fn topology_digest(snapshot: &GitStateSnapshot) -> [u8; 32] {
         hasher.update(&path.raw_bytes);
     }
 
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.git.topology.v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::GitTopology,
+    );
     hasher.update(&snapshot.repository.repository_id);
     hash_path(&mut hasher, &snapshot.repository.common_dir_key);
     let mut worktrees = snapshot.linked_worktrees.iter().collect::<Vec<_>>();
@@ -244,7 +245,7 @@ pub fn topology_digest(snapshot: &GitStateSnapshot) -> [u8; 32] {
             hasher.update(&[0]);
         }
     }
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 #[cfg(feature = "daemon")]
@@ -1311,7 +1312,7 @@ fn object_format(kind: gix::hash::Kind) -> Result<GitHashAlgorithm, GitStateErro
 fn detach_object_id(id: gix::hash::ObjectId) -> Result<GitObjectId, GitStateError> {
     let algorithm = object_format(id.kind())?;
     let bytes = id.as_slice().to_vec();
-    if bytes.len() != algorithm.digest_bytes() {
+    if bytes.len() != algorithm.digest_width_bytes() {
         return Err(GitStateError::UnsupportedObjectFormat);
     }
     Ok(GitObjectId { algorithm, bytes })
@@ -1367,8 +1368,8 @@ fn capture_state_from_repository(
 }
 
 fn index_fingerprint(index: &gix::worktree::Index) -> Result<[u8; 32], GitStateError> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.git.index.v1\0");
+    let mut hasher =
+        crate::identity::semantic_fingerprint(crate::identity::SemanticFingerprintDomain::GitIndex);
     if let Some(checksum) = index.checksum() {
         hasher.update(b"checksum\0");
         hash_object_id(&mut hasher, &detach_object_id(checksum)?);
@@ -1389,10 +1390,13 @@ fn index_fingerprint(index: &gix::worktree::Index) -> Result<[u8; 32], GitStateE
             hasher.update(&entry.mode.bits().to_be_bytes());
         }
     }
-    Ok(*hasher.finalize().as_bytes())
+    Ok(hasher.finalize())
 }
 
-fn hash_object_id(hasher: &mut blake3::Hasher, object_id: &GitObjectId) {
+fn hash_object_id(
+    hasher: &mut crate::identity::SemanticFingerprintBuilder,
+    object_id: &GitObjectId,
+) {
     hasher.update(&[match object_id.algorithm {
         GitHashAlgorithm::Sha1 => 1,
         GitHashAlgorithm::Sha256 => 2,
@@ -1402,7 +1406,10 @@ fn hash_object_id(hasher: &mut blake3::Hasher, object_id: &GitObjectId) {
 
 #[cfg(feature = "daemon")]
 fn state_vector_digest(vector: &GitStateVector) -> [u8; 32] {
-    fn hash_optional_object(hasher: &mut blake3::Hasher, value: Option<&GitObjectId>) {
+    fn hash_optional_object(
+        hasher: &mut crate::identity::SemanticFingerprintBuilder,
+        value: Option<&GitObjectId>,
+    ) {
         if let Some(value) = value {
             hasher.update(&[1]);
             hash_object_id(hasher, value);
@@ -1411,8 +1418,9 @@ fn state_vector_digest(vector: &GitStateVector) -> [u8; 32] {
         }
     }
 
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.git.state-vector.v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::GitStateVector,
+    );
     hasher.update(&vector.repository_id);
     hasher.update(&vector.worktree_id);
     hasher.update(&[vector.head_kind as u8]);
@@ -1430,15 +1438,16 @@ fn state_vector_digest(vector: &GitStateVector) -> [u8; 32] {
     hasher.update(&vector.inclusion_policy_fingerprint);
     hasher.update(&vector.attributes_fingerprint);
     hasher.update(&vector.worktree_inventory_digest);
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 #[cfg(feature = "daemon")]
 fn candidate_payload_digest(payload: &[u8]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.git.candidate-cache-payload.v1\0");
+    let mut hasher = crate::integrity::CacheKeyHasher::for_domain(
+        crate::integrity::CacheKeyDomain::GitCandidateCachePayload,
+    );
     hasher.update(payload);
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 #[cfg(feature = "daemon")]

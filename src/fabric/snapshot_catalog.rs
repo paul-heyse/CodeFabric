@@ -198,7 +198,10 @@ impl SnapshotOverlayProviderFactory for EmptySnapshotOverlay {
     }
 
     fn checksum(&self) -> [u8; 32] {
-        *blake3::hash(b"codefabric-empty-overlay-v1\0").as_bytes()
+        crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::EmptyOverlay,
+        )
+        .finalize()
     }
 
     fn memory_bytes(&self) -> u64 {
@@ -727,13 +730,14 @@ impl SnapshotProviderCatalog {
     /// Digest the exact effective table contents while excluding base/publication locators.
     #[must_use]
     pub fn effective_state_digest(&self) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"codefabric-effective-snapshot-v1\0");
+        let mut hasher = crate::identity::semantic_fingerprint(
+            crate::identity::SemanticFingerprintDomain::EffectiveSnapshot,
+        );
         for (&table_code, record) in &self.providers {
             hasher.update(&table_code.to_be_bytes());
             hasher.update(&record.effective_content_digest);
         }
-        *hasher.finalize().as_bytes()
+        hasher.finalize()
     }
 
     #[must_use]
@@ -943,8 +947,9 @@ async fn stream_provider_evidence(
 
 fn encoded_rows_checksum(schema: &arrow_schema::Schema, rows: &mut [Vec<u8>]) -> [u8; 32] {
     rows.sort_unstable();
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-arrow-batch-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::ArrowBatch,
+    );
     if let Some(digest) = schema.metadata().get("com.codefabric.cpg.schema_digest") {
         hasher.update(digest.as_bytes());
     }
@@ -953,7 +958,7 @@ fn encoded_rows_checksum(schema: &arrow_schema::Schema, rows: &mut [Vec<u8>]) ->
         hasher.update(&(row.len() as u64).to_be_bytes());
         hasher.update(row);
     }
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn schema_fingerprint(spec: &TableSpec) -> Result<[u8; 32], FabricError> {

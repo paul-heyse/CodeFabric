@@ -242,7 +242,7 @@ fn semantic_fingerprint(
     });
     let bytes = crate::contracts::jcs::canonicalize_value(&semantic_manifest)
         .expect("the closed analysis-context manifest is always canonicalizable");
-    *blake3::hash(&bytes).as_bytes()
+    crate::integrity::digest_bytes(&bytes)
 }
 
 fn lower_hex(bytes: &[u8]) -> String {

@@ -15,9 +15,19 @@ pub enum RecipeValue {
     Map(Vec<(RecipeValue, RecipeValue)>),
     TaggedUnion(u16, Box<RecipeValue>),
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecipeNormalization {
+    None,
+    Nfc,
+    Nfkc,
+    AsciiLower,
+    PythonIdentifierNfkc,
+    RustCanonical,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecipeField {
     pub tag: u16,
+    pub normalization: RecipeNormalization,
     pub value: RecipeValue,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,10 +77,12 @@ pub fn workspace(fields: WorkspaceFields) -> Result<RecipeRecord, RecipeError> {
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_registration_nonce,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.workspace_kind,
             },
         ],
@@ -86,6 +98,7 @@ pub fn repository(fields: RepositoryFields) -> Result<RecipeRecord, RecipeError>
         domain_code: 2,
         fields: vec![RecipeField {
             tag: 1,
+            normalization: RecipeNormalization::None,
             value: fields.repository_registration_nonce,
         }],
     })
@@ -105,14 +118,17 @@ pub fn worktree(fields: WorktreeFields) -> Result<RecipeRecord, RecipeError> {
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.repository_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.worktree_registration_nonce,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.worktree_kind,
             },
         ],
@@ -133,14 +149,17 @@ pub fn analysis_context(fields: AnalysisContextFields) -> Result<RecipeRecord, R
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.language_slug,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.environment_digest,
             },
         ],
@@ -159,10 +178,12 @@ pub fn context_set(fields: ContextSetFields) -> Result<RecipeRecord, RecipeError
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.context_ids,
             },
         ],
@@ -183,14 +204,17 @@ pub fn source_file(fields: SourceFileFields) -> Result<RecipeRecord, RecipeError
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.source_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.comparison_key_bytes,
             },
         ],
@@ -213,18 +237,22 @@ pub fn owner(fields: OwnerFields) -> Result<RecipeRecord, RecipeError> {
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.analysis_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.owner_kind,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::None,
                 value: fields.semantic_key,
             },
         ],
@@ -249,22 +277,27 @@ pub fn entity(fields: EntityFields) -> Result<RecipeRecord, RecipeError> {
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.analysis_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.kind_code,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::None,
                 value: fields.owner_id,
             },
             RecipeField {
                 tag: 5,
+                normalization: RecipeNormalization::None,
                 value: fields.semantic_key,
             },
         ],
@@ -291,26 +324,32 @@ pub fn relation_fact(fields: RelationFactFields) -> Result<RecipeRecord, RecipeE
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.analysis_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.relation_kind_code,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::None,
                 value: fields.subject_entity_id,
             },
             RecipeField {
                 tag: 5,
+                normalization: RecipeNormalization::None,
                 value: fields.object_entity_id,
             },
             RecipeField {
                 tag: 6,
+                normalization: RecipeNormalization::None,
                 value: fields.role,
             },
         ],
@@ -335,22 +374,27 @@ pub fn property_fact(fields: PropertyFactFields) -> Result<RecipeRecord, RecipeE
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.analysis_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.property_kind_code,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::None,
                 value: fields.subject_entity_id,
             },
             RecipeField {
                 tag: 5,
+                normalization: RecipeNormalization::None,
                 value: fields.canonical_value,
             },
         ],
@@ -373,18 +417,22 @@ pub fn type_(fields: TypeFields) -> Result<RecipeRecord, RecipeError> {
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.analysis_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.algebra_version,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::None,
                 value: fields.canonical_type_term,
             },
         ],
@@ -405,14 +453,17 @@ pub fn publication(fields: PublicationFields) -> Result<RecipeRecord, RecipeErro
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.serving_snapshot_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.publication_sequence,
             },
         ],
@@ -433,14 +484,17 @@ pub fn serving_snapshot(fields: ServingSnapshotFields) -> Result<RecipeRecord, R
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.publication_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.bundle_digest,
             },
         ],
@@ -463,18 +517,22 @@ pub fn result_artifact(fields: ResultArtifactFields) -> Result<RecipeRecord, Rec
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.analysis_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.query_digest,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.result_kind,
             },
         ],
@@ -493,10 +551,12 @@ pub fn source_context(fields: SourceContextFields) -> Result<RecipeRecord, Recip
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.symbolic_name,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.suite_constant_id,
             },
         ],
@@ -527,34 +587,42 @@ pub fn unknown_remainder(fields: UnknownRemainderFields) -> Result<RecipeRecord,
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.analysis_context_id,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.owner_or_query_scope_id,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::None,
                 value: fields.unknown_kind_code,
             },
             RecipeField {
                 tag: 5,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.originating_role,
             },
             RecipeField {
                 tag: 6,
+                normalization: RecipeNormalization::None,
                 value: fields.reason_code,
             },
             RecipeField {
                 tag: 7,
+                normalization: RecipeNormalization::None,
                 value: fields.candidate_set_digest,
             },
             RecipeField {
                 tag: 8,
+                normalization: RecipeNormalization::None,
                 value: fields.program_point,
             },
         ],
@@ -583,32 +651,376 @@ pub fn root_authorization(fields: RootAuthorizationFields) -> Result<RecipeRecor
         fields: vec![
             RecipeField {
                 tag: 1,
+                normalization: RecipeNormalization::None,
                 value: fields.workspace_id,
             },
             RecipeField {
                 tag: 2,
+                normalization: RecipeNormalization::None,
                 value: fields.root_path,
             },
             RecipeField {
                 tag: 3,
+                normalization: RecipeNormalization::None,
                 value: fields.root_directory_file_identity,
             },
             RecipeField {
                 tag: 4,
+                normalization: RecipeNormalization::None,
                 value: fields.platform_code,
             },
             RecipeField {
                 tag: 5,
+                normalization: RecipeNormalization::AsciiLower,
                 value: fields.case_sensitivity_mode,
             },
             RecipeField {
                 tag: 6,
+                normalization: RecipeNormalization::None,
                 value: fields.authorization_revision,
             },
             RecipeField {
                 tag: 7,
+                normalization: RecipeNormalization::None,
                 value: fields.allowed_source_disclosure_rules,
             },
         ],
     })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SemanticFingerprintDomain {
+    UnframedId16,
+    CapabilityScope,
+    RustcCapabilityScope,
+    FactEvidence,
+    SourceObservation,
+    RustcCanonicalOwner,
+    ResultArtifact,
+    PublicationOperation,
+    ServingQuery,
+    GitTopology,
+    GitIndex,
+    GitStateVector,
+    InclusionPolicy,
+    AttributesPolicy,
+    GitTrustPolicy,
+    OwnerSet,
+    EffectiveSnapshot,
+    UpdateWaveInput,
+    UpdateWaveItemInput,
+    UpdateWaveRemoval,
+    UpdateWave,
+    FastProviderRun,
+    QueryResume,
+    LocalQueryLimits,
+    SnapshotBaseTableVersions,
+    RustcInvocation,
+    RustcPackage,
+    RustcCompilationUnit,
+    RustcOwner,
+    PythonLiteralTokenSpelling,
+}
+impl SemanticFingerprintDomain {
+    pub const fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::UnframedId16 => &[],
+            Self::CapabilityScope => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 99, 97, 112, 97, 98, 105, 108,
+                105, 116, 121, 45, 115, 99, 111, 112, 101, 45, 118, 49, 0,
+            ],
+            Self::RustcCapabilityScope => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 99,
+                97, 112, 97, 98, 105, 108, 105, 116, 121, 45, 115, 99, 111, 112, 101, 46, 118, 49,
+                0,
+            ],
+            Self::FactEvidence => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 102, 97, 99, 116, 45, 101, 118,
+                105, 100, 101, 110, 99, 101, 45, 118, 49, 0,
+            ],
+            Self::SourceObservation => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 115, 111, 117, 114, 99, 101, 45,
+                111, 98, 115, 101, 114, 118, 97, 116, 105, 111, 110, 45, 118, 49, 0,
+            ],
+            Self::RustcCanonicalOwner => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 99,
+                97, 110, 111, 110, 105, 99, 97, 108, 45, 111, 119, 110, 101, 114, 46, 118, 49, 0,
+            ],
+            Self::ResultArtifact => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 101, 115, 117, 108, 116, 45,
+                97, 114, 116, 105, 102, 97, 99, 116, 46, 118, 49, 0,
+            ],
+            Self::PublicationOperation => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 112, 117, 98, 108, 105, 99, 97,
+                116, 105, 111, 110, 45, 111, 112, 101, 114, 97, 116, 105, 111, 110, 45, 118, 49, 0,
+            ],
+            Self::ServingQuery => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 115, 101, 114, 118, 105, 110,
+                103, 45, 113, 117, 101, 114, 121, 45, 118, 49, 0,
+            ],
+            Self::GitTopology => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 105, 116, 46, 116, 111, 112,
+                111, 108, 111, 103, 121, 46, 118, 49, 0,
+            ],
+            Self::GitIndex => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 105, 116, 46, 105, 110, 100,
+                101, 120, 46, 118, 49, 0,
+            ],
+            Self::GitStateVector => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 105, 116, 46, 115, 116, 97,
+                116, 101, 45, 118, 101, 99, 116, 111, 114, 46, 118, 49, 0,
+            ],
+            Self::InclusionPolicy => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 105, 110, 99, 108, 117, 115, 105,
+                111, 110, 45, 112, 111, 108, 105, 99, 121, 46, 118, 49, 0,
+            ],
+            Self::AttributesPolicy => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 97, 116, 116, 114, 105, 98, 117,
+                116, 101, 115, 45, 112, 111, 108, 105, 99, 121, 46, 118, 49, 0,
+            ],
+            Self::GitTrustPolicy => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 105, 116, 45, 116, 114, 117,
+                115, 116, 45, 112, 111, 108, 105, 99, 121, 46, 108, 111, 99, 97, 108, 45, 114, 101,
+                97, 100, 45, 111, 110, 108, 121, 46, 118, 49,
+            ],
+            Self::OwnerSet => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 111, 119, 110, 101, 114, 45, 115,
+                101, 116, 45, 118, 49, 0,
+            ],
+            Self::EffectiveSnapshot => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 101, 102, 102, 101, 99, 116, 105,
+                118, 101, 45, 115, 110, 97, 112, 115, 104, 111, 116, 45, 118, 49, 0,
+            ],
+            Self::UpdateWaveInput => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 117, 112, 100, 97, 116, 101, 45,
+                119, 97, 118, 101, 45, 105, 110, 112, 117, 116, 46, 118, 49, 0,
+            ],
+            Self::UpdateWaveItemInput => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 117, 112, 100, 97, 116, 101, 45,
+                119, 97, 118, 101, 45, 105, 116, 101, 109, 45, 105, 110, 112, 117, 116, 46, 118,
+                49, 0,
+            ],
+            Self::UpdateWaveRemoval => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 117, 112, 100, 97, 116, 101, 45,
+                119, 97, 118, 101, 45, 114, 101, 109, 111, 118, 97, 108, 46, 118, 49, 0,
+            ],
+            Self::UpdateWave => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 117, 112, 100, 97, 116, 101, 45,
+                119, 97, 118, 101, 46, 118, 49, 0,
+            ],
+            Self::FastProviderRun => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 102, 97, 115, 116, 45, 112, 114,
+                111, 118, 105, 100, 101, 114, 45, 114, 117, 110, 46, 118, 49, 0,
+            ],
+            Self::QueryResume => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 113, 117, 101, 114, 121, 46, 114,
+                101, 115, 117, 109, 101, 46, 118, 49, 0,
+            ],
+            Self::LocalQueryLimits => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 108, 111, 99, 97, 108, 45, 113,
+                117, 101, 114, 121, 45, 108, 105, 109, 105, 116, 115, 46, 118, 49,
+            ],
+            Self::SnapshotBaseTableVersions => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 115, 110, 97, 112, 115, 104, 111,
+                116, 46, 98, 97, 115, 101, 45, 116, 97, 98, 108, 101, 45, 118, 101, 114, 115, 105,
+                111, 110, 115, 46, 118, 49, 0,
+            ],
+            Self::RustcInvocation => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 105,
+                110, 118, 111, 99, 97, 116, 105, 111, 110, 46, 118, 49, 0,
+            ],
+            Self::RustcPackage => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 112,
+                97, 99, 107, 97, 103, 101, 46, 118, 49, 0,
+            ],
+            Self::RustcCompilationUnit => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 99,
+                111, 109, 112, 105, 108, 97, 116, 105, 111, 110, 45, 117, 110, 105, 116, 46, 118,
+                49, 0,
+            ],
+            Self::RustcOwner => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 111,
+                119, 110, 101, 114, 46, 118, 49, 0,
+            ],
+            Self::PythonLiteralTokenSpelling => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 58, 112, 121, 116, 104, 111, 110, 45,
+                108, 105, 116, 101, 114, 97, 108, 45, 116, 111, 107, 101, 110, 45, 115, 112, 101,
+                108, 108, 105, 110, 103, 58, 118, 49, 0,
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IntegrityDomain {
+    ArrowBatch,
+    OverlayMutation,
+    OverlayTombstones,
+    OverlayTable,
+    ConsolidatedOverlay,
+    EmptyOverlay,
+    PublicationPhase,
+    QueryResultStream,
+    GoldenProfile,
+    GateBExecution,
+    InventoryFile,
+    InventoryDirectory,
+    DerivationSyntaxTreeInput,
+    DerivationSyntaxTreeState,
+    ContinuousState,
+    ProviderTextImage,
+    RuffFrontendProjection,
+    TreeSitterRawSyntaxFacts,
+    ServingSnapshotManifest,
+    RustcOwnerContent,
+    RustcClosedOwnerSet,
+    RustcObservationStream,
+    Wave4CanonicalState,
+}
+impl IntegrityDomain {
+    pub const fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::ArrowBatch => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 97, 114, 114, 111, 119, 45, 98,
+                97, 116, 99, 104, 45, 118, 49, 0,
+            ],
+            Self::OverlayMutation => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 111, 118, 101, 114, 108, 97, 121,
+                45, 109, 117, 116, 97, 116, 105, 111, 110, 45, 118, 49, 0,
+            ],
+            Self::OverlayTombstones => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 111, 118, 101, 114, 108, 97, 121,
+                45, 116, 111, 109, 98, 115, 116, 111, 110, 101, 115, 45, 118, 49, 0,
+            ],
+            Self::OverlayTable => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 111, 118, 101, 114, 108, 97, 121,
+                45, 116, 97, 98, 108, 101, 45, 118, 49, 0,
+            ],
+            Self::ConsolidatedOverlay => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 99, 111, 110, 115, 111, 108, 105,
+                100, 97, 116, 101, 100, 45, 111, 118, 101, 114, 108, 97, 121, 45, 118, 49, 0,
+            ],
+            Self::EmptyOverlay => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 101, 109, 112, 116, 121, 45, 111,
+                118, 101, 114, 108, 97, 121, 45, 118, 49, 0,
+            ],
+            Self::PublicationPhase => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 112, 117, 98, 108, 105, 99, 97,
+                116, 105, 111, 110, 45, 112, 104, 97, 115, 101, 45, 118, 49, 0,
+            ],
+            Self::QueryResultStream => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 113, 117, 101, 114, 121, 45, 114,
+                101, 115, 117, 108, 116, 45, 115, 116, 114, 101, 97, 109, 45, 118, 49, 0,
+            ],
+            Self::GoldenProfile => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 103, 111, 108, 100, 101, 110, 45,
+                112, 114, 111, 102, 105, 108, 101, 45, 118, 49, 0,
+            ],
+            Self::GateBExecution => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 97, 116, 101, 45, 98, 46,
+                101, 120, 101, 99, 117, 116, 105, 111, 110, 46, 118, 49, 0,
+            ],
+            Self::InventoryFile => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 105, 110, 118, 101, 110, 116,
+                111, 114, 121, 46, 102, 105, 108, 101, 46, 118, 49, 0,
+            ],
+            Self::InventoryDirectory => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 105, 110, 118, 101, 110, 116,
+                111, 114, 121, 46, 100, 105, 114, 101, 99, 116, 111, 114, 121, 46, 118, 49, 0,
+            ],
+            Self::DerivationSyntaxTreeInput => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 100, 101, 114, 105, 118, 97, 116,
+                105, 111, 110, 46, 115, 121, 110, 116, 97, 120, 45, 116, 114, 101, 101, 46, 105,
+                110, 112, 117, 116, 46, 118, 49, 0,
+            ],
+            Self::DerivationSyntaxTreeState => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 100, 101, 114, 105, 118, 97, 116,
+                105, 111, 110, 46, 115, 121, 110, 116, 97, 120, 45, 116, 114, 101, 101, 46, 115,
+                116, 97, 116, 101, 46, 118, 49, 0,
+            ],
+            Self::ContinuousState => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 99, 111, 110, 116, 105, 110, 117,
+                111, 117, 115, 45, 115, 116, 97, 116, 101, 46, 118, 49, 0,
+            ],
+            Self::ProviderTextImage => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 58, 112, 114, 111, 118, 105, 100,
+                101, 114, 45, 116, 101, 120, 116, 45, 105, 109, 97, 103, 101, 58, 118, 49, 0,
+            ],
+            Self::RuffFrontendProjection => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 58, 114, 117, 102, 102, 45, 112, 121,
+                116, 104, 111, 110, 45, 102, 114, 111, 110, 116, 101, 110, 100, 45, 112, 114, 111,
+                106, 101, 99, 116, 105, 111, 110, 58, 118, 49, 0,
+            ],
+            Self::TreeSitterRawSyntaxFacts => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 58, 116, 114, 101, 101, 45, 115, 105,
+                116, 116, 101, 114, 45, 114, 97, 119, 45, 115, 121, 110, 116, 97, 120, 45, 102, 97,
+                99, 116, 115, 58, 118, 49, 0,
+            ],
+            Self::ServingSnapshotManifest => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 115, 101, 114, 118, 105, 110,
+                103, 45, 115, 110, 97, 112, 115, 104, 111, 116, 45, 109, 97, 110, 105, 102, 101,
+                115, 116, 45, 118, 49,
+            ],
+            Self::RustcOwnerContent => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 111,
+                119, 110, 101, 114, 45, 99, 111, 110, 116, 101, 110, 116, 46, 118, 49, 0,
+            ],
+            Self::RustcClosedOwnerSet => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 99,
+                108, 111, 115, 101, 100, 45, 111, 119, 110, 101, 114, 45, 115, 101, 116, 46, 118,
+                49, 0,
+            ],
+            Self::RustcObservationStream => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 117, 115, 116, 99, 46, 111,
+                98, 115, 101, 114, 118, 97, 116, 105, 111, 110, 45, 115, 116, 114, 101, 97, 109,
+                46, 118, 49, 0,
+            ],
+            Self::Wave4CanonicalState => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 119, 97, 118, 101, 52, 46, 99,
+                97, 110, 111, 110, 105, 99, 97, 108, 45, 115, 116, 97, 116, 101, 46, 118, 49, 0,
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheKeyDomain {
+    OverlayPrimaryKey,
+    GitCandidateCachePayload,
+}
+impl CacheKeyDomain {
+    pub const fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::OverlayPrimaryKey => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 111, 118, 101, 114, 108, 97, 121,
+                45, 112, 114, 105, 109, 97, 114, 121, 45, 107, 101, 121, 45, 118, 49, 0,
+            ],
+            Self::GitCandidateCachePayload => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 105, 116, 46, 99, 97, 110,
+                100, 105, 100, 97, 116, 101, 45, 99, 97, 99, 104, 101, 45, 112, 97, 121, 108, 111,
+                97, 100, 46, 118, 49, 0,
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SecurityMacDomain {
+    ResultLease,
+    LocalCapabilityToken,
+}
+impl SecurityMacDomain {
+    pub const fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::ResultLease => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 101, 115, 117, 108, 116, 45,
+                108, 101, 97, 115, 101, 46, 118, 49, 0,
+            ],
+            Self::LocalCapabilityToken => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 108, 111, 99, 97, 108, 45, 99,
+                97, 112, 97, 98, 105, 108, 105, 116, 121, 45, 116, 111, 107, 101, 110, 46, 118, 49,
+                0,
+            ],
+        }
+    }
 }

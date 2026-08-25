@@ -5,6 +5,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use codefabric::integrity::framed_digest as digest_bytes;
 use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1208,7 +1209,7 @@ fn requirements(
             ModelRequirementRecord {
                 requirement_id: format!(
                     "MODEL-{}",
-                    &blake3::hash(artifact.artifact_id.as_bytes()).to_hex()[..16]
+                    &codefabric::integrity::digest_hex(artifact.artifact_id.as_bytes())[..16]
                 ),
                 source_artifact: artifact.artifact_id.clone(),
                 source_path: artifact.authority_path.clone(),
@@ -1699,10 +1700,6 @@ fn json_lines_with_header(
 fn canonical_digest(value: &impl Serialize) -> Result<String, AggregateError> {
     let value = serde_json::to_value(value)?;
     Ok(digest_bytes(&canonical_json(&value)?))
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
 }
 
 #[derive(Debug, Error)]

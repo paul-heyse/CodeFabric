@@ -80,8 +80,9 @@ fn input_digest(
     detail: SyntaxNodeInput,
     relation: AstChildInput,
 ) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.derivation.syntax-tree.input.v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::DerivationSyntaxTreeInput,
+    );
     hasher.update(contract.derivation_id.as_bytes());
     hasher.update(contract.algorithm_version.as_bytes());
     hasher.update(&detail.owner_id);
@@ -89,12 +90,13 @@ fn input_digest(
     hasher.update(&relation.parent_id);
     hasher.update(&relation.child_id);
     hasher.update(&relation.ordinal.to_be_bytes());
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn state_digest(contract: &DerivationEntry, rows: &[SyntaxTreeProjectionRow]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.derivation.syntax-tree.state.v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::DerivationSyntaxTreeState,
+    );
     hasher.update(contract.derivation_id.as_bytes());
     hasher.update(contract.algorithm_version.as_bytes());
     for row in rows {
@@ -104,7 +106,7 @@ fn state_digest(contract: &DerivationEntry, rows: &[SyntaxTreeProjectionRow]) ->
         hasher.update(&row.ordinal.to_be_bytes());
         hasher.update(&row.input_digest);
     }
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 /// Execute the registered `SYNTAX_TREE_V1` owner-replace derivation.

@@ -745,7 +745,7 @@ impl ModelDriver for SchemaDriver {
         Ok(SchemaPlan {
             descriptor,
             ir,
-            source_digest: format!("b3:{}", blake3::hash(&bytes).to_hex()),
+            source_digest: codefabric::integrity::framed_digest(&bytes),
             semantic_digest,
             source_fence,
         })
@@ -1046,7 +1046,7 @@ fn render_rust(ir: &SchemaContractIr) -> Vec<u8> {
     );
     for schema in &ir.provider_observation_schemas {
         let descriptor = provider_observation_descriptor(schema);
-        let digest = format!("b3:{}", blake3::hash(descriptor.as_bytes()).to_hex());
+        let digest = codefabric::integrity::framed_digest(descriptor.as_bytes());
         writeln!(
             output,
             "    ProviderObservationSchema {{ schema_id: {:?}, provider_id: {:?}, observation_family_code: {}, canonical_descriptor: {:?}, schema_digest: {:?}, fields: &[",
@@ -1372,7 +1372,7 @@ pub fn detached_schema_identity(bytes: &[u8]) -> Result<String, SchemaDriverErro
     object.remove("canonical_digest");
     object.remove("source_digest");
     let canonical = serde_json_canonicalizer::to_vec(&value)?;
-    Ok(format!("b3:{}", blake3::hash(&canonical).to_hex()))
+    Ok(codefabric::integrity::framed_digest(&canonical))
 }
 
 #[derive(Debug)]

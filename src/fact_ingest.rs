@@ -1436,7 +1436,7 @@ fn validate_source_file(batch: &RecordBatch, spec: &TableSpec) -> Result<(), Fac
         let bytes = source_bytes.value(row);
         let expected_length = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
         if byte_lengths.value(row) != expected_length
-            || source_digests.value(row) != blake3::hash(bytes).as_bytes()
+            || source_digests.value(row) != crate::integrity::digest_bytes(bytes)
         {
             return Err(invalid(
                 spec,
@@ -1902,14 +1902,7 @@ struct Candidate {
 type CandidateGroups = BTreeMap<(i16, [u8; 16]), Vec<Candidate>>;
 
 fn evidence_id(provider_run_id: [u8; 16], observation_id: [u8; 16], fact_id: [u8; 16]) -> [u8; 16] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-fact-evidence-v1\0");
-    hasher.update(&provider_run_id);
-    hasher.update(&observation_id);
-    hasher.update(&fact_id);
-    let mut id = [0_u8; 16];
-    id.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
-    id
+    crate::identity::fact_evidence_id(provider_run_id, observation_id, fact_id)
 }
 
 fn encode_selected(

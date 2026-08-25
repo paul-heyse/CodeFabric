@@ -214,8 +214,9 @@ fn collect_files(
 }
 
 fn digest_files(root: &Path, files: &[PathBuf]) -> Result<String, CorpusError> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-golden-profile-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::GoldenProfile,
+    );
     for relative in files {
         let relative = relative.to_str().ok_or_else(|| {
             CorpusError::Invariant(format!("profile path is not UTF-8: {}", relative.display()))
@@ -228,7 +229,7 @@ fn digest_files(root: &Path, files: &[PathBuf]) -> Result<String, CorpusError> {
         hasher.update(&bytes);
     }
     hasher.update(&(files.len() as u64).to_be_bytes());
-    Ok(format!("b3:{}", hasher.finalize().to_hex()))
+    Ok(crate::integrity::frame_digest(hasher.finalize()))
 }
 
 fn child_directories(path: &Path) -> Result<BTreeSet<String>, CorpusError> {
@@ -382,11 +383,12 @@ pub fn execute_gate_b_artifacts(corpus_root: &Path) -> Result<GateBExecution, Co
         execute_artifact_contract(corpus_root, group, &value)?;
         artifact_digests.insert(
             group.to_owned(),
-            format!("b3:{}", blake3::hash(&canonical).to_hex()),
+            crate::integrity::framed_digest(&canonical),
         );
     }
-    let mut combined = blake3::Hasher::new();
-    combined.update(b"codefabric.gate-b.execution.v1\0");
+    let mut combined = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::GateBExecution,
+    );
     combined.update(profile.canonical_digest.as_bytes());
     for (group, digest) in &artifact_digests {
         combined.update(&(group.len() as u64).to_be_bytes());
@@ -396,7 +398,7 @@ pub fn execute_gate_b_artifacts(corpus_root: &Path) -> Result<GateBExecution, Co
     Ok(GateBExecution {
         profile_digest: profile.canonical_digest,
         artifact_digests,
-        execution_digest: format!("b3:{}", combined.finalize().to_hex()),
+        execution_digest: crate::integrity::frame_digest(combined.finalize()),
     })
 }
 

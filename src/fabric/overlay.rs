@@ -1488,8 +1488,9 @@ fn mutation_digest(
     source_generation: i64,
     action: &MutationAction,
 ) -> Result<[u8; 32], FabricError> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-overlay-mutation-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::OverlayMutation,
+    );
     hasher.update(&workspace_id);
     hasher.update(&analysis_context_id);
     hasher.update(&table_code.to_be_bytes());
@@ -1537,15 +1538,16 @@ fn mutation_digest(
             hasher.update(&batch_checksum(batch)?);
         }
     }
-    Ok(*hasher.finalize().as_bytes())
+    Ok(hasher.finalize())
 }
 
 fn tombstone_digest(owner: &RecordBatch, key: &RecordBatch) -> Result<[u8; 32], FabricError> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-overlay-tombstones-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::OverlayTombstones,
+    );
     hasher.update(&batch_checksum(owner)?);
     hasher.update(&batch_checksum(key)?);
-    Ok(*hasher.finalize().as_bytes())
+    Ok(hasher.finalize())
 }
 
 fn table_content_digest(
@@ -1557,8 +1559,9 @@ fn table_content_digest(
     rows: [u8; 32],
     tombstones: [u8; 32],
 ) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-overlay-table-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::OverlayTable,
+    );
     hasher.update(&table_code.to_be_bytes());
     hasher.update(policy_name(policy).as_bytes());
     hasher.update(&minimum.to_be_bytes());
@@ -1566,28 +1569,30 @@ fn table_content_digest(
     hasher.update(&[u8::from(full)]);
     hasher.update(&rows);
     hasher.update(&tombstones);
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn overlay_checksum(
     overlay_generation: u64,
     tables: &BTreeMap<i16, Arc<OverlayTable>>,
 ) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-consolidated-overlay-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::ConsolidatedOverlay,
+    );
     hasher.update(&overlay_generation.to_be_bytes());
     for (&table_code, table) in tables {
         hasher.update(&table_code.to_be_bytes());
         hasher.update(&table.content_digest);
     }
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn primary_key_digest(encoded: &[u8]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-overlay-primary-key-v1\0");
+    let mut hasher = crate::integrity::CacheKeyHasher::for_domain(
+        crate::integrity::CacheKeyDomain::OverlayPrimaryKey,
+    );
     hasher.update(encoded);
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn estimate_consolidation_bytes(

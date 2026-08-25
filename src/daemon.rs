@@ -448,7 +448,9 @@ fn now_millis() -> Result<u128, DaemonError> {
 fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
     let startup_time_unix_ms = now_millis()?;
     let pid = std::process::id();
-    let mut identity = blake3::Hasher::new();
+    let mut identity = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::UnframedId16,
+    );
     identity.update(&pid.to_be_bytes());
     identity.update(&startup_time_unix_ms.to_be_bytes());
     identity.update(
@@ -458,7 +460,7 @@ fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
             .as_os_str()
             .as_encoded_bytes(),
     );
-    let daemon_instance_id = identity.finalize().to_hex()[..32].to_owned();
+    let daemon_instance_id = crate::integrity::frame_digest(identity.finalize())[3..35].to_owned();
     let public_bundle_versions = model_artifact_index()
         .map_err(|error| DaemonError::Admin(format!("artifact index: {error}")))?
         .artifacts
@@ -730,7 +732,7 @@ fn execute_workspace_command_inner(
             let bytes = fs::read(&profile_manifest).map_err(|error| {
                 WorkspaceRegistryError::Root(format!("profile manifest: {error}"))
             })?;
-            vec![registry.configure(workspace_id, *blake3::hash(&bytes).as_bytes())?]
+            vec![registry.configure(workspace_id, crate::integrity::digest_bytes(&bytes))?]
         }
         WorkspaceAdminCommand::Enable { workspace_id } => vec![registry.enable(workspace_id)?],
         WorkspaceAdminCommand::Disable { workspace_id } => vec![registry.disable(workspace_id)?],

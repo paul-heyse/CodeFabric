@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use codefabric::integrity::framed_digest as digest_bytes;
 use notify_debouncer_full::{DebounceEventResult, new_debouncer, notify::RecursiveMode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -589,10 +590,6 @@ fn canonical_digest(value: &impl Serialize) -> Result<String, IncrementalError> 
     let value = serde_json::to_value(value)?;
     let bytes = serde_json_canonicalizer::to_vec(&value)?;
     Ok(digest_bytes(&bytes))
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
 }
 
 fn io(path: &Path, source: std::io::Error) -> IncrementalError {

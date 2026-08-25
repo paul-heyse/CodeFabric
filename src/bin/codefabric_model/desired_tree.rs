@@ -6,6 +6,7 @@ use std::fs;
 use std::os::unix::ffi::OsStringExt as _;
 use std::path::{Component, Path, PathBuf};
 
+use codefabric::integrity::framed_digest as digest_bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -1008,10 +1009,6 @@ fn canonical_digest(value: &impl Serialize) -> Result<String, DesiredTreeError> 
     let value = serde_json::to_value(value).map_err(DesiredTreeError::Json)?;
     let bytes = serde_json_canonicalizer::to_vec(&value).map_err(DesiredTreeError::Json)?;
     Ok(digest_bytes(&bytes))
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
 }
 
 fn display_bytes(bytes: &[u8]) -> String {

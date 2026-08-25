@@ -652,7 +652,7 @@ impl DriverExecutableIdentity {
 fn canonical_digest(value: &impl Serialize) -> Result<String, ModelError> {
     let value = serde_json::to_value(value).map_err(ModelError::IdentityEncoding)?;
     let bytes = serde_json_canonicalizer::to_vec(&value).map_err(ModelError::IdentityEncoding)?;
-    Ok(format!("b3:{}", blake3::hash(&bytes).to_hex()))
+    Ok(codefabric::integrity::framed_digest(&bytes))
 }
 
 #[cfg(test)]

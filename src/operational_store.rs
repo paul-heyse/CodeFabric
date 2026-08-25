@@ -872,7 +872,7 @@ impl OperationalReader {
 /// Digest of the exact generated DDL bytes compiled into the daemon.
 #[must_use]
 pub fn operational_ddl_digest() -> String {
-    format!("b3:{}", blake3::hash(OPERATIONAL_DDL.as_bytes()).to_hex())
+    crate::integrity::framed_digest(OPERATIONAL_DDL.as_bytes())
 }
 
 fn verify_ddl_lineage() -> Result<(), OperationalStoreError> {

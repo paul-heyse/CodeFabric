@@ -75,8 +75,9 @@ impl ProviderText {
     /// Fingerprint the exact provider text and authoritative boundary geometry.
     /// This binds independently executed syntax providers to one immutable image.
     pub(crate) fn provider_image_fingerprint(&self) -> String {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"codefabric:provider-text-image:v1\0");
+        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::ProviderTextImage,
+        );
         hasher.update(
             &u64::try_from(self.text.len())
                 .unwrap_or(u64::MAX)
@@ -91,6 +92,6 @@ impl ProviderText {
         for offset in self.original_byte_offsets.iter() {
             hasher.update(&offset.to_le_bytes());
         }
-        format!("b3:{}", hasher.finalize())
+        crate::integrity::frame_digest(hasher.finalize())
     }
 }

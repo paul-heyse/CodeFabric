@@ -6,6 +6,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use codefabric::integrity::framed_digest as digest_bytes;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -591,7 +592,7 @@ fn build_rust_generator(plan: &ProtoPlan) -> Result<RustGenerator, ProtoDriverEr
     identity_material.extend(rustc.as_bytes());
     identity_material
         .extend(b"proto-tooling|debug|host|reproducible-path-remap-nodebug-v3|incremental=0");
-    let action_key = blake3::hash(&identity_material).to_hex().to_string();
+    let action_key = codefabric::integrity::digest_hex(&identity_material);
     let target = plan
         .repository_root
         .join("target/model-tools/proto")
@@ -695,10 +696,6 @@ fn encoded_json(value: &Value) -> Result<Vec<u8>, serde_json::Error> {
     let mut bytes = serde_json::to_vec_pretty(value)?;
     bytes.push(b'\n');
     Ok(bytes)
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
 }
 
 fn digest_file(path: &Path) -> Result<String, ProtoDriverError> {
@@ -856,8 +853,8 @@ mod tests {
 
     #[test]
     fn model_proto_feature_distinct_rust_consumers_use_isolated_executables() {
-        let material_a = blake3::hash(b"proto-tooling|debug|host");
-        let material_b = blake3::hash(b"rpc|debug|host");
+        let material_a = codefabric::integrity::digest_bytes(b"proto-tooling|debug|host");
+        let material_b = codefabric::integrity::digest_bytes(b"rpc|debug|host");
         assert_ne!(material_a, material_b);
     }
 

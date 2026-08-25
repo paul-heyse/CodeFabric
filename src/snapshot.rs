@@ -10,8 +10,6 @@ use crate::identity::{
     context_set_identity, decode_public_id, derive_identity, encode_public_id, encode_record,
 };
 
-const MANIFEST_DOMAIN: &[u8] = b"codefabric-serving-snapshot-manifest-v1";
-
 /// Snapshot source observation frozen at construction.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -712,10 +710,11 @@ impl ServingSnapshotManifestBody {
     /// Returns a field or CBEF validation error.
     pub fn derive(self) -> Result<ServingSnapshotManifest, SnapshotManifestError> {
         let body = self.canonical_body()?;
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(MANIFEST_DOMAIN);
+        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::ServingSnapshotManifest,
+        );
         hasher.update(&body);
-        let manifest_digest = *hasher.finalize().as_bytes();
+        let manifest_digest = hasher.finalize();
         let identity = derive_identity(&CbefRecord {
             domain: IdentityDomain::ServingSnapshot,
             fields: vec![CbefField {

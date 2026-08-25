@@ -24,6 +24,13 @@ pub mod derivation;
 pub mod golden_corpus;
 #[cfg(feature = "canonical-json")]
 pub mod identity;
+#[cfg(any(
+    feature = "canonical-json",
+    feature = "fact-generation",
+    feature = "model-compiler",
+    feature = "repository-state"
+))]
+pub mod integrity;
 #[cfg(feature = "daemon")]
 pub mod inventory;
 #[cfg(feature = "daemon")]
@@ -61,6 +68,8 @@ pub mod rustc_service;
 pub mod schema_registry;
 #[cfg(feature = "daemon")]
 pub mod secure_path;
+#[cfg(feature = "daemon")]
+pub mod security;
 #[cfg(feature = "daemon")]
 pub mod semantic_query;
 #[cfg(feature = "canonical-json")]

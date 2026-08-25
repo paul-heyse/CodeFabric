@@ -280,7 +280,7 @@ impl BlobStore {
     }
 
     fn put(&self, bytes: &[u8]) -> Result<BlobReference, SourceImageError> {
-        let digest = *blake3::hash(bytes).as_bytes();
+        let digest = crate::integrity::digest_bytes(bytes);
         let name = digest_name(&digest);
         match self.read_named(&name) {
             Ok(existing) => {
@@ -320,7 +320,7 @@ impl BlobStore {
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)
             .map_err(|_| SourceImageError::BlobIo)?;
-        if digest_name(blake3::hash(&bytes).as_bytes()) != name {
+        if digest_name(&crate::integrity::digest_bytes(&bytes)) != name {
             return Err(SourceImageError::BlobDigestMismatch);
         }
         Ok(bytes)
@@ -442,7 +442,7 @@ impl SourceImageStore {
             self.record_duration(started);
             return Ok(CaptureOutcome::Deferred);
         }
-        let digest = *blake3::hash(&stable.bytes).as_bytes();
+        let digest = crate::integrity::digest_bytes(&stable.bytes);
         let blob = self.blobs.put(&stable.bytes)?;
         let line_index = build_line_index(&stable.bytes);
         let line_blob = self.blobs.put(&line_index.serialized)?;
@@ -1113,7 +1113,7 @@ fn build_line_index(bytes: &[u8]) -> LineIndex {
         .collect::<Vec<_>>();
     LineIndex {
         offsets: Arc::from(offsets),
-        digest: *blake3::hash(&serialized).as_bytes(),
+        digest: crate::integrity::digest_bytes(&serialized),
         serialized: Arc::from(serialized),
         format_version: 1,
         newline_kind,
@@ -1207,7 +1207,7 @@ fn python_encoding_cookie(bytes: &[u8]) -> Option<String> {
 }
 
 fn digest_name(digest: &[u8; 32]) -> String {
-    blake3::Hash::from_bytes(*digest).to_hex().to_string()
+    crate::integrity::frame_digest(*digest)[3..].to_owned()
 }
 
 fn digest_name_16(digest: &[u8; 16]) -> String {
@@ -1301,13 +1301,13 @@ mod tests {
             panic!("stable source was not published");
         };
         assert_eq!(image.bytes.as_ref(), bytes);
-        assert_eq!(image.digest, *blake3::hash(bytes).as_bytes());
+        assert_eq!(image.digest, crate::integrity::digest_bytes(bytes));
         assert_eq!(image.line_index.offsets.as_ref(), &[0, 7, 14, 20]);
         assert_eq!(image.line_index.newline_kind, NewlineKind::Mixed);
         assert_eq!(image.line_index.serialized.len(), 4 * 8);
         assert_eq!(
             image.line_index.digest,
-            *blake3::hash(&image.line_index.serialized).as_bytes()
+            crate::integrity::digest_bytes(&image.line_index.serialized)
         );
         assert_eq!(build_line_index(b"").offsets.as_ref(), &[0]);
         assert_eq!(build_line_index(b"no-newline").offsets.as_ref(), &[0]);
@@ -1537,8 +1537,8 @@ mod tests {
         )
         .unwrap();
         let expected = [
-            *blake3::hash(&left).as_bytes(),
-            *blake3::hash(&right).as_bytes(),
+            crate::integrity::digest_bytes(&left),
+            crate::integrity::digest_bytes(&right),
         ];
         let race_request = request(workspace_id, b"racy.rs");
         for _ in 0..250 {

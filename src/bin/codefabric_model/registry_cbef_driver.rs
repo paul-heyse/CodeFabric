@@ -24,6 +24,7 @@ use super::registry_models as governed;
 use super::repository_model::read_stable;
 
 const CBEF_PATH: &str = "contracts/identity/cbef-v1.yaml";
+const FINGERPRINT_DOMAINS_PATH: &str = "contracts/identity/fingerprint-domain-registry.yaml";
 const ENUM_PATH: &str = "contracts/registry/enum-registry.yaml";
 const FLAG_PATH: &str = "contracts/registry/flag-registry.yaml";
 const RUST_RECIPES_PATH: &str = "src/generated/model_identity_recipes.rs";
@@ -159,6 +160,11 @@ pub fn detached_registry_identity(
                 DesignPrincipleGovernanceRegistry,
             >(bytes)?)?)
         }
+        "codefabric.identity.fingerprint-domain-registry" => {
+            Some(detached_typed_digest(&decode_yaml::<
+                FingerprintDomainRegistry,
+            >(bytes)?)?)
+        }
         _ => None,
     };
     Ok(digest)
@@ -176,7 +182,7 @@ fn detached_typed_digest(value: &impl Serialize) -> Result<String, RegistryCbefE
     object.remove("canonical_digest");
     object.remove("source_digest");
     let canonical = serde_json_canonicalizer::to_vec(&value)?;
-    Ok(format!("b3:{}", blake3::hash(&canonical).to_hex()))
+    Ok(codefabric::integrity::framed_digest(&canonical))
 }
 
 /// Header common to the three native family authorities.
@@ -199,6 +205,35 @@ struct OwnerAcceptance {
     accepted_at: String,
     construction_rule: String,
     source_digest: String,
+}
+
+/// One purpose-classified BLAKE3 domain. Only semantic records may be exposed
+/// through `crate::identity`; the other purposes name their separate authority.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FingerprintDomainSpec {
+    domain_id: String,
+    purpose: String,
+    domain_string: String,
+    separator: String,
+    framing: String,
+    fields: Vec<String>,
+    #[serde(default)]
+    normalization: BTreeMap<String, String>,
+    compatibility: String,
+    authority: String,
+    consumers: Vec<String>,
+}
+
+/// Governed hash-purpose and semantic-fingerprint authority.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FingerprintDomainRegistry {
+    #[serde(flatten)]
+    header: AuthorityHeader,
+    schema_version: u8,
+    records: Vec<FingerprintDomainSpec>,
+    owner_acceptance: OwnerAcceptance,
 }
 
 /// One CBEF type allocation.
@@ -448,6 +483,7 @@ pub struct SourceSyntaxTransitionSemantics {
 pub struct RegistryCbefPlan {
     descriptor: DriverDescriptor,
     cbef: CbefAuthority,
+    fingerprint_domains: FingerprintDomainRegistry,
     enums: EnumRegistry,
     flags: FlagRegistry,
     registry_values: BTreeMap<String, Value>,
@@ -529,6 +565,7 @@ impl RegistryCbefDriver {
         let registry_root = self.repository_root.join("contracts/registry");
         let mut paths = vec![
             CBEF_PATH.to_owned(),
+            FINGERPRINT_DOMAINS_PATH.to_owned(),
             "contracts/rpc/feature-registry.yaml".to_owned(),
             CARGO_MANIFEST_PATH.to_owned(),
             CARGO_LOCK_PATH.to_owned(),
@@ -676,6 +713,7 @@ impl RegistryCbefDriver {
             serde_json::from_slice(bytes).map_err(RegistryCbefError::Json)?;
         if projection.schema_version != 1
             || projection.cbef_domains != plan.cbef.domains
+            || projection.fingerprint_domains != plan.fingerprint_domains.records
             || projection.enum_domains != plan.enums.records
             || projection.flag_domains != plan.flags.records
         {
@@ -765,13 +803,18 @@ impl ModelDriver for RegistryCbefDriver {
         let descriptor = self.describe()?;
         let source_fence = DriverSourceFence::capture(repository_root, &descriptor)?;
         let cbef = parse_yaml::<CbefAuthority>(repository_root, CBEF_PATH)?;
+        let fingerprint_domains =
+            parse_yaml::<FingerprintDomainRegistry>(repository_root, FINGERPRINT_DOMAINS_PATH)?;
         let enums = parse_yaml::<EnumRegistry>(repository_root, ENUM_PATH)?;
         let flags = parse_yaml::<FlagRegistry>(repository_root, FLAG_PATH)?;
         validate_authorities(&cbef, &enums, &flags)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        validate_fingerprint_domains(&fingerprint_domains)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         let mut registry_values = BTreeMap::new();
         for source in descriptor.sources.iter().filter(|source| {
             source.display() != CBEF_PATH
+                && source.display() != FINGERPRINT_DOMAINS_PATH
                 && Path::new(&source.display())
                     .extension()
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("yaml"))
@@ -818,6 +861,7 @@ impl ModelDriver for RegistryCbefDriver {
         Ok(RegistryCbefPlan {
             descriptor,
             cbef,
+            fingerprint_domains,
             enums,
             flags,
             registry_values,
@@ -839,7 +883,7 @@ impl ModelDriver for RegistryCbefDriver {
         let mut outputs: Vec<(String, Vec<u8>)> = vec![
             (
                 RUST_RECIPES_PATH.to_owned(),
-                rustfmt_source(&render_rust_recipes(&plan.cbef))?,
+                rustfmt_source(&render_rust_recipes(&plan.cbef, &plan.fingerprint_domains))?,
             ),
             (
                 RUST_REGISTRIES_PATH.to_owned(),
@@ -963,6 +1007,7 @@ struct RegistryCbefProjection {
     schema_version: u8,
     source_artifact_ids: Vec<String>,
     cbef_domains: Vec<CbefDomainSpec>,
+    fingerprint_domains: Vec<FingerprintDomainSpec>,
     enum_domains: Vec<EnumDomain>,
     flag_domains: Vec<FlagDomain>,
 }
@@ -980,7 +1025,7 @@ fn run_provider_probe(repository_root: &Path) -> Result<(ProviderProbe, Value), 
     material.extend(
         b"provider-inventory-tooling|debug|host|reproducible-path-remap-nodebug-v3|incremental=0",
     );
-    let action_key = blake3::hash(&material).to_hex().to_string();
+    let action_key = codefabric::integrity::digest_hex(&material);
     let target = repository_root
         .join("target/model-tools/provider-inventory")
         .join(&action_key);
@@ -1042,7 +1087,7 @@ fn run_provider_probe(repository_root: &Path) -> Result<(ProviderProbe, Value), 
     let executable_bytes = read_stable(&executable, MAX_PROVIDER_PROBE_BYTES)?;
     let identity = json!({
         "action_key": format!("b3:{action_key}"),
-        "executable_digest": format!("b3:{}", blake3::hash(&executable_bytes).to_hex()),
+        "executable_digest": codefabric::integrity::framed_digest(&executable_bytes),
         "cargo_lock_digest": digest_file(repository_root, CARGO_LOCK_PATH)?,
         "cargo_manifest_digest": digest_file(repository_root, CARGO_MANIFEST_PATH)?,
         "source_digest": digest_file(repository_root, PROVIDER_TOOL_PATH)?,
@@ -1069,7 +1114,7 @@ fn command_text(command: &mut Command) -> Result<String, RegistryCbefError> {
 
 fn digest_file(repository_root: &Path, relative: &str) -> Result<String, RegistryCbefError> {
     let bytes = read_stable(&repository_root.join(relative), MAX_PROVIDER_PROBE_BYTES)?;
-    Ok(format!("b3:{}", blake3::hash(&bytes).to_hex()))
+    Ok(codefabric::integrity::framed_digest(&bytes))
 }
 
 fn provider_normalizations(
@@ -1238,7 +1283,7 @@ fn render_provider_catalogs(
     });
     let query_bundle_digest = format!(
         "b3:{}",
-        blake3::hash(&canonical_bytes(&query_bundle)?).to_hex()
+        codefabric::integrity::digest_hex(&canonical_bytes(&query_bundle)?)
     );
     let mut outputs = BTreeMap::new();
     for probe in &plan.provider_probe.tree_sitter {
@@ -1282,11 +1327,11 @@ fn render_provider_catalogs(
         let runtime_inventory = json!({"raw_kinds": raw_kinds, "fields": probe.fields});
         let runtime_inventory_fingerprint = format!(
             "b3:{}",
-            blake3::hash(&canonical_bytes(&runtime_inventory)?).to_hex()
+            codefabric::integrity::digest_hex(&canonical_bytes(&runtime_inventory)?)
         );
         let node_types_digest = format!(
             "b3:{}",
-            blake3::hash(probe.node_types_source.as_bytes()).to_hex()
+            codefabric::integrity::digest_hex(probe.node_types_source.as_bytes())
         );
         let node_types: Value = serde_json::from_str(&probe.node_types_source)?;
         let document = json!({
@@ -1342,7 +1387,7 @@ fn render_provider_catalogs(
     });
     let runtime_inventory_fingerprint = format!(
         "b3:{}",
-        blake3::hash(&canonical_bytes(&runtime_inventory)?).to_hex()
+        codefabric::integrity::digest_hex(&canonical_bytes(&runtime_inventory)?)
     );
     let document = json!({
         "catalog_id": ruff.catalog_id,
@@ -1766,6 +1811,66 @@ fn validate_authorities(
     validate_allocations(&enums.records, &flags.records)
 }
 
+fn validate_fingerprint_domains(
+    registry: &FingerprintDomainRegistry,
+) -> Result<(), RegistryCbefError> {
+    if registry.schema_version != 1
+        || registry.header.artifact_id != "codefabric.identity.fingerprint-domain-registry"
+        || registry.records.is_empty()
+    {
+        return Err(RegistryCbefError::AuthorityInvariant);
+    }
+    let purposes = [
+        "SEMANTIC_FINGERPRINT",
+        "INTEGRITY",
+        "CACHE_KEY",
+        "SECURITY_MAC",
+    ];
+    let separators = ["NUL", "NONE"];
+    let compatibilities = ["PERSISTED_FROZEN", "INTERNAL_VERSIONED", "EPHEMERAL"];
+    let mut ids = BTreeSet::new();
+    let mut domain_bytes = BTreeSet::new();
+    for record in &registry.records {
+        if !ids.insert(record.domain_id.as_str())
+            || !domain_bytes.insert((record.domain_string.as_str(), record.separator.as_str()))
+            || !purposes.contains(&record.purpose.as_str())
+            || !separators.contains(&record.separator.as_str())
+            || !compatibilities.contains(&record.compatibility.as_str())
+            || (record.domain_string.is_empty() && record.domain_id != "UNFRAMED_ID16")
+            || record.framing.is_empty()
+            || record.fields.is_empty()
+            || record.authority.is_empty()
+            || record.consumers.is_empty()
+        {
+            return Err(RegistryCbefError::AuthorityInvariant);
+        }
+        let expected_authority = match record.purpose.as_str() {
+            "SEMANTIC_FINGERPRINT" => "crate::identity",
+            "INTEGRITY" => "crate::integrity",
+            "CACHE_KEY" => "crate::integrity::CacheKeyHasher",
+            "SECURITY_MAC" => "crate::security",
+            _ => return Err(RegistryCbefError::AuthorityInvariant),
+        };
+        if !record.authority.starts_with(expected_authority) {
+            return Err(RegistryCbefError::AuthorityInvariant);
+        }
+        let fields = record
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        if fields.len() != record.fields.len()
+            || !record
+                .normalization
+                .keys()
+                .all(|field| fields.contains(field.as_str()))
+        {
+            return Err(RegistryCbefError::AuthorityInvariant);
+        }
+    }
+    Ok(())
+}
+
 fn validate_exact_domain(
     cbef: &CbefAuthority,
     name: &str,
@@ -2081,10 +2186,12 @@ fn render_projection(plan: &RegistryCbefPlan) -> Result<Vec<u8>, RegistryCbefErr
         schema_version: 1,
         source_artifact_ids: vec![
             plan.cbef.header.artifact_id.clone(),
+            plan.fingerprint_domains.header.artifact_id.clone(),
             plan.enums.header.artifact_id.clone(),
             plan.flags.header.artifact_id.clone(),
         ],
         cbef_domains: plan.cbef.domains.clone(),
+        fingerprint_domains: plan.fingerprint_domains.records.clone(),
         enum_domains: plan.enums.records.clone(),
         flag_domains: plan.flags.records.clone(),
     };
@@ -2094,12 +2201,16 @@ fn render_projection(plan: &RegistryCbefPlan) -> Result<Vec<u8>, RegistryCbefErr
     Ok(bytes)
 }
 
-fn render_rust_recipes(authority: &CbefAuthority) -> Vec<u8> {
+fn render_rust_recipes(
+    authority: &CbefAuthority,
+    fingerprint_domains: &FingerprintDomainRegistry,
+) -> Vec<u8> {
     let mut output = String::from(
         "// @generated by codefabric-model; do not edit.\n\
          #[derive(Clone, Debug, Eq, PartialEq)]\n\
          pub enum RecipeValue { Absent, Bytes(Vec<u8>), Utf8(String), RawPath(u8, Vec<u8>), Unsigned(Vec<u8>), Signed(Vec<u8>), Boolean(bool), Id([u8; 16]), Digest([u8; 32]), OrderedList(Vec<RecipeValue>), Set(Vec<RecipeValue>), Map(Vec<(RecipeValue, RecipeValue)>), TaggedUnion(u16, Box<RecipeValue>) }\n\
-         #[derive(Clone, Debug, Eq, PartialEq)] pub struct RecipeField { pub tag: u16, pub value: RecipeValue }\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)] pub enum RecipeNormalization { None, Nfc, Nfkc, AsciiLower, PythonIdentifierNfkc, RustCanonical }\n\
+         #[derive(Clone, Debug, Eq, PartialEq)] pub struct RecipeField { pub tag: u16, pub normalization: RecipeNormalization, pub value: RecipeValue }\n\
          #[derive(Clone, Debug, Eq, PartialEq)] pub struct RecipeRecord { pub domain_code: u16, pub fields: Vec<RecipeField> }\n\
          #[derive(Clone, Copy, Debug, Eq, PartialEq)] pub struct RecipeError;\n\
          fn expect(value: &RecipeValue, expected: u8, width: usize) -> Result<(), RecipeError> { let actual = match value { RecipeValue::Absent => 0, RecipeValue::Bytes(_) => 1, RecipeValue::Utf8(_) => 2, RecipeValue::RawPath(_, _) => 3, RecipeValue::Unsigned(_) => 4, RecipeValue::Signed(_) => 5, RecipeValue::Boolean(_) => 6, RecipeValue::Id(_) => 7, RecipeValue::Digest(_) => 8, RecipeValue::OrderedList(_) => 9, RecipeValue::Set(_) => 10, RecipeValue::Map(_) => 11, RecipeValue::TaggedUnion(_, _) => 12 }; if actual != expected { return Err(RecipeError); } if width != 0 { match value { RecipeValue::Unsigned(bytes) | RecipeValue::Signed(bytes) if bytes.len() == width => {}, _ => return Err(RecipeError) } } Ok(()) }\n\n",
@@ -2134,9 +2245,18 @@ fn render_rust_recipes(authority: &CbefAuthority) -> Vec<u8> {
         )
         .unwrap();
         for field in &domain.fields {
+            let normalization = match field.normalization.as_deref() {
+                None => "None",
+                Some("NFC") => "Nfc",
+                Some("NFKC") => "Nfkc",
+                Some("ASCII_LOWER") => "AsciiLower",
+                Some("PYTHON_IDENTIFIER_NFKC") => "PythonIdentifierNfkc",
+                Some("RUST_CANONICAL") => "RustCanonical",
+                Some(_) => panic!("validated CBEF normalization"),
+            };
             writeln!(
                 output,
-                "        RecipeField {{ tag: {}, value: fields.{} }},",
+                "        RecipeField {{ tag: {}, normalization: RecipeNormalization::{normalization}, value: fields.{} }},",
                 field.tag,
                 snake(&field.name)
             )
@@ -2144,7 +2264,54 @@ fn render_rust_recipes(authority: &CbefAuthority) -> Vec<u8> {
         }
         output.push_str("    ] })\n}\n\n");
     }
+    render_fingerprint_domains(&mut output, fingerprint_domains);
     output.into_bytes()
+}
+
+fn render_fingerprint_domains(output: &mut String, registry: &FingerprintDomainRegistry) {
+    for (purpose, type_name) in [
+        ("SEMANTIC_FINGERPRINT", "SemanticFingerprintDomain"),
+        ("INTEGRITY", "IntegrityDomain"),
+        ("CACHE_KEY", "CacheKeyDomain"),
+        ("SECURITY_MAC", "SecurityMacDomain"),
+    ] {
+        writeln!(
+            output,
+            "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum {type_name} {{"
+        )
+        .unwrap();
+        for record in registry
+            .records
+            .iter()
+            .filter(|record| record.purpose == purpose)
+        {
+            writeln!(output, "    {},", pascal(&record.domain_id)).unwrap();
+        }
+        output.push_str("}\n");
+        writeln!(
+            output,
+            "impl {type_name} {{\n    pub const fn bytes(self) -> &'static [u8] {{\n        match self {{"
+        )
+        .unwrap();
+        for record in registry
+            .records
+            .iter()
+            .filter(|record| record.purpose == purpose)
+        {
+            let mut domain = record.domain_string.clone();
+            if record.separator == "NUL" {
+                domain.push('\0');
+            }
+            writeln!(
+                output,
+                "            Self::{} => &{:?},",
+                pascal(&record.domain_id),
+                domain.as_bytes()
+            )
+            .unwrap();
+        }
+        output.push_str("        }\n    }\n}\n\n");
+    }
 }
 
 fn render_rust_registries(enums: &EnumRegistry, flags: &FlagRegistry) -> Vec<u8> {
@@ -3141,12 +3308,15 @@ mod tests {
     #[test]
     fn model_registry_generated_consumers_compile_and_typecheck() {
         let plan = plan();
-        let recipes = String::from_utf8(render_rust_recipes(&plan.cbef)).unwrap();
+        let recipes =
+            String::from_utf8(render_rust_recipes(&plan.cbef, &plan.fingerprint_domains)).unwrap();
         let registries =
             String::from_utf8(render_rust_registries(&plan.enums, &plan.flags)).unwrap();
         let python = String::from_utf8(render_python_registries(&plan.enums, &plan.flags)).unwrap();
         assert!(recipes.contains("pub struct EntityFields"));
         assert!(recipes.contains("pub fn relation_fact"));
+        assert!(recipes.contains("normalization: RecipeNormalization::AsciiLower"));
+        assert!(recipes.contains("pub enum SemanticFingerprintDomain"));
         assert!(registries.contains("pub enum OccurrenceFamily"));
         assert!(registries.contains("pub struct ProviderNodeFlags"));
         assert!(python.contains("class OccurrenceFamily(IntEnum)"));

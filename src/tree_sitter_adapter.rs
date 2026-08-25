@@ -644,7 +644,7 @@ fn version_mismatch(part: &str) -> TreeSitterAdapterError {
 }
 
 fn checksum(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
+    crate::integrity::framed_digest(bytes)
 }
 
 type RecoveryNode = (usize, usize, bool, bool, u16);
@@ -977,13 +977,14 @@ mod tests {
     }
 
     fn fact_stream_digest(facts: &[RawSyntaxFact]) -> String {
-        fn frame_bytes(hasher: &mut blake3::Hasher, value: &[u8]) {
+        fn frame_bytes(hasher: &mut crate::integrity::IntegrityHasher, value: &[u8]) {
             hasher.update(&u64::try_from(value.len()).unwrap().to_le_bytes());
             hasher.update(value);
         }
 
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"codefabric:tree-sitter-raw-syntax-facts:v1\0");
+        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::TreeSitterRawSyntaxFacts,
+        );
         hasher.update(&u64::try_from(facts.len()).unwrap().to_le_bytes());
         for fact in facts {
             hasher.update(&fact.id.0.to_le_bytes());
@@ -1022,7 +1023,7 @@ mod tests {
             hasher.update(&fact.ordinal.to_le_bytes());
             hasher.update(&fact.depth.to_le_bytes());
         }
-        format!("b3:{}", hasher.finalize())
+        crate::integrity::frame_digest(hasher.finalize())
     }
 
     struct CancelAfter {

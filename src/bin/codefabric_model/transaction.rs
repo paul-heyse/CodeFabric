@@ -9,6 +9,7 @@ use std::os::unix::ffi::OsStringExt as _;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 
+use codefabric::integrity::framed_digest as digest_bytes;
 use rustix::fs::{FlockOperation, flock};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -933,10 +934,6 @@ fn canonical_digest(value: &impl Serialize) -> Result<String, TransactionError> 
     let value = serde_json::to_value(value)?;
     let bytes = serde_json_canonicalizer::to_vec(&value)?;
     Ok(digest_bytes(&bytes))
-}
-
-fn digest_bytes(bytes: &[u8]) -> String {
-    format!("b3:{}", blake3::hash(bytes).to_hex())
 }
 
 fn fail_if_requested(failure_after: Option<usize>, step: usize) -> Result<(), TransactionError> {

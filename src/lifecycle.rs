@@ -919,8 +919,9 @@ fn wave_input_fingerprint(
     strategy: UpdateCandidateStrategy,
     paths: &BTreeSet<Vec<u8>>,
 ) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.update-wave-input.v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::UpdateWaveInput,
+    );
     hasher.update(&workspace_id);
     hasher.update(&source_generation.to_be_bytes());
     hasher.update(&event_watermark.to_be_bytes());
@@ -929,22 +930,24 @@ fn wave_input_fingerprint(
         hasher.update(&(path.len() as u64).to_be_bytes());
         hasher.update(path);
     }
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn wave_item_input_fingerprint(path: &[u8]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.update-wave-item-input.v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::UpdateWaveItemInput,
+    );
     hasher.update(&(path.len() as u64).to_be_bytes());
     hasher.update(path);
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn removal_fingerprint(path: &[u8]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.update-wave-removal.v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::UpdateWaveRemoval,
+    );
     hasher.update(path);
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn wave_identity(
@@ -953,15 +956,14 @@ fn wave_identity(
     event_watermark: u64,
     input_fingerprint: [u8; 32],
 ) -> [u8; 16] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.update-wave.v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::UpdateWave,
+    );
     hasher.update(&workspace_id);
     hasher.update(&source_generation.to_be_bytes());
     hasher.update(&event_watermark.to_be_bytes());
     hasher.update(&input_fingerprint);
-    let mut identity = [0_u8; 16];
-    identity.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
-    identity
+    hasher.finalize_id16()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1742,15 +1744,14 @@ pub fn removed_owner_mutations(
 }
 
 fn provider_run_identity(wave_id: [u8; 16], path: &[u8], provider: &[u8]) -> [u8; 16] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.fast-provider-run.v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::FastProviderRun,
+    );
     hasher.update(&wave_id);
     hasher.update(&(path.len() as u64).to_be_bytes());
     hasher.update(path);
     hasher.update(provider);
-    let mut identity = [0_u8; 16];
-    identity.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
-    identity
+    hasher.finalize_id16()
 }
 
 /// Model-selected overlay flush thresholds. No duration measurement is an acceptance criterion.
@@ -2186,8 +2187,9 @@ impl CanonicalState {
 
     #[must_use]
     pub fn digest(&self) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"codefabric.continuous-state.v1\0");
+        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+            crate::integrity::IntegrityDomain::ContinuousState,
+        );
         for (table, rows) in &self.tables {
             hasher.update(&(table.len() as u64).to_be_bytes());
             hasher.update(table.as_bytes());
@@ -2204,7 +2206,7 @@ impl CanonicalState {
             hasher.update(&(diagnostic.len() as u64).to_be_bytes());
             hasher.update(&diagnostic);
         }
-        *hasher.finalize().as_bytes()
+        hasher.finalize()
     }
 
     /// Compare exact normalized rows and diagnostics with a clean rebuild.

@@ -176,22 +176,22 @@ const fn state_code(state: DurablePublicationState) -> i16 {
 }
 
 fn derived_operation_id(base: [u8; 16], table_code: i16, label: &str) -> [u8; 16] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-publication-operation-v1\0");
+    let mut hasher = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::PublicationOperation,
+    );
     hasher.update(&base);
     hasher.update(&table_code.to_be_bytes());
     hasher.update(label.as_bytes());
-    let mut id = [0_u8; 16];
-    id.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
-    id
+    hasher.finalize_id16()
 }
 
 fn digest_payload(label: &str, payload: &[u8]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric-publication-phase-v1\0");
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::PublicationPhase,
+    );
     hasher.update(label.as_bytes());
     hasher.update(payload);
-    *hasher.finalize().as_bytes()
+    hasher.finalize()
 }
 
 fn advanced_version(base: Option<u64>, commits: u64) -> Result<Option<u64>, FabricError> {
