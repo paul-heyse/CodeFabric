@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP65",
+  "current_packet": "WP61",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -105,37 +105,47 @@
       "blockers": []
     },
     "WP61": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "7de9e42ccd4b23c193a706ae0bf2f8183c75be40",
-      "deviations": [],
+      "deviations": [
+        "Current-HEAD revalidation found that WP64 introduced RESULT_CHECKSUM_CANONICAL_SCHEMA after WP61's proving commit without adding it to the public error registry. just public-error-closure-check and just governance-scan now fail, so WP61's registry-closure proof is stale until the error is registered or remapped to an existing registered public code and the named gates pass again."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP62": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "f51ed2a1625869a85a27626626f6775f2773a827",
-      "deviations": [],
+      "deviations": [
+        "All four WP62 packet oracles and the query legacy negative suite pass at HEAD, but dependency WP61 is stale because public error closure fails; WP62 cannot remain trusted complete until that foundational gate is repaired and the dependency-closed proof is rerun."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP75": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "3ebe45f95defffed2cac6e8620109adc8639e435",
-      "deviations": [],
+      "deviations": [
+        "All four WP75 packet oracles and semantic-query-conformance-check pass at HEAD, but dependency WP62 is stale through WP61's failed public-error closure gate; dependency-closed completion must be re-proved after repair."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP63": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "7d3a710235290923258ea3d15023fb604f1a6b3f",
-      "deviations": [],
+      "deviations": [
+        "All four WP63 packet oracles and query-daemon-activation-check pass at HEAD, but dependency WP75 is stale through WP61's failed public-error closure gate; dependency-closed completion must be re-proved after repair."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP64": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "dcf30b6eaa8c34c85557ecba563d1618cffadb25",
-      "deviations": [],
+      "deviations": [
+        "All four WP64 packet oracles, query-determinism-check, and query legacy zero-state pass at HEAD, but WP64 introduced the unregistered RESULT_CHECKSUM_CANONICAL_SCHEMA public error prefix after WP61's proof and also depends on stale WP75. Its completion proof is stale until registry closure and the dependency chain are re-proved."
+      ],
       "failed_approaches": [
         "The first M11 full-root run exposed checksum working bytes being charged to the delivered Arrow output-byte limit, which made an exact-boundary WP25 result fail after WP64. The checksum encoder is now bounded by the remaining session memory while the output-byte contract remains inclusive; the focused regression and complete root suite passed."
       ],
@@ -227,9 +237,11 @@
       "blockers": []
     },
     "M11": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "dcf30b6eaa8c34c85557ecba563d1618cffadb25",
-      "deviations": [],
+      "deviations": [
+        "The M11 behavioral, daemon, determinism, Wave-5, root, and packet-oracle suites pass at HEAD, but constituent WP61 and its dependent query packets are stale because the required public-error closure gate fails."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -257,9 +269,11 @@
   },
   "decommission_batches": {
     "DB10": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "c1da2820b184827bc2c8946a58c549d54fe700b3",
-      "deviations": [],
+      "deviations": [
+        "query-legacy-zero-state-check passes at HEAD, but DB10 requires M11 and M11 is stale through WP61's failed public-error closure gate; the zero-state remains observed but batch completion cannot remain trusted."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -323,8 +337,18 @@
         "docs/plans/state/codefabric-design-principles-full-alignment_v3_state.json"
       ],
       "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
+    },
+    {
+      "kind": "completion_proof_stale",
+      "packet": "WP61",
+      "paths": [
+        "src/fabric/result_checksum.rs",
+        "contracts/registry/error-registry.yaml",
+        "tooling/ci/error_registry_closure.py"
+      ],
+      "summary": "Current-HEAD status revalidation found RESULT_CHECKSUM_CANONICAL_SCHEMA, introduced by WP64 after WP61's proving commit, absent from the public error registry. This makes WP61 and its dependency chain through WP62, WP75, WP63, WP64, M11, and DB10 stale despite their focused behavioral and legacy checks otherwise passing."
     }
   ],
-  "next_action": "Implement WP65 execution identity and the persisted single-execution artifact bundle with exact packet oracles and proportional validation.",
-  "updated_at": "2026-08-25T22:58:06Z"
+  "next_action": "Repair WP61 public error closure for RESULT_CHECKSUM_CANONICAL_SCHEMA at the authoritative registry boundary, regenerate affected projections if the registry changes, rerun the WP61-WP64 dependency-chain packet oracles and M11 gates, commit the repair, and reconcile the shared proving commit before beginning WP65.",
+  "updated_at": "2026-08-25T23:15:50Z"
 }
