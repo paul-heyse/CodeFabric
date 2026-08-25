@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP54",
+  "current_packet": null,
   "packets": {
     "WP73": {
       "status": "complete",
@@ -16,14 +16,19 @@
       "blockers": []
     },
     "WP54": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "6297e2a4838d1e46a8f353cad01f405be974c89d",
+      "deviations": [
+        "The two WP73 registry record sets are unchanged; WP54 adds the repository-model identity envelope and detached semantic identity required for those accepted authorities to participate in governance."
+      ],
+      "failed_approaches": [
+        "The first governance rerun exposed a stale post-control active-plan whitelist; the correction validates any atomically activated schema-2 plan while retaining the malformed-plan negative oracle.",
+        "The first model-assurance rerun rejected the new governance YAML files as headerless or unclaimed; standard identity headers and explicit detached registry identities replace that split authority."
+      ],
       "blockers": []
     },
     "WP55": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -239,7 +244,17 @@
   },
   "baseline_failures": [],
   "discovered_obligations": [],
-  "plan_deviations": [],
-  "next_action": "Execute WP54 baseline canonicalization, oracle-substance, artifact registration, and legacy tree disposition against the accepted WP73 authorities.",
-  "updated_at": "2026-08-25T12:45:00Z"
+  "plan_deviations": [
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP54",
+      "paths": [
+        "contracts/registry/design-principle-registry.yaml",
+        "contracts/registry/design-principle-detector-registry.yaml"
+      ],
+      "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
+    }
+  ],
+  "next_action": "Re-run all WP54 gates against proving commit 6297e2a; if green, start dependency-ready WP55.",
+  "updated_at": "2026-08-25T16:45:00Z"
 }
