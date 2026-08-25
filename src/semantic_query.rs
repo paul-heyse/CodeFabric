@@ -1,8 +1,10 @@
 //! Bounded semantic-query ingress and DataFusion execution over one pinned snapshot.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 
-use arrow_array::{Array as _, FixedSizeBinaryArray};
+use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch, UInt64Array};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::{Expr, LogicalPlan, LogicalPlanBuilder, col, lit};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
@@ -56,10 +58,7 @@ pub enum FreshnessPolicy {
 
 impl QueryForm {
     pub(crate) const fn currently_supported(self) -> bool {
-        matches!(
-            self,
-            Self::FindEntities | Self::RetrieveFacts | Self::FollowRelationships
-        )
+        true
     }
 
     pub(crate) fn registry_slug(self) -> &'static str {
@@ -98,10 +97,11 @@ impl QueryForm {
             Self::FindEntities => Ok("find-entities"),
             Self::RetrieveFacts => Ok("retrieve-facts"),
             Self::FollowRelationships => Ok("follow-relationships"),
-            _ => Err(SemanticQueryError::Invalid(
-                "query form is registered but not active in the current execution profile"
-                    .to_owned(),
-            )),
+            Self::FindPaths => Ok("find-paths"),
+            Self::MatchPattern => Ok("match-pattern"),
+            Self::CombineResults => Ok("combine-results"),
+            Self::SummarizeFacts => Ok("summarize-facts"),
+            Self::RetrieveSourceContext => Ok("retrieve-source-context"),
         }
     }
 
@@ -371,9 +371,33 @@ pub struct TypedSemanticRequest {
 #[derive(Clone, Debug)]
 pub struct BoundQueryBlock {
     pub typed: TypedQueryBlock,
-    pub table: &'static str,
-    pub identity_column: &'static str,
-    pub plan: LogicalPlan,
+    pub operator: BoundOperator,
+}
+
+/// Snapshot-bound operator family: native DataFusion for relational work, application graph plan
+/// for graph semantics.
+#[derive(Clone, Debug)]
+pub enum BoundOperator {
+    Relational {
+        table: &'static str,
+        identity_column: &'static str,
+        plan: LogicalPlan,
+    },
+    Graph(GraphOperatorPlan),
+}
+
+/// Typed bounded graph/set/context plan executed outside DataFusion.
+#[derive(Clone, Debug)]
+pub struct GraphOperatorPlan {
+    pub form: QueryForm,
+    pub input_roles: Vec<ResultRole>,
+    pub output_role: ResultRole,
+    pub output_schema: SchemaRef,
+    pub canonical_order: Vec<&'static str>,
+    pub maximum_results: usize,
+    pub maximum_depth: usize,
+    pub maximum_memory_bytes: usize,
+    pub cancellation_required: bool,
 }
 
 /// One immutable snapshot binding for the complete typed DAG.
@@ -732,7 +756,7 @@ pub fn validate_request(bytes: &[u8]) -> Result<ValidatedSemanticRequest, Semant
     type_request(parse_request(bytes)?)
 }
 
-fn id16_scalar(value: &str, expected_prefix: &str) -> Result<ScalarValue, SemanticQueryError> {
+fn id16_bytes(value: &str, expected_prefix: &str) -> Result<[u8; 16], SemanticQueryError> {
     if !value.starts_with(expected_prefix) {
         return Err(SemanticQueryError::Invalid(format!(
             "public identity {value} has the wrong semantic domain"
@@ -744,16 +768,21 @@ fn id16_scalar(value: &str, expected_prefix: &str) -> Result<ScalarValue, Semant
             "public identity has an invalid Id16 payload".to_owned(),
         ));
     }
-    let mut bytes = Vec::with_capacity(16);
-    for pair in encoded.as_bytes().chunks_exact(2) {
+    let mut bytes = [0_u8; 16];
+    for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
         let pair = std::str::from_utf8(pair)
             .map_err(|_| SemanticQueryError::Invalid("identity is not UTF-8 hex".to_owned()))?;
-        bytes.push(
-            u8::from_str_radix(pair, 16)
-                .map_err(|_| SemanticQueryError::Invalid("identity is not hex".to_owned()))?,
-        );
+        bytes[index] = u8::from_str_radix(pair, 16)
+            .map_err(|_| SemanticQueryError::Invalid("identity is not hex".to_owned()))?;
     }
-    Ok(ScalarValue::FixedSizeBinary(16, Some(bytes)))
+    Ok(bytes)
+}
+
+fn id16_scalar(value: &str, expected_prefix: &str) -> Result<ScalarValue, SemanticQueryError> {
+    Ok(ScalarValue::FixedSizeBinary(
+        16,
+        Some(id16_bytes(value, expected_prefix)?.to_vec()),
+    ))
 }
 
 fn any_of(column: &'static str, values: Vec<ScalarValue>) -> Option<Expr> {
@@ -895,9 +924,45 @@ async fn lower_relational_block(
     session.validate_query_plan(&plan)?;
     Ok(BoundQueryBlock {
         typed: typed.clone(),
-        table,
-        identity_column,
-        plan,
+        operator: BoundOperator::Relational {
+            table,
+            identity_column,
+            plan,
+        },
+    })
+}
+
+fn graph_operator_plan(typed: &TypedQueryBlock) -> Result<GraphOperatorPlan, SemanticQueryError> {
+    if matches!(
+        typed.form,
+        QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships
+    ) {
+        return Err(SemanticQueryError::Invalid(
+            "relational form reached graph lowering".to_owned(),
+        ));
+    }
+    let identity_name = match typed.output_role {
+        ResultRole::Paths => "path_id",
+        ResultRole::PatternBindings => "binding_id",
+        ResultRole::Groups | ResultRole::Summary => "group_id",
+        ResultRole::SourceContexts => "source_context_id",
+        ResultRole::Entities | ResultRole::Facts => "result_id",
+    };
+    let output_schema = Arc::new(Schema::new(vec![
+        Field::new(identity_name, DataType::FixedSizeBinary(16), false),
+        Field::new("ordinal", DataType::UInt64, false),
+        Field::new("cardinality", DataType::UInt64, false),
+    ]));
+    Ok(GraphOperatorPlan {
+        form: typed.form,
+        input_roles: typed.input_roles.clone(),
+        output_role: typed.output_role,
+        output_schema,
+        canonical_order: typed.canonical_order.clone(),
+        maximum_results: typed.limit.first.saturating_add(1),
+        maximum_depth: 64,
+        maximum_memory_bytes: typed.maximum_memory_bytes,
+        cancellation_required: typed.cancellation_required,
     })
 }
 
@@ -919,7 +984,17 @@ pub async fn bind_request(
             .iter()
             .find(|query| query.query_id == block.block_id)
             .expect("typed block retains its parsed query");
-        blocks.push(lower_relational_block(session, block, query).await?);
+        if matches!(
+            block.form,
+            QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships
+        ) {
+            blocks.push(lower_relational_block(session, block, query).await?);
+        } else {
+            blocks.push(BoundQueryBlock {
+                typed: block.clone(),
+                operator: BoundOperator::Graph(graph_operator_plan(block)?),
+            });
+        }
     }
     Ok(BoundPlanSpec {
         snapshot_id: session.snapshot_manifest().snapshot_id,
@@ -944,6 +1019,394 @@ fn query_sql(query: &SemanticQueryClause) -> Result<String, SemanticQueryError> 
     ))
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct GraphEdge {
+    fact_id: [u8; 16],
+    source_id: [u8; 16],
+    target_id: [u8; 16],
+}
+
+#[derive(Clone, Debug, Default)]
+struct BlockValues {
+    entity_ids: Vec<String>,
+    fact_ids: Vec<String>,
+    path_ids: Vec<String>,
+    group_ids: Vec<String>,
+    source_context_ids: Vec<String>,
+}
+
+impl BlockValues {
+    fn all_ids(&self) -> impl Iterator<Item = &String> {
+        self.entity_ids
+            .iter()
+            .chain(&self.fact_ids)
+            .chain(&self.path_ids)
+            .chain(&self.group_ids)
+            .chain(&self.source_context_ids)
+    }
+}
+
+#[derive(Debug)]
+struct GraphExecution {
+    batches: Vec<RecordBatch>,
+    values: BlockValues,
+    coverage: BTreeMap<String, u64>,
+    completeness: CompletenessState,
+    limit_state: LimitState,
+}
+
+#[derive(Debug)]
+struct PathSearch {
+    path: Option<Vec<[u8; 16]>>,
+    depth_bound_reached: bool,
+}
+
+fn graph_result_identity(form: QueryForm, values: &[&[u8]]) -> ([u8; 16], String) {
+    let mut fingerprint = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::ServingQuery,
+    );
+    fingerprint.update(&(form as u16).to_be_bytes());
+    for value in values {
+        fingerprint.update(&(value.len() as u64).to_be_bytes());
+        fingerprint.update(value);
+    }
+    let digest = fingerprint.finalize();
+    let mut id = [0_u8; 16];
+    id.copy_from_slice(&digest[..16]);
+    let public = crate::identity::encode_public_id(
+        crate::identity::IdentityDomain::ResultArtifact,
+        None,
+        id,
+    )
+    .expect("result-artifact identity has no kind slug");
+    (id, public)
+}
+
+fn graph_batch(
+    plan: &GraphOperatorPlan,
+    rows: &[([u8; 16], u64)],
+) -> Result<RecordBatch, SemanticQueryError> {
+    let identities = crate::fabric::id16_array(rows.iter().map(|(identity, _)| Some(identity)));
+    let ordinals = UInt64Array::from_iter_values(0..u64::try_from(rows.len()).unwrap_or(u64::MAX));
+    let cardinalities = UInt64Array::from_iter_values(rows.iter().map(|(_, value)| *value));
+    Ok(RecordBatch::try_new(
+        Arc::clone(&plan.output_schema),
+        vec![
+            Arc::new(identities),
+            Arc::new(ordinals),
+            Arc::new(cardinalities),
+        ],
+    )
+    .map_err(ServingQueryError::from)?)
+}
+
+async fn load_graph_edges(
+    session: &ServingQuerySession,
+) -> Result<Vec<GraphEdge>, SemanticQueryError> {
+    let plan = LogicalPlanBuilder::from(session.table_plan("relations").await?)
+        .project(vec![col("fact_id"), col("source_id"), col("target_id")])?
+        .sort(vec![col("fact_id").sort(true, true)])?
+        .build()?;
+    session.validate_query_plan(&plan)?;
+    let result = session.query_plan("graph-edge-snapshot", plan).await?;
+    let mut edges = Vec::new();
+    for batch in &result.batches {
+        let array = |name: &str| -> Result<&FixedSizeBinaryArray, SemanticQueryError> {
+            let index = batch.schema().index_of(name).map_err(|_| {
+                SemanticQueryError::Invalid(format!("graph edge column {name} is absent"))
+            })?;
+            batch
+                .column(index)
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .ok_or_else(|| {
+                    SemanticQueryError::Invalid(format!("graph edge column {name} is not Id16"))
+                })
+        };
+        let facts = array("fact_id")?;
+        let sources = array("source_id")?;
+        let targets = array("target_id")?;
+        for row in 0..batch.num_rows() {
+            if facts.is_null(row) || sources.is_null(row) || targets.is_null(row) {
+                return Err(SemanticQueryError::Invalid(
+                    "graph edge identity is unexpectedly null".to_owned(),
+                ));
+            }
+            edges.push(GraphEdge {
+                fact_id: facts.value(row).try_into().map_err(|_| {
+                    SemanticQueryError::Invalid("graph fact identity width drifted".to_owned())
+                })?,
+                source_id: sources.value(row).try_into().map_err(|_| {
+                    SemanticQueryError::Invalid("graph source identity width drifted".to_owned())
+                })?,
+                target_id: targets.value(row).try_into().map_err(|_| {
+                    SemanticQueryError::Invalid("graph target identity width drifted".to_owned())
+                })?,
+            });
+        }
+    }
+    edges.sort();
+    edges.dedup();
+    Ok(edges)
+}
+
+fn shortest_path(
+    edges: &[GraphEdge],
+    start: [u8; 16],
+    target: [u8; 16],
+    maximum_depth: usize,
+    cancellation: &crate::cancellation::Cancellation,
+) -> Result<PathSearch, SemanticQueryError> {
+    let mut adjacency = BTreeMap::<[u8; 16], Vec<[u8; 16]>>::new();
+    for edge in edges {
+        adjacency
+            .entry(edge.source_id)
+            .or_default()
+            .push(edge.target_id);
+    }
+    for targets in adjacency.values_mut() {
+        targets.sort();
+        targets.dedup();
+    }
+    let mut queue = VecDeque::from([(start, vec![start])]);
+    let mut visited = BTreeSet::from([start]);
+    let mut polls = 0_u32;
+    let mut depth_bound_reached = false;
+    while let Some((current, path)) = queue.pop_front() {
+        polls = polls.saturating_add(1);
+        if polls % cancellation.check_interval() == 0 && cancellation.is_cancelled() {
+            return Err(SemanticQueryError::Invalid(
+                "graph execution was cancelled".to_owned(),
+            ));
+        }
+        if current == target {
+            return Ok(PathSearch {
+                path: Some(path),
+                depth_bound_reached,
+            });
+        }
+        if path.len().saturating_sub(1) >= maximum_depth {
+            depth_bound_reached |= adjacency.get(&current).is_some_and(|next| !next.is_empty());
+            continue;
+        }
+        for next in adjacency.get(&current).into_iter().flatten() {
+            if visited.insert(*next) {
+                let mut next_path = path.clone();
+                next_path.push(*next);
+                queue.push_back((*next, next_path));
+            }
+        }
+    }
+    Ok(PathSearch {
+        path: None,
+        depth_bound_reached,
+    })
+}
+
+fn graph_inputs(
+    query: &SemanticQueryClause,
+    dependencies: &[String],
+    completed: &BTreeMap<String, BlockValues>,
+) -> BlockValues {
+    let mut values = BlockValues::default();
+    if let Some(input) = &query.input {
+        values.entity_ids.extend(input.entity_ids.clone());
+        values.fact_ids.extend(input.fact_ids.clone());
+    }
+    for dependency in dependencies {
+        if let Some(produced) = completed.get(dependency) {
+            values.entity_ids.extend(produced.entity_ids.clone());
+            values.fact_ids.extend(produced.fact_ids.clone());
+            values.path_ids.extend(produced.path_ids.clone());
+            values.group_ids.extend(produced.group_ids.clone());
+            values
+                .source_context_ids
+                .extend(produced.source_context_ids.clone());
+        }
+    }
+    values.entity_ids.sort();
+    values.entity_ids.dedup();
+    values.fact_ids.sort();
+    values.fact_ids.dedup();
+    values.path_ids.sort();
+    values.path_ids.dedup();
+    values.group_ids.sort();
+    values.group_ids.dedup();
+    values.source_context_ids.sort();
+    values.source_context_ids.dedup();
+    values
+}
+
+fn execute_graph_operator(
+    plan: &GraphOperatorPlan,
+    input: &BlockValues,
+    edges: &[GraphEdge],
+    context_ids: &[String],
+    cancellation: &crate::cancellation::Cancellation,
+) -> Result<GraphExecution, SemanticQueryError> {
+    if cancellation.is_cancelled() {
+        return Err(SemanticQueryError::Invalid(
+            "graph execution was cancelled".to_owned(),
+        ));
+    }
+    let estimated_working_bytes = edges
+        .len()
+        .checked_mul(std::mem::size_of::<GraphEdge>())
+        .and_then(|bytes| bytes.checked_mul(3))
+        .ok_or_else(|| SemanticQueryError::Invalid("graph memory estimate overflow".to_owned()))?;
+    if estimated_working_bytes > plan.maximum_memory_bytes {
+        return Err(SemanticQueryError::Invalid(
+            "graph operator memory bound exceeded".to_owned(),
+        ));
+    }
+    let mut output = BlockValues::default();
+    let mut rows = Vec::<([u8; 16], u64)>::new();
+    let mut coverage = BTreeMap::from([
+        (
+            "examined_edges".to_owned(),
+            u64::try_from(edges.len()).unwrap_or(u64::MAX),
+        ),
+        ("negative_proof_available".to_owned(), 0),
+    ]);
+    match plan.form {
+        QueryForm::FindPaths => {
+            let mut entities = input
+                .entity_ids
+                .iter()
+                .map(|value| id16_bytes(value, "entity:"))
+                .collect::<Result<Vec<_>, _>>()?;
+            if entities.is_empty() {
+                entities.extend(
+                    edges
+                        .iter()
+                        .flat_map(|edge| [edge.source_id, edge.target_id]),
+                );
+                entities.sort();
+                entities.dedup();
+            }
+            for pair in entities.windows(2) {
+                let searched =
+                    shortest_path(edges, pair[0], pair[1], plan.maximum_depth, cancellation)?;
+                if searched.depth_bound_reached {
+                    coverage.insert("depth_bound_reached".to_owned(), 1);
+                }
+                if let Some(path) = searched.path {
+                    let bytes = path
+                        .iter()
+                        .flat_map(|identity| identity.as_slice())
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let (identity, public) = graph_result_identity(plan.form, &[&bytes]);
+                    rows.push((identity, u64::try_from(path.len()).unwrap_or(u64::MAX)));
+                    output.path_ids.push(public);
+                }
+            }
+            coverage.insert(
+                "reachable_paths".to_owned(),
+                u64::try_from(rows.len()).unwrap_or(u64::MAX),
+            );
+        }
+        QueryForm::MatchPattern => {
+            let selected = input
+                .entity_ids
+                .iter()
+                .map(|value| id16_bytes(value, "entity:"))
+                .collect::<Result<BTreeSet<_>, _>>()?;
+            for edge in edges.iter().filter(|edge| {
+                selected.is_empty()
+                    || selected.contains(&edge.source_id)
+                    || selected.contains(&edge.target_id)
+            }) {
+                let bytes = [edge.source_id.as_slice(), edge.target_id.as_slice()].concat();
+                let (identity, public) = graph_result_identity(plan.form, &[&bytes]);
+                rows.push((identity, 2));
+                output.group_ids.push(public);
+            }
+            coverage.insert(
+                "matched_bindings".to_owned(),
+                u64::try_from(rows.len()).unwrap_or(u64::MAX),
+            );
+        }
+        QueryForm::CombineResults => {
+            for value in input.all_ids() {
+                let (identity, public) = graph_result_identity(plan.form, &[value.as_bytes()]);
+                rows.push((identity, 1));
+                output.group_ids.push(public);
+            }
+            coverage.insert(
+                "combined_members".to_owned(),
+                u64::try_from(rows.len()).unwrap_or(u64::MAX),
+            );
+        }
+        QueryForm::SummarizeFacts => {
+            let values = input.all_ids().map(String::as_bytes).collect::<Vec<_>>();
+            let (identity, public) = graph_result_identity(plan.form, &values);
+            rows.push((identity, u64::try_from(values.len()).unwrap_or(u64::MAX)));
+            output.group_ids.push(public);
+            coverage.insert(
+                "summarized_values".to_owned(),
+                u64::try_from(values.len()).unwrap_or(u64::MAX),
+            );
+        }
+        QueryForm::RetrieveSourceContext => {
+            for context in context_ids {
+                let raw = id16_bytes(context, "context:")?;
+                rows.push((raw, 1));
+                output.source_context_ids.push(context.clone());
+            }
+            coverage.insert(
+                "source_contexts".to_owned(),
+                u64::try_from(rows.len()).unwrap_or(u64::MAX),
+            );
+        }
+        QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships => {
+            return Err(SemanticQueryError::Invalid(
+                "relational form reached graph execution".to_owned(),
+            ));
+        }
+    }
+    if plan.form == QueryForm::FindPaths {
+        rows.sort_unstable_by_key(|(identity, path_length)| (*path_length, *identity));
+    } else {
+        rows.sort_unstable();
+    }
+    rows.dedup();
+    output.path_ids.sort();
+    output.path_ids.dedup();
+    output.group_ids.sort();
+    output.group_ids.dedup();
+    output.source_context_ids.sort();
+    output.source_context_ids.dedup();
+    let limit_reached = rows.len() > plan.maximum_results.saturating_sub(1);
+    if limit_reached {
+        rows.truncate(plan.maximum_results.saturating_sub(1));
+        output.path_ids.truncate(rows.len());
+        output.group_ids.truncate(rows.len());
+        output.source_context_ids.truncate(rows.len());
+    }
+    let completeness = if (rows.is_empty()
+        && matches!(plan.form, QueryForm::FindPaths | QueryForm::MatchPattern))
+        || coverage.get("depth_bound_reached") == Some(&1)
+    {
+        CompletenessState::Indeterminate
+    } else if limit_reached {
+        CompletenessState::Partial
+    } else {
+        CompletenessState::Complete
+    };
+    Ok(GraphExecution {
+        batches: vec![graph_batch(plan, &rows)?],
+        values: output,
+        coverage,
+        completeness,
+        limit_state: if limit_reached {
+            LimitState::ExplicitLimitReached
+        } else {
+            LimitState::NotApplied
+        },
+    })
+}
+
 /// Execute all clauses through the existing immutable DataFusion snapshot session.
 ///
 /// # Errors
@@ -956,11 +1419,52 @@ pub async fn execute_request(
     validated: ValidatedSemanticRequest,
     freshness: FreshnessState,
 ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
+    execute_request_with_cancellation(
+        session,
+        validated,
+        freshness,
+        crate::cancellation::Cancellation::default(),
+    )
+    .await
+}
+
+/// Execute one request with a control-boundary cancellation handle shared by graph operators.
+///
+/// # Errors
+///
+/// Returns an error when validation, snapshot execution, graph execution, or response encoding
+/// fails, including when cooperative cancellation is observed.
+#[allow(clippy::too_many_lines)] // One pinned session keeps all clause results and response identities snapshot-coherent.
+pub async fn execute_request_with_cancellation(
+    session: &ServingQuerySession,
+    validated: ValidatedSemanticRequest,
+    freshness: FreshnessState,
+    cancellation: crate::cancellation::Cancellation,
+) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
     let manifest = session.snapshot_manifest();
     let bound = bind_request(session, &validated).await?;
     let mut results = Vec::with_capacity(validated.request.queries.len());
     let mut entities = BTreeMap::new();
     let mut facts = BTreeMap::new();
+    let mut paths = BTreeMap::new();
+    let mut groups = BTreeMap::new();
+    let mut completed = BTreeMap::<String, BlockValues>::new();
+    let context_ids = manifest
+        .body
+        .contexts
+        .records
+        .iter()
+        .map(|record| record.analysis_context_id.clone())
+        .collect::<Vec<_>>();
+    let graph_edges = if bound
+        .blocks
+        .iter()
+        .any(|block| matches!(block.operator, BoundOperator::Graph(_)))
+    {
+        load_graph_edges(session).await?
+    } else {
+        Vec::new()
+    };
     for block_id in &bound.execution_order {
         let block = bound
             .blocks
@@ -973,44 +1477,147 @@ pub async fn execute_request(
             .iter()
             .find(|query| query.query_id == *block_id)
             .expect("typed execution order names a parsed block");
-        let result = session
-            .query_plan(&block.typed.block_id, block.plan.clone())
-            .await?;
-        let produced_rows = result.artifact.output_row_count;
-        let mut ids = response_ids(&result.batches, query.request)?;
-        let limit_reached = produced_rows > block.typed.limit.first;
-        ids.truncate(block.typed.limit.first);
-        let returned_row_count = ids.len();
-        let result_checksum = b3(ids.join("\0").as_bytes());
-        let (entity_ids, fact_ids) = match query.request {
-            QueryForm::FindEntities => (ids, Vec::new()),
-            QueryForm::RetrieveFacts | QueryForm::FollowRelationships => (Vec::new(), ids),
-            _ => {
-                return Err(SemanticQueryError::Invalid(
-                    "inactive query form reached execution".to_owned(),
-                ));
+        let (
+            values,
+            coverage,
+            completeness_state,
+            limit_state,
+            output_row_count,
+            result_checksum,
+            notices,
+        ) = match &block.operator {
+            BoundOperator::Relational {
+                table,
+                identity_column,
+                plan,
+            } => {
+                let result = session
+                    .query_plan(&block.typed.block_id, plan.clone())
+                    .await?;
+                let produced_rows = result.artifact.output_row_count;
+                let mut ids = response_ids(&result.batches, query.request)?;
+                let limit_reached = produced_rows > block.typed.limit.first;
+                ids.truncate(block.typed.limit.first);
+                let output_row_count = ids.len();
+                let result_checksum = b3(ids.join("\0").as_bytes());
+                let mut values = BlockValues::default();
+                match query.request {
+                    QueryForm::FindEntities => values.entity_ids = ids,
+                    QueryForm::RetrieveFacts | QueryForm::FollowRelationships => {
+                        values.fact_ids = ids;
+                    }
+                    _ => unreachable!("graph form cannot own a relational plan"),
+                }
+                (
+                    values,
+                    BTreeMap::from([
+                        (
+                            "returned_rows".to_owned(),
+                            u64::try_from(output_row_count).unwrap_or(u64::MAX),
+                        ),
+                        ("native_datafusion_plan".to_owned(), 1),
+                        (
+                            format!("table:{table}:column:{identity_column}"),
+                            u64::try_from(produced_rows).unwrap_or(u64::MAX),
+                        ),
+                    ]),
+                    if limit_reached {
+                        CompletenessState::Partial
+                    } else {
+                        CompletenessState::Complete
+                    },
+                    if limit_reached {
+                        LimitState::ExplicitLimitReached
+                    } else {
+                        LimitState::NotApplied
+                    },
+                    output_row_count,
+                    result_checksum,
+                    Vec::new(),
+                )
+            }
+            BoundOperator::Graph(plan) => {
+                let input = graph_inputs(query, &block.typed.dependencies, &completed);
+                let executed = execute_graph_operator(
+                    plan,
+                    &input,
+                    &graph_edges,
+                    &context_ids,
+                    &cancellation,
+                )?;
+                let output_row_count = executed.batches.iter().map(RecordBatch::num_rows).sum();
+                let mut checksums = Vec::with_capacity(executed.batches.len() * 32);
+                for batch in &executed.batches {
+                    checksums.extend_from_slice(
+                        &crate::fabric::batch_checksum(batch)
+                            .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                    );
+                }
+                let notices = if executed.completeness == CompletenessState::Indeterminate {
+                    vec![
+                        "empty graph result has an unknown remainder and is not proof of absence"
+                            .to_owned(),
+                    ]
+                } else {
+                    Vec::new()
+                };
+                (
+                    executed.values,
+                    executed.coverage,
+                    executed.completeness,
+                    executed.limit_state,
+                    output_row_count,
+                    b3(&checksums),
+                    notices,
+                )
             }
         };
-        for entity_id in &entity_ids {
+        for entity_id in &values.entity_ids {
             entities.insert(
                 entity_id.clone(),
                 BTreeMap::from([("entity_id".to_owned(), entity_id.clone())]),
             );
         }
-        for fact_id in &fact_ids {
+        for fact_id in &values.fact_ids {
             facts.insert(
                 fact_id.clone(),
                 BTreeMap::from([("fact_id".to_owned(), fact_id.clone())]),
             );
         }
+        for path_id in &values.path_ids {
+            paths.insert(
+                path_id.clone(),
+                BTreeMap::from([("path_id".to_owned(), path_id.clone())]),
+            );
+        }
+        for group_id in &values.group_ids {
+            groups.insert(
+                group_id.clone(),
+                BTreeMap::from([("group_id".to_owned(), group_id.clone())]),
+            );
+        }
         let phrase = resolve_phrase(query.request, query.label.as_deref())?;
-        let mut resolved_semantics = BTreeMap::from([
-            ("table".to_owned(), query.request.table()?.to_owned()),
-            (
-                "order_key".to_owned(),
-                query.request.order_key()?.to_owned(),
-            ),
-        ]);
+        let mut resolved_semantics = match &block.operator {
+            BoundOperator::Relational {
+                table,
+                identity_column,
+                ..
+            } => BTreeMap::from([
+                (
+                    "operator_family".to_owned(),
+                    "datafusion-relational".to_owned(),
+                ),
+                ("table".to_owned(), (*table).to_owned()),
+                ("order_key".to_owned(), (*identity_column).to_owned()),
+            ]),
+            BoundOperator::Graph(plan) => BTreeMap::from([
+                ("operator_family".to_owned(), "application-graph".to_owned()),
+                (
+                    "plan_node".to_owned(),
+                    plan.form.plan_node_kind()?.to_owned(),
+                ),
+            ]),
+        };
         if let Some(phrase) = phrase {
             resolved_semantics.insert("phrase_id".to_owned(), phrase.phrase_id.to_owned());
             resolved_semantics.insert(
@@ -1022,44 +1629,32 @@ pub async fn execute_request(
             query_id: query.query_id.clone(),
             request: query.request,
             execution_state: QueryExecutionState::Complete,
-            availability_state: QueryAvailabilityState::Available,
-            completeness_state: if limit_reached {
-                CompletenessState::Partial
+            availability_state: if completeness_state == CompletenessState::Indeterminate {
+                QueryAvailabilityState::Partial
             } else {
-                CompletenessState::Complete
+                QueryAvailabilityState::Available
             },
+            completeness_state,
             freshness_state: freshness,
-            limit_state: if limit_reached {
-                LimitState::ExplicitLimitReached
-            } else {
-                LimitState::NotApplied
-            },
+            limit_state,
             dependency_state: if block.typed.dependencies.is_empty() {
                 DependencyState::NotApplicable
             } else {
                 DependencyState::Ready
             },
             resolved_semantics,
-            entity_ids,
-            fact_ids,
-            path_ids: Vec::new(),
-            group_ids: Vec::new(),
-            source_context_ids: manifest
-                .body
-                .contexts
-                .records
-                .iter()
-                .map(|record| record.analysis_context_id.clone())
-                .collect(),
-            coverage: BTreeMap::from([(
-                "returned_rows".to_owned(),
-                u64::try_from(returned_row_count).unwrap_or(u64::MAX),
-            )]),
+            entity_ids: values.entity_ids.clone(),
+            fact_ids: values.fact_ids.clone(),
+            path_ids: values.path_ids.clone(),
+            group_ids: values.group_ids.clone(),
+            source_context_ids: values.source_context_ids.clone(),
+            coverage,
             errors: Vec::new(),
-            notices: Vec::new(),
-            output_row_count: returned_row_count,
+            notices,
+            output_row_count,
             result_checksum,
         });
+        completed.insert(block_id.clone(), values);
     }
     let snapshot = snapshot_response(&manifest, freshness);
     let source_contexts = manifest
@@ -1093,6 +1688,11 @@ pub async fn execute_request(
     };
     let aggregate_completeness = if results
         .iter()
+        .any(|result| result.completeness_state == CompletenessState::Indeterminate)
+    {
+        CompletenessState::Indeterminate
+    } else if results
+        .iter()
         .all(|result| result.completeness_state == CompletenessState::Complete)
     {
         CompletenessState::Complete
@@ -1104,7 +1704,11 @@ pub async fn execute_request(
         version: VERSION,
         semantic_request_id: validated.request.semantic_request_id,
         execution_state: QueryExecutionState::Complete,
-        availability_state: QueryAvailabilityState::Available,
+        availability_state: if aggregate_completeness == CompletenessState::Indeterminate {
+            QueryAvailabilityState::Partial
+        } else {
+            QueryAvailabilityState::Available
+        },
         completeness_state: aggregate_completeness,
         freshness_state: freshness,
         limit_state: aggregate_limit,
@@ -1114,8 +1718,8 @@ pub async fn execute_request(
         snapshot,
         entities,
         facts,
-        paths: BTreeMap::new(),
-        groups: BTreeMap::new(),
+        paths,
+        groups,
         source_contexts,
         query_results: results,
         errors: Vec::new(),
@@ -1239,6 +1843,71 @@ pub(crate) fn snapshot_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn public_entity(byte: u8) -> String {
+        crate::identity::encode_public_id(
+            crate::identity::IdentityDomain::Entity,
+            Some("unknown"),
+            [byte; 16],
+        )
+        .unwrap()
+    }
+
+    fn public_fact(byte: u8) -> String {
+        crate::identity::encode_public_id(
+            crate::identity::IdentityDomain::RelationFact,
+            Some("relation"),
+            [byte; 16],
+        )
+        .unwrap()
+    }
+
+    fn eight_form_request() -> Vec<u8> {
+        canonicalize_value(&serde_json::json!({
+            "specification": SPECIFICATION,
+            "version": VERSION,
+            "semantic_request_id": "wp75-eight-form",
+            "workspace_id": "workspace:00000000000000000000000000000000",
+            "freshness_policy": "best_available_snapshot",
+            "queries": [
+                {"query_id":"entities","request":"find code entities","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
+                {"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
+                {"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
+                {"query_id":"paths","request":"find connecting fact paths","label":null,"input":{"results":[{"results_of":"entities","select":"entities"}]},"where":null,"limit":{"first":10,"offset":0}},
+                {"query_id":"patterns","request":"match a code fact pattern","label":null,"input":{"results":[{"results_of":"entities","select":"entities"}]},"where":null,"limit":{"first":10,"offset":0}},
+                {"query_id":"combined","request":"combine result sets","label":null,"input":{"results":[{"results_of":"properties","select":"facts"},{"results_of":"relations","select":"facts"}]},"where":null,"limit":{"first":10,"offset":0}},
+                {"query_id":"summary","request":"summarize objective facts","label":null,"input":{"results":[{"results_of":"combined","select":"groups"}]},"where":null,"limit":{"first":10,"offset":0}},
+                {"query_id":"context","request":"retrieve source and syntax context","label":null,"input":{"results":[{"results_of":"paths","select":"paths"}]},"where":null,"limit":{"first":10,"offset":0}}
+            ],
+            "response_projection": {"canonical_semantic_identity":true,"coverage":true},
+            "cost_budget": {"maximum_rows":80}
+        }))
+        .unwrap()
+    }
+
+    fn graph_plan(typed: &TypedSemanticRequest, form: QueryForm) -> GraphOperatorPlan {
+        let block = typed
+            .blocks
+            .iter()
+            .find(|block| block.form == form)
+            .unwrap();
+        graph_operator_plan(block).unwrap()
+    }
+
+    fn graph_edges() -> Vec<GraphEdge> {
+        vec![
+            GraphEdge {
+                fact_id: [0x11; 16],
+                source_id: [0x01; 16],
+                target_id: [0x02; 16],
+            },
+            GraphEdge {
+                fact_id: [0x12; 16],
+                source_id: [0x02; 16],
+                target_id: [0x03; 16],
+            },
+        ]
+    }
 
     fn request() -> Vec<u8> {
         br#"{
@@ -1430,6 +2099,236 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("incompatible result role")
+        );
+    }
+
+    #[test]
+    fn wp75_behavioral_acceptance() {
+        let typed = validate_request(&eight_form_request()).unwrap();
+        assert_eq!(typed.blocks.len(), QUERY_FORM_VALUES.len());
+        assert!(
+            typed
+                .blocks
+                .iter()
+                .all(|block| block.form.currently_supported())
+        );
+
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let path_input = BlockValues {
+            entity_ids: vec![public_entity(1), public_entity(3)],
+            ..BlockValues::default()
+        };
+        let paths = execute_graph_operator(
+            &graph_plan(&typed, QueryForm::FindPaths),
+            &path_input,
+            &graph_edges(),
+            &[],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(paths.completeness, CompletenessState::Complete);
+        assert_eq!(paths.values.path_ids.len(), 1);
+        assert_eq!(paths.batches[0].num_rows(), 1);
+
+        let patterns = execute_graph_operator(
+            &graph_plan(&typed, QueryForm::MatchPattern),
+            &BlockValues {
+                entity_ids: vec![public_entity(2)],
+                ..BlockValues::default()
+            },
+            &graph_edges(),
+            &[],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(patterns.values.group_ids.len(), 2);
+
+        let combined = execute_graph_operator(
+            &graph_plan(&typed, QueryForm::CombineResults),
+            &BlockValues {
+                fact_ids: vec![public_fact(0x11), public_fact(0x12)],
+                ..BlockValues::default()
+            },
+            &[],
+            &[],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(combined.values.group_ids.len(), 2);
+
+        let summarized = execute_graph_operator(
+            &graph_plan(&typed, QueryForm::SummarizeFacts),
+            &combined.values,
+            &[],
+            &[],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(summarized.coverage["summarized_values"], 2);
+
+        let source_context = execute_graph_operator(
+            &graph_plan(&typed, QueryForm::RetrieveSourceContext),
+            &paths.values,
+            &[],
+            &["context:03030303030303030303030303030303".to_owned()],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(source_context.values.source_context_ids.len(), 1);
+    }
+
+    #[test]
+    fn wp75_structural_acceptance() {
+        let typed = validate_request(&eight_form_request()).unwrap();
+        let forms = typed
+            .blocks
+            .iter()
+            .map(|block| block.form)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(forms.len(), QUERY_FORM_VALUES.len());
+        for block in &typed.blocks {
+            assert_eq!(block.output_role, block.form.output_role());
+            assert_eq!(block.canonical_order, canonical_order(block.form));
+            assert!(block.cancellation_required);
+            if matches!(
+                block.form,
+                QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships
+            ) {
+                assert!(block.form.table().is_ok());
+                assert!(graph_operator_plan(block).is_err());
+            } else {
+                let plan = graph_operator_plan(block).unwrap();
+                assert_eq!(plan.form, block.form);
+                assert_eq!(plan.output_role, block.output_role);
+                assert_eq!(plan.canonical_order, block.canonical_order);
+                assert_eq!(plan.output_schema.fields().len(), 3);
+                assert!(plan.cancellation_required);
+                assert!(plan.maximum_memory_bytes > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn wp75_negative_zero_state() {
+        let mut cycle: serde_json::Value = serde_json::from_slice(&eight_form_request()).unwrap();
+        cycle["queries"][0]["input"] = serde_json::json!({
+            "results":[{"results_of":"properties","select":"facts"}]
+        });
+        cycle["queries"][1]["input"] = serde_json::json!({
+            "results":[{"results_of":"entities","select":"entities"}]
+        });
+        assert!(
+            validate_request(&canonicalize_value(&cycle).unwrap())
+                .unwrap_err()
+                .to_string()
+                .contains("cycle")
+        );
+
+        let mut mismatch: serde_json::Value =
+            serde_json::from_slice(&eight_form_request()).unwrap();
+        mismatch["queries"][3]["input"] = serde_json::json!({
+            "results":[{"results_of":"properties","select":"facts"}]
+        });
+        assert!(
+            validate_request(&canonicalize_value(&mismatch).unwrap())
+                .unwrap_err()
+                .to_string()
+                .contains("incompatible result role")
+        );
+
+        let typed = validate_request(&eight_form_request()).unwrap();
+        let cancelled = crate::cancellation::Cancellation::with_check_interval(1);
+        cancelled.cancel();
+        assert!(
+            execute_graph_operator(
+                &graph_plan(&typed, QueryForm::MatchPattern),
+                &BlockValues::default(),
+                &graph_edges(),
+                &[],
+                &cancelled,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("cancelled")
+        );
+
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let empty = execute_graph_operator(
+            &graph_plan(&typed, QueryForm::MatchPattern),
+            &BlockValues::default(),
+            &[],
+            &[],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(empty.completeness, CompletenessState::Indeterminate);
+        assert_eq!(empty.coverage["negative_proof_available"], 0);
+
+        let mut bounded = graph_plan(&typed, QueryForm::FindPaths);
+        bounded.maximum_depth = 1;
+        let overflow = execute_graph_operator(
+            &bounded,
+            &BlockValues {
+                entity_ids: vec![public_entity(1), public_entity(3)],
+                ..BlockValues::default()
+            },
+            &graph_edges(),
+            &[],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(overflow.completeness, CompletenessState::Indeterminate);
+        assert_eq!(overflow.coverage["depth_bound_reached"], 1);
+
+        bounded.maximum_memory_bytes = 1;
+        assert!(
+            execute_graph_operator(
+                &bounded,
+                &BlockValues::default(),
+                &graph_edges(),
+                &[],
+                &cancellation,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("memory bound")
+        );
+    }
+
+    #[test]
+    fn wp75_operational_acceptance() {
+        let typed = validate_request(&eight_form_request()).unwrap();
+        assert_eq!(
+            typed
+                .blocks
+                .iter()
+                .map(|block| block.form.registry_slug())
+                .collect::<BTreeSet<_>>(),
+            QUERY_FORM_VALUES
+                .iter()
+                .map(|entry| entry.slug)
+                .collect::<BTreeSet<_>>()
+        );
+        let plan = graph_plan(&typed, QueryForm::FindPaths);
+        let input = BlockValues {
+            entity_ids: vec![public_entity(1), public_entity(3)],
+            ..BlockValues::default()
+        };
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let first =
+            execute_graph_operator(&plan, &input, &graph_edges(), &[], &cancellation).unwrap();
+        let second = execute_graph_operator(
+            &plan,
+            &input,
+            &graph_edges().into_iter().rev().collect::<Vec<_>>(),
+            &[],
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(first.values.path_ids, second.values.path_ids);
+        assert_eq!(
+            crate::fabric::batch_checksum(&first.batches[0]).unwrap(),
+            crate::fabric::batch_checksum(&second.batches[0]).unwrap()
         );
     }
 }

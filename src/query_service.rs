@@ -47,7 +47,8 @@ use crate::security::{
 use crate::semantic_query::QueryForm;
 use crate::semantic_query::{
     ExecutedSemanticResponse, FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse,
-    ValidatedSemanticRequest, execute_request, snapshot_response, validate_request,
+    ValidatedSemanticRequest, execute_request_with_cancellation, snapshot_response,
+    validate_request,
 };
 
 const SUPPORTED_FEATURE_BITS: u64 = 0b1111;
@@ -158,6 +159,7 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
         &self,
         request: ValidatedSemanticRequest,
         freshness: FreshnessState,
+        cancellation: crate::cancellation::Cancellation,
     ) -> Result<ExecutedSemanticResponse, SemanticQueryError>;
 
     async fn public_snapshot(
@@ -317,8 +319,9 @@ impl SemanticQueryBackend for ServingQuerySession {
         &self,
         request: ValidatedSemanticRequest,
         freshness: FreshnessState,
+        cancellation: crate::cancellation::Cancellation,
     ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
-        execute_request(self, request, freshness).await
+        execute_request_with_cancellation(self, request, freshness, cancellation).await
     }
 
     async fn public_snapshot(
@@ -347,7 +350,7 @@ struct QueryHandle {
     cancel_token: Vec<u8>,
     agent_instance_id: String,
     workspace_id: String,
-    cancelled: AtomicBool,
+    cancelled: Arc<AtomicBool>,
     state: Mutex<QueryHandleState>,
     changed: Notify,
 }
@@ -647,9 +650,13 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
             .await
         {
             Ok(admitted_freshness) => {
+                let cancellation = crate::cancellation::Cancellation::from_shared(
+                    Arc::clone(&handle.cancelled),
+                    64,
+                );
                 match tokio::time::timeout(
                     request_timeout,
-                    backend.execute(validated, admitted_freshness),
+                    backend.execute(validated, admitted_freshness, cancellation),
                 )
                 .await
                 {
@@ -1033,7 +1040,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             cancel_token,
             agent_instance_id: request.agent_instance_id,
             workspace_id: request.workspace_id,
-            cancelled: AtomicBool::new(false),
+            cancelled: Arc::new(AtomicBool::new(false)),
             state: Mutex::new(QueryHandleState::default()),
             changed: Notify::new(),
         });
@@ -1431,6 +1438,7 @@ mod tests {
             &self,
             request: ValidatedSemanticRequest,
             freshness: FreshnessState,
+            _cancellation: crate::cancellation::Cancellation,
         ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
             let response = SemanticQueryResponse {
                 specification: "composable semantic CPG fact query response",
@@ -1501,10 +1509,11 @@ mod tests {
             &self,
             request: ValidatedSemanticRequest,
             freshness: FreshnessState,
+            cancellation: crate::cancellation::Cancellation,
         ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
             self.started.notify_one();
             self.release.notified().await;
-            SemanticQueryBackend::execute(&FakeBackend, request, freshness).await
+            SemanticQueryBackend::execute(&FakeBackend, request, freshness, cancellation).await
         }
 
         async fn public_snapshot(
