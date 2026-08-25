@@ -171,9 +171,14 @@ wave4-integration-check:
 [doc("Run the complete Wave-5 vertical golden-slice acceptance surface")]
 [group('test')]
 wave5-integration-check:
-    cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|75)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
+    cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|75)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
     cd rustc-extractor && cargo test --locked wp35
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests
+
+[doc("Prove daemon activation, authenticated UDS reachability, CORE_SOURCE_V1 status, and joined cancellation")]
+[group('test')]
+query-daemon-activation-check:
+    cargo nextest run --locked -E 'test(/wp63_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail
 
 [doc("Prove all eight semantic query forms, mixed DAG execution, ordering, and absence semantics")]
 [group('test')]

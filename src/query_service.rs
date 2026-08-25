@@ -15,12 +15,13 @@ use async_trait::async_trait;
 use futures::{Stream, stream};
 use serde::Serialize;
 use thiserror::Error;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 use crate::fabric::ServingQuerySession;
+use crate::golden_corpus::CoreSourceCoverage;
 use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
 use crate::integrity::{frame_digest, framed_digest};
 use crate::lifecycle::{FreshnessAdmission, FreshnessBarrier, FreshnessState};
@@ -200,9 +201,6 @@ impl QueryAuthorization {
                 ));
             }
         }
-        if by_workspace.is_empty() {
-            return Err(Status::invalid_argument("workspace claim set is empty"));
-        }
         Ok(Self {
             token_digest: capability_digest(capability_token),
             claims: by_workspace,
@@ -338,6 +336,66 @@ impl SemanticQueryBackend for ServingQuerySession {
     }
 }
 
+/// Production workspace router over genuine snapshot-leased serving sessions.
+#[derive(Debug, Default)]
+pub struct WorkspaceQueryBackend {
+    sessions: RwLock<BTreeMap<String, Arc<ServingQuerySession>>>,
+}
+
+impl WorkspaceQueryBackend {
+    /// Install or atomically replace the exact leased session for one workspace.
+    pub async fn install(
+        &self,
+        session: Arc<ServingQuerySession>,
+    ) -> Result<(), SemanticQueryError> {
+        let workspace_id = session.snapshot_manifest().body.workspace_id;
+        self.sessions.write().await.insert(workspace_id, session);
+        Ok(())
+    }
+
+    #[must_use]
+    pub async fn active_workspace_count(&self) -> usize {
+        self.sessions.read().await.len()
+    }
+
+    async fn session(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Arc<ServingQuerySession>, SemanticQueryError> {
+        self.sessions
+            .read()
+            .await
+            .get(workspace_id)
+            .cloned()
+            .ok_or_else(|| {
+                SemanticQueryError::Invalid(
+                    "workspace has no active snapshot-leased query session".to_owned(),
+                )
+            })
+    }
+}
+
+#[async_trait]
+impl SemanticQueryBackend for WorkspaceQueryBackend {
+    async fn execute(
+        &self,
+        request: ValidatedSemanticRequest,
+        freshness: FreshnessState,
+        cancellation: crate::cancellation::Cancellation,
+    ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
+        let session = self.session(&request.request.workspace_id).await?;
+        execute_request_with_cancellation(session.as_ref(), request, freshness, cancellation).await
+    }
+
+    async fn public_snapshot(
+        &self,
+        workspace_id: &str,
+    ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
+        let session = self.session(workspace_id).await?;
+        SemanticQueryBackend::public_snapshot(session.as_ref(), workspace_id).await
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct QueryHandleState {
     events: Vec<QueryEvent>,
@@ -365,6 +423,8 @@ pub struct ProductionQueryService<B> {
     freshness: FreshnessBarrier,
     freshness_timeout: std::time::Duration,
     query_bundle: BundleIdentity,
+    core_source_coverage: Option<CoreSourceCoverage>,
+    tasks: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 fn valid_bundle_digest(value: &str) -> bool {
@@ -426,6 +486,58 @@ impl<B> ProductionQueryService<B> {
             freshness,
             freshness_timeout,
             query_bundle: query_bundle_identity(),
+            core_source_coverage: None,
+            tasks: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    #[must_use]
+    pub fn with_core_source_coverage(mut self, coverage: CoreSourceCoverage) -> Self {
+        self.core_source_coverage = Some(coverage);
+        self
+    }
+}
+
+async fn cancel_active_queries(
+    handles: Arc<Mutex<BTreeMap<String, Arc<QueryHandle>>>>,
+    tasks: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
+) {
+    let active = handles.lock().await.values().cloned().collect::<Vec<_>>();
+    for handle in active {
+        if handle.state.lock().await.terminal_state.is_some() {
+            continue;
+        }
+        handle.cancelled.store(true, Ordering::Release);
+        append_terminal(
+            &handle,
+            QueryEvent {
+                event: Some(Event::Terminal(TerminalEvent {
+                    header: None,
+                    execution_state: QueryExecutionState::Cancelled as i32,
+                    availability_state: "UNAVAILABLE".to_owned(),
+                    freshness_state: "UNKNOWN".to_owned(),
+                    limit_state: "NOT_APPLIED".to_owned(),
+                    dependency_state: "NOT_EXECUTED".to_owned(),
+                    canonical_response_checksum: None,
+                    canonical_error_record_json: None,
+                    artifact_id: None,
+                    result_row_count: 0,
+                    result_byte_count: 0,
+                    cleanup_state: "COMPLETE".to_owned(),
+                })),
+            },
+            QueryExecutionState::Cancelled,
+        )
+        .await;
+    }
+    let running = std::mem::take(&mut *tasks.lock().await);
+    for (_, mut task) in running {
+        if tokio::time::timeout(std::time::Duration::from_secs(2), &mut task)
+            .await
+            .is_err()
+        {
+            task.abort();
+            let _ = task.await;
         }
     }
 }
@@ -466,9 +578,15 @@ where
             .and_then(|(stream, _)| AuthorizedUnixStream::authenticate(stream, allowed_uid));
         Some((accepted, listener))
     });
+    let handles = Arc::clone(&service.handles);
+    let tasks = Arc::clone(&service.tasks);
     let service = CpgQueryServiceServer::new(service)
         .max_decoding_message_size(MAX_CONTROL_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_CONTROL_MESSAGE_BYTES);
+    let shutdown = async move {
+        shutdown.await;
+        cancel_active_queries(handles, tasks).await;
+    };
     let result = Server::builder()
         .layer(InterceptorLayer::new(SameUserInterceptor::new(allowed_uid)))
         .add_service(service)
@@ -916,7 +1034,39 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             ]),
             supported_languages: vec!["python".to_owned(), "rust".to_owned()],
             supported_request_forms: supported_query_forms(),
-            capability_statuses: Vec::new(),
+            capability_statuses: self.core_source_coverage.as_ref().map_or_else(
+                Vec::new,
+                |coverage| {
+                    vec![BTreeMap::from([
+                        ("capability_code".to_owned(), "CORE_SOURCE_V1".to_owned()),
+                        (
+                            "precision_profile".to_owned(),
+                            coverage.precision_profile.to_owned(),
+                        ),
+                        (
+                            "coverage_profile_id".to_owned(),
+                            coverage.coverage_profile_id.clone(),
+                        ),
+                        (
+                            "coverage_profile_digest".to_owned(),
+                            coverage.coverage_profile_digest.clone(),
+                        ),
+                        (
+                            "scenario_count".to_owned(),
+                            coverage.scenario_ids.len().to_string(),
+                        ),
+                        (
+                            "scenario_ids".to_owned(),
+                            coverage
+                                .scenario_ids
+                                .iter()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(","),
+                        ),
+                    ])]
+                },
+            ),
             freshness_state: match self.freshness.state() {
                 FreshnessState::Current => "CURRENT",
                 FreshnessState::PotentiallyStale => "POTENTIALLY_STALE",
@@ -1050,7 +1200,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             .insert(query_id.clone(), Arc::clone(&handle));
         idempotency.insert(request.idempotency_key, query_id.clone());
         drop(idempotency);
-        tokio::spawn(execute_accepted_query(
+        let task = tokio::spawn(execute_accepted_query(
             Arc::clone(&self.backend),
             Arc::clone(&self.artifacts),
             Arc::clone(&self.artifact_records),
@@ -1061,6 +1211,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             self.freshness.clone(),
             self.freshness_timeout,
         ));
+        self.tasks.lock().await.insert(query_id.clone(), task);
         Ok(Response::new(StartQueryResponse {
             daemon_query_id: query_id,
             resume_token,
@@ -1371,6 +1522,11 @@ mod tests {
                 "find code entities",
                 "retrieve facts about code",
                 "follow code relationships",
+                "find connecting fact paths",
+                "match a code fact pattern",
+                "combine result sets",
+                "summarize objective facts",
+                "retrieve source and syntax context",
             ]
         );
     }
@@ -1385,6 +1541,7 @@ mod tests {
     struct BlockingBackend {
         started: Arc<Notify>,
         release: Arc<Notify>,
+        cancelled: Arc<Notify>,
     }
 
     fn authorization() -> QueryAuthorization {
@@ -1512,7 +1669,17 @@ mod tests {
             cancellation: crate::cancellation::Cancellation,
         ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
             self.started.notify_one();
-            self.release.notified().await;
+            loop {
+                tokio::select! {
+                    () = self.release.notified() => break,
+                    () = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
+                        if cancellation.is_cancelled() {
+                            self.cancelled.notify_one();
+                            return Err(SemanticQueryError::Invalid("query cancelled".to_owned()));
+                        }
+                    }
+                }
+            }
             SemanticQueryBackend::execute(&FakeBackend, request, freshness, cancellation).await
         }
 
@@ -1717,6 +1884,7 @@ mod tests {
         let backend = Arc::new(BlockingBackend {
             started: Arc::new(Notify::new()),
             release: Arc::new(Notify::new()),
+            cancelled: Arc::new(Notify::new()),
         });
         let service = ProductionQueryService::new(
             Arc::clone(&backend),
@@ -1778,6 +1946,123 @@ mod tests {
         backend.release.notify_one();
         tokio::task::yield_now().await;
         assert!(service.artifact_records.lock().await.is_empty());
+    }
+
+    async fn query_client(socket: PathBuf) -> CpgQueryServiceClient<tonic::transport::Channel> {
+        let channel = Endpoint::try_from("http://[::]:50051")
+            .unwrap()
+            .connect_with_connector(service_fn(move |_| {
+                let socket = socket.clone();
+                async move { UnixStream::connect(socket).await.map(TokioIo::new) }
+            }))
+            .await
+            .unwrap();
+        CpgQueryServiceClient::new(channel)
+    }
+
+    #[test]
+    fn wp63_structural_acceptance() {
+        let daemon = include_str!("daemon.rs");
+        let coordinator = include_str!("coordinator.rs");
+        assert!(daemon.contains("ProductionQueryService::new("));
+        assert!(daemon.contains("serve_query_uds("));
+        assert!(daemon.contains("WorkspaceQueryBackend"));
+        assert!(daemon.contains("query_socket_endpoint"));
+        assert!(coordinator.contains("build_continuous_engine("));
+        assert!(coordinator.contains("ContinuousWorkspaceEngine::new("));
+    }
+
+    #[tokio::test]
+    async fn wp63_negative_zero_state() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("query.sock");
+        let service = ProductionQueryService::new(
+            Arc::new(FakeBackend),
+            ResultArtifactStore::new(root.path().join("results")).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+        let allowed_uid = fs::metadata(root.path()).unwrap().uid().saturating_add(1);
+        let (shutdown, shutdown_receiver) = oneshot::channel();
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move {
+            serve_query_uds(&server_socket, allowed_uid, service, async {
+                let _ = shutdown_receiver.await;
+            })
+            .await
+        });
+        while !socket.exists() {
+            tokio::task::yield_now().await;
+        }
+        let mut client = query_client(socket.clone()).await;
+        let status = client
+            .handshake(handshake(b"test-capability-token"))
+            .await
+            .unwrap_err();
+        assert_ne!(status.code(), tonic::Code::Ok);
+        assert!(!status.message().is_empty());
+        shutdown.send(()).unwrap();
+        server.await.unwrap().unwrap();
+        assert!(!socket.exists());
+    }
+
+    #[tokio::test]
+    async fn wp63_operational_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("query.sock");
+        let backend = Arc::new(BlockingBackend {
+            started: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+            cancelled: Arc::new(Notify::new()),
+        });
+        let service = ProductionQueryService::new(
+            Arc::clone(&backend),
+            ResultArtifactStore::new(root.path().join("results")).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+        let allowed_uid = fs::metadata(root.path()).unwrap().uid();
+        let (shutdown, shutdown_receiver) = oneshot::channel();
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move {
+            serve_query_uds(&server_socket, allowed_uid, service, async {
+                let _ = shutdown_receiver.await;
+            })
+            .await
+        });
+        while !socket.exists() {
+            tokio::task::yield_now().await;
+        }
+        let mut client = query_client(socket.clone()).await;
+        let canonical = canonical_request();
+        client
+            .start_query(StartQueryRequest {
+                agent_instance_id: "test-agent".to_owned(),
+                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                semantic_query_version: "1.3".to_owned(),
+                canonical_request_json: canonical.clone(),
+                request_checksum: framed_digest(&canonical),
+                delivery_preference: DeliveryPreference::Resource as i32,
+                deadline_unix_ms: now_millis() + 60_000,
+                idempotency_key: "daemon-shutdown-cancellation".to_owned(),
+                payload_compression: PayloadCompression::Identity as i32,
+                ..StartQueryRequest::default()
+            })
+            .await
+            .unwrap();
+        backend.started.notified().await;
+        drop(client);
+        shutdown.send(()).unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            backend.cancelled.notified(),
+        )
+        .await
+        .expect("in-flight backend observed daemon cancellation");
+        server.await.unwrap().unwrap();
+        assert!(!socket.exists());
     }
 
     #[tokio::test]

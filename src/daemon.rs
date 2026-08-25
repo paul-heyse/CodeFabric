@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 
 use crate::contracts::index::model_artifact_index;
 use crate::contracts::models::DeploymentProfileDocument;
@@ -22,8 +22,15 @@ use crate::coordinator::{
     persisted_workspace_health,
 };
 use crate::fabric::{CommonRepositoryRecord, FabricError, bootstrap_workspace_with_repository};
+use crate::golden_corpus::{CorpusError, core_source_v1_coverage};
+use crate::identity::{IdentityDomain, encode_public_id};
 use crate::operational_store::{OperationalReaderFactory, OperationalStore, OperationalStoreError};
+use crate::query_service::{
+    ProductionQueryService, QueryAuthorization, QueryTransportError, ResultArtifactStore,
+    WorkspaceQueryBackend, serve_query_uds,
+};
 use crate::registries::WorkspaceRegistryLifecycle;
+use crate::rpc::generated::codefabric::cpgd::v1::{WorkspaceClaim, WorkspaceReadiness};
 use crate::workspace_registry::{
     RelinkProof, RemovalPolicy, WorkspaceRecord, WorkspaceRegistry, WorkspaceRegistryError,
     WorkspaceSourceRegistration,
@@ -47,6 +54,10 @@ pub struct StaticConfig {
     pub config_root: PathBuf,
     /// Unix-domain administrative endpoint.
     pub socket_endpoint: PathBuf,
+    /// Unix-domain authenticated query endpoint.
+    pub query_socket_endpoint: PathBuf,
+    /// Private capability-token filename, relative to the configuration root.
+    pub query_capability_token_file: PathBuf,
     /// Operational database filename, relative to the state root.
     pub operational_database: PathBuf,
     /// Packaged contract bundle/index location.
@@ -139,9 +150,24 @@ impl DaemonConfig {
             || !static_config.runtime_root.is_absolute()
             || !static_config.config_root.is_absolute()
             || !static_config.socket_endpoint.is_absolute()
+            || !static_config.query_socket_endpoint.is_absolute()
             || !static_config
                 .socket_endpoint
                 .starts_with(&static_config.runtime_root)
+            || !static_config
+                .query_socket_endpoint
+                .starts_with(&static_config.runtime_root)
+            || static_config.query_socket_endpoint == static_config.socket_endpoint
+            || static_config.query_capability_token_file.is_absolute()
+            || static_config
+                .query_capability_token_file
+                .components()
+                .any(|part| {
+                    matches!(
+                        part,
+                        std::path::Component::ParentDir | std::path::Component::RootDir
+                    )
+                })
             || static_config.operational_database.is_absolute()
             || static_config.operational_database.components().any(|part| {
                 matches!(
@@ -154,8 +180,14 @@ impl DaemonConfig {
                 "roots and socket must be absolute; database must be a safe relative path".into(),
             ));
         }
-        let socket_bytes = static_config.socket_endpoint.as_os_str().as_encoded_bytes();
-        if socket_bytes.len() > SOCKET_PATH_MAX_BYTES {
+        for socket in [
+            &static_config.socket_endpoint,
+            &static_config.query_socket_endpoint,
+        ] {
+            let socket_bytes = socket.as_os_str().as_encoded_bytes();
+            if socket_bytes.len() <= SOCKET_PATH_MAX_BYTES {
+                continue;
+            }
             return Err(DaemonError::Config(format!(
                 "socket endpoint is {} bytes; maximum is {SOCKET_PATH_MAX_BYTES}",
                 socket_bytes.len()
@@ -185,6 +217,7 @@ pub struct DaemonDiscovery {
     pub pid: u32,
     pub process_start_token: u128,
     pub socket_endpoint: PathBuf,
+    pub query_socket_endpoint: PathBuf,
     pub rpc_minimum_minor: u16,
     pub rpc_maximum_minor: u16,
     pub basic_readiness: bool,
@@ -300,6 +333,10 @@ pub enum DaemonError {
     WorkspaceRegistry(#[from] WorkspaceRegistryError),
     #[error(transparent)]
     Fabric(#[from] FabricError),
+    #[error(transparent)]
+    QueryTransport(#[from] QueryTransportError),
+    #[error(transparent)]
+    Corpus(#[from] CorpusError),
 }
 
 fn record_shutdown_step<E: std::fmt::Display>(
@@ -495,6 +532,7 @@ fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
         pid,
         process_start_token: startup_time_unix_ms,
         socket_endpoint: config.static_config.socket_endpoint.clone(),
+        query_socket_endpoint: config.static_config.query_socket_endpoint.clone(),
         rpc_minimum_minor: 0,
         rpc_maximum_minor: 0,
         basic_readiness: false,
@@ -786,6 +824,62 @@ const fn workspace_error_code(error: &WorkspaceRegistryError) -> &'static str {
     }
 }
 
+fn query_capability_token(config: &StaticConfig) -> Result<Vec<u8>, DaemonError> {
+    let path = config.config_root.join(&config.query_capability_token_file);
+    let metadata = fs::symlink_metadata(&path).map_err(|source| DaemonError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.mode() & 0o077 != 0
+        || !(16..=4_096).contains(&metadata.len())
+    {
+        return Err(DaemonError::Config(
+            "query capability token must be a private bounded non-symlink file".to_owned(),
+        ));
+    }
+    let mut token = fs::read(&path).map_err(|source| DaemonError::Io { path, source })?;
+    while matches!(token.last(), Some(b'\n' | b'\r')) {
+        token.pop();
+    }
+    if token.len() < 16 {
+        return Err(DaemonError::Config(
+            "query capability token is shorter than 16 bytes".to_owned(),
+        ));
+    }
+    Ok(token)
+}
+
+fn workspace_claim(record: &WorkspaceRecord) -> Result<WorkspaceClaim, DaemonError> {
+    Ok(WorkspaceClaim {
+        workspace_id: encode_public_id(IdentityDomain::Workspace, None, record.workspace_id)
+            .map_err(|error| DaemonError::Admin(error.to_string()))?,
+        repository_id: record
+            .repository_id
+            .map(|id| encode_public_id(IdentityDomain::Repository, None, id))
+            .transpose()
+            .map_err(|error| DaemonError::Admin(error.to_string()))?,
+        worktree_id: record
+            .worktree_id
+            .map(|id| encode_public_id(IdentityDomain::Worktree, None, id))
+            .transpose()
+            .map_err(|error| DaemonError::Admin(error.to_string()))?,
+        workspace_kind: if record.repository_id.is_some() {
+            "git-worktree"
+        } else {
+            "non-git-root"
+        }
+        .to_owned(),
+        readiness: if record.status == WorkspaceRegistryLifecycle::Ready {
+            WorkspaceReadiness::Ready
+        } else {
+            WorkspaceReadiness::Bootstrapping
+        } as i32,
+        permission_claims: vec!["query".to_owned()],
+    })
+}
+
 /// Run the local administrative service until a joined stop or no-work drain completes.
 ///
 /// # Errors
@@ -793,6 +887,22 @@ const fn workspace_error_code(error: &WorkspaceRegistryError) -> &'static str {
 /// Returns startup, permission, socket, protocol, or joined-shutdown failures.
 #[allow(clippy::too_many_lines)] // The ordered lifecycle is kept visible as one joined sequence.
 pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
+    serve_with_query_backend(
+        config,
+        Arc::new(WorkspaceQueryBackend::default()),
+        Vec::new(),
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_lines)] // The ordered lifecycle is kept visible as one joined sequence.
+pub(crate) async fn serve_with_query_backend(
+    config: DaemonConfig,
+    query_backend: Arc<WorkspaceQueryBackend>,
+    additional_claims: Vec<WorkspaceClaim>,
+    query_allowed_uid_override: Option<u32>,
+) -> Result<DaemonExit, DaemonError> {
     config.validate()?;
     for root in [
         &config.static_config.state_root,
@@ -807,12 +917,25 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
         .state_root
         .join(&config.static_config.operational_database);
     let operational_store = Arc::new(Mutex::new(OperationalStore::open(&operational_database)?));
-    let mut coordinators = WorkspaceCoordinatorManager::new(Arc::clone(&operational_store))?;
+    let mut coordinators = WorkspaceCoordinatorManager::new(
+        Arc::clone(&operational_store),
+        config.static_config.state_root.clone(),
+    )?;
     coordinators.restore_and_bootstrap().await?;
     let workspaces = {
         let mut store = operational_store.lock().await;
         WorkspaceRegistry::new(&mut store).list()?
     };
+    let mut claims = workspaces
+        .iter()
+        .filter(|workspace| workspace.status != WorkspaceRegistryLifecycle::Removed)
+        .map(|workspace| {
+            workspace_claim(workspace).map(|claim| (claim.workspace_id.clone(), claim))
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    for claim in additional_claims {
+        claims.insert(claim.workspace_id.clone(), claim);
+    }
     bootstrap_fabrics(
         &config.static_config.state_root,
         &operational_store,
@@ -847,6 +970,57 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
             source,
         })?
         .uid();
+    if config.static_config.query_socket_endpoint.exists() {
+        fs::remove_file(&config.static_config.query_socket_endpoint).map_err(|source| {
+            DaemonError::Io {
+                path: config.static_config.query_socket_endpoint.clone(),
+                source,
+            }
+        })?;
+    }
+    let query_token = query_capability_token(&config.static_config)?;
+    let query_authorization = QueryAuthorization::new(&query_token, claims.into_values().collect())
+        .map_err(|status| DaemonError::Config(status.to_string()))?;
+    let coverage = core_source_v1_coverage(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/codefabric-golden-v1"),
+    )?;
+    let result_root = config.static_config.state_root.join("query-results");
+    let query_service = ProductionQueryService::new(
+        query_backend,
+        ResultArtifactStore::new(result_root.clone()).map_err(|source| DaemonError::Io {
+            path: result_root,
+            source,
+        })?,
+        query_authorization,
+        crate::lifecycle::FreshnessBarrier::default(),
+        Duration::from_secs(2),
+    )
+    .with_core_source_coverage(coverage);
+    let (query_shutdown, query_shutdown_receiver) = oneshot::channel();
+    let query_socket = config.static_config.query_socket_endpoint.clone();
+    let query_allowed_uid = query_allowed_uid_override.unwrap_or(allowed_uid);
+    let query_task = tokio::spawn(async move {
+        serve_query_uds(
+            &query_socket,
+            query_allowed_uid,
+            query_service,
+            async move {
+                let _ = query_shutdown_receiver.await;
+            },
+        )
+        .await
+    });
+    for _ in 0..1_000 {
+        if config.static_config.query_socket_endpoint.exists() || query_task.is_finished() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    if !config.static_config.query_socket_endpoint.exists() {
+        return Err(DaemonError::Admin(
+            "query service did not bind its configured endpoint".to_owned(),
+        ));
+    }
     lease.publish(&discovery(&config)?)?;
     tracing::info!(lifecycle = "serve", "daemon administrative ingress opened");
 
@@ -908,15 +1082,24 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
         Ok::<(), std::convert::Infallible>(()),
     )?;
     drop(listener);
+    let _ = query_shutdown.send(());
     record_shutdown_step(
         &mut steps,
         "close-ingress",
         Ok::<(), std::convert::Infallible>(()),
     )?;
+    let query_result = query_task
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|result| result.map_err(|error| error.to_string()));
+    let coordinator_result = coordinators
+        .shutdown_all()
+        .await
+        .map_err(|error| error.to_string());
     record_shutdown_step(
         &mut steps,
         "await-workers",
-        coordinators.shutdown_all().await,
+        query_result.and(coordinator_result),
     )?;
     let durable_close = if drained {
         operational_store
@@ -929,11 +1112,14 @@ pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
     };
     record_shutdown_step(&mut steps, "close-durable-stores", durable_close)?;
     drop(operational_store);
-    record_shutdown_step(
-        &mut steps,
-        "retire-endpoint-metadata",
-        fs::remove_file(&config.static_config.socket_endpoint),
-    )?;
+    let retire_endpoints = fs::remove_file(&config.static_config.socket_endpoint).and_then(|()| {
+        if config.static_config.query_socket_endpoint.exists() {
+            fs::remove_file(&config.static_config.query_socket_endpoint)
+        } else {
+            Ok(())
+        }
+    });
+    record_shutdown_step(&mut steps, "retire-endpoint-metadata", retire_endpoints)?;
     drop(lease);
     record_shutdown_step(
         &mut steps,
@@ -1054,12 +1240,19 @@ mod tests {
     }
 
     fn config(root: &Path) -> DaemonConfig {
+        private_directory(&root.join("config")).unwrap();
+        let token = root.join("config/query.capability");
+        if !token.exists() {
+            private_file(&token, b"test-query-capability-token").unwrap();
+        }
         DaemonConfig {
             static_config: StaticConfig {
                 state_root: root.join("state"),
                 runtime_root: root.join("runtime"),
                 config_root: root.join("config"),
                 socket_endpoint: root.join("runtime/admin.sock"),
+                query_socket_endpoint: root.join("runtime/query.sock"),
+                query_capability_token_file: PathBuf::from("query.capability"),
                 operational_database: PathBuf::from("operational.sqlite3"),
                 bundle_index: PathBuf::from(
                     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
@@ -1080,6 +1273,10 @@ mod tests {
 
     fn write_config(root: &Path, extra: &str) -> PathBuf {
         private_directory(&root.join("config")).unwrap();
+        let token = root.join("config/query.capability");
+        if !token.exists() {
+            private_file(&token, b"test-query-capability-token").unwrap();
+        }
         let path = root.join("config/codefabric.toml");
         let source = format!(
             r#"
@@ -1088,6 +1285,8 @@ state_root = {state:?}
 runtime_root = {runtime:?}
 config_root = {config:?}
 socket_endpoint = {socket:?}
+query_socket_endpoint = {query_socket:?}
+query_capability_token_file = "query.capability"
 operational_database = "operational.sqlite3"
 bundle_index = "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json"
 toolchain_identity = "contracts/toolchain/toolchain-identity.json"
@@ -1106,6 +1305,7 @@ maintenance_schedule = "daily-idle"
             runtime = root.join("runtime").display().to_string(),
             config = root.join("config").display().to_string(),
             socket = root.join("runtime/admin.sock").display().to_string(),
+            query_socket = root.join("runtime/query.sock").display().to_string(),
         );
         private_file(&path, source.as_bytes()).unwrap();
         path
@@ -1168,6 +1368,7 @@ maintenance_schedule = "daily-idle"
                 "pid".to_owned(),
                 "process_start_token".to_owned(),
                 "public_bundle_versions".to_owned(),
+                "query_socket_endpoint".to_owned(),
                 "rpc_maximum_minor".to_owned(),
                 "rpc_minimum_minor".to_owned(),
                 "socket_endpoint".to_owned(),
@@ -1221,6 +1422,7 @@ maintenance_schedule = "daily-idle"
         assert!(exit.drained);
         assert!(!discovery_path.exists());
         assert!(!config.static_config.socket_endpoint.exists());
+        assert!(!config.static_config.query_socket_endpoint.exists());
 
         let lease = DaemonLease::acquire(&config).unwrap();
         drop(lease);

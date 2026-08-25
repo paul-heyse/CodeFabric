@@ -30,6 +30,11 @@ fn wp12_wp14_cli_end_to_end() {
     fs::set_permissions(&config_root, fs::Permissions::from_mode(0o700))
         .expect("private config root");
     let config_path = config_root.join("codefabric.toml");
+    let capability_path = config_root.join("query.capability");
+    fs::write(&capability_path, b"integration-query-capability-token")
+        .expect("query capability token");
+    fs::set_permissions(&capability_path, fs::Permissions::from_mode(0o600))
+        .expect("private query capability token");
     let config = format!(
         r#"
 [static_config]
@@ -37,6 +42,8 @@ state_root = {state:?}
 runtime_root = {runtime:?}
 config_root = {config_root:?}
 socket_endpoint = {socket:?}
+query_socket_endpoint = {query_socket:?}
+query_capability_token_file = "query.capability"
 operational_database = "operational.sqlite3"
 bundle_index = "contracts/generated/artifact-index.json"
 toolchain_identity = "contracts/toolchain/toolchain-identity.json"
@@ -54,6 +61,7 @@ maintenance_schedule = "daily-idle"
         runtime = runtime.display().to_string(),
         config_root = config_root.display().to_string(),
         socket = runtime.join("admin.sock").display().to_string(),
+        query_socket = runtime.join("query.sock").display().to_string(),
     );
     fs::write(&config_path, config).expect("configuration");
     fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))

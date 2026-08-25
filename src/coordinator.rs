@@ -14,14 +14,16 @@ use thiserror::Error;
 use tokio::sync::{Mutex, Semaphore, mpsc, oneshot};
 
 use crate::cancellation::Cancellation;
+use crate::continuous::{ContinuousWorkspaceConfig, ContinuousWorkspaceEngine};
 use crate::contracts::models::DeploymentProfileDocument;
 use crate::git_state::{
-    GitHashAlgorithm, GitOperationState, GitStateAdapter, GitStateError, GitStateObservations,
-    GitStateSnapshot, GitStateVector, GitTrustPolicy, GixGitStateAdapter, HeadKind,
-    RegisteredGitIdentity, apply_to_source_inventory, encode_object_id,
+    GitCandidatePlanner, GitHashAlgorithm, GitOperationState, GitStateAdapter, GitStateError,
+    GitStateObservations, GitStateSnapshot, GitStateVector, GitTrustPolicy, GixGitStateAdapter,
+    HeadKind, RegisteredGitIdentity, apply_to_source_inventory, encode_object_id,
 };
 use crate::identity::{IdentityDomain, encode_public_id};
 use crate::inventory::{InventoryError, InventoryLimits, InventoryWalker, SourceInventory};
+use crate::lifecycle::{LifecycleConfig, LifecycleError, UpdateWaveScheduler, recover_workspace};
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::registries::{
     EVENT_STREAM_HEALTH_TRANSITIONS, EVENT_STREAM_HEALTH_VALUES, EventStreamHealth,
@@ -31,6 +33,7 @@ use crate::registries::{
     registry_state_name,
 };
 use crate::secure_path::{SecurePathError, SecureRoot, open_workspace_root};
+use crate::source_image::{SourceImageError, SourceImageStore};
 use crate::workspace_registry::{WorkspaceRecord, WorkspaceRegistry, WorkspaceRegistryError};
 
 const DEPLOYMENT_PROFILE: &[u8] =
@@ -187,6 +190,10 @@ pub enum CoordinatorError {
     #[error(transparent)]
     Git(#[from] GitStateError),
     #[error(transparent)]
+    Lifecycle(#[from] LifecycleError),
+    #[error(transparent)]
+    SourceImage(#[from] SourceImageError),
+    #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
     #[error("COORDINATOR_ALREADY_RUNNING")]
     DuplicateCoordinator,
@@ -295,6 +302,7 @@ impl WorkspaceCoordinatorHandle {
 /// Process registry enforcing exactly one coordinator task per workspace.
 pub struct WorkspaceCoordinatorManager {
     store: Arc<Mutex<OperationalStore>>,
+    state_root: PathBuf,
     limits: CoordinatorLimits,
     source_read_permits: Arc<Semaphore>,
     git_job_permits: Arc<Semaphore>,
@@ -307,10 +315,14 @@ impl WorkspaceCoordinatorManager {
     /// # Errors
     ///
     /// Returns an invalid generated deployment-profile error.
-    pub fn new(store: Arc<Mutex<OperationalStore>>) -> Result<Self, CoordinatorError> {
+    pub fn new(
+        store: Arc<Mutex<OperationalStore>>,
+        state_root: PathBuf,
+    ) -> Result<Self, CoordinatorError> {
         let limits = CoordinatorLimits::local_workstation()?;
         Ok(Self {
             store,
+            state_root,
             limits,
             source_read_permits: Arc::new(Semaphore::new(limits.maximum_concurrent_source_reads)),
             git_job_permits: Arc::new(Semaphore::new(limits.maximum_concurrent_gix_jobs)),
@@ -343,6 +355,7 @@ impl WorkspaceCoordinatorManager {
             state,
             receiver,
             Arc::clone(&self.store),
+            self.state_root.clone(),
             Arc::clone(&self.source_read_permits),
             Arc::clone(&self.git_job_permits),
             self.limits,
@@ -411,15 +424,18 @@ async fn coordinator_task(
     mut state: WorkspaceCoordinatorState,
     mut receiver: mpsc::Receiver<CoordinatorCommand>,
     store: Arc<Mutex<OperationalStore>>,
+    state_root: PathBuf,
     source_read_permits: Arc<Semaphore>,
     git_job_permits: Arc<Semaphore>,
     limits: CoordinatorLimits,
 ) {
+    let mut _continuous_engine: Option<ContinuousWorkspaceEngine<GixGitStateAdapter>> = None;
     while let Some(command) = receiver.recv().await {
         match command {
             CoordinatorCommand::Bootstrap { hook, response } => {
                 let store = Arc::clone(&store);
                 let workspace_id = state.workspace_id;
+                let state_root = state_root.clone();
                 let permits = async {
                     let source = Arc::clone(&source_read_permits)
                         .acquire_owned()
@@ -437,18 +453,27 @@ async fn coordinator_task(
                 let result = match permits {
                     Ok((_source_permit, _git_permit)) => tokio::task::spawn_blocking(move || {
                         let mut store = store.blocking_lock();
-                        bootstrap_sync(&mut store, workspace_id, limits, hook)
+                        let next = bootstrap_sync(&mut store, workspace_id, limits, hook)?;
+                        let engine =
+                            build_continuous_engine(&mut store, workspace_id, &state_root, &next)?;
+                        Ok::<_, CoordinatorError>((next, engine))
                     })
                     .await
                     .map_err(|_| CoordinatorError::TaskFailed)
                     .and_then(std::convert::identity),
                     Err(error) => Err(error),
                 };
-                if let Ok(next) = &result {
-                    state = next.clone();
-                    state.mutations_applied = state.mutations_applied.saturating_add(1);
+                match result {
+                    Ok((next, engine)) => {
+                        state = next;
+                        state.mutations_applied = state.mutations_applied.saturating_add(1);
+                        _continuous_engine = Some(engine);
+                        let _ = response.send(Ok(state.clone()));
+                    }
+                    Err(error) => {
+                        let _ = response.send(Err(error));
+                    }
                 }
-                let _ = response.send(result.map(|_| state.clone()));
             }
             CoordinatorCommand::Status { response } => {
                 let _ = response.send(state.clone());
@@ -459,6 +484,70 @@ async fn coordinator_task(
             }
         }
     }
+}
+
+fn build_continuous_engine(
+    store: &mut OperationalStore,
+    workspace_id: [u8; 16],
+    state_root: &std::path::Path,
+    state: &WorkspaceCoordinatorState,
+) -> Result<ContinuousWorkspaceEngine<GixGitStateAdapter>, CoordinatorError> {
+    let record = WorkspaceRegistry::new(store).show(workspace_id)?;
+    let profile: DeploymentProfileDocument =
+        serde_yaml_ng::from_slice(DEPLOYMENT_PROFILE).map_err(|_| CoordinatorError::Profile)?;
+    let lifecycle = LifecycleConfig::from_deployment(&profile)?;
+    let recovery = recover_workspace(&store.reader_factory().open()?, workspace_id)?;
+    let root = PathBuf::from(OsString::from_vec(record.root_path_bytes));
+    let scheduler = UpdateWaveScheduler::new(
+        workspace_id,
+        &root,
+        state.source_generation,
+        recovery.event_watermark,
+        recovery.event_watermark,
+        lifecycle,
+    )?;
+    let source_image_root = state_root
+        .join("source-images")
+        .join(public_id(IdentityDomain::Workspace, workspace_id).replace(':', "-"));
+    let source_images =
+        SourceImageStore::open(&source_image_root, lifecycle.source_capture_policy())?;
+    let registered_git_identity =
+        record
+            .repository_id
+            .zip(record.worktree_id)
+            .map(|(repository_id, worktree_id)| RegisteredGitIdentity {
+                repository_id,
+                worktree_id,
+            });
+    let git_observations = state.git_state.as_ref().map_or(
+        GitStateObservations {
+            inclusion_policy_fingerprint: record.authorization_fingerprint,
+            attributes_fingerprint: [0; 32],
+            worktree_inventory_digest: state.inventory_digest.unwrap_or([0; 32]),
+        },
+        |vector| GitStateObservations {
+            inclusion_policy_fingerprint: vector.inclusion_policy_fingerprint,
+            attributes_fingerprint: vector.attributes_fingerprint,
+            worktree_inventory_digest: vector.worktree_inventory_digest,
+        },
+    );
+    let overlay_memory_limit_bytes =
+        usize::try_from(profile.lifecycle_limits.overlay_flush_maximum_bytes)
+            .map_err(|_| CoordinatorError::Profile)?;
+
+    Ok(ContinuousWorkspaceEngine::new(
+        scheduler,
+        source_images,
+        GitCandidatePlanner::without_cache(GixGitStateAdapter),
+        ContinuousWorkspaceConfig {
+            analysis_context_id: crate::identity::SOURCE_CONTEXT_ID,
+            registered_git_identity,
+            git_observations,
+            prior_git_vector: state.git_state.clone(),
+            overlay_memory_limit_bytes,
+            semantic_capabilities_required: true,
+        },
+    ))
 }
 
 fn bootstrap_sync(

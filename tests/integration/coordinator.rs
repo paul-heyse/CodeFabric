@@ -109,7 +109,9 @@ async fn wp18_behavioral_acceptance() {
     )
     .await;
 
-    let mut manager = WorkspaceCoordinatorManager::new(Arc::clone(&store)).expect("manager");
+    let mut manager =
+        WorkspaceCoordinatorManager::new(Arc::clone(&store), fixture.path().join("daemon-state"))
+            .expect("manager");
     let directory_handle = manager.spawn(directory_id).await.expect("directory actor");
     let changed_path = directory.join("source.py");
     let changed = Arc::new(move || {
@@ -155,7 +157,9 @@ async fn wp18_behavioral_acceptance() {
     assert_ne!(main_state.workspace_id, linked_state.workspace_id);
 
     manager.shutdown_all().await.expect("joined actors");
-    let mut restarted = WorkspaceCoordinatorManager::new(Arc::clone(&store)).expect("restart");
+    let mut restarted =
+        WorkspaceCoordinatorManager::new(Arc::clone(&store), fixture.path().join("daemon-state"))
+            .expect("restart");
     let restored = restarted
         .restore_and_bootstrap()
         .await
@@ -180,7 +184,9 @@ async fn wp18_structural_acceptance() {
     ));
     let workspace_id =
         register_enabled(&store, &root, WorkspaceSourceRegistration::Directory).await;
-    let mut manager = WorkspaceCoordinatorManager::new(Arc::clone(&store)).expect("manager");
+    let mut manager =
+        WorkspaceCoordinatorManager::new(Arc::clone(&store), fixture.path().join("daemon-state"))
+            .expect("manager");
     let handle = manager.spawn(workspace_id).await.expect("sole actor");
     assert!(matches!(
         manager.spawn(workspace_id).await,
@@ -223,7 +229,9 @@ async fn wp18_negative_zero_state() {
     ));
     let workspace_id =
         register_enabled(&store, &root, WorkspaceSourceRegistration::Directory).await;
-    let mut manager = WorkspaceCoordinatorManager::new(Arc::clone(&store)).expect("manager");
+    let mut manager =
+        WorkspaceCoordinatorManager::new(Arc::clone(&store), fixture.path().join("daemon-state"))
+            .expect("manager");
     let handle = manager.spawn(workspace_id).await.expect("actor");
     let restart_state = handle.status().await.expect("restart state");
     assert_eq!(restart_state.source_trust, SourceTrustState::Unverified);
@@ -282,7 +290,9 @@ async fn wp18_operational_acceptance() {
     ));
     let workspace_id =
         register_enabled(&store, &root, WorkspaceSourceRegistration::Directory).await;
-    let mut manager = WorkspaceCoordinatorManager::new(Arc::clone(&store)).expect("manager");
+    let mut manager =
+        WorkspaceCoordinatorManager::new(Arc::clone(&store), fixture.path().join("daemon-state"))
+            .expect("manager");
     manager
         .spawn(workspace_id)
         .await

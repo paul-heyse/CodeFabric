@@ -1475,6 +1475,9 @@ fn bound_query_id(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1485,15 +1488,31 @@ mod tests {
     };
     use arrow_buffer::OffsetBuffer;
     use arrow_schema::TimeUnit;
+    use hyper_util::rt::TokioIo;
     use rusqlite::params;
     use tempfile::{TempDir, tempdir};
+    use tokio::net::UnixStream;
     use tokio::sync::Barrier;
+    use tonic::transport::Endpoint;
+    use tower::service_fn;
 
     use super::*;
+    use crate::daemon::{
+        AdminCommand, DaemonConfig, ReloadableConfig, StaticConfig, administer,
+        serve_with_query_backend, wait_for_discovery,
+    };
     use crate::fact_ingest::{EntityRow, FactScope, ValidatedFactBatch, encode_entities};
     use crate::identity::{IdentityDomain, encode_public_id};
     use crate::operational_store::{OperationalStore, OperationalStoreError};
+    use crate::query_service::WorkspaceQueryBackend;
     use crate::registries::{SnapshotLeaseKind, WorkspaceRegistryLifecycle};
+    use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_client::CpgQueryServiceClient;
+    use crate::rpc::generated::codefabric::cpgd::v1::query_event::Event;
+    use crate::rpc::generated::codefabric::cpgd::v1::{
+        CredentialProof, DeliveryPreference, HandshakeRequest, PayloadCompression,
+        ReadResultRequest, StartQueryRequest, StatusRequest, StreamQueryRequest, VersionRange,
+        WorkspaceClaim, WorkspaceReadiness,
+    };
     use crate::snapshot::{
         ServingSnapshotManifestBody, SnapshotBasePublication, SnapshotBundles,
         SnapshotContextRecord, SnapshotContexts, SnapshotIndexes, SnapshotOverlay, SnapshotSource,
@@ -1507,6 +1526,58 @@ mod tests {
     const WORKSPACE: [u8; 16] = [0x11; 16];
     const CONTEXT: [u8; 16] = crate::identity::SOURCE_CONTEXT_ID;
     const OVERLAY: [u8; 32] = [0x33; 32];
+
+    fn daemon_config(root: &std::path::Path) -> DaemonConfig {
+        for path in [
+            root.join("state"),
+            root.join("runtime"),
+            root.join("config"),
+        ] {
+            fs::create_dir_all(&path).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let token = root.join("config/query.capability");
+        fs::write(&token, b"test-query-capability-token").unwrap();
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+        DaemonConfig {
+            static_config: StaticConfig {
+                state_root: root.join("state"),
+                runtime_root: root.join("runtime"),
+                config_root: root.join("config"),
+                socket_endpoint: root.join("runtime/admin.sock"),
+                query_socket_endpoint: root.join("runtime/query.sock"),
+                query_capability_token_file: PathBuf::from("query.capability"),
+                operational_database: PathBuf::from("operational.sqlite3"),
+                bundle_index: PathBuf::from(
+                    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
+                ),
+                toolchain_identity: PathBuf::from("contracts/toolchain/toolchain-identity.json"),
+                sandbox_policy: "required-for-untrusted".to_owned(),
+                hard_limit_profile: "daemon-default-v1".to_owned(),
+                supported_platform_profile: "local-workstation-v1".to_owned(),
+            },
+            reloadable: ReloadableConfig {
+                log_level: "info".to_owned(),
+                telemetry_sampling: 0.1,
+                soft_query_quota: 4,
+                maintenance_schedule: "daily-idle".to_owned(),
+            },
+        }
+    }
+
+    async fn daemon_query_client(
+        socket: PathBuf,
+    ) -> CpgQueryServiceClient<tonic::transport::Channel> {
+        let channel = Endpoint::try_from("http://[::]:50051")
+            .unwrap()
+            .connect_with_connector(service_fn(move |_| {
+                let socket = socket.clone();
+                async move { UnixStream::connect(socket).await.map(TokioIo::new) }
+            }))
+            .await
+            .unwrap();
+        CpgQueryServiceClient::new(channel)
+    }
 
     fn digest(byte: u8) -> String {
         crate::integrity::frame_digest([byte; 32])
@@ -2380,6 +2451,170 @@ mod tests {
         assert_ne!(
             first_bound.bound_query_id,
             changed_parameter_bound.bound_query_id
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[allow(clippy::too_many_lines)] // The oracle proves the entire daemon-to-Arrow result vertical in one real session.
+    async fn wp63_behavioral_acceptance() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let candidate = candidate([0x63; 16], 1, 3);
+        let session = Arc::new(activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            Arc::clone(&candidate),
+            directory.path(),
+        ));
+        let workspace_id = candidate.manifest().body.workspace_id.clone();
+        let backend = Arc::new(WorkspaceQueryBackend::default());
+        backend.install(session).await.unwrap();
+        assert_eq!(backend.active_workspace_count().await, 1);
+
+        let daemon_root = tempdir().unwrap();
+        let config = daemon_config(daemon_root.path());
+        let discovery = config.static_config.runtime_root.join("daemon.json");
+        let query_socket = config.static_config.query_socket_endpoint.clone();
+        let claim = WorkspaceClaim {
+            workspace_id: workspace_id.clone(),
+            repository_id: None,
+            worktree_id: None,
+            workspace_kind: "non-git-root".to_owned(),
+            readiness: WorkspaceReadiness::Ready as i32,
+            permission_claims: vec!["query".to_owned()],
+        };
+        let daemon = tokio::spawn(serve_with_query_backend(config, backend, vec![claim], None));
+        wait_for_discovery(&discovery, Duration::from_secs(10))
+            .await
+            .unwrap();
+
+        let mut client = daemon_query_client(query_socket).await;
+        let handshake = client
+            .handshake(HandshakeRequest {
+                rpc_versions: Some(VersionRange {
+                    minimum: "1.0".to_owned(),
+                    maximum: "1.0".to_owned(),
+                }),
+                semantic_query_versions: Some(VersionRange {
+                    minimum: "1.3".to_owned(),
+                    maximum: "1.3".to_owned(),
+                }),
+                desired_workspace_ids: vec![workspace_id.clone()],
+                credential_proof: Some(CredentialProof {
+                    credential_id: "wp63-credential".to_owned(),
+                    capability_token: b"test-query-capability-token".to_vec(),
+                }),
+                agent_instance_id: "wp63-agent".to_owned(),
+                ..HandshakeRequest::default()
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(handshake.authorized_workspaces.len(), 1);
+        assert_eq!(handshake.readiness.unwrap().supported_query_forms.len(), 8);
+
+        let status = client
+            .get_status(StatusRequest {
+                agent_instance_id: "wp63-agent".to_owned(),
+                workspace_id: workspace_id.clone(),
+                include_diagnostics: false,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        let public_status: serde_json::Value =
+            serde_json::from_slice(&status.canonical_public_status_json).unwrap();
+        assert_eq!(
+            public_status["supported_request_forms"]
+                .as_array()
+                .unwrap()
+                .len(),
+            8
+        );
+        assert_eq!(
+            public_status["capability_statuses"][0]["capability_code"],
+            "CORE_SOURCE_V1"
+        );
+
+        let request = format!(
+            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"wp63-eight-form","workspace_id":"{workspace_id}","freshness_policy":"best_available_snapshot","queries":[{{"query_id":"entities","request":"find code entities","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"patterns","request":"match a code fact pattern","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"combined","request":"combine result sets","label":null,"input":{{"results":[{{"results_of":"properties","select":"facts"}},{{"results_of":"relations","select":"facts"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"summary","request":"summarize objective facts","label":null,"input":{{"results":[{{"results_of":"combined","select":"groups"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"context","request":"retrieve source and syntax context","label":null,"input":{{"results":[{{"results_of":"paths","select":"paths"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":{{"canonical_semantic_identity":true,"coverage":true}},"cost_budget":{{"maximum_rows":80}}}}"#
+        );
+        let canonical = crate::contracts::jcs::canonicalize_slice(request.as_bytes()).unwrap();
+        let started = client
+            .start_query(StartQueryRequest {
+                agent_instance_id: "wp63-agent".to_owned(),
+                workspace_id: workspace_id.clone(),
+                semantic_query_version: "1.3".to_owned(),
+                canonical_request_json: canonical.clone(),
+                request_checksum: crate::integrity::framed_digest(&canonical),
+                delivery_preference: DeliveryPreference::Resource as i32,
+                deadline_unix_ms: i64::MAX,
+                idempotency_key: "wp63-eight-form".to_owned(),
+                payload_compression: PayloadCompression::Identity as i32,
+                ..StartQueryRequest::default()
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        let mut events = client
+            .stream_query(StreamQueryRequest {
+                daemon_query_id: started.daemon_query_id,
+                resume_token: started.resume_token,
+                after_sequence: 0,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        let mut artifact = None;
+        let mut succeeded = false;
+        while let Some(event) = events.message().await.unwrap() {
+            match event.event {
+                Some(Event::ArtifactReady(value)) => artifact = Some(value),
+                Some(Event::Terminal(value)) => {
+                    succeeded = value.execution_state
+                        == crate::rpc::generated::codefabric::cpgd::v1::QueryExecutionState::Succeeded
+                            as i32;
+                }
+                _ => {}
+            }
+        }
+        assert!(succeeded);
+        let artifact = artifact.expect("query result artifact");
+        let mut chunks = client
+            .read_result(ReadResultRequest {
+                artifact_id: artifact.artifact_id,
+                offset: 0,
+                maximum_bytes: None,
+                lease_token: artifact.lease_token,
+                accepted_compression: PayloadCompression::Identity as i32,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        let mut response_bytes = Vec::new();
+        while let Some(chunk) = chunks.message().await.unwrap() {
+            response_bytes.extend_from_slice(&chunk.payload);
+            if chunk.final_chunk {
+                break;
+            }
+        }
+        let response: serde_json::Value = serde_json::from_slice(&response_bytes).unwrap();
+        assert_eq!(response["successful_query_count"], 8);
+        assert_eq!(response["query_results"].as_array().unwrap().len(), 8);
+        assert_eq!(
+            response["snapshot"]["snapshot_id"],
+            candidate.manifest().snapshot_id
+        );
+
+        drop(client);
+        administer(&discovery, AdminCommand::Stop).await.unwrap();
+        let exit = daemon.await.unwrap().unwrap();
+        assert!(!exit.drained);
+        assert!(
+            exit.shutdown_steps
+                .iter()
+                .any(|step| *step == "await-workers")
         );
     }
 
