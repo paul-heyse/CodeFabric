@@ -33,6 +33,7 @@ DIRECT_AUTHORITIES = {
     "src/identity.rs": "SEMANTIC_FINGERPRINT",
     "src/integrity.rs": "INTEGRITY_OR_CACHE_KEY",
     "src/security.rs": "SECURITY_MAC",
+    "src/bin/codefabric_model/registry_cbef_driver.rs": ("WP56_DIGEST_FRAME_GENERATOR"),
     "src/rustc_service.rs": "WP56_CROSS_ROOT_INTEGRITY",
     "rustc-extractor/src/main.rs": "CROSS_ROOT_INTEGRITY",
     "rustc-extractor/src/wrapper.rs": "WP56_CROSS_ROOT_MIXED",
