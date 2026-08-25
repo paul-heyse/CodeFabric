@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP74",
+  "current_packet": "WP58",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -67,12 +67,14 @@
     "WP74": {
       "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Substantive implementation and all WP74 packet gates proved at 77ff920657f3a4c4bcb760074f87e95730678492 before the inherited execution state exposed WP59 as an unmet dependency; formal completion and detector closure are intentionally withheld until WP59 is complete."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP58": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -275,8 +277,17 @@
         "contracts/registry/design-principle-detector-registry.yaml"
       ],
       "summary": "WP54 adds only the standard self-identifying artifact envelope, owner-acceptance provenance, and detached canonical digest to the accepted P1-P25 and DP-001-DP-124 registries; every principle, detector, disposition, packet mapping, probe, and coverage record remains unchanged."
+    },
+    {
+      "kind": "execution_sequence_correction",
+      "packet": "WP74",
+      "paths": [
+        "src/fabric/publication.rs",
+        "contracts/registry/error-registry.yaml"
+      ],
+      "summary": "WP74 was implemented and proved before its WP59 dependency was complete. Its code is retained because the work is independently valid, but the packet remains in progress without a proving_commit while execution returns to WP58, WP59, and WP60; WP74 will be certified only after dependency closure."
     }
   ],
-  "next_action": "Execute WP57's current-tree schema-contract census, classify all schema metadata semantics, generate FK and row-encoder contracts, author the exact-pin evolution policy, and enforce authenticated table constraints on serving open.",
-  "updated_at": "2026-08-25T14:01:22Z"
+  "next_action": "Execute WP58's truthful provider statistics, pushdown, Id16 extension metadata, and observed-runtime evidence scope with focused provider and serving checks.",
+  "updated_at": "2026-08-25T16:45:00Z"
 }
