@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP57",
+  "current_packet": "WP74",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -51,14 +51,21 @@
       "blockers": []
     },
     "WP57": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "e9ac61308443a539a02e1974f1e4491351a2ed74",
+      "deviations": [
+        "WP57 generates and authenticates typed cross-table foreign-key contracts but leaves complete-candidate enforcement to dependency-closed WP74, preserving the accepted R6 lifecycle split.",
+        "The canonical-response KAT uses a 32 MiB test-session pool after generated semantic metadata increased the four-join plan reservation; the separate WP25 resource oracle continues to prove the production 16 MiB configuration."
+      ],
+      "failed_approaches": [
+        "The first exact Delta constraint comparison used source SQL expressions; delta-rs persists normalized predicates, so generated expectations now match the persisted nullable and required-span forms while still rejecting missing, extra, or changed constraints.",
+        "The first full root-test run exposed the model artifact index's stale 75-output assertion after the encoder and evolution-policy outputs raised the governed census to 77.",
+        "The second full root-test run reproduced a 16 MiB response-KAT allocation failure at TopK after four hash joins; the semantic KAT fixture was isolated at 32 MiB without changing the independent production resource-boundary oracle."
+      ],
       "blockers": []
     },
     "WP74": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
