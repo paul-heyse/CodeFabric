@@ -46,7 +46,6 @@ class ModelArtifactRecord(_ClosedModel):
     canonical_digest: Checksum
     compatible_suite_major: Literal[1]
     compilation_unit: str = Field(min_length=1)
-    consumers: tuple[str, ...] = Field(min_length=1)
     owner: str = Field(min_length=1)
     projection_profile: str = Field(min_length=1)
     provenance: tuple[str, ...] = Field(min_length=1)
@@ -58,12 +57,35 @@ class ModelArtifactRecord(_ClosedModel):
     version: str = Field(min_length=1)
 
 
+class ModelOutputProjection(_ClosedModel):
+    """Closed projection metadata for one generated output."""
+
+    artifact_kind: str | None = None
+    projection_kind: Literal["canonical-artifact", "json-schema", "python-source", "rust-source"]
+    public_identity: str | None = None
+
+
+class ModelOutputRecord(_ClosedModel):
+    """One complete DesiredTree output and its real producer/consumer edges."""
+
+    consumers: tuple[str, ...] = Field(min_length=1)
+    lineage: tuple[str, ...] = Field(min_length=1)
+    output_id: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    producer: str = Field(min_length=1)
+    projection: ModelOutputProjection
+    public_artifact_id: str | None
+    resource_profile: ResourceProfile
+    validators: tuple[str, ...] = Field(min_length=1)
+
+
 class ModelArtifactIndex(_ClosedModel):
     """Canonical packaged projection of the compiled RepositoryModel."""
 
     schema_version: Literal[1]
-    source: Literal["RepositoryModel + accepted release census"]
+    source: Literal["RepositoryModel + accepted release census + complete DesiredTree census"]
     artifacts: tuple[ModelArtifactRecord, ...]
+    outputs: tuple[ModelOutputRecord, ...]
 
 
 _MODEL_INDEX_ADAPTER = TypeAdapter(ModelArtifactIndex)
@@ -100,6 +122,14 @@ def model_artifact_index() -> ModelArtifactIndex:
     paths = tuple(record.authority_path for record in index.artifacts)
     if any(not _safe_relative_path(path) for path in paths):
         raise ValueError("model artifact index contains an unsafe authority path")
+    output_ids = tuple(record.output_id for record in index.outputs)
+    if len(set(output_ids)) != len(output_ids):
+        raise ValueError("model artifact index output IDs are not unique")
+    output_paths = tuple(record.path for record in index.outputs)
+    if output_paths != tuple(sorted(set(output_paths))) or any(
+        not _safe_relative_path(path) for path in output_paths
+    ):
+        raise ValueError("model artifact index output paths are unsafe or unsorted")
     return index
 
 

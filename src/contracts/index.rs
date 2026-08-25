@@ -62,12 +62,46 @@ pub struct ModelArtifactIndexRecord {
     pub compilation_unit: String,
     /// Authority, evidence, acceptance, or derived role.
     pub source_role: String,
-    /// Model-declared consumer capabilities.
-    pub consumers: BTreeSet<String>,
     /// Family resource bounds.
     pub resource_profile: ArtifactResourceProfile,
     /// Detached provenance claims.
     pub provenance: BTreeSet<String>,
+}
+
+/// Closed projection metadata for one generated output.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelOutputProjection {
+    /// Optional family-native artifact kind.
+    pub artifact_kind: Option<String>,
+    /// Canonical artifact, schema, or generated language projection.
+    pub projection_kind: String,
+    /// Optional public schema identity projected into the output.
+    pub public_identity: Option<String>,
+}
+
+/// One complete DesiredTree output with its producer and consumers.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelOutputIndexRecord {
+    /// Stable content-derived model output identity.
+    pub output_id: String,
+    /// Exact repository-relative output path.
+    pub path: PathBuf,
+    /// Owning model action.
+    pub producer: String,
+    /// Upstream action lineage.
+    pub lineage: BTreeSet<String>,
+    /// Real consuming capabilities.
+    pub consumers: BTreeSet<String>,
+    /// Optional public artifact identity associated with the output.
+    pub public_artifact_id: Option<String>,
+    /// Output projection metadata.
+    pub projection: ModelOutputProjection,
+    /// Family resource bounds.
+    pub resource_profile: ArtifactResourceProfile,
+    /// Executable validators for the output.
+    pub validators: BTreeSet<String>,
 }
 
 /// Canonical model-derived packaged index.
@@ -80,6 +114,8 @@ pub struct ModelArtifactIndex {
     pub source: String,
     /// Records sorted by stable artifact identity.
     pub artifacts: Vec<ModelArtifactIndexRecord>,
+    /// Complete DesiredTree output census sorted by repository-relative path.
+    pub outputs: Vec<ModelOutputIndexRecord>,
 }
 
 /// Packaged model-index validation failure.
@@ -107,8 +143,9 @@ fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
     let index: ModelArtifactIndex = serde_json::from_slice(MODEL_ARTIFACT_INDEX_BYTES)
         .map_err(|error| ModelArtifactIndexError::Decode(error.to_string()))?;
     if index.schema_version != 1
-        || index.source != "RepositoryModel + accepted release census"
+        || index.source != "RepositoryModel + accepted release census + complete DesiredTree census"
         || index.artifacts.is_empty()
+        || index.outputs.is_empty()
     {
         return Err(ModelArtifactIndexError::Invariant(
             "index header is unsupported or empty".to_owned(),
@@ -146,6 +183,28 @@ fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
         }
         previous = Some(record.artifact_id.as_str());
     }
+    let mut previous_path = None;
+    let mut output_ids = BTreeSet::new();
+    for record in &index.outputs {
+        if previous_path
+            .as_ref()
+            .is_some_and(|value: &&PathBuf| *value >= &record.path)
+            || !output_ids.insert(record.output_id.as_str())
+            || record.output_id.is_empty()
+            || record.path.as_os_str().is_empty()
+            || record.producer.is_empty()
+            || record.lineage.is_empty()
+            || record.consumers.is_empty()
+            || record.projection.projection_kind.is_empty()
+            || record.validators.is_empty()
+        {
+            return Err(ModelArtifactIndexError::Invariant(format!(
+                "output {} has incomplete or unordered model provenance",
+                record.output_id
+            )));
+        }
+        previous_path = Some(&record.path);
+    }
     Ok(index)
 }
 
@@ -177,6 +236,7 @@ mod tests {
     fn packaged_model_index_is_typed_canonical_and_sorted() {
         let index = model_artifact_index().unwrap();
         assert!(index.artifacts.len() > 100);
+        assert_eq!(index.outputs.len(), 75);
         assert!(
             index
                 .artifacts
