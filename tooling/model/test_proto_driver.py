@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from pathlib import Path
 
@@ -78,6 +79,19 @@ def test_wp56_negative_zero_state() -> None:
         ],
     }
     assert apply_wire_enums(source_model(request(source)), [projection])
+    assert not (Path("src/generated/model_registries.rs")).exists()
+    assert not Path(
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/registries.py"
+    ).exists()
+    handwritten = "\n".join(
+        candidate.read_text(encoding="utf-8")
+        for candidate in Path("src").rglob("*.rs")
+        if "generated" not in candidate.parts
+    )
+    assert "model_generated::registries" not in handwritten
+    assert not re.search(
+        r"pub enum (?:NewlineKind|FreshnessState|QueryForm)\b", handwritten
+    )
     mutated = deepcopy(projection)
     mutated["values"][-1]["number"] = 8
     with pytest.raises(RuntimeError, match="diverge"):

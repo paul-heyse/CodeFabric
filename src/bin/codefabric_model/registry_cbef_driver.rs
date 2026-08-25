@@ -2989,7 +2989,7 @@ from types import MappingProxyType\n\n\n",
         }
         output.push_str("\n\n");
     }
-    output.push_str("ENUM_TRIPLES = MappingProxyType({\n");
+    output.push_str("# fmt: off\nENUM_TRIPLES = MappingProxyType({\n");
     for domain in &enums.records {
         writeln!(output, "    {:?}: (", domain.domain).unwrap();
         for value in &domain.values {
@@ -3112,7 +3112,7 @@ from types import MappingProxyType\n\n\n",
         }
         output.push_str("    ),\n");
     }
-    output.push_str("})\n");
+    output.push_str("})\n# fmt: on\n");
     while output.ends_with("\n\n") {
         output.pop();
     }

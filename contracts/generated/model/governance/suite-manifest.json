@@ -694,7 +694,7 @@
       "artifact_id": "codefabric.governance.design-principle-detector-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/design-principle-detector-registry.yaml",
-      "canonical_digest": "b3:324e2a9fb7d24cb7e4fa4d39f43bb53c0b3870b968bae9df2195bfe9740f5dbe",
+      "canonical_digest": "b3:03a404a620ccb8ab7b1a29d387642bff1db02dd086a39a019b90c3138cb1d182",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "consumers": [
@@ -713,7 +713,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:a8f590b5f252a326db7d44c8065aac020cf0e8489647574445359d18ecd4077a",
+      "source_digest": "b3:0b338f75b003a3da44456d818ed9ab6e7cc571a1e5f352a5da1c5c866e9fe5d1",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"

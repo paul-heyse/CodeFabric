@@ -1,7 +1,6 @@
 """Machine-contract encoding helpers shared with the Rust daemon."""
 
 from . import model_registries as registries
-
 from .identity import (
     SOURCE_CONTEXT_ID,
     CbefField,

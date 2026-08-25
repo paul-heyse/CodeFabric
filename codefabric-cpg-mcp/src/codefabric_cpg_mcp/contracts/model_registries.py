@@ -563,6 +563,7 @@ class ProviderNodeFlags(IntFlag):
     NONE = 0
 
 
+# fmt: off
 ENUM_TRIPLES = MappingProxyType({
     "EVIDENCE_CERTAINTY": (
         (10, "SOURCE_EXACT", "source-exact"),
@@ -1373,3 +1374,4 @@ REGISTRY_IDS = MappingProxyType({
         "Q94_RUST_COMPILE_TIME_VALUES",
     ),
 })
+# fmt: on
