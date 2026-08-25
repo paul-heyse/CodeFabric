@@ -35,7 +35,6 @@ DIRECT_AUTHORITIES = {
     "src/security.rs": "SECURITY_MAC",
     "src/bin/codefabric_model/registry_cbef_driver.rs": ("WP56_DIGEST_FRAME_GENERATOR"),
     "src/rustc_service.rs": "WP56_CROSS_ROOT_INTEGRITY",
-    "rustc-extractor/src/main.rs": "CROSS_ROOT_INTEGRITY",
     "rustc-extractor/src/wrapper.rs": "WP56_CROSS_ROOT_MIXED",
     "pyrefly-sidecar/build.rs": "BUILD_INTEGRITY",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/identity.py": (

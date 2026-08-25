@@ -7,11 +7,10 @@ use std::sync::{Arc, RwLock};
 
 use arrow_array::builder::{BinaryBuilder, Float64Builder, Int64Builder, StringBuilder};
 use arrow_array::{ArrayRef, BinaryArray, Int64Array, RecordBatch, StringArray};
-use arrow_row::{RowConverter, SortField};
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
-use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
 use datafusion::datasource::{MemTable, ViewTable, provider_as_source};
 use datafusion::execution::memory_pool::{
     FairSpillPool, MemoryConsumer, MemoryReservation, TrackConsumersPool,
@@ -19,6 +18,7 @@ use datafusion::execution::memory_pool::{
 #[cfg(test)]
 use datafusion::execution::memory_pool::{MemoryPool, UnboundedMemoryPool};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::logical_expr::expr::Placeholder;
 use datafusion::logical_expr::expr_fn::cast;
 use datafusion::logical_expr::{Expr, JoinType, LogicalPlan, LogicalPlanBuilder, col, lit};
 #[cfg(test)]
@@ -33,6 +33,7 @@ use futures::StreamExt as _;
 use rusqlite::types::Value;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, params};
+use serde::Serialize;
 use thiserror::Error;
 
 use super::{FabricError, SnapshotProviderCatalog};
@@ -91,6 +92,8 @@ pub enum ServingQueryError {
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]
     Fabric(#[from] FabricError),
+    #[error(transparent)]
+    ResultChecksum(#[from] super::result_checksum::ResultChecksumError),
 }
 
 impl From<datafusion::error::DataFusionError> for ServingQueryError {
@@ -116,6 +119,7 @@ pub struct ServingRuntimeConfig {
     memory_limit_bytes: usize,
     max_spill_bytes: u64,
     spill_directory: PathBuf,
+    batch_size: usize,
     target_partitions: usize,
     max_output_rows: usize,
     max_output_bytes: usize,
@@ -152,6 +156,7 @@ impl ServingRuntimeConfig {
             memory_limit_bytes,
             max_spill_bytes,
             spill_directory,
+            batch_size: limits.batch_size,
             target_partitions,
             max_output_rows: limits.max_output_rows,
             max_output_bytes: limits.max_output_bytes,
@@ -177,6 +182,13 @@ impl ServingRuntimeConfig {
         self.max_control_batches = batches;
         self
     }
+
+    #[cfg(test)]
+    fn with_batch_size(mut self, batch_size: usize) -> Self {
+        assert!(batch_size > 0, "test batch size must be positive");
+        self.batch_size = batch_size;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -197,7 +209,8 @@ pub struct ServingRuntimeEvidence {
 /// One emitted §110 query proof artifact without non-deterministic timing observations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryPlanArtifact {
-    pub query_id: String,
+    pub plan_template_id: String,
+    pub bound_query_id: String,
     pub datafusion_version: String,
     pub arrow_version: String,
     pub schema_bundle_id: String,
@@ -210,8 +223,21 @@ pub struct QueryPlanArtifact {
     pub output_schema: Vec<String>,
     pub output_partition_count: usize,
     pub output_row_count: usize,
+    pub result_checksum_version: &'static str,
+    pub canonical_output_schema_digest: String,
     pub result_checksum: String,
+    pub reproducibility: Reproducibility,
     pub execution_metrics: BTreeMap<String, u64>,
+}
+
+/// Machine-derived replay posture for one exact plan and pinned environment.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reproducibility {
+    pub deterministic: bool,
+    pub inputs_pinned: bool,
+    pub volatile_functions: Vec<String>,
+    pub environment_recorded: bool,
 }
 
 /// Query rows and their exact non-timing plan artifact.
@@ -272,7 +298,7 @@ impl ServingQuerySession {
         );
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(CATALOG_NAME, SERVING_SCHEMA)
-            .with_batch_size(serving_resource_profile().batch_size)
+            .with_batch_size(config.batch_size)
             .with_target_partitions(config.target_partitions)
             .with_parquet_pruning(true)
             .set_bool("datafusion.execution.parquet.pushdown_filters", false)
@@ -356,6 +382,11 @@ impl ServingQuerySession {
         self.lease.snapshot().manifest().clone()
     }
 
+    /// Stable digest of every execution setting that may affect physical realization.
+    pub(crate) fn execution_config_digest(&self) -> Result<String, ServingQueryError> {
+        execution_config_digest(&self.limits)
+    }
+
     /// Plan, verify, execute, and describe one read-only SQL query.
     ///
     /// # Errors
@@ -405,10 +436,12 @@ impl ServingQuerySession {
     #[allow(clippy::too_many_lines)] // Keeps one execution, metric capture, and result-accounting lifetime explicit.
     async fn execute_plan(
         &self,
-        sql: &str,
+        _request_label: &str,
         plan: LogicalPlan,
     ) -> Result<ServingQueryResult, ServingQueryError> {
         let state = self.context.state();
+        let logical_plan = format!("{}", plan.display_indent_schema());
+        let plan_template_id = logical_plan_template_id(&plan)?;
         let optimized = state.optimize(&plan)?;
         validate_plan_allowlist(&optimized)?;
         let physical = state.create_physical_plan(&optimized).await?;
@@ -423,10 +456,6 @@ impl ServingQuerySession {
         let mut batches = Vec::new();
         let mut output_row_count = 0_usize;
         let mut output_bytes = 0_usize;
-        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
-            crate::integrity::IntegrityDomain::QueryResultStream,
-        );
-        let converter = output_row_converter(physical.as_ref())?;
         while let Some(batch) = stream.next().await.transpose()? {
             output_row_count = output_row_count
                 .checked_add(batch.num_rows())
@@ -450,17 +479,21 @@ impl ServingQuerySession {
                 )));
             }
             reservation.try_grow(batch.get_array_memory_size())?;
-            let rows = converter.convert_columns(batch.columns())?;
-            for row in &rows {
-                hasher.update(&(row.data().len() as u64).to_be_bytes());
-                hasher.update(row.data());
-            }
             batches.push(batch);
         }
-        hasher.update(&(output_row_count as u64).to_be_bytes());
-        let result_checksum = framed_digest(hasher.finalize());
+        let result = super::result_checksum::result_checksum_v1(
+            physical.schema().as_ref(),
+            &batches,
+            self.limits.max_output_bytes,
+        )?;
         let snapshot = self.lease.snapshot();
         let manifest = snapshot.manifest();
+        let bound_query_id = bound_query_id(
+            &plan_template_id,
+            &logical_plan,
+            &manifest.manifest_digest,
+            &execution_config_digest(&self.limits)?,
+        );
         let operator_metrics = physical_metrics(physical.as_ref());
         {
             let mut evidence = self
@@ -482,7 +515,8 @@ impl ServingQuerySession {
                 .saturating_add(operator_metrics.repartition_output_rows);
         }
         let artifact = QueryPlanArtifact {
-            query_id: query_id(sql, self.snapshot_id()),
+            plan_template_id,
+            bound_query_id,
             datafusion_version: datafusion::DATAFUSION_VERSION.to_owned(),
             arrow_version: arrow::ARROW_VERSION.to_owned(),
             schema_bundle_id: manifest.body.bundles.schema_bundle_id.clone(),
@@ -495,13 +529,23 @@ impl ServingQuerySession {
                 .iter()
                 .map(|table| (table.table_code, table.delta_version))
                 .collect(),
-            logical_plan: format!("{}", plan.display_indent_schema()),
+            logical_plan,
             optimized_logical_plan: format!("{}", optimized.display_indent_schema()),
             physical_plan,
             output_schema,
             output_partition_count,
             output_row_count,
-            result_checksum,
+            result_checksum_version: super::result_checksum::RESULT_CHECKSUM_VERSION,
+            canonical_output_schema_digest: crate::integrity::framed_digest(
+                &result.canonical_schema,
+            ),
+            result_checksum: result.checksum,
+            reproducibility: Reproducibility {
+                deterministic: true,
+                inputs_pinned: true,
+                volatile_functions: Vec::new(),
+                environment_recorded: true,
+            },
             execution_metrics: BTreeMap::from([
                 ("output_partitions".into(), output_partition_count as u64),
                 ("output_rows".into(), output_row_count as u64),
@@ -645,18 +689,6 @@ fn physical_output_schema(plan: &dyn ExecutionPlan) -> Vec<String> {
         .iter()
         .map(|field| field.name().clone())
         .collect()
-}
-
-fn output_row_converter(
-    plan: &dyn ExecutionPlan,
-) -> Result<RowConverter, arrow_schema::ArrowError> {
-    RowConverter::new(
-        plan.schema()
-            .fields()
-            .iter()
-            .map(|field| SortField::new(field.data_type().clone()))
-            .collect(),
-    )
 }
 
 fn read_only_options() -> SQLOptions {
@@ -1338,17 +1370,106 @@ fn table_spec_by_name(name: &str) -> Option<&'static TableSpec> {
         .find(|spec| spec.name == name)
 }
 
-fn query_id(sql: &str, snapshot_id: [u8; 16]) -> String {
-    let mut hasher = crate::identity::semantic_fingerprint(
-        crate::identity::SemanticFingerprintDomain::ServingQuery,
-    );
-    hasher.update(&snapshot_id);
-    hasher.update(sql.as_bytes());
-    crate::integrity::frame_digest(hasher.finalize())
+fn update_length_framed(
+    fingerprint: &mut crate::identity::SemanticFingerprintBuilder,
+    value: &[u8],
+) {
+    fingerprint.update(&(value.len() as u64).to_be_bytes());
+    fingerprint.update(value);
 }
 
-fn framed_digest(digest: [u8; 32]) -> String {
-    crate::integrity::frame_digest(digest)
+fn parameterized_logical_plan(plan: &LogicalPlan) -> Result<LogicalPlan, ServingQueryError> {
+    let mut parameter_index = 0_u64;
+    Ok(plan
+        .clone()
+        .transform_up_with_subqueries(|plan| {
+            plan.map_expressions(|expression| {
+                expression.transform_up(|expression| match expression {
+                    Expr::Literal(value, metadata) => {
+                        parameter_index = parameter_index.checked_add(1).ok_or_else(|| {
+                            datafusion::error::DataFusionError::Plan(
+                                "plan-template parameter counter overflow".to_owned(),
+                            )
+                        })?;
+                        let mut field = Field::new(
+                            format!("parameter_{parameter_index}"),
+                            value.data_type(),
+                            value.is_null(),
+                        );
+                        if let Some(metadata) = metadata {
+                            field = metadata.add_to_field(field);
+                        }
+                        Ok(Transformed::yes(Expr::Placeholder(
+                            Placeholder::new_with_field(
+                                format!("$parameter_{parameter_index}"),
+                                Some(Arc::new(field)),
+                            ),
+                        )))
+                    }
+                    expression => Ok(Transformed::no(expression)),
+                })
+            })
+        })?
+        .data)
+}
+
+pub(crate) fn logical_plan_template_serialization(
+    logical_plan: &LogicalPlan,
+) -> Result<String, ServingQueryError> {
+    Ok(parameterized_logical_plan(logical_plan)?
+        .display_indent()
+        .to_string())
+}
+
+fn logical_plan_template_id(logical_plan: &LogicalPlan) -> Result<String, ServingQueryError> {
+    let value = serde_json::json!({
+        "version": "QueryPlanTemplateV1",
+        "datafusion_version": datafusion::DATAFUSION_VERSION,
+        "logical_plan": logical_plan_template_serialization(logical_plan)?,
+    });
+    let canonical = crate::contracts::jcs::canonicalize_value(&value)
+        .map_err(|error| ServingQueryError::Configuration(error.to_string()))?;
+    let mut fingerprint = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::QueryPlanTemplateV1,
+    );
+    update_length_framed(&mut fingerprint, &canonical);
+    Ok(crate::integrity::frame_digest(fingerprint.finalize()))
+}
+
+fn execution_config_digest(config: &ServingRuntimeConfig) -> Result<String, ServingQueryError> {
+    let value = serde_json::json!({
+        "version": "ServingExecutionConfigV1",
+        "memory_limit_bytes": config.memory_limit_bytes,
+        "max_spill_bytes": config.max_spill_bytes,
+        "batch_size": config.batch_size,
+        "target_partitions": config.target_partitions,
+        "max_output_rows": config.max_output_rows,
+        "max_output_bytes": config.max_output_bytes,
+        "max_output_batches": config.max_output_batches,
+    });
+    let canonical = crate::contracts::jcs::canonicalize_value(&value)
+        .map_err(|error| ServingQueryError::Configuration(error.to_string()))?;
+    Ok(crate::integrity::framed_digest(&canonical))
+}
+
+fn bound_query_id(
+    plan_template_id: &str,
+    bound_logical_plan: &str,
+    snapshot_manifest_digest: &str,
+    execution_config_digest: &str,
+) -> String {
+    let mut fingerprint = crate::identity::semantic_fingerprint(
+        crate::identity::SemanticFingerprintDomain::BoundSemanticQueryV1,
+    );
+    for value in [
+        plan_template_id.as_bytes(),
+        bound_logical_plan.as_bytes(),
+        snapshot_manifest_digest.as_bytes(),
+        execution_config_digest.as_bytes(),
+    ] {
+        update_length_framed(&mut fingerprint, value);
+    }
+    crate::integrity::frame_digest(fingerprint.finalize())
 }
 
 #[cfg(test)]
@@ -1388,7 +1509,7 @@ mod tests {
     const OVERLAY: [u8; 32] = [0x33; 32];
 
     fn digest(byte: u8) -> String {
-        framed_digest([byte; 32])
+        crate::integrity::frame_digest([byte; 32])
     }
 
     fn snapshot_body(source_generation: u64) -> ServingSnapshotManifestBody {
@@ -2133,6 +2254,136 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wp64_production_replay_is_partition_and_batch_independent() {
+        let (first_directory, mut first_store, mut first_images) = operational_store();
+        let first_runtime = ServingSnapshotRuntime::default();
+        let first_session = activate_and_lease_with_config(
+            &mut first_store,
+            &mut first_images,
+            &first_runtime,
+            candidate([0x64; 16], 1, 200),
+            ServingRuntimeConfig::new(
+                128 * 1024 * 1024,
+                64 * 1024 * 1024,
+                first_directory.path().join("wp64-spill"),
+                1,
+            )
+            .unwrap()
+            .with_batch_size(3),
+        )
+        .unwrap();
+        let query = "SELECT entity_id FROM cpg_serving.entities \
+                     WHERE entity_kind_code = 1 ORDER BY entity_id";
+        let first = first_session.query(query).await.unwrap();
+
+        let (second_directory, mut second_store, mut second_images) = operational_store();
+        let second_runtime = ServingSnapshotRuntime::default();
+        let second_session = activate_and_lease_with_config(
+            &mut second_store,
+            &mut second_images,
+            &second_runtime,
+            candidate([0x64; 16], 1, 200),
+            ServingRuntimeConfig::new(
+                128 * 1024 * 1024,
+                64 * 1024 * 1024,
+                second_directory.path().join("wp64-spill"),
+                4,
+            )
+            .unwrap()
+            .with_batch_size(17),
+        )
+        .unwrap();
+        let second = second_session.query(query).await.unwrap();
+
+        let first_rows =
+            arrow_select::concat::concat_batches(&first.batches[0].schema(), first.batches.iter())
+                .unwrap();
+        let second_rows = arrow_select::concat::concat_batches(
+            &second.batches[0].schema(),
+            second.batches.iter(),
+        )
+        .unwrap();
+        assert_eq!(first_rows, second_rows);
+        assert_eq!(
+            first.artifact.result_checksum,
+            second.artifact.result_checksum
+        );
+        assert_eq!(
+            first.artifact.canonical_output_schema_digest,
+            second.artifact.canonical_output_schema_digest
+        );
+        assert_eq!(
+            first.artifact.plan_template_id,
+            second.artifact.plan_template_id
+        );
+        assert_ne!(
+            first.artifact.bound_query_id,
+            second.artifact.bound_query_id
+        );
+
+        let other_parameter = first_session
+            .query(
+                "SELECT entity_id FROM cpg_serving.entities \
+                 WHERE entity_kind_code = 2 ORDER BY entity_id",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            first.artifact.plan_template_id,
+            other_parameter.artifact.plan_template_id
+        );
+        assert_ne!(
+            first.artifact.bound_query_id,
+            other_parameter.artifact.bound_query_id
+        );
+
+        let workspace_id = first_session.snapshot_manifest().body.workspace_id;
+        let semantic_request = |request_id: &str, kind_code: u16| {
+            format!(
+                r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"{request_id}","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":null,"input":null,"where":{{"entity_kind_codes":[{kind_code}],"relation_kind_codes":[]}},"limit":{{"first":10,"offset":0}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":20}}}}"#
+            )
+        };
+        let first_typed =
+            crate::semantic_query::validate_request(semantic_request("request-one", 1).as_bytes())
+                .unwrap();
+        let same_query_new_request =
+            crate::semantic_query::validate_request(semantic_request("request-two", 1).as_bytes())
+                .unwrap();
+        let changed_parameter = crate::semantic_query::validate_request(
+            semantic_request("request-three", 2).as_bytes(),
+        )
+        .unwrap();
+        let first_bound = crate::semantic_query::bind_request(&first_session, &first_typed)
+            .await
+            .unwrap();
+        let same_query_bound =
+            crate::semantic_query::bind_request(&first_session, &same_query_new_request)
+                .await
+                .unwrap();
+        let changed_parameter_bound =
+            crate::semantic_query::bind_request(&first_session, &changed_parameter)
+                .await
+                .unwrap();
+        assert_ne!(
+            first_typed.request_digest,
+            same_query_new_request.request_digest
+        );
+        assert_eq!(
+            first_bound.plan_template_id,
+            same_query_bound.plan_template_id
+        );
+        assert_eq!(first_bound.bound_query_id, same_query_bound.bound_query_id);
+        assert_eq!(
+            first_bound.plan_template_id,
+            changed_parameter_bound.plan_template_id
+        );
+        assert_ne!(
+            first_bound.bound_query_id,
+            changed_parameter_bound.bound_query_id
+        );
+    }
+
+    #[tokio::test]
     async fn production_eight_form_semantic_query_conformance() {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();
@@ -2520,7 +2771,13 @@ mod tests {
             datafusion::DATAFUSION_VERSION
         );
         assert_eq!(control.artifact.arrow_version, arrow::ARROW_VERSION);
-        assert!(control.artifact.query_id.starts_with("b3:"));
+        assert!(control.artifact.plan_template_id.starts_with("b3:"));
+        assert!(control.artifact.bound_query_id.starts_with("b3:"));
+        assert_eq!(
+            control.artifact.result_checksum_version,
+            crate::fabric::RESULT_CHECKSUM_VERSION
+        );
+        assert!(control.artifact.reproducibility.deterministic);
         assert!(control.artifact.result_checksum.starts_with("b3:"));
         assert_eq!(
             control

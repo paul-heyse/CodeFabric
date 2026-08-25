@@ -180,6 +180,11 @@ wave5-integration-check:
 semantic-query-conformance-check:
     cargo nextest run --locked --lib -E 'test(/(wp75_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|production_eight_form_semantic_query_conformance|wp39_operational_acceptance)/)' --no-tests=fail
 
+[doc("Prove parameter-neutral plan identity and partition-independent Arrow result checksums")]
+[group('test')]
+query-determinism-check:
+    cargo nextest run --locked --lib -E 'test(/(wp64_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|wp64_production_replay_is_partition_and_batch_independent)/)' --no-tests=fail
+
 [doc("Prove Readiness Gate B across all eleven accepted golden artifacts")]
 [group('test')]
 gate-b-check: wave5-integration-check adapter-wheel-test model-release-census-check

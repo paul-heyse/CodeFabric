@@ -404,6 +404,8 @@ pub struct GraphOperatorPlan {
 #[derive(Clone, Debug)]
 pub struct BoundPlanSpec {
     pub snapshot_id: String,
+    pub plan_template_id: String,
+    pub bound_query_id: String,
     pub request_digest: String,
     pub blocks: Vec<BoundQueryBlock>,
     pub execution_order: Vec<String>,
@@ -966,6 +968,116 @@ fn graph_operator_plan(typed: &TypedQueryBlock) -> Result<GraphOperatorPlan, Sem
     })
 }
 
+fn semantic_identity(
+    domain: crate::identity::SemanticFingerprintDomain,
+    canonical: &[u8],
+) -> String {
+    let mut fingerprint = crate::identity::semantic_fingerprint(domain);
+    fingerprint.update(&(canonical.len() as u64).to_be_bytes());
+    fingerprint.update(canonical);
+    crate::integrity::frame_digest(fingerprint.finalize())
+}
+
+fn semantic_plan_template(
+    blocks: &[BoundQueryBlock],
+    execution_order: &[String],
+) -> Result<(Vec<u8>, String), SemanticQueryError> {
+    let mut serialized_blocks = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        let operator = match &block.operator {
+            BoundOperator::Relational {
+                table,
+                identity_column,
+                plan,
+            } => serde_json::json!({
+                "family": "datafusion_relational",
+                "provider": {
+                    "catalog": "codefabric",
+                    "schema": "cpg_serving",
+                    "table": table,
+                    "snapshot_bound": true,
+                },
+                "identity_column": identity_column,
+                "logical_plan": crate::fabric::logical_plan_template_serialization(plan)?,
+            }),
+            BoundOperator::Graph(plan) => serde_json::json!({
+                "family": "application_graph",
+                "node": plan.form.plan_node_kind()?,
+                "input_roles": plan.input_roles,
+                "output_role": plan.output_role,
+                "output_schema": serde_json::to_value(plan.output_schema.as_ref())
+                    .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                "canonical_order": plan.canonical_order,
+                "maximum_results": "parameter.first + 1",
+                "maximum_depth": plan.maximum_depth,
+                "maximum_memory_bytes": "(parameter.first + 1) * 1024",
+                "cancellation_required": plan.cancellation_required,
+            }),
+        };
+        serialized_blocks.push(serde_json::json!({
+            "block_id": block.typed.block_id,
+            "source_pointer": block.typed.source_pointer,
+            "form": block.typed.form,
+            "input_roles": block.typed.input_roles,
+            "output_role": block.typed.output_role,
+            "dependencies": block.typed.dependencies,
+            "fan_in": block.typed.fan_in,
+            "fan_out": block.typed.fan_out,
+            "coverage_prerequisites": block.typed.coverage_prerequisites,
+            "coverage_effects": block.typed.coverage_effects,
+            "canonical_order": block.typed.canonical_order,
+            "parameter_slots": {
+                "label": {"type": "semantic_phrase", "nullable": true},
+                "input_entity_ids": {"type": "Id16[]"},
+                "input_fact_ids": {"type": "Id16[]"},
+                "entity_kind_codes": {"type": "Code16[]"},
+                "relation_kind_codes": {"type": "Code16[]"},
+                "first": {"type": "usize"},
+                "offset": {"type": "usize"},
+            },
+            "resource_contract": {
+                "maximum_memory_bytes": "(parameter.first + 1) * 1024",
+                "cancellation_required": block.typed.cancellation_required,
+            },
+            "operator": operator,
+        }));
+    }
+    let template = serde_json::json!({
+        "version": "QueryPlanTemplateV1",
+        "family": "typed_semantic_dag",
+        "datafusion_version": datafusion::DATAFUSION_VERSION,
+        "arrow_version": arrow::ARROW_VERSION,
+        "blocks": serialized_blocks,
+        "execution_order": execution_order,
+    });
+    let canonical = canonicalize_value(&template)?;
+    let identity = semantic_identity(
+        crate::identity::SemanticFingerprintDomain::QueryPlanTemplateV1,
+        &canonical,
+    );
+    Ok((canonical, identity))
+}
+
+fn bound_semantic_query_identity(
+    typed: &TypedSemanticRequest,
+    plan_template_id: &str,
+    snapshot_manifest_digest: &str,
+    execution_config_digest: &str,
+) -> Result<String, SemanticQueryError> {
+    let bound = serde_json::json!({
+        "version": "BoundSemanticQueryV1",
+        "plan_template_id": plan_template_id,
+        "queries": typed.request.queries,
+        "snapshot_manifest_digest": snapshot_manifest_digest,
+        "execution_config_digest": execution_config_digest,
+    });
+    let canonical = canonicalize_value(&bound)?;
+    Ok(semantic_identity(
+        crate::identity::SemanticFingerprintDomain::BoundSemanticQueryV1,
+        &canonical,
+    ))
+}
+
 /// Bind the typed relational DAG to one immutable serving snapshot and validate its native plans.
 ///
 /// # Errors
@@ -996,8 +1108,18 @@ pub async fn bind_request(
             });
         }
     }
+    let (_, plan_template_id) = semantic_plan_template(&blocks, &typed.execution_order)?;
+    let manifest = session.snapshot_manifest();
+    let bound_query_id = bound_semantic_query_identity(
+        typed,
+        &plan_template_id,
+        &manifest.manifest_digest,
+        &session.execution_config_digest()?,
+    )?;
     Ok(BoundPlanSpec {
-        snapshot_id: session.snapshot_manifest().snapshot_id,
+        snapshot_id: manifest.snapshot_id,
+        plan_template_id,
+        bound_query_id,
         request_digest: typed.request_digest.clone(),
         blocks,
         execution_order: typed.execution_order.clone(),
@@ -1063,7 +1185,7 @@ struct PathSearch {
 
 fn graph_result_identity(form: QueryForm, values: &[&[u8]]) -> ([u8; 16], String) {
     let mut fingerprint = crate::identity::semantic_fingerprint(
-        crate::identity::SemanticFingerprintDomain::ServingQuery,
+        crate::identity::SemanticFingerprintDomain::QueryResultValueV1,
     );
     fingerprint.update(&(form as u16).to_be_bytes());
     for value in values {

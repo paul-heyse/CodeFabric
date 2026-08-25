@@ -41,6 +41,7 @@ use crate::workspace_registry::WorkspaceRecord;
 mod mutation;
 mod overlay;
 mod publication;
+mod result_checksum;
 #[cfg(feature = "daemon")]
 mod serving;
 mod snapshot_catalog;
@@ -58,9 +59,14 @@ pub use publication::{
     PublicationPins, PublicationReferenceViolation, PublicationRequest, PublicationScope,
     PublicationTableRecord,
 };
+pub use result_checksum::{
+    RESULT_CHECKSUM_VERSION, ResultChecksumError, ResultChecksumV1, result_checksum_v1,
+};
+#[cfg(feature = "daemon")]
+pub(crate) use serving::logical_plan_template_serialization;
 #[cfg(feature = "daemon")]
 pub use serving::{
-    QueryPlanArtifact, ServingQueryError, ServingQueryResult, ServingQuerySession,
+    QueryPlanArtifact, Reproducibility, ServingQueryError, ServingQueryResult, ServingQuerySession,
     ServingRuntimeConfig, ServingRuntimeEvidence,
 };
 pub use snapshot_catalog::{
