@@ -8,7 +8,7 @@
   "packets": {
     "WP73": {
       "status": "complete",
-      "proving_commit": "c6db86ea8b7ad709b114a1828e0d9bb7a9cd845d",
+      "proving_commit": "c133c9ed7ce2e5af293d6693da1509428d0be747",
       "deviations": [
         "Repository owner explicitly accepted the exact WP73 normative amendment candidate in commit c6db86e on 2026-08-25."
       ],
