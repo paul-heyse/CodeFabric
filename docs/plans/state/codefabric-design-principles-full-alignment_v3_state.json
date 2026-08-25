@@ -8,7 +8,7 @@
   "packets": {
     "WP73": {
       "status": "complete",
-      "proving_commit": "c133c9ed7ce2e5af293d6693da1509428d0be747",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [
         "Inherited from the trusted v2 WP73 checkpoint after explicit repository-owner acceptance; v3 changes only declared-input provenance."
       ],
@@ -17,7 +17,7 @@
     },
     "WP54": {
       "status": "complete",
-      "proving_commit": "d336544418840bf825fcea4a7a1eca293ff3ae21",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [
         "The two WP73 registry record sets are unchanged; WP54 adds the repository-model identity envelope and detached semantic identity required for those accepted authorities to participate in governance."
       ],
@@ -30,7 +30,7 @@
     },
     "WP55": {
       "status": "complete",
-      "proving_commit": "57d0c5530e6d64463633ef1d534873afd2dd6330",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [],
       "failed_approaches": [
         "The first aggregate oracle-substance rerun exposed WP54 test assertions that hard-coded eight active oracle definitions; the correction derives four definitions per complete or in-progress packet from schema-2 state.",
@@ -41,7 +41,7 @@
     },
     "WP56": {
       "status": "complete",
-      "proving_commit": "974cb78c03c6047ce0da090ff22d540a5f6d1fb6",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [
         "The purpose-aware digest census classifies the model compiler's digest-frame template as the WP56 generator authority; the two emitted Cargo-root helpers remain byte-identical generated outputs rather than independent authorities."
       ],
@@ -52,7 +52,7 @@
     },
     "WP57": {
       "status": "complete",
-      "proving_commit": "e9ac61308443a539a02e1974f1e4491351a2ed74",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [
         "WP57 generates and authenticates typed cross-table foreign-key contracts but leaves complete-candidate enforcement to dependency-closed WP74, preserving the accepted R6 lifecycle split.",
         "The canonical-response KAT uses a 32 MiB test-session pool after generated semantic metadata increased the four-join plan reservation; the separate WP25 resource oracle continues to prove the production 16 MiB configuration."
@@ -66,7 +66,7 @@
     },
     "WP74": {
       "status": "complete",
-      "proving_commit": "77ff920657f3a4c4bcb760074f87e95730678492",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [
         "Substantive implementation and all WP74 packet gates proved at 77ff920657f3a4c4bcb760074f87e95730678492 before the inherited execution state exposed WP59 as an unmet dependency; formal completion and detector closure are intentionally withheld until WP59 is complete.",
         "WP59 dependency closure was proved at 75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47; all four WP74 oracles and publication-referential-integrity-check were rerun at that HEAD before certification."
@@ -76,7 +76,7 @@
     },
     "WP58": {
       "status": "complete",
-      "proving_commit": "9562c235a5c446256d15a1badf6b6d6d6ffb475d",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [],
       "failed_approaches": [
         "The first staged-schema family run exposed an outdated independent consumer: Arrow 59 exports extension metadata keys through arrow_schema, the field metadata update had a move-order defect, and the strict manifest decoder lacked WP57's semantic fields plus the new golden-instance path. The consumer now compiles independently and validates the complete current manifest.",
@@ -86,7 +86,7 @@
     },
     "WP59": {
       "status": "complete",
-      "proving_commit": "75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [
         "The substantive one-Arrow ingress implementation landed at e6f9ca53a64e9ea5a28fd7611e8cdde835ea100b; the proving commit is the follow-up census fix at 75a3f2b06f0ea896686fe5ce0c4fdc8892b6bf47 because packet and root acceptance are green only with both commits in history."
       ],
@@ -105,7 +105,7 @@
       "blockers": []
     },
     "WP61": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -169,7 +169,7 @@
     },
     "WP69": {
       "status": "complete",
-      "proving_commit": "cc6985fe5a9260a46daca54fde4b42e8b0a3e98f",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [
         "WP69 release certification expanded beyond the packet's known-touch list to close two pre-existing narrow-feature defects: fact-generation and repository-state now explicitly depend on the contract-model substrate their activated identity, snapshot, and generated-registry modules require; stable-graph-check enforces both exact closures."
       ],
@@ -212,7 +212,7 @@
   "milestones": {
     "M09": {
       "status": "complete",
-      "proving_commit": "cc6985fe5a9260a46daca54fde4b42e8b0a3e98f",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -270,7 +270,7 @@
     },
     "DB12": {
       "status": "complete",
-      "proving_commit": "cc6985fe5a9260a46daca54fde4b42e8b0a3e98f",
+      "proving_commit": "9ff37e6db461e79d4b3d2b3269b557f331355252",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -323,6 +323,6 @@
       "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
     }
   ],
-  "next_action": "Complete implemented-scope closeout and implementation-status reconstruction, then begin WP60 preflight at the external provider adapter and lifecycle boundary.",
-  "updated_at": "2026-08-25T19:53:14Z"
+  "next_action": "Begin WP60 preflight and implement the provider hierarchy, single cancellation handle, generated field-role crosswalk, and single extractor protocol without starting WP61.",
+  "updated_at": "2026-08-25T20:04:04Z"
 }
