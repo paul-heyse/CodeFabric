@@ -722,6 +722,8 @@ pub enum SemanticFingerprintDomain {
     PythonLiteralTokenSpelling,
 }
 impl SemanticFingerprintDomain {
+    #[must_use]
+    #[allow(clippy::too_many_lines)] // Exhaustive generated registry projection.
     pub const fn bytes(self) -> &'static [u8] {
         match self {
             Self::UnframedId16 => &[],
@@ -878,6 +880,8 @@ pub enum IntegrityDomain {
     Wave4CanonicalState,
 }
 impl IntegrityDomain {
+    #[must_use]
+    #[allow(clippy::too_many_lines)] // Exhaustive generated registry projection.
     pub const fn bytes(self) -> &'static [u8] {
         match self {
             Self::ArrowBatch => &[
@@ -989,6 +993,8 @@ pub enum CacheKeyDomain {
     GitCandidateCachePayload,
 }
 impl CacheKeyDomain {
+    #[must_use]
+    #[allow(clippy::too_many_lines)] // Exhaustive generated registry projection.
     pub const fn bytes(self) -> &'static [u8] {
         match self {
             Self::OverlayPrimaryKey => &[
@@ -1010,6 +1016,8 @@ pub enum SecurityMacDomain {
     LocalCapabilityToken,
 }
 impl SecurityMacDomain {
+    #[must_use]
+    #[allow(clippy::too_many_lines)] // Exhaustive generated registry projection.
     pub const fn bytes(self) -> &'static [u8] {
         match self {
             Self::ResultLease => &[

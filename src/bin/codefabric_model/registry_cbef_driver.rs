@@ -2308,7 +2308,7 @@ fn render_fingerprint_domains(output: &mut String, registry: &FingerprintDomainR
         output.push_str("}\n");
         writeln!(
             output,
-            "impl {type_name} {{\n    pub const fn bytes(self) -> &'static [u8] {{\n        match self {{"
+            "impl {type_name} {{\n    #[must_use]\n    #[allow(clippy::too_many_lines)] // Exhaustive generated registry projection.\n    pub const fn bytes(self) -> &'static [u8] {{\n        match self {{"
         )
         .unwrap();
         for record in registry
@@ -2601,7 +2601,7 @@ fn render_rust_runtime_registries(
             "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub struct {name}(u64);\nimpl {name} {{"
         )
         .unwrap();
-        output.push_str("    pub const fn empty() -> Self { Self(0) }\n");
+        output.push_str("    #[must_use]\n    pub const fn empty() -> Self { Self(0) }\n");
         let mut accepted_mask = 0_u64;
         for value in &domain.values {
             let bit = 1_u64 << value.bit;
@@ -2614,13 +2614,19 @@ fn render_rust_runtime_registries(
             )
             .unwrap();
         }
-        writeln!(
-            output,
-            "    pub const fn from_bits(bits: u64) -> Option<Self> {{ if bits & !{} == 0 {{ Some(Self(bits)) }} else {{ None }} }}",
-            rust_u64_literal(accepted_mask)
-        )
-        .unwrap();
-        output.push_str("    pub const fn bits(self) -> u64 { self.0 }\n}\n\n");
+        if accepted_mask == 0 {
+            output.push_str(
+                "    #[must_use]\n    pub const fn from_bits(bits: u64) -> Option<Self> { if bits == 0 { Some(Self(bits)) } else { None } }\n",
+            );
+        } else {
+            writeln!(
+                output,
+                "    #[must_use]\n    pub const fn from_bits(bits: u64) -> Option<Self> {{ if bits & !{} == 0 {{ Some(Self(bits)) }} else {{ None }} }}",
+                rust_u64_literal(accepted_mask)
+            )
+            .unwrap();
+        }
+        output.push_str("    #[must_use]\n    pub const fn bits(self) -> u64 { self.0 }\n}\n\n");
         writeln!(
             output,
             "pub const {}_FLAGS: &[FlagEntry] = &[",

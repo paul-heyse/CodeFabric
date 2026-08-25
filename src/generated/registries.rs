@@ -5077,6 +5077,7 @@ pub const WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS: &[StateTransitionEntry] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FactFlags(u64);
 impl FactFlags {
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
@@ -5087,6 +5088,7 @@ impl FactFlags {
     pub const PYTHON_PROFILE: Self = Self(0x0000_0001_0000_0000);
     pub const RUST_PROFILE: Self = Self(0x0000_0002_0000_0000);
     pub const COMPILER_SYNTHETIC: Self = Self(0x0001_0000_0000_0000);
+    #[must_use]
     pub const fn from_bits(bits: u64) -> Option<Self> {
         if bits & !0x0001_0003_0000_000f == 0 {
             Some(Self(bits))
@@ -5094,6 +5096,7 @@ impl FactFlags {
             None
         }
     }
+    #[must_use]
     pub const fn bits(self) -> u64 {
         self.0
     }
@@ -5140,16 +5143,15 @@ pub const FACT_FLAGS_FLAGS: &[FlagEntry] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderNodeFlags(u64);
 impl ProviderNodeFlags {
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
+    #[must_use]
     pub const fn from_bits(bits: u64) -> Option<Self> {
-        if bits & !0x0000_0000_0000_0000 == 0 {
-            Some(Self(bits))
-        } else {
-            None
-        }
+        if bits == 0 { Some(Self(bits)) } else { None }
     }
+    #[must_use]
     pub const fn bits(self) -> u64 {
         self.0
     }

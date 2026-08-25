@@ -893,7 +893,7 @@ mod tests {
 
     #[test]
     fn model_proto_has_one_descriptor_compiler_identity() {
-        assert_eq!(PROTOCOL_VERSION, "codefabric-external-proto-driver-v1");
+        assert_eq!(PROTOCOL_VERSION, "codefabric-external-proto-driver-v2");
         assert!(include_str!("../../../tooling/proto/generate.rs").contains("compile_fds"));
     }
 

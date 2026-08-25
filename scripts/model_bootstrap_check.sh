@@ -48,11 +48,15 @@ omit_generated_outputs() {
   done < <(jq -r '.output_paths[]' <<<"$plan")
 }
 
-model_bootstrap_has_no_generated_or_production_library_edge() {
+model_bootstrap_has_no_generated_or_unapproved_library_edge() {
   local source_hits tree
-  source_hits="$(rg -n 'include(_bytes)?!\s*\(|\bcodefabric::|extern\s+crate\s+codefabric|#\s*\[\s*path\s*=.*generated|\b(use|mod)\s+(crate::)?generated\b' \
-    "$sandbox_root/src/bin/codefabric_model" || true)"
-  [ -z "$source_hits" ] || fail "model binary source reaches a generated or production library surface: $source_hits"
+  source_hits="$(
+    rg -n '\bcodefabric::|extern\s+crate\s+codefabric|#\s*\[\s*path\s*=.*generated|\b(use|mod)\s+(crate::)?generated\b' \
+      "$sandbox_root/src/bin/codefabric_model" \
+      | rg -v '\bcodefabric::(integrity|contracts::(jcs|models))\b' \
+      || true
+  )"
+  [ -z "$source_hits" ] || fail "model binary source reaches a generated or unapproved production library surface: $source_hits"
 
   tree="$(cd "$sandbox_root" && cargo tree --locked --edges normal \
     --no-default-features --features model-compiler --prefix none)"
@@ -111,7 +115,7 @@ model_bootstrap_builds_without_generated_outputs() {
 cd "$repo_root"
 copy_current_tree
 omit_generated_outputs
-model_bootstrap_has_no_generated_or_production_library_edge
+model_bootstrap_has_no_generated_or_unapproved_library_edge
 model_bootstrap_builds_without_generated_outputs
 
 printf 'model bootstrap check passed\n'

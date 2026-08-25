@@ -4,7 +4,13 @@
 //! production modules; [`compatibility`] is a compile- and test-only pinned-library probe tier,
 //! never a runtime application contract.
 
-#[cfg(feature = "canonical-json")]
+#[cfg(any(
+    all(feature = "canonical-json", not(feature = "model-compiler")),
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
 pub mod analysis_context;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
@@ -22,7 +28,13 @@ pub mod daemon;
 pub mod derivation;
 #[cfg(feature = "daemon")]
 pub mod golden_corpus;
-#[cfg(feature = "canonical-json")]
+#[cfg(any(
+    all(feature = "canonical-json", not(feature = "model-compiler")),
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
 pub mod identity;
 #[cfg(any(
     feature = "canonical-json",
@@ -36,7 +48,13 @@ pub mod inventory;
 #[cfg(feature = "daemon")]
 pub mod lifecycle;
 /// Model-generated exhaustive bindings. The generated aggregator owns its member list.
-#[cfg(any(feature = "canonical-json", feature = "fact-generation"))]
+#[cfg(any(
+    all(feature = "canonical-json", not(feature = "model-compiler")),
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
 #[path = "generated/model.rs"]
 pub(crate) mod model_generated;
 #[cfg(feature = "data-fabric")]
@@ -51,7 +69,7 @@ pub mod provider_types;
 pub mod query_service;
 /// Generated categorical and lifecycle registry types.
 #[cfg(any(
-    feature = "contract-models",
+    all(feature = "contract-models", not(feature = "model-compiler")),
     feature = "daemon",
     feature = "data-fabric",
     feature = "fact-generation",
@@ -72,7 +90,13 @@ pub mod secure_path;
 pub mod security;
 #[cfg(feature = "daemon")]
 pub mod semantic_query;
-#[cfg(feature = "canonical-json")]
+#[cfg(any(
+    all(feature = "canonical-json", not(feature = "model-compiler")),
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
 pub mod snapshot;
 #[cfg(feature = "daemon")]
 pub mod snapshot_runtime;

@@ -117,7 +117,7 @@ case "$family" in
       and .domain_count == 17
       and .enum_domain_count > 0
       and .flag_domain_count > 0
-      and (.rendered_outputs | length) == 9
+      and (.rendered_outputs | length) == 10
       and (.tool_identity.action_key | startswith("b3:"))
       and (.tool_identity.executable_digest | startswith("b3:"))
       and .tool_identity.features == ["provider-inventory-tooling"]

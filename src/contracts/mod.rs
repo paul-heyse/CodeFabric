@@ -2,7 +2,13 @@
 
 #[cfg(feature = "contract-models")]
 pub mod catalog;
-#[cfg(feature = "contract-models")]
+#[cfg(any(
+    all(feature = "contract-models", not(feature = "model-compiler")),
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
 pub mod index;
 pub mod jcs;
 #[cfg(feature = "contract-models")]

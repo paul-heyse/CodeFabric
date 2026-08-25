@@ -615,6 +615,10 @@ impl SemanticFingerprintBuilder {
     }
 
     /// Finish as the canonical first-16-byte semantic identifier.
+    ///
+    /// # Panics
+    ///
+    /// The fixed 32-byte BLAKE3 digest always contains the required 16-byte prefix.
     #[must_use]
     pub fn finalize_id16(self) -> [u8; 16] {
         let digest = self.finalize();

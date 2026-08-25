@@ -6,7 +6,13 @@
 
 use std::fmt::Write as _;
 
-#[cfg(any(feature = "canonical-json", feature = "fact-generation"))]
+#[cfg(any(
+    all(feature = "canonical-json", not(feature = "model-compiler")),
+    feature = "daemon",
+    feature = "data-fabric",
+    feature = "fact-generation",
+    feature = "repository-state"
+))]
 pub use crate::model_generated::identity_recipes::{CacheKeyDomain, IntegrityDomain};
 
 /// Compute an unframed BLAKE3-256 content digest.
@@ -55,7 +61,13 @@ impl IntegrityHasher {
 
     /// Start a domain-separated content-integrity digest selected from the
     /// governed hash-purpose registry.
-    #[cfg(any(feature = "canonical-json", feature = "fact-generation"))]
+    #[cfg(any(
+        all(feature = "canonical-json", not(feature = "model-compiler")),
+        feature = "daemon",
+        feature = "data-fabric",
+        feature = "fact-generation",
+        feature = "repository-state"
+    ))]
     #[must_use]
     pub fn for_domain(domain: IntegrityDomain) -> Self {
         let mut hasher = blake3::Hasher::new();
@@ -94,7 +106,13 @@ impl CacheKeyHasher {
 
     /// Start a domain-separated ephemeral cache key selected from the
     /// governed hash-purpose registry.
-    #[cfg(any(feature = "canonical-json", feature = "fact-generation"))]
+    #[cfg(any(
+        all(feature = "canonical-json", not(feature = "model-compiler")),
+        feature = "daemon",
+        feature = "data-fabric",
+        feature = "fact-generation",
+        feature = "repository-state"
+    ))]
     #[must_use]
     pub fn for_domain(domain: CacheKeyDomain) -> Self {
         let mut hasher = blake3::Hasher::new();

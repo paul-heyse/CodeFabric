@@ -1190,7 +1190,7 @@ fn requirements(
                 .iter()
                 .map(|family| format!("just model-family-check {family}"))
                 .collect::<BTreeSet<_>>();
-            verified_by.insert("just model-release-check".to_owned());
+            verified_by.insert("just model-repro-check".to_owned());
             let record = RequirementRecord {
                 requirement_id: requirement_id.clone(),
                 source_artifact: header.artifact_id.to_string(),

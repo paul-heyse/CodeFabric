@@ -166,16 +166,28 @@ def main() -> int:
             assert artifact["canonical_digest"] == digest_bytes(
                 detached_projection(artifact["authority_path"], source, proto_census)
             )
-    assert len(requirements) == len(traceability) > 0
-    assert len(requirements) <= len(released)
-    assert requirements == traceability
+    assert len(requirements) == len(traceability) == 84
+    requirement_ids = [record["requirement_id"] for record in requirements]
+    traceability_ids = [record["requirement_id"] for record in traceability]
+    assert len(set(requirement_ids)) == len(requirement_ids)
+    assert traceability_ids == requirement_ids
+    assert requirements != traceability
     assert all(
-        record["source_path"]
+        record["source_artifact"]
+        and record["source_section"]
+        and record["status"] == "active"
+        and record["owner_acceptance"]["approver"]
         and record["implements"]
         and record["verified_by"]
         and record["normative_text_digest"]
         == digest_bytes(record["normative_text"].encode())
         for record in requirements
+    )
+    assert all(
+        record["implements"]
+        and record["verified_by"]
+        and isinstance(record["traces_to"], dict)
+        for record in traceability
     )
 
     assert len(bundles) == 8
@@ -219,7 +231,8 @@ def main() -> int:
             .splitlines()
         ]
         assert records[0]["artifact_id"] == f"codefabric.manifests.{name}"
-        assert records[1:] == requirements
+        expected_records = requirements if name == "requirements" else traceability
+        assert records[1:] == expected_records
     fixture_manifest = read_json(
         stage, Path("contracts/manifests/fixture-oracles.json")
     )
@@ -287,7 +300,8 @@ def main() -> int:
     )
     print(
         f"validated aggregate DesiredTree: {len(actual_files)} outputs, "
-        f"{len(released)} released requirements, {len(bundles)} bundles"
+        f"{len(released)} released artifacts, {len(requirements)} requirements, "
+        f"{len(bundles)} bundles"
     )
     return 0
 
