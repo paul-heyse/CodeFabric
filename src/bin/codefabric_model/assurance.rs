@@ -5,9 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use codefabric::contracts::models::{
-    OwnerAcceptance, RequirementRecord, RequirementStatus, RequirementTraces,
-};
+#[cfg(test)]
+use codefabric::contracts::models::{OwnerAcceptance, RequirementTraces};
+use codefabric::contracts::models::{RequirementRecord, RequirementStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
