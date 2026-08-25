@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP61",
+  "current_packet": "WP62",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -105,14 +105,14 @@
       "blockers": []
     },
     "WP61": {
-      "status": "ready",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "7de9e42ccd4b23c193a706ae0bf2f8183c75be40",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP62": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -323,6 +323,6 @@
       "summary": "WP60 is activated as the dependency-closed next packet but remains ready, not in_progress, because no WP60-specific functional change or substantive oracle exists yet. This preserves the assurance rule that in-progress packets must already have their packet oracles implemented."
     }
   ],
-  "next_action": "Implement WP61 lifecycle phases, generated error vocabulary, guard/state truth, and four exact oracles with proportional packet validation.",
-  "updated_at": "2026-08-25T20:51:56Z"
+  "next_action": "Implement WP62 typed semantic request IR, native DataFusion relational lowering, truthful runtime states, and four exact oracles with proportional packet validation.",
+  "updated_at": "2026-08-25T21:17:47Z"
 }
