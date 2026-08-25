@@ -97,3 +97,44 @@ def test_active_plan_resolution(tmp_path: Path) -> None:
     (tmp_path / plan).write_text("### WP54 — packet\n", encoding="utf-8")
     pointer.write_text(json.dumps({"plan_path": plan.as_posix()}), encoding="utf-8")
     assert alignment._active_plan(tmp_path) == (plan, "### WP54 — packet\n")
+
+
+def test_wp73_behavioral_acceptance() -> None:
+    assert alignment.validate_traceability() == (25, 124)
+    observations = alignment.execute_detectors()
+    assert len(observations) == 124
+    assert {item.detector_id for item in observations} == alignment.DETECTOR_IDS
+
+
+def test_wp73_structural_acceptance() -> None:
+    principles = alignment._records(
+        alignment._load_yaml(alignment.PRINCIPLE_REGISTRY),
+        alignment.PRINCIPLE_REGISTRY,
+    )
+    detectors = alignment._records(
+        alignment._load_yaml(alignment.DETECTOR_REGISTRY),
+        alignment.DETECTOR_REGISTRY,
+    )
+    assert len(principles) == 25
+    assert len(detectors) == 124
+    assert all(
+        record["command"].endswith(record["detector_id"]) for record in detectors
+    )
+
+
+def test_wp73_negative_zero_state() -> None:
+    with pytest.raises(alignment.AlignmentContractError, match="vacuous"):
+        alignment._validate_probe(
+            "DP-999",
+            {
+                "kind": "contains",
+                "paths": ["src/**/*.rs"],
+                "pattern": "nonempty",
+                "min_matches": 0,
+            },
+        )
+
+
+def test_wp73_operational_acceptance() -> None:
+    current_dirty, attributed = alignment.validate_baseline()
+    assert current_dirty <= attributed
