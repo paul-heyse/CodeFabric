@@ -8,7 +8,7 @@
     "contracts/fixtures",
     "docs/upfront_design"
   ],
-  "output_count": 77,
+  "output_count": 78,
   "released_requirement_count": 84,
   "routine_write_roots": [
     "contracts/generated/model",
@@ -21,5 +21,5 @@
     "tooling/proto"
   ],
   "schema_version": 1,
-  "tree_digest": "b3:594654ddae0fb9e58cbfb63f5e8ec0b8ebab67e2d97b197f6b909fa784be2dc9"
+  "tree_digest": "b3:b5f3d127ee410701337228e3ac7938c09ecc0253bec8a67aa52cb4129d66d9f5"
 }

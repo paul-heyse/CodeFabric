@@ -6,7 +6,8 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use arrow_array::{
-    Array as _, ArrayRef, BinaryArray, Int16Array, Int64Array, RecordBatch, UInt32Array,
+    Array as _, ArrayRef, BinaryArray, FixedSizeBinaryArray, Int16Array, Int64Array, RecordBatch,
+    UInt32Array,
 };
 use arrow_row::{RowConverter, SortField};
 use arrow_schema::{Field, Schema, SchemaRef};
@@ -680,7 +681,7 @@ impl SnapshotOverlayProviderFactory for ConsolidatedOverlay {
         spec: &TableSpec,
         base: Arc<dyn TableProvider>,
     ) -> Result<Arc<dyn TableProvider>, FabricError> {
-        if base.schema() != spec.arrow_schema {
+        if base.schema().fields() != spec.arrow_schema.fields() {
             return Err(policy_error(spec.table_code, "base provider schema drift"));
         }
         let plan = effective_plan(&base, spec, self.tables.get(&spec.table_code))?;
@@ -777,7 +778,7 @@ impl TableProvider for OverlayEffectiveProvider {
     }
 
     fn statistics(&self) -> Option<Statistics> {
-        None
+        Some(Statistics::new_unknown(self.schema().as_ref()))
     }
 }
 
@@ -1136,18 +1137,8 @@ fn owner_tombstone_batch(
     let overlay_generation = i64::try_from(overlay_generation)
         .map_err(|_| policy_error(table_code, "overlay generation exceeds i64"))?;
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(
-            records
-                .iter()
-                .map(|_| Some(workspace_id.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
-        Arc::new(BinaryArray::from(
-            records
-                .iter()
-                .map(|_| Some(analysis_context_id.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
+        super::id16_array(records.iter().map(|_| Some(&workspace_id))),
+        super::id16_array(records.iter().map(|_| Some(&analysis_context_id))),
         Arc::new(Int64Array::from(
             records
                 .iter()
@@ -1156,12 +1147,7 @@ fn owner_tombstone_batch(
         )),
         Arc::new(Int64Array::from(vec![overlay_generation; records.len()])),
         Arc::new(Int16Array::from(vec![table_code; records.len()])),
-        Arc::new(BinaryArray::from(
-            records
-                .iter()
-                .map(|(_, owner_id, ..)| Some(owner_id.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
+        super::id16_array(records.iter().map(|(_, owner_id, ..)| Some(owner_id))),
         Arc::new(Int16Array::from(
             records
                 .iter()
@@ -1212,18 +1198,8 @@ fn key_tombstone_batch(
     let overlay_generation = i64::try_from(overlay_generation)
         .map_err(|_| policy_error(table_code, "overlay generation exceeds i64"))?;
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(
-            records
-                .iter()
-                .map(|_| Some(workspace_id.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
-        Arc::new(BinaryArray::from(
-            records
-                .iter()
-                .map(|_| Some(analysis_context_id.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
+        super::id16_array(records.iter().map(|_| Some(&workspace_id))),
+        super::id16_array(records.iter().map(|_| Some(&analysis_context_id))),
         Arc::new(Int64Array::from(
             records
                 .iter()
@@ -1280,12 +1256,7 @@ fn touched_key_batch(
                 .clone();
             RecordBatch::try_new(
                 Arc::new(Schema::new(vec![field])),
-                vec![Arc::new(BinaryArray::from(
-                    owners
-                        .iter()
-                        .map(|owner| Some(owner.as_slice()))
-                        .collect::<Vec<_>>(),
-                ))],
+                vec![super::id16_array(owners.iter().map(Some))],
             )
             .map_err(FabricError::from)
         }
@@ -1436,7 +1407,7 @@ fn validate_batch_column<'a, T: 'static>(
 }
 
 fn fixed_id_column(batch: &RecordBatch, name: &str, row: usize) -> Result<[u8; 16], FabricError> {
-    let array = validate_batch_column::<BinaryArray>(batch, name)?;
+    let array = validate_batch_column::<FixedSizeBinaryArray>(batch, name)?;
     let value = array.value(row);
     value.try_into().map_err(|_| {
         FabricError::OverlayPolicyViolation(format!("{name} is not a 16-byte identity"))
@@ -1798,6 +1769,7 @@ fn snapshot_runtime_error(error: &SnapshotRuntimeError) -> FabricError {
 mod tests {
     use super::*;
 
+    use crate::fabric::id16_array;
     use arrow_array::{StringArray, TimestampMicrosecondArray};
     use datafusion::prelude::SessionContext;
 
@@ -1813,20 +1785,15 @@ mod tests {
             .collect::<Vec<_>>();
         let count = rows.len();
         let columns: Vec<ArrayRef> = vec![
-            Arc::new(BinaryArray::from(vec![Some(WORKSPACE.as_slice()); count])),
-            Arc::new(BinaryArray::from(vec![Some(CONTEXT.as_slice()); count])),
+            id16_array(vec![Some(&WORKSPACE); count]),
+            id16_array(vec![Some(&CONTEXT); count]),
             Arc::new(Int64Array::from(
                 rows.iter()
                     .map(|(_, generation, _)| *generation)
                     .collect::<Vec<_>>(),
             )),
-            Arc::new(BinaryArray::from(
-                owner_ids
-                    .iter()
-                    .map(|owner| Some(owner.as_slice()))
-                    .collect::<Vec<_>>(),
-            )),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>; count])),
+            id16_array(owner_ids.iter().map(Some)),
+            id16_array(vec![None; count]),
             Arc::new(Int16Array::from(
                 rows.iter()
                     .map(|(owner, ..)| i16::from(*owner))
@@ -1834,8 +1801,8 @@ mod tests {
             )),
             Arc::new(Int16Array::from(vec![1; count])),
             Arc::new(Int16Array::from(vec![1; count])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>; count])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>; count])),
+            id16_array(vec![None; count]),
+            id16_array(vec![None; count]),
             Arc::new(Int64Array::from(vec![None::<i64>; count])),
             Arc::new(Int64Array::from(vec![None::<i64>; count])),
             Arc::new(BinaryArray::from(vec![None::<&[u8]>; count])),
@@ -1854,9 +1821,9 @@ mod tests {
         let workspace_id = [workspace; 16];
         let authorization = [9_u8; 32];
         let columns: Vec<ArrayRef> = vec![
-            Arc::new(BinaryArray::from(vec![Some(workspace_id.as_slice())])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
+            id16_array([Some(&workspace_id)]),
+            id16_array([None]),
+            id16_array([None]),
             Arc::new(Int16Array::from(vec![1])),
             Arc::new(StringArray::from(vec![format!("workspace-{workspace}")])),
             Arc::new(BinaryArray::from(vec![Some(b"/workspace".as_slice())])),
@@ -1933,11 +1900,30 @@ mod tests {
             .unwrap()],
         );
         let provider = overlay.wrap(spec, base).unwrap();
-        assert!(provider.statistics().is_none());
+        let statistics = provider
+            .statistics()
+            .expect("provider reports honest unknowns");
+        assert_eq!(
+            statistics.num_rows,
+            datafusion::common::stats::Precision::Absent
+        );
+        assert_eq!(
+            statistics.column_statistics.len(),
+            spec.arrow_schema.fields().len()
+        );
+        assert!(statistics.column_statistics.iter().all(|column| {
+            column.null_count == datafusion::common::stats::Precision::Absent
+                && column.min_value == datafusion::common::stats::Precision::Absent
+                && column.max_value == datafusion::common::stats::Precision::Absent
+        }));
 
         let projection = [0, 3, 14];
         let filters =
             [datafusion::prelude::col("owner_bucket").eq(datafusion::prelude::lit(2_i16))];
+        assert_eq!(
+            provider.supports_filters_pushdown(&[&filters[0]]).unwrap(),
+            [TableProviderFilterPushDown::Exact]
+        );
         let statistics_requests = [StatisticsRequest::RowCount];
         let context = SessionContext::new();
         let state = context.state();

@@ -17,7 +17,7 @@ use crate::schema_registry::{
 use crate::snapshot::SnapshotOverlayTable;
 #[cfg(test)]
 use arrow_array::RecordBatch;
-use arrow_array::{Array as _, BinaryArray};
+use arrow_array::{Array as _, FixedSizeBinaryArray};
 use arrow_row::{RowConverter, SortField};
 #[cfg(test)]
 use arrow_select::concat::concat_batches;
@@ -25,7 +25,8 @@ use async_trait::async_trait;
 use datafusion::catalog::{
     CatalogProvider, ScanArgs, ScanResult, SchemaProvider, Session, TableProvider,
 };
-use datafusion::common::{DataFusionError, Statistics};
+use datafusion::common::stats::Precision;
+use datafusion::common::{ColumnStatistics, DataFusionError, Statistics};
 use datafusion::datasource::{ViewTable, provider_as_source};
 use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, TrackConsumersPool};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
@@ -231,6 +232,85 @@ struct OverlayIdentityProvider {
     table_code: i16,
     generation: u64,
     checksum: [u8; 32],
+}
+
+/// Closed WP58 posture: query-aware StatisticsRequest is not advertised or consumed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StatisticsRequestPosture {
+    Declined,
+}
+
+/// Current posture until an optimizer producer, cache, and consumer are designed together.
+pub const STATISTICS_REQUEST_POSTURE: StatisticsRequestPosture = StatisticsRequestPosture::Declined;
+
+struct EffectiveStatisticsProvider {
+    inner: Arc<dyn TableProvider>,
+    statistics: Statistics,
+}
+
+impl fmt::Debug for EffectiveStatisticsProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EffectiveStatisticsProvider")
+            .field("statistics", &self.statistics)
+            .finish_non_exhaustive()
+    }
+}
+
+#[async_trait]
+impl TableProvider for EffectiveStatisticsProvider {
+    fn schema(&self) -> arrow_schema::SchemaRef {
+        self.inner.schema()
+    }
+
+    fn constraints(&self) -> Option<&datafusion::common::Constraints> {
+        self.inner.constraints()
+    }
+
+    fn table_type(&self) -> TableType {
+        self.inner.table_type()
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
+        self.inner.scan(state, projection, filters, limit).await
+    }
+
+    async fn scan_with_args<'a>(
+        &self,
+        state: &dyn Session,
+        args: ScanArgs<'a>,
+    ) -> datafusion::error::Result<ScanResult> {
+        debug_assert_eq!(
+            STATISTICS_REQUEST_POSTURE,
+            StatisticsRequestPosture::Declined
+        );
+        let projection = args.projection().map(<[usize]>::to_vec);
+        self.scan(
+            state,
+            projection.as_ref(),
+            args.filters().unwrap_or(&[]),
+            args.limit(),
+        )
+        .await
+        .map(Into::into)
+    }
+
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> datafusion::error::Result<Vec<TableProviderFilterPushDown>> {
+        self.inner.supports_filters_pushdown(filters)
+    }
+
+    fn statistics(&self) -> Option<Statistics> {
+        Some(self.statistics.clone())
+    }
 }
 
 impl fmt::Debug for OverlayIdentityProvider {
@@ -614,6 +694,14 @@ impl SnapshotProviderCatalog {
             } else {
                 Some(stream_provider_evidence(Arc::clone(&provider), spec).await?)
             };
+            let statistics = evidence.as_ref().map_or_else(
+                || authenticated_statistics(spec, manifest.row_count),
+                |value| Ok(value.statistics.clone()),
+            )?;
+            let provider: Arc<dyn TableProvider> = Arc::new(EffectiveStatisticsProvider {
+                inner: provider,
+                statistics,
+            });
             wrapped.insert(
                 table_code,
                 SnapshotProviderRecord {
@@ -844,6 +932,33 @@ struct ProviderEvidence {
     content_digest: [u8; 32],
     row_count: i64,
     owner_count: i64,
+    statistics: Statistics,
+}
+
+fn authenticated_statistics(spec: &TableSpec, row_count: i64) -> Result<Statistics, FabricError> {
+    let row_count = usize::try_from(row_count).map_err(|_| {
+        FabricError::SnapshotProviderIntegrity(format!(
+            "{} authenticated row count is negative or exceeds usize",
+            spec.name
+        ))
+    })?;
+    Ok(Statistics {
+        num_rows: Precision::Exact(row_count),
+        total_byte_size: Precision::Absent,
+        column_statistics: spec
+            .arrow_schema
+            .fields()
+            .iter()
+            .map(|field| ColumnStatistics {
+                null_count: if field.is_nullable() {
+                    Precision::Absent
+                } else {
+                    Precision::Exact(0)
+                },
+                ..ColumnStatistics::default()
+            })
+            .collect(),
+    })
 }
 
 async fn stream_provider_evidence(
@@ -893,6 +1008,7 @@ async fn stream_provider_evidence(
     let mut owners = BTreeSet::new();
     let mut bytes = 0_usize;
     let mut batches = 0_usize;
+    let mut null_counts = vec![0_usize; spec.arrow_schema.fields().len()];
     while let Some(batch) = stream.next().await.transpose()? {
         batches += 1;
         if rows.len() + batch.num_rows() > limits.max_snapshot_validation_rows
@@ -924,12 +1040,15 @@ async fn stream_provider_evidence(
             )));
         }
         reservation.try_resize(bytes)?;
+        for (null_count, column) in null_counts.iter_mut().zip(batch.columns()) {
+            *null_count = null_count.saturating_add(column.null_count());
+        }
         if let Some(index) = owner_index {
             let values = batch
                 .column(index)
                 .as_any()
-                .downcast_ref::<BinaryArray>()
-                .expect("generated owner_id is Binary");
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .expect("generated owner_id is Id16");
             owners.extend(values.iter().flatten().map(<[u8]>::to_vec));
         }
     }
@@ -942,6 +1061,17 @@ async fn stream_provider_evidence(
         primary_key_digest: encoded_rows_checksum(&primary_schema, &mut primary_rows),
         row_count,
         owner_count,
+        statistics: Statistics {
+            num_rows: Precision::Exact(rows.len()),
+            total_byte_size: Precision::Absent,
+            column_statistics: null_counts
+                .into_iter()
+                .map(|null_count| ColumnStatistics {
+                    null_count: Precision::Exact(null_count),
+                    ..ColumnStatistics::default()
+                })
+                .collect(),
+        },
     })
 }
 
@@ -992,8 +1122,8 @@ fn owner_count(batch: &RecordBatch) -> Result<i64, FabricError> {
     let owners = batch
         .column(index)
         .as_any()
-        .downcast_ref::<BinaryArray>()
-        .ok_or_else(|| FabricError::SnapshotProviderIntegrity("owner_id is not Binary".into()))?;
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .ok_or_else(|| FabricError::SnapshotProviderIntegrity("owner_id is not Id16".into()))?;
     i64::try_from(
         owners
             .iter()
@@ -1256,6 +1386,31 @@ mod tests {
                 record.provider().schema().fields(),
                 table_spec(table_code).unwrap().arrow_schema.fields()
             );
+            let statistics = record.provider().statistics().unwrap();
+            assert_eq!(
+                statistics.num_rows,
+                Precision::Exact(usize::try_from(expected.row_count).unwrap())
+            );
+            assert_eq!(
+                statistics.column_statistics.len(),
+                table_spec(table_code).unwrap().arrow_schema.fields().len()
+            );
+            for (field, column) in table_spec(table_code)
+                .unwrap()
+                .arrow_schema
+                .fields()
+                .iter()
+                .zip(&statistics.column_statistics)
+            {
+                assert_eq!(
+                    column.null_count,
+                    if field.is_nullable() {
+                        Precision::Absent
+                    } else {
+                        Precision::Exact(0)
+                    }
+                );
+            }
         }
     }
 
@@ -1276,6 +1431,10 @@ mod tests {
             DeltaMaterializationPosture::ExactVersionProvider
         );
         assert!(!DeltaAccessProfile::QueryServing.skip_stats());
+        assert_eq!(
+            STATISTICS_REQUEST_POSTURE,
+            StatisticsRequestPosture::Declined
+        );
         let first = candidate.provider(1).unwrap();
         let second = candidate.provider(1).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
@@ -1430,6 +1589,89 @@ mod tests {
         assert_eq!(
             changed.metrics().validation_scan_count,
             publication.tables.len()
+        );
+        for record in changed.providers.values() {
+            let statistics = record.provider().statistics().unwrap();
+            assert_eq!(
+                statistics.num_rows,
+                Precision::Exact(usize::try_from(record.effective_row_count).unwrap())
+            );
+            assert!(
+                statistics
+                    .column_statistics
+                    .iter()
+                    .all(|column| matches!(column.null_count, Precision::Exact(_)))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn wp58_behavioral_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let (_fabric, publication) = fixture(root.path()).await;
+        let authenticated = SnapshotProviderCatalog::build(&publication, &EmptySnapshotOverlay)
+            .await
+            .unwrap();
+        for (&table_code, manifest) in &publication.tables {
+            let provider = authenticated.provider(table_code).unwrap();
+            let statistics = provider.statistics().unwrap();
+            assert_eq!(
+                statistics.num_rows,
+                Precision::Exact(usize::try_from(manifest.row_count).unwrap())
+            );
+            assert_eq!(
+                statistics.column_statistics.len(),
+                provider.schema().fields().len()
+            );
+            for (field, column) in provider
+                .schema()
+                .fields()
+                .iter()
+                .zip(&statistics.column_statistics)
+            {
+                assert_eq!(
+                    column.null_count,
+                    if field.is_nullable() {
+                        Precision::Absent
+                    } else {
+                        Precision::Exact(0)
+                    }
+                );
+                assert_eq!(column.min_value, Precision::Absent);
+                assert_eq!(column.max_value, Precision::Absent);
+                assert_eq!(column.distinct_count, Precision::Absent);
+            }
+        }
+        assert_eq!(authenticated.metrics().validation_scan_count, 0);
+
+        let measured = SnapshotProviderCatalog::build(&publication, &ChangedIdentityOverlay)
+            .await
+            .unwrap();
+        assert_eq!(
+            measured.metrics().validation_scan_count,
+            publication.tables.len()
+        );
+        for record in measured.providers.values() {
+            let statistics = record.provider().statistics().unwrap();
+            assert_eq!(
+                statistics.num_rows,
+                Precision::Exact(usize::try_from(record.effective_row_count).unwrap())
+            );
+            assert_eq!(
+                statistics.column_statistics.len(),
+                record.provider().schema().fields().len()
+            );
+            assert!(
+                statistics
+                    .column_statistics
+                    .iter()
+                    .all(|column| matches!(column.null_count, Precision::Exact(_)))
+            );
+        }
+        assert_eq!(
+            STATISTICS_REQUEST_POSTURE,
+            StatisticsRequestPosture::Declined,
+            "query-aware requested statistics have no advertised capability"
         );
     }
 }

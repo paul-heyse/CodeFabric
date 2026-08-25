@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use arrow_array::builder::{BinaryBuilder, Float64Builder, Int64Builder, StringBuilder};
 use arrow_array::{ArrayRef, BinaryArray, Int64Array, RecordBatch, StringArray};
@@ -23,6 +23,7 @@ use datafusion::logical_expr::expr_fn::cast;
 use datafusion::logical_expr::{Expr, JoinType, LogicalPlan, LogicalPlanBuilder, col, lit};
 #[cfg(test)]
 use datafusion::physical_plan::SendableRecordBatchStream;
+use datafusion::physical_plan::metrics::MetricValue;
 use datafusion::physical_plan::{
     ExecutionPlan, ExecutionPlanProperties, displayable, execute_stream,
 };
@@ -178,14 +179,6 @@ impl ServingRuntimeConfig {
     }
 }
 
-/// Observable functional runtime configuration; no elapsed-time fields exist.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ParquetFilterPushdownPosture {
-    Disabled,
-    EnabledPreservingOrder,
-    EnabledWithReordering,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServingRuntimeEvidence {
     pub memory_pool: String,
@@ -194,10 +187,11 @@ pub struct ServingRuntimeEvidence {
     pub spill_directory: PathBuf,
     pub batch_size: usize,
     pub target_partitions: usize,
-    pub parquet_pruning: bool,
-    pub parquet_filter_pushdown: ParquetFilterPushdownPosture,
-    pub repartition_joins: bool,
-    pub repartition_aggregations: bool,
+    pub observed_query_count: u64,
+    pub observed_pruning_metric_count: u64,
+    pub observed_pruned_row_groups: u64,
+    pub observed_repartition_operator_count: u64,
+    pub observed_repartition_output_rows: u64,
 }
 
 /// One emitted §110 query proof artifact without non-deterministic timing observations.
@@ -232,7 +226,7 @@ pub struct ServingQueryResult {
 pub struct ServingQuerySession {
     lease: SnapshotLeaseGuard,
     context: SessionContext,
-    evidence: ServingRuntimeEvidence,
+    evidence: RwLock<ServingRuntimeEvidence>,
     _control_reservation: Arc<MemoryReservation>,
     limits: ServingRuntimeConfig,
 }
@@ -242,7 +236,7 @@ impl std::fmt::Debug for ServingQuerySession {
         formatter
             .debug_struct("ServingQuerySession")
             .field("lease", &self.lease.record())
-            .field("evidence", &self.evidence)
+            .field("evidence", &self.runtime_evidence())
             .finish_non_exhaustive()
     }
 }
@@ -321,14 +315,6 @@ impl ServingQuerySession {
         // the installed catalog and schemas reject all subsequent mutation.
         context.register_catalog(CATALOG_NAME, catalog);
         let actual = context.state().config().clone();
-        let parquet_filter_pushdown = match (
-            actual.options().execution.parquet.pushdown_filters,
-            actual.options().execution.parquet.reorder_filters,
-        ) {
-            (false, _) => ParquetFilterPushdownPosture::Disabled,
-            (true, false) => ParquetFilterPushdownPosture::EnabledPreservingOrder,
-            (true, true) => ParquetFilterPushdownPosture::EnabledWithReordering,
-        };
         let evidence = ServingRuntimeEvidence {
             memory_pool: runtime.memory_pool.name().to_owned(),
             memory_limit_bytes: config.memory_limit_bytes,
@@ -336,23 +322,27 @@ impl ServingQuerySession {
             spill_directory: config.spill_directory.clone(),
             batch_size: actual.batch_size(),
             target_partitions: actual.target_partitions(),
-            parquet_pruning: actual.parquet_pruning(),
-            parquet_filter_pushdown,
-            repartition_joins: actual.repartition_joins(),
-            repartition_aggregations: actual.repartition_aggregations(),
+            observed_query_count: 0,
+            observed_pruning_metric_count: 0,
+            observed_pruned_row_groups: 0,
+            observed_repartition_operator_count: 0,
+            observed_repartition_output_rows: 0,
         };
         Ok(Self {
             lease,
             context,
-            evidence,
+            evidence: RwLock::new(evidence),
             _control_reservation: Arc::new(control_reservation),
             limits: config,
         })
     }
 
     #[must_use]
-    pub const fn runtime_evidence(&self) -> &ServingRuntimeEvidence {
-        &self.evidence
+    pub fn runtime_evidence(&self) -> ServingRuntimeEvidence {
+        self.evidence
+            .read()
+            .expect("serving runtime evidence lock is not poisoned")
+            .clone()
     }
 
     #[must_use]
@@ -438,6 +428,25 @@ impl ServingQuerySession {
         let snapshot = self.lease.snapshot();
         let manifest = snapshot.manifest();
         let operator_metrics = physical_metrics(physical.as_ref());
+        {
+            let mut evidence = self
+                .evidence
+                .write()
+                .expect("serving runtime evidence lock is not poisoned");
+            evidence.observed_query_count = evidence.observed_query_count.saturating_add(1);
+            evidence.observed_pruning_metric_count = evidence
+                .observed_pruning_metric_count
+                .saturating_add(operator_metrics.pruning_metric_count);
+            evidence.observed_pruned_row_groups = evidence
+                .observed_pruned_row_groups
+                .saturating_add(operator_metrics.pruned_row_groups);
+            evidence.observed_repartition_operator_count = evidence
+                .observed_repartition_operator_count
+                .saturating_add(operator_metrics.repartition_operator_count);
+            evidence.observed_repartition_output_rows = evidence
+                .observed_repartition_output_rows
+                .saturating_add(operator_metrics.repartition_output_rows);
+        }
         let artifact = QueryPlanArtifact {
             query_id: query_id(sql, self.snapshot_id()),
             datafusion_version: datafusion::DATAFUSION_VERSION.to_owned(),
@@ -464,9 +473,25 @@ impl ServingQuerySession {
                 ("output_rows".into(), output_row_count as u64),
                 ("output_bytes".into(), output_bytes as u64),
                 ("output_batches".into(), batches.len() as u64),
-                ("operator_output_rows".into(), operator_metrics.0),
-                ("spill_count".into(), operator_metrics.1),
-                ("spilled_bytes".into(), operator_metrics.2),
+                ("operator_output_rows".into(), operator_metrics.output_rows),
+                ("spill_count".into(), operator_metrics.spill_count),
+                ("spilled_bytes".into(), operator_metrics.spilled_bytes),
+                (
+                    "pruning_metric_count".into(),
+                    operator_metrics.pruning_metric_count,
+                ),
+                (
+                    "pruned_row_groups".into(),
+                    operator_metrics.pruned_row_groups,
+                ),
+                (
+                    "repartition_operator_count".into(),
+                    operator_metrics.repartition_operator_count,
+                ),
+                (
+                    "repartition_output_rows".into(),
+                    operator_metrics.repartition_output_rows,
+                ),
                 (
                     "memory_reserved_after_execution".into(),
                     self.context.runtime_env().memory_pool.reserved() as u64,
@@ -513,21 +538,70 @@ impl ServingQuerySession {
     }
 }
 
-fn physical_metrics(plan: &dyn ExecutionPlan) -> (u64, u64, u64) {
-    let local = plan.metrics().map_or((0, 0, 0), |metrics| {
-        (
-            metrics.output_rows().unwrap_or_default() as u64,
-            metrics.spill_count().unwrap_or_default() as u64,
-            metrics.spilled_bytes().unwrap_or_default() as u64,
-        )
-    });
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ObservedPhysicalMetrics {
+    output_rows: u64,
+    spill_count: u64,
+    spilled_bytes: u64,
+    pruning_metric_count: u64,
+    pruned_row_groups: u64,
+    repartition_operator_count: u64,
+    repartition_output_rows: u64,
+}
+
+impl ObservedPhysicalMetrics {
+    fn add(self, other: Self) -> Self {
+        Self {
+            output_rows: self.output_rows.saturating_add(other.output_rows),
+            spill_count: self.spill_count.saturating_add(other.spill_count),
+            spilled_bytes: self.spilled_bytes.saturating_add(other.spilled_bytes),
+            pruning_metric_count: self
+                .pruning_metric_count
+                .saturating_add(other.pruning_metric_count),
+            pruned_row_groups: self
+                .pruned_row_groups
+                .saturating_add(other.pruned_row_groups),
+            repartition_operator_count: self
+                .repartition_operator_count
+                .saturating_add(other.repartition_operator_count),
+            repartition_output_rows: self
+                .repartition_output_rows
+                .saturating_add(other.repartition_output_rows),
+        }
+    }
+}
+
+fn physical_metrics(plan: &dyn ExecutionPlan) -> ObservedPhysicalMetrics {
+    let metrics = plan.metrics();
+    let mut local = metrics
+        .as_ref()
+        .map_or_else(ObservedPhysicalMetrics::default, |metrics| {
+            ObservedPhysicalMetrics {
+                output_rows: metrics.output_rows().unwrap_or_default() as u64,
+                spill_count: metrics.spill_count().unwrap_or_default() as u64,
+                spilled_bytes: metrics.spilled_bytes().unwrap_or_default() as u64,
+                ..ObservedPhysicalMetrics::default()
+            }
+        });
+    if let Some(metrics) = metrics {
+        for metric in metrics.iter() {
+            if let MetricValue::PruningMetrics {
+                pruning_metrics, ..
+            } = metric.value()
+            {
+                local.pruning_metric_count = local.pruning_metric_count.saturating_add(1);
+                local.pruned_row_groups = local
+                    .pruned_row_groups
+                    .saturating_add(pruning_metrics.pruned() as u64);
+            }
+        }
+    }
+    if plan.name() == "RepartitionExec" {
+        local.repartition_operator_count = 1;
+        local.repartition_output_rows = local.output_rows;
+    }
     plan.children().into_iter().fold(local, |total, child| {
-        let observed = physical_metrics(child.as_ref());
-        (
-            total.0.saturating_add(observed.0),
-            total.1.saturating_add(observed.1),
-            total.2.saturating_add(observed.2),
-        )
+        total.add(physical_metrics(child.as_ref()))
     })
 }
 
@@ -1249,7 +1323,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use arrow_array::builder::BinaryBuilder;
+    use arrow_array::builder::{BinaryBuilder, FixedSizeBinaryBuilder};
     use arrow_array::{
         BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array, ListArray, StringArray,
         TimestampMicrosecondArray, UInt64Array, new_null_array,
@@ -1405,6 +1479,22 @@ mod tests {
                 }
                 Arc::new(builder.finish())
             }
+            DataType::FixedSizeBinary(16) => {
+                let values = (0..rows)
+                    .map(|row| {
+                        let mut bytes = [u8::try_from(table_code).unwrap_or_default(); 16];
+                        if field.name() == "workspace_id" {
+                            bytes = WORKSPACE;
+                        } else if field.name() == "analysis_context_id" {
+                            bytes = CONTEXT;
+                        } else {
+                            bytes[15] = u8::try_from(row + 1).unwrap();
+                        }
+                        bytes
+                    })
+                    .collect::<Vec<_>>();
+                crate::fabric::id16_array(values.iter().map(Some))
+            }
             DataType::Int16 => Arc::new(Int16Array::from(vec![1_i16; rows])),
             DataType::Int32 => Arc::new(Int32Array::from(vec![1_i32; rows])),
             DataType::Int64 if field.name() == "source_generation" => {
@@ -1418,6 +1508,16 @@ mod tests {
                     Arc::new(Int64Array::from(vec![0_i64; rows])),
                     None,
                 ))
+            }
+            DataType::List(element) if element.data_type() == &DataType::FixedSizeBinary(16) => {
+                let mut builder =
+                    arrow_array::builder::ListBuilder::new(FixedSizeBinaryBuilder::new(16))
+                        .with_field(Arc::clone(element));
+                for _ in 0..rows {
+                    builder.values().append_value(WORKSPACE).unwrap();
+                    builder.append(true);
+                }
+                Arc::new(builder.finish())
             }
             DataType::Float64 => Arc::new(Float64Array::from(vec![1.0_f64; rows])),
             DataType::Boolean => Arc::new(BooleanArray::from(vec![true; rows])),
@@ -1552,18 +1652,16 @@ mod tests {
     fn owner_batch(scope: FactScope) -> ValidatedFactBatch {
         let spec = table_spec(8).unwrap();
         let columns: Vec<ArrayRef> = vec![
-            Arc::new(BinaryArray::from(vec![Some(scope.workspace_id.as_slice())])),
-            Arc::new(BinaryArray::from(vec![Some(
-                scope.analysis_context_id.as_slice(),
-            )])),
+            crate::fabric::id16_array([Some(&scope.workspace_id)]),
+            crate::fabric::id16_array([Some(&scope.analysis_context_id)]),
             Arc::new(Int64Array::from(vec![scope.source_generation])),
-            Arc::new(BinaryArray::from(vec![Some(scope.owner_id.as_slice())])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
+            crate::fabric::id16_array([Some(&scope.owner_id)]),
+            crate::fabric::id16_array([None]),
             Arc::new(Int16Array::from(vec![i16::from(scope.owner_id[0])])),
             Arc::new(Int16Array::from(vec![10_i16])),
             Arc::new(Int16Array::from(vec![10_i16])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
+            crate::fabric::id16_array([None]),
+            crate::fabric::id16_array([None]),
             Arc::new(Int64Array::from(vec![0_i64])),
             Arc::new(Int64Array::from(vec![0_i64])),
             Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
@@ -2181,13 +2279,11 @@ mod tests {
         assert_eq!(evidence.max_spill_bytes, 64 * 1024 * 1024);
         assert_eq!(evidence.batch_size, 65_536);
         assert_eq!(evidence.target_partitions, 2);
-        assert!(evidence.parquet_pruning);
-        assert_eq!(
-            evidence.parquet_filter_pushdown,
-            ParquetFilterPushdownPosture::Disabled
-        );
-        assert!(evidence.repartition_joins);
-        assert!(evidence.repartition_aggregations);
+        assert_eq!(evidence.observed_query_count, 0);
+        assert_eq!(evidence.observed_pruning_metric_count, 0);
+        assert_eq!(evidence.observed_pruned_row_groups, 0);
+        assert_eq!(evidence.observed_repartition_operator_count, 0);
+        assert_eq!(evidence.observed_repartition_output_rows, 0);
         assert!(evidence.spill_directory.is_dir());
 
         let control = session
@@ -2252,9 +2348,23 @@ mod tests {
                 &"output_bytes".to_owned(),
                 &"output_partitions".to_owned(),
                 &"output_rows".to_owned(),
+                &"pruned_row_groups".to_owned(),
+                &"pruning_metric_count".to_owned(),
+                &"repartition_operator_count".to_owned(),
+                &"repartition_output_rows".to_owned(),
                 &"spill_count".to_owned(),
                 &"spilled_bytes".to_owned(),
             ])
+        );
+        let evidence = session.runtime_evidence();
+        assert_eq!(evidence.observed_query_count, 4);
+        assert!(
+            evidence.observed_pruning_metric_count
+                >= control.artifact.execution_metrics["pruning_metric_count"]
+        );
+        assert!(
+            evidence.observed_repartition_operator_count
+                >= control.artifact.execution_metrics["repartition_operator_count"]
         );
     }
 
@@ -2511,7 +2621,7 @@ mod tests {
             scoped.batches[0]
                 .column(0)
                 .as_any()
-                .downcast_ref::<BinaryArray>()
+                .downcast_ref::<arrow_array::FixedSizeBinaryArray>()
                 .unwrap()
                 .value(0),
             CONTEXT
@@ -2535,24 +2645,20 @@ mod tests {
         assert!(normalized.contains("workspace_id IS NOT NULL"));
         assert!(normalized.contains("DeltaScanExec"));
         assert!(normalized.contains("projection=[workspace_id]"));
-        assert!(normalized.contains("partial_filters="));
         assert!(normalized.contains("pruning_predicate="));
         insta::assert_snapshot!(normalized, @r###"
 UNOPTIMIZED
-Projection: cpg_base.workspace.workspace_id [workspace_id:Binary]
-  Filter: cpg_base.workspace.workspace_id IS NOT NULL [workspace_id:Binary, repository_id:Binary;N, worktree_id:Binary;N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
-    SubqueryAlias: cpg_base.workspace [workspace_id:Binary, repository_id:Binary;N, worktree_id:Binary;N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
-      Filter: workspace.workspace_id = Binary("17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17") [workspace_id:Binary, repository_id:Binary;N, worktree_id:Binary;N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
-        TableScan: workspace [workspace_id:Binary, repository_id:Binary;N, worktree_id:Binary;N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
+Projection: cpg_base.workspace.workspace_id [workspace_id:FixedSizeBinary(16)]
+  Filter: cpg_base.workspace.workspace_id IS NOT NULL [workspace_id:FixedSizeBinary(16), repository_id:FixedSizeBinary(16);N, worktree_id:FixedSizeBinary(16);N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
+    TableScan: cpg_base.workspace [workspace_id:FixedSizeBinary(16), repository_id:FixedSizeBinary(16);N, worktree_id:FixedSizeBinary(16);N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
 OPTIMIZED
-SubqueryAlias: cpg_base.workspace [workspace_id:Binary]
-  Filter: workspace.workspace_id = Binary("17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17") [workspace_id:Binary]
-    TableScan: workspace projection=[workspace_id], partial_filters=[workspace.workspace_id = Binary("17,17,17,17,17,17,17,17,17,17,17,17,17,17,17,17")] [workspace_id:Binary]
+TableScan: cpg_base.workspace projection=[workspace_id] [workspace_id:FixedSizeBinary(16)]
 PHYSICAL
 FilterExec: workspace_id@0 = 11111111111111111111...
-  DeltaScanExec
-    RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
-      DataSourceExec: file_groups=<NORMALIZED>, projection=[workspace_id, __delta_rs_file_id__], file_type=parquet, predicate=workspace_id@0 = 11111111111111111111..., pruning_predicate=workspace_id_null_count@2 != row_count@3 AND workspace_id_min@0 <= 11111111111111111111... AND 11111111111111111111... <= workspace_id_max@1, required_guarantees=[workspace_id in (11111111111111111111...)]
+  ProjectionExec: expr=[CAST(workspace_id@0 AS FixedSizeBinary(16)) as workspace_id]
+    DeltaScanExec
+      RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
+        DataSourceExec: file_groups=<NORMALIZED>, projection=[workspace_id, __delta_rs_file_id__], file_type=parquet, predicate=CAST(workspace_id@0 AS FixedSizeBinary(16)) = 11111111111111111111... AND CAST(workspace_id@0 AS FixedSizeBinary(16)) = 11111111111111111111..., pruning_predicate=workspace_id_null_count@2 != row_count@3 AND CAST(workspace_id_min@0 AS FixedSizeBinary(16)) <= 11111111111111111111... AND 11111111111111111111... <= CAST(workspace_id_max@1 AS FixedSizeBinary(16)) AND workspace_id_null_count@2 != row_count@3 AND CAST(workspace_id_min@0 AS FixedSizeBinary(16)) <= 11111111111111111111... AND 11111111111111111111... <= CAST(workspace_id_max@1 AS FixedSizeBinary(16)), required_guarantees=[]
 "###);
     }
 
@@ -2589,10 +2695,86 @@ FilterExec: workspace_id@0 = 11111111111111111111...
             result.artifact.execution_metrics["memory_reserved_after_execution"]
                 < evidence.memory_limit_bytes as u64
         );
-        assert!(evidence.parquet_pruning);
         assert_eq!(
-            evidence.parquet_filter_pushdown,
-            ParquetFilterPushdownPosture::Disabled
+            evidence.observed_query_count, 1,
+            "only the served Delta query contributes observed runtime evidence"
+        );
+        assert_eq!(
+            evidence.observed_pruning_metric_count,
+            result.artifact.execution_metrics["pruning_metric_count"]
+        );
+        assert_eq!(
+            evidence.observed_pruned_row_groups,
+            result.artifact.execution_metrics["pruned_row_groups"]
+        );
+        assert_eq!(
+            evidence.observed_repartition_operator_count,
+            result.artifact.execution_metrics["repartition_operator_count"]
+        );
+        assert_eq!(
+            evidence.observed_repartition_output_rows,
+            result.artifact.execution_metrics["repartition_output_rows"]
+        );
+    }
+
+    #[tokio::test]
+    async fn wp58_operational_acceptance() {
+        let (directory, mut store, mut images) = operational_store();
+        let candidate = published_delta_candidate(directory.path(), &mut store).await;
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate,
+            directory.path(),
+        );
+        let initial = session.runtime_evidence();
+        assert_eq!(initial.observed_query_count, 0);
+        assert_eq!(initial.observed_pruning_metric_count, 0);
+        assert_eq!(initial.observed_repartition_operator_count, 0);
+
+        let result = session
+            .query(
+                "SELECT workspace_id FROM cpg_base.workspace \
+                 WHERE workspace_id IS NOT NULL",
+            )
+            .await
+            .unwrap();
+        assert!(result.artifact.physical_plan.contains("DeltaScanExec"));
+        assert!(
+            result
+                .artifact
+                .physical_plan
+                .contains("CAST(workspace_id@0 AS FixedSizeBinary(16))")
+        );
+        assert!(result.artifact.physical_plan.contains("pruning_predicate="));
+        assert_eq!(
+            result.batches[0]
+                .schema()
+                .field(0)
+                .try_extension_type::<crate::schema_registry::Id16Extension>()
+                .unwrap(),
+            crate::schema_registry::Id16Extension::v1()
+        );
+
+        let observed = session.runtime_evidence();
+        assert_eq!(observed.observed_query_count, 1);
+        assert_eq!(
+            observed.observed_pruning_metric_count,
+            result.artifact.execution_metrics["pruning_metric_count"]
+        );
+        assert_eq!(
+            observed.observed_pruned_row_groups,
+            result.artifact.execution_metrics["pruned_row_groups"]
+        );
+        assert_eq!(
+            observed.observed_repartition_operator_count,
+            result.artifact.execution_metrics["repartition_operator_count"]
+        );
+        assert_eq!(
+            observed.observed_repartition_output_rows,
+            result.artifact.execution_metrics["repartition_output_rows"]
         );
     }
 

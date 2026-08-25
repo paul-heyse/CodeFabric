@@ -42,6 +42,7 @@ def validate(stage_root: Path) -> dict[str, int]:
         raise ValueError(f"{MANIFEST}: expected eight public schema declarations")
 
     seen: set[PurePosixPath] = set()
+    schemas: dict[tuple[str, PurePosixPath], dict[str, Any]] = {}
     for index, declaration in enumerate(declarations):
         if not isinstance(declaration, dict):
             raise TypeError(f"{MANIFEST}: public_schemas[{index}] is not an object")
@@ -66,6 +67,65 @@ def validate(stage_root: Path) -> dict[str, int]:
         if schema.get("$id") != f"https://codefabric.dev/{path.as_posix()}":
             raise ValueError(f"{path}: model-derived $id mismatch")
         Draft202012Validator.check_schema(schema)
+        schema_kind = declaration.get("schema_kind")
+        if not isinstance(schema_kind, str):
+            raise TypeError(
+                f"{MANIFEST}: public_schemas[{index}].schema_kind is not a string"
+            )
+        schemas[(schema_kind, path)] = schema
+
+    raw_instances_path = manifest.get("public_schema_instances")
+    if not isinstance(raw_instances_path, str):
+        raise TypeError(f"{MANIFEST}: public_schema_instances is not a string")
+    instances_path = PurePosixPath(raw_instances_path)
+    if instances_path.is_absolute() or any(
+        part in {"", ".", ".."} for part in instances_path.parts
+    ):
+        raise ValueError(f"{MANIFEST}: unsafe public schema instances path")
+    instance_fixture = _load_json(stage_root, instances_path)
+    if not isinstance(instance_fixture, dict) or set(instance_fixture) != {
+        "format_version",
+        "instances",
+    }:
+        raise TypeError(f"{instances_path}: invalid fixture envelope")
+    if instance_fixture["format_version"] != 1:
+        raise ValueError(f"{instances_path}: unsupported format version")
+    instances = instance_fixture["instances"]
+    if not isinstance(instances, list) or len(instances) != len(schemas):
+        raise ValueError(f"{instances_path}: expected one instance per public schema")
+    validated_instances: set[tuple[str, PurePosixPath]] = set()
+    for index, item in enumerate(instances):
+        if not isinstance(item, dict) or set(item) != {
+            "schema_kind",
+            "schema_path",
+            "instance",
+        }:
+            raise TypeError(f"{instances_path}: instances[{index}] is malformed")
+        schema_kind = item["schema_kind"]
+        raw_schema_path = item["schema_path"]
+        if not isinstance(schema_kind, str) or not isinstance(raw_schema_path, str):
+            raise TypeError(
+                f"{instances_path}: instances[{index}] identity is malformed"
+            )
+        key = (schema_kind, PurePosixPath(raw_schema_path))
+        schema = schemas.get(key)
+        if schema is None or key in validated_instances:
+            raise ValueError(
+                f"{instances_path}: unknown or duplicate instance identity {key}"
+            )
+        validated_instances.add(key)
+        errors = sorted(
+            Draft202012Validator(schema).iter_errors(item["instance"]),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
+        if errors:
+            location = ".".join(str(part) for part in errors[0].absolute_path) or "$"
+            raise ValueError(
+                f"{instances_path}: {schema_kind} instance fails at {location}: "
+                f"{errors[0].message}"
+            )
+    if validated_instances != set(schemas):
+        raise ValueError(f"{instances_path}: public schema instance census differs")
 
     ddl = (stage_root / DDL).read_text(encoding="utf-8")
     connection = sqlite3.connect(":memory:")
@@ -125,6 +185,7 @@ def validate(stage_root: Path) -> dict[str, int]:
         )
     return {
         "public_schema_count": len(seen),
+        "public_schema_instance_count": len(validated_instances),
         "sqlite_table_count": table_count,
         "sqlite_view_count": len(actual_views),
     }

@@ -497,7 +497,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:eda06c403203a8d10bceddbaaf7bc7abfd3995a312cf738f9571a57241a67f70",
+      "canonical_digest": "b3:db11218b376ae391183506fa3633180e7aaadc1ac36f2e445d784141f5592210",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -511,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:b822756a732b41412b295112fc53d8f738074c22627ef3e682ee6fd0f910235c",
+      "source_digest": "b3:a747d1d4d20635df56176cb395cf14663097be8bb1b08da748a3d7c0e29d4ca9",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1683,7 +1683,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:26c1a8b060603f4ee4b02521bcf90324c00f32c7daa250f436a88bccb04645a2",
+      "canonical_digest": "b3:f10abaf27d003a4557eb6b99c1bd00fd4f36e7b8d4cf1b7748f3c01a372b3cb9",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -1697,7 +1697,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:244bb70f54759b3efc4024f5f7066df88c4c999309ffaacd8eb2b7ad7dbac096",
+      "source_digest": "b3:fcd9161473c3f782ebe1deea28d945e7fa95062bda4e1cfa449954d9738d1260",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -2879,7 +2879,7 @@
   "compatible_suite_major": 1,
   "families": [
     {
-      "action_key": "b3:93e3917aae6be0a33b2cb6c9ff55770b2fce531bfeddff09d79ac0a611618220",
+      "action_key": "b3:8bb777815e72e5740be7bef625f61575138dc170a1c912163d28fa9fc604a4e6",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -2914,10 +2914,11 @@
       }
     },
     {
-      "action_key": "b3:16575f5e2da070fca0decbb9768db827ad4da458d9c068cee739931c801ea853",
+      "action_key": "b3:9d7dc18f31f658c7842e9a7a30132a542b13c874ced2ba7378fa7aaeeb8f817e",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",
+        "contracts/generated/model/schema/public-schema-golden-instances.json",
         "contracts/generated/model/schema/schema-evolution-policy.json",
         "contracts/generated/model/schema/schema-validation.json",
         "contracts/generated/model/schema/table-specs.json",
@@ -2945,7 +2946,7 @@
       }
     },
     {
-      "action_key": "b3:2636951b7dde90532c1694a367a9ab2487fa6d623b7b2806b3d3945280b83632",
+      "action_key": "b3:7bc5439b7348ddc051671e06bebd20c15c07c333d9f796f5b89c1027d7c77fa7",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -2978,7 +2979,7 @@
       }
     },
     {
-      "action_key": "b3:65d708e7338ed50c1ed015a28119f09036f05fcce3d966e42203dc0f60648ea3",
+      "action_key": "b3:6bf2cadf4e1f82c576974327b909e676529c7a4db704577ebddc3d9019509be4",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -4069,6 +4070,31 @@
       "producer": "action:schemas",
       "projection": {
         "artifact_kind": "sql",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "max_output_bytes": 8388608,
+        "max_outputs": 16,
+        "max_source_bytes": 16777216
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:schemas"
+      ],
+      "output_id": "output:f56903747017b82b138b9fee12f80c48cc71abfa06f7ab3905b67c44674e6eff",
+      "path": "contracts/generated/model/schema/public-schema-golden-instances.json",
+      "producer": "action:schemas",
+      "projection": {
+        "artifact_kind": "json",
         "projection_kind": "canonical-artifact"
       },
       "public_artifact_id": null,

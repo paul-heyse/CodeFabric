@@ -139,6 +139,17 @@ data-fabric-upgrade-check:
     cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|wp05_|wp06_(behavioral|structural|negative)|delta_43a0cf10_|data_fabric_(old_write_new_read|new_write_old_read)_compatibility|data_fabric_(target_stack_release|old_live_authority|current_reference_routing|gate_b_empty))/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(datafusion_55_|delta_43a0cf10_|wp03_operational|wp05_|wp2[12]_)/)' --no-tests=fail
 
+[doc("Prove FixedSizeBinary(16) extension preservation, fallback, and staged schema instances")]
+[group('test')]
+id16-extension-contract-check:
+    cargo nextest run --locked --lib -E 'test(/wp58_(structural_acceptance|negative_zero_state)/)' --no-tests=fail
+    just model-family-check schemas
+
+[doc("Prove effective-relation statistics, pushdown truth, and observed runtime evidence")]
+[group('test')]
+provider-statistics-contract-check:
+    cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract)/)' --no-tests=fail
+
 [doc("Prove predecessor data-fabric identities survive only in reviewed historical locations")]
 [group('static')]
 data-fabric-old-authority-check:

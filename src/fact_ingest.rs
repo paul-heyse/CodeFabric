@@ -5,11 +5,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrow_array::builder::{
-    BinaryBuilder, BooleanBuilder, Float64Builder, Int16Builder, Int32Builder, Int64Builder,
-    ListBuilder, StringBuilder,
+    BinaryBuilder, BooleanBuilder, FixedSizeBinaryBuilder, Float64Builder, Int16Builder,
+    Int32Builder, Int64Builder, ListBuilder, StringBuilder,
 };
 use arrow_array::{
-    Array as _, ArrayRef, BinaryArray, Int16Array, Int32Array, Int64Array, ListArray, RecordBatch,
+    Array as _, ArrayRef, BinaryArray, FixedSizeBinaryArray, Int16Array, Int32Array, Int64Array,
+    ListArray, RecordBatch,
 };
 use arrow_row::{RowConverter, SortField};
 use arrow_schema::{ArrowError, DataType};
@@ -298,6 +299,20 @@ fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]
     Arc::new(builder.finish())
 }
 
+fn id16s<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8; 16]>) -> ArrayRef {
+    let mut builder = FixedSizeBinaryBuilder::with_capacity(rows.len(), 16);
+    for row in rows {
+        if let Some(value) = value(row) {
+            builder
+                .append_value(value)
+                .expect("typed Id16 always has the governed storage width");
+        } else {
+            builder.append_null();
+        }
+    }
+    Arc::new(builder.finish())
+}
+
 fn utf8<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a str>) -> ArrayRef {
     let capacity = rows
         .iter()
@@ -410,6 +425,17 @@ fn binary_column<'a>(batch: &'a RecordBatch, spec: &TableSpec, name: &str) -> &'
         .expect("generated binary column")
 }
 
+fn id16_column<'a>(
+    batch: &'a RecordBatch,
+    spec: &TableSpec,
+    name: &str,
+) -> &'a FixedSizeBinaryArray {
+    column(batch, spec, name)
+        .as_any()
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .expect("generated Id16 column")
+}
+
 fn i16_column<'a>(batch: &'a RecordBatch, spec: &TableSpec, name: &str) -> &'a Int16Array {
     column(batch, spec, name)
         .as_any()
@@ -456,19 +482,39 @@ fn validate_primary_key(batch: &RecordBatch, spec: &TableSpec) -> Result<(), Fac
 
 fn validate_id_widths(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
     for field in spec.arrow_schema.fields() {
-        let expected = match field.metadata().get("com.codefabric.cpg.semantic_type") {
-            Some(value) if value == "id16" => Some(16),
-            Some(value) if value == "hash32" => Some(32),
-            _ => None,
-        };
-        let Some(expected) = expected else { continue };
-        let array = binary_column(batch, spec, field.name());
-        if array.iter().flatten().any(|value| value.len() != expected) {
-            return Err(invalid(
-                spec,
-                "fixed-width",
-                format!("{} is not {expected} bytes", field.name()),
-            ));
+        match field
+            .metadata()
+            .get("com.codefabric.cpg.semantic_type")
+            .map(String::as_str)
+        {
+            Some("id16") => {
+                if field
+                    .try_extension_type::<crate::schema_registry::Id16Extension>()
+                    .is_err()
+                    || column(batch, spec, field.name()).data_type()
+                        != &DataType::FixedSizeBinary(16)
+                {
+                    return Err(invalid(
+                        spec,
+                        "id16-extension",
+                        format!(
+                            "{} lacks the governed codefabric.id16 contract",
+                            field.name()
+                        ),
+                    ));
+                }
+            }
+            Some("hash32") => {
+                let array = binary_column(batch, spec, field.name());
+                if array.iter().flatten().any(|value| value.len() != 32) {
+                    return Err(invalid(
+                        spec,
+                        "fixed-width",
+                        format!("{} is not 32 bytes", field.name()),
+                    ));
+                }
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -484,7 +530,7 @@ fn validate_buckets(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIng
             continue;
         }
         let buckets = i16_column(batch, spec, bucket);
-        let identities = binary_column(batch, spec, identity);
+        let identities = id16_column(batch, spec, identity);
         for row in 0..batch.num_rows() {
             if buckets.is_null(row)
                 || identities.is_null(row)
@@ -818,10 +864,10 @@ pub fn validate_fact_batch(
     validate_registered_codes(batch, spec)?;
     validate_property_values(batch, spec)?;
     validate_source_file(batch, spec)?;
-    let workspaces = binary_column(batch, spec, "workspace_id");
-    let contexts = binary_column(batch, spec, "analysis_context_id");
+    let workspaces = id16_column(batch, spec, "workspace_id");
+    let contexts = id16_column(batch, spec, "analysis_context_id");
     let generations = i64_column(batch, spec, "source_generation");
-    let owners = binary_column(batch, spec, "owner_id");
+    let owners = id16_column(batch, spec, "owner_id");
     for row in 0..batch.num_rows() {
         if workspaces.value(row) != expected_scope.workspace_id
             || contexts.value(row) != expected_scope.analysis_context_id
@@ -1434,8 +1480,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use arrow_array::builder::BinaryBuilder;
-    use arrow_array::{ArrayRef, RecordBatch};
+    use arrow_array::RecordBatch;
     use serde::Deserialize;
 
     use super::*;
@@ -1568,13 +1613,6 @@ mod tests {
         }
     }
 
-    fn replace_column(batch: &RecordBatch, name: &str, replacement: ArrayRef) -> RecordBatch {
-        let mut columns = batch.columns().to_vec();
-        let index = batch.schema().index_of(name).expect("test column");
-        columns[index] = replacement;
-        RecordBatch::try_new(batch.schema(), columns).expect("compatible test batch")
-    }
-
     fn manifest(
         provider: &FixtureProvider,
         scope: FactScope,
@@ -1669,7 +1707,7 @@ mod tests {
             fixture.expected.rejected_provider_code
         );
         assert_eq!(
-            binary_column(
+            id16_column(
                 output.batches[&110].batch(),
                 table_spec(110).unwrap(),
                 "target_id",
@@ -1700,13 +1738,29 @@ mod tests {
             validate_fact_batch(&malformed, 100, expected_scope),
             Err(FactIngestError::BatchInvalid { check: "span", .. })
         ));
-        let mut short = BinaryBuilder::new();
-        short.append_value([1_u8; 15]);
-        let invalid_width = replace_column(&one_batch, "entity_id", Arc::new(short.finish()));
+        let entity_index = one_batch.schema().index_of("entity_id").unwrap();
+        let mut fields = one_batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.as_ref().clone())
+            .collect::<Vec<_>>();
+        let mut metadata = fields[entity_index].metadata().clone();
+        metadata.remove(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY);
+        metadata.remove(arrow_schema::extension::EXTENSION_TYPE_METADATA_KEY);
+        fields[entity_index] = fields[entity_index].clone().with_metadata(metadata);
+        let missing_extension = RecordBatch::try_new(
+            Arc::new(arrow_schema::Schema::new_with_metadata(
+                fields,
+                one_batch.schema().metadata().clone(),
+            )),
+            one_batch.columns().to_vec(),
+        )
+        .expect("storage-only unknown consumer accepts fixed-size values");
         assert!(matches!(
-            validate_fact_batch(&invalid_width, 100, expected_scope),
+            validate_fact_batch(&missing_extension, 100, expected_scope),
             Err(FactIngestError::BatchInvalid {
-                check: "fixed-width",
+                check: "schema",
                 ..
             })
         ));
@@ -1911,6 +1965,37 @@ mod tests {
                 .is_err()
         );
         assert_eq!(ingress.metrics().validation_failures, 1);
+    }
+
+    #[test]
+    fn wp58_negative_zero_state() {
+        let batch = encode_entities(&[entity([0x58; 16])]).unwrap();
+        let entity_index = batch.schema().index_of("entity_id").unwrap();
+        let mut fields = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.as_ref().clone())
+            .collect::<Vec<_>>();
+        let mut metadata = fields[entity_index].metadata().clone();
+        metadata.remove(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY);
+        metadata.remove(arrow_schema::extension::EXTENSION_TYPE_METADATA_KEY);
+        fields[entity_index] = fields[entity_index].clone().with_metadata(metadata);
+        let storage_only = RecordBatch::try_new(
+            Arc::new(arrow_schema::Schema::new_with_metadata(
+                fields,
+                batch.schema().metadata().clone(),
+            )),
+            batch.columns().to_vec(),
+        )
+        .expect("an unknown Arrow consumer can still read FixedSizeBinary(16) storage");
+        assert!(matches!(
+            validate_fact_batch(&storage_only, 100, scope()),
+            Err(FactIngestError::BatchInvalid {
+                check: "schema",
+                ..
+            })
+        ));
     }
 
     #[test]

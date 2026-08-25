@@ -3,7 +3,71 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
+use arrow_schema::extension::ExtensionType;
+use arrow_schema::{ArrowError, DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
+
+/// Application-enforced Arrow extension contract for canonical 16-byte identifiers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Id16Extension {
+    version: u16,
+}
+
+impl Id16Extension {
+    pub const NAME: &'static str = "codefabric.id16";
+    pub const METADATA_V1: &'static str = "version=1";
+
+    #[must_use]
+    pub const fn v1() -> Self {
+        Self { version: 1 }
+    }
+}
+
+impl ExtensionType for Id16Extension {
+    const NAME: &'static str = Self::NAME;
+    type Metadata = u16;
+
+    fn metadata(&self) -> &Self::Metadata {
+        &self.version
+    }
+
+    fn serialize_metadata(&self) -> Option<String> {
+        Some(Self::METADATA_V1.to_owned())
+    }
+
+    fn deserialize_metadata(metadata: Option<&str>) -> Result<Self::Metadata, ArrowError> {
+        match metadata {
+            Some(Self::METADATA_V1) => Ok(1),
+            value => Err(ArrowError::InvalidArgumentError(format!(
+                "{} requires metadata {}, received {value:?}",
+                Self::NAME,
+                Self::METADATA_V1
+            ))),
+        }
+    }
+
+    fn supports_data_type(&self, data_type: &DataType) -> Result<(), ArrowError> {
+        if data_type == &DataType::FixedSizeBinary(16) {
+            Ok(())
+        } else {
+            Err(ArrowError::InvalidArgumentError(format!(
+                "{} requires FixedSizeBinary(16), received {data_type}",
+                Self::NAME
+            )))
+        }
+    }
+
+    fn try_new(data_type: &DataType, version: Self::Metadata) -> Result<Self, ArrowError> {
+        let extension = Self { version };
+        if version != 1 {
+            return Err(ArrowError::InvalidArgumentError(format!(
+                "{} metadata version {version} is unsupported",
+                Self::NAME
+            )));
+        }
+        extension.supports_data_type(data_type)?;
+        Ok(extension)
+    }
+}
 
 /// Durable Delta mutation policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -371,7 +435,8 @@ pub const fn schema_evolution_policy() -> SchemaEvolutionPolicy {
 
 fn physical_type(logical: LogicalType) -> DataType {
     match logical {
-        LogicalType::Id16 | LogicalType::Hash32 | LogicalType::Binary => DataType::Binary,
+        LogicalType::Id16 => DataType::FixedSizeBinary(16),
+        LogicalType::Hash32 | LogicalType::Binary => DataType::Binary,
         LogicalType::Code16 | LogicalType::Bucket16 | LogicalType::Int16 => DataType::Int16,
         LogicalType::Code32 | LogicalType::Int32 => DataType::Int32,
         LogicalType::Int64 => DataType::Int64,
@@ -384,7 +449,10 @@ fn physical_type(logical: LogicalType) -> DataType {
         LogicalType::IdList => {
             // Delta's Arrow conversion canonicalizes list children to `element`.
             // Emit that library-native name so the generated schema round-trips exactly.
-            DataType::List(Arc::new(Field::new("element", DataType::Binary, false)))
+            DataType::List(Arc::new(
+                Field::new("element", DataType::FixedSizeBinary(16), false)
+                    .with_extension_type(Id16Extension::v1()),
+            ))
         }
         LogicalType::Int64List => {
             DataType::List(Arc::new(Field::new("element", DataType::Int64, false)))
@@ -432,12 +500,17 @@ fn field(contract: GeneratedColumn, primary_key: &[&str]) -> Field {
             "true".to_owned(),
         );
     }
-    Field::new(
+    let field = Field::new(
         contract.name,
         physical_type(contract.logical_type),
         contract.nullable,
     )
-    .with_metadata(metadata)
+    .with_metadata(metadata);
+    if matches!(contract.logical_type, LogicalType::Id16) {
+        field.with_extension_type(Id16Extension::v1())
+    } else {
+        field
+    }
 }
 
 fn model_logical_type(
@@ -725,10 +798,22 @@ pub fn operational_table_spec(name: &str) -> Option<&'static OperationalTableSpe
 mod tests {
     use super::*;
 
+    fn one_id16_batch(schema: SchemaRef) -> arrow::record_batch::RecordBatch {
+        use arrow::array::{ArrayRef, FixedSizeBinaryBuilder};
+
+        let mut values = FixedSizeBinaryBuilder::with_capacity(1, 16);
+        values.append_value([0x58; 16]).unwrap();
+        arrow::record_batch::RecordBatch::try_new(
+            schema,
+            vec![Arc::new(values.finish()) as ArrayRef],
+        )
+        .unwrap()
+    }
+
     fn synthetic_wave4_batch(table: &TableSpec) -> arrow::record_batch::RecordBatch {
         use arrow::array::{
-            ArrayRef, BinaryArray, BooleanArray, Int16Array, Int32Array, Int64Array, Int64Builder,
-            ListBuilder, StringArray,
+            ArrayRef, BinaryArray, BooleanArray, FixedSizeBinaryBuilder, Int16Array, Int32Array,
+            Int64Array, Int64Builder, ListBuilder, StringArray,
         };
 
         const BYTES: [u8; 32] = [7; 32];
@@ -739,6 +824,11 @@ mod tests {
             .map(|field| -> ArrayRef {
                 match field.data_type() {
                     DataType::Binary => Arc::new(BinaryArray::from(vec![Some(BYTES.as_slice())])),
+                    DataType::FixedSizeBinary(16) => {
+                        let mut values = FixedSizeBinaryBuilder::with_capacity(1, 16);
+                        values.append_value(&BYTES[..16]).unwrap();
+                        Arc::new(values.finish())
+                    }
                     DataType::Int16 => Arc::new(Int16Array::from(vec![0])),
                     DataType::Int32 => Arc::new(Int32Array::from(vec![0])),
                     DataType::Int64 => Arc::new(Int64Array::from(vec![0])),
@@ -748,6 +838,15 @@ mod tests {
                         let mut values =
                             ListBuilder::new(Int64Builder::new()).with_field(Arc::clone(element));
                         values.values().append_value(0);
+                        values.append(true);
+                        Arc::new(values.finish())
+                    }
+                    DataType::List(element)
+                        if element.data_type() == &DataType::FixedSizeBinary(16) =>
+                    {
+                        let mut values = ListBuilder::new(FixedSizeBinaryBuilder::new(16))
+                            .with_field(Arc::clone(element));
+                        values.values().append_value(&BYTES[..16]).unwrap();
                         values.append(true);
                         Arc::new(values.finish())
                     }
@@ -778,7 +877,7 @@ mod tests {
                 .field_with_name("entity_id")
                 .unwrap()
                 .data_type(),
-            &DataType::Binary
+            &DataType::FixedSizeBinary(16)
         );
         assert_eq!(entity.arrow_schema.metadata().len(), 12);
         assert_eq!(
@@ -818,6 +917,112 @@ mod tests {
                 .all(|table| table.name != "owner_tombstone"
                     && table.name != "primary_key_tombstone")
         );
+    }
+
+    #[test]
+    fn wp58_structural_acceptance() {
+        use std::io::{Cursor, Seek as _};
+
+        use arrow::ipc::reader::StreamReader;
+        use arrow::ipc::writer::StreamWriter;
+        use arrow_cast::cast;
+        use parquet::arrow::ArrowWriter;
+        use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+        let entity = table_spec(100).unwrap();
+        let index = entity.arrow_schema.index_of("entity_id").unwrap();
+        let field = entity.arrow_schema.field(index);
+        assert_eq!(
+            field.try_extension_type::<Id16Extension>().unwrap(),
+            Id16Extension::v1()
+        );
+        assert_eq!(field.data_type(), &DataType::FixedSizeBinary(16));
+
+        let projected = Arc::new(entity.arrow_schema.project(&[index]).unwrap());
+        assert_eq!(
+            projected
+                .field(0)
+                .try_extension_type::<Id16Extension>()
+                .unwrap(),
+            Id16Extension::v1(),
+            "Arrow schema projection must preserve the application extension contract"
+        );
+        let batch = one_id16_batch(Arc::clone(&projected));
+
+        let mut ipc = Vec::new();
+        {
+            let mut writer = StreamWriter::try_new(&mut ipc, &projected).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+        }
+        let ipc_batch = StreamReader::try_new(Cursor::new(ipc), None)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            ipc_batch
+                .schema()
+                .field(0)
+                .try_extension_type::<Id16Extension>()
+                .unwrap(),
+            Id16Extension::v1(),
+            "IPC must preserve the extension metadata"
+        );
+
+        let mut parquet_file = tempfile::tempfile().unwrap();
+        {
+            let mut writer =
+                ArrowWriter::try_new(parquet_file.try_clone().unwrap(), projected, None).unwrap();
+            writer.write(&batch).unwrap();
+            writer.close().unwrap();
+        }
+        parquet_file.rewind().unwrap();
+        let parquet_batch = ParquetRecordBatchReaderBuilder::try_new(parquet_file)
+            .unwrap()
+            .build()
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            parquet_batch
+                .schema()
+                .field(0)
+                .try_extension_type::<Id16Extension>()
+                .unwrap(),
+            Id16Extension::v1(),
+            "Parquet Arrow schema metadata must preserve the extension contract"
+        );
+
+        let binary = cast(batch.column(0), &DataType::Binary).unwrap();
+        let fixed = cast(&binary, &DataType::FixedSizeBinary(16)).unwrap();
+        let reattached =
+            arrow::record_batch::RecordBatch::try_new(batch.schema(), vec![fixed]).unwrap();
+        assert_eq!(
+            reattached
+                .schema()
+                .field(0)
+                .try_extension_type::<Id16Extension>()
+                .unwrap(),
+            Id16Extension::v1(),
+            "application schema reattachment restores metadata after storage casts"
+        );
+
+        let mut fallback_metadata = field.metadata().clone();
+        fallback_metadata.remove(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY);
+        fallback_metadata.remove(arrow_schema::extension::EXTENSION_TYPE_METADATA_KEY);
+        let fallback = field.clone().with_metadata(fallback_metadata);
+        assert_eq!(fallback.data_type(), &DataType::FixedSizeBinary(16));
+        assert!(fallback.try_extension_type::<Id16Extension>().is_err());
+
+        let mut unsupported_metadata = field.metadata().clone();
+        unsupported_metadata.insert(
+            arrow_schema::extension::EXTENSION_TYPE_METADATA_KEY.to_owned(),
+            "version=2".to_owned(),
+        );
+        let unsupported = field.clone().with_metadata(unsupported_metadata);
+        assert!(unsupported.try_extension_type::<Id16Extension>().is_err());
     }
 
     #[test]

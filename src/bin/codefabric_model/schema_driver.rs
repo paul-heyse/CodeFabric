@@ -27,6 +27,10 @@ const RUST_RUNTIME_BINDINGS_PATH: &str = "src/generated/table_specs.rs";
 const RUST_ROW_ENCODERS_PATH: &str = "src/generated/fact_row_encoders.rs";
 const VALIDATION_PATH: &str = "contracts/generated/model/schema/schema-validation.json";
 const EVOLUTION_POLICY_PATH: &str = "contracts/generated/model/schema/schema-evolution-policy.json";
+const PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH: &str =
+    "tooling/model/fixtures/public-schema-golden-instances.json";
+const PUBLIC_SCHEMA_INSTANCES_PATH: &str =
+    "contracts/generated/model/schema/public-schema-golden-instances.json";
 const ENUM_REGISTRY_PATH: &str = "contracts/registry/enum-registry.yaml";
 const ENTITY_REGISTRY_PATH: &str = "contracts/registry/ontology-entity-registry.yaml";
 const RELATION_REGISTRY_PATH: &str = "contracts/registry/ontology-relation-registry.yaml";
@@ -1072,6 +1076,7 @@ fn validate_semantic_authorities(
 pub struct SchemaPlan {
     descriptor: DriverDescriptor,
     ir: SchemaContractIr,
+    public_schema_instances: Value,
     source_digest: String,
     semantic_digest: String,
     source_fence: DriverSourceFence,
@@ -1113,6 +1118,10 @@ impl SchemaDriver {
             ),
             (safe(VALIDATION_PATH)?, render_validation(plan)?),
             (safe(EVOLUTION_POLICY_PATH)?, render_evolution_policy(plan)?),
+            (
+                safe(PUBLIC_SCHEMA_INSTANCES_PATH)?,
+                pretty(&plan.public_schema_instances)?,
+            ),
         ];
         for schema in &plan.ir.public_schemas {
             outputs.push((
@@ -1165,6 +1174,11 @@ impl ModelDriver for SchemaDriver {
                 EVOLUTION_POLICY_PATH,
                 DriverOutputRole::CanonicalProjection,
             )?,
+            Self::output(
+                "output:model-schema-public-golden-instances",
+                PUBLIC_SCHEMA_INSTANCES_PATH,
+                DriverOutputRole::CanonicalProjection,
+            )?,
         ];
         let descriptor = DriverDescriptor {
             driver_id: StableId::parse("driver:schema-contract-v1".to_owned())
@@ -1180,6 +1194,7 @@ impl ModelDriver for SchemaDriver {
                 PROPERTY_REGISTRY_PATH,
                 FACT_REGISTRY_PATH,
                 CAPABILITY_REGISTRY_PATH,
+                PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH,
             ]
             .into_iter()
             .map(safe_protocol)
@@ -1209,6 +1224,11 @@ impl ModelDriver for SchemaDriver {
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         validate_semantic_authorities(repository_root, &ir)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let public_schema_instances: Value = serde_json::from_slice(&read_stable(
+            &repository_root.join(PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?)
+        .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         for schema in &ir.public_schemas {
             let output = Self::output(
                 format!("output:model-schema-{}", schema.schema_kind),
@@ -1232,6 +1252,7 @@ impl ModelDriver for SchemaDriver {
         Ok(SchemaPlan {
             descriptor,
             ir,
+            public_schema_instances,
             source_digest: codefabric::integrity::framed_digest(&bytes),
             semantic_digest,
             source_fence,
@@ -1391,6 +1412,7 @@ fn render_table_manifest(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError
         "serving_projections": plan.ir.serving_projections,
         "control_projections": plan.ir.control_projections,
         "serving_resource_profile": plan.ir.serving_resource_profile,
+        "public_schema_instances": PUBLIC_SCHEMA_INSTANCES_PATH,
         "public_schemas": plan.ir.public_schemas.iter().map(|schema| json!({
             "schema_kind": schema.schema_kind,
             "artifact_id": schema.artifact_id,
@@ -1858,17 +1880,24 @@ fn render_encoder_column(
         "source_bucket" => "i16s(rows, |row| Some(i16::from(row.source_id[0])))".into(),
         "target_bucket" => "i16s(rows, |row| Some(i16::from(row.target_id[0])))".into(),
         "value_kind_code" => "i16s(rows, |row| Some(row.value.code()))".into(),
-        "value_entity_id" => "binary(rows, |row| match &row.value { PropertyValue::Entity(value) => Some(value.as_slice()), _ => None })".into(),
+        "value_entity_id" => "id16s(rows, |row| match &row.value { PropertyValue::Entity(value) => Some(value), _ => None })".into(),
         "value_bool" => "bools(rows, |row| match row.value { PropertyValue::Boolean(value) => Some(value), _ => None })".into(),
         "value_int64" => "i64s(rows, |row| match row.value { PropertyValue::Integer(value) => Some(value), _ => None })".into(),
         "value_float64" => "f64s(rows, |row| match row.value { PropertyValue::Float(value) => Some(value), _ => None })".into(),
         "value_text" => "utf8(rows, |row| match &row.value { PropertyValue::Text(value) => Some(value.as_str()), _ => None })".into(),
         "value_bytes" => "binary(rows, |row| match &row.value { PropertyValue::Bytes(value) => Some(value.as_slice()), _ => None })".into(),
-        "value_type_id" => "binary(rows, |row| match &row.value { PropertyValue::Type(value) => Some(value.as_slice()), _ => None })".into(),
+        "value_type_id" => "id16s(rows, |row| match &row.value { PropertyValue::Type(value) => Some(value), _ => None })".into(),
         _ => match column.logical_type {
-            LogicalType::Id16 | LogicalType::Hash32 => {
+            LogicalType::Id16 => {
                 if column.nullable {
-                    format!("binary(rows, |row| {direct}.as_ref().map(<[u8; {}]>::as_slice))", if column.logical_type == LogicalType::Id16 { 16 } else { 32 })
+                    format!("id16s(rows, |row| {direct}.as_ref())")
+                } else {
+                    format!("id16s(rows, |row| Some(&{direct}))")
+                }
+            }
+            LogicalType::Hash32 => {
+                if column.nullable {
+                    format!("binary(rows, |row| {direct}.as_ref().map(<[u8; 32]>::as_slice))")
                 } else {
                     format!("binary(rows, |row| Some({direct}.as_slice()))")
                 }
@@ -2027,7 +2056,9 @@ fn render_evolution_policy(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverErr
 
 fn arrow_type(logical_type: LogicalType) -> Value {
     match logical_type {
-        LogicalType::Id16 => json!({"name":"binary","byte_width":16}),
+        LogicalType::Id16 => {
+            json!({"name":"fixed_size_binary","byte_width":16,"extension":{"name":"codefabric.id16","metadata":"version=1"}})
+        }
         LogicalType::Hash32 => json!({"name":"binary","byte_width":32}),
         LogicalType::Code16 | LogicalType::Bucket16 | LogicalType::Int16 => json!({"name":"int16"}),
         LogicalType::Code32 | LogicalType::Int32 => json!({"name":"int32"}),
@@ -2040,7 +2071,7 @@ fn arrow_type(logical_type: LogicalType) -> Value {
             json!({"name":"timestamp","unit":"microsecond","timezone":"UTC"})
         }
         LogicalType::IdList => {
-            json!({"name":"list","element":{"name":"binary","byte_width":16,"nullable":false}})
+            json!({"name":"list","element":{"name":"fixed_size_binary","byte_width":16,"nullable":false,"extension":{"name":"codefabric.id16","metadata":"version=1"}}})
         }
         LogicalType::Int64List => {
             json!({"name":"list","element":{"name":"int64","nullable":false}})
@@ -2281,7 +2312,7 @@ mod tests {
                 .count(),
             8
         );
-        assert_eq!(descriptor.sources.len(), 7);
+        assert_eq!(descriptor.sources.len(), 8);
         assert_eq!(descriptor.output_roots.len(), 2);
     }
 

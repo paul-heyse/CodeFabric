@@ -4,13 +4,21 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use arrow_array::builder::{BinaryBuilder, ListBuilder};
+use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder};
 use arrow_array::{
     Array as _, ArrayRef, BinaryArray, BooleanArray, Int16Array, Int32Array, Int64Array,
     RecordBatch, StringArray, TimestampMicrosecondArray,
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
+use async_trait::async_trait;
+use datafusion::catalog::Session;
 use datafusion::catalog::TableProvider;
+use datafusion::common::ScalarValue;
+use datafusion::common::tree_node::{Transformed, TreeNode};
+use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
+use datafusion::physical_expr::expressions::{cast, col as physical_col};
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::projection::{ProjectionExec, ProjectionExpr};
 use datafusion::prelude::{SessionConfig, SessionContext, col};
 use deltalake::DeltaTable;
 use deltalake::kernel::engine::arrow_conversion::{TryIntoArrow as _, TryIntoKernel as _};
@@ -52,8 +60,8 @@ pub use publication::{
 };
 #[cfg(feature = "daemon")]
 pub use serving::{
-    ParquetFilterPushdownPosture, QueryPlanArtifact, ServingQueryError, ServingQueryResult,
-    ServingQuerySession, ServingRuntimeConfig, ServingRuntimeEvidence,
+    QueryPlanArtifact, ServingQueryError, ServingQueryResult, ServingQuerySession,
+    ServingRuntimeConfig, ServingRuntimeEvidence,
 };
 pub use snapshot_catalog::{
     DeltaAccessProfile, DeltaHandleFactory, DeltaMaterializationPosture, EmptySnapshotOverlay,
@@ -74,6 +82,20 @@ const TARGET_FILE_SIZE_BYTES: &str = "134217728";
 const CHECKPOINT_INTERVAL: &str = "10";
 const LOG_RETENTION: &str = "interval 30 days";
 const DELETED_FILE_RETENTION: &str = "interval 7 days";
+
+pub(crate) fn id16_array<'a>(values: impl IntoIterator<Item = Option<&'a [u8; 16]>>) -> ArrayRef {
+    let mut builder = FixedSizeBinaryBuilder::new(16);
+    for value in values {
+        if let Some(value) = value {
+            builder
+                .append_value(value)
+                .expect("typed Id16 always has the governed storage width");
+        } else {
+            builder.append_null();
+        }
+    }
+    Arc::new(builder.finish())
+}
 
 /// Stable failures at the generated-schema/Delta boundary.
 #[derive(Debug, Error)]
@@ -674,7 +696,14 @@ fn authenticate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), F
         }
     }
     let opened: Schema = state.schema().as_ref().try_into_arrow()?;
-    if opened.fields() != spec.arrow_schema.fields() {
+    if opened.fields().len() != spec.arrow_schema.fields().len()
+        || spec
+            .arrow_schema
+            .fields()
+            .iter()
+            .zip(opened.fields())
+            .any(|(expected, actual)| !delta_field_storage_compatible(expected, actual))
+    {
         return Err(FabricError::TableInvariant {
             table: spec.name.into(),
             detail: "Delta StructType round trip changed Arrow fields".into(),
@@ -765,13 +794,148 @@ pub(super) async fn exact_provider(
     let session = Arc::new(SessionContext::new_with_config(config).state());
     let inner = table.table_provider().with_session(session).await?;
     let provider_schema = inner.schema();
-    if provider_schema.fields() != spec.arrow_schema.fields() {
+    if provider_schema.fields().len() != spec.arrow_schema.fields().len()
+        || spec
+            .arrow_schema
+            .fields()
+            .iter()
+            .zip(provider_schema.fields())
+            .any(|(expected, actual)| !delta_field_storage_compatible(expected, actual))
+    {
         return Err(FabricError::TableInvariant {
             table: spec.name.into(),
             detail: "DataFusion provider physical schema differs from generated TableSpec".into(),
         });
     }
-    Ok(inner)
+    Ok(Arc::new(Id16ContractProvider {
+        inner,
+        // DataFusion physical plans intentionally carry no table-level metadata. Field
+        // metadata remains attached because it is the executable Id16 contract.
+        schema: Arc::new(Schema::new(spec.arrow_schema.fields().clone())),
+    }))
+}
+
+struct Id16ContractProvider {
+    inner: Arc<dyn TableProvider>,
+    schema: SchemaRef,
+}
+
+impl std::fmt::Debug for Id16ContractProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Id16ContractProvider")
+            .field("schema", &self.schema)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Id16ContractProvider {
+    fn projected_schema(&self, projection: Option<&Vec<usize>>) -> SchemaRef {
+        projection.map_or_else(
+            || Arc::clone(&self.schema),
+            |indices| {
+                Arc::new(Schema::new_with_metadata(
+                    indices
+                        .iter()
+                        .map(|index| Arc::clone(&self.schema.fields()[*index]))
+                        .collect::<Vec<_>>(),
+                    self.schema.metadata().clone(),
+                ))
+            },
+        )
+    }
+
+    fn reattach_plan(
+        &self,
+        plan: Arc<dyn ExecutionPlan>,
+        projection: Option<&Vec<usize>>,
+    ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
+        let target = self.projected_schema(projection);
+        let input_schema = plan.schema();
+        let expressions = target
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(index, field)| {
+                let expression = physical_col(input_schema.field(index).name(), &input_schema)?;
+                let expression = if input_schema.field(index).data_type() == field.data_type() {
+                    expression
+                } else {
+                    cast(expression, &input_schema, field.data_type().clone())?
+                };
+                Ok(ProjectionExpr {
+                    expr: expression,
+                    alias: field.name().to_owned(),
+                })
+            })
+            .collect::<datafusion::error::Result<Vec<_>>>()?;
+        Ok(Arc::new(ProjectionExec::try_new_with_schema_metadata(
+            expressions,
+            plan,
+            &target,
+        )?))
+    }
+
+    fn storage_filter(filter: &Expr) -> datafusion::error::Result<Expr> {
+        filter
+            .clone()
+            .transform_down(|expression| match expression {
+                Expr::Literal(ScalarValue::FixedSizeBinary(16, value), metadata) => Ok(
+                    Transformed::yes(Expr::Literal(ScalarValue::Binary(value), metadata)),
+                ),
+                expression => Ok(Transformed::no(expression)),
+            })
+            .map(|transformed| transformed.data)
+    }
+}
+
+#[async_trait]
+impl TableProvider for Id16ContractProvider {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+
+    fn constraints(&self) -> Option<&datafusion::common::Constraints> {
+        self.inner.constraints()
+    }
+
+    fn table_type(&self) -> TableType {
+        self.inner.table_type()
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
+        let storage_filters = filters
+            .iter()
+            .map(Self::storage_filter)
+            .collect::<datafusion::error::Result<Vec<_>>>()?;
+        let plan = self
+            .inner
+            .scan(state, projection, &storage_filters, limit)
+            .await?;
+        self.reattach_plan(plan, projection)
+    }
+
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> datafusion::error::Result<Vec<TableProviderFilterPushDown>> {
+        let storage_filters = filters
+            .iter()
+            .map(|filter| Self::storage_filter(filter))
+            .collect::<datafusion::error::Result<Vec<_>>>()?;
+        let storage_filter_refs = storage_filters.iter().collect::<Vec<_>>();
+        self.inner.supports_filters_pushdown(&storage_filter_refs)
+    }
+
+    fn statistics(&self) -> Option<datafusion::common::Statistics> {
+        self.inner.statistics()
+    }
 }
 
 fn millis_to_micros(value: &str, field: &str) -> Result<i64, FabricError> {
@@ -803,14 +967,10 @@ fn workspace_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricError>
         })?;
     let created_at = millis_to_micros(&record.created_at, "created_at")?;
     let updated_at = millis_to_micros(&record.updated_at, "updated_at")?;
-    let repository = record.repository_id.as_ref().map(<[u8; 16]>::as_slice);
-    let worktree = record.worktree_id.as_ref().map(<[u8; 16]>::as_slice);
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(vec![Some(
-            record.workspace_id.as_slice(),
-        )])),
-        Arc::new(BinaryArray::from(vec![repository])),
-        Arc::new(BinaryArray::from(vec![worktree])),
+        id16_array([Some(&record.workspace_id)]),
+        id16_array([record.repository_id.as_ref()]),
+        id16_array([record.worktree_id.as_ref()]),
         Arc::new(Int16Array::from(vec![workspace_kind])),
         Arc::new(StringArray::from(vec![record.root_path_display.as_str()])),
         Arc::new(BinaryArray::from(vec![Some(
@@ -851,9 +1011,7 @@ fn common_repository_batch(record: &CommonRepositoryRecord) -> Result<RecordBatc
     let spec = table_spec(2).expect("generated common_repository table");
     let updated_at = millis_to_micros(&record.updated_at, "updated_at")?;
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(vec![Some(
-            record.repository_id.as_slice(),
-        )])),
+        id16_array([Some(&record.repository_id)]),
         Arc::new(BinaryArray::from(vec![Some(
             record.common_dir_path_bytes.as_slice(),
         )])),
@@ -875,10 +1033,8 @@ fn common_repository_batch(record: &CommonRepositoryRecord) -> Result<RecordBatc
 fn source_context_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricError> {
     let spec = table_spec(3).expect("generated analysis_context table");
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(vec![Some(
-            record.workspace_id.as_slice(),
-        )])),
-        Arc::new(BinaryArray::from(vec![Some(SOURCE_CONTEXT_ID.as_slice())])),
+        id16_array([Some(&record.workspace_id)]),
+        id16_array([Some(&SOURCE_CONTEXT_ID)]),
         Arc::new(Int16Array::from(vec![
             AnalysisContextKindCode::Source as i16,
         ])),
@@ -899,19 +1055,25 @@ fn source_context_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricE
 fn source_context_set_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricError> {
     let spec = table_spec(4).expect("generated analysis_context_set table");
     let identity = context_set_identity(record.workspace_id, &[SOURCE_CONTEXT_ID])?;
-    let mut contexts = ListBuilder::new(BinaryBuilder::new()).with_field(Arc::new(Field::new(
-        "element",
-        DataType::Binary,
-        false,
-    )));
-    contexts.values().append_value(SOURCE_CONTEXT_ID);
+    let DataType::List(element) = spec
+        .arrow_schema
+        .field_with_name("ordered_context_ids")
+        .expect("generated context list")
+        .data_type()
+    else {
+        unreachable!("generated context ids use List<codefabric.id16>")
+    };
+    let mut contexts =
+        ListBuilder::new(FixedSizeBinaryBuilder::new(16)).with_field(Arc::clone(element));
+    contexts
+        .values()
+        .append_value(SOURCE_CONTEXT_ID)
+        .expect("source context is Id16");
     contexts.append(true);
     let created_at = millis_to_micros(&record.created_at, "created_at")?;
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(vec![Some(identity.id.as_slice())])),
-        Arc::new(BinaryArray::from(vec![Some(
-            record.workspace_id.as_slice(),
-        )])),
+        id16_array([Some(&identity.id)]),
+        id16_array([Some(&record.workspace_id)]),
         Arc::new(contexts.finish()),
         Arc::new(BinaryArray::from(vec![Some(
             identity.full_digest.as_slice(),
@@ -986,17 +1148,46 @@ fn enum_catalog_batch() -> Result<RecordBatch, FabricError> {
 pub(crate) fn validate_delta_schema(schema: &SchemaRef) -> Result<(), ArrowError> {
     let kernel: deltalake::kernel::StructType = schema.as_ref().try_into_kernel()?;
     let reopened: Schema = (&kernel).try_into_arrow()?;
-    if reopened.fields() != schema.fields() {
-        return Err(ArrowError::SchemaError(
-            "Delta StructType round trip changed Arrow fields".into(),
-        ));
+    if reopened.fields().len() != schema.fields().len()
+        || schema
+            .fields()
+            .iter()
+            .zip(reopened.fields())
+            .any(|(expected, actual)| !delta_field_storage_compatible(expected, actual))
+    {
+        return Err(ArrowError::SchemaError(format!(
+            "Delta StructType round trip changed Arrow fields: expected={:?} reopened={:?}",
+            schema.fields(),
+            reopened.fields()
+        )));
     }
-    datafusion::common::DFSchema::try_from(Arc::new(reopened)).map_err(|error| {
+    // Delta has no fixed-size binary logical type and therefore reopens governed Id16
+    // storage as Binary. The exact extension metadata survives; the application validates
+    // that downgrade above and deliberately reattaches the canonical storage schema here.
+    let reattached = Schema::new_with_metadata(schema.fields().clone(), schema.metadata().clone());
+    datafusion::common::DFSchema::try_from(Arc::new(reattached)).map_err(|error| {
         ArrowError::SchemaError(format!(
             "DataFusion rejected Delta-round-tripped schema: {error}"
         ))
     })?;
     Ok(())
+}
+
+fn delta_field_storage_compatible(expected: &Field, actual: &Field) -> bool {
+    if expected.name() != actual.name() || expected.is_nullable() != actual.is_nullable() {
+        return false;
+    }
+    match (expected.data_type(), actual.data_type()) {
+        (DataType::FixedSizeBinary(16), DataType::Binary) => {
+            expected.has_valid_extension_type::<crate::schema_registry::Id16Extension>()
+                && (actual.metadata().is_empty() || expected.metadata() == actual.metadata())
+        }
+        _ if expected.metadata() != actual.metadata() => false,
+        (DataType::List(expected), DataType::List(actual)) => {
+            delta_field_storage_compatible(expected, actual)
+        }
+        (expected_type, actual_type) => expected_type == actual_type,
+    }
 }
 
 /// Compute the semantic identity of the exact Delta `StructType` derived from Arrow.

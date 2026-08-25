@@ -1835,7 +1835,7 @@ mod tests {
     use std::sync::Arc;
 
     use arrow::ipc::writer::StreamWriter;
-    use arrow_array::{Array as _, BinaryArray, Int32Array};
+    use arrow_array::{Array as _, FixedSizeBinaryArray, Int32Array};
     use serde::Deserialize;
 
     use super::*;
@@ -2242,7 +2242,7 @@ mod tests {
             .batch()
             .column(entity_spec.arrow_schema.index_of("entity_id").unwrap())
             .as_any()
-            .downcast_ref::<BinaryArray>()
+            .downcast_ref::<FixedSizeBinaryArray>()
             .unwrap()
             .iter()
             .flatten()
@@ -2255,7 +2255,7 @@ mod tests {
                 .batch()
                 .column(relation_spec.arrow_schema.index_of(name).unwrap())
                 .as_any()
-                .downcast_ref::<BinaryArray>()
+                .downcast_ref::<FixedSizeBinaryArray>()
                 .unwrap();
             assert!(endpoints.iter().flatten().all(|id| entity_ids.contains(id)));
         }

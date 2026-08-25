@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use arrow_array::{
-    Array as _, ArrayRef, BinaryArray, BooleanArray, Int16Array, Int32Array, Int64Array,
-    RecordBatch, StringArray, TimestampMicrosecondArray,
+    Array as _, ArrayRef, BinaryArray, BooleanArray, FixedSizeBinaryArray, Int16Array, Int32Array,
+    Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
 };
 use arrow_row::{RowConverter, SortField};
 use arrow_select::concat::concat_batches;
@@ -256,24 +256,16 @@ fn publication_batch(
     let spec = table_spec(5).expect("generated publication table");
     let pins = &request.pins;
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(vec![Some(
-            pins.publication_id.as_slice(),
-        )])),
-        Arc::new(BinaryArray::from(vec![Some(pins.workspace_id.as_slice())])),
-        Arc::new(BinaryArray::from(vec![
-            pins.repository_id.as_ref().map(<[u8; 16]>::as_slice),
-        ])),
-        Arc::new(BinaryArray::from(vec![
-            pins.worktree_id.as_ref().map(<[u8; 16]>::as_slice),
-        ])),
+        super::id16_array([Some(&pins.publication_id)]),
+        super::id16_array([Some(&pins.workspace_id)]),
+        super::id16_array([pins.repository_id.as_ref()]),
+        super::id16_array([pins.worktree_id.as_ref()]),
         Arc::new(Int16Array::from(vec![state_code(state)])),
         Arc::new(Int64Array::from(vec![pins.source_generation])),
         Arc::new(BinaryArray::from(vec![Some(
             pins.source_inventory_digest.as_slice(),
         )])),
-        Arc::new(BinaryArray::from(vec![Some(
-            pins.analysis_context_set_id.as_slice(),
-        )])),
+        super::id16_array([Some(&pins.analysis_context_set_id)]),
         Arc::new(BinaryArray::from(vec![
             pins.git_state_fingerprint
                 .as_ref()
@@ -315,14 +307,6 @@ fn publication_batch(
 
 fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordBatch, FabricError> {
     let spec = table_spec(6).expect("generated publication_table");
-    let publication_ids = records
-        .iter()
-        .map(|record| Some(record.publication_id.as_slice()))
-        .collect::<Vec<_>>();
-    let workspace_ids = records
-        .iter()
-        .map(|record| Some(record.workspace_id.as_slice()))
-        .collect::<Vec<_>>();
     let uris = records
         .iter()
         .map(|record| record.table_uri.as_str())
@@ -340,8 +324,8 @@ fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordB
         .map(|record| Some(record.primary_key_digest.as_slice()))
         .collect::<Vec<_>>();
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(publication_ids)),
-        Arc::new(BinaryArray::from(workspace_ids)),
+        super::id16_array(records.iter().map(|record| Some(&record.publication_id))),
+        super::id16_array(records.iter().map(|record| Some(&record.workspace_id))),
         Arc::new(Int16Array::from(
             records
                 .iter()
@@ -395,12 +379,8 @@ fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordB
 fn current_pointer_batch(record: &CurrentPublicationRecord) -> Result<RecordBatch, FabricError> {
     let spec = table_spec(7).expect("generated current_publication table");
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(vec![Some(
-            record.workspace_id.as_slice(),
-        )])),
-        Arc::new(BinaryArray::from(vec![Some(
-            record.publication_id.as_slice(),
-        )])),
+        super::id16_array([Some(&record.workspace_id)]),
+        super::id16_array([Some(&record.publication_id)]),
         Arc::new(Int64Array::from(vec![record.pointer_generation])),
         Arc::new(
             TimestampMicrosecondArray::from(vec![record.updated_at_micros]).with_timezone("UTC"),
@@ -452,23 +432,29 @@ async fn collect_table(
 pub(super) fn scope_filter(spec: &TableScopeSpec, scope: &PublicationScope) -> Option<Expr> {
     let mut predicates = Vec::new();
     if let Some(column) = spec.workspace_column {
-        predicates
-            .push(col(column).eq(lit(ScalarValue::Binary(Some(scope.workspace_id.to_vec())))));
+        predicates.push(col(column).eq(lit(ScalarValue::FixedSizeBinary(
+            16,
+            Some(scope.workspace_id.to_vec()),
+        ))));
     }
     if let Some(column) = spec.source_generation_column {
         predicates.push(col(column).eq(lit(scope.source_generation)));
     }
     if let Some(column) = spec.analysis_context_set_column {
-        predicates.push(col(column).eq(lit(ScalarValue::Binary(Some(
-            scope.analysis_context_set_id.to_vec(),
-        )))));
+        predicates.push(col(column).eq(lit(ScalarValue::FixedSizeBinary(
+            16,
+            Some(scope.analysis_context_set_id.to_vec()),
+        ))));
     }
     if let Some(column) = spec.analysis_context_column {
         let contexts = scope
             .analysis_context_ids
             .iter()
             .fold(None, |combined, context| {
-                let predicate = col(column).eq(lit(ScalarValue::Binary(Some(context.to_vec()))));
+                let predicate = col(column).eq(lit(ScalarValue::FixedSizeBinary(
+                    16,
+                    Some(context.to_vec()),
+                )));
                 Some(combined.map_or(predicate.clone(), |prior: Expr| prior.or(predicate)))
             });
         if let Some(contexts) = contexts {
@@ -478,13 +464,13 @@ pub(super) fn scope_filter(spec: &TableScopeSpec, scope: &PublicationScope) -> O
     predicates.into_iter().reduce(Expr::and)
 }
 
-fn distinct_binary(batch: &RecordBatch, column: &str) -> Result<i64, FabricError> {
+fn distinct_id16(batch: &RecordBatch, column: &str) -> Result<i64, FabricError> {
     let index = batch.schema().index_of(column)?;
     let values = batch
         .column(index)
         .as_any()
-        .downcast_ref::<BinaryArray>()
-        .ok_or_else(|| FabricError::PublicationIntegrity(format!("{column} is not Binary")))?;
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .ok_or_else(|| FabricError::PublicationIntegrity(format!("{column} is not Id16")))?;
     let count = values
         .iter()
         .flatten()
@@ -530,7 +516,7 @@ async fn manifest_records(
         let row_count = i64::try_from(batch.num_rows())
             .map_err(|_| FabricError::PublicationIntegrity("row count exceeds i64".into()))?;
         let owner_count = if spec.arrow_schema.index_of("owner_id").is_ok() {
-            distinct_binary(&batch, "owner_id")?
+            distinct_id16(&batch, "owner_id")?
         } else {
             0
         };
@@ -603,11 +589,12 @@ fn validate_identifiers_and_spans(batches: &BTreeMap<i16, RecordBatch>) -> Resul
                 let values = batch
                     .column(index)
                     .as_any()
-                    .downcast_ref::<BinaryArray>()
-                    .expect("generated id16 is Binary");
-                if values.iter().flatten().any(|value| value.len() != 16) {
+                    .downcast_ref::<FixedSizeBinaryArray>();
+                if values.is_none()
+                    || !field.has_valid_extension_type::<crate::schema_registry::Id16Extension>()
+                {
                     return Err(FabricError::PublicationIntegrity(format!(
-                        "{} contains a non-16-byte {}",
+                        "{} contains an invalid codefabric.id16 {}",
                         spec.name,
                         field.name()
                     )));
@@ -691,6 +678,9 @@ fn candidate_effective_batches(
 
 fn diagnostic_key(batch: &RecordBatch, column: &str) -> Result<String, FabricError> {
     let array = batch.column(batch.schema().index_of(column)?);
+    if let Some(binary) = array.as_any().downcast_ref::<FixedSizeBinaryArray>() {
+        return Ok(hex(binary.value(0)));
+    }
     if let Some(binary) = array.as_any().downcast_ref::<BinaryArray>() {
         return Ok(hex(binary.value(0)));
     }
@@ -702,9 +692,9 @@ fn owner_scope(batch: &RecordBatch, scope: &PublicationScope) -> Result<String, 
         let owners = batch
             .column(index)
             .as_any()
-            .downcast_ref::<BinaryArray>()
+            .downcast_ref::<FixedSizeBinaryArray>()
             .ok_or_else(|| {
-                FabricError::PublicationIntegrity("generated owner_id is not Binary".into())
+                FabricError::PublicationIntegrity("generated owner_id is not Id16".into())
             })?;
         return Ok(format!("owner:{}", hex(owners.value(0))));
     }
@@ -1017,7 +1007,7 @@ async fn read_current_pointer(
         let values = batch
             .column(batch.schema().index_of(name).unwrap())
             .as_any()
-            .downcast_ref::<BinaryArray>()
+            .downcast_ref::<FixedSizeBinaryArray>()
             .unwrap();
         <[u8; 16]>::try_from(values.value(0)).unwrap()
     };
@@ -1410,10 +1400,10 @@ impl WorkspaceFabric {
 mod tests {
     use std::path::Path;
 
-    use arrow_array::{ArrayRef, BinaryArray, Int16Array, Int64Array, RecordBatch};
+    use arrow_array::{ArrayRef, FixedSizeBinaryArray, Int16Array, Int64Array, RecordBatch};
 
     use super::*;
-    use crate::fabric::{EmptySnapshotOverlay, SnapshotProviderCatalog};
+    use crate::fabric::{EmptySnapshotOverlay, SnapshotProviderCatalog, id16_array};
     use crate::fact_ingest::{
         EntityRow, FactScope, RelationRow, ValidatedFactBatch, encode_entities, encode_relations,
     };
@@ -1456,18 +1446,16 @@ mod tests {
     fn owner_batch() -> ValidatedFactBatch {
         let spec = table_spec(8).unwrap();
         let columns: Vec<ArrayRef> = vec![
-            Arc::new(BinaryArray::from(vec![Some([1; 16].as_slice())])),
-            Arc::new(BinaryArray::from(vec![Some(
-                crate::identity::SOURCE_CONTEXT_ID.as_slice(),
-            )])),
+            id16_array([Some(&[1; 16])]),
+            id16_array([Some(&crate::identity::SOURCE_CONTEXT_ID)]),
             Arc::new(Int64Array::from(vec![7_i64])),
-            Arc::new(BinaryArray::from(vec![Some([3; 16].as_slice())])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
+            id16_array([Some(&[3; 16])]),
+            id16_array([None]),
             Arc::new(Int16Array::from(vec![3_i16])),
             Arc::new(Int16Array::from(vec![10_i16])),
             Arc::new(Int16Array::from(vec![10_i16])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
+            id16_array([None]),
+            id16_array([None]),
             Arc::new(Int64Array::from(vec![0_i64])),
             Arc::new(Int64Array::from(vec![0_i64])),
             Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
@@ -1608,7 +1596,7 @@ mod tests {
         let ids = batch
             .column(batch.schema().index_of("publication_id").unwrap())
             .as_any()
-            .downcast_ref::<BinaryArray>()
+            .downcast_ref::<FixedSizeBinaryArray>()
             .unwrap();
         let states = batch
             .column(batch.schema().index_of("durable_state_code").unwrap())
@@ -1636,7 +1624,7 @@ mod tests {
         let ids = batch
             .column(batch.schema().index_of("publication_id").unwrap())
             .as_any()
-            .downcast_ref::<BinaryArray>()
+            .downcast_ref::<FixedSizeBinaryArray>()
             .unwrap();
         let published = batch
             .column(batch.schema().index_of("published_table_count").unwrap())

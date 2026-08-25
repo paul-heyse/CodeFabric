@@ -1,0 +1,290 @@
+{
+  "format_version": 1,
+  "instances": [
+    {
+      "schema_kind": "analysis-context",
+      "schema_path": "contracts/schema/analysis-context.schema.json",
+      "instance": {
+        "workspace_id": "workspace:00000000000000000000000000000000",
+        "analysis_context_id": "context:00000000000000000000000000000000",
+        "context_kind": "source",
+        "context_fingerprint": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+        "provider_bundle_version": "fixture-v1",
+        "compiler_or_language_version": "fixture-v1",
+        "configuration_manifest_uri": null,
+        "active": true
+      }
+    },
+    {
+      "schema_kind": "serving-snapshot",
+      "schema_path": "contracts/schema/serving-snapshot.schema.json",
+      "instance": {
+        "manifest_version": "1.0",
+        "snapshot_id": "snapshot:00000000000000000000000000000000",
+        "workspace_id": "workspace:00000000000000000000000000000000",
+        "repository_id": "repository:00000000000000000000000000000000",
+        "worktree_id": "worktree:00000000000000000000000000000000",
+        "registration_revision": 0,
+        "source": {
+          "source_generation": 0,
+          "inventory_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "authorization_fingerprint": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "inclusion_policy_fingerprint": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "git_state_fingerprint": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "path_profile_version": "fixture-v1",
+          "source_trust_state": "CURRENT",
+          "event_stream_health": "HEALTHY",
+          "git_acceleration_status": "AVAILABLE",
+          "admitted_event_sequence": 0,
+          "reconciled_event_sequence": 0
+        },
+        "contexts": {
+          "context_set_id": "context-set:00000000000000000000000000000000",
+          "records": [],
+          "default_python_context_id": "context:00000000000000000000000000000000",
+          "default_rust_context_id": "context:00000000000000000000000000000000"
+        },
+        "base_publication": {
+          "publication_id": "publication:00000000000000000000000000000000",
+          "tables": []
+        },
+        "overlay": {
+          "overlay_generation": 0,
+          "overlay_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "total_memory_bytes": 0,
+          "tables": []
+        },
+        "indexes": {
+          "dependency_graph_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "capability_index_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "diagnostic_index_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "bundles": {
+          "ontology_bundle_id": "fixture-v1",
+          "schema_bundle_id": "fixture-v1",
+          "provider_bundle_id": "fixture-v1",
+          "derivation_bundle_id": "fixture-v1",
+          "query_language_bundle_id": "fixture-v1",
+          "model_pack_bundle_id": "fixture-v1",
+          "toolchain_bundle_id": "fixture-v1"
+        },
+        "limits_profile_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+        "manifest_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "schema_kind": "public-snapshot-metadata",
+      "schema_path": "contracts/schema/public-snapshot-metadata.schema.json",
+      "instance": {
+        "snapshot_id": "snapshot:00000000000000000000000000000000",
+        "workspace_id": "workspace:00000000000000000000000000000000",
+        "repository_id": "repository:00000000000000000000000000000000",
+        "worktree_id": "worktree:00000000000000000000000000000000",
+        "source_generation": 0,
+        "source_inventory_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+        "durable_base_publication": "publication:00000000000000000000000000000000",
+        "base_table_version_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+        "overlay_generation": 0,
+        "overlay_checksum": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+        "analysis_context_set_id": "context-set:00000000000000000000000000000000",
+        "analysis_context_ids": [],
+        "freshness_state": "CURRENT",
+        "source_trust_state": "CURRENT",
+        "event_stream_health": "HEALTHY",
+        "git_acceleration_status": "AVAILABLE",
+        "git_operation_summary": null,
+        "pending_update_count": 0,
+        "ontology_version": "fixture-v1",
+        "schema_bundle_version": "fixture-v1",
+        "provider_bundle_version": "fixture-v1",
+        "derivation_bundle_version": "fixture-v1",
+        "query_language_version": "fixture-v1",
+        "capability_summaries": [],
+        "diagnostic_references": []
+      }
+    },
+    {
+      "schema_kind": "source-context",
+      "schema_path": "contracts/schema/source-context.schema.json",
+      "instance": {
+        "context_id": "context:00000000000000000000000000000000",
+        "source_reference": {
+          "workspace_id": "workspace:00000000000000000000000000000000",
+          "source_file_id": "entity:file:00000000000000000000000000000000",
+          "path": {
+            "bytes_base64": "AA==",
+            "display": "fixture.rs",
+            "encoding_code": "UTF-8",
+            "display_is_lossy": false
+          },
+          "source_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "start_byte": 0,
+          "end_byte": 0
+        },
+        "context_kind": "source",
+        "content": {
+          "kind": "text",
+          "text": "fixture",
+          "encoding": "UTF-8",
+          "newline_kind": "LF",
+          "lossless": true
+        },
+        "associated_entity_ids": [],
+        "associated_fact_ids": [],
+        "syntax_outline": {}
+      }
+    },
+    {
+      "schema_kind": "public-status",
+      "schema_path": "contracts/schema/public-status.schema.json",
+      "instance": {
+        "ready": true,
+        "workspace_id": "workspace:00000000000000000000000000000000",
+        "agent_instance_id": "fixture-agent",
+        "snapshot": {
+          "snapshot_id": "snapshot:00000000000000000000000000000000",
+          "workspace_id": "workspace:00000000000000000000000000000000",
+          "repository_id": "repository:00000000000000000000000000000000",
+          "worktree_id": "worktree:00000000000000000000000000000000",
+          "source_generation": 0,
+          "source_inventory_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "durable_base_publication": "publication:00000000000000000000000000000000",
+          "base_table_version_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "overlay_generation": 0,
+          "overlay_checksum": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "analysis_context_set_id": "context-set:00000000000000000000000000000000",
+          "analysis_context_ids": [],
+          "freshness_state": "CURRENT",
+          "source_trust_state": "CURRENT",
+          "event_stream_health": "HEALTHY",
+          "git_acceleration_status": "AVAILABLE",
+          "git_operation_summary": null,
+          "pending_update_count": 0,
+          "ontology_version": "fixture-v1",
+          "schema_bundle_version": "fixture-v1",
+          "provider_bundle_version": "fixture-v1",
+          "derivation_bundle_version": "fixture-v1",
+          "query_language_version": "fixture-v1",
+          "capability_summaries": [],
+          "diagnostic_references": []
+        },
+        "versions": {},
+        "supported_languages": [],
+        "supported_request_forms": [],
+        "capability_statuses": [],
+        "freshness_state": "CURRENT",
+        "service_limits": {},
+        "notices": []
+      }
+    },
+    {
+      "schema_kind": "cpg-semantic-query-request",
+      "schema_path": "contracts/schema/cpg-semantic-query-request.schema.json",
+      "instance": {
+        "specification": "composable semantic CPG fact query",
+        "version": "1.3",
+        "semantic_request_id": "fixture-request",
+        "workspace_id": "workspace:00000000000000000000000000000000",
+        "freshness_policy": "current_required",
+        "queries": [
+          {
+            "query_id": "fixture-query",
+            "request": "find code entities",
+            "label": null,
+            "input": null,
+            "where": null,
+            "limit": null
+          }
+        ],
+        "response_projection": null,
+        "cost_budget": null
+      }
+    },
+    {
+      "schema_kind": "cpg-semantic-query-response",
+      "schema_path": "contracts/schema/cpg-semantic-query-response.schema.json",
+      "instance": {
+        "specification": "composable semantic CPG fact query response",
+        "version": "1.3",
+        "semantic_request_id": "fixture-request",
+        "execution_state": "completed",
+        "availability_state": "available",
+        "completeness_state": "complete",
+        "freshness_state": "CURRENT",
+        "limit_state": "within-limit",
+        "successful_query_count": 0,
+        "failed_query_count": 0,
+        "not_executed_dependency_count": 0,
+        "snapshot": {
+          "snapshot_id": "snapshot:00000000000000000000000000000000",
+          "workspace_id": "workspace:00000000000000000000000000000000",
+          "repository_id": "repository:00000000000000000000000000000000",
+          "worktree_id": "worktree:00000000000000000000000000000000",
+          "source_generation": 0,
+          "source_inventory_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "durable_base_publication": "publication:00000000000000000000000000000000",
+          "base_table_version_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "overlay_generation": 0,
+          "overlay_checksum": "b3:0000000000000000000000000000000000000000000000000000000000000000",
+          "analysis_context_set_id": "context-set:00000000000000000000000000000000",
+          "analysis_context_ids": [],
+          "freshness_state": "CURRENT",
+          "source_trust_state": "CURRENT",
+          "event_stream_health": "HEALTHY",
+          "git_acceleration_status": "AVAILABLE",
+          "git_operation_summary": null,
+          "pending_update_count": 0,
+          "ontology_version": "fixture-v1",
+          "schema_bundle_version": "fixture-v1",
+          "provider_bundle_version": "fixture-v1",
+          "derivation_bundle_version": "fixture-v1",
+          "query_language_version": "fixture-v1",
+          "capability_summaries": [],
+          "diagnostic_references": []
+        },
+        "entities": {},
+        "facts": {},
+        "paths": {},
+        "groups": {},
+        "source_contexts": {},
+        "query_results": [],
+        "errors": []
+      }
+    },
+    {
+      "schema_kind": "plan-spec",
+      "schema_path": "contracts/query/planspec.schema.json",
+      "instance": {
+        "plan_spec_version": "1.0",
+        "binding_state": "unbound",
+        "bound_snapshot_id": null,
+        "semantic_request_id": "fixture-request",
+        "workspace_id": "workspace:00000000000000000000000000000000",
+        "snapshot_requirement": {},
+        "context_selection": {},
+        "authorization_scope": {},
+        "source_boundary": {},
+        "queries": [
+          {
+            "node_kind": "find-entities",
+            "query_id": "fixture-query",
+            "label": null,
+            "inputs": [],
+            "ontology_ids": [],
+            "conditions": [],
+            "context_partition_policy": "all",
+            "certainty_filters": [],
+            "coverage_requirement": {},
+            "soft_limits": {},
+            "requested_output_roles": [],
+            "canonical_ordering": []
+          }
+        ],
+        "deterministic_ordering": [],
+        "response_projection": {},
+        "cost_budget": {},
+        "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ]
+}

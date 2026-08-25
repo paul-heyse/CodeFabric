@@ -4,12 +4,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{
-    ArrayRef, BinaryArray, BinaryBuilder, BooleanArray, Float64Array, Int16Array, Int32Array,
-    Int64Array, Int64Builder, ListBuilder, MapBuilder, MapFieldNames, StringArray, StringBuilder,
-    TimestampMicrosecondArray,
+    ArrayRef, BinaryArray, BooleanArray, FixedSizeBinaryBuilder, Float64Array, Int16Array,
+    Int32Array, Int64Array, Int64Builder, ListBuilder, MapBuilder, MapFieldNames, StringArray,
+    StringBuilder, TimestampMicrosecondArray,
 };
 use arrow::datatypes::{DataType, Field, Fields, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
+use arrow_schema::extension::{EXTENSION_TYPE_METADATA_KEY, EXTENSION_TYPE_NAME_KEY};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
 use serde::Deserialize;
@@ -68,6 +69,8 @@ struct ModelTable {
     publication_pin_role: String,
     dependencies: Vec<i16>,
     required_for_publication: bool,
+    #[serde(rename = "row_encoder")]
+    _row_encoder: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +80,11 @@ struct TableManifest {
     source: serde_json::Value,
     ontology_version: String,
     compatibility_mode: String,
+    metadata_dictionary: Vec<serde_json::Value>,
+    semantic_authorities: Vec<serde_json::Value>,
+    semantic_type_bindings: Vec<serde_json::Value>,
+    schema_evolution_policy: serde_json::Value,
+    sqlite_foreign_key_posture: serde_json::Value,
     owner_bucket_count: u16,
     tables: Vec<ModelTable>,
     table_scopes: Vec<serde_json::Value>,
@@ -84,14 +92,14 @@ struct TableManifest {
     serving_projections: Vec<serde_json::Value>,
     control_projections: Vec<serde_json::Value>,
     serving_resource_profile: serde_json::Value,
+    public_schema_instances: String,
     public_schemas: Vec<serde_json::Value>,
 }
 
 fn physical_type(logical: ModelLogicalType) -> DataType {
     match logical {
-        ModelLogicalType::Id16 | ModelLogicalType::Hash32 | ModelLogicalType::Binary => {
-            DataType::Binary
-        }
+        ModelLogicalType::Id16 => DataType::FixedSizeBinary(16),
+        ModelLogicalType::Hash32 | ModelLogicalType::Binary => DataType::Binary,
         ModelLogicalType::Code16 | ModelLogicalType::Bucket16 | ModelLogicalType::Int16 => {
             DataType::Int16
         }
@@ -103,9 +111,7 @@ fn physical_type(logical: ModelLogicalType) -> DataType {
         ModelLogicalType::TimestampUtc => {
             DataType::Timestamp(TimeUnit::Microsecond, Some(Arc::from("UTC")))
         }
-        ModelLogicalType::IdList => {
-            DataType::List(Arc::new(Field::new("element", DataType::Binary, false)))
-        }
+        ModelLogicalType::IdList => DataType::List(Arc::new(id16_field("element", false))),
         ModelLogicalType::Int64List => {
             DataType::List(Arc::new(Field::new("element", DataType::Int64, false)))
         }
@@ -123,11 +129,30 @@ fn physical_type(logical: ModelLogicalType) -> DataType {
     }
 }
 
+fn id16_field(name: &str, nullable: bool) -> Field {
+    Field::new(name, DataType::FixedSizeBinary(16), nullable).with_metadata(HashMap::from([
+        (
+            EXTENSION_TYPE_NAME_KEY.to_owned(),
+            "codefabric.id16".to_owned(),
+        ),
+        (
+            EXTENSION_TYPE_METADATA_KEY.to_owned(),
+            "version=1".to_owned(),
+        ),
+    ]))
+}
+
+fn sample_id16(value: &[u8; 16]) -> ArrayRef {
+    let mut builder = FixedSizeBinaryBuilder::with_capacity(1, 16);
+    builder.append_value(value).expect("typed Id16 width");
+    Arc::new(builder.finish())
+}
+
 fn sample_array(logical: ModelLogicalType) -> ArrayRef {
     const ID: [u8; 16] = [7; 16];
     const HASH: [u8; 32] = [9; 32];
     match logical {
-        ModelLogicalType::Id16 => Arc::new(BinaryArray::from(vec![Some(ID.as_slice())])),
+        ModelLogicalType::Id16 => sample_id16(&ID),
         ModelLogicalType::Hash32 => Arc::new(BinaryArray::from(vec![Some(HASH.as_slice())])),
         ModelLogicalType::Binary => Arc::new(BinaryArray::from(vec![Some(b"bytes".as_slice())])),
         ModelLogicalType::Code16 | ModelLogicalType::Bucket16 | ModelLogicalType::Int16 => {
@@ -142,9 +167,9 @@ fn sample_array(logical: ModelLogicalType) -> ArrayRef {
             Arc::new(TimestampMicrosecondArray::from(vec![1_i64]).with_timezone("UTC"))
         }
         ModelLogicalType::IdList => {
-            let mut builder = ListBuilder::new(BinaryBuilder::new())
-                .with_field(Arc::new(Field::new("element", DataType::Binary, false)));
-            builder.values().append_value(ID);
+            let mut builder = ListBuilder::new(FixedSizeBinaryBuilder::new(16))
+                .with_field(Arc::new(id16_field("element", false)));
+            builder.values().append_value(ID).expect("typed Id16 width");
             builder.append(true);
             Arc::new(builder.finish())
         }
@@ -188,11 +213,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || manifest.source.as_object().is_none()
         || manifest.ontology_version.is_empty()
         || manifest.compatibility_mode.is_empty()
+        || manifest.metadata_dictionary.is_empty()
+        || manifest.semantic_authorities.is_empty()
+        || manifest.semantic_type_bindings.is_empty()
+        || manifest.schema_evolution_policy.as_object().is_none()
+        || manifest.sqlite_foreign_key_posture.is_null()
         || manifest.table_scopes.is_empty()
         || manifest.operational_tables.is_empty()
         || manifest.serving_projections.is_empty()
         || manifest.control_projections.is_empty()
         || manifest.serving_resource_profile.as_object().is_none()
+        || manifest.public_schema_instances
+            != "contracts/generated/model/schema/public-schema-golden-instances.json"
         || manifest.public_schemas.len() != 8
     {
         return Err("staged TableSpec manifest is incomplete".into());
@@ -234,12 +266,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         foreign_key.to_owned(),
                     );
                 }
-                Field::new(
+                let mut field = Field::new(
                     &column.name,
                     physical_type(column.logical_type),
                     column.nullable,
                 )
-                .with_metadata(metadata)
+                .with_metadata(metadata);
+                if column.logical_type == ModelLogicalType::Id16 {
+                    let mut extension_metadata = field.metadata().clone();
+                    extension_metadata.insert(
+                        EXTENSION_TYPE_NAME_KEY.to_owned(),
+                        "codefabric.id16".to_owned(),
+                    );
+                    extension_metadata.insert(
+                        EXTENSION_TYPE_METADATA_KEY.to_owned(),
+                        "version=1".to_owned(),
+                    );
+                    field = field.with_metadata(extension_metadata);
+                }
+                field
             })
             .collect::<Vec<_>>();
         let schema = Arc::new(Schema::new_with_metadata(

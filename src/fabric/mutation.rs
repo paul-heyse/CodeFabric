@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use arrow_array::{Array as _, BinaryArray, RecordBatch};
+use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch};
 use arrow_row::{RowConverter, SortField};
 use arrow_schema::Schema;
 use arrow_select::concat::concat_batches;
@@ -306,14 +306,22 @@ pub(super) fn commit_properties(prepared: &PreparedMutation) -> CommitProperties
 fn owner_predicate(scope: FactBatchScope, owners: &[[u8; 16]]) -> Expr {
     let owner = owners
         .iter()
-        .map(|owner| col("owner_id").eq(lit(ScalarValue::Binary(Some(owner.to_vec())))))
+        .map(|owner| {
+            col("owner_id").eq(lit(ScalarValue::FixedSizeBinary(16, Some(owner.to_vec()))))
+        })
         .reduce(Expr::or)
         .expect("validated non-empty owner set");
     col("workspace_id")
-        .eq(lit(ScalarValue::Binary(Some(scope.workspace_id.to_vec()))))
-        .and(col("analysis_context_id").eq(lit(ScalarValue::Binary(Some(
-            scope.analysis_context_id.to_vec(),
-        )))))
+        .eq(lit(ScalarValue::FixedSizeBinary(
+            16,
+            Some(scope.workspace_id.to_vec()),
+        )))
+        .and(
+            col("analysis_context_id").eq(lit(ScalarValue::FixedSizeBinary(
+                16,
+                Some(scope.analysis_context_id.to_vec()),
+            ))),
+        )
         .and(owner)
 }
 
@@ -370,14 +378,14 @@ fn validate_request(
             .batch()
             .column(owner_index)
             .as_any()
-            .downcast_ref::<BinaryArray>()
-            .expect("generated owner binary");
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .expect("generated owner Id16");
         let batch_workspaces = batch
             .batch()
             .column(workspace_index)
             .as_any()
-            .downcast_ref::<BinaryArray>()
-            .expect("generated workspace binary");
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .expect("generated workspace Id16");
         if batch_owners.iter().flatten().any(|owner| {
             <[u8; 16]>::try_from(owner).map_or(true, |owner| owners.binary_search(&owner).is_err())
         }) || batch_workspaces

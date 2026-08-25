@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use arrow_array::{Array as _, BinaryArray};
+use arrow_array::{Array as _, FixedSizeBinaryArray};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
@@ -581,9 +581,9 @@ fn response_ids(
         let values = batch
             .column(index)
             .as_any()
-            .downcast_ref::<BinaryArray>()
+            .downcast_ref::<FixedSizeBinaryArray>()
             .ok_or_else(|| {
-                SemanticQueryError::Invalid("result identity column is not Binary".into())
+                SemanticQueryError::Invalid("result identity column is not Id16".into())
             })?;
         for row in 0..values.len() {
             if values.is_null(row) || values.value(row).len() != 16 {
