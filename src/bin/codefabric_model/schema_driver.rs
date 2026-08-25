@@ -1,11 +1,10 @@
 //! Contract-IR-driven schema, `TableSpec`, DDL, and row-encoder family driver.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -775,7 +774,7 @@ impl ModelDriver for SchemaDriver {
 pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriverError> {
     let driver = SchemaDriver;
     let plan = driver.plan(repository_root)?;
-    let stage_path = process_stage_root(repository_root, "schemas-shadow");
+    let stage_path = process_stage_root(repository_root, "schemas-stage");
     if stage_path.exists() {
         fs::remove_dir_all(&stage_path).map_err(|source| SchemaDriverError::Io {
             path: stage_path.clone(),
@@ -787,7 +786,7 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage_path, &plan.descriptor)?;
-    let (rendered, cache_lookup) = render_with_cache(
+    let (rendered, cache_lookup, action_key) = render_with_cache(
         repository_root,
         "schemas",
         &plan.descriptor,
@@ -819,6 +818,7 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
         .collect();
     Ok(SchemaReport {
         family: "schemas".to_owned(),
+        action_key,
         rule_version: plan.descriptor.rule_version.clone(),
         resource_profile: plan.descriptor.resource_profile.clone(),
         table_count: plan.ir.tables.len(),
@@ -836,6 +836,7 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
 #[serde(deny_unknown_fields)]
 pub struct SchemaReport {
     pub family: String,
+    pub action_key: String,
     pub rule_version: String,
     pub resource_profile: DriverResourceProfile,
     pub table_count: usize,
@@ -952,32 +953,8 @@ fn render_ddl(plan: &SchemaPlan) -> Vec<u8> {
         plan.semantic_digest, plan.source_digest
     );
     for table in &plan.ir.operational_tables {
-        writeln!(output, "CREATE TABLE {} (", table.name).unwrap();
-        let mut definitions = table
-            .columns
-            .iter()
-            .map(|column| {
-                format!(
-                    "  {} {}{}",
-                    column.name,
-                    match column.sqlite_type {
-                        SqliteType::Integer => "INTEGER",
-                        SqliteType::Real => "REAL",
-                        SqliteType::Text => "TEXT",
-                        SqliteType::Blob => "BLOB",
-                    },
-                    if column.nullable { "" } else { " NOT NULL" }
-                )
-            })
-            .collect::<Vec<_>>();
-        definitions.push(format!("  PRIMARY KEY ({})", table.primary_key.join(", ")));
-        definitions.extend(
-            table
-                .unique
-                .iter()
-                .map(|columns| format!("  UNIQUE ({})", columns.join(", "))),
-        );
-        writeln!(output, "{}\n) STRICT;\n", definitions.join(",\n")).unwrap();
+        output.push_str(&render_operational_table_ddl(table));
+        output.push('\n');
     }
     for projection in &plan.ir.control_projections {
         if projection.projection_role != ControlProjectionRole::DerivedOperational {
@@ -997,6 +974,36 @@ fn render_ddl(plan: &SchemaPlan) -> Vec<u8> {
         .unwrap();
     }
     output.into_bytes()
+}
+
+fn render_operational_table_ddl(table: &OperationalTableContract) -> String {
+    let mut output = format!("CREATE TABLE {} (\n", table.name);
+    let mut definitions = table
+        .columns
+        .iter()
+        .map(|column| {
+            format!(
+                "  {} {}{}",
+                column.name,
+                match column.sqlite_type {
+                    SqliteType::Integer => "INTEGER",
+                    SqliteType::Real => "REAL",
+                    SqliteType::Text => "TEXT",
+                    SqliteType::Blob => "BLOB",
+                },
+                if column.nullable { "" } else { " NOT NULL" }
+            )
+        })
+        .collect::<Vec<_>>();
+    definitions.push(format!("  PRIMARY KEY ({})", table.primary_key.join(", ")));
+    definitions.extend(
+        table
+            .unique
+            .iter()
+            .map(|columns| format!("  UNIQUE ({})", columns.join(", "))),
+    );
+    writeln!(output, "{}\n) STRICT;", definitions.join(",\n")).unwrap();
+    output
 }
 
 fn render_rust(ir: &SchemaContractIr) -> Vec<u8> {
@@ -1149,6 +1156,12 @@ fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
     for table in &ir.operational_tables {
         writeln!(output, "    GeneratedOperationalTableSpec {{").unwrap();
         writeln!(output, "        name: {:?},", table.name).unwrap();
+        writeln!(
+            output,
+            "        sqlite_ddl: {:?},",
+            render_operational_table_ddl(table)
+        )
+        .unwrap();
         output.push_str("        columns: &[\n");
         for column in &table.columns {
             writeln!(
@@ -1349,8 +1362,8 @@ fn invalid<T>(path: &str, detail: impl Into<String>) -> Result<T, SchemaDriverEr
 }
 
 fn decode_ir(bytes: &[u8]) -> Result<SchemaContractIr, SchemaDriverError> {
-    reject_duplicate_keys(bytes)?;
-    serde_json::from_slice(bytes).map_err(SchemaDriverError::Json)
+    let value = codefabric::contracts::jcs::decode_strict(bytes)?;
+    serde_json::from_value(value).map_err(SchemaDriverError::Json)
 }
 
 /// Compile the schema Contract IR through its closed family-native model and return the detached
@@ -1371,95 +1384,8 @@ pub fn detached_schema_identity(bytes: &[u8]) -> Result<String, SchemaDriverErro
         })?;
     object.remove("canonical_digest");
     object.remove("source_digest");
-    let canonical = serde_json_canonicalizer::to_vec(&value)?;
+    let canonical = codefabric::contracts::jcs::canonicalize_value(&value)?;
     Ok(codefabric::integrity::framed_digest(&canonical))
-}
-
-#[derive(Debug)]
-struct NoDuplicateKeys;
-
-impl<'de> Deserialize<'de> for NoDuplicateKeys {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(NoDuplicateVisitor)
-    }
-}
-
-struct NoDuplicateVisitor;
-
-impl<'de> Visitor<'de> for NoDuplicateVisitor {
-    type Value = NoDuplicateKeys;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("JSON without duplicate object keys")
-    }
-
-    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_string<E>(self, _: String) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        NoDuplicateKeys::deserialize(deserializer)
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        while sequence.next_element::<NoDuplicateKeys>()?.is_some() {}
-        Ok(NoDuplicateKeys)
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut keys = HashSet::new();
-        while let Some(key) = map.next_key::<String>()? {
-            if !keys.insert(key.clone()) {
-                return Err(A::Error::custom(format!("duplicate object key {key}")));
-            }
-            map.next_value::<NoDuplicateKeys>()?;
-        }
-        Ok(NoDuplicateKeys)
-    }
-}
-
-fn reject_duplicate_keys(bytes: &[u8]) -> Result<(), SchemaDriverError> {
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    NoDuplicateKeys::deserialize(&mut deserializer).map_err(|error| {
-        SchemaDriverError::Invalid {
-            path: "$".to_owned(),
-            detail: error.to_string(),
-        }
-    })?;
-    deserializer.end().map_err(SchemaDriverError::Json)
 }
 
 /// Schema family error with bounded JSON-path diagnostics.
@@ -1475,6 +1401,8 @@ pub enum SchemaDriverError {
     ProjectionMismatch,
     #[error("schema JSON failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    CanonicalJson(#[from] codefabric::contracts::jcs::CanonicalJsonError),
     #[error("schema I/O failed at {path}: {source}")]
     Io {
         path: std::path::PathBuf,

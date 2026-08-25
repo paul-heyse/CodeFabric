@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use arrow_schema::DataType;
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior};
 use thiserror::Error;
@@ -993,61 +994,54 @@ fn user_version(connection: &Connection) -> rusqlite::Result<u32> {
 }
 
 fn generated_table_names() -> BTreeSet<String> {
-    OPERATIONAL_DDL
-        .lines()
-        .filter_map(|line| line.strip_prefix("CREATE TABLE "))
-        .filter_map(|line| line.strip_suffix(" ("))
-        .map(str::to_owned)
+    crate::schema_registry::operational_table_specs()
+        .iter()
+        .map(|spec| spec.name.to_owned())
         .collect()
 }
 
 fn generated_table_ddl(table: &str) -> Result<String, OperationalStoreError> {
-    let start = format!("CREATE TABLE {table} (");
-    let mut collecting = false;
-    let mut lines = Vec::new();
-    for line in OPERATIONAL_DDL.lines() {
-        if line == start {
-            collecting = true;
-        }
-        if collecting {
-            lines.push(line);
-            if line == ") STRICT;" {
-                return Ok(format!("{}\n", lines.join("\n")));
-            }
-        }
-    }
-    Err(OperationalStoreError::DdlLineage(format!(
-        "generated DDL has no table {table}"
-    )))
+    crate::schema_registry::operational_table_spec(table)
+        .map(|spec| spec.sqlite_ddl.to_owned())
+        .ok_or_else(|| {
+            OperationalStoreError::DdlLineage(format!("generated specs have no table {table}"))
+        })
 }
 
 fn generated_column_shapes() -> Result<GeneratedColumnShapes, OperationalStoreError> {
     let mut result = BTreeMap::new();
-    for table in generated_table_names() {
-        let ddl = generated_table_ddl(&table)?;
-        let columns = ddl
-            .lines()
-            .skip(1)
-            .take_while(|line| *line != ") STRICT;")
-            .filter_map(|line| {
-                let declaration = line.trim().trim_end_matches(',');
-                if declaration.starts_with("PRIMARY KEY") || declaration.starts_with("UNIQUE") {
-                    return None;
-                }
-                let mut parts = declaration.split_whitespace();
-                Some((
-                    parts.next()?.to_owned(),
-                    parts.next()?.to_owned(),
-                    declaration.ends_with("NOT NULL"),
+    for table in crate::schema_registry::operational_table_specs() {
+        let columns = table
+            .arrow_schema
+            .fields()
+            .iter()
+            .map(|field| {
+                let sqlite_type = match field.data_type() {
+                    DataType::Int64 => "INTEGER",
+                    DataType::Float64 => "REAL",
+                    DataType::Utf8 => "TEXT",
+                    DataType::Binary => "BLOB",
+                    other => {
+                        return Err(OperationalStoreError::DdlLineage(format!(
+                            "generated operational table {} has unsupported Arrow type {other}",
+                            table.name
+                        )));
+                    }
+                };
+                Ok((
+                    field.name().to_owned(),
+                    sqlite_type.to_owned(),
+                    !field.is_nullable(),
                 ))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         if columns.is_empty() {
             return Err(OperationalStoreError::DdlLineage(format!(
-                "generated DDL table {table} has no columns"
+                "generated table spec {} has no columns",
+                table.name
             )));
         }
-        result.insert(table, columns);
+        result.insert(table.name.to_owned(), columns);
     }
     Ok(result)
 }

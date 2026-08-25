@@ -14,14 +14,9 @@ use super::model_control::{
     EdgeDeclaration, EdgeKind, ModelError, ModelGraph, NodeDeclaration, NodeKind, ResourceBounds,
     StableId,
 };
-use super::repository_model::{
-    ArtifactRole, ClaimedPath, RepositoryModel, RepositoryModelError, output_id, read_stable,
-};
+use super::repository_model::{ArtifactRole, RepositoryModel, RepositoryModelError, read_stable};
 
 const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
-const MODEL_SCHEMA_VERSION: &str = "repository-model-v1";
-const OUTPUT_SCHEMA_VERSION: &str = "planned-output-v1";
-const ENVIRONMENT_CONTRACT_VERSION: &str = "model-driver-env-v1";
 
 /// Safe byte-native repository-relative output path.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -188,8 +183,8 @@ pub struct PlannedInput {
     pub source_digest: String,
 }
 
-/// Exact compiler/tool identity. No cache key or pass decision depends on an executable path
-/// alone.
+/// Exact compiler/tool identity used by the canonical family action key. No cache key depends on
+/// an executable path alone.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionExecutableIdentity {
@@ -230,33 +225,6 @@ impl ActionExecutableIdentity {
     }
 }
 
-/// Canonical action-key payload.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ActionKeyMaterial {
-    pub driver_id: StableId,
-    pub rule_version: String,
-    pub model_schema_version: String,
-    pub output_schema_version: String,
-    pub inputs: Vec<PlannedInput>,
-    pub upstream_output_digests: BTreeMap<StableId, String>,
-    pub outputs: Vec<PlannedOutput>,
-    pub executable: ActionExecutableIdentity,
-    pub environment_contract: BTreeMap<String, String>,
-    pub generation_profile: String,
-}
-
-impl ActionKeyMaterial {
-    /// Compute the RFC 8785/BLAKE3 action key.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error only when the closed payload cannot be encoded.
-    pub fn digest(&self) -> Result<String, DesiredTreeError> {
-        canonical_digest(self)
-    }
-}
-
 /// One deterministic action in a read-only plan.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -284,6 +252,7 @@ pub struct DesiredTree {
 }
 
 impl DesiredTree {
+    #[cfg(test)]
     fn insert(&mut self, entry: DesiredTreeEntry) -> Result<(), DesiredTreeError> {
         let path = entry.output.path.clone();
         if let Some(existing) = self.entries.insert(path.clone(), entry) {
@@ -435,15 +404,6 @@ impl SourceFence {
     }
 }
 
-/// Cache payload shape introduced for key/byte semantics only. Pass verdicts are deliberately not
-/// representable.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CachedActionBytes {
-    pub action_key: String,
-    pub outputs: BTreeMap<SafeOutputPath, String>,
-}
-
 /// Compiled read-only plan plus its ephemeral dependency graph.
 #[derive(Debug)]
 pub struct ModelPlan {
@@ -453,33 +413,96 @@ pub struct ModelPlan {
     pub changes: Vec<TreeChange>,
     pub source_fence: SourceFence,
     graph: ModelGraph,
-    reconciled_output_paths: Option<Vec<String>>,
 }
 
 impl ModelPlan {
-    /// Compile a conservative complete shadow plan from the current typed repository model.
-    ///
-    /// Family drivers narrow the current all-source input sets in WP06–WP10; conservative
-    /// over-invalidation is correct during this read-only packet.
+    /// Compile the read-only plan from the aggregate renderer's exact desired bytes and real
+    /// family action keys.
     ///
     /// # Errors
     ///
     /// Returns an error for path, read, graph, identity, or output-ownership violations.
-    pub fn compile(
+    pub fn from_reconciliation(
         root: &Path,
         model: &RepositoryModel,
-        executable: &ActionExecutableIdentity,
+        desired_tree: DesiredTree,
+        action_keys: BTreeMap<StableId, String>,
+        changes: Vec<TreeChange>,
     ) -> Result<Self, DesiredTreeError> {
         let inputs = planned_inputs(model)?;
-        let (outputs_by_family, current_outputs) = current_outputs_by_family(root, model)?;
-        let shadow =
-            compile_shadow_actions(&inputs, outputs_by_family, &current_outputs, executable)?;
-        let graph = ModelGraph::compile(
-            shadow.nodes,
-            shadow.edges,
-            ResourceBounds::new(50_000, 500_000, 64)?,
-        )?;
-        let changes = shadow.desired_tree.compare(&current_outputs);
+        let mut current_outputs = BTreeMap::new();
+        for claim in model
+            .claims
+            .values()
+            .filter(|claim| claim.role == ArtifactRole::Derived)
+        {
+            let path = SafeOutputPath::parse(claim.path.raw_bytes().to_vec())?;
+            let bytes = read_stable(&root.join(path.path_buf()), MAX_OUTPUT_BYTES)?;
+            current_outputs.insert(path, bytes);
+        }
+        for path in desired_tree.entries.keys() {
+            if current_outputs.contains_key(path) {
+                continue;
+            }
+            let absolute = root.join(path.path_buf());
+            if absolute.is_file() {
+                current_outputs.insert(path.clone(), read_stable(&absolute, MAX_OUTPUT_BYTES)?);
+            }
+        }
+        let mut outputs_by_action = BTreeMap::<StableId, Vec<PlannedOutput>>::new();
+        for entry in desired_tree.entries.values() {
+            outputs_by_action
+                .entry(entry.output.producer.clone())
+                .or_default()
+                .push(entry.output.clone());
+        }
+        let mut nodes = inputs
+            .iter()
+            .map(|input| NodeDeclaration {
+                id: input.artifact_id.clone(),
+                kind: NodeKind::Source,
+            })
+            .collect::<Vec<_>>();
+        let mut edges = Vec::new();
+        let mut actions = BTreeMap::new();
+        for (action_id, mut outputs) in outputs_by_action {
+            let action_key = action_keys
+                .get(&action_id)
+                .cloned()
+                .ok_or_else(|| DesiredTreeError::MissingActionKey(action_id.clone()))?;
+            outputs.sort();
+            nodes.push(NodeDeclaration {
+                id: action_id.clone(),
+                kind: NodeKind::Action,
+            });
+            edges.extend(inputs.iter().map(|input| EdgeDeclaration {
+                prerequisite: input.artifact_id.clone(),
+                dependent: action_id.clone(),
+                kind: EdgeKind::ReadsExactBytes,
+            }));
+            for output in &outputs {
+                nodes.push(NodeDeclaration {
+                    id: output.output_id.clone(),
+                    kind: NodeKind::Output,
+                });
+                edges.push(EdgeDeclaration {
+                    prerequisite: action_id.clone(),
+                    dependent: output.output_id.clone(),
+                    kind: EdgeKind::Produces,
+                });
+            }
+            actions.insert(
+                action_id.clone(),
+                PlannedAction {
+                    action_id,
+                    action_key,
+                    inputs: inputs.clone(),
+                    upstream_output_digests: BTreeMap::new(),
+                    outputs,
+                },
+            );
+        }
+        let graph = ModelGraph::compile(nodes, edges, ResourceBounds::new(50_000, 500_000, 64)?)?;
         let source_fence = SourceFence {
             sources: model
                 .claims
@@ -496,25 +519,13 @@ impl ModelPlan {
                 .collect(),
         };
         Ok(Self {
-            actions: shadow.actions,
-            desired_tree: shadow.desired_tree,
+            actions,
+            desired_tree,
             current_outputs,
             changes,
             source_fence,
             graph,
-            reconciled_output_paths: None,
         })
-    }
-
-    /// Replace the bootstrap shadow comparison with the aggregate renderer's real
-    /// transaction preview while retaining the typed action graph and explanations.
-    pub fn apply_reconciliation_preview(
-        &mut self,
-        output_paths: Vec<String>,
-        changes: Vec<TreeChange>,
-    ) {
-        self.reconciled_output_paths = Some(output_paths);
-        self.changes = changes;
     }
 
     /// Stable prerequisite-first action order.
@@ -598,8 +609,7 @@ impl ModelPlan {
             .collect()
     }
 
-    /// Verify current source fences, stage exact desired bytes, and require a zero-diff shadow
-    /// plan.
+    /// Verify current source fences, stage exact desired bytes, and require a zero-diff plan.
     ///
     /// # Errors
     ///
@@ -622,7 +632,7 @@ impl ModelPlan {
             .iter()
             .find(|change| change.kind != ChangeKind::Unchanged)
         {
-            return Err(DesiredTreeError::NonZeroShadowPlan {
+            return Err(DesiredTreeError::NonZeroPlan {
                 path: change.path.display(),
                 kind: change.kind,
             });
@@ -656,13 +666,12 @@ impl ModelPlan {
     /// Build a byte-free structured CLI report.
     #[must_use]
     pub fn report(&self, changed: &[StableId]) -> PlanReport {
-        let output_paths = self.reconciled_output_paths.clone().unwrap_or_else(|| {
-            self.desired_tree
-                .entries
-                .keys()
-                .map(SafeOutputPath::display)
-                .collect()
-        });
+        let output_paths = self
+            .desired_tree
+            .entries
+            .keys()
+            .map(SafeOutputPath::display)
+            .collect::<Vec<_>>();
         PlanReport {
             action_order: self.action_order(),
             action_keys: self
@@ -676,151 +685,6 @@ impl ModelPlan {
             affected: self.affected(changed),
         }
     }
-}
-
-type FamilyOutputs<'a> = BTreeMap<String, Vec<(SafeOutputPath, &'a ClaimedPath)>>;
-
-struct ShadowActions {
-    actions: BTreeMap<StableId, PlannedAction>,
-    desired_tree: DesiredTree,
-    nodes: Vec<NodeDeclaration>,
-    edges: Vec<EdgeDeclaration>,
-}
-
-fn current_outputs_by_family<'a>(
-    root: &Path,
-    model: &'a RepositoryModel,
-) -> Result<(FamilyOutputs<'a>, BTreeMap<SafeOutputPath, Vec<u8>>), DesiredTreeError> {
-    let mut outputs_by_family: FamilyOutputs<'a> = BTreeMap::new();
-    let mut current_outputs = BTreeMap::new();
-    for claim in model
-        .claims
-        .values()
-        .filter(|claim| claim.role == ArtifactRole::Derived)
-    {
-        let path = SafeOutputPath::parse(claim.path.raw_bytes().to_vec())?;
-        let bytes = read_stable(&root.join(path.path_buf()), MAX_OUTPUT_BYTES)?;
-        current_outputs.insert(path.clone(), bytes);
-        outputs_by_family
-            .entry(claim.family_id.clone())
-            .or_default()
-            .push((path, claim));
-    }
-    Ok((outputs_by_family, current_outputs))
-}
-
-fn compile_shadow_actions(
-    inputs: &[PlannedInput],
-    outputs_by_family: FamilyOutputs<'_>,
-    current_outputs: &BTreeMap<SafeOutputPath, Vec<u8>>,
-    executable: &ActionExecutableIdentity,
-) -> Result<ShadowActions, DesiredTreeError> {
-    let mut nodes: Vec<_> = inputs
-        .iter()
-        .map(|input| NodeDeclaration {
-            id: input.artifact_id.clone(),
-            kind: NodeKind::Source,
-        })
-        .collect();
-    let mut edges = Vec::new();
-    let mut actions = BTreeMap::new();
-    let mut desired_tree = DesiredTree::default();
-    for (family, family_outputs) in outputs_by_family {
-        let action_id = StableId::parse(format!("action:{family}"))?;
-        nodes.push(NodeDeclaration {
-            id: action_id.clone(),
-            kind: NodeKind::Action,
-        });
-        edges.extend(inputs.iter().map(|input| EdgeDeclaration {
-            prerequisite: input.artifact_id.clone(),
-            dependent: action_id.clone(),
-            kind: EdgeKind::ReadsExactBytes,
-        }));
-        let outputs = compile_family_outputs(
-            inputs,
-            &action_id,
-            family_outputs,
-            current_outputs,
-            &mut desired_tree,
-            &mut nodes,
-            &mut edges,
-        )?;
-        let key_material = ActionKeyMaterial {
-            driver_id: action_id.clone(),
-            rule_version: format!("{family}-shadow-v1"),
-            model_schema_version: MODEL_SCHEMA_VERSION.to_owned(),
-            output_schema_version: OUTPUT_SCHEMA_VERSION.to_owned(),
-            inputs: inputs.to_vec(),
-            upstream_output_digests: BTreeMap::new(),
-            outputs: outputs.clone(),
-            executable: executable.clone(),
-            environment_contract: BTreeMap::from([
-                (
-                    "contract".to_owned(),
-                    ENVIRONMENT_CONTRACT_VERSION.to_owned(),
-                ),
-                ("credentials".to_owned(), "stripped".to_owned()),
-                ("network".to_owned(), "undeclared".to_owned()),
-            ]),
-            generation_profile: "shadow-read-only".to_owned(),
-        };
-        actions.insert(
-            action_id.clone(),
-            PlannedAction {
-                action_id,
-                action_key: key_material.digest()?,
-                inputs: inputs.to_vec(),
-                upstream_output_digests: BTreeMap::new(),
-                outputs,
-            },
-        );
-    }
-    Ok(ShadowActions {
-        actions,
-        desired_tree,
-        nodes,
-        edges,
-    })
-}
-
-fn compile_family_outputs(
-    inputs: &[PlannedInput],
-    action_id: &StableId,
-    family_outputs: Vec<(SafeOutputPath, &ClaimedPath)>,
-    current_outputs: &BTreeMap<SafeOutputPath, Vec<u8>>,
-    desired_tree: &mut DesiredTree,
-    nodes: &mut Vec<NodeDeclaration>,
-    edges: &mut Vec<EdgeDeclaration>,
-) -> Result<Vec<PlannedOutput>, DesiredTreeError> {
-    let mut outputs = Vec::new();
-    for (path, claim) in family_outputs {
-        let output = planned_output(action_id, path.clone(), claim)?;
-        nodes.push(NodeDeclaration {
-            id: output.output_id.clone(),
-            kind: NodeKind::Output,
-        });
-        edges.push(EdgeDeclaration {
-            prerequisite: action_id.clone(),
-            dependent: output.output_id.clone(),
-            kind: EdgeKind::Produces,
-        });
-        let bytes = current_outputs
-            .get(&path)
-            .cloned()
-            .ok_or_else(|| DesiredTreeError::MissingCurrentOutput(path.display()))?;
-        desired_tree.insert(DesiredTreeEntry {
-            output: output.clone(),
-            lineage: inputs
-                .iter()
-                .map(|input| input.artifact_id.clone())
-                .collect(),
-            content_digest: digest_bytes(&bytes),
-            bytes,
-        })?;
-        outputs.push(output);
-    }
-    outputs.sort();
-    Ok(outputs)
 }
 
 fn planned_inputs(model: &RepositoryModel) -> Result<Vec<PlannedInput>, DesiredTreeError> {
@@ -844,151 +708,6 @@ fn planned_inputs(model: &RepositoryModel) -> Result<Vec<PlannedInput>, DesiredT
     }
     inputs.sort();
     Ok(inputs)
-}
-
-fn planned_output(
-    producer: &StableId,
-    path: SafeOutputPath,
-    claim: &ClaimedPath,
-) -> Result<PlannedOutput, DesiredTreeError> {
-    let display = path.display();
-    let projection = if display.ends_with(".schema.json") {
-        PlannedOutputProjection::JsonSchema {
-            public_identity: claim
-                .header
-                .as_ref()
-                .map_or_else(|| display.clone(), |header| header.artifact_id.to_string()),
-        }
-    } else if display.ends_with("adapter-schemas.json") || display.ends_with("wire_models.py") {
-        PlannedOutputProjection::Pydantic {
-            mode: PydanticSchemaMode::Both,
-            model_roots: BTreeSet::from(["contract-ir".to_owned()]),
-        }
-    } else if has_extension(&display, "pb") {
-        PlannedOutputProjection::Proto {
-            role: ProtoOutputRole::DescriptorSet,
-        }
-    } else if display.ends_with("_pb2_grpc.py") {
-        PlannedOutputProjection::Proto {
-            role: ProtoOutputRole::PythonGrpcBinding,
-        }
-    } else if display.ends_with("_pb2.pyi") {
-        PlannedOutputProjection::Proto {
-            role: ProtoOutputRole::PythonTypingBinding,
-        }
-    } else if display.ends_with("_pb2.py") {
-        PlannedOutputProjection::Proto {
-            role: ProtoOutputRole::PythonMessageBinding,
-        }
-    } else if display.starts_with("src/generated/codefabric.") && has_extension(&display, "rs") {
-        PlannedOutputProjection::Proto {
-            role: ProtoOutputRole::RustBinding,
-        }
-    } else if display.contains("/registry/") || display.ends_with("registries.py") {
-        PlannedOutputProjection::Registry {
-            primary_key: "stable-id".to_owned(),
-        }
-    } else if display.ends_with("table_specs.rs") {
-        PlannedOutputProjection::TableSpec {
-            projection: TableProjection::RustTableSpec,
-        }
-    } else if has_extension(&display, "rs") {
-        PlannedOutputProjection::RustSource
-    } else if has_extension(&display, "py") || has_extension(&display, "pyi") {
-        PlannedOutputProjection::PythonSource
-    } else {
-        PlannedOutputProjection::CanonicalArtifact {
-            artifact_kind: claim.header.as_ref().map_or_else(
-                || extension_kind(&display),
-                |header| header.artifact_kind.clone(),
-            ),
-        }
-    };
-    let consumers = consumers_for(&display, &projection);
-    let validators = validators_for(&projection);
-    Ok(PlannedOutput {
-        output_id: output_id(path.as_bytes())?,
-        public_artifact_id: claim
-            .header
-            .as_ref()
-            .map(|header| header.artifact_id.clone()),
-        path,
-        role: PlannedOutputRole::Derived,
-        producer: producer.clone(),
-        projection,
-        consumers,
-        validators,
-    })
-}
-
-fn consumers_for(path: &str, projection: &PlannedOutputProjection) -> BTreeSet<PlannedConsumer> {
-    let mut consumers = BTreeSet::from([PlannedConsumer::ContractVerifier]);
-    match projection {
-        PlannedOutputProjection::Pydantic { .. } | PlannedOutputProjection::PythonSource => {
-            consumers.insert(PlannedConsumer::PythonAdapter);
-            consumers.insert(PlannedConsumer::PythonPackage);
-        }
-        PlannedOutputProjection::Proto { role } => {
-            consumers.insert(PlannedConsumer::ProtoRuntime);
-            if matches!(
-                role,
-                ProtoOutputRole::PythonMessageBinding
-                    | ProtoOutputRole::PythonGrpcBinding
-                    | ProtoOutputRole::PythonTypingBinding
-            ) {
-                consumers.insert(PlannedConsumer::PythonAdapter);
-            } else {
-                consumers.insert(PlannedConsumer::RustCore);
-            }
-        }
-        PlannedOutputProjection::RustSource | PlannedOutputProjection::TableSpec { .. } => {
-            consumers.insert(PlannedConsumer::RustCore);
-        }
-        PlannedOutputProjection::JsonSchema { .. }
-        | PlannedOutputProjection::Registry { .. }
-        | PlannedOutputProjection::CanonicalArtifact { .. } => {}
-    }
-    if path.starts_with("codefabric-cpg-mcp/") {
-        consumers.insert(PlannedConsumer::PythonPackage);
-    }
-    consumers
-}
-
-fn validators_for(projection: &PlannedOutputProjection) -> BTreeSet<PlannedValidator> {
-    let mut validators = BTreeSet::from([PlannedValidator::ExactBytes]);
-    match projection {
-        PlannedOutputProjection::Pydantic { .. } | PlannedOutputProjection::PythonSource => {
-            validators.insert(PlannedValidator::PythonConsumer);
-        }
-        PlannedOutputProjection::JsonSchema { .. } => {
-            validators.insert(PlannedValidator::StrictDecode);
-            validators.insert(PlannedValidator::JsonSchemaConsumer);
-        }
-        PlannedOutputProjection::Proto { .. } => {
-            validators.insert(PlannedValidator::ProtoDescriptorConsumer);
-        }
-        PlannedOutputProjection::Registry { .. }
-        | PlannedOutputProjection::CanonicalArtifact { .. } => {
-            validators.insert(PlannedValidator::StrictDecode);
-        }
-        PlannedOutputProjection::TableSpec { .. } | PlannedOutputProjection::RustSource => {
-            validators.insert(PlannedValidator::RustConsumer);
-        }
-    }
-    validators
-}
-
-fn extension_kind(path: &str) -> String {
-    Path::new(path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map_or_else(|| "binary".to_owned(), str::to_owned)
-}
-
-fn has_extension(path: &str, expected: &str) -> bool {
-    Path::new(path)
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case(expected))
 }
 
 fn safe_repository_path(bytes: &[u8]) -> Result<PathBuf, DesiredTreeError> {
@@ -1033,8 +752,8 @@ pub enum DesiredTreeError {
     UnsafeOutputPath(String),
     #[error("duplicate desired output path {path}; first producer {first}")]
     DuplicateOutput { path: String, first: StableId },
-    #[error("missing current derived output bytes: {0}")]
-    MissingCurrentOutput(String),
+    #[error("aggregate desired output producer has no real action key: {0}")]
+    MissingActionKey(StableId),
     #[error("missing typed header for planned source: {0}")]
     MissingHeader(String),
     #[error("required executable identity is absent: {0}")]
@@ -1049,8 +768,8 @@ pub enum DesiredTreeError {
     StageConflict(String),
     #[error("source-generation fence changed at {0}")]
     SourceFenceChanged(String),
-    #[error("shadow plan is not zero at {path}: {kind:?}")]
-    NonZeroShadowPlan { path: String, kind: ChangeKind },
+    #[error("model plan is not zero at {path}: {kind:?}")]
+    NonZeroPlan { path: String, kind: ChangeKind },
     #[error("action references missing upstream output: {0}")]
     MissingUpstreamOutput(StableId),
 }
@@ -1081,19 +800,6 @@ mod tests {
         StableId::parse(value).unwrap()
     }
 
-    fn executable() -> ActionExecutableIdentity {
-        ActionExecutableIdentity {
-            compiler_source_identity: "sha256:compiler".to_owned(),
-            cargo_lock_identity: "sha256:lock".to_owned(),
-            rustc_identity: "rustc 1.97.1".to_owned(),
-            feature_set: BTreeSet::from(["model-compiler".to_owned()]),
-            profile: "dev".to_owned(),
-            target_triple: "aarch64-apple-darwin".to_owned(),
-            executable_digest:
-                "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
-        }
-    }
-
     fn output(path: &str) -> PlannedOutput {
         PlannedOutput {
             output_id: id(&format!("output:{path}")),
@@ -1105,87 +811,6 @@ mod tests {
             consumers: BTreeSet::from([PlannedConsumer::RustCore]),
             validators: BTreeSet::from([PlannedValidator::RustConsumer]),
         }
-    }
-
-    fn material() -> ActionKeyMaterial {
-        ActionKeyMaterial {
-            driver_id: id("action:test"),
-            rule_version: "rule-v1".to_owned(),
-            model_schema_version: MODEL_SCHEMA_VERSION.to_owned(),
-            output_schema_version: OUTPUT_SCHEMA_VERSION.to_owned(),
-            inputs: vec![PlannedInput {
-                artifact_id: id("source:a"),
-                path: b"contracts/a.json".to_vec(),
-                semantic_digest: "b3:semantic".to_owned(),
-                source_digest: "b3:source".to_owned(),
-            }],
-            upstream_output_digests: BTreeMap::from([(id("output:upstream"), "b3:up".to_owned())]),
-            outputs: vec![output("src/generated/a.rs")],
-            executable: executable(),
-            environment_contract: BTreeMap::from([("network".to_owned(), "undeclared".to_owned())]),
-            generation_profile: "shadow-read-only".to_owned(),
-        }
-    }
-
-    #[test]
-    fn model_action_key_changes_for_every_output_affecting_input() {
-        let baseline = material();
-        let baseline_digest = baseline.digest().unwrap();
-        let mut variants = Vec::new();
-        let mut changed = baseline.clone();
-        changed.driver_id = id("action:other");
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.rule_version.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.model_schema_version.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.output_schema_version.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.inputs[0].semantic_digest.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.inputs[0].source_digest.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed
-            .upstream_output_digests
-            .values_mut()
-            .next()
-            .unwrap()
-            .push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.outputs[0].path = SafeOutputPath::parse(b"src/generated/b.rs".to_vec()).unwrap();
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.executable.feature_set.insert("other".to_owned());
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.executable.cargo_lock_identity.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.executable.rustc_identity.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed.executable.executable_digest.push('x');
-        variants.push(changed);
-        let mut changed = baseline.clone();
-        changed
-            .environment_contract
-            .insert("locale".to_owned(), "C".to_owned());
-        variants.push(changed);
-        let mut changed = baseline;
-        changed.generation_profile.push('x');
-        variants.push(changed);
-        assert!(
-            variants
-                .iter()
-                .all(|variant| variant.digest().unwrap() != baseline_digest)
-        );
     }
 
     #[test]
@@ -1296,24 +921,17 @@ mod tests {
     }
 
     #[test]
-    fn model_cache_entry_never_contains_pass_verdict() {
-        let value = serde_json::to_value(CachedActionBytes {
-            action_key: "b3:key".to_owned(),
-            outputs: BTreeMap::new(),
-        })
-        .unwrap();
-        let object = value.as_object().unwrap();
-        assert_eq!(object.keys().collect::<Vec<_>>(), ["action_key", "outputs"]);
-        assert!(!value.to_string().contains("verdict"));
-        assert!(!value.to_string().contains("pass"));
-    }
-
-    #[test]
     fn model_explain_reports_source_lineage_consumers_and_oracles() {
-        let material = material();
-        assert!(!material.outputs[0].consumers.is_empty());
-        assert!(!material.outputs[0].validators.is_empty());
-        assert!(!material.inputs.is_empty());
+        let planned = output("src/generated/a.rs");
+        let input = PlannedInput {
+            artifact_id: id("source:a"),
+            path: b"contracts/a.json".to_vec(),
+            semantic_digest: "b3:semantic".to_owned(),
+            source_digest: "b3:source".to_owned(),
+        };
+        assert!(!planned.consumers.is_empty());
+        assert!(!planned.validators.is_empty());
+        assert!(!input.path.is_empty());
     }
 
     fn dag(node_count: usize, parents: &[usize]) -> (ModelGraph, Vec<StableId>) {

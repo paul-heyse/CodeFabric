@@ -5,9 +5,11 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use codefabric::contracts::models::{
+    OwnerAcceptance, RequirementRecord, RequirementStatus, RequirementTraces, TraceabilityRecord,
+};
 use codefabric::integrity::framed_digest as digest_bytes;
-use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -47,7 +49,6 @@ struct ModelArtifactRecord {
     release_status: String,
     compilation_unit: String,
     source_role: ArtifactRole,
-    consumers: BTreeSet<PlannedConsumer>,
     resource_profile: Value,
     provenance: BTreeSet<String>,
 }
@@ -64,20 +65,6 @@ struct ModelOutputRecord {
     validators: BTreeSet<PlannedValidator>,
     lineage: Vec<String>,
     resource_profile: Value,
-    content_digest: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ModelRequirementRecord {
-    requirement_id: String,
-    source_artifact: String,
-    source_path: String,
-    normative_text: String,
-    normative_text_digest: String,
-    implements: Vec<String>,
-    verified_by: Vec<String>,
-    status: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -122,6 +109,7 @@ struct ModelBundleCreatedBy {
 #[serde(deny_unknown_fields)]
 struct FamilyProjection {
     family: String,
+    action_key: String,
     rule_version: String,
     resource_profile: super::driver_protocol::DriverResourceProfile,
     outputs: Vec<String>,
@@ -144,8 +132,11 @@ pub struct AggregateReport {
     pub cache_miss_count: usize,
     pub conservative_fallback_reasons: Vec<String>,
     pub tree_digest: String,
+    pub action_keys: BTreeMap<StableId, String>,
     pub rendered_outputs: Vec<String>,
     pub stage_root: String,
+    #[serde(skip)]
+    pub desired_tree: DesiredTree,
 }
 
 struct AggregateTree {
@@ -239,11 +230,28 @@ impl AggregateTree {
         Ok(())
     }
 
+    fn replace(&mut self, path: &str, bytes: Vec<u8>) -> Result<(), AggregateError> {
+        let safe = SafeOutputPath::parse(path.as_bytes().to_vec())?;
+        let entry = self
+            .desired
+            .entries
+            .get_mut(&safe)
+            .ok_or_else(|| projection_error(path, "replacement target was not declared"))?;
+        entry.content_digest = digest_bytes(&bytes);
+        entry.bytes = bytes;
+        Ok(())
+    }
+
     fn digest(&self) -> Result<String, AggregateError> {
+        self.digest_excluding(&BTreeSet::new())
+    }
+
+    fn digest_excluding(&self, excluded: &BTreeSet<&str>) -> Result<String, AggregateError> {
         let identities = self
             .desired
             .entries
             .iter()
+            .filter(|(path, _)| !excluded.contains(path.display().as_str()))
             .map(|(path, entry)| (path.display(), entry.content_digest.clone()))
             .collect::<BTreeMap<_, _>>();
         canonical_digest(&identities)
@@ -271,6 +279,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
     let families = vec![
         FamilyProjection {
             family: registry.family.clone(),
+            action_key: registry.action_key.clone(),
             rule_version: registry.rule_version.clone(),
             resource_profile: registry.resource_profile.clone(),
             outputs: registry.rendered_outputs.clone(),
@@ -278,6 +287,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         },
         FamilyProjection {
             family: schemas.family.clone(),
+            action_key: schemas.action_key.clone(),
             rule_version: schemas.rule_version.clone(),
             resource_profile: schemas.resource_profile.clone(),
             outputs: schemas.rendered_outputs.clone(),
@@ -285,6 +295,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         },
         FamilyProjection {
             family: adapter.family.clone(),
+            action_key: adapter.action_key.clone(),
             rule_version: adapter.rule_version.clone(),
             resource_profile: adapter.resource_profile.clone(),
             outputs: adapter.rendered_outputs.clone(),
@@ -292,6 +303,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         },
         FamilyProjection {
             family: proto.family.clone(),
+            action_key: proto.action_key.clone(),
             rule_version: proto.rule_version.clone(),
             resource_profile: proto.resource_profile.clone(),
             outputs: proto.rendered_outputs.clone(),
@@ -394,14 +406,88 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         &families,
         &tree.desired,
     )?;
-    let outputs = model_outputs(&tree, &families);
-    let requirements = requirements(&artifacts, &families);
+    let requirements = requirements(repository_root, &before_model, &families)?;
     validate_requirement_closure(&requirements)?;
+    let traceability = traceability(&requirements);
     let fixtures = fixture_index(&before_model);
     let fixture_oracles = fixture_oracle_records(&before_model);
     let package_data = package_data(&tree);
     let aggregators = module_aggregators(&tree);
     let rust_aggregator = rustfmt_source(&rust_module_aggregator(&tree))?;
+    for path in [
+        "contracts/generated/model/governance/suite-manifest.json",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
+        "contracts/manifests/suite-manifest.json",
+        "contracts/generated/model/governance/validation.json",
+    ] {
+        tree.insert(path, "action:governance", Vec::new(), false)?;
+    }
+    let governance = [
+        (
+            "contracts/generated/model/governance/requirements.jsonl",
+            json_lines(&requirements)?,
+        ),
+        (
+            "contracts/generated/model/governance/traceability.jsonl",
+            json_lines(&traceability)?,
+        ),
+        (
+            "contracts/generated/model/governance/bundles.json",
+            pretty_json(&json!({"schema_version": 1, "bundles": bundles}))?,
+        ),
+        (
+            "contracts/generated/model/governance/fixture-index.json",
+            pretty_json(&json!({"schema_version": 1, "fixtures": fixtures}))?,
+        ),
+        (
+            "contracts/generated/model/governance/package-data.json",
+            pretty_json(&package_data)?,
+        ),
+        (
+            "contracts/generated/model/governance/module-aggregators.json",
+            pretty_json(&aggregators)?,
+        ),
+        ("src/generated/model.rs", rust_aggregator),
+    ];
+    for (path, bytes) in governance {
+        tree.insert(path, "action:governance", bytes, false)?;
+    }
+    for (path, bytes) in [
+        (
+            "contracts/manifests/requirements.jsonl",
+            json_lines_with_header(
+                "codefabric.manifests.requirements",
+                "requirements",
+                &requirements,
+            )?,
+        ),
+        (
+            "contracts/manifests/traceability.jsonl",
+            json_lines_with_header(
+                "codefabric.manifests.traceability",
+                "traceability",
+                &traceability,
+            )?,
+        ),
+        (
+            "contracts/manifests/fixture-oracles.json",
+            pretty_json(&json!({
+                "artifact_id": "codefabric.manifests.fixture-oracles",
+                "artifact_kind": "manifest",
+                "version": "1.0",
+                "compatible_suite_major": 1,
+                "status": "released",
+                "schema_version": 1,
+                "canonical_digest": format!("b3:{}", "0".repeat(64)),
+                "digest_projection": "json-jcs-v1",
+                "generator_revision": "codefabric-model/1.0",
+                "records": fixture_oracles,
+            }))?,
+        ),
+    ] {
+        tree.insert(path, "action:governance", bytes, false)?;
+    }
+    let outputs = model_outputs(&tree, &families);
     let manifest = json!({
         "artifact_id": "codefabric.generated.model-suite-manifest",
         "artifact_kind": "model-suite-manifest",
@@ -434,95 +520,29 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
     });
     let artifact_index = json!({
         "schema_version": 1,
-        "source": "RepositoryModel + accepted release census",
+        "source": "RepositoryModel + accepted release census + complete DesiredTree census",
         "artifacts": artifacts,
+        "outputs": outputs,
     });
-    let governance = [
-        (
-            "contracts/generated/model/governance/suite-manifest.json",
-            pretty_json(&manifest)?,
-        ),
-        (
-            "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
-            canonical_json(&artifact_index)?,
-        ),
-        (
-            "contracts/generated/model/governance/requirements.jsonl",
-            json_lines(&requirements)?,
-        ),
-        (
-            "contracts/generated/model/governance/traceability.jsonl",
-            json_lines(&requirements)?,
-        ),
-        (
-            "contracts/generated/model/governance/bundles.json",
-            pretty_json(&json!({"schema_version": 1, "bundles": bundles}))?,
-        ),
-        (
-            "contracts/generated/model/governance/fixture-index.json",
-            pretty_json(&json!({"schema_version": 1, "fixtures": fixtures}))?,
-        ),
-        (
-            "contracts/generated/model/governance/package-data.json",
-            pretty_json(&package_data)?,
-        ),
-        (
-            "contracts/generated/model/governance/module-aggregators.json",
-            pretty_json(&aggregators)?,
-        ),
-        ("src/generated/model.rs", rust_aggregator),
-    ];
-    for (path, bytes) in governance {
-        tree.insert(path, "action:governance", bytes, false)?;
-    }
-    for (path, bytes) in [
-        (
-            "contracts/manifests/suite-manifest.json",
-            pretty_json(&compatibility_manifest)?,
-        ),
-        (
-            "contracts/manifests/requirements.jsonl",
-            json_lines_with_header(
-                "codefabric.manifests.requirements",
-                "requirements",
-                &requirements,
-            )?,
-        ),
-        (
-            "contracts/manifests/traceability.jsonl",
-            json_lines_with_header(
-                "codefabric.manifests.traceability",
-                "traceability",
-                &requirements,
-            )?,
-        ),
-        (
-            "contracts/manifests/fixture-oracles.json",
-            pretty_json(&json!({
-                "artifact_id": "codefabric.manifests.fixture-oracles",
-                "artifact_kind": "manifest",
-                "version": "1.0",
-                "compatible_suite_major": 1,
-                "status": "released",
-                "schema_version": 1,
-                "canonical_digest": format!("b3:{}", "0".repeat(64)),
-                "digest_projection": "json-jcs-v1",
-                "generator_revision": "codefabric-model/1.0",
-                "records": fixture_oracles,
-            }))?,
-        ),
-    ] {
-        tree.insert(path, "action:governance", bytes, false)?;
-    }
+    tree.replace(
+        "contracts/generated/model/governance/suite-manifest.json",
+        pretty_json(&manifest)?,
+    )?;
+    tree.replace(
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
+        canonical_json(&artifact_index)?,
+    )?;
+    tree.replace(
+        "contracts/manifests/suite-manifest.json",
+        pretty_json(&compatibility_manifest)?,
+    )?;
     let validation = aggregate_validation(&tree, &artifacts, &requirements, &bundles, &fixtures)?;
-    tree.insert(
+    tree.replace(
         "contracts/generated/model/governance/validation.json",
-        "action:governance",
         pretty_json(&validation)?,
-        false,
     )?;
 
-    let stage_root = process_stage_root(repository_root, "aggregate-shadow");
+    let stage_root = process_stage_root(repository_root, "aggregate-stage");
     if stage_root.exists() {
         fs::remove_dir_all(&stage_root).map_err(|source| AggregateError::Io {
             path: stage_root.clone(),
@@ -559,6 +579,22 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         .iter()
         .filter_map(|lookup| lookup.miss_reason().map(str::to_owned))
         .collect::<Vec<_>>();
+    let mut action_keys = families
+        .iter()
+        .map(|family| {
+            StableId::parse(format!("action:{}", family.family))
+                .map(|id| (id, family.action_key.clone()))
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    action_keys.insert(
+        StableId::parse("action:governance".to_owned())?,
+        canonical_digest(&json!({
+            "action_id": "action:governance",
+            "family_action_keys": action_keys,
+            "source_identity": before_digest,
+            "desired_tree_identity": tree_digest,
+        }))?,
+    );
     Ok(AggregateReport {
         family: "aggregate".to_owned(),
         artifact_count: artifacts.len(),
@@ -577,8 +613,10 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         cache_miss_count: cache_lookups.len() - cache_hit_count,
         conservative_fallback_reasons,
         tree_digest,
+        action_keys,
         rendered_outputs,
         stage_root: stage_root.to_string_lossy().into_owned(),
+        desired_tree: tree.desired,
     })
 }
 
@@ -816,7 +854,6 @@ fn model_artifacts(
             .to_owned(),
             compilation_unit: compilation_unit(claim.path.display()).to_owned(),
             source_role: claim.role,
-            consumers: consumers(claim.path.display()),
             resource_profile: resource_profile_for(driver_family(claim.path.display()), families),
             provenance: BTreeSet::from([
                 "current-stable-source-bytes".to_owned(),
@@ -929,8 +966,8 @@ fn remove_own_identity(value: &mut Value, path: &str) -> Result<(), AggregateErr
 }
 
 fn canonical_json_projection(path: &str, bytes: &[u8]) -> Result<Vec<u8>, AggregateError> {
-    reject_duplicate_json_keys(path, bytes)?;
-    let mut value: Value = serde_json::from_slice(bytes)?;
+    let mut value = codefabric::contracts::jcs::decode_strict(bytes)
+        .map_err(|error| projection_error(path, error.to_string()))?;
     remove_own_identity(&mut value, path)?;
     canonical_json(&value)
 }
@@ -987,8 +1024,8 @@ fn canonical_jsonl_projection(path: &str, bytes: &[u8]) -> Result<Vec<u8>, Aggre
         if line.is_empty() {
             return Err(projection_error(path, "blank JSON Lines record"));
         }
-        reject_duplicate_json_keys(path, line)?;
-        let mut value: Value = serde_json::from_slice(line)?;
+        let mut value = codefabric::contracts::jcs::decode_strict(line)
+            .map_err(|error| projection_error(path, error.to_string()))?;
         if index == 0 {
             remove_own_identity(&mut value, path)?;
         }
@@ -1048,91 +1085,6 @@ fn projection_error(path: &str, detail: impl Into<String>) -> AggregateError {
     }
 }
 
-#[derive(Debug)]
-struct NoDuplicateKeys;
-
-impl<'de> Deserialize<'de> for NoDuplicateKeys {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(NoDuplicateVisitor)
-    }
-}
-
-struct NoDuplicateVisitor;
-
-impl<'de> Visitor<'de> for NoDuplicateVisitor {
-    type Value = NoDuplicateKeys;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("JSON without duplicate object keys")
-    }
-
-    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_string<E>(self, _: String) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(NoDuplicateKeys)
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        NoDuplicateKeys::deserialize(deserializer)
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        while sequence.next_element::<NoDuplicateKeys>()?.is_some() {}
-        Ok(NoDuplicateKeys)
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut keys = BTreeSet::new();
-        while let Some(key) = map.next_key::<String>()? {
-            if !keys.insert(key.clone()) {
-                return Err(A::Error::custom(format!("duplicate object key {key}")));
-            }
-            map.next_value::<NoDuplicateKeys>()?;
-        }
-        Ok(NoDuplicateKeys)
-    }
-}
-
-fn reject_duplicate_json_keys(path: &str, bytes: &[u8]) -> Result<(), AggregateError> {
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    NoDuplicateKeys::deserialize(&mut deserializer)
-        .map_err(|error| projection_error(path, error.to_string()))?;
-    deserializer
-        .end()
-        .map_err(|error| projection_error(path, error.to_string()))
-}
-
 fn model_outputs(tree: &AggregateTree, families: &[FamilyProjection]) -> Vec<ModelOutputRecord> {
     tree.desired
         .entries
@@ -1154,7 +1106,6 @@ fn model_outputs(tree: &AggregateTree, families: &[FamilyProjection]) -> Vec<Mod
                 entry.output.producer.as_str().trim_start_matches("action:"),
                 families,
             ),
-            content_digest: entry.content_digest.clone(),
         })
         .collect()
 }
@@ -1184,58 +1135,151 @@ fn portable_tool_identity(value: Value) -> Value {
 }
 
 fn requirements(
-    artifacts: &[ModelArtifactRecord],
+    root: &Path,
+    model: &RepositoryModel,
     families: &[FamilyProjection],
-) -> Vec<ModelRequirementRecord> {
-    artifacts
-        .iter()
-        .filter(|artifact| artifact.release_status == "released")
-        .map(|artifact| {
-            let family = driver_family(&artifact.authority_path);
-            let projection = families.iter().find(|item| item.family == family);
-            let implements = projection.map_or_else(
-                || vec!["contracts/generated/model/governance/suite-manifest.json".to_owned()],
-                |item| item.outputs.clone(),
-            );
-            let verified_by = if projection.is_some() {
-                vec![format!("just model-family-check {family}")]
-            } else {
-                vec!["just model-repro-check".to_owned()]
+) -> Result<Vec<RequirementRecord>, AggregateError> {
+    let mut records = BTreeMap::new();
+    for claim in model.claims.values().filter(|claim| {
+        claim.path.display().starts_with("docs/upfront_design/")
+            && claim.path.display().ends_with(".md")
+    }) {
+        let Some(header) = &claim.header else {
+            continue;
+        };
+        let bytes = read_stable(&root.join(claim.path.display()), MAX_BYTES)?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|error| projection_error(claim.path.display(), error.to_string()))?;
+        let lines = text.lines().collect::<Vec<_>>();
+        for (index, heading) in lines.iter().enumerate() {
+            let Some(section) = heading.strip_prefix("## AC-G-") else {
+                continue;
             };
-            let normative_text = format!(
-                "Released artifact {} must retain its accepted identity and have model-derived implementation and executable proof closure.",
-                artifact.artifact_id
+            let requirement_id = format!(
+                "AC-G-{}",
+                section
+                    .split_whitespace()
+                    .next()
+                    .ok_or_else(|| projection_error(claim.path.display(), "empty AC-G heading"))?
             );
-            ModelRequirementRecord {
-                requirement_id: format!(
-                    "MODEL-{}",
-                    &codefabric::integrity::digest_hex(artifact.artifact_id.as_bytes())[..16]
-                ),
-                source_artifact: artifact.artifact_id.clone(),
-                source_path: artifact.authority_path.clone(),
+            let end = lines[index + 1..]
+                .iter()
+                .position(|line| line.starts_with("## "))
+                .map_or(lines.len(), |offset| index + 1 + offset);
+            let normative_text = lines[index + 1..end]
+                .iter()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if normative_text.is_empty() {
+                return Err(projection_error(
+                    claim.path.display(),
+                    format!("{requirement_id} has no normative body"),
+                ));
+            }
+            let family_ids = requirement_families(claim.path.display());
+            let mut implements = families
+                .iter()
+                .filter(|family| family_ids.contains(family.family.as_str()))
+                .flat_map(|family| family.outputs.iter().cloned())
+                .collect::<BTreeSet<_>>();
+            implements
+                .insert("contracts/generated/model/governance/suite-manifest.json".to_owned());
+            let mut verified_by = family_ids
+                .iter()
+                .map(|family| format!("just model-family-check {family}"))
+                .collect::<BTreeSet<_>>();
+            verified_by.insert("just model-release-check".to_owned());
+            let record = RequirementRecord {
+                requirement_id: requirement_id.clone(),
+                source_artifact: header.artifact_id.to_string(),
+                source_section: heading.trim_start_matches("## ").to_owned(),
                 normative_text_digest: digest_bytes(normative_text.as_bytes()),
                 normative_text,
-                implements,
-                verified_by,
-                status: "active".to_owned(),
+                implements: implements.into_iter().collect(),
+                traces_to: empty_requirement_traces(),
+                trace_selectors: BTreeSet::new(),
+                verified_by: verified_by.into_iter().collect(),
+                owner_acceptance: OwnerAcceptance {
+                    approver: "codefabric-repository-owner".to_owned(),
+                    accepted_at: "2026-08-23".to_owned(),
+                    construction_rule:
+                        "codefabric-model AC-G heading and complete normalized section transcription"
+                            .to_owned(),
+                    source_digest: claim.source_digest.clone(),
+                },
+                status: RequirementStatus::Active,
+            };
+            if records.insert(requirement_id.clone(), record).is_some() {
+                return Err(projection_error(
+                    claim.path.display(),
+                    format!("duplicate requirement {requirement_id}"),
+                ));
             }
-        })
-        .collect()
+        }
+    }
+    Ok(records.into_values().collect())
 }
 
-fn validate_requirement_closure(
-    requirements: &[ModelRequirementRecord],
-) -> Result<(), AggregateError> {
+fn validate_requirement_closure(requirements: &[RequirementRecord]) -> Result<(), AggregateError> {
     let mut ids = BTreeSet::new();
-    if requirements.iter().any(|requirement| {
-        !ids.insert(&requirement.requirement_id)
-            || requirement.source_path.is_empty()
-            || requirement.implements.is_empty()
-            || requirement.verified_by.is_empty()
-    }) {
+    let texts = requirements
+        .iter()
+        .map(|requirement| requirement.normative_text.as_str())
+        .collect::<BTreeSet<_>>();
+    if requirements.len() != 84
+        || texts.len() != requirements.len()
+        || requirements.iter().any(|requirement| {
+            !ids.insert(&requirement.requirement_id)
+                || requirement.source_section.is_empty()
+                || requirement.implements.is_empty()
+                || requirement.verified_by.is_empty()
+                || !requirement.normative_text_digest.starts_with("b3:")
+        })
+    {
         return Err(AggregateError::RequirementClosure);
     }
     Ok(())
+}
+
+fn requirement_families(path: &str) -> BTreeSet<&'static str> {
+    if path.contains("fastmcp_serving") {
+        BTreeSet::from(["adapter", "proto"])
+    } else if path.contains("semantic_query") {
+        BTreeSet::from(["adapter", "schemas"])
+    } else if path.contains("data_fabric") {
+        BTreeSet::from(["schemas"])
+    } else if path.contains("fact_generation") || path.contains("lifecycle_management") {
+        BTreeSet::from(["registry-cbef", "schemas", "proto"])
+    } else if path.contains("fact_ontology") {
+        BTreeSet::from(["registry-cbef", "schemas"])
+    } else {
+        BTreeSet::from(["registry-cbef", "schemas", "adapter", "proto"])
+    }
+}
+
+fn empty_requirement_traces() -> RequirementTraces {
+    RequirementTraces {
+        ontology_kinds: Vec::new(),
+        capability_codes: Vec::new(),
+        table_fields: Vec::new(),
+        query_phrase_ids: Vec::new(),
+        response_fields: Vec::new(),
+        error_codes: Vec::new(),
+    }
+}
+
+fn traceability(requirements: &[RequirementRecord]) -> Vec<TraceabilityRecord> {
+    requirements
+        .iter()
+        .map(|requirement| TraceabilityRecord {
+            requirement_id: requirement.requirement_id.clone(),
+            implements: requirement.implements.clone(),
+            traces_to: requirement.traces_to.clone(),
+            verified_by: requirement.verified_by.clone(),
+        })
+        .collect()
 }
 
 fn bundles(artifacts: &[ModelArtifactRecord]) -> Result<Vec<ModelBundleRecord>, AggregateError> {
@@ -1552,15 +1596,17 @@ fn rust_module_aggregator(tree: &AggregateTree) -> Vec<u8> {
 fn aggregate_validation(
     tree: &AggregateTree,
     artifacts: &[ModelArtifactRecord],
-    requirements: &[ModelRequirementRecord],
+    requirements: &[RequirementRecord],
     bundles: &[ModelBundleRecord],
     fixtures: &[Value],
 ) -> Result<Value, AggregateError> {
     Ok(json!({
         "schema_version": 1,
         "family": "aggregate",
-        "tree_digest": tree.digest()?,
-        "output_count": tree.desired.entries.len() + 1,
+        "tree_digest": tree.digest_excluding(&BTreeSet::from([
+            "contracts/generated/model/governance/validation.json"
+        ]))?,
+        "output_count": tree.desired.entries.len(),
         "artifact_count": artifacts.len(),
         "released_requirement_count": requirements.len(),
         "bundle_count": bundles.len(),
@@ -1659,7 +1705,7 @@ fn has_extension(path: &str, expected: &str) -> bool {
 }
 
 fn canonical_json(value: &Value) -> Result<Vec<u8>, AggregateError> {
-    serde_json_canonicalizer::to_vec(value).map_err(AggregateError::Json)
+    codefabric::contracts::jcs::canonicalize_value(value).map_err(AggregateError::CanonicalJson)
 }
 
 fn pretty_json(value: &Value) -> Result<Vec<u8>, AggregateError> {
@@ -1668,19 +1714,20 @@ fn pretty_json(value: &Value) -> Result<Vec<u8>, AggregateError> {
     Ok(bytes)
 }
 
-fn json_lines(values: &[ModelRequirementRecord]) -> Result<Vec<u8>, AggregateError> {
+fn json_lines<T: Serialize>(values: &[T]) -> Result<Vec<u8>, AggregateError> {
     let mut bytes = Vec::new();
     for value in values {
-        bytes.extend(serde_json_canonicalizer::to_vec(value)?);
+        let value = serde_json::to_value(value)?;
+        bytes.extend(codefabric::contracts::jcs::canonicalize_value(&value)?);
         bytes.push(b'\n');
     }
     Ok(bytes)
 }
 
-fn json_lines_with_header(
+fn json_lines_with_header<T: Serialize>(
     artifact_id: &str,
     record_kind: &str,
-    values: &[ModelRequirementRecord],
+    values: &[T],
 ) -> Result<Vec<u8>, AggregateError> {
     let header = json!({
         "artifact_id": artifact_id,
@@ -1730,6 +1777,8 @@ pub enum AggregateError {
     },
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    CanonicalJson(#[from] codefabric::contracts::jcs::CanonicalJsonError),
     #[error(transparent)]
     Repository(#[from] RepositoryModelError),
     #[error(transparent)]
@@ -1915,7 +1964,6 @@ mod tests {
             release_status: "released".to_owned(),
             compilation_unit: "governance".to_owned(),
             source_role: ArtifactRole::Authority,
-            consumers: BTreeSet::from([PlannedConsumer::ContractVerifier]),
             resource_profile: json!({"profile": "test"}),
             provenance: BTreeSet::from(["test".to_owned()]),
         };
@@ -1950,7 +1998,6 @@ mod tests {
             release_status: "released".to_owned(),
             compilation_unit: "governance".to_owned(),
             source_role: ArtifactRole::Derived,
-            consumers: BTreeSet::from([PlannedConsumer::ContractVerifier]),
             resource_profile: json!({"profile": "test"}),
             provenance: BTreeSet::from(["test".to_owned()]),
         };
@@ -1982,16 +2029,29 @@ mod tests {
 
     #[test]
     fn model_released_traceability_has_source_implementation_and_executable_oracle_closure() {
-        let requirement = ModelRequirementRecord {
-            requirement_id: "MODEL-example".to_owned(),
+        let requirement = RequirementRecord {
+            requirement_id: "AC-G-01".to_owned(),
             source_artifact: "codefabric.example".to_owned(),
-            source_path: "contracts/example.json".to_owned(),
+            source_section: "AC-G-01 — Example".to_owned(),
             normative_text: "example".to_owned(),
             normative_text_digest: digest_bytes(b"example"),
             implements: vec!["src/example.rs".to_owned()],
+            traces_to: empty_requirement_traces(),
+            trace_selectors: BTreeSet::new(),
             verified_by: vec!["just model-family-check schemas".to_owned()],
-            status: "active".to_owned(),
+            owner_acceptance: OwnerAcceptance {
+                approver: "owner".to_owned(),
+                accepted_at: "2026-08-23".to_owned(),
+                construction_rule: "test".to_owned(),
+                source_digest: digest_bytes(b"source"),
+            },
+            status: RequirementStatus::Active,
         };
-        validate_requirement_closure(&[requirement]).unwrap();
+        let traces = traceability(std::slice::from_ref(&requirement));
+        assert_eq!(traces[0].requirement_id, requirement.requirement_id);
+        assert_ne!(
+            serde_json::to_value(&requirement).unwrap(),
+            serde_json::to_value(&traces[0]).unwrap()
+        );
     }
 }

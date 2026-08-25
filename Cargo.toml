@@ -33,6 +33,7 @@ contract-models = [
     "dep:serde_yaml_ng",
 ]
 model-compiler = [
+    "contract-models",
     "dep:blake3",
     "dep:gix",
     "dep:notify-debouncer-full",

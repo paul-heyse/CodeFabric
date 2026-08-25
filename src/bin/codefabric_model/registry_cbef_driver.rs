@@ -182,7 +182,7 @@ fn detached_typed_digest(value: &impl Serialize) -> Result<String, RegistryCbefE
     })?;
     object.remove("canonical_digest");
     object.remove("source_digest");
-    let canonical = serde_json_canonicalizer::to_vec(&value)?;
+    let canonical = codefabric::contracts::jcs::canonicalize_value(&value)?;
     Ok(codefabric::integrity::framed_digest(&canonical))
 }
 
@@ -464,7 +464,8 @@ impl SourceOccurrenceSemanticKeyV1 {
             return Err(RegistryCbefError::InvalidOccurrenceKey);
         }
         let value = serde_json::to_value(self).map_err(RegistryCbefError::Json)?;
-        serde_json_canonicalizer::to_vec(&value).map_err(RegistryCbefError::Json)
+        codefabric::contracts::jcs::canonicalize_value(&value)
+            .map_err(RegistryCbefError::CanonicalJson)
     }
 }
 
@@ -951,7 +952,7 @@ impl ModelDriver for RegistryCbefDriver {
 pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, RegistryCbefError> {
     let driver = RegistryCbefDriver::for_repository(repository_root);
     let plan = driver.plan(repository_root)?;
-    let stage_path = process_stage_root(repository_root, "registry-cbef-shadow");
+    let stage_path = process_stage_root(repository_root, "registry-cbef-stage");
     if stage_path.exists() {
         fs::remove_dir_all(&stage_path).map_err(|source| RegistryCbefError::Io {
             path: stage_path.clone(),
@@ -963,7 +964,7 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage_path, &plan.descriptor)?;
-    let (rendered, cache_lookup) = render_with_cache(
+    let (rendered, cache_lookup, action_key) = render_with_cache(
         repository_root,
         "registry-cbef",
         &plan.descriptor,
@@ -988,6 +989,7 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
     validate_transition_semantics(&plan.enums, &plan.flags)?;
     Ok(RegistryCbefReport {
         family: "registry-cbef".to_owned(),
+        action_key,
         rule_version: plan.descriptor.rule_version.clone(),
         resource_profile: plan.descriptor.resource_profile.clone(),
         domain_count: plan.cbef.domains.len(),
@@ -1005,6 +1007,7 @@ pub fn check_family(repository_root: &Path) -> Result<RegistryCbefReport, Regist
 #[serde(deny_unknown_fields)]
 pub struct RegistryCbefReport {
     pub family: String,
+    pub action_key: String,
     pub rule_version: String,
     pub resource_profile: DriverResourceProfile,
     pub domain_count: usize,
@@ -1271,7 +1274,7 @@ fn validate_mapping_coverage(
 }
 
 fn canonical_bytes(value: &Value) -> Result<Vec<u8>, RegistryCbefError> {
-    serde_json_canonicalizer::to_vec(value).map_err(RegistryCbefError::Json)
+    codefabric::contracts::jcs::canonicalize_value(value).map_err(RegistryCbefError::CanonicalJson)
 }
 
 #[allow(clippy::too_many_lines)] // One typed join proves the provider/catalog census atomically.
@@ -2211,7 +2214,7 @@ fn render_projection(plan: &RegistryCbefPlan) -> Result<Vec<u8>, RegistryCbefErr
         flag_domains: plan.flags.records.clone(),
     };
     let value = serde_json::to_value(projection).map_err(RegistryCbefError::Json)?;
-    let mut bytes = serde_json_canonicalizer::to_vec(&value).map_err(RegistryCbefError::Json)?;
+    let mut bytes = codefabric::contracts::jcs::canonicalize_value(&value)?;
     bytes.push(b'\n');
     Ok(bytes)
 }
@@ -3270,6 +3273,8 @@ pub enum RegistryCbefError {
     Yaml(serde_yaml_ng::Error),
     #[error("registry/CBEF JSON failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    CanonicalJson(#[from] codefabric::contracts::jcs::CanonicalJsonError),
     #[error("registry/CBEF I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,

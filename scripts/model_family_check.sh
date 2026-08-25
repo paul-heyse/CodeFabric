@@ -80,8 +80,7 @@ case "$family" in
       and .family_output_count > 0
       and .governance_output_count > 0
       and .output_count == (.rendered_outputs | length)
-      and .requirement_count > 0
-      and .requirement_count <= .released_artifact_count
+      and .requirement_count == 84
       and .bundle_count == 8
       and .fixture_count > 0
       and (.tree_digest | startswith("b3:"))

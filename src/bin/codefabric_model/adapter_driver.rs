@@ -377,6 +377,7 @@ impl ModelDriver for AdapterDriver {
 #[serde(deny_unknown_fields)]
 pub struct AdapterReport {
     pub family: String,
+    pub action_key: String,
     pub rule_version: String,
     pub resource_profile: DriverResourceProfile,
     pub rendered_outputs: Vec<String>,
@@ -394,7 +395,7 @@ pub struct AdapterReport {
 pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriverError> {
     let driver = AdapterDriver::for_repository(repository_root);
     let plan = driver.plan(repository_root)?;
-    let stage_path = process_stage_root(repository_root, "adapter-shadow");
+    let stage_path = process_stage_root(repository_root, "adapter-stage");
     if stage_path.exists() {
         fs::remove_dir_all(&stage_path).map_err(|source| AdapterDriverError::Io {
             path: stage_path.clone(),
@@ -406,7 +407,7 @@ pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriv
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage_path, &plan.descriptor)?;
-    let (rendered, cache_lookup) = render_with_cache(
+    let (rendered, cache_lookup, action_key) = render_with_cache(
         repository_root,
         "adapter",
         &plan.descriptor,
@@ -430,6 +431,7 @@ pub fn check_family(repository_root: &Path) -> Result<AdapterReport, AdapterDriv
     }
     Ok(AdapterReport {
         family: "adapter".to_owned(),
+        action_key,
         rule_version: plan.descriptor.rule_version.clone(),
         resource_profile: plan.descriptor.resource_profile.clone(),
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),

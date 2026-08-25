@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::aggregate_driver;
-use super::desired_tree::{ChangeKind, SafeOutputPath, TreeChange};
+use super::desired_tree::{ChangeKind, DesiredTree, SafeOutputPath, TreeChange};
+use super::model_control::StableId;
 use super::repository_model::{ArtifactRole, InventoryBounds, RepositoryModel, read_stable};
 
 const ADMIN_DIRECTORY: &str = "codefabric-model/transaction-v1";
@@ -99,6 +100,8 @@ pub struct ReconciliationPreview {
     pub desired_tree_identity: String,
     pub output_paths: Vec<String>,
     pub changes: Vec<TreeChange>,
+    pub action_keys: BTreeMap<StableId, String>,
+    pub desired_tree: DesiredTree,
 }
 
 #[derive(Clone, Debug)]
@@ -114,6 +117,8 @@ struct SyncPlan {
     desired_tree_identity: String,
     entries: Vec<PlannedEntry>,
     desired_outputs: BTreeMap<String, String>,
+    action_keys: BTreeMap<StableId, String>,
+    desired_tree: DesiredTree,
     unchanged: usize,
 }
 
@@ -328,6 +333,8 @@ fn reconciliation_preview(plan: &SyncPlan) -> Result<ReconciliationPreview, Tran
         desired_tree_identity: plan.desired_tree_identity.clone(),
         output_paths: plan.desired_outputs.keys().cloned().collect(),
         changes: changes.into_values().collect(),
+        action_keys: plan.action_keys.clone(),
+        desired_tree: plan.desired_tree.clone(),
     })
 }
 
@@ -431,19 +438,16 @@ fn compile_sync_plan(paths: &TransactionPaths) -> Result<SyncPlan, TransactionEr
     if before_source != source_identity(&after)? {
         return Err(TransactionError::SourceDrift);
     }
-    let stage_root = PathBuf::from(&report.stage_root);
     let mut desired = BTreeMap::<String, Vec<u8>>::new();
-    for path in &report.rendered_outputs {
-        validate_output_path(&paths.repository_root, path)?;
+    for (safe_path, entry) in &report.desired_tree.entries {
+        let path = safe_path.display();
+        validate_output_path(&paths.repository_root, &path)?;
         if before.claims.get(path.as_bytes()).is_some_and(|claim| {
             !matches!(claim.role, ArtifactRole::Derived | ArtifactRole::Ignored)
         }) {
             return Err(TransactionError::SourceOutputOverlap(path.clone()));
         }
-        desired.insert(
-            path.clone(),
-            read_stable(&stage_root.join(path), MAX_FILE_BYTES)?,
-        );
+        desired.insert(path, entry.bytes.clone());
     }
     let previous = read_committed_tree(paths)?.unwrap_or_default();
     for (path, expected_digest) in &previous.outputs {
@@ -461,6 +465,13 @@ fn compile_sync_plan(paths: &TransactionPaths) -> Result<SyncPlan, TransactionEr
 
     let mut all_paths = desired.keys().cloned().collect::<BTreeSet<_>>();
     all_paths.extend(previous.outputs.keys().cloned());
+    all_paths.extend(
+        before
+            .claims
+            .values()
+            .filter(|claim| claim.role == ArtifactRole::Derived)
+            .map(|claim| claim.path.display().to_owned()),
+    );
     let mut entries = Vec::new();
     let mut unchanged = 0;
     for path in all_paths {
@@ -485,6 +496,8 @@ fn compile_sync_plan(paths: &TransactionPaths) -> Result<SyncPlan, TransactionEr
         desired_tree_identity: report.tree_digest,
         entries,
         desired_outputs,
+        action_keys: report.action_keys,
+        desired_tree: report.desired_tree,
         unchanged,
     })
 }
@@ -1033,6 +1046,8 @@ mod tests {
             desired_outputs: new
                 .map(|bytes| BTreeMap::from([(path, digest_bytes(bytes))]))
                 .unwrap_or_default(),
+            action_keys: BTreeMap::new(),
+            desired_tree: DesiredTree::default(),
             unchanged: 0,
         }
     }
@@ -1065,6 +1080,8 @@ mod tests {
                 ("generated/replaced.txt".into(), digest_bytes(b"new")),
                 ("generated/unchanged.txt".into(), digest_bytes(&unchanged)),
             ]),
+            action_keys: BTreeMap::new(),
+            desired_tree: DesiredTree::default(),
             unchanged: 1,
         };
         let preview = reconciliation_preview(&plan).unwrap();
@@ -1243,6 +1260,8 @@ mod tests {
                 "generated/model.txt".to_owned(),
                 digest_bytes(b"desired"),
             )]),
+            action_keys: BTreeMap::new(),
+            desired_tree: DesiredTree::default(),
             unchanged: 1,
         };
         let second = apply_plan(&paths, second, None).unwrap();

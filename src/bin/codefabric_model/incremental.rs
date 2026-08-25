@@ -378,21 +378,24 @@ pub fn render_with_cache<R, T>(
     staging: &StagingRoot,
     tool_identity: T,
     render: R,
-) -> Result<(Vec<SafeOutputPath>, CacheLookup), super::driver_protocol::DriverProtocolError>
+) -> Result<(Vec<SafeOutputPath>, CacheLookup, String), super::driver_protocol::DriverProtocolError>
 where
     R: FnOnce() -> Result<Vec<SafeOutputPath>, super::driver_protocol::DriverProtocolError>,
     T: FnOnce() -> Result<Value, super::driver_protocol::DriverProtocolError>,
 {
     let cache = ActionCache::for_repository(repository_root);
-    if cache.mode == CacheMode::Disabled {
-        let mut outputs = render()?;
-        outputs.sort();
-        return Ok((outputs, miss("cache-disabled")));
-    }
     let identity = family_action_identity(family, descriptor, source_fence, &tool_identity()?)
         .map_err(|error| {
             super::driver_protocol::DriverProtocolError::InvalidAuthority(error.to_string())
         })?;
+    let action_key = identity.action_key().map_err(|error| {
+        super::driver_protocol::DriverProtocolError::InvalidAuthority(error.to_string())
+    })?;
+    if cache.mode == CacheMode::Disabled {
+        let mut outputs = render()?;
+        outputs.sort();
+        return Ok((outputs, miss("cache-disabled"), action_key));
+    }
     let lookup = cache.restore(&identity, descriptor, staging);
     if matches!(&lookup, CacheLookup::Hit { .. }) {
         let mut outputs = descriptor
@@ -401,14 +404,14 @@ where
             .map(|output| output.path.clone())
             .collect::<Vec<_>>();
         outputs.sort();
-        return Ok((outputs, lookup));
+        return Ok((outputs, lookup, action_key));
     }
     let mut outputs = render()?;
     outputs.sort();
     cache.store(&identity, &outputs, staging).map_err(|error| {
         super::driver_protocol::DriverProtocolError::InvalidAuthority(error.to_string())
     })?;
-    Ok((outputs, lookup))
+    Ok((outputs, lookup, action_key))
 }
 
 fn expected_cache_files(manifest: &CacheManifest) -> BTreeSet<PathBuf> {

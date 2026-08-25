@@ -750,6 +750,7 @@ fn digest_file(path: &Path) -> Result<String, ProtoDriverError> {
 #[serde(deny_unknown_fields)]
 pub struct ProtoReport {
     pub family: String,
+    pub action_key: String,
     pub rule_version: String,
     pub resource_profile: DriverResourceProfile,
     pub source_count: usize,
@@ -770,7 +771,7 @@ pub struct ProtoReport {
 pub fn check_family(repository_root: &Path) -> Result<ProtoReport, ProtoDriverError> {
     let driver = ProtoDriver::for_repository(repository_root);
     let plan = driver.plan(repository_root)?;
-    let stage = process_stage_root(repository_root, "proto-shadow");
+    let stage = process_stage_root(repository_root, "proto-stage");
     if stage.exists() {
         fs::remove_dir_all(&stage).map_err(|source| ProtoDriverError::Io {
             path: stage.clone(),
@@ -782,7 +783,7 @@ pub fn check_family(repository_root: &Path) -> Result<ProtoReport, ProtoDriverEr
         source,
     })?;
     let staging = StagingRoot::new(repository_root, &stage, &plan.descriptor)?;
-    let (rendered, cache_lookup) = render_with_cache(
+    let (rendered, cache_lookup, action_key) = render_with_cache(
         repository_root,
         "proto",
         &plan.descriptor,
@@ -817,6 +818,7 @@ pub fn check_family(repository_root: &Path) -> Result<ProtoReport, ProtoDriverEr
     }
     Ok(ProtoReport {
         family: "proto".to_owned(),
+        action_key,
         rule_version: plan.descriptor.rule_version.clone(),
         resource_profile: plan.descriptor.resource_profile.clone(),
         source_count: plan.sources.len(),

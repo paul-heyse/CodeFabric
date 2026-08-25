@@ -137,6 +137,7 @@ pub enum OperationalSqliteType {
 #[derive(Clone, Debug)]
 pub struct OperationalTableSpec {
     pub name: &'static str,
+    pub sqlite_ddl: &'static str,
     pub arrow_schema: SchemaRef,
     pub primary_key: &'static [&'static str],
     pub workspace_scope: Option<OperationalWorkspaceScope>,
@@ -244,6 +245,7 @@ struct GeneratedOperationalColumn {
 #[derive(Clone, Copy)]
 struct GeneratedOperationalTableSpec {
     name: &'static str,
+    sqlite_ddl: &'static str,
     columns: &'static [GeneratedOperationalColumn],
     primary_key: &'static [&'static str],
     workspace_scope: Option<OperationalWorkspaceScope>,
@@ -547,6 +549,7 @@ fn build_operational(contract: GeneratedOperationalTableSpec) -> OperationalTabl
         .collect::<Vec<_>>();
     OperationalTableSpec {
         name: contract.name,
+        sqlite_ddl: contract.sqlite_ddl,
         arrow_schema: Arc::new(Schema::new(fields)),
         primary_key: contract.primary_key,
         workspace_scope: contract.workspace_scope,

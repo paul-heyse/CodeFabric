@@ -174,24 +174,19 @@ fn compile_repository(root: &std::path::Path) -> Result<repository_model::Reposi
     .map_err(|error| error.to_string())
 }
 
-fn compile_plan(
-    root: &std::path::Path,
-) -> Result<(repository_model::RepositoryModel, desired_tree::ModelPlan), String> {
-    let model = compile_repository(root)?;
-    let executable =
-        desired_tree::ActionExecutableIdentity::current().map_err(|error| error.to_string())?;
-    let plan = desired_tree::ModelPlan::compile(root, &model, &executable)
-        .map_err(|error| error.to_string())?;
-    Ok((model, plan))
-}
-
 fn compile_reconciled_plan(
     root: &std::path::Path,
 ) -> Result<(repository_model::RepositoryModel, desired_tree::ModelPlan), String> {
     let preview = transaction::preview_current(root).map_err(|error| error.to_string())?;
-    let _guard = transaction::read_guard(root).map_err(|error| error.to_string())?;
-    let (model, mut plan) = compile_plan(root)?;
-    plan.apply_reconciliation_preview(preview.output_paths, preview.changes);
+    let model = compile_repository(root)?;
+    let plan = desired_tree::ModelPlan::from_reconciliation(
+        root,
+        &model,
+        preview.desired_tree,
+        preview.action_keys,
+        preview.changes,
+    )
+    .map_err(|error| error.to_string())?;
     Ok((model, plan))
 }
 
@@ -479,14 +474,7 @@ fn explain(arguments: &[String]) -> ExitCode {
     let root = arguments
         .get(1)
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
-    let _guard = match transaction::read_guard(&root) {
-        Ok(guard) => guard,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    match compile_plan(&root) {
+    match compile_reconciled_plan(&root) {
         Ok((model, plan)) => {
             let explanations = model.explain(target);
             let plan_explanations = plan.explain(target);
