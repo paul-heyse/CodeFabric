@@ -120,19 +120,18 @@ model_linked_worktree_inventory_uses_current_bytes() {
   git -C "$fixture_root" worktree add -qb fixture-linked "$linked_root"
   printf 'note: linked-current-bytes\n' >> "$linked_root/contracts/identity/tracked.yaml"
 
-  local accelerated fallback main_explanation linked_explanation
+  local accelerated fallback main_inventory
   accelerated="$(model inventory "$linked_root")"
   fallback="$(model inventory --no-gix "$linked_root")"
+  main_inventory="$(model inventory "$fixture_root")"
   jq -e '.summary.topology.linked_worktree and .summary.topology.git_available' \
     <<<"$accelerated" >/dev/null || fail 'linked worktree topology was not detached correctly'
   [ "$(jq -r '.summary.semantic_digest' <<<"$accelerated")" = \
     "$(jq -r '.summary.semantic_digest' <<<"$fallback")" ] || \
     fail 'linked-worktree acceleration changed current-byte semantics'
 
-  main_explanation="$(model explain contracts/identity/tracked.yaml "$fixture_root")"
-  linked_explanation="$(model explain contracts/identity/tracked.yaml "$linked_root")"
-  [ "$(jq -r '.model[0].claim.source_digest' <<<"$main_explanation")" != \
-    "$(jq -r '.model[0].claim.source_digest' <<<"$linked_explanation")" ] || \
+  [ "$(jq -r '.summary.semantic_digest' <<<"$main_inventory")" != \
+    "$(jq -r '.summary.semantic_digest' <<<"$accelerated")" ] || \
     fail 'linked worktree did not use its current source bytes'
 }
 
