@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP61",
+  "current_packet": "WP65",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -105,46 +105,46 @@
       "blockers": []
     },
     "WP61": {
-      "status": "in_progress",
-      "proving_commit": "7de9e42ccd4b23c193a706ae0bf2f8183c75be40",
+      "status": "complete",
+      "proving_commit": "fc939042ffa2169eb6027e79e55a65da51d30a16",
       "deviations": [
-        "Current-HEAD revalidation found that WP64 introduced RESULT_CHECKSUM_CANONICAL_SCHEMA after WP61's proving commit without adding it to the public error registry. just public-error-closure-check and just governance-scan now fail, so WP61's registry-closure proof is stale until the error is registered or remapped to an existing registered public code and the named gates pass again."
+        "Current-HEAD revalidation found that WP64 introduced RESULT_CHECKSUM_CANONICAL_SCHEMA after WP61's proving commit without adding it to the public error registry. just public-error-closure-check and just governance-scan failed until fc939042ffa2169eb6027e79e55a65da51d30a16 kept the lower-level checksum serialization failure as private diagnostic text and re-proved public registry closure."
       ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP62": {
-      "status": "stale",
-      "proving_commit": "f51ed2a1625869a85a27626626f6775f2773a827",
+      "status": "complete",
+      "proving_commit": "fc939042ffa2169eb6027e79e55a65da51d30a16",
       "deviations": [
-        "All four WP62 packet oracles and the query legacy negative suite pass at HEAD, but dependency WP61 is stale because public error closure fails; WP62 cannot remain trusted complete until that foundational gate is repaired and the dependency-closed proof is rerun."
+        "The status reconciliation temporarily marked WP62 stale through WP61's failed public-error closure. After fc939042ffa2169eb6027e79e55a65da51d30a16 repaired that foundation, all four WP62 packet oracles and the query legacy negative suite were re-proved."
       ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP75": {
-      "status": "stale",
-      "proving_commit": "3ebe45f95defffed2cac6e8620109adc8639e435",
+      "status": "complete",
+      "proving_commit": "fc939042ffa2169eb6027e79e55a65da51d30a16",
       "deviations": [
-        "All four WP75 packet oracles and semantic-query-conformance-check pass at HEAD, but dependency WP62 is stale through WP61's failed public-error closure gate; dependency-closed completion must be re-proved after repair."
+        "The status reconciliation temporarily marked WP75 stale through WP62 and WP61. After fc939042ffa2169eb6027e79e55a65da51d30a16 repaired public-error closure, all four WP75 packet oracles and semantic-query-conformance-check were re-proved."
       ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP63": {
-      "status": "stale",
-      "proving_commit": "7d3a710235290923258ea3d15023fb604f1a6b3f",
+      "status": "complete",
+      "proving_commit": "fc939042ffa2169eb6027e79e55a65da51d30a16",
       "deviations": [
-        "All four WP63 packet oracles and query-daemon-activation-check pass at HEAD, but dependency WP75 is stale through WP61's failed public-error closure gate; dependency-closed completion must be re-proved after repair."
+        "The status reconciliation temporarily marked WP63 stale through WP75 and WP61. After fc939042ffa2169eb6027e79e55a65da51d30a16 repaired public-error closure, all four WP63 packet oracles and query-daemon-activation-check were re-proved."
       ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP64": {
-      "status": "stale",
-      "proving_commit": "dcf30b6eaa8c34c85557ecba563d1618cffadb25",
+      "status": "complete",
+      "proving_commit": "fc939042ffa2169eb6027e79e55a65da51d30a16",
       "deviations": [
-        "All four WP64 packet oracles, query-determinism-check, and query legacy zero-state pass at HEAD, but WP64 introduced the unregistered RESULT_CHECKSUM_CANONICAL_SCHEMA public error prefix after WP61's proof and also depends on stale WP75. Its completion proof is stale until registry closure and the dependency chain are re-proved."
+        "WP64 introduced the unregistered RESULT_CHECKSUM_CANONICAL_SCHEMA public error prefix after WP61's proof. fc939042ffa2169eb6027e79e55a65da51d30a16 kept that lower-level failure private and re-proved all four WP64 packet oracles, query-determinism-check, and query legacy zero-state."
       ],
       "failed_approaches": [
         "The first M11 full-root run exposed checksum working bytes being charged to the delivered Arrow output-byte limit, which made an exact-boundary WP25 result fail after WP64. The checksum encoder is now bounded by the remaining session memory while the output-byte contract remains inclusive; the focused regression and complete root suite passed."
@@ -152,7 +152,7 @@
       "blockers": []
     },
     "WP65": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -237,10 +237,10 @@
       "blockers": []
     },
     "M11": {
-      "status": "stale",
-      "proving_commit": "dcf30b6eaa8c34c85557ecba563d1618cffadb25",
+      "status": "complete",
+      "proving_commit": "fc939042ffa2169eb6027e79e55a65da51d30a16",
       "deviations": [
-        "The M11 behavioral, daemon, determinism, Wave-5, root, and packet-oracle suites pass at HEAD, but constituent WP61 and its dependent query packets are stale because the required public-error closure gate fails."
+        "M11 was temporarily stale because public-error closure failed after WP64. fc939042ffa2169eb6027e79e55a65da51d30a16 restored the gate and the behavioral, daemon, determinism, Wave-5, root, and packet-oracle suites were re-proved."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -269,10 +269,10 @@
   },
   "decommission_batches": {
     "DB10": {
-      "status": "stale",
-      "proving_commit": "c1da2820b184827bc2c8946a58c549d54fe700b3",
+      "status": "complete",
+      "proving_commit": "fc939042ffa2169eb6027e79e55a65da51d30a16",
       "deviations": [
-        "query-legacy-zero-state-check passes at HEAD, but DB10 requires M11 and M11 is stale through WP61's failed public-error closure gate; the zero-state remains observed but batch completion cannot remain trusted."
+        "DB10 was temporarily stale through M11 even though query-legacy-zero-state-check passed. After fc939042ffa2169eb6027e79e55a65da51d30a16 restored M11 trust, the DB10 negative oracles and zero-state gate were re-proved."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -347,8 +347,16 @@
         "tooling/ci/error_registry_closure.py"
       ],
       "summary": "Current-HEAD status revalidation found RESULT_CHECKSUM_CANONICAL_SCHEMA, introduced by WP64 after WP61's proving commit, absent from the public error registry. This makes WP61 and its dependency chain through WP62, WP75, WP63, WP64, M11, and DB10 stale despite their focused behavioral and legacy checks otherwise passing."
+    },
+    {
+      "kind": "completion_proof_stale_resolved",
+      "packet": "WP61",
+      "paths": [
+        "src/fabric/result_checksum.rs"
+      ],
+      "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Repair WP61 public error closure by keeping ResultChecksumError::CanonicalSchema as private diagnostic text, then rerun the WP61-WP64 dependency-chain packet oracles and M11 gates before beginning WP65.",
-  "updated_at": "2026-08-25T23:32:58Z"
+  "next_action": "Begin WP65 preflight and implement execution identity plus the persisted single-execution QueryPlanArtifact bundle and its four substantive oracles.",
+  "updated_at": "2026-08-25T23:34:41Z"
 }
