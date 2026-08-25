@@ -95,6 +95,12 @@ printf '%s' "$root_shape" | jq -e '
     "dep:serde_json_canonicalizer", "dep:serde_yaml_ng", "dep:tempfile",
     "dep:thiserror", "dep:toml"
   ] | sort)
+  and (.features["fact-generation"] | sort) == ([
+    "contract-models", "dep:blake3", "dep:rayon", "dep:ruff_python_ast",
+    "dep:ruff_python_index", "dep:ruff_python_parser", "dep:ruff_python_trivia",
+    "dep:ruff_source_file", "dep:ruff_text_size", "dep:tree-sitter",
+    "dep:tree-sitter-python", "dep:tree-sitter-rust", "dep:thiserror"
+  ] | sort)
   and .features.default == ["local-workstation"]
 ' >/dev/null || fail "root package boundary drifted: $root_shape"
 rg -q '^resolver = "3"$' Cargo.toml || fail 'Cargo resolver 3 is not declared'
