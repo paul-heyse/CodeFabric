@@ -497,7 +497,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:041a28872ab1ee472856108c631b173e2d3350f10eac145c11b5630d7d3963ae",
+      "canonical_digest": "b3:e22955f35d8b5a5e028db098f2168cd0c96810c3a52155ef043f72d232681df3",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -511,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:8a10d9de0daed9fff7d85d96c47064ebec32a402011d8fcc928e3f6305c64eeb",
+      "source_digest": "b3:4bda8fa20cbc46da0f1b14bf399f8c1b993884b91c4ea06386af43aeb6a61061",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -616,7 +616,7 @@
       "artifact_id": "codefabric.governance.design-principle-detector-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/design-principle-detector-registry.yaml",
-      "canonical_digest": "b3:613580f3414f4ecd4540a52547ae1e81f99474645f2a4a447aadf2d45ae1427f",
+      "canonical_digest": "b3:00b29f0627aedc47e99a19b32457ce4943ca83c188306ec35c3c31a20915b491",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "owner": "contracts",
@@ -632,7 +632,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:20c736fc924e37f47f7f7a265e0549b4f58c2f4f89fc0cf20f2f170caafb3c07",
+      "source_digest": "b3:8de3512a15845c11b8ceb65081d1fde6c3652af654bb1458c634951fa0128f6a",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -1683,7 +1683,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:98d84a8a0d1676bfd99c1e13d2d3e44f9e767f1458755b8652a6ac3cd0a26629",
+      "canonical_digest": "b3:974b20899d10ad98f7f3e1c51db989ddd6891f20b149fd0a2783c8fde0a000f8",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -1697,7 +1697,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:3c5554dab77b33baf154c2565e380348bd28552116ea1e09b7cd746e8bcc6b9a",
+      "source_digest": "b3:c08b5f5eb0a4e4c02a0fbefe7e3a0e56ea7b4a9a482229db580145f7c6aa29fa",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -2879,7 +2879,7 @@
   "compatible_suite_major": 1,
   "families": [
     {
-      "action_key": "b3:8bb777815e72e5740be7bef625f61575138dc170a1c912163d28fa9fc604a4e6",
+      "action_key": "b3:1c8a73fbd1826610cc2a6633f12173f03290318ad8c7b402df7856393e4cca3d",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
