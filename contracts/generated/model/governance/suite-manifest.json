@@ -9,9 +9,6 @@
       "canonical_digest": "b3:b404c56f5bcd84474a9bcb4d080eaaede920d59af8135ed8f65b6b99124d603a",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "proto-tooling",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -35,9 +32,6 @@
       "canonical_digest": "b3:be3786b067d70dbc4ff70700265a1400d2f3954fd31b83c474bc6be3f83faff9",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -61,9 +55,6 @@
       "canonical_digest": "b3:719a481f4bcd91ef9752f73adac126e3aa619108f81a90fc8fdd5d9998e9ae16",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -87,9 +78,6 @@
       "canonical_digest": "b3:0375c51ffd5ad9701dfee3443e37c3a0457d56b34a7fc319befcec65c54246d7",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -113,9 +101,6 @@
       "canonical_digest": "b3:20cc5c7e20e3b8c5dd27bed2e976cefb48fdd04bced1eb22e01ba0990c0e1de0",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -139,9 +124,6 @@
       "canonical_digest": "b3:0a0a6c4e4b8964f268c84dde414b2ced0c2a84c2450c917cea8a9bcc7f643a92",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -165,9 +147,6 @@
       "canonical_digest": "b3:de120ae29b04a5d3524f602ddc0553da02d57421f423ae4f494c6fb2ae3f5bd0",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -191,9 +170,6 @@
       "canonical_digest": "b3:a72194ebe6404d0e96b7d78b8187342c8b780cf83603260114ca1a1788fcb14d",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -217,9 +193,6 @@
       "canonical_digest": "b3:bc3c7f6ecbbee749064ce49dc2098ca2360229f2ce8e33b9b9bd35529b4f78db",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "upfront-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
@@ -243,9 +216,6 @@
       "canonical_digest": "b3:8a59d138610110ac79fdb620bdb439b43eb6c9d99505c0cc3a68118b651f1f81",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -269,9 +239,6 @@
       "canonical_digest": "b3:4e0d415cfabfb972644c55de5e254defd54fb3b8d11e5e7b1cb99db2875df7e8",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -297,9 +264,6 @@
       "canonical_digest": "b3:d7bdc648b2d32324403acfb02b6c5c498e92f9040b3b4d45a247a75cb6fea15e",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -325,9 +289,6 @@
       "canonical_digest": "b3:39b08d1fb58cebc739c78ca86a69a79d4202a35baab470caa3a3c0a89fa99b61",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -353,9 +314,6 @@
       "canonical_digest": "b3:fc4c1fc4d8e8ae9933c15ba6d146a729915b1b1d611d9ebba92b9c53f868d52d",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "adapter-pydantic-typed-v1",
       "provenance": [
@@ -381,9 +339,6 @@
       "canonical_digest": "b3:e8f14cb96cbe1d6734d8a99d3014c8a0e8d7e3f2b08de6f9a2711aa0c49fb306",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -407,9 +362,6 @@
       "canonical_digest": "b3:c3d10f39fd4c956a8812e0045103813b080ee56062bf2dace189ebc0d86e9d43",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -433,9 +385,6 @@
       "canonical_digest": "b3:b63c8c24c249102c55f6b5192dabd34e1e74a49116e7f9019769953c3b483ccb",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -459,9 +408,6 @@
       "canonical_digest": "b3:af71e2e5011abc728098eef53e68797fce7a02987e734c01c234801d84073fc6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -485,9 +431,6 @@
       "canonical_digest": "b3:ab9ce4a98145b662131ef24a8fb4ec7f64de84598add44f82ef6442bf131790a",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -511,9 +454,6 @@
       "canonical_digest": "b3:13642d73787f55c78efdb6cf827fc78b7b212a32e9a864f18c49cd9ce8c0c0b5",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -537,9 +477,6 @@
       "canonical_digest": "b3:3d30eac78e477a4ac01ae77e2372f857a37961c8153b05257705639f4b5a8ff9",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -560,12 +497,9 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:81c08b20bc6099b67ed8d9473a70fa6e4ded9b8d31ac75d860f15769ca9b6a7b",
+      "canonical_digest": "b3:51a13ebfd0e10f31eb634676de61d134ee55a3bd1040fc03f15c8af6f3807a55",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -577,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:ed2fa0658f863d854f6c87eabae7537c96909c16587ea4d754ed13466a096f38",
+      "source_digest": "b3:9e82cc6a88e602bbd4b7ce728ecb11863bbb955c26c227cad4b515ee92dd7a78",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -589,9 +523,6 @@
       "canonical_digest": "b3:a718c360e281dceb93124dcadb7c5ba49826c6270862f915705e45591b874153",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -617,9 +548,6 @@
       "canonical_digest": "b3:f08a83d356ace9203a1116165ebb7d6830b578cc7a58f91b48a1fbb3f845c806",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -643,9 +571,6 @@
       "canonical_digest": "b3:61f3562945bfb6608b0cf9462c599692d3bd15142301f78b4b1683a60ac4e06c",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -671,9 +596,6 @@
       "canonical_digest": "b3:6ae6c0809730c3eefb628d5473b8f1b70d68e934008613958bf59d3d208c03bf",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -697,9 +619,6 @@
       "canonical_digest": "b3:03a404a620ccb8ab7b1a29d387642bff1db02dd086a39a019b90c3138cb1d182",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -725,9 +644,6 @@
       "canonical_digest": "b3:4deb5e6b9a94f1fefa9436c031e929ef0c915aca99788418f58bf198a5c41c29",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -753,9 +669,6 @@
       "canonical_digest": "b3:83a29451e09e2532c00f312bccb4c1111c04baee8826215ea1452a298d483916",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -779,9 +692,6 @@
       "canonical_digest": "b3:a749eca0307587c485412a1ce9770947068f8d44f2d8e23381a433a4e9dee252",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -807,9 +717,6 @@
       "canonical_digest": "b3:3fff0400b3d14b1602815944b26cdfc5947c99867fcd36827757e4ceb89d93ec",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -835,9 +742,6 @@
       "canonical_digest": "b3:7efb391e76722d272c9953dbe305190f7793014e699d1fbe462eeb24665a6762",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -863,9 +767,6 @@
       "canonical_digest": "b3:73da9c1c7479b44bed00612631e7ff8fa648ccaea31bd715597233b7accdc22d",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -891,9 +792,6 @@
       "canonical_digest": "b3:34e8dba71c47fdc3ae590f0a1242391dc11dc56e9577ca58e2a36f1d0ad1fec9",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -917,9 +815,6 @@
       "canonical_digest": "b3:3c71370f9a8c5b84d097766753f57f7cdd3c6704b62d5caa600541c0fe29e806",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "fixture-oracle-typed-v1",
       "provenance": [
@@ -943,9 +838,6 @@
       "canonical_digest": "b3:e337ede8c7843ed8058b7e5c1f0871a1707ac2d03df8cc2519c4b8999ffbf0a8",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "ebnf-source-v1",
       "provenance": [
@@ -971,9 +863,6 @@
       "canonical_digest": "b3:2f8495aa25416fe0536c95e03a1de0695ddaf20543f84ab6c7d13509c0fc8cb3",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -999,9 +888,6 @@
       "canonical_digest": "b3:1bb7395ee44b7c263e27ea087875555374f1e2e7e253891949c0ff13876da8dc",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1027,9 +913,6 @@
       "canonical_digest": "b3:d2d35dafb2b37e2a5b56f2043bdef5c577b78099d20173a9bc63013dabde31f6",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1055,9 +938,6 @@
       "canonical_digest": "b3:a3106ab60afa63b4357d96dca74894a65c631d90bd06b6d18cdac90eb0032f89",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1083,9 +963,6 @@
       "canonical_digest": "b3:25cfd27732b0403f2424985b534f42388d8baf98120892902d7271581c4a11a4",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1111,9 +988,6 @@
       "canonical_digest": "b3:e8f5cc419132108c65548b6f594124197913e4d24907b4d46b2e694d66cc9499",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1139,9 +1013,6 @@
       "canonical_digest": "b3:425ef0f440c3a064af8026ab0a3ebde47dc2dbc490416d7ea8023cbe4c55260b",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1167,9 +1038,6 @@
       "canonical_digest": "b3:1aef53a170d4a00b4549dda8b9fe67ac7644976669b8db3f6e29380ab2b9064f",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1195,9 +1063,6 @@
       "canonical_digest": "b3:77d21f5ff81e0202d753bdd7fc2a606bdb31503a4f2c1880db2f04e0e4aa6ba2",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1223,9 +1088,6 @@
       "canonical_digest": "b3:05b14e4de007611d241113f336378fd5040defe3e2c0d7d056fbfce1466a79c7",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1251,9 +1113,6 @@
       "canonical_digest": "b3:d6605d0f4bc7b3f374f3a7547d965e261e9e544ffb6d7705eba84ca89623aa77",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1279,9 +1138,6 @@
       "canonical_digest": "b3:f889d4a52ef079e0b3a372a5e11dae9005c587c0d006aa39eca89107d25d1092",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1307,9 +1163,6 @@
       "canonical_digest": "b3:2f9c4bd292da802fe2f2f9e1ccbdcdb034fffa52b01e9b42b7682afadea70c6f",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1335,9 +1188,6 @@
       "canonical_digest": "b3:79e12dbe7adbe5407041c5b464132c58c563653e802a5f0825c2ac1c08888beb",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1363,9 +1213,6 @@
       "canonical_digest": "b3:322e949a38e8db51baf1644c9ec1a6723118663bfed4f1abed7733a1380e5657",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1391,9 +1238,6 @@
       "canonical_digest": "b3:5e54836133b813183c46bfacd05f7fa50bf5c2d643c4c7465a1207e01c1d23bf",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1419,9 +1263,6 @@
       "canonical_digest": "b3:7f66936184803cfca4616f5420201f49e67ed2175127377945aef8a45a96302f",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1447,9 +1288,6 @@
       "canonical_digest": "b3:cb86c470b1640a80ecc2668bca9312862f38441be08d906b7967aaba272606e1",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1475,9 +1313,6 @@
       "canonical_digest": "b3:d0963ec768d11455304dfab7160c207870b6505bbf8b350728e1f7e950a095d6",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "registry-family-typed-v1",
       "provenance": [
@@ -1503,9 +1338,6 @@
       "canonical_digest": "b3:758603c19dbd3402b79ffebb5e6559f6f9ca8cbe53f7062ee66f6220ffb0526f",
       "compatible_suite_major": 1,
       "compilation_unit": "proto",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "proto-descriptor-v1",
       "provenance": [
@@ -1531,9 +1363,6 @@
       "canonical_digest": "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41",
       "compatible_suite_major": 1,
       "compilation_unit": "proto",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -1559,9 +1388,6 @@
       "canonical_digest": "b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f",
       "compatible_suite_major": 1,
       "compilation_unit": "proto",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "proto-descriptor-v1",
       "provenance": [
@@ -1587,9 +1413,6 @@
       "canonical_digest": "b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973",
       "compatible_suite_major": 1,
       "compilation_unit": "proto",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "proto-descriptor-v1",
       "provenance": [
@@ -1615,9 +1438,6 @@
       "canonical_digest": "b3:85928f1a4fc0a3faa4209a76afe97cb4b9fa6123ac9ad9716675f04fe9fea604",
       "compatible_suite_major": 1,
       "compilation_unit": "proto",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "proto-descriptor-v1",
       "provenance": [
@@ -1643,9 +1463,6 @@
       "canonical_digest": "b3:a259ff883629cff84c9bb0468e5c3869814dfa93ca5cb7fbf85a7f8fc801b675",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1671,9 +1488,6 @@
       "canonical_digest": "b3:f9b19e8aa846a4d240a5b4f337f2b7c5829846f71c6b582de7a37356a216bcd3",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "schema-contract-ir-typed-v1",
       "provenance": [
@@ -1699,9 +1513,6 @@
       "canonical_digest": "b3:53f076445134e48da2358e108fd4eb0c84bc5de4b349a8f2480af32ac46a6b62",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1727,9 +1538,6 @@
       "canonical_digest": "b3:8bb7011fe4fd52e5e29136c8da4182f42a7a9ac84a3e34959852d42dd5060b13",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1755,9 +1563,6 @@
       "canonical_digest": "b3:0d0b91a721f2f7e513664f6a99b9329bf9138af6143918be50752381d4953050",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1783,9 +1588,6 @@
       "canonical_digest": "b3:aa14b33cabb0aaf1e733886368d9bc16ccfc16bf96adba4305052d59d2b52b83",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1811,9 +1613,6 @@
       "canonical_digest": "b3:2ecb302501754658e8c5002200d23abe0cde89ba0356c8720c94214b82036e71",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1839,9 +1638,6 @@
       "canonical_digest": "b3:91ac8510ba98517e8cb1321ec6b2009f7aeb95ddb869d9ef87b2bf15985d5f47",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1867,9 +1663,6 @@
       "canonical_digest": "b3:b83c0b8607050d1e29d59b1344a9589d358df7a89f8a5e41ce9f56ce172d0c3f",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -1890,12 +1683,9 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:eb4c3ca28a938b2d7212f7bdb48a60c84423e04b105e180e77d477786de65d3a",
+      "canonical_digest": "b3:f57566c2546c1a61b26c3a08e55ddaea5bca3144eacea9ec70f3f9325317a4ea",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1907,7 +1697,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:bfa8be43ed76eab7544eb7edc0c90b03c39a2137c94c77e15a9e3475cf2268fe",
+      "source_digest": "b3:d546cb2007459f68314521dee582b97cae575dfbbe35fa1fb7ac8ce4e8cc42f0",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1919,9 +1709,6 @@
       "canonical_digest": "b3:fa9aee3081f689bf6dbaa93c5b71c8057f62829f8a66149f89d9879a0c5712a6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1945,9 +1732,6 @@
       "canonical_digest": "b3:859db8706e3e0fcdfa8e9c0fca1606e292a843faac3b773bd8b235a80d5ab1b1",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1971,9 +1755,6 @@
       "canonical_digest": "b3:96a2a9f8807320997a9e28faf8abf5fc2c9671f22e0a26f851ae3561d459286f",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -1997,9 +1778,6 @@
       "canonical_digest": "b3:167f2ced7dd4678424dd644cc9e3fd3a0ca70e25efcb8305be3c88c95cb3a846",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2023,9 +1801,6 @@
       "canonical_digest": "b3:7d1b76295d229d74499e339e141a8d027427275b86bbaf4b336cd687789a6956",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2049,9 +1824,6 @@
       "canonical_digest": "b3:7af580a1682c708fb61108f019bc554764cb9be5e5400fc741837b2eb56f1242",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2075,9 +1847,6 @@
       "canonical_digest": "b3:bae193f4567dce8d49ee1a6906aa63952801c22b65a2a9afb3a18cf583bea5a6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2101,9 +1870,6 @@
       "canonical_digest": "b3:176e4836194275c91698c7577168e92b01c9448678e03e6ee8ad5606eff58efe",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2127,9 +1893,6 @@
       "canonical_digest": "b3:ea0e5e5582ae5ca6fb4b675fd4bced01c35b36838c2dbb7a88dd48c561bc83e5",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2153,9 +1916,6 @@
       "canonical_digest": "b3:f6975242b0d6af41e9383c58d033b7a20ed8ff4085f77f4b76255a8793cd211f",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2179,9 +1939,6 @@
       "canonical_digest": "b3:edc9e13155d40658d67f37b77c493abcc716df4e4421a8683dc269445710cb95",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2205,9 +1962,6 @@
       "canonical_digest": "b3:51734b90b00c56ff927a291a9037e36a332ecee5f1ed231d9ffbff1dc6d36874",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2231,9 +1985,6 @@
       "canonical_digest": "b3:79a4f83f5e6d1ace018589898886230f4f28579b84d9919d829660579a7b9d43",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2257,9 +2008,6 @@
       "canonical_digest": "b3:cc240698e30b7421530591855cf2df6fff6b94a0470fb3e7aa9ca4a6d3405b67",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2283,9 +2031,6 @@
       "canonical_digest": "b3:66087d5c6a036789b53d9c244a0b6393719de19f9892b776e28b05319f5d4eed",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2309,9 +2054,6 @@
       "canonical_digest": "b3:9cefca5d3e6efa30ba9f0723f042443eebb195171759554ddcf8e05367534246",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2335,9 +2077,6 @@
       "canonical_digest": "b3:3d4a6ac6387f2551a369ec03a7c7b788300afd45995d50640360db75ba4d35e7",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2361,9 +2100,6 @@
       "canonical_digest": "b3:492261a7565b05c6145ac69ba7858d2803641edfc599ccc2401141dc62d584a2",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2387,9 +2123,6 @@
       "canonical_digest": "b3:e466cb4eb8fd63a0ea95a60794da5705da219c1792d3ec18ec341354547ec311",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "contracts",
       "projection_profile": "json-jcs-v1",
       "provenance": [
@@ -2413,9 +2146,6 @@
       "canonical_digest": "b3:f3d8b1288259470b28a745e2c3ed512fe91da6de42d895acf21a277659fd0ebe",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2439,9 +2169,6 @@
       "canonical_digest": "b3:033476d03e7064ea0ea3c27a8b1f5c95cdc992e8cfa8e16c0e44daf34d6bc04d",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2465,9 +2192,6 @@
       "canonical_digest": "b3:359b8580afd2d3a9cafaa3e2e19a0086ca3f0dbcdba61c95dad96ff93560081c",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2491,9 +2215,6 @@
       "canonical_digest": "b3:2065ee7d43e2a379827e59f7a9f4b1a2e18c3cfeaa3e6bb9385eb8b75846e4e3",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2517,9 +2238,6 @@
       "canonical_digest": "b3:8ab60fcf57205390b0004371507653f7d6c7f034bb42756c2f321be9c479a03d",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2543,9 +2261,6 @@
       "canonical_digest": "b3:c4a825a5b3c51a7836bd743556bd38325edf81cdaacc99e0383f3e47e6df4e67",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2569,9 +2284,6 @@
       "canonical_digest": "b3:37240d546fe2bb8b29f3f130039a39c971089e0d743e85b1b356d5bf5e028065",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2595,9 +2307,6 @@
       "canonical_digest": "b3:10220462c8d27ab3a2b4a7b1ac0b5848c46e5e5244ce3a7940583d0dc26079d9",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2621,9 +2330,6 @@
       "canonical_digest": "b3:ee2f649d1acf0004cd555fddb94ed0d93d6e1cf7507a2e6c44e8126b7ce77e5f",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2647,9 +2353,6 @@
       "canonical_digest": "b3:8c082845e68c912ff00da1c7d5b0a5ff10ac030c99396ce006543feff76c2e90",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2673,9 +2376,6 @@
       "canonical_digest": "b3:70b40f6558ad30d22719838fbccdf7c1fef5133186485744cf840958e6098174",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2699,9 +2399,6 @@
       "canonical_digest": "b3:97d6f0d5d6fb57314c3c45645443c5203690ad96ac2d5c46fd3e8ee82e3c123a",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2725,9 +2422,6 @@
       "canonical_digest": "b3:a9e2aada087c4f948862347b36d48ebc71a0015fbb068ae17e5129d68c14aff7",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2751,9 +2445,6 @@
       "canonical_digest": "b3:c5ae20e1a0f987e62e81ed876b7424d425faaea3b825e8b62b1ba08fcc490575",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2777,9 +2468,6 @@
       "canonical_digest": "b3:6ee291008fd5128522e24f3596036ea20a3a1769ac21a300073eea68b96c5ee0",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2803,9 +2491,6 @@
       "canonical_digest": "b3:b0aa89a007740233e76e85f251fb99eb9cce7f78f51ec06a1095a66d4c4ae15e",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rule-tests",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2829,9 +2514,6 @@
       "canonical_digest": "b3:f83de7b310db42ace27ca4f64d683e5075dbb93d3f5af5d36ffe26a424843ab5",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2855,9 +2537,6 @@
       "canonical_digest": "b3:032b8ceff101f4f1b4dfcf9b6f0ed44e8d8cd309875d9c93726047f8aafc5906",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2881,9 +2560,6 @@
       "canonical_digest": "b3:ad76e5a230ff9b785948afd54b8d328cf77c797fc078d45b52554daef42323fa",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2907,9 +2583,6 @@
       "canonical_digest": "b3:147f8c527282dbca4d24682c919d92afa097f9f0b333692c79377dedead97151",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2933,9 +2606,6 @@
       "canonical_digest": "b3:6bcc22db9941dcb7c1b082fc9eda5ae163f83a7146e3522778ea9c6ec1a1b4db",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2959,9 +2629,6 @@
       "canonical_digest": "b3:69e7004a0d5ee2ac14c769279ba7995758525d649f3c3e0a35dc06ac56c7202a",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -2985,9 +2652,6 @@
       "canonical_digest": "b3:8fd542966c546ac5fa3a82b5c9672338b61d88e89f18043037ba16007fe227ce",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3011,9 +2675,6 @@
       "canonical_digest": "b3:199b6dbafeba0223b6bea5347bf327aae58e9946ff3de5ebd720fdac02bf153c",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3037,9 +2698,6 @@
       "canonical_digest": "b3:4b5621f1871b37606cc373208dbc3973d73347a844b548b8da1a2b2b8e78d9d7",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3063,9 +2721,6 @@
       "canonical_digest": "b3:f8557e525cd69ed856a42fa6636fda89eb59389d995272ce6e7f2ce3b2e1bd3d",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3089,9 +2744,6 @@
       "canonical_digest": "b3:fbd09fca4158b7cf7a20c0e7de743bcf1f79237fd031ec71f634b55cf9bf7039",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3115,9 +2767,6 @@
       "canonical_digest": "b3:eea4906b31e8cb5622aa4212917519b6503519c4108963c6352047ed169ad773",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3141,9 +2790,6 @@
       "canonical_digest": "b3:b3eeecc42b8072f906665c5fdbaa4b7d3e1ea5032e507d0892dd29b480f1db68",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3167,9 +2813,6 @@
       "canonical_digest": "b3:f5d93bcdd853c8647c2b9e174e95ea2cb8d969ca796eaa3d460f702af87e6771",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3193,9 +2836,6 @@
       "canonical_digest": "b3:4771d6156e9422f82f61ad9af8ccff4daba736731a10d35b8e504b535ec3fc70",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3219,9 +2859,6 @@
       "canonical_digest": "b3:6212e5b430d4b15f8b46fdb4ebaf997369a9ca66257776a0b7eb113f50f89e81",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "consumers": [
-        "contract-verifier"
-      ],
       "owner": "ast-grep-rules",
       "projection_profile": "yaml-ac-g-53-v1",
       "provenance": [
@@ -3242,6 +2879,7 @@
   "compatible_suite_major": 1,
   "families": [
     {
+      "action_key": "b3:fe305a220eb50d17b443f3d66891600840abf0879398794ae32231582ef4aa2b",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -3262,9 +2900,9 @@
       },
       "rule_version": "registry-cbef-driver-v1",
       "tool_identity": {
-        "action_key": "b3:ac5500e0440a8e1f1ddad89209040ef7b92643a5d6b3a05d58023933ac0d6158",
+        "action_key": "b3:75ae7eb097ceabca679d16f41414ab44847c9a8b87e3d409d19c0e5ea7418ff4",
         "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
-        "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
+        "cargo_manifest_digest": "b3:fe1aabc4b0572be56fac6355adb7936af306b36e67fcfab87e6a540e9918bc4c",
         "executable_digest": "b3:a3e552c7b5342f0b0a7e3449880876d4ff27566e73ecdc52f3473952fcb40ce2",
         "features": [
           "provider-inventory-tooling"
@@ -3276,6 +2914,7 @@
       }
     },
     {
+      "action_key": "b3:507fb2140074e773ea8ae7936919ac07487866d8533f1469c7e1afcf88f82977",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",
@@ -3304,6 +2943,7 @@
       }
     },
     {
+      "action_key": "b3:f89b1f42806e9f50a114ab1aab6b763505997beb9f0fce2a16d99c7260a8a4c0",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -3336,6 +2976,7 @@
       }
     },
     {
+      "action_key": "b3:0bea2ae7b69c4b6a9fe7e3ab68b073d03d14790044ff5feb1b698d7e200efb67",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -3379,10 +3020,10 @@
           "script_digest": "b3:7304585e5f9a044259627968bb2b42e1f1c4342596fb128c41a430e28ff1bfea"
         },
         "rust": {
-          "action_key": "b3:4c8d6bf22d182a483433ec68aa6aa8eb99bd966303b7c86a4d8c5c65ae503119",
+          "action_key": "b3:5d5f6015968d64061684e011f8efe5463592c629046c6ad1b0c61a8aba2a317a",
           "binary_digest": "b3:b6751909f69fc42af4cbd95f37a032a986f235593b3b87ddf61c48e2b8423528",
           "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
-          "cargo_manifest_digest": "b3:fc720152a818b1c243cdfb175325c27c398370fe9c2eefc1855aac488371d803",
+          "cargo_manifest_digest": "b3:fe1aabc4b0572be56fac6355adb7936af306b36e67fcfab87e6a540e9918bc4c",
           "descriptor_api": "tonic_prost_build::Builder::compile_fds",
           "features": [
             "proto-tooling"
@@ -3408,7 +3049,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:86b4aec9407aa11f81dfee93ad62ea7ba950c0e98bcdab7f06a691f8d03d8518",
       "lineage": [
         "action:adapter"
       ],
@@ -3436,7 +3076,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:0dbebe04350d844e2091a711df48586079a5aea37b92d0f877467095d856b4b9",
       "lineage": [
         "action:adapter"
       ],
@@ -3464,7 +3103,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:e163ab112dad9620eec56ffb55dd8e5c5c22e2b54dda18d6fb5fcc46b6ed7f1b",
       "lineage": [
         "action:adapter"
       ],
@@ -3492,7 +3130,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:feaba22621d85bce5e6fa0fed2eb3faeff5c483b439a72a101bff1a3339f43f1",
       "lineage": [
         "action:adapter"
       ],
@@ -3519,7 +3156,31 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:9bede48228ae5737331c2ab767f9d10bc1b96d28d30f33b7a6711fc4be41e10d",
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:994b809c3d2b9bc01d998f916d5e2bdd28aaf8970f51fbe739c2689ae2b8ed29",
+      "path": "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "python-adapter",
+        "python-package",
+        "contract-verifier"
+      ],
       "lineage": [
         "action:registry-cbef"
       ],
@@ -3546,7 +3207,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:581a48e53a6cb0b4548b3bb54980a988f542ced8e7c083c377e0f17b9882a154",
       "lineage": [
         "action:adapter"
       ],
@@ -3573,7 +3233,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:bfa96360e0fe880ea09de3ed6baf134ffc4744860361be86754c2e075e5d8777",
       "lineage": [
         "action:proto"
       ],
@@ -3600,7 +3259,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:dab4ea0b9393194de253b4f012860290e129ab72e1f965dd5604dc17ae2bcdb4",
       "lineage": [
         "action:proto"
       ],
@@ -3627,7 +3285,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:fbfd83bb361e557cb6234082af252d778ed426495df43216e198d3a8274492f6",
       "lineage": [
         "action:proto"
       ],
@@ -3654,7 +3311,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:e3a045cb368b0d6d94c1d172830f940419462e6a2f0e8db166ad4c08e38223e9",
       "lineage": [
         "action:proto"
       ],
@@ -3681,7 +3337,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:fa9ad03e145e53c49039b17ce4c80750bfbb916f9129cbfe38dce75acfc9956e",
       "lineage": [
         "action:proto"
       ],
@@ -3708,7 +3363,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:c2bc36b00388adbb262c76827e6b9a92e65609b4d5af533ac00339b2ab494c7f",
       "lineage": [
         "action:proto"
       ],
@@ -3735,7 +3389,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:53692aa191836fd4d50f16e214e27673718ede6e84138c5bad8e9210da4d2fca",
       "lineage": [
         "action:proto"
       ],
@@ -3762,7 +3415,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:99e98cecd9b2707be19780c5fdcab1d7c2db55d6c285f10f7919e4a748d52c73",
       "lineage": [
         "action:proto"
       ],
@@ -3789,7 +3441,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:c286c93c7b0819dc95521c3862b9e58382d36b57181a761621d06f6763586cdc",
       "lineage": [
         "action:proto"
       ],
@@ -3816,7 +3467,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:32b71518f9abf6f70e9d36cf5443badeddb3f8f61c7a0972e20cfc934fd56d9c",
       "lineage": [
         "action:proto"
       ],
@@ -3843,7 +3493,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:2a9bb5babfd761453874bcc9647cdf4018c022265e36ac34a067134b1907fcad",
       "lineage": [
         "action:proto"
       ],
@@ -3870,7 +3519,6 @@
         "python-package",
         "contract-verifier"
       ],
-      "content_digest": "b3:b98d6d4bf9cf8050c545761ac817cb2351ec41609eba9b9567ac0dd8c8a21971",
       "lineage": [
         "action:proto"
       ],
@@ -3895,7 +3543,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:8d3fa82b47453804df84e09e17100f0c8b83fc48d834f82444141865729a3fcc",
       "lineage": [
         "action:adapter"
       ],
@@ -3921,7 +3568,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:e5ff5bebca0142a0626446471e498c083e318d5ee483e19e2e6e9d640ce05130",
       "lineage": [
         "action:adapter"
       ],
@@ -3947,7 +3593,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:c8bb9bf4e7afdf66bf062f5e866ea201f3226df62776f9a1c8f49ea7b767b3e1",
       "lineage": [
         "action:adapter"
       ],
@@ -3973,7 +3618,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:0273b5ac5baca7ff36539a7d82fb0107a2d326d0062c4f9fbeaf724e1818fa25",
       "lineage": [
         "action:governance"
       ],
@@ -3997,7 +3641,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:8016a121d66d1e3ff0468a5b497e2ad6e7f3fbff14244bebc7e0383a409002cd",
       "lineage": [
         "action:governance"
       ],
@@ -4021,7 +3664,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:641a5f33436a881f08fd1a29370259e0e37ed99d1f5031936ad140fd387bedb3",
       "lineage": [
         "action:governance"
       ],
@@ -4045,7 +3687,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:80766d8e669c15e7010e8c3a385c9f8afb01f89632c27185eeb1d40bc02fd02b",
       "lineage": [
         "action:governance"
       ],
@@ -4069,7 +3710,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:899f37c5762cd2260f2c7886bb368fb7ed4bb2115c70b005739b66fb44c85087",
       "lineage": [
         "action:governance"
       ],
@@ -4093,7 +3733,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:0852dd9f22db77b9486ec5a814f7f1b2061c3eb6821407ba0759a7c3dca33fee",
       "lineage": [
         "action:governance"
       ],
@@ -4117,7 +3756,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:9c600ecd81fdb8ebfed51599a3524a93a0b67e360253b77c4b318fb16a895dfa",
       "lineage": [
         "action:governance"
       ],
@@ -4141,7 +3779,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:ed2fa0658f863d854f6c87eabae7537c96909c16587ea4d754ed13466a096f38",
       "lineage": [
         "action:governance"
       ],
@@ -4165,7 +3802,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:da4c3e944b4929129b60af9dfc59ae4f0d676ffe23bd04020846be6240eafd16",
       "lineage": [
         "action:adapter"
       ],
@@ -4191,7 +3827,144 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:66d88fde8ec2333d9a3e34f22e394aa249ed0dff748285f4d7d35461132567c1",
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:515a16ff344441bb423b8e3e8d104148aca453f4bf3911c84e08dfd8d5463f2a",
+      "path": "contracts/generated/model/governance/bundles.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:82cf30cde77c4844c443742ca451c7118889f8afdae9c63707624a61b86ce355",
+      "path": "contracts/generated/model/governance/fixture-index.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:7a7c1c67c0fd4741effcff0d6895060e8f42150b802a1118adfa1a9fcf0ee7c8",
+      "path": "contracts/generated/model/governance/module-aggregators.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:0274b6d48b134dcbb128225a0cfb2c26f0b20f11bbca9c082488df8a42891d6c",
+      "path": "contracts/generated/model/governance/package-data.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:cd44949639f869944d10175c4909c9630ab804436e96c40e5829a90562e6dc30",
+      "path": "contracts/generated/model/governance/requirements.jsonl",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "jsonl",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:71857dc865e9e7670413c8d0f2b641e49b30e834bc15b31326506f733294e84d",
+      "path": "contracts/generated/model/governance/suite-manifest.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
       "lineage": [
         "action:governance"
       ],
@@ -4215,7 +3988,52 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:d5f4532272b98e5d64ea0a71d824fbbf15ee22bf2c473c643e5daa6acb77300d",
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:1444611c5efe969d992803e9d97ee23652c4c09403db7a6693703d5771616b43",
+      "path": "contracts/generated/model/governance/traceability.jsonl",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "jsonl",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:4c5a38cf1df35ec07504f0e7429b7d1456348a7012bc0c7a0640333af21f6847",
+      "path": "contracts/generated/model/governance/validation.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4241,7 +4059,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:0f605ec8f545955c90b926a32e1a4f8af2b6c691b21ff523ef0aca2c4e936d5c",
       "lineage": [
         "action:schemas"
       ],
@@ -4267,7 +4084,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:12ec0d895ea4353e559acba43d8e86ae2c373592987ca53d8d178bf5e04d21dd",
       "lineage": [
         "action:schemas"
       ],
@@ -4293,7 +4109,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:330da492c7dbb2bbc79015620758e3d633e92b31ef313cf6a69a7128b89e0284",
       "lineage": [
         "action:schemas"
       ],
@@ -4319,7 +4134,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:a6441db9b6faded35fa582df8cca10fcfc2f2255b3b9fec2ea4bdbe5f4a3e04d",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4345,7 +4159,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:dfa13d35b6f79f56fd98b759d242d2e613095eac93a8e80cc936abdb3a70516e",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4371,7 +4184,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:36fd7b779fdb1d7d54c5eacb8593771714895c23b4ec64992e5ae7caa1e30c7c",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4397,7 +4209,98 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:9551996991d6cc07b9a71d6172e321de8f55a2ffee72c062d13ff6d1801327b6",
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:4fa4d914e630c4a06f322f1ba01ff6c85aed96ed8935a9cf38560ef84cc00382",
+      "path": "contracts/manifests/fixture-oracles.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:75d73c74aed2dcfd1b762f6b32829fc98ba427a4bf4244aa0fb27aed7ff614fd",
+      "path": "contracts/manifests/requirements.jsonl",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "jsonl",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:4b7dd0e91b86ff05f0e3144875c28a1a7598c729ebf5c2ecec8f3a0ea097bb10",
+      "path": "contracts/manifests/suite-manifest.json",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "json",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:3d14b5bd78786cf2691b2166549752398baee3231acc5caea6f9e8651d40ead4",
+      "path": "contracts/manifests/traceability.jsonl",
+      "producer": "action:governance",
+      "projection": {
+        "artifact_kind": "jsonl",
+        "projection_kind": "canonical-artifact"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "strict-decode"
+      ]
+    },
+    {
+      "consumers": [
+        "contract-verifier"
+      ],
       "lineage": [
         "action:schemas"
       ],
@@ -4423,7 +4326,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:5d953d0028f0040849a7ebc347c808c9081ce17f9d8720e85fbeec1e5de08732",
       "lineage": [
         "action:schemas"
       ],
@@ -4449,7 +4351,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:f22658f8e0406404027f5f4420a13963453069b866c977f0bbdfd7809c1db438",
       "lineage": [
         "action:schemas"
       ],
@@ -4475,7 +4376,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:135ad623d59a93d9ccdbc9fe9054dbb83912061b45daa2298433905b6a7733fe",
       "lineage": [
         "action:schemas"
       ],
@@ -4501,7 +4401,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:83dbd840b3d6f353bb43b73b0117ce87db2fd635e086bdd9942bc934b115f688",
       "lineage": [
         "action:schemas"
       ],
@@ -4527,7 +4426,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:67d913e1c2794aabb6ee5d0f99fd870239fdcac205abfd6c9f86acf5c01fda97",
       "lineage": [
         "action:schemas"
       ],
@@ -4553,7 +4451,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:c61828ef8e5b4116d7f1266a5eee12aeb061b8d7fe2a93dd468912daab329ed4",
       "lineage": [
         "action:schemas"
       ],
@@ -4579,7 +4476,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:324831a50394ee3fd80882ed88f47380d5d2941f066a911f6770ebf335e7b811",
       "lineage": [
         "action:schemas"
       ],
@@ -4605,7 +4501,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:bfa8be43ed76eab7544eb7edc0c90b03c39a2137c94c77e15a9e3475cf2268fe",
       "lineage": [
         "action:governance"
       ],
@@ -4630,7 +4525,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:2e47496f46971e63f1e3d1e293cb9885c6d641702d399519d608b20c71ba02aa",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4656,7 +4550,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:bbd3a8370f630c661ebd4d41e343b5df4089a1bf67256056c7ebaa49fe74df4d",
       "lineage": [
         "action:proto"
       ],
@@ -4682,7 +4575,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:4e49c9b48aa66c0c2317c8d9d5374bc53adf61cc36118eeb535dd62bd7747c9c",
       "lineage": [
         "action:proto"
       ],
@@ -4708,7 +4600,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:d66a37470ef378b3224fb8d7ee342ef49f02cde735c4bb9881dafb9430185124",
       "lineage": [
         "action:proto"
       ],
@@ -4734,7 +4625,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:fe9af2b1bab6a5ad8cd6bc36baa616e82b26fd8f8629146708c8d5a9b606f2a2",
       "lineage": [
         "action:proto"
       ],
@@ -4760,7 +4650,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:2e47496f46971e63f1e3d1e293cb9885c6d641702d399519d608b20c71ba02aa",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4786,7 +4675,29 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:8f6e438951020a8399eef9ef8c3bce7d6602bac84406d395c922478b9a1ab6bc",
+      "lineage": [
+        "action:governance"
+      ],
+      "output_id": "output:24c35a4392fb33eeb9a287744636aea8433335b0604a71a478dd089402f06815",
+      "path": "src/generated/model.rs",
+      "producer": "action:governance",
+      "projection": {
+        "projection_kind": "rust-source"
+      },
+      "public_artifact_id": null,
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "validators": [
+        "exact-bytes",
+        "rust-consumer"
+      ]
+    },
+    {
+      "consumers": [
+        "rust-core",
+        "contract-verifier"
+      ],
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4812,7 +4723,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:1e9328c77413d3374900fd75fa2e6f594f213d683521722fb6e85e32937b5cf4",
       "lineage": [
         "action:schemas"
       ],
@@ -4838,7 +4748,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:0dc60929b3f69577c9b5d8a6f4beba446d4f6eb8af05649c77a105e8c52f9a6a",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4864,7 +4773,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:9f41567c0fb78cf630d7e9bcc7f175dcb3744c51c388f1d7579923599f7eb621",
       "lineage": [
         "action:registry-cbef"
       ],
@@ -4890,7 +4798,6 @@
         "rust-core",
         "contract-verifier"
       ],
-      "content_digest": "b3:0c5660624aaf777351cc09cbbc3bcc908ce05fc8db41198e10a2246e256ac588",
       "lineage": [
         "action:schemas"
       ],
@@ -4915,7 +4822,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:d496f4db88a38f00920ea7c4db36512b01ae7ca9c3517a376663c2befcd0c678",
       "lineage": [
         "action:proto"
       ],
@@ -4941,7 +4847,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:1451279f9ab5676d536eabbe3d425ea8e7d8d23713f161f2f6b20dc5a659d145",
       "lineage": [
         "action:proto"
       ],
@@ -4967,7 +4872,6 @@
       "consumers": [
         "contract-verifier"
       ],
-      "content_digest": "b3:e2c2db06a9e81462986da6fb53ead59722013a63855d8f6c051f01094865bf57",
       "lineage": [
         "action:proto"
       ],

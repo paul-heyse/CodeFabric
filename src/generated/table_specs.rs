@@ -2765,6 +2765,7 @@ const GENERATED_TABLE_SPECS: &[GeneratedTableSpec] = &[
 const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     GeneratedOperationalTableSpec {
         name: "workspace_registration",
+        sqlite_ddl: "CREATE TABLE workspace_registration (\n  workspace_id BLOB NOT NULL,\n  workspace_registration_nonce BLOB NOT NULL,\n  registration_revision INTEGER NOT NULL,\n  administrative_key BLOB NOT NULL,\n  root_path_bytes BLOB NOT NULL,\n  root_path_display TEXT NOT NULL,\n  root_directory_file_identity BLOB NOT NULL,\n  platform_code INTEGER NOT NULL,\n  case_sensitivity_mode TEXT NOT NULL,\n  authorization_revision INTEGER NOT NULL,\n  allowed_source_disclosure_rules BLOB NOT NULL,\n  repository_id BLOB,\n  worktree_id BLOB,\n  authorization_fingerprint BLOB NOT NULL,\n  context_fingerprint BLOB NOT NULL,\n  status_code INTEGER NOT NULL,\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  PRIMARY KEY (workspace_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -2862,6 +2863,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "workspace_generation",
+        sqlite_ddl: "CREATE TABLE workspace_generation (\n  workspace_id BLOB NOT NULL,\n  source_generation INTEGER NOT NULL,\n  admitted_event_sequence INTEGER NOT NULL,\n  reconciled_event_sequence INTEGER NOT NULL,\n  durable_generation INTEGER NOT NULL,\n  active_pointer_generation INTEGER NOT NULL,\n  updated_at TEXT NOT NULL,\n  PRIMARY KEY (workspace_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -2904,6 +2906,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "nested_root_exclusion",
+        sqlite_ddl: "CREATE TABLE nested_root_exclusion (\n  parent_workspace_id BLOB NOT NULL,\n  child_workspace_id BLOB NOT NULL,\n  relative_path_bytes BLOB NOT NULL,\n  relative_path_display TEXT NOT NULL,\n  authorization_fingerprint BLOB NOT NULL,\n  created_at TEXT NOT NULL,\n  PRIMARY KEY (parent_workspace_id, child_workspace_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "parent_workspace_id",
@@ -2941,6 +2944,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "credential_metadata",
+        sqlite_ddl: "CREATE TABLE credential_metadata (\n  credential_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  agent_id TEXT NOT NULL,\n  credential_hash BLOB NOT NULL,\n  operations_mask INTEGER NOT NULL,\n  issued_at TEXT NOT NULL,\n  expires_at TEXT NOT NULL,\n  revoked_at TEXT,\n  revocation_reason_code INTEGER,\n  PRIMARY KEY (credential_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "credential_id",
@@ -2993,6 +2997,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "audit_event",
+        sqlite_ddl: "CREATE TABLE audit_event (\n  event_id BLOB NOT NULL,\n  workspace_id BLOB,\n  event_code INTEGER NOT NULL,\n  actor_id TEXT NOT NULL,\n  occurred_at TEXT NOT NULL,\n  details_digest BLOB NOT NULL,\n  diagnostic_id BLOB,\n  PRIMARY KEY (event_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "event_id",
@@ -3035,6 +3040,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "repository_registration",
+        sqlite_ddl: "CREATE TABLE repository_registration (\n  repository_id BLOB NOT NULL,\n  repository_registration_nonce BLOB NOT NULL,\n  created_at TEXT NOT NULL,\n  PRIMARY KEY (repository_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "repository_id",
@@ -3057,6 +3063,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "worktree_registration",
+        sqlite_ddl: "CREATE TABLE worktree_registration (\n  worktree_id BLOB NOT NULL,\n  repository_id BLOB NOT NULL,\n  worktree_registration_nonce BLOB NOT NULL,\n  worktree_kind TEXT NOT NULL,\n  administrative_key BLOB NOT NULL,\n  created_at TEXT NOT NULL,\n  removed_at TEXT,\n  PRIMARY KEY (worktree_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "worktree_id",
@@ -3099,6 +3106,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "common_repository_state",
+        sqlite_ddl: "CREATE TABLE common_repository_state (\n  repository_id BLOB NOT NULL,\n  common_dir_path_bytes BLOB NOT NULL,\n  common_dir_path_display TEXT NOT NULL,\n  object_format_code INTEGER NOT NULL,\n  gix_version TEXT NOT NULL,\n  trust_policy_fingerprint BLOB NOT NULL,\n  worktree_count INTEGER NOT NULL,\n  git_health_code INTEGER NOT NULL,\n  updated_at TEXT NOT NULL,\n  last_diagnostic_id BLOB,\n  PRIMARY KEY (repository_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "repository_id",
@@ -3161,6 +3169,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "worktree_state",
+        sqlite_ddl: "CREATE TABLE worktree_state (\n  workspace_id BLOB NOT NULL,\n  worktree_id BLOB,\n  repository_id BLOB,\n  work_dir_path_bytes BLOB NOT NULL,\n  work_dir_path_display TEXT NOT NULL,\n  git_dir_path_bytes BLOB,\n  git_dir_path_display TEXT,\n  lifecycle_state_code INTEGER NOT NULL,\n  source_trust_state_code INTEGER NOT NULL,\n  event_stream_health_code INTEGER NOT NULL,\n  git_acceleration_status_code INTEGER NOT NULL,\n  active_snapshot_id BLOB,\n  analysis_context_set_id BLOB NOT NULL,\n  source_generation INTEGER NOT NULL,\n  event_watermark INTEGER NOT NULL,\n  newest_dirty_generation INTEGER NOT NULL,\n  durable_generation INTEGER NOT NULL,\n  reconcile_required INTEGER NOT NULL,\n  updated_at TEXT NOT NULL,\n  last_diagnostic_id BLOB,\n  inventory_digest BLOB,\n  PRIMARY KEY (workspace_id),\n  UNIQUE (worktree_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -3275,6 +3284,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "source_inventory",
+        sqlite_ddl: "CREATE TABLE source_inventory (\n  workspace_id BLOB NOT NULL,\n  source_generation INTEGER NOT NULL,\n  path_bytes BLOB NOT NULL,\n  path_display TEXT NOT NULL,\n  comparison_key_bytes BLOB NOT NULL,\n  file_id BLOB,\n  content_digest BLOB,\n  byte_length INTEGER NOT NULL,\n  file_kind_code INTEGER NOT NULL,\n  language_code TEXT,\n  inventory_classification_code INTEGER NOT NULL,\n  inclusion_state_code INTEGER NOT NULL,\n  git_repo_path_bytes BLOB,\n  git_blob_oid BLOB,\n  current_file_owner BLOB,\n  PRIMARY KEY (workspace_id, source_generation, path_bytes)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -3357,6 +3367,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "source_blob",
+        sqlite_ddl: "CREATE TABLE source_blob (\n  blob_digest BLOB NOT NULL,\n  byte_length INTEGER NOT NULL,\n  line_index_digest BLOB NOT NULL,\n  encoding_code INTEGER NOT NULL,\n  newline_code INTEGER NOT NULL,\n  created_at TEXT NOT NULL,\n  PRIMARY KEY (blob_digest)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "blob_digest",
@@ -3394,6 +3405,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "source_blob_lease",
+        sqlite_ddl: "CREATE TABLE source_blob_lease (\n  lease_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  source_generation INTEGER NOT NULL,\n  holder_kind_code INTEGER NOT NULL,\n  holder_id BLOB NOT NULL,\n  state_code INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  orphaned_at INTEGER,\n  PRIMARY KEY (lease_id),\n  UNIQUE (workspace_id, source_generation, holder_kind_code, holder_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "lease_id",
@@ -3441,6 +3453,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "source_blob_lease_member",
+        sqlite_ddl: "CREATE TABLE source_blob_lease_member (\n  lease_id BLOB NOT NULL,\n  blob_digest BLOB NOT NULL,\n  PRIMARY KEY (lease_id, blob_digest)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "lease_id",
@@ -3458,6 +3471,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "git_state_vector",
+        sqlite_ddl: "CREATE TABLE git_state_vector (\n  workspace_id BLOB NOT NULL,\n  source_generation INTEGER NOT NULL,\n  repository_id BLOB NOT NULL,\n  worktree_id BLOB NOT NULL,\n  head_kind_code INTEGER NOT NULL,\n  head_target BLOB,\n  head_tree BLOB,\n  index_fingerprint BLOB,\n  index_entry_count INTEGER,\n  has_conflict_stages INTEGER NOT NULL,\n  repository_state_code INTEGER NOT NULL,\n  inclusion_policy_fingerprint BLOB NOT NULL,\n  attributes_fingerprint BLOB NOT NULL,\n  worktree_inventory_digest BLOB NOT NULL,\n  captured_at TEXT NOT NULL,\n  PRIMARY KEY (workspace_id, source_generation)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -3540,6 +3554,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "update_wave",
+        sqlite_ddl: "CREATE TABLE update_wave (\n  wave_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  source_generation INTEGER NOT NULL,\n  event_watermark INTEGER NOT NULL,\n  state_code INTEGER NOT NULL,\n  candidate_strategy_code INTEGER NOT NULL,\n  input_fingerprint BLOB NOT NULL,\n  candidate_count INTEGER NOT NULL,\n  started_at TEXT NOT NULL,\n  terminal_at TEXT,\n  diagnostic_id BLOB,\n  PRIMARY KEY (wave_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "wave_id",
@@ -3604,6 +3619,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "update_wave_item",
+        sqlite_ddl: "CREATE TABLE update_wave_item (\n  wave_id BLOB NOT NULL,\n  item_ordinal INTEGER NOT NULL,\n  path_bytes BLOB NOT NULL,\n  path_display TEXT NOT NULL,\n  path_encoding_code INTEGER NOT NULL,\n  state_code INTEGER NOT NULL,\n  input_fingerprint BLOB NOT NULL,\n  output_fingerprint BLOB,\n  diagnostic_id BLOB,\n  PRIMARY KEY (wave_id, item_ordinal)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "wave_id",
@@ -3661,6 +3677,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "operational_dependency_edge",
+        sqlite_ddl: "CREATE TABLE operational_dependency_edge (\n  workspace_id BLOB NOT NULL,\n  source_owner_id BLOB NOT NULL,\n  dependent_owner_id BLOB NOT NULL,\n  edge_kind_code INTEGER NOT NULL,\n  derivation_id TEXT,\n  source_generation INTEGER NOT NULL,\n  input_digest BLOB NOT NULL,\n  active INTEGER NOT NULL,\n  PRIMARY KEY (workspace_id, source_owner_id, dependent_owner_id, edge_kind_code)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -3715,6 +3732,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "provider_run",
+        sqlite_ddl: "CREATE TABLE provider_run (\n  provider_run_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  analysis_context_id BLOB NOT NULL,\n  wave_id BLOB NOT NULL,\n  provider_code INTEGER NOT NULL,\n  owner_id BLOB,\n  build_unit_id BLOB,\n  source_generation INTEGER NOT NULL,\n  input_fingerprint BLOB NOT NULL,\n  output_fingerprint BLOB,\n  state_code INTEGER NOT NULL,\n  accepted_at TEXT NOT NULL,\n  terminal_at TEXT,\n  diagnostic_id BLOB,\n  PRIMARY KEY (provider_run_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "provider_run_id",
@@ -3794,6 +3812,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "git_operation_run",
+        sqlite_ddl: "CREATE TABLE git_operation_run (\n  git_operation_run_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  baseline_fingerprint BLOB NOT NULL,\n  result_fingerprint BLOB,\n  candidate_count INTEGER NOT NULL,\n  verified_count INTEGER NOT NULL,\n  state_code INTEGER NOT NULL,\n  started_at TEXT NOT NULL,\n  terminal_at TEXT,\n  diagnostic_id BLOB,\n  PRIMARY KEY (git_operation_run_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "git_operation_run_id",
@@ -3853,6 +3872,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "git_candidate_cache",
+        sqlite_ddl: "CREATE TABLE git_candidate_cache (\n  workspace_id BLOB NOT NULL,\n  worktree_id BLOB NOT NULL,\n  state_vector_digest BLOB NOT NULL,\n  topology_digest BLOB NOT NULL,\n  mode_code INTEGER NOT NULL,\n  candidate_payload BLOB NOT NULL,\n  payload_digest BLOB NOT NULL,\n  source_generation INTEGER NOT NULL,\n  PRIMARY KEY (workspace_id, worktree_id, state_vector_digest, topology_digest, mode_code)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -3908,6 +3928,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "table_mutation_operation",
+        sqlite_ddl: "CREATE TABLE table_mutation_operation (\n  operation_id BLOB NOT NULL,\n  table_code INTEGER NOT NULL,\n  mutation_phase TEXT NOT NULL,\n  application_id TEXT NOT NULL,\n  application_version INTEGER NOT NULL,\n  publication_id BLOB NOT NULL,\n  owner_set_fingerprint BLOB NOT NULL,\n  input_checksum BLOB NOT NULL,\n  expected_output_checksum BLOB NOT NULL,\n  expected_predecessor INTEGER,\n  state_code INTEGER NOT NULL,\n  delta_version INTEGER,\n  created_at TEXT NOT NULL,\n  completed_at TEXT,\n  PRIMARY KEY (operation_id, table_code, mutation_phase),\n  UNIQUE (application_id, application_version)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "operation_id",
@@ -3985,6 +4006,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "hot_overlay_manifest",
+        sqlite_ddl: "CREATE TABLE hot_overlay_manifest (\n  workspace_id BLOB NOT NULL,\n  snapshot_id BLOB NOT NULL,\n  base_publication_id BLOB NOT NULL,\n  overlay_generation INTEGER NOT NULL,\n  analysis_context_set_id BLOB NOT NULL,\n  overlay_checksum BLOB NOT NULL,\n  table_manifest_bytes BLOB NOT NULL,\n  created_at TEXT NOT NULL,\n  PRIMARY KEY (workspace_id, overlay_generation)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
@@ -4034,6 +4056,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "snapshot_lease",
+        sqlite_ddl: "CREATE TABLE snapshot_lease (\n  lease_id BLOB NOT NULL,\n  lease_kind_code INTEGER NOT NULL,\n  workspace_id BLOB NOT NULL,\n  snapshot_id BLOB NOT NULL,\n  base_publication_id BLOB NOT NULL,\n  required_delta_versions_bytes BLOB NOT NULL,\n  requires_overlay INTEGER NOT NULL,\n  agent_instance_id BLOB,\n  created_at INTEGER NOT NULL,\n  last_heartbeat_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  state_code INTEGER NOT NULL,\n  process_instance_id BLOB NOT NULL,\n  orphaned_at INTEGER,\n  artifact_expires_at INTEGER,\n  source_blob_lease_id BLOB,\n  PRIMARY KEY (lease_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "lease_id",
@@ -4123,6 +4146,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "result_artifact_lease",
+        sqlite_ddl: "CREATE TABLE result_artifact_lease (\n  lease_id BLOB NOT NULL,\n  artifact_uri TEXT NOT NULL,\n  checksum BLOB NOT NULL,\n  expires_at INTEGER NOT NULL,\n  PRIMARY KEY (lease_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "lease_id",
@@ -4155,6 +4179,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "serving_snapshot_manifest",
+        sqlite_ddl: "CREATE TABLE serving_snapshot_manifest (\n  snapshot_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  publication_id BLOB NOT NULL,\n  state_code INTEGER NOT NULL,\n  manifest_body_bytes BLOB NOT NULL,\n  manifest_json_bytes BLOB NOT NULL,\n  manifest_digest BLOB NOT NULL,\n  created_at INTEGER NOT NULL,\n  activated_at INTEGER,\n  retired_at INTEGER,\n  PRIMARY KEY (snapshot_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "snapshot_id",
@@ -4212,6 +4237,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "active_snapshot",
+        sqlite_ddl: "CREATE TABLE active_snapshot (\n  workspace_id BLOB NOT NULL,\n  snapshot_id BLOB NOT NULL,\n  created_at INTEGER NOT NULL,\n  activated_at INTEGER NOT NULL,\n  observed_durable_pointer_generation INTEGER NOT NULL,\n  active_pointer_generation INTEGER NOT NULL,\n  lease_count INTEGER NOT NULL,\n  PRIMARY KEY (workspace_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "workspace_id",
