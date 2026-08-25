@@ -23,7 +23,7 @@
   },
   "families": [
     {
-      "action_key": "b3:126f68ba0812afbbda9a25a545d4d6a08fac0646381c8df3c5b1ce38753f5215",
+      "action_key": "b3:93e3917aae6be0a33b2cb6c9ff55770b2fce531bfeddff09d79ac0a611618220",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -58,7 +58,7 @@
       }
     },
     {
-      "action_key": "b3:196a74fc4b425bab7548f5219fbc78aad05e5414c601889cd726c98fe3bca8b1",
+      "action_key": "b3:16575f5e2da070fca0decbb9768db827ad4da458d9c068cee739931c801ea853",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",
@@ -89,7 +89,7 @@
       }
     },
     {
-      "action_key": "b3:c34e0f9730ee4ca0f50a28a4d6ba98529ac978f3da579bc16b0b8395e2d99f2c",
+      "action_key": "b3:2636951b7dde90532c1694a367a9ab2487fa6d623b7b2806b3d3945280b83632",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -122,7 +122,7 @@
       }
     },
     {
-      "action_key": "b3:76d8bf3909518e76815ef1c0a6c5eb790ea27d3e75a32c2de353c247112c4d46",
+      "action_key": "b3:65d708e7338ed50c1ed015a28119f09036f05fcce3d966e42203dc0f60648ea3",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",

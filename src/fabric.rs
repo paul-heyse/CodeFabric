@@ -47,7 +47,8 @@ pub use overlay::{
 pub use overlay::{OverlayRebaseFaultPoint, OverlayRebaseOutcome, OverlayRebaseRequest};
 pub use publication::{
     CurrentPublicationRecord, OwnerPublicationWrite, PublicationFaultPoint, PublicationOutcome,
-    PublicationPins, PublicationRequest, PublicationScope, PublicationTableRecord,
+    PublicationPins, PublicationReferenceViolation, PublicationRequest, PublicationScope,
+    PublicationTableRecord,
 };
 #[cfg(feature = "daemon")]
 pub use serving::{
@@ -91,6 +92,8 @@ pub enum FabricError {
     MutationFault(MutationFaultPoint),
     #[error("PUBLICATION_INTEGRITY:{0}")]
     PublicationIntegrity(String),
+    #[error(transparent)]
+    PublicationReference(#[from] PublicationReferenceViolation),
     #[error("CURRENT_POINTER_CONFLICT:{0}")]
     CurrentPointerConflict(String),
     #[error("PUBLICATION_FAULT:{0:?}")]

@@ -1276,7 +1276,7 @@ mod tests {
     use crate::workspace_registry::WorkspaceRecord;
 
     const WORKSPACE: [u8; 16] = [0x11; 16];
-    const CONTEXT: [u8; 16] = [0x44; 16];
+    const CONTEXT: [u8; 16] = crate::identity::SOURCE_CONTEXT_ID;
     const OVERLAY: [u8; 32] = [0x33; 32];
 
     fn digest(byte: u8) -> String {

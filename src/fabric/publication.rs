@@ -10,12 +10,14 @@ use arrow_array::{
 use arrow_row::{RowConverter, SortField};
 use arrow_select::concat::concat_batches;
 use datafusion::common::ScalarValue;
-use datafusion::logical_expr::{Expr, col, lit};
+use datafusion::datasource::MemTable;
+use datafusion::logical_expr::{Expr, JoinType, col, lit};
 use datafusion::prelude::SessionContext;
 use deltalake::protocol::SaveMode;
+use thiserror::Error;
 
 use super::mutation::{
-    DurableWriteKind, append_phase, application_id, commit_properties, enforce_write_kind,
+    DurableWriteKind, append_phase, application_id, commit_properties, enforce_write_kind, hex,
     primary_key_checksum, reconcile_prepared, reload_table, storage_batch,
 };
 use super::{
@@ -31,8 +33,12 @@ use crate::registries::{
     DurablePublicationState, generated_transition, registry_state_name,
 };
 use crate::schema_registry::{
-    PublicationPinRole, TableScopeSpec, TableSpec, table_scope_spec, table_spec, table_specs,
+    PublicationPinRole, TableScopeSpec, TableSpec, foreign_key_contracts, table_scope_spec,
+    table_spec, table_specs,
 };
+
+const PUBLICATION_REFERENTIAL_INTEGRITY: &str = "PUBLICATION_REFERENTIAL_INTEGRITY";
+const CANDIDATE_REFERENCE_COVERAGE: &str = "COMPLETE_CANDIDATE_EFFECTIVE_SNAPSHOT";
 
 /// Closed row selection bound to one publication and every derived serving snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +123,22 @@ pub struct PublicationOutcome {
     pub scope: PublicationScope,
     pub pointer: CurrentPublicationRecord,
     pub tables: BTreeMap<i16, PublicationTableRecord>,
+}
+
+/// Registered cross-table failure over the complete candidate publication relation.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[error(
+    "{error_code}:source={source_table}.{source_column}:target={target_table}.{target_column}:key={key}:owner_scope={owner_scope}:coverage={coverage}"
+)]
+pub struct PublicationReferenceViolation {
+    pub error_code: &'static str,
+    pub source_table: &'static str,
+    pub source_column: &'static str,
+    pub target_table: &'static str,
+    pub target_column: &'static str,
+    pub key: String,
+    pub owner_scope: String,
+    pub coverage: &'static str,
 }
 
 impl PublicationPins {
@@ -622,52 +644,161 @@ fn validate_identifiers_and_spans(batches: &BTreeMap<i16, RecordBatch>) -> Resul
     Ok(())
 }
 
-fn binary_set(batch: &RecordBatch, name: &str) -> BTreeSet<Vec<u8>> {
-    let index = batch
-        .schema()
-        .index_of(name)
-        .expect("generated binary column");
-    batch
-        .column(index)
-        .as_any()
-        .downcast_ref::<BinaryArray>()
-        .expect("generated binary physical type")
-        .iter()
-        .flatten()
-        .map(<[u8]>::to_vec)
-        .collect()
+fn prospective_pointer(
+    request: &PublicationRequest,
+) -> Result<CurrentPublicationRecord, FabricError> {
+    Ok(CurrentPublicationRecord {
+        workspace_id: request.pins.workspace_id,
+        publication_id: request.pins.publication_id,
+        pointer_generation: request
+            .expected_pointer
+            .as_ref()
+            .map_or(Ok(1), |pointer| {
+                pointer.pointer_generation.checked_add(1).ok_or(())
+            })
+            .map_err(|()| {
+                FabricError::CurrentPointerConflict("pointer generation exhausted".into())
+            })?,
+        updated_at_micros: request.completed_at_micros,
+    })
 }
 
-fn validate_references(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
-    let owners = binary_set(&batches[&8], "owner_id");
-    let entities = binary_set(&batches[&100], "entity_id");
-    for (&table_code, batch) in batches {
-        if batch.schema().index_of("owner_id").is_ok()
-            && binary_set(batch, "owner_id")
-                .iter()
-                .any(|owner| !owners.contains(owner))
-        {
-            return Err(FabricError::PublicationIntegrity(format!(
-                "{} contains an unknown owner",
-                table_spec(table_code).expect("generated table").name
-            )));
-        }
-    }
-    let relations = &batches[&110];
-    for endpoint in ["source_id", "target_id"] {
-        if binary_set(relations, endpoint)
-            .iter()
-            .any(|entity| !entities.contains(entity))
-        {
-            return Err(FabricError::PublicationIntegrity(format!(
-                "relation {endpoint} is absent from entity"
-            )));
-        }
-    }
-    Ok(())
+fn candidate_effective_batches(
+    request: &PublicationRequest,
+    records: &BTreeMap<i16, PublicationTableRecord>,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<BTreeMap<i16, RecordBatch>, FabricError> {
+    let mut candidate = batches.clone();
+    let table_count = i32::try_from(records.len())
+        .map_err(|_| FabricError::PublicationIntegrity("table census exceeds i32".into()))?;
+    candidate.insert(
+        5,
+        publication_batch(
+            request,
+            DurablePublicationState::Validating,
+            table_count,
+            table_count,
+            0,
+        )?,
+    );
+    candidate.insert(
+        6,
+        publication_table_batch(&records.values().cloned().collect::<Vec<_>>())?,
+    );
+    candidate.insert(7, current_pointer_batch(&prospective_pointer(request)?)?);
+    Ok(candidate)
 }
 
-fn validate_candidate(
+fn diagnostic_key(batch: &RecordBatch, column: &str) -> Result<String, FabricError> {
+    let array = batch.column(batch.schema().index_of(column)?);
+    if let Some(binary) = array.as_any().downcast_ref::<BinaryArray>() {
+        return Ok(hex(binary.value(0)));
+    }
+    Ok(ScalarValue::try_from_array(array, 0)?.to_string())
+}
+
+fn owner_scope(batch: &RecordBatch, scope: &PublicationScope) -> Result<String, FabricError> {
+    if let Ok(index) = batch.schema().index_of("owner_id") {
+        let owners = batch
+            .column(index)
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .ok_or_else(|| {
+                FabricError::PublicationIntegrity("generated owner_id is not Binary".into())
+            })?;
+        return Ok(format!("owner:{}", hex(owners.value(0))));
+    }
+    Ok(format!(
+        "workspace:{};source_generation:{};analysis_context_set:{};analysis_context_count:{}",
+        hex(&scope.workspace_id),
+        scope.source_generation,
+        hex(&scope.analysis_context_set_id),
+        scope.analysis_context_ids.len()
+    ))
+}
+
+async fn validate_references(
+    request: &PublicationRequest,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<usize, FabricError> {
+    let scope = request.pins.scope()?;
+    let mut validated = 0;
+    for contract in foreign_key_contracts() {
+        let source_spec = table_spec(contract.source_table_code).expect("generated FK source");
+        let target_spec = table_spec(contract.target_table_code).expect("generated FK target");
+        let source = batches.get(&contract.source_table_code).ok_or_else(|| {
+            FabricError::PublicationIntegrity(format!(
+                "candidate relation lacks FK source {}",
+                source_spec.name
+            ))
+        })?;
+        let target = batches.get(&contract.target_table_code).ok_or_else(|| {
+            FabricError::PublicationIntegrity(format!(
+                "candidate relation lacks FK target {}",
+                target_spec.name
+            ))
+        })?;
+        if source.column(contract.source_column_index).data_type()
+            != target.column(contract.target_column_index).data_type()
+        {
+            return Err(FabricError::PublicationIntegrity(format!(
+                "generated FK physical types differ for {}.{} and {}.{}",
+                source_spec.name, contract.source_column, target_spec.name, contract.target_column
+            )));
+        }
+
+        let context = SessionContext::new();
+        let source_provider = Arc::new(MemTable::try_new(
+            source.schema(),
+            vec![vec![source.clone()]],
+        )?);
+        let target_provider = Arc::new(MemTable::try_new(
+            target.schema(),
+            vec![vec![target.clone()]],
+        )?);
+        let mut source_projection = vec![contract.source_column];
+        if source.schema().index_of("owner_id").is_ok() && contract.source_column != "owner_id" {
+            source_projection.push("owner_id");
+        }
+        let source_frame = context
+            .read_table(source_provider)?
+            .filter(col(contract.source_column).is_not_null())?
+            .select_columns(&source_projection)?;
+        let target_frame = context
+            .read_table(target_provider)?
+            .select_columns(&[contract.target_column])?;
+        let missing = source_frame
+            .join(
+                target_frame,
+                JoinType::LeftAnti,
+                &[contract.source_column],
+                &[contract.target_column],
+                None,
+            )?
+            .limit(0, Some(1))?
+            .collect()
+            .await?;
+        let Some(missing) = missing.first() else {
+            validated += 1;
+            continue;
+        };
+        return Err(PublicationReferenceViolation {
+            error_code: PUBLICATION_REFERENTIAL_INTEGRITY,
+            source_table: source_spec.name,
+            source_column: contract.source_column,
+            target_table: target_spec.name,
+            target_column: contract.target_column,
+            key: diagnostic_key(missing, contract.source_column)?,
+            owner_scope: owner_scope(missing, &scope)?,
+            coverage: CANDIDATE_REFERENCE_COVERAGE,
+        }
+        .into());
+    }
+    Ok(validated)
+}
+
+async fn validate_candidate(
+    request: &PublicationRequest,
     records: &BTreeMap<i16, PublicationTableRecord>,
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<(), FabricError> {
@@ -685,7 +816,12 @@ fn validate_candidate(
     }
     validate_primary_keys(records, batches)?;
     validate_identifiers_and_spans(batches)?;
-    validate_references(batches)
+    validate_references(
+        request,
+        &candidate_effective_batches(request, records, batches)?,
+    )
+    .await
+    .map(|_| ())
 }
 
 struct PublicationTransition<'a> {
@@ -914,20 +1050,7 @@ async fn commit_pointer<J: MutationJournal>(
     enforce_write_kind(spec, DurableWriteKind::CurrentPointerSwap)?;
     let table = fabric.tables.get_mut(&7).expect("current pointer exists");
     reload_table(table, DeltaAccessProfile::OptimizeDml).await?;
-    let next = CurrentPublicationRecord {
-        workspace_id: request.pins.workspace_id,
-        publication_id: request.pins.publication_id,
-        pointer_generation: request
-            .expected_pointer
-            .as_ref()
-            .map_or(Ok(1), |pointer| {
-                pointer.pointer_generation.checked_add(1).ok_or(())
-            })
-            .map_err(|()| {
-                FabricError::CurrentPointerConflict("pointer generation exhausted".into())
-            })?,
-        updated_at_micros: request.completed_at_micros,
-    };
+    let next = prospective_pointer(request)?;
     let batch = current_pointer_batch(&next)?;
     let checksum = batch_checksum(&batch)?;
     let prepared = journal
@@ -1122,7 +1245,7 @@ async fn validate_and_mark_publication<J: MutationJournal>(
     records: &mut BTreeMap<i16, PublicationTableRecord>,
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<(), FabricError> {
-    if let Err(error) = validate_candidate(records, batches) {
+    if let Err(error) = validate_candidate(request, records, batches).await {
         transition_publication(
             fabric,
             journal,
@@ -1290,11 +1413,12 @@ mod tests {
     use arrow_array::{ArrayRef, BinaryArray, Int16Array, Int64Array, RecordBatch};
 
     use super::*;
+    use crate::fabric::{EmptySnapshotOverlay, SnapshotProviderCatalog};
     use crate::fact_ingest::{
         EntityRow, FactScope, RelationRow, ValidatedFactBatch, encode_entities, encode_relations,
     };
     use crate::operational_store::OperationalStore;
-    use crate::registries::WorkspaceRegistryLifecycle;
+    use crate::registries::{PUBLIC_ERROR_IDS, WorkspaceRegistryLifecycle};
     use crate::workspace_registry::WorkspaceRecord;
 
     fn workspace_record() -> WorkspaceRecord {
@@ -1323,7 +1447,7 @@ mod tests {
     const fn scope() -> FactScope {
         FactScope {
             workspace_id: [1; 16],
-            analysis_context_id: [2; 16],
+            analysis_context_id: crate::identity::SOURCE_CONTEXT_ID,
             source_generation: 7,
             owner_id: [3; 16],
         }
@@ -1333,7 +1457,9 @@ mod tests {
         let spec = table_spec(8).unwrap();
         let columns: Vec<ArrayRef> = vec![
             Arc::new(BinaryArray::from(vec![Some([1; 16].as_slice())])),
-            Arc::new(BinaryArray::from(vec![Some([2; 16].as_slice())])),
+            Arc::new(BinaryArray::from(vec![Some(
+                crate::identity::SOURCE_CONTEXT_ID.as_slice(),
+            )])),
             Arc::new(Int64Array::from(vec![7_i64])),
             Arc::new(BinaryArray::from(vec![Some([3; 16].as_slice())])),
             Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
@@ -1373,15 +1499,19 @@ mod tests {
         ValidatedFactBatch::validate(100, encode_entities(&[row]).unwrap(), scope()).unwrap()
     }
 
-    fn dangling_relation_batch() -> ValidatedFactBatch {
+    fn empty_entity_batch() -> ValidatedFactBatch {
+        ValidatedFactBatch::validate(100, encode_entities(&[]).unwrap(), scope()).unwrap()
+    }
+
+    fn relation_batch(source_id: [u8; 16], target_id: [u8; 16]) -> ValidatedFactBatch {
         let row = RelationRow {
             scope: scope(),
             fact_id: [8; 16],
             language: 10,
             relation_family_code: 2,
             relation_kind_code: 10,
-            source_id: [44; 16],
-            target_id: [45; 16],
+            source_id,
+            target_id,
             ordinal: None,
             role_code: None,
             distance: None,
@@ -1397,6 +1527,10 @@ mod tests {
             fact_hash64: 8,
         };
         ValidatedFactBatch::validate(110, encode_relations(&[row]).unwrap(), scope()).unwrap()
+    }
+
+    fn dangling_relation_batch() -> ValidatedFactBatch {
+        relation_batch([44; 16], [45; 16])
     }
 
     fn operation_id(publication: u8, table_code: i16) -> [u8; 16] {
@@ -1430,7 +1564,7 @@ mod tests {
     }
 
     async fn request(fabric: &WorkspaceFabric, publication: u8) -> PublicationRequest {
-        let analysis_context_ids = vec![[2; 16]];
+        let analysis_context_ids = vec![crate::identity::SOURCE_CONTEXT_ID];
         let analysis_context_set_id = context_set_identity([1; 16], &analysis_context_ids)
             .unwrap()
             .id;
@@ -1531,6 +1665,21 @@ mod tests {
         (fabric, journal)
     }
 
+    async fn published_rows(outcome: &PublicationOutcome, table_code: i16) -> usize {
+        let catalog = SnapshotProviderCatalog::build(outcome, &EmptySnapshotOverlay)
+            .await
+            .unwrap();
+        SessionContext::new()
+            .read_table(catalog.provider(table_code).unwrap())
+            .unwrap()
+            .collect()
+            .await
+            .unwrap()
+            .iter()
+            .map(RecordBatch::num_rows)
+            .sum()
+    }
+
     #[tokio::test]
     async fn wp22_behavioral_acceptance() {
         let root = tempfile::tempdir().unwrap();
@@ -1562,13 +1711,25 @@ mod tests {
             )
         );
         let (records, batches) = manifest_records(&fabric, &request).await.unwrap();
-        assert!(validate_candidate(&records, &batches).is_ok());
+        assert!(
+            validate_candidate(&request, &records, &batches)
+                .await
+                .is_ok()
+        );
         let mut missing_record = records.clone();
         missing_record.pop_first();
-        assert!(validate_candidate(&missing_record, &batches).is_err());
+        assert!(
+            validate_candidate(&request, &missing_record, &batches)
+                .await
+                .is_err()
+        );
         let mut missing_batch = batches;
         missing_batch.pop_first();
-        assert!(validate_candidate(&records, &missing_batch).is_err());
+        assert!(
+            validate_candidate(&request, &records, &missing_batch)
+                .await
+                .is_err()
+        );
         let mut other_scope = request.clone();
         other_scope.pins.source_generation = 8;
         other_scope.pins.analysis_context_ids = vec![[9; 16]];
@@ -1638,7 +1799,7 @@ mod tests {
             invalid_fabric
                 .publish(&mut invalid_journal, &invalid_request, &invalid_writes)
                 .await,
-            Err(FabricError::PublicationIntegrity(_))
+            Err(FabricError::PublicationReference(_))
         ));
         assert_eq!(invalid_fabric.current_publication().await.unwrap(), None);
         assert_eq!(
@@ -1757,6 +1918,177 @@ mod tests {
             assert!(operations >= 10);
             assert_eq!(operations, committed);
         }
+    }
+
+    #[tokio::test]
+    async fn wp74_behavioral_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut fabric, mut journal) = fixture(root.path()).await;
+
+        let base_request = request(&fabric, 74).await;
+        let base_writes = valid_writes(&fabric, 74);
+        let base = fabric
+            .publish(&mut journal, &base_request, &base_writes)
+            .await
+            .unwrap();
+        assert_eq!(published_rows(&base, 100).await, 1);
+
+        let unchanged_request = request(&fabric, 75).await;
+        let unchanged_writes = vec![owner_write(
+            &fabric,
+            75,
+            110,
+            relation_batch([4; 16], [4; 16]),
+        )];
+        let unchanged = fabric
+            .publish(&mut journal, &unchanged_request, &unchanged_writes)
+            .await
+            .unwrap();
+        assert_eq!(published_rows(&unchanged, 110).await, 1);
+
+        let co_arriving_request = request(&fabric, 76).await;
+        let co_arriving_writes = vec![
+            owner_write(&fabric, 76, 100, entity_batch([5; 16])),
+            owner_write(&fabric, 76, 110, relation_batch([5; 16], [5; 16])),
+        ];
+        let co_arriving = fabric
+            .publish(&mut journal, &co_arriving_request, &co_arriving_writes)
+            .await
+            .unwrap();
+        assert_eq!(published_rows(&co_arriving, 100).await, 1);
+        assert_eq!(published_rows(&co_arriving, 110).await, 1);
+
+        let replacement_request = request(&fabric, 77).await;
+        let replacement_writes = vec![
+            owner_write(&fabric, 77, 100, entity_batch([6; 16])),
+            owner_write(&fabric, 77, 110, relation_batch([6; 16], [6; 16])),
+        ];
+        let replacement = fabric
+            .publish(&mut journal, &replacement_request, &replacement_writes)
+            .await
+            .unwrap();
+        assert_eq!(replacement.pointer.pointer_generation, 4);
+        assert_eq!(published_rows(&replacement, 100).await, 1);
+        assert_eq!(published_rows(&replacement, 110).await, 1);
+    }
+
+    #[tokio::test]
+    async fn wp74_structural_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let (fabric, _journal) = fixture(root.path()).await;
+        let request = request(&fabric, 78).await;
+        let (records, batches) = manifest_records(&fabric, &request).await.unwrap();
+        let candidate = candidate_effective_batches(&request, &records, &batches).unwrap();
+        assert_eq!(
+            validate_references(&request, &candidate).await.unwrap(),
+            foreign_key_contracts().len()
+        );
+        assert_eq!(foreign_key_contracts().len(), 14);
+        assert!(foreign_key_contracts().iter().all(|contract| {
+            candidate.contains_key(&contract.source_table_code)
+                && candidate.contains_key(&contract.target_table_code)
+        }));
+        assert!(PUBLIC_ERROR_IDS.contains(&PUBLICATION_REFERENTIAL_INTEGRITY));
+    }
+
+    #[tokio::test]
+    async fn wp74_negative_zero_state() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut fabric, mut journal) = fixture(root.path()).await;
+        let base_request = request(&fabric, 79).await;
+        let base_writes = valid_writes(&fabric, 79);
+        let base = fabric
+            .publish(&mut journal, &base_request, &base_writes)
+            .await
+            .unwrap();
+
+        let tombstone_request = request(&fabric, 80).await;
+        let tombstone_writes = vec![
+            owner_write(&fabric, 80, 100, empty_entity_batch()),
+            owner_write(&fabric, 80, 110, relation_batch([4; 16], [4; 16])),
+        ];
+        let violation = fabric
+            .publish(&mut journal, &tombstone_request, &tombstone_writes)
+            .await
+            .unwrap_err();
+        let FabricError::PublicationReference(violation) = violation else {
+            panic!("expected registered referential-integrity failure");
+        };
+        assert_eq!(violation.error_code, PUBLICATION_REFERENTIAL_INTEGRITY);
+        assert_eq!(violation.source_table, "relation");
+        assert_eq!(violation.target_table, "entity");
+        assert_eq!(violation.owner_scope, format!("owner:{}", hex(&[3; 16])));
+        assert_eq!(violation.coverage, CANDIDATE_REFERENCE_COVERAGE);
+        assert_eq!(
+            fabric.current_publication().await.unwrap(),
+            Some(base.pointer.clone())
+        );
+        assert_eq!(published_rows(&base, 100).await, 1);
+        assert_eq!(
+            state_and_diagnostics(&fabric, [80; 16]).await,
+            (state_code(DurablePublicationState::Failed), 1)
+        );
+
+        let missing_root = tempfile::tempdir().unwrap();
+        let (mut missing, mut missing_journal) = fixture(missing_root.path()).await;
+        let missing_request = request(&missing, 81).await;
+        let missing_writes = vec![
+            owner_write(&missing, 81, 8, owner_batch()),
+            owner_write(&missing, 81, 110, dangling_relation_batch()),
+        ];
+        assert!(matches!(
+            missing
+                .publish(&mut missing_journal, &missing_request, &missing_writes)
+                .await,
+            Err(FabricError::PublicationReference(_))
+        ));
+        assert_eq!(missing.current_publication().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn wp74_operational_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut fabric, mut journal) = fixture(root.path()).await;
+        let base_request = request(&fabric, 82).await;
+        let base_writes = valid_writes(&fabric, 82);
+        let base = fabric
+            .publish(&mut journal, &base_request, &base_writes)
+            .await
+            .unwrap();
+
+        let failed_request = request(&fabric, 83).await;
+        let failed_writes = vec![
+            owner_write(&fabric, 83, 100, empty_entity_batch()),
+            owner_write(&fabric, 83, 110, relation_batch([4; 16], [4; 16])),
+        ];
+        assert!(matches!(
+            fabric
+                .publish(&mut journal, &failed_request, &failed_writes)
+                .await,
+            Err(FabricError::PublicationReference(_))
+        ));
+        assert_eq!(
+            fabric.current_publication().await.unwrap(),
+            Some(base.pointer.clone())
+        );
+        assert_eq!(published_rows(&base, 100).await, 1);
+
+        let recovery_request = request(&fabric, 84).await;
+        let recovery_writes = vec![
+            owner_write(&fabric, 84, 100, entity_batch([9; 16])),
+            owner_write(&fabric, 84, 110, relation_batch([9; 16], [9; 16])),
+        ];
+        let recovered = fabric
+            .publish(&mut journal, &recovery_request, &recovery_writes)
+            .await
+            .unwrap();
+        assert_eq!(recovered.pointer.pointer_generation, 2);
+        assert_eq!(published_rows(&recovered, 100).await, 1);
+        assert_eq!(published_rows(&recovered, 110).await, 1);
+        assert_eq!(
+            state_and_diagnostics(&fabric, [83; 16]).await,
+            (state_code(DurablePublicationState::Failed), 1)
+        );
     }
 
     #[test]

@@ -1747,6 +1747,7 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
             "SNAPSHOT_METADATA_MISMATCH",
             "ID_COLLISION_DETECTED",
             "COMPARATOR_ERROR",
+            "PUBLICATION_REFERENTIAL_INTEGRITY",
             "REQUIRED_FEATURE_UNSUPPORTED",
             "SCHEMA_DIGEST_MISMATCH",
             "TOOLCHAIN_MISMATCH",

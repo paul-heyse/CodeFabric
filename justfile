@@ -128,6 +128,11 @@ wave3-integration-check:
     cargo nextest run --locked -E 'test(/wp(19|2[0-6])/)' --no-tests=fail
     cargo test --doc
 
+[doc("Prove generated foreign keys over the complete candidate publication state")]
+[group('test')]
+publication-referential-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/wp74_/)' --no-tests=fail
+
 [doc("Run the DataFusion 55, Arrow 59, and delta 43a0cf10 behavioral contract")]
 [group('test')]
 data-fabric-upgrade-check:
