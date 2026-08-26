@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "412af14566393c2379ba4e174387361cea5370e8",
   "status": "executing",
-  "current_packet": "WP02",
+  "current_packet": "WP03",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -14,14 +14,14 @@
       "blockers": []
     },
     "WP02": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "18d5e68",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -135,6 +135,6 @@
   ],
   "discovered_obligations": [],
   "plan_deviations": [],
-  "next_action": "Run WP01 current-tree preflight and implement the governed eight-form query authority plus generated public/runtime projections.",
-  "updated_at": "2026-08-26T10:06:00Z"
+  "next_action": "Implement petgraph-backed Follow, Paths, and Pattern executors, replace bespoke dependency topology, and prove all eight query forms through the production boundary.",
+  "updated_at": "2026-08-26T11:27:17Z"
 }
