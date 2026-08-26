@@ -197,6 +197,11 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/__snapshots__/semantic-query-graph-authority-snapshot.yml",
+      "source_digest": "b3:a83e38a8b9adf4b4a6751f813e760d11db90ead9831bdae86b99670d299cd2ef"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/__snapshots__/serving-leased-providers-only-snapshot.yml",
       "source_digest": "b3:da6292b662b6ecd2f03e2369908e9982ce4fe7fa1b6bfd08322604110c4ede6b"
     },
@@ -302,6 +307,11 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/semantic-query-graph-authority-test.yml",
+      "source_digest": "b3:d462bbd8141f23428f314ce73f7ce4a815998cb90c9e47c94bb233afe2d02342"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/serving-leased-providers-only-test.yml",
       "source_digest": "b3:5679831515bbd4d11c0253a5f86c405841b97ccb3fa0e1b4299c67827fcb8f3b"
     },
@@ -404,6 +414,11 @@
       "class": "property",
       "path": "rules/ruff-boundary-only.yml",
       "source_digest": "b3:49e835c0efc37fe842022adf535ddf5e435187ccbb3174d73f5ff977b56386cf"
+    },
+    {
+      "class": "property",
+      "path": "rules/semantic-query-graph-authority.yml",
+      "source_digest": "b3:ccdda593c417960996e0f7212794384e1d6a0a7e294759f2e6a1decd37ccb6a3"
     },
     {
       "class": "property",

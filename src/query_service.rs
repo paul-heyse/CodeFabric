@@ -2122,6 +2122,9 @@ mod tests {
             vec![
                 "find code entities",
                 "retrieve facts about code",
+                "follow code relationships",
+                "find connecting fact paths",
+                "match a code fact pattern",
                 "combine result sets",
                 "summarize objective facts",
                 "retrieve source and syntax context",

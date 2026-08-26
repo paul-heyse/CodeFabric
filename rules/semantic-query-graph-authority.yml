@@ -1,0 +1,27 @@
+id: semantic-query-graph-authority
+language: Rust
+severity: error
+message: Semantic-query graph execution must use the private immutable DiGraph projection and transparent built-in plans.
+note: Reject reduced adjacency, edge-collapsing graph types, escaped petgraph identity, opaque DataFusion extensions, and graph serialization authority.
+files:
+  - src/semantic_query.rs
+rule:
+  any:
+    - all:
+        - kind: type_identifier
+        - regex: '^(GraphMap|StableGraph|MatrixGraph|Csr|EdgeIndex)$'
+    - all:
+        - kind: function_item
+        - regex: 'fn\s+shortest_path\s*\('
+    - all:
+        - kind: function_item
+        - regex: 'pub(?:\([^)]*\))?\s+(?:async\s+)?fn[^\{]*(NodeIndex|EdgeIndex)'
+    - all:
+        - kind: call_expression
+        - regex: '\.update_edge\s*\('
+    - all:
+        - kind: call_expression
+        - regex: '\.register_udf\s*\('
+    - all:
+        - kind: scoped_identifier
+        - regex: '(LogicalPlan::Extension|petgraph::dot|isomorph)'

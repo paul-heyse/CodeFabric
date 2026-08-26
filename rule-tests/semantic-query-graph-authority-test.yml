@@ -1,0 +1,31 @@
+id: semantic-query-graph-authority
+valid:
+  - |
+      struct QueryGraph {
+          graph: DiGraph<[u8; 16], usize, u32>,
+      }
+  - |
+      fn shortest_paths(graph: &QueryGraph) {
+          let reversed = Reversed(&graph.graph);
+      }
+invalid:
+  - |
+      struct QueryGraph {
+          graph: GraphMap<[u8; 16], usize>,
+      }
+  - |
+      fn shortest_path(graph: &QueryGraph) {
+          let mut adjacency = BTreeMap::new();
+      }
+  - |
+      fn collapse(graph: &mut DiGraph<u8, u8>) {
+          graph.update_edge(NodeIndex::new(0), NodeIndex::new(1), 1);
+      }
+  - |
+      pub fn leaked(graph: &QueryGraph) -> NodeIndex<u32> {
+          NodeIndex::new(0)
+      }
+  - |
+      fn opaque(ctx: &SessionContext, udf: ScalarUDF) {
+          ctx.register_udf(udf);
+      }

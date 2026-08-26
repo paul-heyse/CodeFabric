@@ -171,7 +171,7 @@ wave4-integration-check:
 [doc("Run the complete Wave-5 vertical golden-slice acceptance surface")]
 [group('test')]
 wave5-integration-check:
-    cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|65|75)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
+    cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|65)|qry_v13_graph_forms_conformance|semantic_query_(mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
     cd rustc-extractor && cargo test --locked wp35
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests
 
@@ -183,7 +183,7 @@ query-daemon-activation-check:
 [doc("Prove all eight semantic query forms, mixed DAG execution, ordering, and absence semantics")]
 [group('test')]
 semantic-query-conformance-check:
-    cargo nextest run --locked --lib -E 'test(/(wp75_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|production_eight_form_semantic_query_conformance|wp39_operational_acceptance)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(qry_v13_(form_contract_conformance|relational_forms_conformance|graph_forms_conformance)|semantic_query_(relational_plan_visibility|relational_policy_and_absence|relational_operational_gate|mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance|wp39_operational_acceptance)/)' --no-tests=fail
 
 [doc("Prove the generated QRY 1.3 form authority, Rust/Python projections, and retired-slug zero state")]
 [group('test')]

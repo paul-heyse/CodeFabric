@@ -1,0 +1,53 @@
+id: semantic-query-graph-authority
+snapshots:
+  ? |
+    fn collapse(graph: &mut DiGraph<u8, u8>) {
+        graph.update_edge(NodeIndex::new(0), NodeIndex::new(1), 1);
+    }
+  : labels:
+    - source: graph.update_edge(NodeIndex::new(0), NodeIndex::new(1), 1)
+      style: primary
+      start: 47
+      end: 105
+  ? |
+    fn opaque(ctx: &SessionContext, udf: ScalarUDF) {
+        ctx.register_udf(udf);
+    }
+  : labels:
+    - source: ctx.register_udf(udf)
+      style: primary
+      start: 54
+      end: 75
+  ? |
+    fn shortest_path(graph: &QueryGraph) {
+        let mut adjacency = BTreeMap::new();
+    }
+  : labels:
+    - source: |-
+        fn shortest_path(graph: &QueryGraph) {
+            let mut adjacency = BTreeMap::new();
+        }
+      style: primary
+      start: 0
+      end: 81
+  ? |
+    pub fn leaked(graph: &QueryGraph) -> NodeIndex<u32> {
+        NodeIndex::new(0)
+    }
+  : labels:
+    - source: |-
+        pub fn leaked(graph: &QueryGraph) -> NodeIndex<u32> {
+            NodeIndex::new(0)
+        }
+      style: primary
+      start: 0
+      end: 77
+  ? |
+    struct QueryGraph {
+        graph: GraphMap<[u8; 16], usize>,
+    }
+  : labels:
+    - source: GraphMap
+      style: primary
+      start: 31
+      end: 39

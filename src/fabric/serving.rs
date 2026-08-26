@@ -3214,13 +3214,22 @@ mod tests {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();
         let candidate = candidate([0x63; 16], 1, 3);
-        let session = Arc::new(activate_and_lease(
-            &mut store,
-            &mut images,
-            &runtime,
-            Arc::clone(&candidate),
-            directory.path(),
-        ));
+        let session = Arc::new(
+            activate_and_lease_with_config(
+                &mut store,
+                &mut images,
+                &runtime,
+                Arc::clone(&candidate),
+                ServingRuntimeConfig::new(
+                    64 * 1024 * 1024,
+                    128 * 1024 * 1024,
+                    directory.path().join("query-spill"),
+                    2,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        );
         let workspace_id = candidate.manifest().body.workspace_id.clone();
         let backend = Arc::new(WorkspaceQueryBackend::default());
         backend.install(session).await.unwrap();
@@ -3285,7 +3294,7 @@ mod tests {
             .unwrap()
             .into_inner();
         assert_eq!(handshake.authorized_workspaces.len(), 1);
-        assert_eq!(handshake.readiness.unwrap().supported_query_forms.len(), 5);
+        assert_eq!(handshake.readiness.unwrap().supported_query_forms.len(), 8);
 
         let status = client
             .get_status(StatusRequest {
@@ -3303,14 +3312,14 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            5
+            8
         );
         assert_eq!(
             public_status["capability_statuses"][0]["capability_code"],
             "CORE_SOURCE_V1"
         );
 
-        let request = relational_semantic_request(&workspace_id, "wp63-relational");
+        let request = eight_form_semantic_request(&workspace_id, "wp63-eight-form");
         let canonical = crate::contracts::jcs::canonicalize_slice(request.as_bytes()).unwrap();
         let started = client
             .start_query(StartQueryRequest {
@@ -3372,8 +3381,8 @@ mod tests {
             }
         }
         let response: serde_json::Value = serde_json::from_slice(&response_bytes).unwrap();
-        assert_eq!(response["successful_query_count"], 7);
-        assert_eq!(response["query_results"].as_array().unwrap().len(), 7);
+        assert_eq!(response["successful_query_count"], 8);
+        assert_eq!(response["query_results"].as_array().unwrap().len(), 8);
         assert_eq!(
             response["snapshot"]["snapshot_id"],
             candidate.manifest().snapshot_id
@@ -3386,19 +3395,71 @@ mod tests {
         assert!(exit.shutdown_steps.contains(&"await-workers"));
     }
 
-    #[test]
-    fn graph_forms_remain_withdrawn_until_wp03_executor_proof() {
-        let request = eight_form_semantic_request(
-            "workspace:11111111111111111111111111111111",
-            "graph-withdrawn",
+    #[tokio::test]
+    async fn production_eight_form_semantic_query_conformance() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let candidate = candidate([0x75; 16], 1, 3);
+        let session = activate_and_lease_with_config(
+            &mut store,
+            &mut images,
+            &runtime,
+            Arc::clone(&candidate),
+            ServingRuntimeConfig::new(
+                64 * 1024 * 1024,
+                128 * 1024 * 1024,
+                directory.path().join("query-spill"),
+                2,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let workspace_id = candidate.manifest().body.workspace_id.clone();
+        let request = eight_form_semantic_request(&workspace_id, "production-eight-form");
+        let first = crate::semantic_query::execute_request(
+            &session,
+            crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
+            crate::registries::FreshnessState::Current,
+        )
+        .await
+        .unwrap();
+        let second = crate::semantic_query::execute_request(
+            &session,
+            crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
+            crate::registries::FreshnessState::Current,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.response.successful_query_count, 8);
+        assert_eq!(first.response.query_results.len(), 8);
+        assert_eq!(
+            first.response.snapshot.snapshot_id,
+            candidate.manifest().snapshot_id
         );
-        let request = crate::semantic_query::validate_request(request.as_bytes()).unwrap();
-        assert_eq!(request.request.queries.len(), 8);
-        let error = crate::semantic_query::require_registered_executors(&request).unwrap_err();
-        let error = error.to_string();
-        assert!(error.contains("follow code relationships"));
-        assert!(!crate::semantic_query::QueryForm::FindPaths.executor_registered());
-        assert!(!crate::semantic_query::QueryForm::MatchPattern.executor_registered());
+        assert_eq!(first.canonical_bytes, second.canonical_bytes);
+        assert_eq!(first.response_digest, second.response_digest);
+        assert_eq!(
+            first
+                .response
+                .query_results
+                .iter()
+                .filter(|result| {
+                    result.resolved_semantics["operator_family"] == "datafusion-relational"
+                })
+                .count(),
+            5
+        );
+        assert_eq!(
+            first
+                .response
+                .query_results
+                .iter()
+                .filter(|result| {
+                    result.resolved_semantics["operator_family"] == "application-graph"
+                })
+                .count(),
+            3
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

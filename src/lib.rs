@@ -28,6 +28,7 @@ pub mod daemon;
 #[cfg(feature = "daemon")]
 pub mod derivation;
 #[cfg(any(
+    all(feature = "canonical-json", not(feature = "model-compiler")),
     all(feature = "contract-models", not(feature = "model-compiler")),
     feature = "daemon",
     feature = "data-fabric",
@@ -82,6 +83,7 @@ pub mod provider_types;
 pub mod query_service;
 /// Generated categorical and lifecycle registry types.
 #[cfg(any(
+    all(feature = "canonical-json", not(feature = "model-compiler")),
     all(feature = "contract-models", not(feature = "model-compiler")),
     feature = "daemon",
     feature = "data-fabric",

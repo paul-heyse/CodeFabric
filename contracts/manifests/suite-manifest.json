@@ -593,7 +593,7 @@
       "artifact_id": "codefabric.governance.design-principle-baseline",
       "artifact_kind": "governance-ledger",
       "authority_path": "contracts/governance/design-principle-baseline.yaml",
-      "canonical_digest": "b3:92cdae912b181c8a0a53019bedfe790a4baf56c7e8c47827c206a38b3ba35f0e",
+      "canonical_digest": "b3:bab05658bd0e79e4095c4c925a3ac7f26b55da7961f4e004a7749fa0b64605fa",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -607,7 +607,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:d0c0f44b34a493447403b1c100ecb651ff7c28c0b0670cba379590690d8e312e",
+      "source_digest": "b3:6d6665f8405afd51357493e2156b6e3c7fbcf55ad76533dd74aca4072a9ec915",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -2650,6 +2650,29 @@
       "version": "1.0"
     },
     {
+      "artifact_id": "evidence:rule-tests---snapshots---semantic-query-graph-authority-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/semantic-query-graph-authority-snapshot.yml",
+      "canonical_digest": "b3:99c17a4bb7271ae20648352059481476de0c50d2ed7ee8df75453d6ed18939f2",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:a83e38a8b9adf4b4a6751f813e760d11db90ead9831bdae86b99670d299cd2ef",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
       "artifact_id": "evidence:rule-tests---snapshots---serving-leased-providers-only-snapshot",
       "artifact_kind": "evidence",
       "authority_path": "rule-tests/__snapshots__/serving-leased-providers-only-snapshot.yml",
@@ -3133,6 +3156,29 @@
       "version": "1.0"
     },
     {
+      "artifact_id": "evidence:rule-tests-semantic-query-graph-authority-test",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/semantic-query-graph-authority-test.yml",
+      "canonical_digest": "b3:e73c145915493ffc53f7974d3b485d6f515dddf4b9c4612e023f52034e3cbeeb",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:d462bbd8141f23428f314ce73f7ce4a815998cb90c9e47c94bb233afe2d02342",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
       "artifact_id": "evidence:rule-tests-serving-leased-providers-only-test",
       "artifact_kind": "evidence",
       "authority_path": "rule-tests/serving-leased-providers-only-test.yml",
@@ -3611,6 +3657,29 @@
         "profile": "aggregate-governance-bounded-v1"
       },
       "source_digest": "b3:49e835c0efc37fe842022adf535ddf5e435187ccbb3174d73f5ff977b56386cf",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rules-semantic-query-graph-authority",
+      "artifact_kind": "evidence",
+      "authority_path": "rules/semantic-query-graph-authority.yml",
+      "canonical_digest": "b3:76e0ad5cd14a2c37dead3425bbeac8e1cb74c5d75cb8935c5701aa9704f63caf",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rules",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:ccdda593c417960996e0f7212794384e1d6a0a7e294759f2e6a1decd37ccb6a3",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"

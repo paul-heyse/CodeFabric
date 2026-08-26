@@ -151,6 +151,11 @@ records:
     disposition: plan_owned
     owner: semantic-query-owner
     current_packet: WP01
+  - path: contracts/generated/model/governance/fixture-index.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP03
   - path: contracts/generated/model/governance/module-aggregators.json
     status_at_wp73: " M"
     disposition: plan_owned
@@ -196,6 +201,11 @@ records:
     disposition: plan_owned
     owner: suite-governance-owner
     current_packet: WP01
+  - path: contracts/manifests/fixture-oracles.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP03
   - path: contracts/manifests/suite-manifest.json
     status_at_wp73: " M"
     disposition: plan_owned
@@ -261,11 +271,31 @@ records:
     disposition: plan_owned
     owner: semantic-query-owner
     current_packet: WP02
+  - path: src/lib.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP03
   - path: src/generated/registries.rs
     status_at_wp73: " M"
     disposition: plan_owned
     owner: semantic-query-owner
     current_packet: WP02
+  - path: rules/semantic-query-graph-authority.yml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP03
+  - path: rule-tests/semantic-query-graph-authority-test.yml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP03
+  - path: rule-tests/__snapshots__/semantic-query-graph-authority-snapshot.yml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP03
   - path: src/semantic_query.rs
     status_at_wp73: " M"
     disposition: plan_owned
