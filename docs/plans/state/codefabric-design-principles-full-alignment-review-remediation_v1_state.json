@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "412af14566393c2379ba4e174387361cea5370e8",
   "status": "executing",
-  "current_packet": "WP06",
+  "current_packet": "WP07",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -47,18 +47,19 @@
       "blockers": []
     },
     "WP06": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "e198c7c38ad709eb4ed55100c00ecfa9f2ed62aa",
       "deviations": [
         "Gate B re-execution now compares a governed functional projection while retaining exact per-run bytes and checksums inside the immutable candidate digest chain. Newly allocated publication, snapshot, provider-run, artifact, and transport identities are validated for within-run correlation rather than required to repeat across runs."
       ],
       "failed_approaches": [
-        "Byte-comparing two independently allocated Gate B executions conflated operational locators and content checksums with semantic outcome. The semantic Arrow state was equal while publication/snapshot/artifact identities correctly differed, so the cross-run byte-equality assertion was retired."
+        "Byte-comparing two independently allocated Gate B executions conflated operational locators and content checksums with semantic outcome. The semantic Arrow state was equal while publication/snapshot/artifact identities correctly differed, so the cross-run byte-equality assertion was retired.",
+        "The first CLI candidate emission passed a relative repository root through to the Pyrefly module request, which correctly rejected the non-absolute source path. Repository and execution roots are now normalized once at the CLI boundary while the released output path remains safely repository-relative."
       ],
       "blockers": []
     },
     "WP07": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -99,8 +100,8 @@
       "blockers": []
     },
     "M04": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "e198c7c38ad709eb4ed55100c00ecfa9f2ed62aa",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -129,8 +130,8 @@
       "blockers": []
     },
     "DB03": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "e198c7c38ad709eb4ed55100c00ecfa9f2ed62aa",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -178,6 +179,6 @@
       "summary": "The user-directed design reconciliation was implemented with and is contained by trusted WP05 proof. It records intentional improvements without weakening accepted outcomes: exact byte integrity remains per execution, clean rebuilds compare an AC-G-79-governed functional projection across independent allocations, canonical identities remain application-owned, provider withdrawal is explicit, and semantic evidence is path-independent. WP08 still requires accountable closeout review before certification."
     }
   ],
-  "next_action": "Revalidate WP06's four functional Gate B oracles against WP05 proving commit 469bb0d, emit and verify the exact unreleased v3 owner-review candidate, then create and record the WP06 proving commit.",
-  "updated_at": "2026-08-26T17:11:25Z"
+  "next_action": "Present candidate codefabric-golden-v3.0.0-candidate.1 and detached digest b3:1584bb589fc6686cccb254a17b454a05f4d5fbd1a8856bb179080309d7f9fd68 to the registered accountable repository owner, then pause for an explicit accept or reject decision before invoking gate-b-owner-accept.",
+  "updated_at": "2026-08-26T17:18:36Z"
 }
