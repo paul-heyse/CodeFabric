@@ -134,7 +134,16 @@
     "Pre-activation baseline classification: the audit-baseline owner-disposition oracle rejected only the untracked remediation plan and its declared implementation-review input; both are in-scope activation artifacts, not a production-code regression."
   ],
   "discovered_obligations": [],
-  "plan_deviations": [],
+  "plan_deviations": [
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP04",
+      "paths": [
+        "contracts/schema/schema-contract-ir.json"
+      ],
+      "summary": "WP04 adds the model-owned query_execution_terminal operational-table contract required by the accepted terminal-evidence design. The immutable planning-time digest remains historical; proving commit 36abfda contains the evolved Contract IR."
+    }
+  ],
   "next_action": "Replace the five-stage rebuild approximation with sixteen real clean rebuilds and AC-G-79 effective-state equivalence over independent serving sessions.",
   "updated_at": "2026-08-26T12:48:49Z"
 }
