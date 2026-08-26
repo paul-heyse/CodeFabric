@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "412af14566393c2379ba4e174387361cea5370e8",
   "status": "executing",
-  "current_packet": "WP05",
+  "current_packet": "WP06",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -35,17 +35,26 @@
       "blockers": []
     },
     "WP05": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "469bb0d14f8eb27fbd404a795be624b36fd00873",
+      "deviations": [
+        "The shared provider, publication, and candidate source surface also lands bounded WP06 vertical machinery in the WP05 proving commit. WP06 remains incomplete until its own four oracles, exact emitted candidate, and proving commit close against this dependency-closed ancestor."
+      ],
+      "failed_approaches": [
+        "A provider-enabled full-corpus validation was interrupted when execution was intentionally pivoted to implementation-status reconciliation. No completed assertion from that invocation failed, so it is not product-failure evidence and must be rerun once at the WP05 proving commit.",
+        "Running a packet-oracle aggregate before assigning the user-directed normative design evolution to a trusted proving packet caused the artifact validator to reject the intentionally changed inputs after the runtime oracle had passed. The correct order is proving commit, state reconciliation, then aggregate revalidation; bypassing input freshness is forbidden."
+      ],
       "blockers": []
     },
     "WP06": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "deviations": [
+        "Gate B re-execution now compares a governed functional projection while retaining exact per-run bytes and checksums inside the immutable candidate digest chain. Newly allocated publication, snapshot, provider-run, artifact, and transport identities are validated for within-run correlation rather than required to repeat across runs."
+      ],
+      "failed_approaches": [
+        "Byte-comparing two independently allocated Gate B executions conflated operational locators and content checksums with semantic outcome. The semantic Arrow state was equal while publication/snapshot/artifact identities correctly differed, so the cross-run byte-equality assertion was retired."
+      ],
       "blockers": []
     },
     "WP07": {
@@ -56,11 +65,15 @@
       "blockers": []
     },
     "WP08": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "At the user's explicit implementation-status pivot, the intentional-design-improvement portion of WP08 began before WP05/WP07 certification dependencies were complete. This early documentation reconciliation does not satisfy WP08, accept a candidate, or authorize certification; its four changed normative inputs remain stale until accountable acceptance and a trusted WP08 proving commit."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP08 certification remains dependency-blocked on WP05, WP07, DB02, DB03, and DB04; the current design edits require accountable acceptance before their digests can become certification inputs."
+      ]
     }
   },
   "milestones": {
@@ -86,7 +99,7 @@
       "blockers": []
     },
     "M04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -116,7 +129,7 @@
       "blockers": []
     },
     "DB03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -133,7 +146,9 @@
   "baseline_failures": [
     "Pre-activation baseline classification: the audit-baseline owner-disposition oracle rejected only the untracked remediation plan and its declared implementation-review input; both are in-scope activation artifacts, not a production-code regression."
   ],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    "At WP08 closeout, obtain accountable acceptance of the four intentional normative design clarifications, regenerate only their derived views through owning tools, and record their final digests at a trusted proving commit before treating plan input freshness as healthy."
+  ],
   "plan_deviations": [
     {
       "kind": "planned_design_input_evolution",
@@ -142,8 +157,27 @@
         "contracts/schema/schema-contract-ir.json"
       ],
       "summary": "WP04 adds the model-owned query_execution_terminal operational-table contract required by the accepted terminal-evidence design. The immutable planning-time digest remains historical; proving commit 36abfda contains the evolved Contract IR."
+    },
+    {
+      "kind": "implementation_oracle_refinement",
+      "packet": "WP06",
+      "paths": [
+        "src/gate_b_candidate.rs"
+      ],
+      "summary": "Gate B preserves exact accepted output bytes as immutable evidence and validates every byte-based contract within one execution, but cross-run certification compares the AC-G-79-governed functional projection rather than requiring operational publication, snapshot, provider-run, artifact, and transport identities to repeat."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP05",
+      "paths": [
+        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
+        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+        "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md"
+      ],
+      "summary": "The user-directed design reconciliation was implemented with and is contained by trusted WP05 proof. It records intentional improvements without weakening accepted outcomes: exact byte integrity remains per execution, clean rebuilds compare an AC-G-79-governed functional projection across independent allocations, canonical identities remain application-owned, provider withdrawal is explicit, and semantic evidence is path-independent. WP08 still requires accountable closeout review before certification."
     }
   ],
-  "next_action": "Replace the five-stage rebuild approximation with sixteen real clean rebuilds and AC-G-79 effective-state equivalence over independent serving sessions.",
-  "updated_at": "2026-08-26T12:48:49Z"
+  "next_action": "Revalidate WP06's four functional Gate B oracles against WP05 proving commit 469bb0d, emit and verify the exact unreleased v3 owner-review candidate, then create and record the WP06 proving commit.",
+  "updated_at": "2026-08-26T17:11:25Z"
 }
