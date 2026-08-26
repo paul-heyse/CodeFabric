@@ -32,6 +32,9 @@ rule:
           any:
             # The golden corpus is an owner-accepted contract input, never workspace source.
             - pattern: 'fn read($PATH: &Path) -> Result<Vec<u8>, CorpusError> { $$$BODY }'
+            # A Gate B candidate reads governed contract inputs and review artifacts, never
+            # workspace source; scenario workspace bytes still flow through secure_path.
+            - pattern: 'fn read_candidate_input($PATH: &Path) -> Result<Vec<u8>, GateBCandidateError> { $$$BODY }'
             # ResultArtifactStore owns private daemon artifacts below its configured state root.
             - all:
                 - kind: impl_item

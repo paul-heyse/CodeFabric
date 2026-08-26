@@ -981,13 +981,17 @@ fn file_bytes(value: &impl Serialize) -> Result<Vec<u8>, GateBCandidateError> {
     Ok(bytes)
 }
 
+fn read_candidate_input(path: &Path) -> Result<Vec<u8>, GateBCandidateError> {
+    Ok(fs::read(path)?)
+}
+
 fn expectation_inputs(
     repository_root: &Path,
 ) -> Result<BTreeMap<String, String>, GateBCandidateError> {
     EXPECTATION_INPUTS
         .into_iter()
         .map(|relative| {
-            let bytes = fs::read(repository_root.join(relative))?;
+            let bytes = read_candidate_input(&repository_root.join(relative))?;
             Ok((relative.to_owned(), crate::integrity::framed_digest(&bytes)))
         })
         .collect()
@@ -1130,8 +1134,8 @@ fn derive_diff(
             .ok_or_else(|| invariant(format!("missing candidate Gate B item {group}")))?;
         let expected_digest = crate::integrity::framed_digest(&canonical_value(expected)?);
         let candidate_digest = crate::integrity::framed_digest(&canonical_value(candidate)?);
-        let released = canonicalize_slice(&fs::read(
-            corpus_root.join("expected").join(group).join("gate-b.json"),
+        let released = canonicalize_slice(&read_candidate_input(
+            &corpus_root.join("expected").join(group).join("gate-b.json"),
         )?)
         .map_err(invariant)?;
         let released_digest = crate::integrity::framed_digest(&released);
@@ -1321,12 +1325,13 @@ pub fn verify_candidate_bundle(candidate_root: &Path) -> Result<(), GateBCandida
         return Err(invariant("candidate bundle member census differs"));
     }
     let payload: GateBCandidatePayload =
-        serde_json::from_slice(&fs::read(candidate_root.join(CANDIDATE_FILE))?)?;
-    let diff: CandidateDiff = serde_json::from_slice(&fs::read(candidate_root.join(DIFF_FILE))?)?;
+        serde_json::from_slice(&read_candidate_input(&candidate_root.join(CANDIDATE_FILE))?)?;
+    let diff: CandidateDiff =
+        serde_json::from_slice(&read_candidate_input(&candidate_root.join(DIFF_FILE))?)?;
     let manifest: CandidateManifest =
-        serde_json::from_slice(&fs::read(candidate_root.join(MANIFEST_FILE))?)?;
+        serde_json::from_slice(&read_candidate_input(&candidate_root.join(MANIFEST_FILE))?)?;
     let detached: DetachedCandidateDigest =
-        serde_json::from_slice(&fs::read(candidate_root.join(DIGEST_FILE))?)?;
+        serde_json::from_slice(&read_candidate_input(&candidate_root.join(DIGEST_FILE))?)?;
     if payload.candidate_id != CANDIDATE_ID
         || manifest.candidate_id != CANDIDATE_ID
         || diff.candidate_id != CANDIDATE_ID
@@ -1346,7 +1351,7 @@ pub fn verify_candidate_bundle(candidate_root: &Path) -> Result<(), GateBCandida
         if member.path == MANIFEST_FILE || member.path == DIGEST_FILE {
             return Err(invariant("candidate digest chain is self-referential"));
         }
-        let bytes = fs::read(candidate_root.join(&member.path))?;
+        let bytes = read_candidate_input(&candidate_root.join(&member.path))?;
         if crate::integrity::framed_digest(&bytes) != member.digest {
             return Err(invariant(format!(
                 "candidate member {} drifted",
@@ -1361,7 +1366,7 @@ pub fn verify_candidate_bundle(candidate_root: &Path) -> Result<(), GateBCandida
         return Err(invariant("detached candidate digest differs"));
     }
     for name in BUNDLE_FILES {
-        let bytes = fs::read(candidate_root.join(name))?;
+        let bytes = read_candidate_input(&candidate_root.join(name))?;
         let canonical = canonicalize_slice(&bytes).map_err(invariant)?;
         let mut expected_file = canonical;
         expected_file.push(b'\n');
@@ -1388,7 +1393,7 @@ pub fn check_candidate_bundle(
     verify_candidate_bundle(candidate_root)?;
     let generated = generate_candidate_bundle(repository_root, corpus_root, scratch_root)?;
     for (name, expected) in generated.files() {
-        if fs::read(candidate_root.join(name))? != *expected {
+        if read_candidate_input(&candidate_root.join(name))? != *expected {
             return Err(invariant(format!(
                 "committed candidate member {name} is not reproducible"
             )));
@@ -1479,15 +1484,18 @@ mod tests {
         let released = temporary.path().join("self-accepted");
         copy_bundle(&bundle, &released);
         let mut manifest: Value =
-            serde_json::from_slice(&fs::read(released.join(MANIFEST_FILE)).unwrap()).unwrap();
+            serde_json::from_slice(&read_candidate_input(&released.join(MANIFEST_FILE)).unwrap())
+                .unwrap();
         manifest["owner_acceptance"] = json!({"accepted_by":"executor"});
         fs::write(released.join(MANIFEST_FILE), file_bytes(&manifest).unwrap()).unwrap();
         assert!(verify_candidate_bundle(&released).is_err());
 
         let incomplete = temporary.path().join("unexecuted");
         copy_bundle(&bundle, &incomplete);
-        let mut payload: Value =
-            serde_json::from_slice(&fs::read(incomplete.join(CANDIDATE_FILE)).unwrap()).unwrap();
+        let mut payload: Value = serde_json::from_slice(
+            &read_candidate_input(&incomplete.join(CANDIDATE_FILE)).unwrap(),
+        )
+        .unwrap();
         payload["scenario_executions"].as_array_mut().unwrap().pop();
         fs::write(
             incomplete.join(CANDIDATE_FILE),

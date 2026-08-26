@@ -2789,7 +2789,7 @@
       "artifact_id": "evidence:rule-tests-authoritative-source-read-boundary-test",
       "artifact_kind": "evidence",
       "authority_path": "rule-tests/authoritative-source-read-boundary-test.yml",
-      "canonical_digest": "b3:f3d8b1288259470b28a745e2c3ed512fe91da6de42d895acf21a277659fd0ebe",
+      "canonical_digest": "b3:796b081bff911bd5d1314dc00325c757d63b0acd3271fbb4a5a653f680f6e777",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rule-tests",
@@ -2803,7 +2803,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:071e05aa3bcb2399a54efaffcd452e4d21cc621e8f320060c80266827cfd7a74",
+      "source_digest": "b3:74f724f5bd591f706957922e77e349d60607fb2ad20d1d81cae87b5d59cb9b39",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -3272,7 +3272,7 @@
       "artifact_id": "evidence:rules-authoritative-source-read-boundary",
       "artifact_kind": "evidence",
       "authority_path": "rules/authoritative-source-read-boundary.yml",
-      "canonical_digest": "b3:aea502861406b9ef08c2c9210ee03c9675531dec1c44ee8e776f3f5e9c8e7f8d",
+      "canonical_digest": "b3:0cb5a9b29bb21d4c4a22d94f0be929c1ba98949717a2ba6a50b78b5018302a1b",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rules",
@@ -3286,7 +3286,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:b57319c8fff9ac24cfe7b0b4c11cd890826344975e2f5e26a7811a138d690853",
+      "source_digest": "b3:3d93810b98de15dd998e6c56082a8b20e8b4bd9d8588fc3747dc117f94bffa34",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
