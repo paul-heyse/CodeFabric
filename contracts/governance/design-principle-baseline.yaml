@@ -246,6 +246,26 @@ records:
     disposition: plan_owned
     owner: semantic-query-owner
     current_packet: WP01
+  - path: src/bin/codefabric_model/registry_cbef_driver.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP02
+  - path: src/contracts/index.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP02
+  - path: src/fabric/serving.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP02
+  - path: src/generated/registries.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP02
   - path: src/semantic_query.rs
     status_at_wp73: " M"
     disposition: plan_owned

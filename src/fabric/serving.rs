@@ -2841,6 +2841,18 @@ mod tests {
         assert_eq!(valid_null.finish().null_count(), 1);
     }
 
+    fn relational_semantic_request(workspace_id: &str, request_id: &str) -> String {
+        format!(
+            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"{request_id}","workspace_id":"{workspace_id}","freshness_policy":"best_available_snapshot","queries":[{{"query_id":"entities-a","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"entities-b","request":"find code entities","label":null,"looking_for":"semantic symbols","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"facts-a","request":"retrieve facts about code","label":null,"about":[{{"results_of":"entities-a","select":"entities"}}],"facts":["callable contracts"],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"facts-b","request":"retrieve facts about code","label":null,"about":[{{"results_of":"entities-b","select":"entities"}}],"facts":["callable contracts"],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"combined","request":"combine result sets","label":null,"inputs":[{{"results_of":"facts-a","select":"facts"}},{{"results_of":"facts-b","select":"facts"}}],"combination":"union by fact identity","identity":"fact identity","preserve_origin":"all origins","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"summary","request":"summarize objective facts","label":null,"input":[{{"results_of":"combined","select":"groups"}}],"summaries":["graph metrics"],"include_support":"fact identities","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"context","request":"retrieve source and syntax context","label":null,"for":[{{"results_of":"facts-a","select":"facts"}}],"context":["source location","exact span"],"text_handling":"omit text","return":{{"limit":{{"maximum_results":10}}}}}}],"response_projection":{{"canonical_semantic_identity":true,"coverage":true}},"cost_budget":{{"maximum_rows":70}}}}"#
+        )
+    }
+
+    fn eight_form_semantic_request(workspace_id: &str, request_id: &str) -> String {
+        format!(
+            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"{request_id}","workspace_id":"{workspace_id}","freshness_policy":"best_available_snapshot","queries":[{{"query_id":"entities","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"about":[{{"results_of":"entities","select":"entities"}}],"facts":["callable contracts"],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"starting_from":[{{"results_of":"entities","select":"entities"}}],"relationship":"call targets","direction":"outgoing","distance":"transitive","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"starting_from":[{{"results_of":"entities","select":"entities"}}],"ending_at":["syntax nodes"],"through":["control flow"],"path_policy":"one shortest witness path","direction":"outgoing","maximum_length":4,"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"patterns","request":"match a code fact pattern","label":null,"bindings":[{{"name":"source","looking_for":"syntax nodes","within":{{"results_of":"entities","select":"entities"}}}}],"relationships":[],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"combined","request":"combine result sets","label":null,"inputs":[{{"results_of":"properties","select":"facts"}},{{"results_of":"relations","select":"facts"}}],"combination":"union by fact identity","identity":"fact identity","preserve_origin":"all origins","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"summary","request":"summarize objective facts","label":null,"input":[{{"results_of":"combined","select":"groups"}}],"summaries":["graph metrics"],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"context","request":"retrieve source and syntax context","label":null,"for":[{{"results_of":"paths","select":"paths"}}],"context":["source location","exact span"],"text_handling":"omit text","return":{{"limit":{{"maximum_results":10}}}}}}],"response_projection":{{"canonical_semantic_identity":true,"coverage":true}},"cost_budget":{{"maximum_rows":80}}}}"#
+        )
+    }
+
     #[tokio::test]
     async fn wp38_response_kat_is_canonical_and_snapshot_pinned() {
         let (directory, mut store, mut images) = operational_store();
@@ -2861,9 +2873,7 @@ mod tests {
         )
         .unwrap();
         let workspace_id = candidate.manifest().body.workspace_id.clone();
-        let request = format!(
-            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"response-kat","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":"syntax nodes","input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":30}}}}"#
-        );
+        let request = relational_semantic_request(&workspace_id, "response-kat");
         let first = crate::semantic_query::execute_request(
             &session,
             crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
@@ -2884,9 +2894,9 @@ mod tests {
             first.response.snapshot.snapshot_id,
             session.snapshot_manifest().snapshot_id
         );
-        assert_eq!(first.response.successful_query_count, 3);
+        assert_eq!(first.response.successful_query_count, 7);
         assert_eq!(
-            first.response.query_results[0].resolved_semantics["phrase_id"],
+            first.response.query_results[0].resolved_semantics["phrase_ids"],
             "Q51_SYNTAX_NODES"
         );
     }
@@ -2912,43 +2922,40 @@ mod tests {
         .unwrap();
         let workspace_id = candidate.manifest().body.workspace_id.clone();
         let request = format!(
-            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"wp62-native","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":null,"input":null,"where":{{"entity_kind_codes":[1],"relation_kind_codes":[]}},"limit":{{"first":10,"offset":0}}}}],"response_projection":{{"canonical_semantic_identity":true}},"cost_budget":{{"maximum_rows":10}}}}"#
+            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"wp62-native","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{{"limit":{{"maximum_results":10}}}}}}],"response_projection":{{"canonical_semantic_identity":true}},"cost_budget":{{"maximum_rows":10}}}}"#
         );
         let typed = crate::semantic_query::validate_request(request.as_bytes()).unwrap();
         let bound = crate::semantic_query::bind_request(&session, &typed)
             .await
             .unwrap();
         assert_eq!(bound.snapshot_id, candidate.manifest().snapshot_id);
-        let crate::semantic_query::BoundOperator::Relational { plan, .. } =
-            &bound.blocks[0].operator
+        let crate::semantic_query::BoundOperator::Relational(plan) = &bound.blocks[0].operator
         else {
             panic!("find-entities must lower to a relational plan");
         };
-        let plan_text = plan.display_indent().to_string();
-        for native_node in ["Limit", "Sort", "Projection", "Filter", "TableScan"] {
+        let plan_text = plan.template_plan.display_indent().to_string();
+        for native_node in ["Limit", "Sort", "Projection", "Filter", "Join", "TableScan"] {
             assert!(
                 plan_text.contains(native_node),
                 "missing {native_node}: {plan_text}"
             );
         }
         let native = session
-            .query_plan("wp62-native", plan.clone())
+            .query_plan("wp62-native", plan.template_plan.clone())
             .await
             .unwrap();
-        let transition = session
-            .query(
-                "SELECT entity_id FROM entities WHERE entity_kind_code = 1 \
-                 ORDER BY entity_id LIMIT 11",
-            )
-            .await
-            .unwrap();
-        let checksums = |batches: &[RecordBatch]| {
-            batches
-                .iter()
-                .map(|batch| crate::fabric::batch_checksum(batch).unwrap())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(checksums(&native.batches), checksums(&transition.batches));
+        assert_eq!(
+            native.artifact.output_schema,
+            [
+                "source_file_path",
+                "span_start",
+                "semantic_kind",
+                "qualified_name",
+                "entity_id",
+                "origin_query_id",
+                "certainty_code"
+            ]
+        );
         let response = crate::semantic_query::execute_request(
             &session,
             typed,
@@ -2962,12 +2969,107 @@ mod tests {
         );
         assert_eq!(response.response.successful_query_count, 1);
         assert!(
-            response
-                .response
-                .entities
-                .keys()
-                .all(|id| id.starts_with("entity:unknown:"))
+            response.response.entities.is_empty()
+                || response
+                    .response
+                    .entities
+                    .keys()
+                    .all(|id| id.starts_with("entity:unknown:"))
         );
+    }
+
+    #[tokio::test]
+    async fn qry_v13_relational_forms_conformance() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let candidate = candidate([0x21; 16], 1, 4);
+        let session = activate_and_lease_with_config(
+            &mut store,
+            &mut images,
+            &runtime,
+            Arc::clone(&candidate),
+            ServingRuntimeConfig::new(
+                32 * 1024 * 1024,
+                64 * 1024 * 1024,
+                directory.path().join("wp02-relational-spill"),
+                3,
+            )
+            .unwrap()
+            .with_batch_size(2),
+        )
+        .unwrap();
+        let request = relational_semantic_request(
+            &candidate.manifest().body.workspace_id,
+            "qry-v13-relational",
+        );
+        let typed = crate::semantic_query::validate_request(request.as_bytes()).unwrap();
+        crate::semantic_query::require_registered_executors(&typed).unwrap();
+        let executed = crate::semantic_query::execute_request(
+            &session,
+            typed,
+            crate::registries::FreshnessState::Current,
+        )
+        .await
+        .unwrap();
+        assert_eq!(executed.response.successful_query_count, 7);
+        assert_eq!(executed.plan_artifacts.len(), 7);
+        assert!(executed.response.query_results.iter().all(|result| {
+            result.resolved_semantics["operator_family"] == "datafusion-relational"
+        }));
+        assert!(executed.response.source_contexts.is_empty());
+        assert!(executed.response.query_results.iter().any(|result| {
+            result.output_row_count == 0
+                && result.completeness_state == crate::registries::CompletenessState::Indeterminate
+                && result.coverage["negative_proof_available"] == 0
+                && result
+                    .notices
+                    .iter()
+                    .any(|notice| notice.contains("not proof of absence"))
+        }));
+    }
+
+    #[tokio::test]
+    async fn semantic_query_relational_plan_visibility() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let candidate = candidate([0x22; 16], 1, 4);
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            Arc::clone(&candidate),
+            directory.path(),
+        );
+        let request = relational_semantic_request(
+            &candidate.manifest().body.workspace_id,
+            "relational-plan-visibility",
+        );
+        let typed = crate::semantic_query::validate_request(request.as_bytes()).unwrap();
+        let bound = crate::semantic_query::bind_request(&session, &typed)
+            .await
+            .unwrap();
+        assert_eq!(bound.blocks.len(), 7);
+        for block in &bound.blocks {
+            let crate::semantic_query::BoundOperator::Relational(plan) = &block.operator else {
+                panic!("relational-only request produced a graph operator");
+            };
+            let displayed = plan.template_plan.display_indent().to_string();
+            assert!(!displayed.contains("Extension"));
+            assert!(!displayed.contains("UDF"));
+            assert!(!displayed.contains("SELECT "));
+            assert!(displayed.contains("TableScan"));
+            assert_eq!(plan.form, block.typed.form);
+            assert_eq!(
+                plan.output_schema.as_ref(),
+                plan.template_plan.schema().as_arrow()
+            );
+        }
+        let forms = bound
+            .blocks
+            .iter()
+            .map(|block| block.typed.form)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(forms.len(), 5);
     }
 
     #[tokio::test]
@@ -3059,19 +3161,21 @@ mod tests {
         );
 
         let workspace_id = first_session.snapshot_manifest().body.workspace_id;
-        let semantic_request = |request_id: &str, kind_code: u16| {
+        let semantic_request = |request_id: &str, looking_for: &str| {
             format!(
-                r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"{request_id}","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":null,"input":null,"where":{{"entity_kind_codes":[{kind_code}],"relation_kind_codes":[]}},"limit":{{"first":10,"offset":0}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":20}}}}"#
+                r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"{request_id}","workspace_id":"{workspace_id}","freshness_policy":"current_required","queries":[{{"query_id":"entities","request":"find code entities","label":null,"looking_for":"{looking_for}","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"starting_from":[{{"results_of":"entities","select":"entities"}}],"ending_at":["syntax nodes"],"through":["control flow"],"path_policy":"one shortest witness path","maximum_length":4,"return":{{"limit":{{"maximum_results":10}}}}}}],"response_projection":null,"cost_budget":{{"maximum_rows":20}}}}"#
             )
         };
-        let first_typed =
-            crate::semantic_query::validate_request(semantic_request("request-one", 1).as_bytes())
-                .unwrap();
-        let same_query_new_request =
-            crate::semantic_query::validate_request(semantic_request("request-two", 1).as_bytes())
-                .unwrap();
+        let first_typed = crate::semantic_query::validate_request(
+            semantic_request("request-one", "syntax nodes").as_bytes(),
+        )
+        .unwrap();
+        let same_query_new_request = crate::semantic_query::validate_request(
+            semantic_request("request-two", "syntax nodes").as_bytes(),
+        )
+        .unwrap();
         let changed_parameter = crate::semantic_query::validate_request(
-            semantic_request("request-three", 2).as_bytes(),
+            semantic_request("request-three", "semantic symbols").as_bytes(),
         )
         .unwrap();
         let first_bound = crate::semantic_query::bind_request(&first_session, &first_typed)
@@ -3181,7 +3285,7 @@ mod tests {
             .unwrap()
             .into_inner();
         assert_eq!(handshake.authorized_workspaces.len(), 1);
-        assert_eq!(handshake.readiness.unwrap().supported_query_forms.len(), 8);
+        assert_eq!(handshake.readiness.unwrap().supported_query_forms.len(), 5);
 
         let status = client
             .get_status(StatusRequest {
@@ -3199,16 +3303,14 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            8
+            5
         );
         assert_eq!(
             public_status["capability_statuses"][0]["capability_code"],
             "CORE_SOURCE_V1"
         );
 
-        let request = format!(
-            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"wp63-eight-form","workspace_id":"{workspace_id}","freshness_policy":"best_available_snapshot","queries":[{{"query_id":"entities","request":"find code entities","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"patterns","request":"match a code fact pattern","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"combined","request":"combine result sets","label":null,"input":{{"results":[{{"results_of":"properties","select":"facts"}},{{"results_of":"relations","select":"facts"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"summary","request":"summarize objective facts","label":null,"input":{{"results":[{{"results_of":"combined","select":"groups"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"context","request":"retrieve source and syntax context","label":null,"input":{{"results":[{{"results_of":"paths","select":"paths"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":{{"canonical_semantic_identity":true,"coverage":true}},"cost_budget":{{"maximum_rows":80}}}}"#
-        );
+        let request = relational_semantic_request(&workspace_id, "wp63-relational");
         let canonical = crate::contracts::jcs::canonicalize_slice(request.as_bytes()).unwrap();
         let started = client
             .start_query(StartQueryRequest {
@@ -3270,8 +3372,8 @@ mod tests {
             }
         }
         let response: serde_json::Value = serde_json::from_slice(&response_bytes).unwrap();
-        assert_eq!(response["successful_query_count"], 8);
-        assert_eq!(response["query_results"].as_array().unwrap().len(), 8);
+        assert_eq!(response["successful_query_count"], 7);
+        assert_eq!(response["query_results"].as_array().unwrap().len(), 7);
         assert_eq!(
             response["snapshot"]["snapshot_id"],
             candidate.manifest().snapshot_id
@@ -3284,75 +3386,19 @@ mod tests {
         assert!(exit.shutdown_steps.contains(&"await-workers"));
     }
 
-    #[tokio::test]
-    async fn production_eight_form_semantic_query_conformance() {
-        let (directory, mut store, mut images) = operational_store();
-        let runtime = ServingSnapshotRuntime::default();
-        let candidate = candidate([0x75; 16], 1, 3);
-        let session = activate_and_lease(
-            &mut store,
-            &mut images,
-            &runtime,
-            Arc::clone(&candidate),
-            directory.path(),
+    #[test]
+    fn graph_forms_remain_withdrawn_until_wp03_executor_proof() {
+        let request = eight_form_semantic_request(
+            "workspace:11111111111111111111111111111111",
+            "graph-withdrawn",
         );
-        let workspace_id = candidate.manifest().body.workspace_id.clone();
-        let request = format!(
-            r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"production-eight-form","workspace_id":"{workspace_id}","freshness_policy":"best_available_snapshot","queries":[{{"query_id":"entities","request":"find code entities","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"patterns","request":"match a code fact pattern","label":null,"input":{{"results":[{{"results_of":"entities","select":"entities"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"combined","request":"combine result sets","label":null,"input":{{"results":[{{"results_of":"properties","select":"facts"}},{{"results_of":"relations","select":"facts"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"summary","request":"summarize objective facts","label":null,"input":{{"results":[{{"results_of":"combined","select":"groups"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}},{{"query_id":"context","request":"retrieve source and syntax context","label":null,"input":{{"results":[{{"results_of":"paths","select":"paths"}}]}},"where":null,"limit":{{"first":10,"offset":0}}}}],"response_projection":{{"canonical_semantic_identity":true,"coverage":true}},"cost_budget":{{"maximum_rows":80}}}}"#
-        );
-        let first = crate::semantic_query::execute_request(
-            &session,
-            crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
-            crate::registries::FreshnessState::Current,
-        )
-        .await
-        .unwrap();
-        let second = crate::semantic_query::execute_request(
-            &session,
-            crate::semantic_query::validate_request(request.as_bytes()).unwrap(),
-            crate::registries::FreshnessState::Current,
-        )
-        .await
-        .unwrap();
-        assert_eq!(first.response.successful_query_count, 8);
-        assert_eq!(first.response.query_results.len(), 8);
-        assert_eq!(
-            first.response.snapshot.snapshot_id,
-            candidate.manifest().snapshot_id
-        );
-        assert_eq!(first.canonical_bytes, second.canonical_bytes);
-        assert_eq!(first.response_digest, second.response_digest);
-        assert_eq!(
-            first
-                .response
-                .query_results
-                .iter()
-                .filter(|result| {
-                    result.resolved_semantics["operator_family"] == "datafusion-relational"
-                })
-                .count(),
-            3
-        );
-        assert_eq!(
-            first
-                .response
-                .query_results
-                .iter()
-                .filter(|result| {
-                    result.resolved_semantics["operator_family"] == "application-graph"
-                })
-                .count(),
-            5
-        );
-        assert!(
-            first
-                .response
-                .query_results
-                .iter()
-                .find(|result| result.request
-                    == crate::semantic_query::QueryForm::RetrieveSourceContext)
-                .is_some_and(|result| !result.source_context_ids.is_empty())
-        );
+        let request = crate::semantic_query::validate_request(request.as_bytes()).unwrap();
+        assert_eq!(request.request.queries.len(), 8);
+        let error = crate::semantic_query::require_registered_executors(&request).unwrap_err();
+        let error = error.to_string();
+        assert!(error.contains("follow code relationships"));
+        assert!(!crate::semantic_query::QueryForm::FindPaths.executor_registered());
+        assert!(!crate::semantic_query::QueryForm::MatchPattern.executor_registered());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

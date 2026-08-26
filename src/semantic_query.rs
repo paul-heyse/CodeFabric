@@ -3,10 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch, UInt64Array};
+use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch, StringArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::common::ScalarValue;
-use datafusion::logical_expr::{Expr, LogicalPlan, LogicalPlanBuilder, col, lit};
+use datafusion::datasource::{MemTable, provider_as_source};
+use datafusion::functions_aggregate::expr_fn::count;
+use datafusion::logical_expr::{Expr, JoinType, LogicalPlan, LogicalPlanBuilder, col, lit};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
@@ -82,12 +84,10 @@ impl QueryForm {
         match self {
             Self::FindEntities
             | Self::RetrieveFacts
-            | Self::FollowRelationships
-            | Self::FindPaths
-            | Self::MatchPattern
             | Self::CombineResults
             | Self::SummarizeFacts
-            | Self::RetrieveSourceContext => false,
+            | Self::RetrieveSourceContext => true,
+            Self::FollowRelationships | Self::FindPaths | Self::MatchPattern => false,
         }
     }
 
@@ -97,29 +97,6 @@ impl QueryForm {
             .find(|entry| entry.code == self as u16)
             .expect("generated QueryForm and QUERY_FORM_VALUES are one authority")
             .slug
-    }
-
-    fn table(self) -> Result<&'static str, SemanticQueryError> {
-        match self {
-            Self::FindEntities => Ok("entities"),
-            Self::RetrieveFacts => Ok("properties"),
-            Self::FollowRelationships => Ok("relations"),
-            _ => Err(SemanticQueryError::Invalid(
-                "query form is registered but not active in the current execution profile"
-                    .to_owned(),
-            )),
-        }
-    }
-
-    fn order_key(self) -> Result<&'static str, SemanticQueryError> {
-        match self {
-            Self::FindEntities => Ok("entity_id"),
-            Self::RetrieveFacts | Self::FollowRelationships => Ok("fact_id"),
-            _ => Err(SemanticQueryError::Invalid(
-                "query form is registered but not active in the current execution profile"
-                    .to_owned(),
-            )),
-        }
     }
 
     const fn plan_node_kind(self) -> &'static str {
@@ -324,6 +301,7 @@ pub struct TypedQueryBlock {
     pub form: QueryForm,
     pub input_roles: Vec<ResultRole>,
     pub output_role: ResultRole,
+    pub resolved_phrases: Vec<ResolvedPhrase>,
     pub dependencies: Vec<String>,
     pub fan_in: usize,
     pub fan_out: usize,
@@ -333,6 +311,18 @@ pub struct TypedQueryBlock {
     pub limit: QueryLimit,
     pub maximum_memory_bytes: usize,
     pub cancellation_required: bool,
+}
+
+/// One governed phrase resolved to its registry-owned semantic projection.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedPhrase {
+    pub source_pointer: String,
+    pub phrase_id: String,
+    pub canonical_text: String,
+    pub contract_family: String,
+    pub contract_code: String,
+    pub language_code: Option<u16>,
 }
 
 /// Parsed request plus the dependency-closed application semantic IR.
@@ -356,12 +346,53 @@ pub struct BoundQueryBlock {
 /// for graph semantics.
 #[derive(Clone, Debug)]
 pub enum BoundOperator {
-    Relational {
-        table: &'static str,
-        identity_column: &'static str,
-        plan: LogicalPlan,
-    },
+    Relational(Box<RelationalOperatorPlan>),
     Graph(GraphOperatorPlan),
+}
+
+/// Application-owned relational semantics compiled only to built-in DataFusion nodes.
+#[derive(Clone, Debug)]
+pub struct RelationalOperatorPlan {
+    pub form: QueryForm,
+    pub source_tables: Vec<&'static str>,
+    pub identity_column: &'static str,
+    pub output_schema: SchemaRef,
+    pub canonical_order: Vec<&'static str>,
+    pub template_plan: LogicalPlan,
+    pub runtime: RelationalRuntime,
+}
+
+/// The parameterized relational operation retained beside its transparent plan exemplar.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RelationalRuntime {
+    Snapshot,
+    Combine {
+        operation: SetOperation,
+        identity_role: ResultRole,
+    },
+    Summarize {
+        summary_names: Vec<String>,
+        group_by: Vec<String>,
+    },
+    SourceContext {
+        context_fields: Vec<String>,
+        text_handling: SourceTextHandling,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SetOperation {
+    Union,
+    Intersection,
+    Difference,
+    InnerJoin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceTextHandling {
+    Omit,
+    ExactBytes,
+    DecodedText,
 }
 
 /// Typed bounded graph/set/context plan executed outside DataFusion.
@@ -404,10 +435,31 @@ pub struct ExecutedSemanticResponse {
 pub enum SemanticQueryError {
     #[error("INVALID_REQUEST_SCHEMA:SEMANTIC_QUERY_INVALID:{0}")]
     Invalid(String),
+    #[error("{code}:{phase}:{pointer}:{message}")]
+    Phase {
+        code: &'static str,
+        phase: &'static str,
+        pointer: String,
+        message: String,
+    },
     #[error(transparent)]
     Canonical(#[from] CanonicalJsonError),
     #[error(transparent)]
     Serving(#[from] ServingQueryError),
+}
+
+fn phase_error(
+    code: &'static str,
+    phase: &'static str,
+    pointer: impl Into<String>,
+    message: impl Into<String>,
+) -> SemanticQueryError {
+    SemanticQueryError::Phase {
+        code,
+        phase,
+        pointer: pointer.into(),
+        message: message.into(),
+    }
 }
 
 impl From<datafusion::error::DataFusionError> for SemanticQueryError {
@@ -458,6 +510,173 @@ fn resolve_phrase(
     Ok(Some(resolved))
 }
 
+fn resolved_phrase(
+    form: QueryForm,
+    value: &str,
+    pointer: impl Into<String>,
+) -> Result<ResolvedPhrase, SemanticQueryError> {
+    let pointer = pointer.into();
+    let entry = resolve_phrase(form, Some(value)).map_err(|error| {
+        phase_error(
+            "SEMANTIC_PHRASE_UNSUPPORTED",
+            "semantic_binding",
+            &pointer,
+            error.to_string(),
+        )
+    })?;
+    let entry = entry.ok_or_else(|| {
+        phase_error(
+            "SEMANTIC_PHRASE_REQUIRED",
+            "semantic_binding",
+            &pointer,
+            "a governed semantic phrase is required",
+        )
+    })?;
+    let language_code = if entry.required_modifiers.contains(&"python") {
+        Some(crate::registries::Language::Python as u16)
+    } else if entry.required_modifiers.contains(&"rust") {
+        Some(crate::registries::Language::Rust as u16)
+    } else {
+        None
+    };
+    Ok(ResolvedPhrase {
+        source_pointer: pointer,
+        phrase_id: entry.phrase_id.to_owned(),
+        canonical_text: entry.canonical_text.to_owned(),
+        contract_family: entry.contract_family.to_owned(),
+        contract_code: entry.contract_code.to_owned(),
+        language_code,
+    })
+}
+
+fn resolve_query_phrases(
+    query: &SemanticQueryClause,
+    query_pointer: &str,
+) -> Result<Vec<ResolvedPhrase>, SemanticQueryError> {
+    let form = query.form();
+    let mut phrases = Vec::new();
+    match query {
+        SemanticQueryClause::FindEntities { looking_for, .. } => {
+            phrases.push(resolved_phrase(
+                form,
+                looking_for,
+                format!("{query_pointer}/looking_for"),
+            )?);
+        }
+        SemanticQueryClause::RetrieveFacts { facts, .. } => {
+            for (index, phrase) in facts.iter().enumerate() {
+                phrases.push(resolved_phrase(
+                    form,
+                    phrase,
+                    format!("{query_pointer}/facts/{index}"),
+                )?);
+            }
+        }
+        SemanticQueryClause::FollowRelationships { relationship, .. } => {
+            phrases.push(resolved_phrase(
+                form,
+                relationship,
+                format!("{query_pointer}/relationship"),
+            )?);
+        }
+        SemanticQueryClause::FindPaths { through, .. } => {
+            for (index, phrase) in through.iter().enumerate() {
+                phrases.push(resolved_phrase(
+                    form,
+                    phrase,
+                    format!("{query_pointer}/through/{index}"),
+                )?);
+            }
+        }
+        SemanticQueryClause::MatchPattern {
+            bindings,
+            relationships,
+            ..
+        } => {
+            for (index, binding) in bindings.iter().enumerate() {
+                // Binding selectors use the find-entities phrase vocabulary even though the
+                // enclosing operator is the pattern matcher.
+                phrases.push(resolved_phrase(
+                    QueryForm::FindEntities,
+                    &binding.looking_for,
+                    format!("{query_pointer}/bindings/{index}/looking_for"),
+                )?);
+            }
+            for (index, relationship) in relationships.iter().enumerate() {
+                phrases.push(resolved_phrase(
+                    QueryForm::FollowRelationships,
+                    &relationship.relationship,
+                    format!("{query_pointer}/relationships/{index}/relationship"),
+                )?);
+            }
+        }
+        SemanticQueryClause::SummarizeFacts { summaries, .. } => {
+            for (index, phrase) in summaries.iter().enumerate() {
+                phrases.push(resolved_phrase(
+                    form,
+                    phrase,
+                    format!("{query_pointer}/summaries/{index}"),
+                )?);
+            }
+        }
+        SemanticQueryClause::CombineResults { .. }
+        | SemanticQueryClause::RetrieveSourceContext { .. } => {}
+    }
+    Ok(phrases)
+}
+
+fn query_where_conditions(query: &SemanticQueryClause) -> &[String] {
+    match query {
+        SemanticQueryClause::FindEntities {
+            where_conditions, ..
+        }
+        | SemanticQueryClause::RetrieveFacts {
+            where_conditions, ..
+        }
+        | SemanticQueryClause::FollowRelationships {
+            where_conditions, ..
+        }
+        | SemanticQueryClause::FindPaths {
+            where_conditions, ..
+        }
+        | SemanticQueryClause::MatchPattern {
+            where_conditions, ..
+        }
+        | SemanticQueryClause::SummarizeFacts {
+            where_conditions, ..
+        }
+        | SemanticQueryClause::RetrieveSourceContext {
+            where_conditions, ..
+        } => where_conditions,
+        SemanticQueryClause::CombineResults { .. } => &[],
+    }
+}
+
+fn validate_structural_conditions(
+    query: &SemanticQueryClause,
+    pointer: &str,
+) -> Result<(), SemanticQueryError> {
+    for (index, condition) in query_where_conditions(query).iter().enumerate() {
+        if !matches!(
+            condition.as_str(),
+            "entities whose semantic kind is function"
+                | "language is Python"
+                | "language is Rust"
+                | "certainty is exact"
+                | "certainty is sound may"
+                | "certainty is unresolved"
+        ) {
+            return Err(phase_error(
+                "SEMANTIC_CONDITION_UNSUPPORTED",
+                "structural_policy",
+                format!("{pointer}/where/{index}"),
+                "condition is not a governed typed predicate",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Strictly decode and canonicalize one semantic request without assigning semantic types.
 ///
 /// # Errors
@@ -497,15 +716,12 @@ fn evaluative_intent(canonical_bytes: &[u8]) -> bool {
 }
 
 fn canonical_order(form: QueryForm) -> Vec<&'static str> {
-    match form {
-        QueryForm::FindEntities => vec!["entity_id"],
-        QueryForm::RetrieveFacts | QueryForm::FollowRelationships => vec!["fact_id"],
-        QueryForm::FindPaths => vec!["path_length", "path_id"],
-        QueryForm::MatchPattern => vec!["binding_id"],
-        QueryForm::CombineResults => vec!["group_id"],
-        QueryForm::SummarizeFacts => vec!["summary_key"],
-        QueryForm::RetrieveSourceContext => vec!["source_file_id", "span_start"],
-    }
+    QUERY_FORM_CONTRACTS
+        .iter()
+        .find(|descriptor| descriptor.code == form as u16)
+        .expect("generated form enum and form contract are one authority")
+        .canonical_order
+        .to_vec()
 }
 
 /// Type-check block roles, dependency topology, resource contracts, and semantic policy.
@@ -556,7 +772,6 @@ pub fn type_request(
             ));
         }
         forms.insert(query_id.to_owned(), form);
-        resolve_phrase(form, query.label())?;
         if query
             .direct_entity_ids()
             .into_iter()
@@ -679,6 +894,9 @@ pub fn type_request(
         .map(|(index, query)| {
             let query_id = query.query_id();
             let form = query.form();
+            let source_pointer = format!("/queries/{index}");
+            let resolved_phrases = resolve_query_phrases(query, &source_pointer)?;
+            validate_structural_conditions(query, &source_pointer)?;
             let references = query.result_references();
             let limit = QueryLimit {
                 first: query.maximum_results(),
@@ -690,10 +908,11 @@ pub fn type_request(
                 .collect::<Vec<_>>();
             Ok(TypedQueryBlock {
                 block_id: query_id.to_owned(),
-                source_pointer: format!("/queries/{index}"),
+                source_pointer,
                 form,
                 input_roles,
                 output_role: form.output_role(),
+                resolved_phrases,
                 dependencies: dependencies.get(query_id).cloned().unwrap_or_default(),
                 fan_in: references.len(),
                 fan_out: fan_out.get(query_id).copied().unwrap_or_default(),
@@ -798,66 +1017,724 @@ fn all_of(expressions: Vec<Expr>) -> Option<Expr> {
     expressions.into_iter().reduce(Expr::and)
 }
 
+fn ontology_code(ids: &[&str], codes: &[crate::registries::OntologyCodeEntry], name: &str) -> i32 {
+    ids.iter()
+        .position(|candidate| *candidate == name)
+        .and_then(|index| codes.get(index))
+        .map_or(0, |entry| entry.code)
+}
+
+fn entity_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
+    let mut names = BTreeSet::new();
+    for phrase in phrases {
+        match phrase.phrase_id.as_str() {
+            "Q50_SOURCE_FILES" => {
+                names.insert("SOURCE_FILE");
+            }
+            "Q51_SYNTAX_NODES" => {
+                names.insert("SYNTAX_NODE");
+            }
+            "Q52_SEMANTIC_SYMBOLS" | "Q71_PYTHON_BINDINGS" => {
+                names.insert("SYMBOL");
+            }
+            "Q54_SEMANTIC_TYPES" | "Q72_PYTHON_TYPES" | "Q82_RUST_GENERICS" => {
+                names.insert("SEMANTIC_TYPE");
+            }
+            "Q78_PYTHON_COMPREHENSIONS" => {
+                names.insert("EXPRESSION");
+            }
+            "Q80_PYTHON_ASYNC_GENERATORS" | "Q81_RUST_SEMANTIC_ITEMS" => {
+                names.insert("CALLABLE");
+            }
+            "Q84_RUST_MIR_STRUCTURE" => {
+                names.insert("CFG_BLOCK");
+            }
+            _ => {}
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            ScalarValue::Int32(Some(ontology_code(
+                crate::registries::ENTITY_KIND_IDS,
+                crate::registries::ENTITY_KIND_CODES,
+                name,
+            )))
+        })
+        .collect()
+}
+
+fn relation_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
+    let mut names = BTreeSet::new();
+    for phrase in phrases {
+        match phrase.contract_code.as_str() {
+            "CALL_EXACT_V1" | "CALL_SOUND_V1" => {
+                names.insert("CALLS");
+            }
+            "TYPE_GRAPH_V1" => {
+                names.insert("HAS_TYPE");
+            }
+            "CFG_FULL_V1" => {
+                names.insert("CFG_NORMAL");
+            }
+            "DATAFLOW_V1" => {
+                names.insert("DEF_USE");
+            }
+            "ALIAS_V1" => {
+                names.insert("POINTS_TO");
+            }
+            "EFFECT_V1" => {
+                names.insert("HAS_EFFECT");
+            }
+            "RESOURCE_V1" => {
+                names.insert("USES_RESOURCE");
+            }
+            "DEPENDENCY_V1" => {
+                names.insert("REFERS_TO");
+            }
+            _ => {}
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            ScalarValue::Int32(Some(ontology_code(
+                crate::registries::RELATION_KIND_IDS,
+                crate::registries::RELATION_KIND_CODES,
+                name,
+            )))
+        })
+        .collect()
+}
+
+fn property_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
+    let mut names = BTreeSet::new();
+    for phrase in phrases {
+        match phrase.phrase_id.as_str() {
+            "Q56_CALLABLE_CONTRACTS" => {
+                names.extend(["NAME", "QUALIFIED_NAME", "TYPE_REF", "VISIBILITY"]);
+            }
+            "Q61_PROGRAM_POINT_STATE" => {
+                names.extend(["TYPE_REF", "CATEGORICAL_KIND"]);
+            }
+            "Q70_EXPLICIT_UNKNOWNS" => {
+                names.insert("CATEGORICAL_KIND");
+            }
+            _ => {}
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            ScalarValue::Int32(Some(ontology_code(
+                crate::registries::PROPERTY_KIND_IDS,
+                crate::registries::PROPERTY_KIND_CODES,
+                name,
+            )))
+        })
+        .collect()
+}
+
+fn language_predicate(column: &'static str, phrases: &[ResolvedPhrase]) -> Option<Expr> {
+    let values = phrases
+        .iter()
+        .filter_map(|phrase| phrase.language_code)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|code| ScalarValue::Int16(Some(i16::try_from(code).unwrap_or(i16::MAX))))
+        .collect::<Vec<_>>();
+    any_of(column, values)
+}
+
+fn condition_predicates(query: &SemanticQueryClause, qualifier: &str) -> Vec<Expr> {
+    query_where_conditions(query)
+        .iter()
+        .filter_map(|condition| match condition.as_str() {
+            "entities whose semantic kind is function" => Some(
+                col(format!("{qualifier}.entity_kind_code")).eq(lit(ScalarValue::Int32(Some(
+                    ontology_code(
+                        crate::registries::ENTITY_KIND_IDS,
+                        crate::registries::ENTITY_KIND_CODES,
+                        "CALLABLE",
+                    ),
+                )))),
+            ),
+            "language is Python" => Some(col(format!("{qualifier}.language")).eq(lit(
+                ScalarValue::Int16(Some(crate::registries::Language::Python as i16)),
+            ))),
+            "language is Rust" => Some(col(format!("{qualifier}.language")).eq(lit(
+                ScalarValue::Int16(Some(crate::registries::Language::Rust as i16)),
+            ))),
+            "certainty is exact" => Some(col(format!("{qualifier}.certainty_code")).in_list(
+                vec![
+                    lit(ScalarValue::Int16(Some(10))),
+                    lit(ScalarValue::Int16(Some(20))),
+                ],
+                false,
+            )),
+            "certainty is sound may" => Some(
+                col(format!("{qualifier}.certainty_code")).eq(lit(ScalarValue::Int16(Some(40)))),
+            ),
+            "certainty is unresolved" => Some(
+                col(format!("{qualifier}.certainty_code")).eq(lit(ScalarValue::Int16(Some(70)))),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+fn bounded_plan(
+    builder: LogicalPlanBuilder,
+    order: &[&'static str],
+    limit: QueryLimit,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let fetch = limit.first.checked_add(1).ok_or_else(|| {
+        phase_error(
+            "QUERY_BOUND_OVERFLOW",
+            "logical_compile",
+            "",
+            "fetch bound overflow",
+        )
+    })?;
+    Ok(builder
+        .sort(
+            order
+                .iter()
+                .map(|column| col(*column).sort(true, true))
+                .collect::<Vec<_>>(),
+        )?
+        .limit(limit.offset, Some(fetch))?
+        .build()?)
+}
+
+async fn compile_find_entities(
+    session: &ServingQuerySession,
+    typed: &TypedQueryBlock,
+    query: &SemanticQueryClause,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let mut predicates = condition_predicates(query, "entity");
+    let identities = query
+        .direct_entity_ids()
+        .into_iter()
+        .map(|value| id16_scalar(value, "entity:"))
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(predicate) = any_of("entity.entity_id", identities) {
+        predicates.push(predicate);
+    }
+    let kinds = entity_kind_codes(&typed.resolved_phrases);
+    if let Some(predicate) = any_of("entity.entity_kind_code", kinds) {
+        predicates.push(predicate);
+    }
+    if let Some(predicate) = language_predicate("entity.language", &typed.resolved_phrases) {
+        predicates.push(predicate);
+    }
+    let mut entities =
+        LogicalPlanBuilder::from(session.table_plan("entities").await?).alias("entity")?;
+    if let Some(predicate) = all_of(predicates) {
+        entities = entities.filter(predicate)?;
+    }
+    let files = LogicalPlanBuilder::from(session.table_plan("files").await?)
+        .alias("source_file")?
+        .build()?;
+    let builder = entities
+        .join_on(
+            files,
+            JoinType::Left,
+            [col("entity.file_id").eq(col("source_file.file_id"))],
+        )?
+        .project(vec![
+            col("source_file.path_display").alias("source_file_path"),
+            col("entity.start_byte").alias("span_start"),
+            col("entity.entity_kind_code").alias("semantic_kind"),
+            col("entity.qualified_name"),
+            col("entity.entity_id"),
+            lit(query.query_id()).alias("origin_query_id"),
+            lit(ScalarValue::Int16(Some(10))).alias("certainty_code"),
+        ])?;
+    bounded_plan(builder, &typed.canonical_order, typed.limit)
+}
+
+fn fact_about_predicates(
+    query: &SemanticQueryClause,
+    subject_column: &'static str,
+    object_column: Option<&'static str>,
+) -> Result<Option<Expr>, SemanticQueryError> {
+    let entities = query
+        .direct_entity_ids()
+        .into_iter()
+        .map(|value| id16_scalar(value, "entity:"))
+        .collect::<Result<Vec<_>, _>>()?;
+    if entities.is_empty() {
+        return Ok(None);
+    }
+    let subject = any_of(subject_column, entities.clone()).expect("non-empty identities");
+    Ok(Some(object_column.map_or(subject.clone(), |object| {
+        subject.or(any_of(object, entities).expect("non-empty identities"))
+    })))
+}
+
+async fn compile_retrieve_facts(
+    session: &ServingQuerySession,
+    typed: &TypedQueryBlock,
+    query: &SemanticQueryClause,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let direct_facts = query
+        .direct_fact_ids()
+        .into_iter()
+        .map(|value| id16_scalar(value, "fact:"))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut property_predicates = condition_predicates(query, "property");
+    if let Some(predicate) = any_of("property.fact_id", direct_facts.clone()) {
+        property_predicates.push(predicate);
+    }
+    if let Some(predicate) = fact_about_predicates(query, "property.subject_entity_id", None)? {
+        property_predicates.push(predicate);
+    }
+    let property_kinds = property_kind_codes(&typed.resolved_phrases);
+    let relation_kinds = relation_kind_codes(&typed.resolved_phrases);
+    if let Some(predicate) = any_of("property.property_kind_code", property_kinds.clone()) {
+        property_predicates.push(predicate);
+    } else if !relation_kinds.is_empty() {
+        property_predicates.push(lit(false));
+    }
+    let mut properties =
+        LogicalPlanBuilder::from(session.table_plan("properties").await?).alias("property")?;
+    if let Some(predicate) = all_of(property_predicates) {
+        properties = properties.filter(predicate)?;
+    }
+    let properties = properties
+        .project(vec![
+            col("property.fact_id"),
+            col("property.owner_id").alias("semantic_owner"),
+            col("property.start_byte").alias("source_location"),
+            lit("property").alias("fact_class"),
+            col("property.property_kind_code").alias("relationship"),
+            col("property.subject_entity_id").alias("subject_id"),
+            col("property.value_entity_id").alias("object_or_value"),
+            col("property.certainty_code"),
+            col("property.resolution_code"),
+            col("property.file_id"),
+            col("property.end_byte").alias("span_end"),
+            lit(query.query_id()).alias("origin_query_id"),
+        ])?
+        .build()?;
+
+    let mut relation_predicates = condition_predicates(query, "relation");
+    if let Some(predicate) = any_of("relation.fact_id", direct_facts) {
+        relation_predicates.push(predicate);
+    }
+    if let Some(predicate) =
+        fact_about_predicates(query, "relation.source_id", Some("relation.target_id"))?
+    {
+        relation_predicates.push(predicate);
+    }
+    if let Some(predicate) = any_of("relation.relation_kind_code", relation_kinds) {
+        relation_predicates.push(predicate);
+    } else if !property_kinds.is_empty() {
+        relation_predicates.push(lit(false));
+    }
+    let mut relations =
+        LogicalPlanBuilder::from(session.table_plan("relations").await?).alias("relation")?;
+    if let Some(predicate) = all_of(relation_predicates) {
+        relations = relations.filter(predicate)?;
+    }
+    let relations = relations
+        .project(vec![
+            col("relation.fact_id"),
+            col("relation.owner_id").alias("semantic_owner"),
+            col("relation.start_byte").alias("source_location"),
+            lit("relation").alias("fact_class"),
+            col("relation.relation_kind_code").alias("relationship"),
+            col("relation.source_id").alias("subject_id"),
+            col("relation.target_id").alias("object_or_value"),
+            col("relation.certainty_code"),
+            col("relation.resolution_code"),
+            col("relation.file_id"),
+            col("relation.end_byte").alias("span_end"),
+            lit(query.query_id()).alias("origin_query_id"),
+        ])?
+        .build()?;
+    let builder = LogicalPlanBuilder::from(properties).union(relations)?;
+    bounded_plan(builder, &typed.canonical_order, typed.limit)
+}
+
+fn dependency_identity(role: ResultRole) -> Result<&'static str, SemanticQueryError> {
+    match role {
+        ResultRole::Entities => Ok("entity_id"),
+        ResultRole::Facts => Ok("fact_id"),
+        ResultRole::Paths => Ok("path_id"),
+        ResultRole::PatternBindings => Ok("binding_id"),
+        ResultRole::Groups => Ok("group_key"),
+        ResultRole::SourceContexts => Ok("source_file_id"),
+        ResultRole::Summary => Err(phase_error(
+            "QUERY_ROLE_INCOMPATIBLE",
+            "type_check",
+            "",
+            "summary output has no set identity domain",
+        )),
+    }
+}
+
+fn dependency_schema(role: ResultRole) -> Result<SchemaRef, SemanticQueryError> {
+    Ok(Arc::new(Schema::new(vec![
+        Field::new(
+            dependency_identity(role)?,
+            DataType::FixedSizeBinary(16),
+            false,
+        ),
+        Field::new("origin_query_id", DataType::Utf8, false),
+        Field::new("certainty_code", DataType::Int16, false),
+    ])))
+}
+
+fn empty_dependency_plan(name: &str, role: ResultRole) -> Result<LogicalPlan, SemanticQueryError> {
+    let schema = dependency_schema(role)?;
+    let empty = RecordBatch::new_empty(Arc::clone(&schema));
+    let provider = Arc::new(MemTable::try_new(schema, vec![vec![empty]])?);
+    Ok(LogicalPlanBuilder::scan(
+        format!("cpg_serving.{name}"),
+        provider_as_source(provider),
+        None,
+    )?
+    .build()?)
+}
+
+fn parse_set_operation(value: &str, pointer: &str) -> Result<SetOperation, SemanticQueryError> {
+    match value {
+        "union by entity identity" | "union by fact identity" | "union by result identity" => {
+            Ok(SetOperation::Union)
+        }
+        "intersection by entity identity"
+        | "intersection by fact identity"
+        | "intersection by result identity" => Ok(SetOperation::Intersection),
+        "difference by entity identity"
+        | "difference by fact identity"
+        | "difference by result identity" => Ok(SetOperation::Difference),
+        "join by entity identity" | "join by fact identity" | "join by result identity" => {
+            Ok(SetOperation::InnerJoin)
+        }
+        _ => Err(phase_error(
+            "QUERY_SET_OPERATION_UNSUPPORTED",
+            "semantic_binding",
+            pointer,
+            "set operation is not governed",
+        )),
+    }
+}
+
+fn combine_plans(
+    plans: Vec<LogicalPlan>,
+    operation: SetOperation,
+    identity: &'static str,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let mut plans = plans.into_iter();
+    let first = plans.next().ok_or_else(|| {
+        phase_error(
+            "QUERY_DEPENDENCY_REQUIRED",
+            "logical_compile",
+            "",
+            "set operation has no input",
+        )
+    })?;
+    plans.try_fold(first, |left, right| {
+        Ok(match operation {
+            SetOperation::Union => LogicalPlanBuilder::from(left)
+                .union_distinct(right)?
+                .build()?,
+            SetOperation::Intersection => LogicalPlanBuilder::intersect(left, right, false)?,
+            SetOperation::Difference => LogicalPlanBuilder::except(left, right, false)?,
+            SetOperation::InnerJoin => LogicalPlanBuilder::from(left)
+                .join(
+                    right,
+                    JoinType::Inner,
+                    (vec![identity], vec![identity]),
+                    None,
+                )?
+                .project(vec![
+                    col(identity),
+                    col("origin_query_id"),
+                    col("certainty_code"),
+                ])?
+                .build()?,
+        })
+    })
+}
+
+fn compile_combine_template(
+    typed: &TypedQueryBlock,
+    query: &SemanticQueryClause,
+) -> Result<(LogicalPlan, RelationalRuntime), SemanticQueryError> {
+    let SemanticQueryClause::CombineResults {
+        inputs,
+        combination,
+        identity,
+        ..
+    } = query
+    else {
+        return Err(phase_error(
+            "QUERY_FORM_COMPILER_MISMATCH",
+            "logical_compile",
+            &typed.source_pointer,
+            "combine compiler received another form",
+        ));
+    };
+    if inputs.len() < 2 {
+        return Err(phase_error(
+            "QUERY_DEPENDENCY_REQUIRED",
+            "type_check",
+            format!("{}/inputs", typed.source_pointer),
+            "combine requires at least two inputs",
+        ));
+    }
+    let identity_role = inputs[0].select;
+    if inputs.iter().any(|input| input.select != identity_role) {
+        return Err(phase_error(
+            "QUERY_IDENTITY_DOMAIN_MISMATCH",
+            "type_check",
+            format!("{}/inputs", typed.source_pointer),
+            "combine inputs do not share one identity domain",
+        ));
+    }
+    if identity.as_deref().is_some_and(|declared| {
+        !matches!(
+            (identity_role, declared),
+            (ResultRole::Entities, "entity identity")
+                | (ResultRole::Facts, "fact identity")
+                | (_, "result identity")
+        )
+    }) {
+        return Err(phase_error(
+            "QUERY_IDENTITY_DOMAIN_MISMATCH",
+            "semantic_binding",
+            format!("{}/identity", typed.source_pointer),
+            "declared identity is incompatible with the typed input role",
+        ));
+    }
+    let operation = parse_set_operation(
+        combination,
+        &format!("{}/combination", typed.source_pointer),
+    )?;
+    let identity_column = dependency_identity(identity_role)?;
+    let plans = (0..inputs.len())
+        .map(|index| empty_dependency_plan(&format!("query_input_{index}"), identity_role))
+        .collect::<Result<Vec<_>, _>>()?;
+    let combined = combine_plans(plans, operation, identity_column)?;
+    let builder = LogicalPlanBuilder::from(combined).project(vec![
+        col(identity_column).alias("group_key"),
+        col("origin_query_id"),
+        col("certainty_code"),
+    ])?;
+    Ok((
+        bounded_plan(builder, &typed.canonical_order, typed.limit)?,
+        RelationalRuntime::Combine {
+            operation,
+            identity_role,
+        },
+    ))
+}
+
+fn compile_summary_template(
+    typed: &TypedQueryBlock,
+    query: &SemanticQueryClause,
+) -> Result<(LogicalPlan, RelationalRuntime), SemanticQueryError> {
+    let SemanticQueryClause::SummarizeFacts {
+        summaries,
+        group_by,
+        ..
+    } = query
+    else {
+        return Err(phase_error(
+            "QUERY_FORM_COMPILER_MISMATCH",
+            "logical_compile",
+            &typed.source_pointer,
+            "summary compiler received another form",
+        ));
+    };
+    let role = typed
+        .input_roles
+        .first()
+        .copied()
+        .unwrap_or(ResultRole::Facts);
+    let identity = dependency_identity(role)?;
+    let input = empty_dependency_plan("query_input_summary", role)?;
+    let summary_name = summaries.first().ok_or_else(|| {
+        phase_error(
+            "QUERY_SUMMARY_REQUIRED",
+            "semantic_binding",
+            format!("{}/summaries", typed.source_pointer),
+            "at least one objective summary is required",
+        )
+    })?;
+    let builder = LogicalPlanBuilder::from(input)
+        .aggregate(
+            Vec::<Expr>::new(),
+            vec![count(col(identity)).alias("summary_value")],
+        )?
+        .project(vec![
+            lit("all").alias("group_key"),
+            lit(summary_name.clone()).alias("summary_name"),
+            col("summary_value"),
+            lit(query.query_id()).alias("origin_query_id"),
+        ])?;
+    Ok((
+        bounded_plan(builder, &typed.canonical_order, typed.limit)?,
+        RelationalRuntime::Summarize {
+            summary_names: summaries.clone(),
+            group_by: group_by.clone(),
+        },
+    ))
+}
+
+fn compile_source_context_template(
+    typed: &TypedQueryBlock,
+    query: &SemanticQueryClause,
+) -> Result<(LogicalPlan, RelationalRuntime), SemanticQueryError> {
+    let SemanticQueryClause::RetrieveSourceContext {
+        context,
+        text_handling,
+        ..
+    } = query
+    else {
+        return Err(phase_error(
+            "QUERY_FORM_COMPILER_MISMATCH",
+            "logical_compile",
+            &typed.source_pointer,
+            "source-context compiler received another form",
+        ));
+    };
+    for (index, field) in context.iter().enumerate() {
+        if !matches!(
+            field.as_str(),
+            "source location" | "source file" | "exact span" | "enclosing syntax"
+        ) {
+            return Err(phase_error(
+                "QUERY_CONTEXT_FIELD_UNSUPPORTED",
+                "semantic_binding",
+                format!("{}/context/{index}", typed.source_pointer),
+                "source-context field is not governed",
+            ));
+        }
+    }
+    let handling = match text_handling.as_deref() {
+        None | Some("omit text") => SourceTextHandling::Omit,
+        Some("exact bytes") => SourceTextHandling::ExactBytes,
+        Some("decoded text when available") => SourceTextHandling::DecodedText,
+        Some(_) => {
+            return Err(phase_error(
+                "QUERY_TEXT_HANDLING_UNSUPPORTED",
+                "semantic_binding",
+                format!("{}/text_handling", typed.source_pointer),
+                "text handling is not governed",
+            ));
+        }
+    };
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("source_file_id", DataType::FixedSizeBinary(16), false),
+        Field::new("source_file_path", DataType::Utf8, false),
+        Field::new("span_start", DataType::Int64, false),
+        Field::new("span_end", DataType::Int64, false),
+        Field::new("source_digest", DataType::Binary, false),
+        Field::new("source_bytes", DataType::Binary, true),
+        Field::new("decoded_text", DataType::Utf8, true),
+        Field::new("origin_query_id", DataType::Utf8, false),
+    ]));
+    let empty = RecordBatch::new_empty(Arc::clone(&schema));
+    let provider = Arc::new(MemTable::try_new(schema, vec![vec![empty]])?);
+    let plan = bounded_plan(
+        LogicalPlanBuilder::scan(
+            "cpg_serving.query_input_source_context",
+            provider_as_source(provider),
+            None,
+        )?,
+        &typed.canonical_order,
+        typed.limit,
+    )?;
+    Ok((
+        plan,
+        RelationalRuntime::SourceContext {
+            context_fields: context.clone(),
+            text_handling: handling,
+        },
+    ))
+}
+
 #[allow(clippy::too_many_lines)] // All relational forms share one policy-enforced DataFusion lowering fence.
 async fn lower_relational_block(
     session: &ServingQuerySession,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<BoundQueryBlock, SemanticQueryError> {
-    let table = typed.form.table()?;
-    let identity_column = typed.form.order_key()?;
-    let mut predicates = Vec::new();
-    let (column, identities, prefix) = match typed.form {
-        QueryForm::FindEntities => ("entity_id", query.direct_entity_ids(), "entity:"),
-        QueryForm::RetrieveFacts | QueryForm::FollowRelationships => {
-            ("fact_id", query.direct_fact_ids(), "fact:")
+    let (plan, source_tables, identity_column, runtime) = match typed.form {
+        QueryForm::FindEntities => (
+            compile_find_entities(session, typed, query).await?,
+            vec!["entities", "files"],
+            "entity_id",
+            RelationalRuntime::Snapshot,
+        ),
+        QueryForm::RetrieveFacts => (
+            compile_retrieve_facts(session, typed, query).await?,
+            vec!["properties", "relations"],
+            "fact_id",
+            RelationalRuntime::Snapshot,
+        ),
+        QueryForm::CombineResults => {
+            let (plan, runtime) = compile_combine_template(typed, query)?;
+            (plan, Vec::new(), "group_key", runtime)
         }
-        _ => {
-            return Err(SemanticQueryError::Invalid(
-                "graph form reached relational lowering".to_owned(),
+        QueryForm::SummarizeFacts => {
+            let (plan, runtime) = compile_summary_template(typed, query)?;
+            (plan, Vec::new(), "group_key", runtime)
+        }
+        QueryForm::RetrieveSourceContext => {
+            let (plan, runtime) = compile_source_context_template(typed, query)?;
+            (
+                plan,
+                vec!["entities", "relations", "properties", "files"],
+                "source_file_id",
+                runtime,
+            )
+        }
+        QueryForm::FollowRelationships | QueryForm::FindPaths | QueryForm::MatchPattern => {
+            return Err(phase_error(
+                "QUERY_FORM_COMPILER_MISMATCH",
+                "logical_compile",
+                &typed.source_pointer,
+                "graph form reached relational lowering",
             ));
         }
     };
-    let values = identities
-        .into_iter()
-        .map(|value| id16_scalar(value, prefix))
-        .collect::<Result<Vec<_>, _>>()?;
-    if let Some(predicate) = any_of(column, values) {
-        predicates.push(predicate);
-    }
-    let mut builder = LogicalPlanBuilder::from(session.table_plan(table).await?);
-    if let Some(predicate) = all_of(predicates) {
-        builder = builder.filter(predicate)?;
-    }
-    builder = builder.project(vec![col(identity_column)])?;
-    builder = builder.sort(
-        typed
-            .canonical_order
-            .iter()
-            .map(|column| col(*column).sort(true, true))
-            .collect::<Vec<_>>(),
-    )?;
-    let fetch = typed
-        .limit
-        .first
-        .checked_add(1)
-        .ok_or_else(|| SemanticQueryError::Invalid("query fetch bound overflow".to_owned()))?;
-    let plan = builder.limit(typed.limit.offset, Some(fetch))?.build()?;
-    session.validate_query_plan(&plan)?;
+    session.validate_query_plan(&plan).map_err(|error| {
+        phase_error(
+            "QUERY_PLAN_POLICY_REJECTED",
+            "structural_policy",
+            &typed.source_pointer,
+            error.to_string(),
+        )
+    })?;
+    let output_schema = Arc::new(plan.schema().as_arrow().clone());
     Ok(BoundQueryBlock {
         typed: typed.clone(),
-        operator: BoundOperator::Relational {
-            table,
+        operator: BoundOperator::Relational(Box::new(RelationalOperatorPlan {
+            form: typed.form,
+            source_tables,
             identity_column,
-            plan,
-        },
+            output_schema,
+            canonical_order: typed.canonical_order.clone(),
+            template_plan: plan,
+            runtime,
+        })),
     })
 }
 
 fn graph_operator_plan(typed: &TypedQueryBlock) -> Result<GraphOperatorPlan, SemanticQueryError> {
     if matches!(
         typed.form,
-        QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships
+        QueryForm::FindEntities
+            | QueryForm::RetrieveFacts
+            | QueryForm::CombineResults
+            | QueryForm::SummarizeFacts
+            | QueryForm::RetrieveSourceContext
     ) {
         return Err(SemanticQueryError::Invalid(
             "relational form reached graph lowering".to_owned(),
@@ -905,20 +1782,18 @@ fn semantic_plan_template(
     let mut serialized_blocks = Vec::with_capacity(blocks.len());
     for block in blocks {
         let operator = match &block.operator {
-            BoundOperator::Relational {
-                table,
-                identity_column,
-                plan,
-            } => serde_json::json!({
+            BoundOperator::Relational(plan) => serde_json::json!({
                 "family": "datafusion_relational",
                 "provider": {
                     "catalog": "codefabric",
                     "schema": "cpg_serving",
-                    "table": table,
+                    "tables": plan.source_tables,
                     "snapshot_bound": true,
                 },
-                "identity_column": identity_column,
-                "logical_plan": crate::fabric::logical_plan_template_serialization(plan)?,
+                "identity_column": plan.identity_column,
+                "output_schema": serde_json::to_value(plan.output_schema.as_ref())
+                    .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                "logical_plan": crate::fabric::logical_plan_template_serialization(&plan.template_plan)?,
             }),
             BoundOperator::Graph(plan) => serde_json::json!({
                 "family": "application_graph",
@@ -1022,7 +1897,11 @@ pub async fn bind_request(
             })?;
         if matches!(
             block.form,
-            QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships
+            QueryForm::FindEntities
+                | QueryForm::RetrieveFacts
+                | QueryForm::CombineResults
+                | QueryForm::SummarizeFacts
+                | QueryForm::RetrieveSourceContext
         ) {
             blocks.push(lower_relational_block(session, block, query).await?);
         } else {
@@ -1068,6 +1947,15 @@ struct BlockValues {
     source_context_ids: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+struct CompletedBlock {
+    role: ResultRole,
+    schema: SchemaRef,
+    batches: Vec<RecordBatch>,
+    values: BlockValues,
+    completeness: CompletenessState,
+}
+
 impl BlockValues {
     fn all_ids(&self) -> impl Iterator<Item = &String> {
         self.entity_ids
@@ -1077,6 +1965,442 @@ impl BlockValues {
             .chain(&self.group_ids)
             .chain(&self.source_context_ids)
     }
+}
+
+fn completed_scan(
+    name: &str,
+    completed: &CompletedBlock,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let batches = if completed.batches.is_empty() {
+        vec![RecordBatch::new_empty(Arc::clone(&completed.schema))]
+    } else {
+        completed.batches.clone()
+    };
+    for batch in &batches {
+        if batch.schema() != completed.schema {
+            return Err(phase_error(
+                "QUERY_DEPENDENCY_SCHEMA_MISMATCH",
+                "response_verification",
+                name,
+                "dependency batch schema differs from its typed Arrow contract",
+            ));
+        }
+    }
+    let provider = Arc::new(MemTable::try_new(
+        Arc::clone(&completed.schema),
+        vec![batches],
+    )?);
+    Ok(LogicalPlanBuilder::scan(
+        format!("cpg_serving.{name}"),
+        provider_as_source(provider),
+        None,
+    )?
+    .build()?)
+}
+
+fn dependency_identity_in_schema(completed: &CompletedBlock) -> Result<&str, SemanticQueryError> {
+    let preferred = dependency_identity(completed.role)?;
+    if completed.schema.field_with_name(preferred).is_ok() {
+        return Ok(preferred);
+    }
+    [
+        "group_id",
+        "source_context_id",
+        "binding_id",
+        "path_id",
+        "fact_id",
+        "entity_id",
+    ]
+    .into_iter()
+    .find(|name| completed.schema.field_with_name(name).is_ok())
+    .ok_or_else(|| {
+        phase_error(
+            "QUERY_DEPENDENCY_SCHEMA_MISMATCH",
+            "response_verification",
+            "",
+            "dependency Arrow schema has no identity column for its role",
+        )
+    })
+}
+
+fn normalized_dependency_plan(
+    dependency_id: &str,
+    completed: &CompletedBlock,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let identity = dependency_identity_in_schema(completed)?;
+    let input = completed_scan(&format!("query_input_{dependency_id}"), completed)?;
+    let origin = if completed.schema.field_with_name("origin_query_id").is_ok() {
+        col("origin_query_id")
+    } else {
+        lit(dependency_id)
+    };
+    let certainty = if completed.schema.field_with_name("certainty_code").is_ok() {
+        col("certainty_code")
+    } else {
+        lit(ScalarValue::Int16(Some(70)))
+    };
+    Ok(LogicalPlanBuilder::from(input)
+        .project(vec![
+            col(identity).alias(dependency_identity(completed.role)?),
+            origin.alias("origin_query_id"),
+            certainty.alias("certainty_code"),
+        ])?
+        .build()?)
+}
+
+fn compile_runtime_combine(
+    block: &BoundQueryBlock,
+    operation: SetOperation,
+    identity_role: ResultRole,
+    completed: &BTreeMap<String, CompletedBlock>,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let plans = block
+        .typed
+        .dependencies
+        .iter()
+        .map(|dependency| {
+            let result = completed.get(dependency).ok_or_else(|| {
+                phase_error(
+                    "QUERY_DEPENDENCY_NOT_READY",
+                    "execution",
+                    &block.typed.source_pointer,
+                    format!("dependency {dependency} has no completed Arrow result"),
+                )
+            })?;
+            if result.role != identity_role {
+                return Err(phase_error(
+                    "QUERY_IDENTITY_DOMAIN_MISMATCH",
+                    "execution",
+                    &block.typed.source_pointer,
+                    "runtime dependency role differs from the bound identity domain",
+                ));
+            }
+            normalized_dependency_plan(dependency, result)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let identity = dependency_identity(identity_role)?;
+    let combined = combine_plans(plans, operation, identity)?;
+    bounded_plan(
+        LogicalPlanBuilder::from(combined).project(vec![
+            col(identity).alias("group_key"),
+            col("origin_query_id"),
+            col("certainty_code"),
+        ])?,
+        &block.typed.canonical_order,
+        block.typed.limit,
+    )
+}
+
+fn summary_group_expressions(group_by: &[String]) -> Result<Vec<Expr>, SemanticQueryError> {
+    group_by
+        .iter()
+        .enumerate()
+        .map(|(index, group)| match group.as_str() {
+            "origin query" => Ok(col("origin_query_id")),
+            "certainty" => Ok(col("certainty_code")),
+            _ => Err(phase_error(
+                "QUERY_SUMMARY_GROUP_UNSUPPORTED",
+                "semantic_binding",
+                format!("/group_by/{index}"),
+                "summary grouping is not a governed objective dimension",
+            )),
+        })
+        .collect()
+}
+
+fn compile_runtime_summary(
+    block: &BoundQueryBlock,
+    query: &SemanticQueryClause,
+    summary_names: &[String],
+    group_by: &[String],
+    completed: &BTreeMap<String, CompletedBlock>,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let mut inputs = block
+        .typed
+        .dependencies
+        .iter()
+        .map(|dependency| {
+            completed
+                .get(dependency)
+                .ok_or_else(|| {
+                    phase_error(
+                        "QUERY_DEPENDENCY_NOT_READY",
+                        "execution",
+                        &block.typed.source_pointer,
+                        format!("dependency {dependency} has no completed Arrow result"),
+                    )
+                })
+                .and_then(|result| normalized_dependency_plan(dependency, result))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter();
+    let first = inputs.next().ok_or_else(|| {
+        phase_error(
+            "QUERY_DEPENDENCY_REQUIRED",
+            "execution",
+            &block.typed.source_pointer,
+            "summary has no completed input",
+        )
+    })?;
+    let input = inputs.try_fold(first, |left, right| {
+        Ok::<_, SemanticQueryError>(LogicalPlanBuilder::from(left).union(right)?.build()?)
+    })?;
+    let role = block
+        .typed
+        .input_roles
+        .first()
+        .copied()
+        .unwrap_or(ResultRole::Facts);
+    let identity = dependency_identity(role)?;
+    let group_expr = summary_group_expressions(group_by)?;
+    let mut summary_plans = Vec::new();
+    for summary_name in summary_names {
+        let aggregated = LogicalPlanBuilder::from(input.clone())
+            .aggregate(
+                group_expr.clone(),
+                vec![count(col(identity)).alias("summary_value")],
+            )?
+            .build()?;
+        let group_key = if group_by.is_empty() {
+            lit("all")
+        } else {
+            // The generated public contract treats the group key as presentation data. The
+            // exact typed grouping columns remain beside it in the Arrow schema.
+            col(group_by[0].replace(' ', "_"))
+        };
+        let mut projection = vec![
+            group_key.alias("group_key"),
+            lit(summary_name.clone()).alias("summary_name"),
+            col("summary_value"),
+            lit(query.query_id()).alias("origin_query_id"),
+        ];
+        projection.extend(group_expr.clone());
+        summary_plans.push(
+            LogicalPlanBuilder::from(aggregated)
+                .project(projection)?
+                .build()?,
+        );
+    }
+    let mut summaries = summary_plans.into_iter();
+    let first = summaries.next().ok_or_else(|| {
+        phase_error(
+            "QUERY_SUMMARY_REQUIRED",
+            "execution",
+            &block.typed.source_pointer,
+            "summary compiler has no objective summary",
+        )
+    })?;
+    let plan = summaries.try_fold(first, |left, right| {
+        Ok::<_, SemanticQueryError>(LogicalPlanBuilder::from(left).union(right)?.build()?)
+    })?;
+    bounded_plan(
+        LogicalPlanBuilder::from(plan),
+        &block.typed.canonical_order,
+        block.typed.limit,
+    )
+}
+
+async fn source_locator_plan(
+    session: &ServingQuerySession,
+    dependency_id: &str,
+    completed: &CompletedBlock,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let input = completed_scan(&format!("query_context_{dependency_id}"), completed)?;
+    let identity = dependency_identity_in_schema(completed)?;
+    let input = LogicalPlanBuilder::from(input)
+        .project(vec![
+            col(identity).alias(identity),
+            if completed.schema.field_with_name("origin_query_id").is_ok() {
+                col("origin_query_id")
+            } else {
+                lit(dependency_id).alias("origin_query_id")
+            },
+        ])?
+        .alias("query_input")?;
+    match completed.role {
+        ResultRole::Entities => {
+            let entities = LogicalPlanBuilder::from(session.table_plan("entities").await?)
+                .alias("entity")?
+                .build()?;
+            Ok(input
+                .join_on(
+                    entities,
+                    JoinType::Inner,
+                    [col("query_input.entity_id").eq(col("entity.entity_id"))],
+                )?
+                .project(vec![
+                    col("entity.file_id"),
+                    col("entity.start_byte").alias("span_start"),
+                    col("entity.end_byte").alias("span_end"),
+                    col("query_input.origin_query_id"),
+                ])?
+                .build()?)
+        }
+        ResultRole::Facts => {
+            let relations = LogicalPlanBuilder::from(session.table_plan("relations").await?)
+                .alias("relation")?
+                .build()?;
+            let relation_locations = input
+                .clone()
+                .join_on(
+                    relations,
+                    JoinType::Inner,
+                    [col("query_input.fact_id").eq(col("relation.fact_id"))],
+                )?
+                .project(vec![
+                    col("relation.file_id"),
+                    col("relation.start_byte").alias("span_start"),
+                    col("relation.end_byte").alias("span_end"),
+                    col("query_input.origin_query_id"),
+                ])?
+                .build()?;
+            let properties = LogicalPlanBuilder::from(session.table_plan("properties").await?)
+                .alias("property")?
+                .build()?;
+            let property_locations = input
+                .join_on(
+                    properties,
+                    JoinType::Inner,
+                    [col("query_input.fact_id").eq(col("property.fact_id"))],
+                )?
+                .project(vec![
+                    col("property.file_id"),
+                    col("property.start_byte").alias("span_start"),
+                    col("property.end_byte").alias("span_end"),
+                    col("query_input.origin_query_id"),
+                ])?
+                .build()?;
+            Ok(LogicalPlanBuilder::from(relation_locations)
+                .union(property_locations)?
+                .build()?)
+        }
+        ResultRole::Paths | ResultRole::PatternBindings
+            if completed.schema.field_with_name("fact_id").is_ok() =>
+        {
+            let facts = CompletedBlock {
+                role: ResultRole::Facts,
+                schema: Arc::clone(&completed.schema),
+                batches: completed.batches.clone(),
+                values: completed.values.clone(),
+                completeness: completed.completeness,
+            };
+            Box::pin(source_locator_plan(session, dependency_id, &facts)).await
+        }
+        ResultRole::Paths
+        | ResultRole::PatternBindings
+        | ResultRole::Groups
+        | ResultRole::Summary
+        | ResultRole::SourceContexts => Err(phase_error(
+            "QUERY_CONTEXT_INPUT_UNLOCATABLE",
+            "semantic_binding",
+            dependency_id,
+            "input role has no source-locatable entity or fact witness",
+        )),
+    }
+}
+
+async fn compile_runtime_source_context(
+    session: &ServingQuerySession,
+    block: &BoundQueryBlock,
+    handling: SourceTextHandling,
+    completed: &BTreeMap<String, CompletedBlock>,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let mut locators = Vec::new();
+    for dependency in &block.typed.dependencies {
+        let result = completed.get(dependency).ok_or_else(|| {
+            phase_error(
+                "QUERY_DEPENDENCY_NOT_READY",
+                "execution",
+                &block.typed.source_pointer,
+                format!("dependency {dependency} has no completed Arrow result"),
+            )
+        })?;
+        locators.push(source_locator_plan(session, dependency, result).await?);
+    }
+    let mut locators = locators.into_iter();
+    let first = locators.next().ok_or_else(|| {
+        phase_error(
+            "QUERY_CONTEXT_INPUT_REQUIRED",
+            "execution",
+            &block.typed.source_pointer,
+            "source-context request has no resolved input",
+        )
+    })?;
+    let locator = locators.try_fold(first, |left, right| {
+        Ok::<_, SemanticQueryError>(LogicalPlanBuilder::from(left).union(right)?.build()?)
+    })?;
+    let files = LogicalPlanBuilder::from(session.table_plan("files").await?)
+        .alias("source_file")?
+        .build()?;
+    let source_bytes = match handling {
+        SourceTextHandling::ExactBytes => col("source_file.source_bytes"),
+        SourceTextHandling::Omit | SourceTextHandling::DecodedText => {
+            lit(ScalarValue::Binary(None))
+        }
+    };
+    let decoded_text = match handling {
+        SourceTextHandling::DecodedText => col("source_file.decoded_text"),
+        SourceTextHandling::Omit | SourceTextHandling::ExactBytes => lit(ScalarValue::Utf8(None)),
+    };
+    let builder = LogicalPlanBuilder::from(locator)
+        .alias("locator")?
+        .join_on(
+            files,
+            JoinType::Inner,
+            [col("locator.file_id").eq(col("source_file.file_id"))],
+        )?
+        .filter(
+            col("locator.span_start")
+                .gt_eq(lit(0_i64))
+                .and(col("locator.span_end").gt_eq(col("locator.span_start")))
+                .and(col("locator.span_end").lt_eq(col("source_file.byte_len"))),
+        )?
+        .project(vec![
+            col("source_file.file_id").alias("source_file_id"),
+            col("source_file.path_display").alias("source_file_path"),
+            col("locator.span_start"),
+            col("locator.span_end"),
+            col("source_file.source_digest"),
+            source_bytes.alias("source_bytes"),
+            decoded_text.alias("decoded_text"),
+            col("locator.origin_query_id"),
+        ])?
+        .distinct()?;
+    bounded_plan(builder, &block.typed.canonical_order, block.typed.limit)
+}
+
+async fn runtime_relational_plan(
+    session: &ServingQuerySession,
+    block: &BoundQueryBlock,
+    query: &SemanticQueryClause,
+    plan: &RelationalOperatorPlan,
+    completed: &BTreeMap<String, CompletedBlock>,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let runtime_plan = match &plan.runtime {
+        RelationalRuntime::Snapshot => plan.template_plan.clone(),
+        RelationalRuntime::Combine {
+            operation,
+            identity_role,
+        } => compile_runtime_combine(block, *operation, *identity_role, completed)?,
+        RelationalRuntime::Summarize {
+            summary_names,
+            group_by,
+        } => compile_runtime_summary(block, query, summary_names, group_by, completed)?,
+        RelationalRuntime::SourceContext { text_handling, .. } => {
+            compile_runtime_source_context(session, block, *text_handling, completed).await?
+        }
+    };
+    session
+        .validate_query_plan(&runtime_plan)
+        .map_err(|error| {
+            phase_error(
+                "QUERY_PLAN_POLICY_REJECTED",
+                "structural_policy",
+                &block.typed.source_pointer,
+                error.to_string(),
+            )
+        })?;
+    Ok(runtime_plan)
 }
 
 #[derive(Debug)]
@@ -1242,7 +2566,7 @@ fn shortest_path(
 fn graph_inputs(
     query: &SemanticQueryClause,
     dependencies: &[String],
-    completed: &BTreeMap<String, BlockValues>,
+    completed: &BTreeMap<String, CompletedBlock>,
 ) -> BlockValues {
     let mut values = BlockValues::default();
     values
@@ -1253,13 +2577,13 @@ fn graph_inputs(
         .extend(query.direct_fact_ids().into_iter().map(str::to_owned));
     for dependency in dependencies {
         if let Some(produced) = completed.get(dependency) {
-            values.entity_ids.extend(produced.entity_ids.clone());
-            values.fact_ids.extend(produced.fact_ids.clone());
-            values.path_ids.extend(produced.path_ids.clone());
-            values.group_ids.extend(produced.group_ids.clone());
+            values.entity_ids.extend(produced.values.entity_ids.clone());
+            values.fact_ids.extend(produced.values.fact_ids.clone());
+            values.path_ids.extend(produced.values.path_ids.clone());
+            values.group_ids.extend(produced.values.group_ids.clone());
             values
                 .source_context_ids
-                .extend(produced.source_context_ids.clone());
+                .extend(produced.values.source_context_ids.clone());
         }
     }
     values.entity_ids.sort();
@@ -1510,7 +2834,8 @@ pub async fn execute_request_in_context(
     let mut facts = BTreeMap::new();
     let mut paths = BTreeMap::new();
     let mut groups = BTreeMap::new();
-    let mut completed = BTreeMap::<String, BlockValues>::new();
+    let mut source_contexts = BTreeMap::new();
+    let mut completed = BTreeMap::<String, CompletedBlock>::new();
     let context_ids = manifest
         .body
         .contexts
@@ -1555,56 +2880,91 @@ pub async fn execute_request_in_context(
             output_row_count,
             result_checksum,
             notices,
+            output_batches,
+            output_schema,
         ) = match &block.operator {
-            BoundOperator::Relational {
-                table,
-                identity_column,
-                plan,
-            } => {
+            BoundOperator::Relational(plan_spec) => {
+                let plan =
+                    runtime_relational_plan(session, block, query, plan_spec, &completed).await?;
+                let output_schema = Arc::new(plan.schema().as_arrow().clone());
                 let result = session
-                    .query_plan_in_execution(&block.typed.block_id, plan.clone(), &execution)
+                    .query_plan_in_execution(&block.typed.block_id, plan, &execution)
                     .await?;
                 plan_artifacts.push(result.artifact.clone());
                 let produced_rows = result.artifact.output_row_count;
-                let mut ids = response_ids(&result.batches, query.form())?;
+                let output_batches = limited_batches(&result.batches, block.typed.limit.first);
                 let limit_reached = produced_rows > block.typed.limit.first;
-                ids.truncate(block.typed.limit.first);
-                let output_row_count = ids.len();
-                let result_checksum = b3(ids.join("\0").as_bytes());
-                let mut values = BlockValues::default();
-                match query.form() {
-                    QueryForm::FindEntities => values.entity_ids = ids,
-                    QueryForm::RetrieveFacts | QueryForm::FollowRelationships => {
-                        values.fact_ids = ids;
-                    }
-                    _ => unreachable!("graph form cannot own a relational plan"),
+                let output_row_count = output_batches.iter().map(RecordBatch::num_rows).sum();
+                let values = relational_response_values(&output_batches, query.form())?;
+                let mut checksum_material = Vec::new();
+                for batch in &output_batches {
+                    checksum_material.extend_from_slice(
+                        &crate::fabric::batch_checksum(batch).map_err(|error| {
+                            phase_error(
+                                "QUERY_OUTPUT_CHECKSUM_FAILED",
+                                "response_verification",
+                                &block.typed.source_pointer,
+                                error.to_string(),
+                            )
+                        })?,
+                    );
+                }
+                let table_coverage = if plan_spec.source_tables.is_empty() {
+                    "query-local-arrow".to_owned()
+                } else {
+                    plan_spec.source_tables.join(",")
+                };
+                let dependency_indeterminate = block.typed.dependencies.iter().any(|dependency| {
+                    completed.get(dependency).is_some_and(|result| {
+                        result.completeness == CompletenessState::Indeterminate
+                    })
+                });
+                let completeness = if dependency_indeterminate || output_row_count == 0 {
+                    CompletenessState::Indeterminate
+                } else if limit_reached {
+                    CompletenessState::Partial
+                } else {
+                    CompletenessState::Complete
+                };
+                let mut coverage = BTreeMap::from([
+                    (
+                        "returned_rows".to_owned(),
+                        u64::try_from(output_row_count).unwrap_or(u64::MAX),
+                    ),
+                    ("native_datafusion_plan".to_owned(), 1),
+                    (
+                        format!(
+                            "tables:{table_coverage}:column:{}",
+                            plan_spec.identity_column
+                        ),
+                        u64::try_from(produced_rows).unwrap_or(u64::MAX),
+                    ),
+                    ("negative_proof_available".to_owned(), 0),
+                ]);
+                if output_row_count == 0 {
+                    coverage.insert("empty_result".to_owned(), 1);
                 }
                 (
                     values,
-                    BTreeMap::from([
-                        (
-                            "returned_rows".to_owned(),
-                            u64::try_from(output_row_count).unwrap_or(u64::MAX),
-                        ),
-                        ("native_datafusion_plan".to_owned(), 1),
-                        (
-                            format!("table:{table}:column:{identity_column}"),
-                            u64::try_from(produced_rows).unwrap_or(u64::MAX),
-                        ),
-                    ]),
-                    if limit_reached {
-                        CompletenessState::Partial
-                    } else {
-                        CompletenessState::Complete
-                    },
+                    coverage,
+                    completeness,
                     if limit_reached {
                         LimitState::ExplicitLimitReached
                     } else {
                         LimitState::NotApplied
                     },
                     output_row_count,
-                    result_checksum,
-                    Vec::new(),
+                    b3(&checksum_material),
+                    if completeness == CompletenessState::Indeterminate {
+                        vec![
+                            "empty or dependency-limited relational result is not proof of absence"
+                                .to_owned(),
+                        ]
+                    } else {
+                        Vec::new()
+                    },
+                    output_batches,
+                    output_schema,
                 )
             }
             BoundOperator::Graph(plan) => {
@@ -1640,6 +3000,8 @@ pub async fn execute_request_in_context(
                     output_row_count,
                     b3(&checksums),
                     notices,
+                    executed.batches,
+                    Arc::clone(&plan.output_schema),
                 )
             }
         };
@@ -1667,19 +3029,20 @@ pub async fn execute_request_in_context(
                 BTreeMap::from([("group_id".to_owned(), group_id.clone())]),
             );
         }
-        let phrase = resolve_phrase(query.form(), query.label())?;
+        for source_context_id in &values.source_context_ids {
+            source_contexts.insert(
+                source_context_id.clone(),
+                BTreeMap::from([("source_context_id".to_owned(), source_context_id.clone())]),
+            );
+        }
         let mut resolved_semantics = match &block.operator {
-            BoundOperator::Relational {
-                table,
-                identity_column,
-                ..
-            } => BTreeMap::from([
+            BoundOperator::Relational(plan) => BTreeMap::from([
                 (
                     "operator_family".to_owned(),
                     "datafusion-relational".to_owned(),
                 ),
-                ("table".to_owned(), (*table).to_owned()),
-                ("order_key".to_owned(), (*identity_column).to_owned()),
+                ("tables".to_owned(), plan.source_tables.join(",")),
+                ("order_key".to_owned(), plan.identity_column.to_owned()),
             ]),
             BoundOperator::Graph(plan) => BTreeMap::from([
                 ("operator_family".to_owned(), "application-graph".to_owned()),
@@ -1689,11 +3052,26 @@ pub async fn execute_request_in_context(
                 ),
             ]),
         };
-        if let Some(phrase) = phrase {
-            resolved_semantics.insert("phrase_id".to_owned(), phrase.phrase_id.to_owned());
+        if !block.typed.resolved_phrases.is_empty() {
             resolved_semantics.insert(
-                "canonical_phrase".to_owned(),
-                phrase.canonical_text.to_owned(),
+                "phrase_ids".to_owned(),
+                block
+                    .typed
+                    .resolved_phrases
+                    .iter()
+                    .map(|phrase| phrase.phrase_id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            resolved_semantics.insert(
+                "projection_ids".to_owned(),
+                block
+                    .typed
+                    .resolved_phrases
+                    .iter()
+                    .map(|phrase| phrase.contract_code.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
             );
         }
         results.push(QueryResultRecord {
@@ -1725,30 +3103,18 @@ pub async fn execute_request_in_context(
             output_row_count,
             result_checksum,
         });
-        completed.insert(block_id.clone(), values);
+        completed.insert(
+            block_id.clone(),
+            CompletedBlock {
+                role: block.typed.output_role,
+                schema: output_schema,
+                batches: output_batches,
+                values,
+                completeness: completeness_state,
+            },
+        );
     }
     let snapshot = snapshot_response(&manifest, freshness);
-    let source_contexts = manifest
-        .body
-        .contexts
-        .records
-        .iter()
-        .map(|record| {
-            (
-                record.analysis_context_id.clone(),
-                BTreeMap::from([
-                    (
-                        "analysis_context_id".to_owned(),
-                        record.analysis_context_id.clone(),
-                    ),
-                    (
-                        "context_manifest_digest".to_owned(),
-                        record.context_manifest_digest.clone(),
-                    ),
-                ]),
-            )
-        })
-        .collect();
     let aggregate_limit = if results
         .iter()
         .any(|result| result.limit_state == LimitState::ExplicitLimitReached)
@@ -1806,54 +3172,245 @@ pub async fn execute_request_in_context(
     })
 }
 
-fn response_ids(
-    batches: &[arrow_array::RecordBatch],
-    form: QueryForm,
-) -> Result<Vec<String>, SemanticQueryError> {
-    let column_name = form.order_key()?;
-    let (domain, kind_slug) = match form {
-        QueryForm::FindEntities => (crate::identity::IdentityDomain::Entity, "unknown"),
-        QueryForm::RetrieveFacts => (crate::identity::IdentityDomain::PropertyFact, "property"),
-        QueryForm::FollowRelationships => {
-            (crate::identity::IdentityDomain::RelationFact, "relation")
-        }
-        _ => {
-            return Err(SemanticQueryError::Invalid(
-                "inactive query form reached response decoding".to_owned(),
-            ));
-        }
-    };
-    let mut ids = Vec::new();
+fn limited_batches(batches: &[RecordBatch], maximum_rows: usize) -> Vec<RecordBatch> {
+    let mut remaining = maximum_rows;
+    let mut selected = Vec::new();
     for batch in batches {
-        let index = batch
-            .schema()
-            .index_of(column_name)
-            .map_err(|_| SemanticQueryError::Invalid("result identity column is absent".into()))?;
-        let values = batch
-            .column(index)
-            .as_any()
-            .downcast_ref::<FixedSizeBinaryArray>()
-            .ok_or_else(|| {
-                SemanticQueryError::Invalid("result identity column is not Id16".into())
-            })?;
-        for row in 0..values.len() {
-            if values.is_null(row) || values.value(row).len() != 16 {
-                return Err(SemanticQueryError::Invalid(
-                    "result identity is null or has invalid width".into(),
-                ));
+        if remaining == 0 {
+            break;
+        }
+        let rows = remaining.min(batch.num_rows());
+        selected.push(batch.slice(0, rows));
+        remaining -= rows;
+    }
+    selected
+}
+
+fn fixed_id_at(
+    batch: &RecordBatch,
+    column_name: &str,
+    row: usize,
+) -> Result<[u8; 16], SemanticQueryError> {
+    let index = batch.schema().index_of(column_name).map_err(|_| {
+        phase_error(
+            "QUERY_OUTPUT_SCHEMA_MISMATCH",
+            "response_verification",
+            column_name,
+            "result identity column is absent",
+        )
+    })?;
+    let values = batch
+        .column(index)
+        .as_any()
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .ok_or_else(|| {
+            phase_error(
+                "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                "response_verification",
+                column_name,
+                "result identity column is not Id16",
+            )
+        })?;
+    if values.is_null(row) || values.value(row).len() != 16 {
+        return Err(phase_error(
+            "QUERY_OUTPUT_IDENTITY_INVALID",
+            "response_verification",
+            column_name,
+            "result identity is null or has invalid width",
+        ));
+    }
+    values.value(row).try_into().map_err(|_| {
+        phase_error(
+            "QUERY_OUTPUT_IDENTITY_INVALID",
+            "response_verification",
+            column_name,
+            "result identity has invalid width",
+        )
+    })
+}
+
+fn encode_result_id(
+    domain: crate::identity::IdentityDomain,
+    kind_slug: Option<&str>,
+    raw: [u8; 16],
+) -> Result<String, SemanticQueryError> {
+    crate::identity::encode_public_id(domain, kind_slug, raw).map_err(|error| {
+        phase_error(
+            "QUERY_OUTPUT_IDENTITY_INVALID",
+            "response_verification",
+            "",
+            error.to_string(),
+        )
+    })
+}
+
+#[allow(clippy::too_many_lines)] // Exhaustive response verification keeps every form/domain pairing fail-closed.
+fn relational_response_values(
+    batches: &[RecordBatch],
+    form: QueryForm,
+) -> Result<BlockValues, SemanticQueryError> {
+    let mut output = BlockValues::default();
+    for batch in batches {
+        for row in 0..batch.num_rows() {
+            match form {
+                QueryForm::FindEntities => output.entity_ids.push(encode_result_id(
+                    crate::identity::IdentityDomain::Entity,
+                    Some("unknown"),
+                    fixed_id_at(batch, "entity_id", row)?,
+                )?),
+                QueryForm::RetrieveFacts => {
+                    let class_index = batch.schema().index_of("fact_class").map_err(|_| {
+                        phase_error(
+                            "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                            "response_verification",
+                            "fact_class",
+                            "fact result omits its identity domain discriminator",
+                        )
+                    })?;
+                    let classes = batch
+                        .column(class_index)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .ok_or_else(|| {
+                            phase_error(
+                                "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                                "response_verification",
+                                "fact_class",
+                                "fact class is not Utf8",
+                            )
+                        })?;
+                    let (domain, kind) = match classes.value(row) {
+                        "relation" => (crate::identity::IdentityDomain::RelationFact, "relation"),
+                        "property" => (crate::identity::IdentityDomain::PropertyFact, "property"),
+                        _ => {
+                            return Err(phase_error(
+                                "QUERY_OUTPUT_IDENTITY_INVALID",
+                                "response_verification",
+                                "fact_class",
+                                "fact class is outside the governed identity domains",
+                            ));
+                        }
+                    };
+                    output.fact_ids.push(encode_result_id(
+                        domain,
+                        Some(kind),
+                        fixed_id_at(batch, "fact_id", row)?,
+                    )?);
+                }
+                QueryForm::CombineResults => output.group_ids.push(encode_result_id(
+                    crate::identity::IdentityDomain::ResultArtifact,
+                    None,
+                    fixed_id_at(batch, "group_key", row)?,
+                )?),
+                QueryForm::SummarizeFacts => {
+                    let group_index = batch.schema().index_of("group_key").map_err(|_| {
+                        phase_error(
+                            "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                            "response_verification",
+                            "group_key",
+                            "summary group key is absent",
+                        )
+                    })?;
+                    let groups = batch
+                        .column(group_index)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .ok_or_else(|| {
+                            phase_error(
+                                "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                                "response_verification",
+                                "group_key",
+                                "summary group key is not Utf8",
+                            )
+                        })?;
+                    let (raw, public) = graph_result_identity(
+                        form,
+                        &[groups.value(row).as_bytes(), row.to_string().as_bytes()],
+                    );
+                    let _ = raw;
+                    output.group_ids.push(public);
+                }
+                QueryForm::RetrieveSourceContext => {
+                    let file = fixed_id_at(batch, "source_file_id", row)?;
+                    let start_index = batch.schema().index_of("span_start").map_err(|_| {
+                        phase_error(
+                            "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                            "response_verification",
+                            "span_start",
+                            "source context start is absent",
+                        )
+                    })?;
+                    let end_index = batch.schema().index_of("span_end").map_err(|_| {
+                        phase_error(
+                            "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                            "response_verification",
+                            "span_end",
+                            "source context end is absent",
+                        )
+                    })?;
+                    let starts = batch
+                        .column(start_index)
+                        .as_any()
+                        .downcast_ref::<arrow_array::Int64Array>()
+                        .ok_or_else(|| {
+                            phase_error(
+                                "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                                "response_verification",
+                                "span_start",
+                                "span start is not Int64",
+                            )
+                        })?;
+                    let ends = batch
+                        .column(end_index)
+                        .as_any()
+                        .downcast_ref::<arrow_array::Int64Array>()
+                        .ok_or_else(|| {
+                            phase_error(
+                                "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                                "response_verification",
+                                "span_end",
+                                "span end is not Int64",
+                            )
+                        })?;
+                    let bytes = [
+                        file.as_slice(),
+                        starts.value(row).to_be_bytes().as_slice(),
+                        ends.value(row).to_be_bytes().as_slice(),
+                    ]
+                    .concat();
+                    let mut fingerprint = crate::identity::semantic_fingerprint(
+                        crate::identity::SemanticFingerprintDomain::QueryResultValueV1,
+                    );
+                    fingerprint.update(&bytes);
+                    let digest = fingerprint.finalize();
+                    let mut raw = [0_u8; 16];
+                    raw.copy_from_slice(&digest[..16]);
+                    output.source_context_ids.push(encode_result_id(
+                        crate::identity::IdentityDomain::SourceContext,
+                        None,
+                        raw,
+                    )?);
+                }
+                QueryForm::FollowRelationships | QueryForm::FindPaths | QueryForm::MatchPattern => {
+                    return Err(phase_error(
+                        "QUERY_FORM_COMPILER_MISMATCH",
+                        "response_verification",
+                        "",
+                        "graph form reached relational response verification",
+                    ));
+                }
             }
-            let raw: [u8; 16] = values.value(row).try_into().map_err(|_| {
-                SemanticQueryError::Invalid("result identity has invalid width".into())
-            })?;
-            ids.push(
-                crate::identity::encode_public_id(domain, Some(kind_slug), raw)
-                    .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
-            );
         }
     }
-    ids.sort();
-    ids.dedup();
-    Ok(ids)
+    output.entity_ids.sort();
+    output.entity_ids.dedup();
+    output.fact_ids.sort();
+    output.fact_ids.dedup();
+    output.group_ids.sort();
+    output.group_ids.dedup();
+    output.source_context_ids.sort();
+    output.source_context_ids.dedup();
+    Ok(output)
 }
 
 pub(crate) fn snapshot_response(
@@ -1962,15 +3519,6 @@ mod tests {
         .unwrap()
     }
 
-    fn public_fact(byte: u8) -> String {
-        crate::identity::encode_public_id(
-            crate::identity::IdentityDomain::RelationFact,
-            Some("relation"),
-            [byte; 16],
-        )
-        .unwrap()
-    }
-
     fn eight_form_request() -> Vec<u8> {
         canonicalize_value(&serde_json::json!({
             "specification": SPECIFICATION,
@@ -1980,12 +3528,12 @@ mod tests {
             "freshness_policy": "best_available_snapshot",
             "queries": [
                 {"query_id":"entities","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":10}}},
-                {"query_id":"properties","request":"retrieve facts about code","label":null,"about":[{"results_of":"entities","select":"entities"}],"facts":["declared properties"],"return":{"limit":{"maximum_results":10}}},
-                {"query_id":"relations","request":"follow code relationships","label":null,"starting_from":[{"results_of":"entities","select":"entities"}],"relationship":"outgoing fact relationships","return":{"limit":{"maximum_results":10}}},
-                {"query_id":"paths","request":"find connecting fact paths","label":null,"starting_from":[{"results_of":"entities","select":"entities"}],"ending_at":["matching destination entities"],"through":["relation facts"],"path_policy":"one shortest witness path","maximum_length":4,"return":{"limit":{"maximum_results":10}}},
-                {"query_id":"patterns","request":"match a code fact pattern","label":null,"bindings":[{"name":"source","looking_for":"code entities","within":{"results_of":"entities","select":"entities"}}],"relationships":[],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"properties","request":"retrieve facts about code","label":null,"about":[{"results_of":"entities","select":"entities"}],"facts":["callable contracts"],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"relations","request":"follow code relationships","label":null,"starting_from":[{"results_of":"entities","select":"entities"}],"relationship":"call targets","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"paths","request":"find connecting fact paths","label":null,"starting_from":[{"results_of":"entities","select":"entities"}],"ending_at":["matching destination entities"],"through":["control flow"],"path_policy":"one shortest witness path","maximum_length":4,"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"patterns","request":"match a code fact pattern","label":null,"bindings":[{"name":"source","looking_for":"syntax nodes","within":{"results_of":"entities","select":"entities"}}],"relationships":[],"return":{"limit":{"maximum_results":10}}},
                 {"query_id":"combined","request":"combine result sets","label":null,"inputs":[{"results_of":"properties","select":"facts"},{"results_of":"relations","select":"facts"}],"combination":"union by fact identity","return":{"limit":{"maximum_results":10}}},
-                {"query_id":"summary","request":"summarize objective facts","label":null,"input":[{"results_of":"combined","select":"groups"}],"summaries":["count facts by kind"],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"summary","request":"summarize objective facts","label":null,"input":[{"results_of":"combined","select":"groups"}],"summaries":["graph metrics"],"return":{"limit":{"maximum_results":10}}},
                 {"query_id":"context","request":"retrieve source and syntax context","label":null,"for":[{"results_of":"paths","select":"paths"}],"context":["source location"],"return":{"limit":{"maximum_results":10}}}
             ],
             "response_projection": {"canonical_semantic_identity":true,"coverage":true},
@@ -2027,8 +3575,8 @@ mod tests {
           "freshness_policy":"best_available_snapshot",
           "queries":[
             {"query_id":"q1","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":10}}},
-            {"query_id":"q2","request":"retrieve facts about code","label":null,"about":[{"results_of":"q1","select":"entities"}],"facts":["declared properties"],"return":{"limit":{"maximum_results":10}}},
-            {"query_id":"q3","request":"follow code relationships","label":null,"starting_from":[{"results_of":"q1","select":"entities"}],"relationship":"outgoing fact relationships","return":{"limit":{"maximum_results":10}}}
+            {"query_id":"q2","request":"retrieve facts about code","label":null,"about":[{"results_of":"q1","select":"entities"}],"facts":["callable contracts"],"return":{"limit":{"maximum_results":10}}},
+            {"query_id":"q3","request":"follow code relationships","label":null,"starting_from":[{"results_of":"q1","select":"entities"}],"relationship":"call targets","return":{"limit":{"maximum_results":10}}}
           ],
           "response_projection":null,
           "cost_budget":{"maximum_rows":30}
@@ -2036,11 +3584,108 @@ mod tests {
         .to_vec()
     }
 
+    fn relational_request() -> Vec<u8> {
+        canonicalize_value(&serde_json::json!({
+            "specification": SPECIFICATION,
+            "version": VERSION,
+            "semantic_request_id": "wp02-relational",
+            "workspace_id": "workspace:00000000000000000000000000000000",
+            "freshness_policy": "best_available_snapshot",
+            "queries": [
+                {"query_id":"entities-a","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"entities-b","request":"find code entities","label":null,"looking_for":"semantic symbols","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"facts-a","request":"retrieve facts about code","label":null,"about":[{"results_of":"entities-a","select":"entities"}],"facts":["callable contracts"],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"facts-b","request":"retrieve facts about code","label":null,"about":[{"results_of":"entities-b","select":"entities"}],"facts":["callable contracts"],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"combined","request":"combine result sets","label":null,"inputs":[{"results_of":"facts-a","select":"facts"},{"results_of":"facts-b","select":"facts"}],"combination":"union by fact identity","identity":"fact identity","preserve_origin":"all origins","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"summary","request":"summarize objective facts","label":null,"input":[{"results_of":"combined","select":"groups"}],"summaries":["graph metrics"],"include_support":"fact identities","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"context","request":"retrieve source and syntax context","label":null,"for":[{"results_of":"facts-a","select":"facts"}],"context":["source location","exact span"],"text_handling":"omit text","return":{"limit":{"maximum_results":10}}}
+            ],
+            "response_projection": {"canonical_semantic_identity":true,"coverage":true},
+            "cost_budget": {"maximum_rows":70}
+        }))
+        .unwrap()
+    }
+
     #[test]
     fn wp38_behavioral_acceptance() {
         let validated = validate_request(&request()).unwrap();
         assert_eq!(validated.request.queries.len(), 3);
         assert!(validated.request_digest.starts_with("b3:"));
+    }
+
+    #[test]
+    fn semantic_query_relational_policy_and_absence() {
+        let typed = validate_request(&relational_request()).unwrap();
+        assert_eq!(
+            typed
+                .blocks
+                .iter()
+                .map(|block| block.form)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                QueryForm::FindEntities,
+                QueryForm::RetrieveFacts,
+                QueryForm::CombineResults,
+                QueryForm::SummarizeFacts,
+                QueryForm::RetrieveSourceContext,
+            ])
+        );
+
+        let mut unknown: serde_json::Value = serde_json::from_slice(&relational_request()).unwrap();
+        unknown["queries"][0]["looking_for"] = serde_json::json!("guessed entities");
+        let error = validate_request(&canonicalize_value(&unknown).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("semantic_binding"));
+        assert!(error.to_string().contains("/queries/0/looking_for"));
+
+        let mut mixed: serde_json::Value = serde_json::from_slice(&relational_request()).unwrap();
+        mixed["queries"][4]["inputs"][0]["select"] = serde_json::json!("entities");
+        mixed["queries"][4]["inputs"][0]["results_of"] = serde_json::json!("entities-a");
+        let mixed = validate_request(&canonicalize_value(&mixed).unwrap()).unwrap();
+        let block = mixed
+            .blocks
+            .iter()
+            .find(|block| block.form == QueryForm::CombineResults)
+            .unwrap();
+        let query = mixed
+            .request
+            .queries
+            .iter()
+            .find(|query| query.form() == QueryForm::CombineResults)
+            .unwrap();
+        let error = compile_combine_template(block, query).unwrap_err();
+        assert!(error.to_string().contains("QUERY_IDENTITY_DOMAIN_MISMATCH"));
+
+        let mut uncovered: serde_json::Value =
+            serde_json::from_slice(&relational_request()).unwrap();
+        uncovered["queries"][0]["where"] = serde_json::json!(["there are no callers"]);
+        let error = validate_request(&canonicalize_value(&uncovered).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("structural_policy"));
+    }
+
+    #[test]
+    fn semantic_query_relational_operational_gate() {
+        let typed = validate_request(&relational_request()).unwrap();
+        assert!(require_registered_executors(&typed).is_ok());
+        let registered = QUERY_FORM_VALUES
+            .iter()
+            .filter_map(|entry| QueryForm::try_from(entry.code).ok())
+            .filter(|form| form.executor_registered())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            registered,
+            BTreeSet::from([
+                QueryForm::FindEntities,
+                QueryForm::RetrieveFacts,
+                QueryForm::CombineResults,
+                QueryForm::SummarizeFacts,
+                QueryForm::RetrieveSourceContext,
+            ])
+        );
+        assert!(typed.blocks.iter().all(|block| {
+            !block.canonical_order.is_empty()
+                && block.cancellation_required
+                && block.maximum_memory_bytes > 0
+        }));
     }
 
     #[test]
@@ -2122,7 +3767,7 @@ mod tests {
         assert_eq!(ending_at.len(), 1);
         assert_eq!(
             through.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["relation facts"]
+            ["control flow"]
         );
         assert_eq!(path_policy, "one shortest witness path");
         assert_eq!(*maximum_length, Some(4));
@@ -2147,10 +3792,22 @@ mod tests {
     fn query_form_contract_operational_gate() {
         let typed = validate_request(&eight_form_request()).unwrap();
         assert!(require_registered_executors(&typed).is_err());
+        assert_eq!(
+            typed
+                .blocks
+                .iter()
+                .filter(|block| block.form.executor_registered())
+                .count(),
+            5
+        );
         assert!(
             typed
                 .blocks
                 .iter()
+                .filter(|block| matches!(
+                    block.form,
+                    QueryForm::FollowRelationships | QueryForm::FindPaths | QueryForm::MatchPattern
+                ))
                 .all(|block| !block.form.executor_registered())
         );
     }
@@ -2171,8 +3828,8 @@ mod tests {
             .replace("\"maximum_rows\":30", "\"maximum_rows\":29");
         assert!(validate_request(over_budget.as_bytes()).is_err());
         let incompatible_phrase = String::from_utf8(request()).unwrap().replace(
-            "\"query_id\":\"q1\",\"request\":\"find code entities\",\"label\":null",
-            "\"query_id\":\"q1\",\"request\":\"find code entities\",\"label\":\"call targets\"",
+            "\"looking_for\":\"syntax nodes\"",
+            "\"looking_for\":\"call targets\"",
         );
         assert!(validate_request(incompatible_phrase.as_bytes()).is_err());
     }
@@ -2227,7 +3884,16 @@ mod tests {
         assert_eq!(typed.blocks.len(), 3);
         assert_eq!(typed.blocks[0].form, QueryForm::FindEntities);
         assert_eq!(typed.blocks[0].output_role, ResultRole::Entities);
-        assert_eq!(typed.blocks[0].canonical_order, ["entity_id"]);
+        assert_eq!(
+            typed.blocks[0].canonical_order,
+            [
+                "source_file_path",
+                "span_start",
+                "semantic_kind",
+                "qualified_name",
+                "entity_id"
+            ]
+        );
         let SemanticQueryClause::FindEntities {
             where_conditions, ..
         } = &typed.request.queries[0]
@@ -2338,38 +4004,16 @@ mod tests {
         .unwrap();
         assert_eq!(patterns.values.group_ids.len(), 2);
 
-        let combined = execute_graph_operator(
-            &graph_plan(&typed, QueryForm::CombineResults),
-            &BlockValues {
-                fact_ids: vec![public_fact(0x11), public_fact(0x12)],
-                ..BlockValues::default()
-            },
-            &[],
-            &[],
-            &cancellation,
-        )
-        .unwrap();
-        assert_eq!(combined.values.group_ids.len(), 2);
-
-        let summarized = execute_graph_operator(
-            &graph_plan(&typed, QueryForm::SummarizeFacts),
-            &combined.values,
-            &[],
-            &[],
-            &cancellation,
-        )
-        .unwrap();
-        assert_eq!(summarized.coverage["summarized_values"], 2);
-
-        let source_context = execute_graph_operator(
-            &graph_plan(&typed, QueryForm::RetrieveSourceContext),
-            &paths.values,
-            &[],
-            &["context:03030303030303030303030303030303".to_owned()],
-            &cancellation,
-        )
-        .unwrap();
-        assert_eq!(source_context.values.source_context_ids.len(), 1);
+        assert!(
+            graph_operator_plan(
+                typed
+                    .blocks
+                    .iter()
+                    .find(|block| block.form == QueryForm::CombineResults)
+                    .unwrap()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2387,9 +4031,12 @@ mod tests {
             assert!(block.cancellation_required);
             if matches!(
                 block.form,
-                QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships
+                QueryForm::FindEntities
+                    | QueryForm::RetrieveFacts
+                    | QueryForm::CombineResults
+                    | QueryForm::SummarizeFacts
+                    | QueryForm::RetrieveSourceContext
             ) {
-                assert!(block.form.table().is_ok());
                 assert!(graph_operator_plan(block).is_err());
             } else {
                 let plan = graph_operator_plan(block).unwrap();

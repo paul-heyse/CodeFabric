@@ -2744,19 +2744,31 @@ fn render_rust_runtime_registries(
     }
     output.push_str(
         "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
-         pub struct PhraseEntry { pub phrase_id: &'static str, pub owner_section: u16, pub canonical_text: &'static str, pub accepted_aliases: &'static [&'static str], pub plan_node_kind: &'static str, pub output_role: &'static str }\n\n\
+         pub struct PhraseEntry { pub phrase_id: &'static str, pub owner_section: u16, pub canonical_text: &'static str, pub accepted_aliases: &'static [&'static str], pub plan_node_kind: &'static str, pub output_role: &'static str, pub contract_family: &'static str, pub contract_code: &'static str, pub required_modifiers: &'static [&'static str] }\n\n\
          pub const PHRASE_ENTRIES: &[PhraseEntry] = &[\n",
     );
     for phrase in &phrases {
         writeln!(
             output,
-            "    PhraseEntry {{ phrase_id: {:?}, owner_section: {}, canonical_text: {:?}, accepted_aliases: &{:?}, plan_node_kind: {:?}, output_role: {:?} }},",
+            "    PhraseEntry {{ phrase_id: {:?}, owner_section: {}, canonical_text: {:?}, accepted_aliases: &{:?}, plan_node_kind: {:?}, output_role: {:?}, contract_family: {:?}, contract_code: {:?}, required_modifiers: &{:?} }},",
             phrase.phrase_id,
             phrase.owner_section,
             phrase.canonical_text,
             phrase.accepted_aliases,
             phrase.planspec_mapping.node_kind.as_str(),
             phrase.planspec_mapping.output_role.as_str(),
+            match phrase.contract_reference.family {
+                governed::PhraseReferenceFamily::EntityKind => "entity-kind",
+                governed::PhraseReferenceFamily::FactKind => "fact-kind",
+                governed::PhraseReferenceFamily::RelationKind => "relation-kind",
+                governed::PhraseReferenceFamily::PropertyKind => "property-kind",
+                governed::PhraseReferenceFamily::Projection => "projection",
+                governed::PhraseReferenceFamily::EffectKind => "effect-kind",
+                governed::PhraseReferenceFamily::ResourceKind => "resource-kind",
+                governed::PhraseReferenceFamily::UnknownKind => "unknown-kind",
+            },
+            phrase.contract_reference.code,
+            phrase.required_modifiers,
         )
         .unwrap();
     }

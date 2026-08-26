@@ -192,6 +192,11 @@ query-form-contract-check:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py -k query_form_projection_parity
     just model-repro-check
 
+[doc("Prove the five governed relational QRY forms compile and execute as native DataFusion plans")]
+[group('test')]
+semantic-query-relational-conformance-check:
+    cargo nextest run --locked --lib -E 'test(/(qry_v13_relational_forms_conformance|semantic_query_relational_plan_visibility|semantic_query_relational_policy_and_absence|semantic_query_relational_operational_gate)/)' --no-tests=fail
+
 [doc("Prove parameter-neutral plan identity and partition-independent Arrow result checksums")]
 [group('test')]
 query-determinism-check:

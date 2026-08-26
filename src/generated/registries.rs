@@ -5614,6 +5614,9 @@ pub struct PhraseEntry {
     pub accepted_aliases: &'static [&'static str],
     pub plan_node_kind: &'static str,
     pub output_role: &'static str,
+    pub contract_family: &'static str,
+    pub contract_code: &'static str,
+    pub required_modifiers: &'static [&'static str],
 }
 
 pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
@@ -5624,6 +5627,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["source documents"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "SYNTAX_TREE_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q51_SYNTAX_NODES",
@@ -5632,6 +5638,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["syntax occurrences"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "SYNTAX_TREE_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q52_SEMANTIC_SYMBOLS",
@@ -5640,6 +5649,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["bound symbols"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "SYMBOL_BINDING_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q53_MODULE_DEPENDENCIES",
@@ -5648,6 +5660,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["module imports"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "DEPENDENCY_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q54_SEMANTIC_TYPES",
@@ -5656,6 +5671,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["computed types"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "TYPE_GRAPH_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q55_OBJECT_MEMBERS",
@@ -5664,6 +5682,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["declared members"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "TYPE_GRAPH_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q56_CALLABLE_CONTRACTS",
@@ -5672,6 +5693,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["callable signatures"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "CALL_EXACT_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q57_CALL_TARGETS",
@@ -5680,6 +5704,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["dispatch targets"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "CALL_SOUND_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q58_CONTROL_FLOW",
@@ -5688,6 +5715,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["control paths"],
         plan_node_kind: "find-paths",
         output_role: "path-set",
+        contract_family: "projection",
+        contract_code: "CFG_FULL_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q59_DATA_FLOW",
@@ -5696,6 +5726,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["definition use flow"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "DATAFLOW_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q60_MEMORY_ALIASES",
@@ -5704,6 +5737,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["points to relations"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "ALIAS_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q61_PROGRAM_POINT_STATE",
@@ -5712,6 +5748,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["state at program point"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "DATAFLOW_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q62_EFFECTS",
@@ -5720,6 +5759,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["observable effects"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "EFFECT_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q63_EXCEPTIONAL_FLOW",
@@ -5728,6 +5770,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["exception paths"],
         plan_node_kind: "find-paths",
         output_role: "path-set",
+        contract_family: "projection",
+        contract_code: "CFG_FULL_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q64_RESOURCE_LIFETIMES",
@@ -5736,6 +5781,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["resource actions"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "EFFECT_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q65_CONCURRENCY_EVENTS",
@@ -5744,6 +5792,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["task ordering events"],
         plan_node_kind: "find-paths",
         output_role: "path-set",
+        contract_family: "projection",
+        contract_code: "CONCURRENCY_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q66_CLOSURE_CAPTURES",
@@ -5752,6 +5803,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["captured symbols"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "DATAFLOW_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q67_GENERATED_ORIGINS",
@@ -5760,6 +5814,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["lowered origins"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "SYMBOL_BINDING_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q68_GRAPH_METRICS",
@@ -5768,6 +5825,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["objective graph measures"],
         plan_node_kind: "summarize-facts",
         output_role: "scalar-summary",
+        contract_family: "projection",
+        contract_code: "CFG_FULL_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q69_CALLABLE_SUMMARIES",
@@ -5776,6 +5836,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["interprocedural summaries"],
         plan_node_kind: "summarize-facts",
         output_role: "group-set",
+        contract_family: "projection",
+        contract_code: "CALL_SOUND_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q70_EXPLICIT_UNKNOWNS",
@@ -5784,6 +5847,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["unresolved facts"],
         plan_node_kind: "retrieve-facts",
         output_role: "coverage-proof",
+        contract_family: "projection",
+        contract_code: "SYMBOL_BINDING_V1",
+        required_modifiers: &[],
     },
     PhraseEntry {
         phrase_id: "Q71_PYTHON_BINDINGS",
@@ -5792,6 +5858,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python scopes"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "SYMBOL_BINDING_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q72_PYTHON_TYPES",
@@ -5800,6 +5869,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python inferred types"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "TYPE_GRAPH_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q73_PYTHON_OBJECT_MEMBERS",
@@ -5808,6 +5880,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python descriptors"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "TYPE_GRAPH_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q74_PYTHON_CALL_TARGETS",
@@ -5816,6 +5891,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python dispatch targets"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "CALL_SOUND_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q75_PYTHON_DYNAMIC_SEMANTICS",
@@ -5824,6 +5902,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python dynamic operations"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "EFFECT_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q76_PYTHON_DECORATORS",
@@ -5832,6 +5913,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python decorated entities"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "SYMBOL_BINDING_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q77_PYTHON_PATTERN_MATCHING",
@@ -5840,6 +5924,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python match cases"],
         plan_node_kind: "match-pattern",
         output_role: "binding-table",
+        contract_family: "projection",
+        contract_code: "SYNTAX_TREE_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q78_PYTHON_COMPREHENSIONS",
@@ -5848,6 +5935,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python comprehension scopes"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "SYNTAX_TREE_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q79_PYTHON_CONTEXT_MANAGERS",
@@ -5856,6 +5946,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python with statements"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "EFFECT_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q80_PYTHON_ASYNC_GENERATORS",
@@ -5864,6 +5957,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Python coroutine generators"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "CONCURRENCY_V1",
+        required_modifiers: &["python"],
     },
     PhraseEntry {
         phrase_id: "Q81_RUST_SEMANTIC_ITEMS",
@@ -5872,6 +5968,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust source items"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "SYMBOL_BINDING_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q82_RUST_GENERICS",
@@ -5880,6 +5979,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust generic parameters"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "TYPE_GRAPH_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q83_RUST_TYPE_ADJUSTMENTS",
@@ -5888,6 +5990,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust coercions"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "TYPE_GRAPH_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q84_RUST_MIR_STRUCTURE",
@@ -5896,6 +6001,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust MIR bodies"],
         plan_node_kind: "find-entities",
         output_role: "entity-set",
+        contract_family: "projection",
+        contract_code: "CFG_FULL_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q85_RUST_PLACE_PROJECTIONS",
@@ -5904,6 +6012,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust MIR places"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "ALIAS_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q86_RUST_MIR_TRANSITIONS",
@@ -5912,6 +6023,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust MIR state changes"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "DATAFLOW_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q87_RUST_OWNERSHIP_LOANS",
@@ -5920,6 +6034,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust borrow loans"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "OWNERSHIP_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q88_RUST_EXECUTABLE_INSTANCES",
@@ -5928,6 +6045,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust monomorphic calls"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "CALL_EXACT_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q89_RUST_TRAIT_DISPATCH",
@@ -5936,6 +6056,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust implementation dispatch"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "TYPE_GRAPH_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q90_RUST_MACRO_EXPANSIONS",
@@ -5944,6 +6067,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust expanded origins"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "SYMBOL_BINDING_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q91_RUST_DROP_BEHAVIOR",
@@ -5952,6 +6078,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust destruction effects"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "EFFECT_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q92_RUST_COROUTINE_LOWERING",
@@ -5960,6 +6089,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust async lowering"],
         plan_node_kind: "follow-relationships",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "CFG_FULL_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q93_RUST_UNSAFE_FFI",
@@ -5968,6 +6100,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust foreign operations"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "EFFECT_V1",
+        required_modifiers: &["rust"],
     },
     PhraseEntry {
         phrase_id: "Q94_RUST_COMPILE_TIME_VALUES",
@@ -5976,6 +6111,9 @@ pub const PHRASE_ENTRIES: &[PhraseEntry] = &[
         accepted_aliases: &["Rust constants and statics"],
         plan_node_kind: "retrieve-facts",
         output_role: "fact-set",
+        contract_family: "projection",
+        contract_code: "DATAFLOW_V1",
+        required_modifiers: &["rust"],
     },
 ];
 

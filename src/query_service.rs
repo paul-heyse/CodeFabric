@@ -2122,9 +2122,6 @@ mod tests {
             vec![
                 "find code entities",
                 "retrieve facts about code",
-                "follow code relationships",
-                "find connecting fact paths",
-                "match a code fact pattern",
                 "combine result sets",
                 "summarize objective facts",
                 "retrieve source and syntax context",
@@ -2297,11 +2294,11 @@ mod tests {
     }
 
     fn canonical_request() -> Vec<u8> {
-        crate::contracts::jcs::canonicalize_slice(br#"{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"rpc-gate-b","workspace_id":"workspace:00000000000000000000000000000000","freshness_policy":"best_available_snapshot","queries":[{"query_id":"q1","request":"find code entities","label":null,"input":null,"where":null,"limit":{"first":1,"offset":0}}],"response_projection":null,"cost_budget":{"maximum_rows":1}}"#).unwrap()
+        crate::contracts::jcs::canonicalize_slice(br#"{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"rpc-gate-b","workspace_id":"workspace:00000000000000000000000000000000","freshness_policy":"best_available_snapshot","queries":[{"query_id":"q1","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":1}}}],"response_projection":null,"cost_budget":{"maximum_rows":1}}"#).unwrap()
     }
 
     fn canonical_current_required_request() -> Vec<u8> {
-        crate::contracts::jcs::canonicalize_slice(br#"{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"rpc-current","workspace_id":"workspace:00000000000000000000000000000000","freshness_policy":"current_required","queries":[{"query_id":"q1","request":"find code entities","label":null,"input":null,"where":null,"limit":{"first":1,"offset":0}}],"response_projection":null,"cost_budget":{"maximum_rows":1}}"#).unwrap()
+        crate::contracts::jcs::canonicalize_slice(br#"{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"rpc-current","workspace_id":"workspace:00000000000000000000000000000000","freshness_policy":"current_required","queries":[{"query_id":"q1","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":1}}}],"response_projection":null,"cost_budget":{"maximum_rows":1}}"#).unwrap()
     }
 
     fn test_host_profile() -> HostCapabilityProfile {
