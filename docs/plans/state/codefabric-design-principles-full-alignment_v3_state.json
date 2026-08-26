@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP71",
+  "current_packet": "WP76",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -216,10 +216,21 @@
       "blockers": []
     },
     "WP71": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "84aa2cbd8650bb7af6cb9ac1ee54e4b67acfa1e4",
+      "deviations": [
+        "The candidate manifest uses a dedicated GATE_B_REVIEW_CANDIDATE integrity domain instead of reusing GATE_B_EXECUTION; the source-owned registry digest and all model-generated dependents were reconciled and re-proved.",
+        "Candidate checksums explicitly normalize operational-only capability lease and evidence-provider identities under an OPERATIONAL_IDENTITIES_NORMALIZED scope while retaining deterministic application-owned workspace, file, wave, row, and response identities."
+      ],
+      "failed_approaches": [
+        "The first case-only rename attempted tombstone and replacement in one source generation; owner-scoped reconciliation correctly rejected the equal-generation conflict, so the scenario now emits the rename as two real watcher waves.",
+        "The first context-change scenario replaced the source analysis-context identity, which violated the source/syntax SOURCE_CONTEXT_ID contract; the executable scenario now mutates the governed context manifest and performs an authoritative rescan through the ordinary wave path.",
+        "The first daemon-restart scenario replayed only the final hint after volatile state loss; recovery correctly required an authoritative inventory, so restart now resumes with a rescan-required batch.",
+        "The first deterministic bundle comparison retained raw operational lease and provider-observation identities in table checksums; the final candidate records an explicit normalized checksum scope for those two operational tables and byte-compares identically across independent executions.",
+        "The first candidate emission could not create the absent review-candidates parent directory; the writer now validates a safe repository-relative destination, creates only its parent chain, and still refuses to overwrite the immutable candidate directory.",
+        "The first post-commit governance pass rejected direct fs::read calls even though they read governed contract and review artifacts; the final implementation centralizes those reads in a named candidate-input boundary covered by an ast-grep valid fixture, while scenario workspace bytes remain secure_path-owned.",
+        "The first aggregate governance rerun exposed the fingerprint-domain registry's stale envelope digest after adding the candidate domain; the digest was independently recomputed, its generated closure synchronized, and the historical WP55 oracle plus full governance gate passed."
+      ],
       "blockers": []
     },
     "WP76": {
@@ -373,6 +384,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Implement WP71 golden-corpus execution and prepare the immutable Gate B review candidate without releasing or self-accepting it.",
-  "updated_at": "2026-08-26T02:28:10Z"
+  "next_action": "Present WP71 candidate codefabric-golden-v2.0.0-candidate.1 and detached digest b3:23b48fa3f8aa667238e30461e217034c02e5b4e697d0729eb31c6011334f1da2 to the accountable repository owner, then pause until that owner explicitly accepts or rejects it; do not invoke gate-b-owner-accept or release expected bytes without that decision.",
+  "updated_at": "2026-08-26T03:17:02Z"
 }
