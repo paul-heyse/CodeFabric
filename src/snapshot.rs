@@ -129,6 +129,8 @@ pub struct ServingSnapshotManifestBody {
     pub indexes: SnapshotIndexes,
     pub bundles: SnapshotBundles,
     pub limits_profile_digest: String,
+    /// Ordered unique source-image digests that make snapshot-to-bytes provenance resolvable.
+    pub source_blob_digests: Vec<String>,
 }
 
 /// Content-addressed serving-snapshot manifest.
@@ -230,6 +232,26 @@ impl ServingSnapshotManifest {
     /// Rejects an empty, unsorted, duplicate, malformed, or identity-inconsistent set.
     pub fn raw_analysis_context_ids(&self) -> Result<Vec<[u8; 16]>, SnapshotManifestError> {
         self.body.validated_context_ids()
+    }
+
+    /// Decode the ordered source-image digest set bound into snapshot identity.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed, duplicate, or non-canonical digest order.
+    pub fn raw_source_blob_digests(&self) -> Result<Vec<[u8; 32]>, SnapshotManifestError> {
+        let digests = self
+            .body
+            .source_blob_digests
+            .iter()
+            .map(|value| decode_digest(value, "source_blob_digests"))
+            .collect::<Result<Vec<_>, _>>()?;
+        if !digests.windows(2).all(|pair| pair[0] < pair[1]) {
+            return Err(SnapshotManifestError::InvalidField(
+                "source_blob_digests order",
+            ));
+        }
+        Ok(digests)
     }
 }
 
@@ -440,6 +462,23 @@ impl ServingSnapshotManifestBody {
             return Err(SnapshotManifestError::InvalidField("manifest_version"));
         }
         self.validated_context_ids()?;
+        let raw_source_blob_digests = self
+            .source_blob_digests
+            .iter()
+            .map(|value| decode_digest(value, "source_blob_digests"))
+            .collect::<Result<Vec<_>, _>>()?;
+        if raw_source_blob_digests
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(SnapshotManifestError::InvalidField(
+                "source_blob_digests order",
+            ));
+        }
+        let source_blob_digests = raw_source_blob_digests
+            .into_iter()
+            .map(CbefValue::Digest)
+            .collect();
         let source = map(vec![
             ("source_generation", unsigned(self.source.source_generation)),
             (
@@ -699,6 +738,10 @@ impl ServingSnapshotManifestBody {
                     tag: 12,
                     value: digest(&self.limits_profile_digest, "limits_profile_digest")?,
                 },
+                CbefField {
+                    tag: 13,
+                    value: CbefValue::OrderedList(source_blob_digests),
+                },
             ],
         })?)
     }
@@ -828,6 +871,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".to_owned(),
             },
             limits_profile_digest: digest_value(16),
+            source_blob_digests: vec![digest_value(17)],
         }
     }
 

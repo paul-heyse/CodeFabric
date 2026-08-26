@@ -160,6 +160,12 @@
       "consumer_symbol": "hidden_operational"
     },
     {
+      "annotation": "integrity",
+      "class": "CONTRACTUAL",
+      "consumer_path": "src/fabric/mutation.rs",
+      "consumer_symbol": "integrity evidence"
+    },
+    {
       "annotation": "logical_type",
       "class": "ENFORCED",
       "consumer_path": "src/fact_ingest.rs",
@@ -1516,6 +1522,21 @@
           "sqlite_type": "BLOB"
         },
         {
+          "name": "workspace_id",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "analysis_context_id",
+          "nullable": true,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "source_generation",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        },
+        {
           "name": "owner_set_fingerprint",
           "nullable": false,
           "sqlite_type": "BLOB"
@@ -1568,7 +1589,10 @@
           "application_version"
         ]
       ],
-      "workspace_scope": null
+      "workspace_scope": {
+        "kind": "DIRECT",
+        "workspace_column": "workspace_id"
+      }
     },
     {
       "columns": [
@@ -2198,7 +2222,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:f5b92afb26c3c02f40a0f0a85e5bd47d2a8c378550aa12b8a3bbe782fa0a738b"
+    "source_digest": "b3:1838fedccd46a3c8631e580df76f575b089f997585065f2b56a57343a64d76ac"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [

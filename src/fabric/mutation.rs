@@ -87,6 +87,12 @@ impl MutationPhase {
 pub struct MutationPhaseSpec {
     pub operation_id: [u8; 16],
     pub publication_id: [u8; 16],
+    /// Typed workspace join; `application_id` is an idempotency key, never a scope parser.
+    pub workspace_id: [u8; 16],
+    /// Present for owner-scoped fact mutations and absent for publication-control rows.
+    pub analysis_context_id: Option<[u8; 16]>,
+    /// Exact source generation whose inputs the mutation materializes.
+    pub source_generation: i64,
     pub table_code: i16,
     pub phase: MutationPhase,
     pub application_id: String,
@@ -249,6 +255,8 @@ pub(super) fn application_id(
 }
 
 fn metadata(prepared: &PreparedMutation) -> BTreeMap<String, Value> {
+    // Digest-valued keys are integrity evidence, not reversible preimage stores. Typed scope
+    // columns and the artifact graph retain the identities needed for provenance joins.
     BTreeMap::from([
         (
             "publication_id".into(),
@@ -257,6 +265,21 @@ fn metadata(prepared: &PreparedMutation) -> BTreeMap<String, Value> {
         (
             "operation_id".into(),
             Value::String(hex(&prepared.spec.operation_id)),
+        ),
+        (
+            "workspace_id".into(),
+            Value::String(hex(&prepared.spec.workspace_id)),
+        ),
+        (
+            "analysis_context_id".into(),
+            prepared
+                .spec
+                .analysis_context_id
+                .map_or(Value::Null, |id| Value::String(hex(&id))),
+        ),
+        (
+            "source_generation".into(),
+            Value::from(prepared.spec.source_generation),
         ),
         ("table_code".into(), Value::from(prepared.spec.table_code)),
         (
@@ -412,6 +435,9 @@ pub(super) fn phase_spec(
     Ok(MutationPhaseSpec {
         operation_id: request.operation_id,
         publication_id: request.publication_id,
+        workspace_id: request.scope.workspace_id,
+        analysis_context_id: Some(request.scope.analysis_context_id),
+        source_generation: request.scope.source_generation,
         table_code: request.table_code,
         phase,
         application_id: application_id(request.scope.workspace_id, request.table_code, phase)?,
@@ -1063,22 +1089,39 @@ mod tests {
                 | DurableMutationClass::DerivedOwnerReplaced
                 | DurableMutationClass::GlobalDerivedReplacement
         )));
-        let operation = include_str!("../../contracts/schema/schema-contract-ir.json");
-        for field in [
+        let schema_ir: serde_json::Value = serde_json::from_str(include_str!(
+            "../../contracts/schema/schema-contract-ir.json"
+        ))
+        .unwrap();
+        let operation = schema_ir["operational_tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|table| table["name"] == "table_mutation_operation")
+            .unwrap();
+        let actual_fields = operation["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|column| column["name"].as_str().unwrap())
+            .collect::<BTreeSet<_>>();
+        let required_fields = BTreeSet::from([
             "operation_id",
             "table_code",
             "mutation_phase",
             "application_id",
             "application_version",
             "publication_id",
+            "workspace_id",
+            "analysis_context_id",
+            "source_generation",
             "owner_set_fingerprint",
             "input_checksum",
             "expected_output_checksum",
             "expected_predecessor",
             "delta_version",
-        ] {
-            assert!(operation.contains(&format!("\"name\":\"{field}\"")));
-        }
+        ]);
+        assert!(required_fields.is_subset(&actual_fields));
         assert_eq!(MutationFaultPoint::ALL.len(), 2);
         let prepared = PreparedMutation {
             spec: phase_spec(

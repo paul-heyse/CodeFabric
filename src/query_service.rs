@@ -21,7 +21,7 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tracing::Instrument as _;
 
-use crate::fabric::{QueryExecutionContext, QueryPlanArtifact, ServingQuerySession};
+use crate::fabric::{FabricTable, QueryExecutionContext, QueryPlanArtifact, ServingQuerySession};
 use crate::golden_corpus::CoreSourceCoverage;
 use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
 use crate::integrity::{frame_digest, framed_digest};
@@ -122,6 +122,18 @@ pub struct PersistedQueryArtifactBundle {
     pub expires_at_unix_ms: i64,
 }
 
+/// Bounded operator explanation joining one exact Delta commit to the executions that read it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VersionExplanation {
+    pub table_code: i16,
+    pub table_name: String,
+    pub delta_version: u64,
+    pub delta_commit_info: serde_json::Value,
+    pub executions: Vec<PersistedQueryArtifactBundle>,
+    pub scanned_artifact_count: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct ResultArtifactStore {
     root: PathBuf,
@@ -150,14 +162,16 @@ impl ResultArtifactStore {
             .join(format!("{}.json", &digest[3..]))
     }
 
-    fn persist_query_artifact(
+    pub(crate) fn persist_query_artifact(
         &self,
         artifact: &PersistedQueryArtifactBundle,
     ) -> Result<(), Status> {
         let value = serde_json::to_value(artifact)
             .map_err(|_| Status::internal("query artifact serialization failed"))?;
         let bytes = crate::contracts::jcs::canonicalize_value(&value)
-            .map_err(|_| Status::internal("query artifact canonicalization failed"))?;
+            .map_err(|error| {
+                Status::internal(format!("query artifact canonicalization failed: {error}"))
+            })?;
         let final_path = self.query_artifact_path(&artifact.execution.execution_id);
         if final_path.exists() {
             let existing = fs::read(&final_path)
@@ -244,6 +258,82 @@ impl ResultArtifactStore {
             }
         }
         Ok(removed)
+    }
+
+    /// Explain one committed table version from Delta history and retained query artifacts.
+    ///
+    /// The scan is bounded so the administrative/status path cannot become an unbounded query.
+    ///
+    /// # Errors
+    ///
+    /// Returns a gRPC status when the table/version is absent, history is unreadable, or the
+    /// retained artifact census exceeds the operator bound.
+    pub async fn explain_version(
+        &self,
+        table: &FabricTable,
+        delta_version: u64,
+    ) -> Result<VersionExplanation, Status> {
+        const MAX_EXPLAIN_ARTIFACTS: usize = 4_096;
+        let spec = crate::schema_registry::table_spec(table.table_code)
+            .ok_or_else(|| Status::not_found("table code is not registered"))?;
+        let mut historical = table.delta.clone();
+        historical
+            .load_version(delta_version)
+            .await
+            .map_err(|_| Status::not_found("Delta version is not available"))?;
+        let commit = historical
+            .history(Some(1))
+            .await
+            .map_err(|_| Status::internal("Delta history lookup failed"))?
+            .next()
+            .ok_or_else(|| Status::data_loss("Delta version has no commit-info action"))?;
+        let delta_commit_info = serde_json::to_value(commit)
+            .map_err(|_| Status::internal("Delta commit-info serialization failed"))?;
+
+        let mut paths = fs::read_dir(self.root.join("query-plan-artifacts"))
+            .map_err(|_| Status::internal("query artifact directory read failed"))?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+        if paths.len() > MAX_EXPLAIN_ARTIFACTS {
+            return Err(Status::resource_exhausted(
+                "query artifact explanation scan exceeds the bounded census",
+            ));
+        }
+        let scanned_artifact_count = paths.len();
+        let mut executions = Vec::new();
+        for path in paths {
+            let bytes = fs::read(path)
+                .map_err(|_| Status::internal("query artifact explanation read failed"))?;
+            let artifact: PersistedQueryArtifactBundle = serde_json::from_slice(&bytes)
+                .map_err(|_| Status::data_loss("query artifact explanation schema is invalid"))?;
+            if artifact.plan_artifacts.iter().any(|plan| {
+                plan.source_table_versions
+                    .get(&u16::try_from(table.table_code).unwrap_or(u16::MAX))
+                    .copied()
+                    == Some(delta_version)
+            }) {
+                executions.push(artifact);
+            }
+        }
+        executions.sort_by(|left, right| {
+            left.execution
+                .execution_id
+                .cmp(&right.execution.execution_id)
+        });
+        Ok(VersionExplanation {
+            table_code: table.table_code,
+            table_name: spec.name.to_owned(),
+            delta_version,
+            delta_commit_info,
+            executions,
+            scanned_artifact_count,
+        })
     }
 
     fn insert(

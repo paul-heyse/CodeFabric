@@ -1676,6 +1676,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".into(),
             },
             limits_profile_digest: framed(9),
+            source_blob_digests: Vec::new(),
         }
     }
 

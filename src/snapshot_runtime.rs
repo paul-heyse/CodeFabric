@@ -137,6 +137,10 @@ impl ServingSnapshotCandidate {
         body.overlay.overlay_digest = framed_digest(providers.overlay_checksum());
         body.overlay.total_memory_bytes = providers.overlay_memory_bytes();
         body.overlay.tables = providers.overlay_tables().to_vec();
+        let mut unique_blobs = source_blob_digests.to_vec();
+        unique_blobs.sort_unstable();
+        unique_blobs.dedup();
+        body.source_blob_digests = unique_blobs.iter().copied().map(framed_digest).collect();
         let manifest = body.derive()?;
         Self::validate_and_bind(manifest, providers, source_blob_digests)
     }
@@ -210,6 +214,11 @@ impl ServingSnapshotCandidate {
         let mut unique_blobs = source_blob_digests.to_vec();
         unique_blobs.sort_unstable();
         unique_blobs.dedup();
+        if manifest.raw_source_blob_digests()? != unique_blobs {
+            return Err(SnapshotRuntimeError::Candidate(
+                "manifest source-blob closure differs from supplied snapshot bytes".into(),
+            ));
+        }
         Ok(Self {
             manifest,
             providers,
@@ -947,6 +956,7 @@ pub struct SnapshotRetentionMetrics {
     pub lease_count: usize,
     pub recovery_count: usize,
     pub minimum_window_count: usize,
+    pub provenance_count: usize,
     pub retained_count: usize,
 }
 
@@ -971,43 +981,53 @@ impl SnapshotRetentionSet {
     ) -> Result<Self, SnapshotRuntimeError> {
         let now_sql = sql_u64(now)?;
         let grace_sql = sql_u64(SNAPSHOT_ORPHAN_GRACE.as_secs())?;
-        let (active, leases) = store
-            .reader_factory()
-            .open()?
-            .with_connection(|connection| {
-                let active = {
-                    let mut statement = connection.prepare(
-                        "SELECT publication_id FROM serving_snapshot_manifest
+        let (active, leases, provenance) =
+            store
+                .reader_factory()
+                .open()?
+                .with_connection(|connection| {
+                    let active = {
+                        let mut statement = connection.prepare(
+                            "SELECT publication_id FROM serving_snapshot_manifest
                      WHERE state_code=?1 ORDER BY publication_id",
-                    )?;
-                    statement
-                        .query_map([i64::from(ServingActivationState::Active as u16)], |row| {
-                            row.get::<_, Vec<u8>>(0)
-                        })?
-                        .collect::<Result<Vec<_>, _>>()?
-                };
-                let leases = {
-                    let mut statement = connection.prepare(
-                        "SELECT DISTINCT base_publication_id FROM snapshot_lease
+                        )?;
+                        statement
+                            .query_map([i64::from(ServingActivationState::Active as u16)], |row| {
+                                row.get::<_, Vec<u8>>(0)
+                            })?
+                            .collect::<Result<Vec<_>, _>>()?
+                    };
+                    let leases = {
+                        let mut statement = connection.prepare(
+                            "SELECT DISTINCT base_publication_id FROM snapshot_lease
                      WHERE (state_code IN (?1, ?2) AND expires_at>?4)
                         OR (state_code=?3 AND orphaned_at+?5>?4)
                      ORDER BY base_publication_id",
-                    )?;
-                    statement
-                        .query_map(
-                            params![
-                                i64::from(SnapshotLeaseState::Active as u16),
-                                i64::from(SnapshotLeaseState::Releasing as u16),
-                                i64::from(SnapshotLeaseState::Orphaned as u16),
-                                now_sql,
-                                grace_sql,
-                            ],
-                            |row| row.get::<_, Vec<u8>>(0),
-                        )?
-                        .collect::<Result<Vec<_>, _>>()?
-                };
-                Ok::<_, rusqlite::Error>((active, leases))
-            })?;
+                        )?;
+                        statement
+                            .query_map(
+                                params![
+                                    i64::from(SnapshotLeaseState::Active as u16),
+                                    i64::from(SnapshotLeaseState::Releasing as u16),
+                                    i64::from(SnapshotLeaseState::Orphaned as u16),
+                                    now_sql,
+                                    grace_sql,
+                                ],
+                                |row| row.get::<_, Vec<u8>>(0),
+                            )?
+                            .collect::<Result<Vec<_>, _>>()?
+                    };
+                    let provenance = {
+                        let mut statement = connection.prepare(
+                            "SELECT DISTINCT publication_id FROM serving_snapshot_manifest
+                         ORDER BY publication_id",
+                        )?;
+                        statement
+                            .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+                            .collect::<Result<Vec<_>, _>>()?
+                    };
+                    Ok::<_, rusqlite::Error>((active, leases, provenance))
+                })?;
         let active = active
             .into_iter()
             .map(|bytes| fixed_blob::<16>(&bytes, "active publication"))
@@ -1016,12 +1036,17 @@ impl SnapshotRetentionSet {
             .into_iter()
             .map(|bytes| fixed_blob::<16>(&bytes, "lease publication"))
             .collect::<Result<BTreeSet<_>, _>>()?;
+        let provenance = provenance
+            .into_iter()
+            .map(|bytes| fixed_blob::<16>(&bytes, "provenance publication"))
+            .collect::<Result<BTreeSet<_>, _>>()?;
         let metrics = SnapshotRetentionMetrics {
             current_count: usize::from(input.current_publication.is_some()),
             active_snapshot_count: active.len(),
             lease_count: leases.len(),
             recovery_count: input.recovery_eligible_publications.len(),
             minimum_window_count: input.minimum_window_publications.len(),
+            provenance_count: provenance.len(),
             retained_count: 0,
         };
         let mut publications = BTreeSet::new();
@@ -1030,6 +1055,7 @@ impl SnapshotRetentionSet {
         publications.extend(leases);
         publications.extend(input.recovery_eligible_publications);
         publications.extend(input.minimum_window_publications);
+        publications.extend(provenance);
         Ok(Self {
             metrics: SnapshotRetentionMetrics {
                 retained_count: publications.len(),
@@ -1211,6 +1237,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".into(),
             },
             limits_profile_digest: digest(8),
+            source_blob_digests: Vec::new(),
         }
     }
 

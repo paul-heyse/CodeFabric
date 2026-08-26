@@ -484,6 +484,7 @@ impl SchemaContractIr {
             "foreign_key",
             "grain",
             "hidden_operational",
+            "integrity",
             "logical_type",
             "materialization_role",
             "name",
@@ -2337,7 +2338,7 @@ mod tests {
     fn wp57_structural_acceptance() {
         let ir = authority();
         ir.validate().unwrap();
-        assert_eq!(ir.metadata_dictionary.len(), 23);
+        assert_eq!(ir.metadata_dictionary.len(), 24);
         assert_eq!(
             ir.metadata_dictionary
                 .iter()

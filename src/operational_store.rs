@@ -14,8 +14,9 @@ use thiserror::Error;
 
 use crate::contracts::index::model_artifact_index;
 use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
+use crate::snapshot::ServingSnapshotManifest;
 
-const SCHEMA_VERSION: u32 = 8;
+const SCHEMA_VERSION: u32 = 9;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str =
     include_str!("../contracts/generated/model/schema/operational-store.sql");
@@ -282,19 +283,99 @@ impl OperationalStore {
         &mut self,
         cutoff: &str,
     ) -> Result<RetentionReport, OperationalStoreError> {
+        let protected_scopes = {
+            let mut statement = self.connection.prepare(
+                "SELECT manifest_json_bytes FROM serving_snapshot_manifest ORDER BY snapshot_id",
+            )?;
+            let manifests = statement
+                .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            manifests.into_iter().try_fold(
+                BTreeSet::new(),
+                |mut scopes, bytes| -> Result<_, OperationalStoreError> {
+                    let manifest: ServingSnapshotManifest = serde_json::from_slice(&bytes)
+                        .map_err(|error| {
+                            OperationalStoreError::DdlLineage(format!(
+                                "retained snapshot manifest is malformed: {error}"
+                            ))
+                        })?;
+                    let workspace = manifest.raw_workspace_id().map_err(|error| {
+                        OperationalStoreError::DdlLineage(format!(
+                            "retained snapshot workspace is malformed: {error}"
+                        ))
+                    })?;
+                    let generation = i64::try_from(manifest.body.source.source_generation)
+                        .map_err(|_| {
+                            OperationalStoreError::DdlLineage(
+                                "retained snapshot source generation exceeds i64".into(),
+                            )
+                        })?;
+                    scopes.insert((workspace, generation));
+                    Ok(scopes)
+                },
+            )?
+        };
         self.write_transaction(|transaction| {
-            let update_wave_items = transaction.execute(
-                "DELETE FROM update_wave_item WHERE wave_id IN (SELECT wave_id FROM update_wave WHERE terminal_at IS NOT NULL AND terminal_at < ?1)",
-                [cutoff],
-            )?;
-            let update_waves = transaction.execute(
-                "DELETE FROM update_wave WHERE terminal_at IS NOT NULL AND terminal_at < ?1",
-                [cutoff],
-            )?;
-            let provider_runs = transaction.execute(
-                "DELETE FROM provider_run WHERE terminal_at IS NOT NULL AND terminal_at < ?1",
-                [cutoff],
-            )?;
+            let terminal_waves = {
+                let mut statement = transaction.prepare(
+                    "SELECT wave_id, workspace_id, source_generation FROM update_wave
+                     WHERE terminal_at IS NOT NULL AND terminal_at < ?1 ORDER BY wave_id",
+                )?;
+                statement
+                    .query_map([cutoff], |row| {
+                        Ok((
+                            row.get::<_, Vec<u8>>(0)?,
+                            row.get::<_, Vec<u8>>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            let mut update_wave_items = 0;
+            let mut update_waves = 0;
+            for (wave_id, workspace, generation) in terminal_waves {
+                let workspace = <[u8; 16]>::try_from(workspace.as_slice()).map_err(|_| {
+                    OperationalStoreError::DdlLineage("update-wave workspace is not Id16".into())
+                })?;
+                if protected_scopes.contains(&(workspace, generation)) {
+                    continue;
+                }
+                update_wave_items += transaction.execute(
+                    "DELETE FROM update_wave_item WHERE wave_id=?1",
+                    [wave_id.as_slice()],
+                )?;
+                update_waves += transaction.execute(
+                    "DELETE FROM update_wave WHERE wave_id=?1",
+                    [wave_id.as_slice()],
+                )?;
+            }
+            let terminal_provider_runs = {
+                let mut statement = transaction.prepare(
+                    "SELECT provider_run_id, workspace_id, source_generation FROM provider_run
+                     WHERE terminal_at IS NOT NULL AND terminal_at < ?1 ORDER BY provider_run_id",
+                )?;
+                statement
+                    .query_map([cutoff], |row| {
+                        Ok((
+                            row.get::<_, Vec<u8>>(0)?,
+                            row.get::<_, Vec<u8>>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            let mut provider_runs = 0;
+            for (run_id, workspace, generation) in terminal_provider_runs {
+                let workspace = <[u8; 16]>::try_from(workspace.as_slice()).map_err(|_| {
+                    OperationalStoreError::DdlLineage("provider-run workspace is not Id16".into())
+                })?;
+                if !protected_scopes.contains(&(workspace, generation)) {
+                    provider_runs += transaction.execute(
+                        "DELETE FROM provider_run WHERE provider_run_id=?1",
+                        [run_id.as_slice()],
+                    )?;
+                }
+            }
             let git_operation_runs = transaction.execute(
                 "DELETE FROM git_operation_run WHERE terminal_at IS NOT NULL AND terminal_at < ?1",
                 [cutoff],
@@ -323,6 +404,29 @@ impl OperationalStore {
         &mut self,
         record: &ProviderRunRecord,
     ) -> Result<(), OperationalStoreError> {
+        for (field, bytes) in [
+            ("provider_run_id", record.provider_run_id.as_slice()),
+            ("workspace_id", record.workspace_id.as_slice()),
+            ("analysis_context_id", record.analysis_context_id.as_slice()),
+            ("wave_id", record.wave_id.as_slice()),
+        ] {
+            if bytes.len() != 16 {
+                return Err(OperationalStoreError::ProviderRunRecord(format!(
+                    "{field} must be an Id16"
+                )));
+            }
+        }
+        for (field, bytes) in [
+            ("owner_id", record.owner_id.as_deref()),
+            ("build_unit_id", record.build_unit_id.as_deref()),
+            ("diagnostic_id", record.diagnostic_id.as_deref()),
+        ] {
+            if bytes.is_some_and(|bytes| bytes.len() != 16) {
+                return Err(OperationalStoreError::ProviderRunRecord(format!(
+                    "{field} must be an Id16 when present"
+                )));
+            }
+        }
         self.write_transaction(|transaction| {
             let changed = transaction.execute(
                 "INSERT INTO provider_run (
@@ -417,6 +521,7 @@ impl OperationalStore {
                 migrate_v5_to_v6(&transaction)?;
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
+                migrate_v8_to_v9(&transaction)?;
             }
             2 => {
                 migrate_v2_to_v3(&transaction)?;
@@ -425,6 +530,7 @@ impl OperationalStore {
                 migrate_v5_to_v6(&transaction)?;
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
+                migrate_v8_to_v9(&transaction)?;
             }
             3 => {
                 migrate_v3_to_v4(&transaction)?;
@@ -432,23 +538,31 @@ impl OperationalStore {
                 migrate_v5_to_v6(&transaction)?;
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
+                migrate_v8_to_v9(&transaction)?;
             }
             4 => {
                 migrate_v4_to_v5(&transaction)?;
                 migrate_v5_to_v6(&transaction)?;
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
+                migrate_v8_to_v9(&transaction)?;
             }
             5 => {
                 migrate_v5_to_v6(&transaction)?;
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
+                migrate_v8_to_v9(&transaction)?;
             }
             6 => {
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
+                migrate_v8_to_v9(&transaction)?;
             }
-            7 => migrate_v7_to_v8(&transaction)?,
+            7 => {
+                migrate_v7_to_v8(&transaction)?;
+                migrate_v8_to_v9(&transaction)?;
+            }
+            8 => migrate_v8_to_v9(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -507,6 +621,9 @@ struct StoredMutation {
     application_id: String,
     application_version: i64,
     publication_id: Vec<u8>,
+    workspace_id: Vec<u8>,
+    analysis_context_id: Option<Vec<u8>>,
+    source_generation: i64,
     owner_set_fingerprint: Vec<u8>,
     input_checksum: Vec<u8>,
     expected_output_checksum: Vec<u8>,
@@ -545,6 +662,7 @@ impl OperationalStore {
         let stored = transaction
             .query_row(
                 "SELECT application_id, application_version, publication_id,
+                        workspace_id, analysis_context_id, source_generation,
                         owner_set_fingerprint, input_checksum, expected_output_checksum,
                         expected_predecessor, state_code, delta_version
                    FROM table_mutation_operation
@@ -555,12 +673,15 @@ impl OperationalStore {
                         application_id: row.get(0)?,
                         application_version: row.get(1)?,
                         publication_id: row.get(2)?,
-                        owner_set_fingerprint: row.get(3)?,
-                        input_checksum: row.get(4)?,
-                        expected_output_checksum: row.get(5)?,
-                        expected_predecessor: row.get(6)?,
-                        state_code: row.get(7)?,
-                        delta_version: row.get(8)?,
+                        workspace_id: row.get(3)?,
+                        analysis_context_id: row.get(4)?,
+                        source_generation: row.get(5)?,
+                        owner_set_fingerprint: row.get(6)?,
+                        input_checksum: row.get(7)?,
+                        expected_output_checksum: row.get(8)?,
+                        expected_predecessor: row.get(9)?,
+                        state_code: row.get(10)?,
+                        delta_version: row.get(11)?,
                     })
                 },
             )
@@ -568,6 +689,10 @@ impl OperationalStore {
         if let Some(stored) = stored {
             let exact = stored.application_id == spec.application_id
                 && stored.publication_id.as_slice() == spec.publication_id
+                && stored.workspace_id.as_slice() == spec.workspace_id
+                && stored.analysis_context_id.as_deref()
+                    == spec.analysis_context_id.as_ref().map(<[u8; 16]>::as_slice)
+                && stored.source_generation == spec.source_generation
                 && stored.owner_set_fingerprint.as_slice() == spec.owner_set_fingerprint
                 && stored.input_checksum.as_slice() == spec.input_checksum
                 && stored.expected_output_checksum.as_slice() == spec.expected_output_checksum
@@ -615,10 +740,11 @@ impl OperationalStore {
         transaction.execute(
             "INSERT INTO table_mutation_operation(
                  operation_id, table_code, mutation_phase, application_id,
-                 application_version, publication_id, owner_set_fingerprint,
+                 application_version, publication_id, workspace_id,
+                 analysis_context_id, source_generation, owner_set_fingerprint,
                  input_checksum, expected_output_checksum, expected_predecessor,
                  state_code, delta_version, created_at, completed_at
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,10,NULL,
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,10,NULL,
                        strftime('%Y-%m-%dT%H:%M:%fZ','now'),NULL)",
             rusqlite::params![
                 spec.operation_id,
@@ -627,6 +753,9 @@ impl OperationalStore {
                 spec.application_id,
                 application_version,
                 spec.publication_id,
+                spec.workspace_id,
+                spec.analysis_context_id,
+                spec.source_generation,
                 spec.owner_set_fingerprint,
                 spec.input_checksum,
                 spec.expected_output_checksum,
@@ -810,6 +939,28 @@ fn migrate_v6_to_v7(transaction: &Transaction<'_>) -> Result<(), OperationalStor
 
 fn migrate_v7_to_v8(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
     transaction.execute_batch(&generated_table_ddl("git_candidate_cache")?)?;
+    Ok(())
+}
+
+fn migrate_v8_to_v9(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    transaction.execute_batch(
+        "ALTER TABLE table_mutation_operation RENAME TO table_mutation_operation_v8;",
+    )?;
+    transaction.execute_batch(&generated_table_ddl("table_mutation_operation")?)?;
+    transaction.execute_batch(
+        "INSERT INTO table_mutation_operation(
+           operation_id, table_code, mutation_phase, application_id,
+           application_version, publication_id, workspace_id,
+           analysis_context_id, source_generation, owner_set_fingerprint,
+           input_checksum, expected_output_checksum, expected_predecessor,
+           state_code, delta_version, created_at, completed_at)
+         SELECT operation_id, table_code, mutation_phase, application_id,
+           application_version, publication_id, zeroblob(16), NULL, 0,
+           owner_set_fingerprint, input_checksum, expected_output_checksum,
+           expected_predecessor, state_code, delta_version, created_at, completed_at
+         FROM table_mutation_operation_v8;
+         DROP TABLE table_mutation_operation_v8;",
+    )?;
     Ok(())
 }
 
@@ -1186,6 +1337,92 @@ mod tests {
                 .count()
         );
         assert!(verify_ddl_lineage().is_ok());
+    }
+
+    #[test]
+    fn wp66_structural_acceptance() {
+        let (_directory, path) = database();
+        let mut store = OperationalStore::open(&path).unwrap();
+        let workspace = [0x61_u8; 16];
+        let wave = [0x62_u8; 16];
+        let owner_from_fact_batch = [0x63_u8; 16];
+        store
+            .write_transaction(|transaction| {
+                transaction.execute(
+                    "INSERT INTO update_wave(
+                       wave_id, workspace_id, source_generation, event_watermark,
+                       state_code, candidate_strategy_code, input_fingerprint,
+                       candidate_count, started_at, terminal_at, diagnostic_id)
+                     VALUES (?1, ?2, 7, 9, 70, 10, ?3, 1,
+                             '2026-08-25T00:00:00Z', '2026-08-25T00:00:01Z', NULL)",
+                    rusqlite::params![
+                        wave.as_slice(),
+                        workspace.as_slice(),
+                        [0x64_u8; 32].as_slice(),
+                    ],
+                )?;
+                Ok::<_, OperationalStoreError>(())
+            })
+            .unwrap();
+        store
+            .record_provider_run(&ProviderRunRecord {
+                provider_run_id: vec![0x65; 16],
+                workspace_id: workspace.to_vec(),
+                analysis_context_id: vec![0x66; 16],
+                wave_id: wave.to_vec(),
+                provider_code: 10,
+                owner_id: Some(owner_from_fact_batch.to_vec()),
+                build_unit_id: None,
+                source_generation: 7,
+                input_fingerprint: vec![0x67; 32],
+                output_fingerprint: Some(vec![0x68; 32]),
+                state_code: 70,
+                accepted_at: "2026-08-25T00:00:00Z".into(),
+                terminal_at: Some("2026-08-25T00:00:01Z".into()),
+                diagnostic_id: None,
+            })
+            .unwrap();
+        let joined = store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM update_wave AS wave
+                     JOIN provider_run AS run
+                       ON run.wave_id=wave.wave_id
+                      AND run.workspace_id=wave.workspace_id
+                      AND run.source_generation=wave.source_generation
+                     WHERE run.owner_id=?1",
+                    [owner_from_fact_batch.as_slice()],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(joined, 1);
+
+        let mut malformed = ProviderRunRecord {
+            provider_run_id: vec![0x70; 16],
+            workspace_id: workspace.to_vec(),
+            analysis_context_id: vec![0x71; 16],
+            wave_id: wave.to_vec(),
+            provider_code: 10,
+            owner_id: Some(vec![0; 15]),
+            build_unit_id: None,
+            source_generation: 7,
+            input_fingerprint: vec![0; 32],
+            output_fingerprint: None,
+            state_code: 10,
+            accepted_at: "2026-08-25T00:00:02Z".into(),
+            terminal_at: None,
+            diagnostic_id: None,
+        };
+        assert!(matches!(
+            store.record_provider_run(&malformed),
+            Err(OperationalStoreError::ProviderRunRecord(_))
+        ));
+        malformed.owner_id = Some(owner_from_fact_batch.to_vec());
+        assert!(store.record_provider_run(&malformed).is_ok());
     }
 
     #[test]

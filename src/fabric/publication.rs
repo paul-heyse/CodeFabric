@@ -404,6 +404,9 @@ fn phase(
     Ok(MutationPhaseSpec {
         operation_id: derived_operation_id(request.operation_id, table_code, label),
         publication_id: request.pins.publication_id,
+        workspace_id: request.pins.workspace_id,
+        analysis_context_id: None,
+        source_generation: request.pins.source_generation,
         table_code,
         phase: mutation_phase,
         application_id: application_id(request.pins.workspace_id, table_code, mutation_phase)?,

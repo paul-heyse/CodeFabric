@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:f5b92afb26c3c02f40a0f0a85e5bd47d2a8c378550aa12b8a3bbe782fa0a738b; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:1838fedccd46a3c8631e580df76f575b089f997585065f2b56a57343a64d76ac; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
@@ -48,6 +48,12 @@ const GENERATED_METADATA_DICTIONARY: &[MetadataAnnotationSpec] = &[
         class: MetadataClass::Governance,
         consumer_path: Some("src/fabric/serving.rs"),
         consumer_symbol: Some("hidden_operational"),
+    },
+    MetadataAnnotationSpec {
+        annotation: "integrity",
+        class: MetadataClass::Contractual,
+        consumer_path: Some("src/fabric/mutation.rs"),
+        consumer_symbol: Some("integrity evidence"),
     },
     MetadataAnnotationSpec {
         annotation: "logical_type",
@@ -4553,7 +4559,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "table_mutation_operation",
-        sqlite_ddl: "CREATE TABLE table_mutation_operation (\n  operation_id BLOB NOT NULL,\n  table_code INTEGER NOT NULL,\n  mutation_phase TEXT NOT NULL,\n  application_id TEXT NOT NULL,\n  application_version INTEGER NOT NULL,\n  publication_id BLOB NOT NULL,\n  owner_set_fingerprint BLOB NOT NULL,\n  input_checksum BLOB NOT NULL,\n  expected_output_checksum BLOB NOT NULL,\n  expected_predecessor INTEGER,\n  state_code INTEGER NOT NULL,\n  delta_version INTEGER,\n  created_at TEXT NOT NULL,\n  completed_at TEXT,\n  PRIMARY KEY (operation_id, table_code, mutation_phase),\n  UNIQUE (application_id, application_version)\n) STRICT;\n",
+        sqlite_ddl: "CREATE TABLE table_mutation_operation (\n  operation_id BLOB NOT NULL,\n  table_code INTEGER NOT NULL,\n  mutation_phase TEXT NOT NULL,\n  application_id TEXT NOT NULL,\n  application_version INTEGER NOT NULL,\n  publication_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  analysis_context_id BLOB,\n  source_generation INTEGER NOT NULL,\n  owner_set_fingerprint BLOB NOT NULL,\n  input_checksum BLOB NOT NULL,\n  expected_output_checksum BLOB NOT NULL,\n  expected_predecessor INTEGER,\n  state_code INTEGER NOT NULL,\n  delta_version INTEGER,\n  created_at TEXT NOT NULL,\n  completed_at TEXT,\n  PRIMARY KEY (operation_id, table_code, mutation_phase),\n  UNIQUE (application_id, application_version)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "operation_id",
@@ -4583,6 +4589,21 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
             GeneratedOperationalColumn {
                 name: "publication_id",
                 sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "analysis_context_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "source_generation",
+                sqlite_type: OperationalSqliteType::Integer,
                 nullable: false,
             },
             GeneratedOperationalColumn {
@@ -4627,7 +4648,9 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
             },
         ],
         primary_key: &["operation_id", "table_code", "mutation_phase"],
-        workspace_scope: None,
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
+            workspace_column: "workspace_id",
+        }),
     },
     GeneratedOperationalTableSpec {
         name: "hot_overlay_manifest",

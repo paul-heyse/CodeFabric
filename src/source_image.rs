@@ -1,5 +1,6 @@
 //! Immutable source-image capture, content-addressed blobs, and lease-safe reclamation.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::os::fd::OwnedFd;
@@ -24,6 +25,7 @@ use crate::secure_path::{
     PlatformPath, SecurePathError, StableFileMetadata, StableFileRead, StableReadError,
     open_workspace_root,
 };
+use crate::snapshot::ServingSnapshotManifest;
 use crate::workspace_registry::{WorkspaceRegistry, WorkspaceRegistryError};
 
 /// Default maximum for ordinary source files (16 MiB).
@@ -196,6 +198,8 @@ pub enum SourceImageError {
     GenerationOverflow,
     #[error("source blob lease does not exist or is no longer active")]
     LeaseInactive,
+    #[error("retained serving-snapshot provenance is malformed: {0}")]
+    RetainedProvenance(String),
 }
 
 /// Capture policy loaded from the generated deployment profile.
@@ -695,6 +699,28 @@ impl SourceImageStore {
         let grace_sql = sql_i64(grace)?;
         let maximum_blobs_sql =
             i64::try_from(maximum_blobs).map_err(|_| SourceImageError::BlobIo)?;
+        let retained_publication_blobs =
+            store
+                .reader_factory()
+                .open()?
+                .with_connection(|connection| {
+                    let mut statement = connection.prepare(
+                        "SELECT manifest_json_bytes FROM serving_snapshot_manifest
+                     ORDER BY snapshot_id",
+                    )?;
+                    statement
+                        .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+                        .collect::<Result<Vec<_>, _>>()
+                })?
+                .into_iter()
+                .try_fold(BTreeSet::new(), |mut retained, bytes| {
+                    let manifest: ServingSnapshotManifest = serde_json::from_slice(&bytes)
+                        .map_err(|error| SourceImageError::RetainedProvenance(error.to_string()))?;
+                    retained.extend(manifest.raw_source_blob_digests().map_err(|error| {
+                        SourceImageError::RetainedProvenance(error.to_string())
+                    })?);
+                    Ok::<_, SourceImageError>(retained)
+                })?;
         let candidates = store
             .reader_factory()
             .open()?
@@ -719,12 +745,45 @@ impl SourceImageStore {
                     })?
                     .collect::<Result<Vec<_>, _>>()
             })?;
+        let candidates = candidates
+            .into_iter()
+            .filter(
+                |(digest, _, _)| match <&[u8; 32]>::try_from(digest.as_slice()) {
+                    Ok(digest) => !retained_publication_blobs.contains(digest),
+                    Err(_) => true,
+                },
+            )
+            .collect::<Vec<_>>();
         let mut report = GarbageCollectionReport::default();
         for (raw_digest, byte_length, raw_line_digest) in candidates {
             let byte_length = u64::try_from(byte_length).map_err(|_| SourceImageError::BlobIo)?;
             let digest = fixed_digest(&raw_digest)?;
             let line_digest = fixed_digest(&raw_line_digest)?;
             let deleted = store.write_transaction(|transaction| {
+                let publication_protected = {
+                    let mut statement = transaction.prepare(
+                        "SELECT manifest_json_bytes FROM serving_snapshot_manifest
+                         ORDER BY snapshot_id",
+                    )?;
+                    let manifests = statement
+                        .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    manifests.into_iter().try_fold(false, |protected, bytes| {
+                        if protected {
+                            return Ok::<_, SourceImageError>(true);
+                        }
+                        let manifest: ServingSnapshotManifest = serde_json::from_slice(&bytes)
+                            .map_err(|error| {
+                                SourceImageError::RetainedProvenance(error.to_string())
+                            })?;
+                        Ok(manifest
+                            .raw_source_blob_digests()
+                            .map_err(|error| {
+                                SourceImageError::RetainedProvenance(error.to_string())
+                            })?
+                            .contains(&digest))
+                    })?
+                };
                 let protected: bool = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM source_blob_lease_member m
                      JOIN source_blob_lease l ON l.lease_id=m.lease_id
@@ -734,7 +793,7 @@ impl SourceImageStore {
                     params![digest.as_slice(), now_sql, grace_sql],
                     |row| row.get(0),
                 )?;
-                if protected {
+                if protected || publication_protected {
                     return Ok::<bool, SourceImageError>(false);
                 }
                 self.blobs.remove(&digest)?;
@@ -1234,6 +1293,10 @@ mod tests {
 
     use super::*;
     use crate::identity::PlatformCode;
+    use crate::snapshot::{
+        ServingSnapshotManifestBody, SnapshotBasePublication, SnapshotBundles,
+        SnapshotContextRecord, SnapshotContexts, SnapshotIndexes, SnapshotOverlay, SnapshotSource,
+    };
     use crate::workspace_registry::WorkspaceSourceRegistration;
 
     fn platform() -> PlatformCode {
@@ -1277,6 +1340,82 @@ mod tests {
             holder_kind: SourceBlobHolderKind::ProviderRun,
             holder_id: [9; 16],
         }
+    }
+
+    fn retained_manifest(
+        workspace_id: [u8; 16],
+        source_digest: [u8; 32],
+    ) -> ServingSnapshotManifest {
+        let context_id = [0x51_u8; 16];
+        let context_set = crate::identity::context_set_identity(workspace_id, &[context_id])
+            .unwrap()
+            .id;
+        let framed = |byte| crate::integrity::frame_digest([byte; 32]);
+        ServingSnapshotManifestBody {
+            manifest_version: "1.0".into(),
+            workspace_id: encode_public_id(IdentityDomain::Workspace, None, workspace_id).unwrap(),
+            repository_id: None,
+            worktree_id: None,
+            registration_revision: 1,
+            source: SnapshotSource {
+                source_generation: 0,
+                admitted_event_sequence: 0,
+                reconciled_event_sequence: 0,
+                inventory_digest: framed(1),
+                authorization_fingerprint: framed(2),
+                inclusion_policy_fingerprint: framed(3),
+                path_profile_version: "1".into(),
+                source_trust_state: "CURRENT".into(),
+                event_stream_health: "HEALTHY".into(),
+                git_acceleration_status: "NOT_REQUIRED".into(),
+                git_state_fingerprint: None,
+            },
+            contexts: SnapshotContexts {
+                context_set_id: encode_public_id(IdentityDomain::ContextSet, None, context_set)
+                    .unwrap(),
+                default_python_context_id: None,
+                default_rust_context_id: None,
+                records: vec![SnapshotContextRecord {
+                    analysis_context_id: encode_public_id(
+                        IdentityDomain::AnalysisContext,
+                        None,
+                        context_id,
+                    )
+                    .unwrap(),
+                    context_manifest_digest: framed(4),
+                    capability_partition_digest: framed(5),
+                }],
+            },
+            base_publication: SnapshotBasePublication {
+                publication_id: encode_public_id(IdentityDomain::Publication, None, [0x52; 16])
+                    .unwrap(),
+                tables: Vec::new(),
+            },
+            overlay: SnapshotOverlay {
+                overlay_generation: 0,
+                overlay_digest: framed(0),
+                total_memory_bytes: 0,
+                tables: Vec::new(),
+            },
+            indexes: SnapshotIndexes {
+                capability_index_digest: framed(6),
+                diagnostic_index_digest: framed(7),
+                dependency_graph_digest: framed(8),
+            },
+            bundles: SnapshotBundles {
+                ontology_bundle_id: "ontology:1".into(),
+                schema_bundle_id: "schema:1".into(),
+                provider_bundle_id: "provider:1".into(),
+                derivation_bundle_id: "derivation:1".into(),
+                query_language_bundle_id: "query:1".into(),
+                model_pack_bundle_id: "model:1".into(),
+                toolchain_bundle_id: "toolchain:1".into(),
+            },
+            limits_profile_digest: framed(9),
+            source_blob_digests: vec![crate::integrity::frame_digest(source_digest)],
+        }
+        .derive()
+        .unwrap()
     }
 
     #[test]
@@ -1544,6 +1683,72 @@ mod tests {
         }
         stop.store(true, Ordering::Release);
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn wp66_negative_zero_state() {
+        let (_directory, mut store, workspace_id, root, mut images) = fixture();
+        fs::write(root.join("retained.rs"), b"pub fn retained() {}\n").unwrap();
+        let CaptureOutcome::Published(image) = images
+            .capture(&mut store, &request(workspace_id, b"retained.rs"))
+            .unwrap()
+        else {
+            panic!("retained source was not captured");
+        };
+        let manifest = retained_manifest(workspace_id, image.digest);
+        let snapshot_id = manifest.raw_snapshot_id().unwrap();
+        let publication_id = manifest.raw_publication_id().unwrap();
+        let manifest_body = manifest.body.canonical_body().unwrap();
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let manifest_digest = manifest.raw_manifest_digest().unwrap();
+        store
+            .write_transaction(|transaction| {
+                transaction.execute(
+                    "INSERT INTO serving_snapshot_manifest(
+                       snapshot_id, workspace_id, publication_id, state_code,
+                       manifest_body_bytes, manifest_json_bytes, manifest_digest,
+                       created_at, activated_at, retired_at)
+                     VALUES (?1, ?2, ?3, 30, ?4, ?5, ?6, 1, NULL, 2)",
+                    params![
+                        snapshot_id.as_slice(),
+                        workspace_id.as_slice(),
+                        publication_id.as_slice(),
+                        manifest_body,
+                        manifest_json,
+                        manifest_digest.as_slice(),
+                    ],
+                )?;
+                Ok::<_, SourceImageError>(())
+            })
+            .unwrap();
+        images.release(&mut store, image.lease.lease_id).unwrap();
+        let now = unix_seconds().unwrap();
+        assert_eq!(
+            images
+                .collect_garbage(&mut store, now, Duration::ZERO, 10)
+                .unwrap()
+                .blobs,
+            0,
+            "retained publication provenance permitted source-blob collection"
+        );
+        assert!(images.blobs.path_for(&image.digest).exists());
+
+        store
+            .write_transaction(|transaction| {
+                transaction.execute(
+                    "DELETE FROM serving_snapshot_manifest WHERE snapshot_id=?1",
+                    [snapshot_id.as_slice()],
+                )?;
+                Ok::<_, SourceImageError>(())
+            })
+            .unwrap();
+        assert_eq!(
+            images
+                .collect_garbage(&mut store, now, Duration::ZERO, 10)
+                .unwrap()
+                .blobs,
+            1
+        );
     }
 
     #[test]

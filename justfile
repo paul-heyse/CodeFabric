@@ -216,7 +216,7 @@ rebuild-equivalence-check:
 [doc("Run the complete Wave-6 continuous-update acceptance surface")]
 [group('test')]
 wave6-integration-check:
-    cargo nextest run --locked -E 'test(/wp(23|24|25|26|4[1-8])/)' --no-tests=fail
+    cargo nextest run --locked -E 'test(/(wp(23|24|25|26|4[1-8])|wp66_)/)' --no-tests=fail
 
 [doc("Compare Git-accelerated candidates and state with authoritative fallback")]
 [group('test')]
@@ -230,7 +230,7 @@ wave7-integration-check: git-parity-check rebuild-equivalence-check
 [doc("Validate that a vacuum dry-run cannot include retained snapshot files")]
 [group('test')]
 vacuum-dry-run-check:
-    cargo nextest run --locked -E 'test(/wp24_negative_zero_state/)' --no-tests=fail
+    cargo nextest run --locked -E 'test(/(wp24_negative_zero_state|wp66_negative_zero_state)/)' --no-tests=fail
 
 [doc("Run the seeded 10,000-attempt three-size source-capture race campaign")]
 [group('test')]

@@ -1635,7 +1635,10 @@ mod tests {
     use crate::fact_ingest::{EntityRow, FactScope, ValidatedFactBatch, encode_entities};
     use crate::identity::{IdentityDomain, encode_public_id};
     use crate::operational_store::{OperationalStore, OperationalStoreError};
-    use crate::query_service::WorkspaceQueryBackend;
+    use crate::query_service::{
+        PersistedQueryArtifactBundle, QueryArtifactPhase, ResultArtifactStore, VersionExplanation,
+        WorkspaceQueryBackend,
+    };
     use crate::registries::{SnapshotLeaseKind, WorkspaceRegistryLifecycle};
     use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_client::CpgQueryServiceClient;
     use crate::rpc::generated::codefabric::cpgd::v1::query_event::Event;
@@ -1781,6 +1784,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".into(),
             },
             limits_profile_digest: digest(8),
+            source_blob_digests: Vec::new(),
         }
     }
 
@@ -2082,7 +2086,7 @@ mod tests {
     async fn published_delta_candidate(
         root: &std::path::Path,
         journal: &mut OperationalStore,
-    ) -> Arc<ServingSnapshotCandidate> {
+    ) -> (super::super::WorkspaceFabric, Arc<ServingSnapshotCandidate>) {
         let mut fabric =
             super::super::bootstrap_workspace(&root.join("fabric"), &workspace_record())
                 .await
@@ -2153,7 +2157,72 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(providers.metrics().validation_scan_count, 0);
-        Arc::new(ServingSnapshotCandidate::build(snapshot_body(1), providers, &[]).unwrap())
+        let candidate =
+            Arc::new(ServingSnapshotCandidate::build(snapshot_body(1), providers, &[]).unwrap());
+        (fabric, candidate)
+    }
+
+    async fn explainable_version_fixture() -> (VersionExplanation, i64, serde_json::Value) {
+        let (directory, mut store, mut images) = operational_store();
+        let (fabric, candidate) = published_delta_candidate(directory.path(), &mut store).await;
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            Arc::clone(&candidate),
+            directory.path(),
+        );
+        let query = session
+            .query("SELECT entity_id FROM entities ORDER BY entity_id")
+            .await
+            .unwrap();
+        let execution = QueryExecutionContext {
+            execution_id: query.artifact.execution_id.clone(),
+            semantic_request_id: query.artifact.semantic_request_id.clone(),
+            mcp_call_id: query.artifact.mcp_call_id.clone(),
+        };
+        let artifacts =
+            ResultArtifactStore::new(directory.path().join("result-artifacts")).unwrap();
+        artifacts
+            .persist_query_artifact(&PersistedQueryArtifactBundle {
+                artifact_schema_version: "codefabric.query-execution-artifact.v1".into(),
+                execution,
+                phase: QueryArtifactPhase::Succeeded,
+                plan_artifacts: vec![query.artifact],
+                result_artifact_id: Some("result:wp66".into()),
+                public_error_code: None,
+                created_at_unix_ms: 1,
+                expires_at_unix_ms: 60_001,
+            })
+            .unwrap();
+        let table = fabric.table(100).unwrap();
+        let delta_version = table.version().unwrap();
+        let typed_scope_rows = store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM table_mutation_operation
+                     WHERE table_code=100 AND delta_version=?1
+                       AND workspace_id=?2 AND source_generation=2
+                       AND analysis_context_id=?3",
+                    params![
+                        i64::try_from(delta_version).unwrap(),
+                        WORKSPACE.as_slice(),
+                        [0x45_u8; 16].as_slice()
+                    ],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .unwrap();
+        let manifest_json = serde_json::to_value(candidate.manifest()).unwrap();
+        let explanation = artifacts
+            .explain_version(table, delta_version)
+            .await
+            .unwrap();
+        (explanation, typed_scope_rows, manifest_json)
     }
 
     fn normalize_plan(plan: &str, root: &std::path::Path) -> String {
@@ -3011,6 +3080,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wp66_behavioral_acceptance() {
+        let (explanation, typed_scope_rows, manifest) = explainable_version_fixture().await;
+        assert_eq!(
+            typed_scope_rows, 1,
+            "typed mutation scope join is incomplete"
+        );
+        assert_eq!(explanation.table_code, 100);
+        assert_eq!(explanation.table_name, "entity");
+        assert_eq!(explanation.executions.len(), 1);
+        let plan = &explanation.executions[0].plan_artifacts[0];
+        assert_eq!(
+            plan.source_table_versions.get(&100),
+            Some(&explanation.delta_version)
+        );
+        assert_eq!(plan.snapshot_id, manifest["snapshot_id"]);
+        assert!(manifest["source_blob_digests"].is_array());
+        for bundle in [
+            &plan.bundle_ids.ontology_bundle_id,
+            &plan.bundle_ids.schema_bundle_id,
+            &plan.bundle_ids.provider_bundle_id,
+            &plan.bundle_ids.derivation_bundle_id,
+            &plan.bundle_ids.query_language_bundle_id,
+            &plan.bundle_ids.model_pack_bundle_id,
+            &plan.bundle_ids.toolchain_bundle_id,
+        ] {
+            assert!(!bundle.is_empty(), "provenance bundle identity is absent");
+        }
+        assert!(explanation.delta_commit_info.get("workspace_id").is_some());
+        assert!(
+            explanation
+                .delta_commit_info
+                .get("source_generation")
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn wp66_operational_acceptance() {
+        let started = std::time::Instant::now();
+        let (explanation, _, _) = explainable_version_fixture().await;
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(explanation.scanned_artifact_count, 1);
+        assert_eq!(
+            explanation.executions[0].phase,
+            QueryArtifactPhase::Succeeded
+        );
+    }
+
+    #[tokio::test]
     async fn wp25_structural_acceptance() {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();
@@ -3498,7 +3616,7 @@ mod tests {
     #[tokio::test]
     async fn wp25_delta_serving_acceptance() {
         let (directory, mut store, mut images) = operational_store();
-        let candidate = published_delta_candidate(directory.path(), &mut store).await;
+        let (_, candidate) = published_delta_candidate(directory.path(), &mut store).await;
         let runtime = ServingSnapshotRuntime::default();
         let session = activate_and_lease(
             &mut store,
@@ -3598,7 +3716,7 @@ FilterExec: workspace_id@0 = 11111111111111111111...
     #[tokio::test]
     async fn datafusion_55_serving_equivalence() {
         let (directory, mut store, mut images) = operational_store();
-        let candidate = published_delta_candidate(directory.path(), &mut store).await;
+        let (_, candidate) = published_delta_candidate(directory.path(), &mut store).await;
         let runtime = ServingSnapshotRuntime::default();
         let session = activate_and_lease(
             &mut store,
@@ -3653,7 +3771,7 @@ FilterExec: workspace_id@0 = 11111111111111111111...
     #[tokio::test]
     async fn wp58_operational_acceptance() {
         let (directory, mut store, mut images) = operational_store();
-        let candidate = published_delta_candidate(directory.path(), &mut store).await;
+        let (_, candidate) = published_delta_candidate(directory.path(), &mut store).await;
         let runtime = ServingSnapshotRuntime::default();
         let session = activate_and_lease(
             &mut store,

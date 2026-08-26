@@ -67,13 +67,13 @@
     },
     {
       "artifact_id": "codefabric.schema.public-status.schema",
-      "canonical_digest": "b3:fc51d31e6d59aba67082be6fcf64ea1e3cca992654e9835f44d1edf6926d7c53",
+      "canonical_digest": "b3:432d2f697e1e4d9e68d32ef49ab387792fde71ef054748ce1b78b06ed181725f",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:1fff4f8cab6c37e8a7915c3e8bfb10e7a1763f894d340a4a057c3d2e8916d86d",
+  "bundle_digest": "b3:60abd82daeafd1519c36149324a4cf2a706c2d73fbd20aee1d85ed1ffa8d5d9b",
   "bundle_kind": "tool-contract",
   "bundle_major": 1,
   "bundle_version": "1.0",
