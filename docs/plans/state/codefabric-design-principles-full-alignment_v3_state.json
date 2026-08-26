@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP67",
+  "current_packet": "WP68",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -171,10 +171,14 @@
       "blockers": []
     },
     "WP67": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "258de9810ceb91603025dbc791cb08bd2464783a",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first closed Rust resource-profile union placed deny_unknown_fields on enum variants, which serde does not support; named and external profile records now use closed newtype payload structs and the Rust/Python differential corpus passes.",
+        "The first structural peer-policy oracle matched its own forbidden peer_cred literal; the assertion now constructs the forbidden token from fragments while still proving daemon.rs contains no inline peer-credential lookup.",
+        "The first full root-test run exposed WP63's real-UDS client still using the pre-WP67 handshake. The compatibility oracle now supplies registry-derived required features, a derived host profile digest, and the same digest on StartQuery before the complete 325-test and doctest gate passed."
+      ],
       "blockers": []
     },
     "WP68": {
@@ -362,6 +366,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Implement WP67 keyed token separation, lease and workspace authorization enforcement, typed feature negotiation, schema-covered admin protocol, and one cross-language model-index decode contract.",
-  "updated_at": "2026-08-26T00:25:04Z"
+  "next_action": "Implement WP68 as a strictly presentational FastMCP adapter over the hardened generated gRPC boundary, including the four packet oracles and adapter wheel proof.",
+  "updated_at": "2026-08-26T01:00:21Z"
 }
