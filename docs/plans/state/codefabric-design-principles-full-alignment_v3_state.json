@@ -247,7 +247,7 @@
       "blockers": []
     },
     "WP72": {
-      "status": "ready",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -392,6 +392,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Implement WP72 true zero-state rebuild equivalence, shared InventoryWalker Git parity across gix/cache-disabled configurations, superseding status evidence, and M14 closeout.",
-  "updated_at": "2026-08-26T04:22:02Z"
+  "next_action": "Validate and certify WP72 true zero-state serving equivalence and Git parity, then reconcile upfront design and complete M14 closeout.",
+  "updated_at": "2026-08-26T04:47:27Z"
 }
