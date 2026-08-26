@@ -37,6 +37,8 @@ pub mod derivation;
 pub mod error;
 #[cfg(all(feature = "daemon", feature = "compatibility-probes"))]
 pub mod gate_b_candidate;
+#[cfg(all(feature = "daemon", feature = "compatibility-probes"))]
+pub mod gate_b_release;
 #[cfg(feature = "daemon")]
 pub mod golden_corpus;
 #[cfg(any(

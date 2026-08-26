@@ -16,6 +16,11 @@ use crate::registries::{DURABLE_PUBLICATION_STATE_VALUES, PROVIDER_IDS};
 use crate::schema_registry::table_specs;
 
 const REQUIRED_MEMBER_ROOTS: [&str; 3] = ["expected", "scenarios", "workspace"];
+pub const LEGACY_CORPUS_ID: &str = "codefabric-golden-v1";
+pub const LEGACY_CORPUS_VERSION: &str = "1.0";
+pub const RELEASED_CORPUS_ID: &str = "codefabric-golden-v2";
+pub const RELEASED_CORPUS_VERSION: &str = "2.0.0";
+pub const GATE_B_PROFILE_ID: &str = "gate-b-v1";
 pub(crate) const REQUIRED_EXPECTED_GROUPS: [&str; 11] = [
     "canonical_tables",
     "diagnostics",
@@ -87,7 +92,7 @@ pub enum ScenarioTerminal {
     Partial,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CorpusManifest {
     pub corpus_id: String,
@@ -105,16 +110,31 @@ pub struct CorpusManifest {
     pub derivation_bundle_digest: String,
     pub query_bundle_digest: String,
     pub tool_contract_bundle_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<CorpusSupersedes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_artifact: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released_candidate_digest: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CorpusSupersedes {
+    pub corpus_id: String,
+    pub corpus_version: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CorpusStatus {
     Candidate,
     Released,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CoverageProfile {
     pub profile_id: String,
@@ -127,7 +147,7 @@ pub struct CoverageProfile {
     pub acceptance: OwnerAcceptance,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnerAcceptance {
     pub accepted_by: String,
@@ -180,6 +200,12 @@ fn read(path: &Path) -> Result<Vec<u8>, CorpusError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 67
+        && value.starts_with("b3:")
+        && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn safe_relative(value: &str) -> Result<&Path, CorpusError> {
@@ -269,6 +295,16 @@ fn digest_files(root: &Path, files: &[PathBuf]) -> Result<String, CorpusError> {
     }
     hasher.update(&(files.len() as u64).to_be_bytes());
     Ok(crate::integrity::frame_digest(hasher.finalize()))
+}
+
+pub(crate) fn compute_required_profile(corpus_root: &Path) -> Result<(usize, String), CorpusError> {
+    let mut files = Vec::new();
+    for member_root in REQUIRED_MEMBER_ROOTS {
+        collect_files(corpus_root, Path::new(member_root), &mut files)?;
+    }
+    files.sort();
+    let digest = digest_files(corpus_root, &files)?;
+    Ok((files.len(), digest))
 }
 
 fn child_directories(path: &Path) -> Result<BTreeSet<String>, CorpusError> {
@@ -361,6 +397,7 @@ pub fn load_scenarios(corpus_root: &Path) -> Result<Vec<ScenarioDefinition>, Cor
 ///
 /// Returns an error for missing or unreadable corpus members, malformed manifests, path escapes,
 /// digest drift, or an unaccepted profile.
+#[allow(clippy::too_many_lines)] // One validation pass keeps corpus identity, acceptance, membership, and digest checks visibly coupled.
 pub fn validate_profile(
     corpus_root: &Path,
     profile_id: &str,
@@ -368,7 +405,30 @@ pub fn validate_profile(
     let manifest_path = corpus_root.join("corpus-manifest.json");
     let manifest: CorpusManifest = serde_json::from_slice(&read(&manifest_path)?)
         .map_err(|error| CorpusError::Manifest(error.to_string()))?;
-    if manifest.corpus_id != "codefabric-golden-v1" || manifest.corpus_version != "1.0" {
+    let legacy = manifest.corpus_id == LEGACY_CORPUS_ID
+        && manifest.corpus_version == LEGACY_CORPUS_VERSION
+        && manifest.corpus_status == CorpusStatus::Candidate
+        && manifest.supersedes.is_none()
+        && manifest.acceptance_artifact.is_none()
+        && manifest.acceptance_digest.is_none()
+        && manifest.released_candidate_digest.is_none();
+    let released = manifest.corpus_id == RELEASED_CORPUS_ID
+        && manifest.corpus_version == RELEASED_CORPUS_VERSION
+        && manifest.corpus_status == CorpusStatus::Released
+        && manifest.supersedes.as_ref().is_some_and(|supersedes| {
+            supersedes.corpus_id == LEGACY_CORPUS_ID
+                && supersedes.corpus_version == LEGACY_CORPUS_VERSION
+        })
+        && manifest.acceptance_artifact.as_deref() == Some("owner-acceptance.json")
+        && manifest
+            .acceptance_digest
+            .as_deref()
+            .is_some_and(valid_digest)
+        && manifest
+            .released_candidate_digest
+            .as_deref()
+            .is_some_and(valid_digest);
+    if !legacy && !released {
         return Err(CorpusError::Invariant(
             "unexpected corpus identity or version".to_owned(),
         ));
@@ -388,6 +448,13 @@ pub fn validate_profile(
         .iter()
         .find(|profile| profile.profile_id == profile_id)
         .ok_or_else(|| CorpusError::Invariant(format!("unknown coverage profile {profile_id}")))?;
+    if (legacy && profile.profile_version != "1.0")
+        || (released && profile.profile_version != "2.0")
+    {
+        return Err(CorpusError::Invariant(format!(
+            "coverage profile {profile_id} has the wrong version"
+        )));
+    }
     if profile.profile_status != CorpusStatus::Released
         || profile.acceptance.accepted_by.trim().is_empty()
         || profile.acceptance.acceptance_basis.trim().is_empty()
@@ -464,7 +531,7 @@ pub fn validate_profile(
 /// Returns an error when the released profile or any required artifact is absent, malformed,
 /// non-canonical, or inconsistent with current generated authority.
 pub fn execute_gate_b_artifacts(corpus_root: &Path) -> Result<GateBExecution, CorpusError> {
-    let profile = validate_profile(corpus_root, "gate-b-v1")?;
+    let profile = validate_profile(corpus_root, GATE_B_PROFILE_ID)?;
     let mut artifact_digests = BTreeMap::new();
     for group in REQUIRED_EXPECTED_GROUPS {
         let path = corpus_root.join("expected").join(group).join("gate-b.json");
@@ -472,7 +539,7 @@ pub fn execute_gate_b_artifacts(corpus_root: &Path) -> Result<GateBExecution, Co
             .map_err(|error| CorpusError::Artifact(error.to_string()))?;
         let value: Value = serde_json::from_slice(&canonical)
             .map_err(|error| CorpusError::Artifact(error.to_string()))?;
-        if text_field(&value, "profile")? != "gate-b-v1" {
+        if text_field(&value, "profile")? != GATE_B_PROFILE_ID {
             return Err(CorpusError::Artifact(format!(
                 "{group} belongs to a different profile"
             )));
@@ -506,7 +573,7 @@ pub fn execute_gate_b_artifacts(corpus_root: &Path) -> Result<GateBExecution, Co
 /// Returns an error unless Gate B executes successfully and the exact required scenario census is
 /// present.
 pub fn core_source_v1_coverage(corpus_root: &Path) -> Result<CoreSourceCoverage, CorpusError> {
-    let profile = validate_profile(corpus_root, "gate-b-v1")?;
+    let profile = validate_profile(corpus_root, GATE_B_PROFILE_ID)?;
     execute_gate_b_artifacts(corpus_root)?;
     let scenario_ids = child_directories(&corpus_root.join("scenarios"))?;
     if scenario_ids != REQUIRED_SCENARIOS.into_iter().map(str::to_owned).collect() {

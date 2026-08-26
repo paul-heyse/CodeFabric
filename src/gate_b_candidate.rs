@@ -985,6 +985,10 @@ fn read_candidate_input(path: &Path) -> Result<Vec<u8>, GateBCandidateError> {
     Ok(fs::read(path)?)
 }
 
+pub(crate) fn read_candidate_artifact(path: &Path) -> Result<Vec<u8>, GateBCandidateError> {
+    read_candidate_input(path)
+}
+
 fn expectation_inputs(
     repository_root: &Path,
 ) -> Result<BTreeMap<String, String>, GateBCandidateError> {

@@ -204,11 +204,16 @@ query-legacy-zero-state-check:
     @just alignment-detector-check DP-110
     cargo nextest run --locked --lib -E 'test(/(wp62_negative_zero_state|wp75_negative_zero_state|wp64_negative_zero_state)/)' --no-tests=fail
 
-[doc("Refuse Readiness Gate B until WP76 records accountable owner acceptance")]
+[doc("Verify accountable-owner acceptance and execute the immutable released Gate B corpus")]
 [group('test')]
-gate-b-check:
-    @echo "Gate B release is blocked pending WP76 accountable owner acceptance" >&2
-    @exit 1
+gate-b-check: gate-b-owner-acceptance-check wave5-integration-check wave6-integration-check adapter-wheel-test model-release-census-check
+    cargo run --locked --bin codefabric-gate-b-candidate -- check-release . target/gate-b-release-check-scratch
+
+[doc("Verify the Gate B owner authority, accepted candidate, immutable corpus, and current-version index")]
+[group('test')]
+gate-b-owner-acceptance-check:
+    cargo run --locked --bin codefabric-gate-b-candidate -- verify-release .
+    @just packet-oracle-check WP76
 
 [doc("Regenerate and verify the unreleased Gate B review candidate")]
 [group('test')]
@@ -580,7 +585,7 @@ ci-fast: root-ci-fast extractor-ci-fast sidecar-ci-fast adapter-ci-fast governan
 
 [doc("ci-fast plus policy, the ci nextest profile, and snapshot review state")]
 [group('gate')]
-ci-pr: ci-fast policy sidecar-policy wave-acceptance-check
+ci-pr: ci-fast policy sidecar-policy wave-acceptance-check gate-b-check
     cargo nextest run -P ci
     cargo test --doc
     cargo insta pending-snapshots
@@ -772,6 +777,12 @@ model-release-census-candidate:
 [group('mutating')]
 gate-b-candidate-emit output_dir="tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1":
     cargo run --locked --bin codefabric-gate-b-candidate -- emit . tests/golden/codefabric-golden-v1 target/gate-b-candidate-emit-scratch "{{output_dir}}"
+
+[confirm("Accept the exact reviewed Gate B candidate and publish immutable corpus v2. Continue?")]
+[doc("MUTATES: record accountable-owner acceptance and publish immutable Gate B corpus v2 exactly once")]
+[group('mutating')]
+gate-b-owner-accept candidate_bundle="tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1" acceptance_artifact="tests/golden/codefabric-golden-v2/owner-acceptance.json":
+    cargo run --locked --bin codefabric-gate-b-candidate -- accept . "{{candidate_bundle}}" "{{acceptance_artifact}}" codefabric-repository-owner "Explicit accountable-owner approval of the exact WP71 candidate bundle recorded in the implementation-plan execution thread"
 
 [confirm("Accept the reviewed released-artifact census as owner authority. Continue?")]
 [doc("MUTATES: create the owner-accepted released-artifact census exactly once")]

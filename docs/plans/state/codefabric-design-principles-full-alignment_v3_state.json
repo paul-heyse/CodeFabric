@@ -234,11 +234,15 @@
       "blockers": []
     },
     "WP76": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The accountable repository owner explicitly accepted the exact WP71 candidate presented in the preceding checkpoint and directed execution to continue; WP76 records that human decision in its versioned acceptance authority rather than treating executor output as approval."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The accountable repository owner must invoke just gate-b-owner-accept; the accepted plan explicitly prohibits the executor from invoking that acceptance action."
+      ]
     },
     "WP72": {
       "status": "not_started",
@@ -384,6 +388,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Present WP71 candidate codefabric-golden-v2.0.0-candidate.1 and detached digest b3:23b48fa3f8aa667238e30461e217034c02e5b4e697d0729eb31c6011334f1da2 to the accountable repository owner, then pause until that owner explicitly accepts or rejects it; do not invoke gate-b-owner-accept or release expected bytes without that decision.",
-  "updated_at": "2026-08-26T03:17:02Z"
+  "next_action": "The accountable repository owner invokes just gate-b-owner-accept to materialize the already approved candidate decision. Then verify and commit the immutable corpus-v2 release, complete WP76, and proceed to WP72.",
+  "updated_at": "2026-08-26T03:59:11Z"
 }

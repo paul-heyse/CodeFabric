@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:4c7b33224e684c14dff8b6bccab56453447ee4049d6acc958d1f6e56c58c52fa"
+canonical_digest: "b3:d441349a1b43a2d5f5382064f4a14cdd78ecdf68ac82ece8cac2a2bfe711611c"
 schema_version: 1
 records:
   - {domain_id: UNFRAMED_ID16, purpose: SEMANTIC_FINGERPRINT, domain_string: "", separator: NONE, framing: legacy-unframed-exact-preimage, fields: [preimage_bytes], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::identity::unframed_semantic_id", consumers: [src/core_facts.rs, src/daemon.rs, src/provider_runtime.rs]}
@@ -50,6 +50,7 @@ records:
   - {domain_id: GOLDEN_PROFILE, purpose: INTEGRITY, domain_string: codefabric-golden-profile-v1, separator: NUL, framing: u64-be-length-prefixed-files, fields: [ordered_relative_paths_and_bytes, file_count], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::integrity::IntegrityHasher", consumers: [src/golden_corpus.rs]}
   - {domain_id: GATE_B_EXECUTION, purpose: INTEGRITY, domain_string: codefabric.gate-b.execution.v1, separator: NUL, framing: u64-be-length-prefixed-artifacts, fields: [profile_digest_utf8, ordered_group_digest_pairs], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::integrity::IntegrityHasher", consumers: [src/golden_corpus.rs]}
   - {domain_id: GATE_B_REVIEW_CANDIDATE, purpose: INTEGRITY, domain_string: codefabric.gate-b.review-candidate.v1, separator: NUL, framing: u64-be-length-prefixed-canonical-manifest, fields: [canonical_candidate_manifest_bytes], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::integrity::IntegrityHasher", consumers: [src/golden_corpus.rs, src/gate_b_candidate.rs]}
+  - {domain_id: GATE_B_OWNER_ACCEPTANCE, purpose: INTEGRITY, domain_string: codefabric.gate-b.owner-acceptance.v1, separator: NUL, framing: u64-be-length-prefixed-canonical-acceptance-projection, fields: [canonical_acceptance_bytes_without_acceptance_digest], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::integrity::IntegrityHasher", consumers: [src/gate_b_release.rs]}
   - {domain_id: INVENTORY_FILE, purpose: INTEGRITY, domain_string: codefabric.inventory.file.v1, separator: NUL, framing: typed-exact-concatenation, fields: [path, content_digest, byte_length, file_kind, classification, inclusion], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::integrity::IntegrityHasher", consumers: [src/inventory.rs]}
   - {domain_id: INVENTORY_DIRECTORY, purpose: INTEGRITY, domain_string: codefabric.inventory.directory.v1, separator: NUL, framing: ordered-length-prefixed-children, fields: [child_name_kind_digest_tuples], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::integrity::IntegrityHasher", consumers: [src/inventory.rs]}
   - {domain_id: DERIVATION_SYNTAX_TREE_INPUT, purpose: INTEGRITY, domain_string: codefabric.derivation.syntax-tree.input.v1, separator: NUL, framing: exact-concatenation, fields: [derivation_id, algorithm_version, owner_id, entity_id, parent_id, child_id, ordinal], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::integrity::IntegrityHasher", consumers: [src/derivation.rs]}
