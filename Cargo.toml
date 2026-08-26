@@ -190,6 +190,10 @@ tower = { version = "=0.5.3", features = ["util"] }
 ignored = [
     "tonic-prost",
 ]
+# This source is copied into isolated old/new revision worktrees as a temporary integration
+# target by data_fabric_revision_check.sh; linking it in the live package would defeat the
+# cross-revision API-intersection contract it exists to test.
+ignored-paths = ["tooling/data_fabric_revision_benchmark.rs"]
 
 [[bin]]
 name = "codefabric-proto-gen"
