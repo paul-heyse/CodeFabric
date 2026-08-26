@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP70",
+  "current_packet": "WP71",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -206,10 +206,13 @@
       "blockers": []
     },
     "WP70": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "c472f9b3831f9536b6a79558640c8dbb69908fab",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first ci-fast pass reached Rust 1.98 Clippy and exposed newly denied findings in previously completed packet surfaces plus a generated hexadecimal-literal formatting issue; the generator was corrected, only semantics-preserving API or narrowly justified lint changes were made, and both default and featureless Clippy graphs were re-proved.",
+        "The first post-fix aggregate run reached WP73 baseline attribution while the WP70 fixes were intentionally uncommitted; after committing only the scoped implementation paths and preserving the four pre-existing owner-work paths, the clean-commit ci-fast run passed."
+      ],
       "blockers": []
     },
     "WP71": {
@@ -370,6 +373,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Implement WP70 repository assurance and evidence hardening, then prove its four packet oracles and required governance gates.",
-  "updated_at": "2026-08-26T01:34:10Z"
+  "next_action": "Implement WP71 golden-corpus execution and prepare the immutable Gate B review candidate without releasing or self-accepting it.",
+  "updated_at": "2026-08-26T02:28:10Z"
 }
