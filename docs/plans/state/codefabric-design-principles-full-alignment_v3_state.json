@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP72",
+  "current_packet": null,
   "packets": {
     "WP73": {
       "status": "complete",
@@ -247,10 +247,18 @@
       "blockers": []
     },
     "WP72": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "24393ac8836eb40275d058f8e7aa7f366d742475",
+      "deviations": [
+        "The true-rebuild oracle replaces the WP48 same-wave replay checksum with an independently constructed zero-state engine and operational store, authoritative inventory walk, source-byte recapture, ordinary reconciliation and publication, and separately pinned DataFusion serving sessions.",
+        "Comparison policy is schema-registry-owned and preserves exact Arrow schema metadata plus duplicate-sensitive row multiplicities; fact evidence normalizes provider-run-derived foreign keys by semantic evidence content while retaining canonical fact IDs.",
+        "The upfront design now makes CodeFabric's descriptor-relative InventoryWalker the sole inclusion and current-byte authority. Optional gix supplies classifications, candidate reduction, and cacheable observations only, so enabled, disabled, and cache-disabled configurations converge to the same terminal state.",
+        "Released Gate B candidate bytes and review-time source-input digests remain immutable; current conformance separately regenerates and compares the semantic candidate payload, avoiding a false requirement for renewed owner acceptance after non-semantic design-text evolution."
+      ],
+      "failed_approaches": [
+        "The first true serving-session comparison exposed provider-run-derived evidence and observation IDs as operational noise. The comparator now executes the schema registry's EvidenceContentIdentityV1 normalization, and the full behavioral corpus passes without ignoring fact identity or semantic evidence fields.",
+        "The first aggregate gate after design reconciliation tried to byte-regenerate the already accepted candidate manifest and detached digest from current whole-document input digests. The accepted chain stays immutable, while the released-candidate gate now replays the current semantic payload and still fails on any Gate B scenario or expected-item drift."
+      ],
       "blockers": []
     }
   },
@@ -327,7 +335,8 @@
   },
   "baseline_failures": [],
   "discovered_obligations": [
-    "WP76 completion required explicit cargo-shear classification for tooling/data_fabric_revision_benchmark.rs because it is an isolated cross-revision test source, followed by regeneration of model identities derived from Cargo.toml."
+    "WP76 completion required explicit cargo-shear classification for tooling/data_fabric_revision_benchmark.rs because it is an isolated cross-revision test source, followed by regeneration of model identities derived from Cargo.toml.",
+    "WP72 true serving comparison exposed provider-run-derived evidence IDs as operational foreign keys; this is resolved by schema-registry-owned EvidenceContentIdentityV1 normalization with fact IDs and all semantic evidence fields preserved."
   ],
   "plan_deviations": [
     {
@@ -364,6 +373,16 @@
         "contracts/registry/design-principle-detector-registry.yaml"
       ],
       "summary": "Implemented-scope closeout corrected DP-038 from counting handwritten encoder functions in src/fact_ingest.rs to asserting the single generated src/generated/fact_row_encoders.rs artifact. The detector is closed because WP57's generated encoder family and generation/reproduction oracles replace the legacy drift surface."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP72",
+      "paths": [
+        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
+        "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md"
+      ],
+      "summary": "WP72 closeout reconciles the normative suite with proven implementation improvements: authoritative descriptor-relative inventory and current bytes with optional gix acceleration, a genuinely independent zero-state rebuild and serving-session comparison, schema-registry-owned operational evidence normalization, and immutable Gate B review evidence separated from current semantic replay. The ontology, fact-generation, data-fabric, query, and serving specifications were reviewed and require no semantic correction."
     },
     {
       "kind": "execution_state_correction",
