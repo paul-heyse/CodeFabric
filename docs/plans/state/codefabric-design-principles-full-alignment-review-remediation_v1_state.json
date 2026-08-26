@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "412af14566393c2379ba4e174387361cea5370e8",
   "status": "executing",
-  "current_packet": "WP04",
+  "current_packet": "WP05",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -28,14 +28,14 @@
       "blockers": []
     },
     "WP04": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "36abfda",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP05": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -79,8 +79,8 @@
       "blockers": []
     },
     "M03": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "36abfda",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -135,6 +135,6 @@
   ],
   "discovered_obligations": [],
   "plan_deviations": [],
-  "next_action": "Implement phase-complete terminal artifacts and persist success and failure provenance through one reconciled terminal commit path.",
-  "updated_at": "2026-08-26T12:09:53Z"
+  "next_action": "Replace the five-stage rebuild approximation with sixteen real clean rebuilds and AC-G-79 effective-state equivalence over independent serving sessions.",
+  "updated_at": "2026-08-26T12:48:49Z"
 }
