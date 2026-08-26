@@ -201,6 +201,7 @@ impl PyreflySidecar for Service {
     type AnalyzeModulesStream =
         Pin<Box<dyn Stream<Item = Result<AnalyzeEvent, Status>> + Send + 'static>>;
 
+    #[allow(clippy::too_many_lines)] // One ordered provider stream keeps lease, module, digest, and terminal correlation adjacent.
     async fn analyze_modules(
         &self,
         request: Request<tonic::Streaming<AnalyzeCommand>>,
@@ -337,7 +338,7 @@ impl PyreflySidecar for Service {
             sequence += 1;
             let overall_digest = b3(module_digests
                 .iter()
-                .flat_map(|digest| digest.as_bytes())
+                .flat_map(std::string::String::as_bytes)
                 .copied()
                 .collect::<Vec<_>>()
                 .as_slice());

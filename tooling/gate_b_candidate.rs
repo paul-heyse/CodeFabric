@@ -20,6 +20,18 @@ fn path(argument: Option<String>) -> PathBuf {
     PathBuf::from(argument.unwrap_or_else(|| usage()))
 }
 
+fn repository_root(argument: Option<String>) -> Result<PathBuf, std::io::Error> {
+    std::fs::canonicalize(path(argument))
+}
+
+fn anchored(root: &Path, candidate: PathBuf) -> PathBuf {
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        root.join(candidate)
+    }
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("Gate B candidate operation failed: {error}");
@@ -31,9 +43,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1);
     match arguments.next().as_deref() {
         Some("emit") => {
-            let repository_root = path(arguments.next());
-            let corpus_root = path(arguments.next());
-            let scratch_root = path(arguments.next());
+            let repository_root = repository_root(arguments.next())?;
+            let corpus_root = anchored(&repository_root, path(arguments.next()));
+            let scratch_root = anchored(&repository_root, path(arguments.next()));
             let output = path(arguments.next());
             if arguments.next().is_some() {
                 usage();
@@ -44,10 +56,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("Gate B review candidate emitted at {}", output.display());
         }
         Some("check") => {
-            let repository_root = path(arguments.next());
-            let corpus_root = path(arguments.next());
-            let scratch_root = path(arguments.next());
-            let candidate_root = path(arguments.next());
+            let repository_root = repository_root(arguments.next())?;
+            let corpus_root = anchored(&repository_root, path(arguments.next()));
+            let scratch_root = anchored(&repository_root, path(arguments.next()));
+            let candidate_root = anchored(&repository_root, path(arguments.next()));
             if arguments.next().is_some() {
                 usage();
             }
@@ -68,7 +80,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("Gate B review candidate digest chain is valid");
         }
         Some("accept") => {
-            let repository_root = path(arguments.next());
+            let repository_root = repository_root(arguments.next())?;
             let candidate_relative = path(arguments.next());
             let acceptance_relative = path(arguments.next());
             let owner_identity = arguments.next().unwrap_or_else(|| usage());
@@ -91,7 +103,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("Gate B owner acceptance and immutable corpus release published");
         }
         Some("verify-release") => {
-            let repository_root = path(arguments.next());
+            let repository_root = repository_root(arguments.next())?;
             if arguments.next().is_some() {
                 usage();
             }
@@ -99,8 +111,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("Gate B owner acceptance and immutable corpus release are valid");
         }
         Some("check-release") => {
-            let repository_root = path(arguments.next());
-            let scratch_root = path(arguments.next());
+            let repository_root = repository_root(arguments.next())?;
+            let scratch_root = anchored(&repository_root, path(arguments.next()));
             if arguments.next().is_some() {
                 usage();
             }

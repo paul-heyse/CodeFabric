@@ -62,10 +62,8 @@ fn normalize_source_locator_text(
                 normalize_source_locator_text(value, source_path, stable_locator);
             }
         }
-        serde_json::Value::String(text) => {
-            if text.contains(source_path) {
-                *text = text.replace(source_path, stable_locator);
-            }
+        serde_json::Value::String(text) if text.contains(source_path) => {
+            *text = text.replace(source_path, stable_locator);
         }
         _ => {}
     }
