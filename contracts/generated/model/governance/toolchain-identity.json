@@ -2,7 +2,7 @@
   "data_fabric": {
     "arrow_version": "59.2.0",
     "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
-    "cargo_manifest_digest": "b3:62e1665ce95ff5cb693af5dbad2d5a7d9b0ea139c9324311d3e5b518ea1b20ad",
+    "cargo_manifest_digest": "b3:f28a773e977298cbe1e0beb8288a906bc302e05fa23289c4d8b58965898e0b95",
     "datafusion_version": "55.0.0",
     "delta_rs_git_rev": "43a0cf10a313e5077c48637ad786a05359136bbb",
     "deltalake_declared_version": "1.0.0",
@@ -23,7 +23,7 @@
   },
   "families": [
     {
-      "action_key": "b3:fa905e1174a92244c352218ac798ed7c5cce4ec51b1fd1bfd0f26a01baf59d18",
+      "action_key": "b3:45a3ef1ab3e3983feef966fe8355a0976815daaff5cf2f9069dd297c9cff8a0e",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -44,9 +44,9 @@
       },
       "rule_version": "registry-cbef-driver-v1",
       "tool_identity": {
-        "action_key": "b3:4a2bc8833d90d7e5bcca078f884a3eb784cfdd5ae175861a7b4da6f7f9bce660",
+        "action_key": "b3:adb985b3ac22254b135c681b03f249d6e5136361e8107c62b1c326547956513b",
         "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
-        "cargo_manifest_digest": "b3:62e1665ce95ff5cb693af5dbad2d5a7d9b0ea139c9324311d3e5b518ea1b20ad",
+        "cargo_manifest_digest": "b3:f28a773e977298cbe1e0beb8288a906bc302e05fa23289c4d8b58965898e0b95",
         "executable_digest": "b3:a3e552c7b5342f0b0a7e3449880876d4ff27566e73ecdc52f3473952fcb40ce2",
         "features": [
           "provider-inventory-tooling"
@@ -58,7 +58,7 @@
       }
     },
     {
-      "action_key": "b3:fa2148e30027cfad953e1dc4dbe51a8799de01fa30cb5f4d1b5d10981105243a",
+      "action_key": "b3:37fa1509239f46909e6e8697e4410050eee20d3e2cb789ccfaebe7d70f578e14",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",
@@ -90,7 +90,7 @@
       }
     },
     {
-      "action_key": "b3:2b96f7171afaa93a6c68693892b47eb3dde1caf7924893c3b0985911a5076665",
+      "action_key": "b3:56ada18ce6556935365b4492621748a633b65f395bfb312286148c4193ceffbe",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -123,7 +123,7 @@
       }
     },
     {
-      "action_key": "b3:84549257647e2854847138797898462da5a5fb5b45e11602cbed61564838c3f9",
+      "action_key": "b3:37f79d23a867de3de6bce7f434f87390dd2a4720604c16b2f2afc528ef4ae850",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -167,10 +167,10 @@
           "script_digest": "b3:7304585e5f9a044259627968bb2b42e1f1c4342596fb128c41a430e28ff1bfea"
         },
         "rust": {
-          "action_key": "b3:98db35fa804f3bd58d054b2196e50722400761f5ea6d73f6cb260e64404509d5",
+          "action_key": "b3:9b8d2a5c34aa4787e901487a9184be89b2eb9478887899323ab9eb95edc8e84c",
           "binary_digest": "b3:b6751909f69fc42af4cbd95f37a032a986f235593b3b87ddf61c48e2b8423528",
           "cargo_lock_digest": "b3:764eec0e854357a2b1b3acc9aa3855d91ccf9127030551d689e4551b94964fba",
-          "cargo_manifest_digest": "b3:62e1665ce95ff5cb693af5dbad2d5a7d9b0ea139c9324311d3e5b518ea1b20ad",
+          "cargo_manifest_digest": "b3:f28a773e977298cbe1e0beb8288a906bc302e05fa23289c4d8b58965898e0b95",
           "descriptor_api": "tonic_prost_build::Builder::compile_fds",
           "features": [
             "proto-tooling"

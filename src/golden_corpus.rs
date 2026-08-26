@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -16,7 +16,7 @@ use crate::registries::{DURABLE_PUBLICATION_STATE_VALUES, PROVIDER_IDS};
 use crate::schema_registry::table_specs;
 
 const REQUIRED_MEMBER_ROOTS: [&str; 3] = ["expected", "scenarios", "workspace"];
-const REQUIRED_EXPECTED_GROUPS: [&str; 11] = [
+pub(crate) const REQUIRED_EXPECTED_GROUPS: [&str; 11] = [
     "canonical_tables",
     "diagnostics",
     "identities",
@@ -29,7 +29,7 @@ const REQUIRED_EXPECTED_GROUPS: [&str; 11] = [
     "serving_snapshots",
     "source_inventory",
 ];
-const REQUIRED_SCENARIOS: [&str; 16] = [
+pub(crate) const REQUIRED_SCENARIOS: [&str; 16] = [
     "000_clean_bootstrap",
     "010_python_local_edit",
     "020_python_import_surface_change",
@@ -47,6 +47,45 @@ const REQUIRED_SCENARIOS: [&str; 16] = [
     "140_capability_withdrawal",
     "150_source_acl_redaction",
 ];
+
+const SCENARIO_DOCUMENT: &str = "scenario.json";
+const REQUIRED_SCENARIO_EDITS: [&str; 18] = [
+    "add-python-import",
+    "break-python",
+    "break-rust",
+    "change-context",
+    "change-generated-source",
+    "change-rust-signature",
+    "drop-watch-hint",
+    "flush-overlay",
+    "multi-file-save",
+    "redact-source",
+    "rename-and-case-change",
+    "repair-python",
+    "repair-rust",
+    "replace-python-body",
+    "replace-rust-body",
+    "rescan",
+    "restart-daemon",
+    "withdraw-capability",
+];
+
+/// Closed executable edit-scenario document.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioDefinition {
+    pub scenario_id: String,
+    pub edits: Vec<String>,
+    pub expected_terminal: ScenarioTerminal,
+}
+
+/// Terminal freshness class asserted by an executable scenario.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ScenarioTerminal {
+    Current,
+    Partial,
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -259,6 +298,63 @@ fn child_directories(path: &Path) -> Result<BTreeSet<String>, CorpusError> {
     Ok(names)
 }
 
+fn scenario_definitions(corpus_root: &Path) -> Result<Vec<ScenarioDefinition>, CorpusError> {
+    let allowed_edits = REQUIRED_SCENARIO_EDITS
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    let mut definitions = Vec::with_capacity(REQUIRED_SCENARIOS.len());
+    let mut observed_edits = BTreeSet::new();
+    for scenario_id in REQUIRED_SCENARIOS {
+        let path = corpus_root
+            .join("scenarios")
+            .join(scenario_id)
+            .join(SCENARIO_DOCUMENT);
+        let definition: ScenarioDefinition = serde_json::from_slice(&read(&path)?)
+            .map_err(|error| CorpusError::Manifest(error.to_string()))?;
+        if definition.scenario_id != scenario_id {
+            return Err(CorpusError::Invariant(format!(
+                "scenario document identity differs for {scenario_id}"
+            )));
+        }
+        if definition
+            .edits
+            .iter()
+            .any(|edit| !allowed_edits.contains(edit) || !observed_edits.insert(edit.clone()))
+        {
+            return Err(CorpusError::Invariant(format!(
+                "scenario {scenario_id} contains an unknown or duplicate edit"
+            )));
+        }
+        let withdrawal = definition
+            .edits
+            .iter()
+            .any(|edit| edit == "withdraw-capability");
+        if (definition.expected_terminal == ScenarioTerminal::Partial) != withdrawal {
+            return Err(CorpusError::Invariant(format!(
+                "scenario {scenario_id} terminal does not match capability withdrawal"
+            )));
+        }
+        definitions.push(definition);
+    }
+    if observed_edits != allowed_edits {
+        return Err(CorpusError::Invariant(
+            "scenario edit census differs from the executable runner".to_owned(),
+        ));
+    }
+    Ok(definitions)
+}
+
+/// Load the exact closed executable scenario set.
+///
+/// # Errors
+///
+/// Returns an error when a document is absent, malformed, misidentified, duplicates an edit,
+/// names an unsupported edit, or disagrees with its expected terminal state.
+pub fn load_scenarios(corpus_root: &Path) -> Result<Vec<ScenarioDefinition>, CorpusError> {
+    scenario_definitions(corpus_root)
+}
+
 /// Load and validate one owner-accepted coverage profile against exact current bytes.
 ///
 /// # Errors
@@ -330,6 +426,7 @@ pub fn validate_profile(
             "scenario logical group census differs".to_owned(),
         ));
     }
+    scenario_definitions(corpus_root)?;
     let mut files = Vec::new();
     for member_root in &profile.member_roots {
         collect_files(corpus_root, safe_relative(member_root)?, &mut files)?;
@@ -446,8 +543,20 @@ fn execute_artifact_contract(
         }
         "provider_observations" => {
             let expected = exact_strings("providers")?;
-            let available = PROVIDER_IDS.iter().copied().collect::<BTreeSet<_>>();
-            if !expected.is_subset(&available) || !bool_field(value, "terminal_manifest_required")?
+            let gate_b_providers = BTreeSet::from([
+                "ruff-python",
+                "rustc-mir",
+                "source-substrate",
+                "tree-sitter",
+            ]);
+            let generated = PROVIDER_IDS
+                .iter()
+                .copied()
+                .filter(|provider| gate_b_providers.contains(provider))
+                .collect::<BTreeSet<_>>();
+            if expected != generated
+                || generated != gate_b_providers
+                || !bool_field(value, "terminal_manifest_required")?
             {
                 return Err(CorpusError::Artifact(
                     "provider observation authority differs".to_owned(),
@@ -455,11 +564,23 @@ fn execute_artifact_contract(
             }
         }
         "canonical_tables" => {
-            let available = table_specs()
+            let gate_b_tables = BTreeSet::from([
+                "entity",
+                "fact_evidence",
+                "property_fact",
+                "relation",
+                "source_annotation",
+                "source_file",
+                "source_token",
+                "syntax_detail",
+            ]);
+            let generated = table_specs()
                 .iter()
                 .map(|spec| spec.name)
+                .filter(|table| gate_b_tables.contains(table))
                 .collect::<BTreeSet<_>>();
-            if !exact_strings("required_tables")?.is_subset(&available)
+            if exact_strings("required_tables")? != generated
+                || generated != gate_b_tables
                 || text_field(value, "ordering")? != "primary-key"
             {
                 return Err(CorpusError::Artifact(

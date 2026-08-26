@@ -108,6 +108,25 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
         self.scheduler.freshness().mark_unavailable();
     }
 
+    /// Replace the active analysis context and invalidate the context-scoped hot overlay.
+    ///
+    /// The next admitted batch must rebuild the affected context through the ordinary wave path;
+    /// no facts from the predecessor context remain query-visible.
+    pub fn replace_analysis_context(&mut self, analysis_context_id: [u8; 16]) {
+        if self.config.analysis_context_id != analysis_context_id {
+            self.config.analysis_context_id = analysis_context_id;
+            self.overlays = ContinuousOverlayState::default();
+        }
+    }
+
+    /// Change whether semantic-provider terminal evidence is required for publication.
+    ///
+    /// This is the actor-owned capability-withdrawal seam used when an analysis contract changes
+    /// or a required provider becomes unavailable.
+    pub const fn set_semantic_capabilities_required(&mut self, required: bool) {
+        self.config.semantic_capabilities_required = required;
+    }
+
     /// Process one normalized final-state batch through candidate selection, authoritative byte
     /// capture, canonical reconciliation, generated-policy overlay staging, and hot publication.
     ///

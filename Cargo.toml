@@ -221,6 +221,11 @@ name = "codefabric"
 path = "src/bin/codefabric.rs"
 required-features = ["daemon"]
 
+[[bin]]
+name = "codefabric-gate-b-candidate"
+path = "tooling/gate_b_candidate.rs"
+required-features = ["local-workstation"]
+
 [lints.rust]
 unsafe_code = "deny"
 

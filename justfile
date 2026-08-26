@@ -204,9 +204,18 @@ query-legacy-zero-state-check:
     @just alignment-detector-check DP-110
     cargo nextest run --locked --lib -E 'test(/(wp62_negative_zero_state|wp75_negative_zero_state|wp64_negative_zero_state)/)' --no-tests=fail
 
-[doc("Prove Readiness Gate B across all eleven accepted golden artifacts")]
+[doc("Refuse Readiness Gate B until WP76 records accountable owner acceptance")]
 [group('test')]
-gate-b-check: wave5-integration-check adapter-wheel-test model-release-census-check
+gate-b-check:
+    @echo "Gate B release is blocked pending WP76 accountable owner acceptance" >&2
+    @exit 1
+
+[doc("Regenerate and verify the unreleased Gate B review candidate")]
+[group('test')]
+gate-b-candidate-check: wave5-integration-check wave6-integration-check
+    cargo run --locked --bin codefabric-gate-b-candidate -- check . tests/golden/codefabric-golden-v1 target/gate-b-candidate-check-scratch tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1
+    @if rg -n 'is_subset' src/golden_corpus.rs src/gate_b_candidate.rs; then echo 'subset-based Gate B authority comparison remains' >&2; exit 1; fi
+    @just packet-oracle-check WP71
 
 [doc("Compare continuous effective state with the clean-rebuild oracle")]
 [group('test')]
@@ -757,6 +766,12 @@ fixture-candidates output_dir="target/fixture-candidates":
 [group('mutating')]
 model-release-census-candidate:
     ./scripts/model_exec.sh release-census-candidate .
+
+[confirm("Generate the immutable unreleased Gate B review candidate for accountable-owner review. Continue?")]
+[doc("MUTATES: emit a new Gate B candidate bundle without accepting or releasing it")]
+[group('mutating')]
+gate-b-candidate-emit output_dir="tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1":
+    cargo run --locked --bin codefabric-gate-b-candidate -- emit . tests/golden/codefabric-golden-v1 target/gate-b-candidate-emit-scratch "{{output_dir}}"
 
 [confirm("Accept the reviewed released-artifact census as owner authority. Continue?")]
 [doc("MUTATES: create the owner-accepted released-artifact census exactly once")]

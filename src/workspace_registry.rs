@@ -262,6 +262,28 @@ impl<'store> WorkspaceRegistry<'store> {
         )
     }
 
+    /// Register a deterministic directory identity for executable compatibility fixtures.
+    ///
+    /// Production registration always uses [`Self::add`] and fresh entropy. This narrow seam is
+    /// compiled only for tests and the compatibility-probe profile so immutable golden outputs
+    /// can pin application identities without depending on process randomness.
+    #[cfg(any(test, feature = "compatibility-probes"))]
+    pub(crate) fn add_directory_fixture(
+        &mut self,
+        root: &Path,
+        workspace_nonce: [u8; 16],
+    ) -> Result<WorkspaceRecord, WorkspaceRegistryError> {
+        self.add_with_nonces(
+            root,
+            WorkspaceSourceRegistration::Directory,
+            RegistrationNonces {
+                workspace: workspace_nonce,
+                repository: [0; 16],
+                worktree: [0; 16],
+            },
+        )
+    }
+
     #[allow(clippy::too_many_lines)] // One transaction keeps registration invariants atomic.
     fn add_with_nonces(
         &mut self,

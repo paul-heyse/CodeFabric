@@ -870,6 +870,7 @@ pub enum IntegrityDomain {
     QueryResultChecksumV1,
     GoldenProfile,
     GateBExecution,
+    GateBReviewCandidate,
     InventoryFile,
     InventoryDirectory,
     DerivationSyntaxTreeInput,
@@ -928,6 +929,11 @@ impl IntegrityDomain {
             Self::GateBExecution => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 97, 116, 101, 45, 98, 46,
                 101, 120, 101, 99, 117, 116, 105, 111, 110, 46, 118, 49, 0,
+            ],
+            Self::GateBReviewCandidate => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 103, 97, 116, 101, 45, 98, 46,
+                114, 101, 118, 105, 101, 119, 45, 99, 97, 110, 100, 105, 100, 97, 116, 101, 46,
+                118, 49, 0,
             ],
             Self::InventoryFile => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 105, 110, 118, 101, 110, 116,
