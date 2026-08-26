@@ -3,7 +3,7 @@
   "plan_path": "docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v3_2026-08-25.md",
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
-  "status": "executing",
+  "status": "complete",
   "current_packet": null,
   "packets": {
     "WP73": {
@@ -301,10 +301,17 @@
       "blockers": []
     },
     "M14": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "f1ee909ed2d364a20188ffa6417c7dbe279fc160",
+      "deviations": [
+        "The accountable repository owner explicitly waived further mutation execution after observing its disproportionate isolated-build cost. M14 therefore records the completed WP64 assertion strengthening, the fully caught viable WP71 scenario-runner scope, the focused WP72 trust-state regression, the successful bounded JCS fuzz campaign, and the complete ordinary final gate matrix without claiming a full-file mutation score.",
+        "Miri was not run because the implementation introduces no first-party unsafe code and the stable root retains unsafe_code = deny; native tests, fuzzing, and the complete PR gate provide the applicable evidence for this safe-Rust scope."
+      ],
+      "failed_approaches": [
+        "The planned file-level WP71 mutation recipe expanded to 154 mutations across candidate construction, filesystem handling, release verification, and scenario logic rather than the named scenario-runner risk surface; both single-worker and parallel full-file attempts were stopped as disproportionate.",
+        "WP64 mutation testing initially exposed nested canonicalization and exact-limit assertion gaps. Independent Arrow RowConverter boundary calculation and nested Struct, Union, List, and Dictionary cases were added at 42e0f62; the repository owner waived a redundant third complete campaign after focused validation.",
+        "The bounded WP72 comparator campaign caught four viable mutations, found one surviving OR-to-AND change in the two-sided CURRENT precondition, and had one compile-unviable whole-function replacement before it was stopped by owner direction. The concrete gap was closed in both operand directions by wp72_rejects_either_noncurrent_comparison_input at 3498f71, with no mutation rerun claimed."
+      ],
       "blockers": []
     }
   },
@@ -336,7 +343,9 @@
   "baseline_failures": [],
   "discovered_obligations": [
     "WP76 completion required explicit cargo-shear classification for tooling/data_fabric_revision_benchmark.rs because it is an isolated cross-revision test source, followed by regeneration of model identities derived from Cargo.toml.",
-    "WP72 true serving comparison exposed provider-run-derived evidence IDs as operational foreign keys; this is resolved by schema-registry-owned EvidenceContentIdentityV1 normalization with fact IDs and all semantic evidence fields preserved."
+    "WP72 true serving comparison exposed provider-run-derived evidence IDs as operational foreign keys; this is resolved by schema-registry-owned EvidenceContentIdentityV1 normalization with fact IDs and all semantic evidence fields preserved.",
+    "Scoped WP72 mutation testing exposed that the comparison precondition lacked an explicit one-sided non-CURRENT regression; 3498f71 proves rejection with either operand non-current.",
+    "The bounded fuzz run refreshed fuzz/Cargo.lock to the actual contract-models plus RPC dependency closure; f1ee909 records the synchronized lock and locked metadata validation."
   ],
   "plan_deviations": [
     {
@@ -409,8 +418,19 @@
         "src/fabric/result_checksum.rs"
       ],
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
+    },
+    {
+      "kind": "owner_approved_quality_scope_change",
+      "packet": "M14",
+      "paths": [
+        "src/fabric/result_checksum.rs",
+        "src/gate_b_candidate.rs",
+        "src/lifecycle.rs",
+        "src/fabric/serving.rs"
+      ],
+      "summary": "The repository owner directed that mutation testing stop because repeated isolated full-package builds were disproportionately burdensome. Closeout retains only completed mutation evidence, records the incomplete WP72 campaign without a score claim, fixes its observed trust-state assertion gap, and relies on the plan's complete ordinary, fuzz, governance, release, and reproduction gates for final certification."
     }
   ],
-  "next_action": "Validate and certify WP72 true zero-state serving equivalence and Git parity, then reconcile upfront design and complete M14 closeout.",
-  "updated_at": "2026-08-26T04:47:27Z"
+  "next_action": "Run an independent read-only implementation review against the completed plan, design reconciliation, final state, and current HEAD.",
+  "updated_at": "2026-08-26T07:37:00Z"
 }
