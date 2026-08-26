@@ -35,7 +35,7 @@ use crate::rpc::generated::codefabric::cpgd::v1::{
     ArtifactReadyEvent, AttachQueryRequest, BundleIdentity, CancelQueryRequest,
     CancelQueryResponse, CancellationState, DeliveryPreference, EffectiveLimitsProfile,
     HandshakeRequest, HandshakeResponse, HostCapabilityProfile, PayloadCompression, QueryEvent,
-    QueryEventHeader, QueryExecutionState, ReadResultRequest, ReadinessSummary,
+    QueryEventHeader, QueryExecutionState, QueryStatusSummary, ReadResultRequest, ReadinessSummary,
     ReleaseResultRequest, ReleaseResultResponse, ResultChunk, SchemaFingerprint,
     SnapshotPinnedEvent, StartQueryRequest, StartQueryResponse, StatusRequest, StatusResponse,
     StreamQueryRequest, TerminalEvent, ValidateQueryRequest, ValidateQueryResponse, WorkspaceClaim,
@@ -877,6 +877,11 @@ async fn cancel_active_queries(
                     result_row_count: 0,
                     result_byte_count: 0,
                     cleanup_state: "COMPLETE".to_owned(),
+                    semantic_execution_state: "CANCELLED".to_owned(),
+                    completeness_state: "UNAVAILABLE".to_owned(),
+                    truncated: false,
+                    query_statuses: Vec::new(),
+                    notices: Vec::new(),
                 })),
             },
             QueryExecutionState::Cancelled,
@@ -1230,6 +1235,11 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                         result_row_count: 0,
                         result_byte_count: 0,
                         cleanup_state: "COMPLETE".to_owned(),
+                        semantic_execution_state: "FAILED".to_owned(),
+                        completeness_state: "UNAVAILABLE".to_owned(),
+                        truncated: false,
+                        query_statuses: Vec::new(),
+                        notices: Vec::new(),
                     })),
                 },
                 execution_state,
@@ -1261,6 +1271,11 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                     result_row_count: 0,
                     result_byte_count: 0,
                     cleanup_state: "COMPLETE".to_owned(),
+                    semantic_execution_state: "FAILED".to_owned(),
+                    completeness_state: "UNAVAILABLE".to_owned(),
+                    truncated: false,
+                    query_statuses: Vec::new(),
+                    notices: Vec::new(),
                 })),
             },
             QueryExecutionState::Failed,
@@ -1302,6 +1317,11 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                     result_row_count: 0,
                     result_byte_count: 0,
                     cleanup_state: "COMPLETE".to_owned(),
+                    semantic_execution_state: "FAILED".to_owned(),
+                    completeness_state: "UNAVAILABLE".to_owned(),
+                    truncated: false,
+                    query_statuses: Vec::new(),
+                    notices: Vec::new(),
                 })),
             },
             QueryExecutionState::Failed,
@@ -1366,6 +1386,47 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                     .sum(),
                 result_byte_count: artifact.bytes.len() as u64,
                 cleanup_state: "RETAINED_BY_LEASE".to_owned(),
+                semantic_execution_state: crate::registries::registry_state_name(
+                    crate::registries::QUERY_EXECUTION_STATE_VALUES,
+                    executed.response.execution_state as u16,
+                )
+                .expect("generated query execution state")
+                .to_owned(),
+                completeness_state: crate::registries::registry_state_name(
+                    crate::registries::COMPLETENESS_STATE_VALUES,
+                    executed.response.completeness_state as u16,
+                )
+                .expect("generated completeness state")
+                .to_owned(),
+                truncated: executed.response.limit_state
+                    == crate::registries::LimitState::ExplicitLimitReached,
+                query_statuses: executed
+                    .response
+                    .query_results
+                    .iter()
+                    .map(|result| QueryStatusSummary {
+                        query_id: result.query_id.clone(),
+                        execution_state: crate::registries::registry_state_name(
+                            crate::registries::QUERY_EXECUTION_STATE_VALUES,
+                            result.execution_state as u16,
+                        )
+                        .expect("generated query execution state")
+                        .to_owned(),
+                        canonical_error_record_json: result.errors.first().and_then(|error| {
+                            crate::contracts::jcs::canonicalize_value(
+                                &serde_json::to_value(error).ok()?,
+                            )
+                            .ok()
+                        }),
+                        notices: result.notices.clone(),
+                    })
+                    .collect(),
+                notices: executed
+                    .response
+                    .query_results
+                    .iter()
+                    .flat_map(|result| result.notices.iter().cloned())
+                    .collect(),
             })),
         },
     ];
@@ -1870,6 +1931,11 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                     result_row_count: 0,
                     result_byte_count: 0,
                     cleanup_state: "COMPLETE".to_owned(),
+                    semantic_execution_state: "CANCELLED".to_owned(),
+                    completeness_state: "UNAVAILABLE".to_owned(),
+                    truncated: false,
+                    query_statuses: Vec::new(),
+                    notices: Vec::new(),
                 })),
             },
             QueryExecutionState::Cancelled,

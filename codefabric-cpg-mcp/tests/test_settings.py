@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from codefabric_cpg_mcp.settings import Settings
+from codefabric_cpg_mcp.settings import Settings, process_settings
 
 
 def required_settings(**overrides: object) -> Settings:
@@ -41,6 +41,19 @@ def test_environment_values_are_converted(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert settings.query_timeout_seconds == 4.5
     assert settings.max_json_nodes == 250
+
+
+def test_process_settings_is_one_instance_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", "unix:///tmp/codefabric.sock")
+    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
+    monkeypatch.setenv("CODEFABRIC_AGENT_INSTANCE_ID", "agent-primary")
+    monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "test-secret")
+
+    first = process_settings()
+    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "replacement-workspace")
+
+    assert process_settings() is first
+    assert process_settings().workspace_id == "workspace-main"
 
 
 def test_canonical_daemon_alias_precedes_migration_alias(

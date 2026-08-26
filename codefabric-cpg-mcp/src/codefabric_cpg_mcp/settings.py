@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from functools import lru_cache
 from typing import Annotated, Literal, cast
 
 from pydantic import AliasChoices, Field, SecretStr, model_validator
@@ -106,3 +107,13 @@ class Settings(BaseSettings):
         """Lock source priority and deliberately exclude dotenv loading."""
 
         return init_settings, env_settings, file_secret_settings
+
+
+@lru_cache(maxsize=1)
+def process_settings() -> Settings:
+    """Load and retain the one immutable settings instance owned by this process."""
+
+    return Settings()
+
+
+__all__ = ["Settings", "process_settings"]

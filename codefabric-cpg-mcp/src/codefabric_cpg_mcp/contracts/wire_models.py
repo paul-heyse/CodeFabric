@@ -1,4 +1,4 @@
-# @generated from codefabric.adapter.model-ir source b3:8d689318b8ee7d1ec3b6e0d0a68961a5b04f35a9a38fe40819cff8f0e55b3b8c; codefabric-model-adapter-driver-v1; do not edit.
+# @generated from codefabric.adapter.model-ir source b3:e8572d05a57be81326b49cf6515d455a96c6df1fe9e0d9f65c3efdd27ce7c6a4; codefabric-model-adapter-driver-v1; do not edit.
 """Statically typed public adapter contracts compiled from Contract IR."""
 
 from typing import Annotated, Literal
@@ -86,9 +86,9 @@ class QueryStatus(StrictWireModel):
     """Generated QueryStatus wire contract."""
 
     query_id: str = Field(description="Logical query identity.")
-    state: Literal["COMPLETE", "FAILED", "CANCELLED", "DEADLINE_EXCEEDED"] = Field(
-        description="Terminal query state."
-    )
+    state: Literal[
+        "COMPLETE", "FAILED", "CANCELLED", "DEADLINE_EXCEEDED", "NOT_EXECUTED_DEPENDENCY"
+    ] = Field(description="Terminal query state.")
     message: str | None = Field(default=None, description="Safe status explanation.")
 
 
@@ -258,15 +258,15 @@ class QueryToolOutput(StrictWireModel):
 
     semantic_request_id: str = Field(description="Semantic idempotency identity.")
     mcp_call_id: str = Field(description="MCP invocation correlation identity.")
-    execution_state: Literal["COMPLETE", "FAILED", "CANCELLED", "DEADLINE_EXCEEDED"] = Field(
-        description="Execution state."
-    )
-    availability_state: Literal["AVAILABLE", "PARTIAL", "UNAVAILABLE"] = Field(
+    execution_state: Literal[
+        "COMPLETE", "FAILED", "CANCELLED", "DEADLINE_EXCEEDED", "NOT_EXECUTED_DEPENDENCY"
+    ] = Field(description="Execution state.")
+    availability_state: Literal["AVAILABLE", "PARTIAL", "UNAVAILABLE", "NOT_APPLICABLE"] = Field(
         description="Availability state."
     )
-    completeness_state: Literal["COMPLETE", "PARTIAL", "INDETERMINATE", "UNAVAILABLE"] = Field(
-        description="Completeness state."
-    )
+    completeness_state: Literal[
+        "COMPLETE", "PARTIAL", "INDETERMINATE", "UNAVAILABLE", "NOT_APPLICABLE"
+    ] = Field(description="Completeness state.")
     freshness_state: Literal["CURRENT", "POTENTIALLY_STALE", "UNAVAILABLE"] = Field(
         description="Freshness state."
     )

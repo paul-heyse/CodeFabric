@@ -59,7 +59,7 @@
     ]},
     {"name":"QueryStatus","fields":[
       {"name":"query_id","type":{"kind":"string"},"description":"Logical query identity."},
-      {"name":"state","type":{"kind":"literal","values":["COMPLETE","FAILED","CANCELLED","DEADLINE_EXCEEDED"]},"description":"Terminal query state."},
+      {"name":"state","type":{"kind":"literal","values":["COMPLETE","FAILED","CANCELLED","DEADLINE_EXCEEDED","NOT_EXECUTED_DEPENDENCY"]},"description":"Terminal query state."},
       {"name":"message","type":{"kind":"optional-string"},"description":"Safe status explanation."}
     ]},
     {"name":"ResultResource","fields":[
@@ -86,9 +86,9 @@
     {"name":"QueryToolOutput","fields":[
       {"name":"semantic_request_id","type":{"kind":"string"},"description":"Semantic idempotency identity."},
       {"name":"mcp_call_id","type":{"kind":"string"},"description":"MCP invocation correlation identity."},
-      {"name":"execution_state","type":{"kind":"literal","values":["COMPLETE","FAILED","CANCELLED","DEADLINE_EXCEEDED"]},"description":"Execution state."},
-      {"name":"availability_state","type":{"kind":"literal","values":["AVAILABLE","PARTIAL","UNAVAILABLE"]},"description":"Availability state."},
-      {"name":"completeness_state","type":{"kind":"literal","values":["COMPLETE","PARTIAL","INDETERMINATE","UNAVAILABLE"]},"description":"Completeness state."},
+      {"name":"execution_state","type":{"kind":"literal","values":["COMPLETE","FAILED","CANCELLED","DEADLINE_EXCEEDED","NOT_EXECUTED_DEPENDENCY"]},"description":"Execution state."},
+      {"name":"availability_state","type":{"kind":"literal","values":["AVAILABLE","PARTIAL","UNAVAILABLE","NOT_APPLICABLE"]},"description":"Availability state."},
+      {"name":"completeness_state","type":{"kind":"literal","values":["COMPLETE","PARTIAL","INDETERMINATE","UNAVAILABLE","NOT_APPLICABLE"]},"description":"Completeness state."},
       {"name":"freshness_state","type":{"kind":"literal","values":["CURRENT","POTENTIALLY_STALE","UNAVAILABLE"]},"description":"Freshness state."},
       {"name":"limit_state","type":{"kind":"literal","values":["NOT_APPLIED","EXPLICIT_LIMIT_REACHED","HARD_LIMIT_REJECTED"]},"description":"Limit state."},
       {"name":"snapshot","type":{"kind":"model","name":"SnapshotSummary"},"description":"Pinned public snapshot."},

@@ -2,24 +2,18 @@
 
 import asyncio
 import json
+import os
 import subprocess
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
-from fastmcp import Client, Context, FastMCP
-from fastmcp.dependencies import CurrentContext, Depends
-from fastmcp.server.lifespan import lifespan
+from fastmcp import Client
 from mcp.types import Tool as MCPTool
-from mcp.types import ToolAnnotations
-from pydantic import JsonValue, ValidationError
+from pydantic import ValidationError
 
 from codefabric_cpg_mcp.contracts.fingerprints import (
     FASTMCP_TOOL_KEYS,
-    fastmcp_tool_fingerprint,
-    fastmcp_tool_manifest,
+    fastmcp_protocol_manifest,
     normalize_mcp_tool,
 )
 from codefabric_cpg_mcp.contracts.schemas import schema_fingerprints, schema_manifest
@@ -30,97 +24,12 @@ from codefabric_cpg_mcp.contracts.wire_models import (
     QueryToolInput,
     ResourceDelivery,
     StatusToolOutput,
-    ValidateQueryOutput,
 )
+from codefabric_cpg_mcp.server import mcp
+from codefabric_cpg_mcp.settings import process_settings
 
 ROOT = Path(__file__).resolve().parents[2]
-PROBE_SERVER = ROOT / "codefabric-cpg-mcp/tests/test_adapter_contracts.py:probe_mcp"
-
-
-@dataclass(frozen=True, slots=True)
-class ProbeRuntime:
-    marker: str
-
-
-@lifespan
-async def probe_lifespan(_server: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
-    yield {"runtime": ProbeRuntime(marker="runtime-only")}
-
-
-_CURRENT_CONTEXT = CurrentContext()
-
-
-def runtime_from_context(ctx: Context = _CURRENT_CONTEXT) -> ProbeRuntime:
-    state = ctx.lifespan_context
-    runtime = state.get("runtime") if isinstance(state, dict) else None
-    if not isinstance(runtime, ProbeRuntime):
-        raise RuntimeError("probe runtime is unavailable")
-    return runtime
-
-
-_PROBE_RUNTIME = Depends(runtime_from_context)
-READ_ONLY = ToolAnnotations(
-    readOnlyHint=True,
-    destructiveHint=False,
-    idempotentHint=True,
-    openWorldHint=False,
-)
-SCHEMAS = cast(dict[str, dict[str, Any]], schema_manifest()["serialization"])
-probe_mcp = FastMCP(
-    name="CodeFabric Contract Probe",
-    version="1.0.0",
-    lifespan=probe_lifespan,
-    on_duplicate="error",
-    strict_input_validation=True,
-)
-
-
-@probe_mcp.tool(
-    name="contract_probe_validate",
-    output_schema=SCHEMAS["ValidateQueryOutput"],
-    annotations=READ_ONLY,
-)
-async def contract_probe_validate(
-    request: dict[str, JsonValue],
-    ctx: Context = _CURRENT_CONTEXT,
-    runtime: ProbeRuntime = _PROBE_RUNTIME,
-) -> ValidateQueryOutput:
-    assert runtime.marker == "runtime-only"
-    return ValidateQueryOutput(
-        valid=True,
-        request_id=str(ctx.request_id),
-        normalized_request=request,
-        dependency_graph={},
-        resolved_semantics={},
-        capability_requirements=(),
-        resource_estimate={},
-        errors=(),
-        warnings=(),
-    )
-
-
-@probe_mcp.tool(
-    name="contract_probe_status",
-    output_schema=SCHEMAS["StatusToolOutput"],
-    annotations=READ_ONLY,
-)
-async def contract_probe_status(
-    runtime: ProbeRuntime = _PROBE_RUNTIME,
-) -> StatusToolOutput:
-    assert runtime.marker == "runtime-only"
-    return StatusToolOutput(
-        ready=True,
-        workspace_id="workspace-probe",
-        agent_instance_id="agent-probe",
-        snapshot=None,
-        versions={"adapter": "1.0"},
-        supported_languages=("python", "rust"),
-        supported_request_forms=("probe",),
-        capability_statuses=(),
-        freshness_state="CURRENT",
-        service_limits={},
-        notices=(),
-    )
+PRODUCTION_SERVER = ROOT / "codefabric-cpg-mcp/tests/production_server_entry.py:mcp"
 
 
 def test_generated_models_are_strict_closed_frozen_and_discriminated() -> None:
@@ -229,54 +138,17 @@ def test_fingerprint_policy_fails_unknown_protocol_fields() -> None:
         normalize_mcp_tool({"name": "probe", "future": True})
 
 
-def test_in_process_tools_and_client_use_generated_contracts() -> None:
-    async def exercise() -> None:
-        tools = [
-            await probe_mcp.get_tool("contract_probe_validate"),
-            await probe_mcp.get_tool("contract_probe_status"),
-        ]
-        assert all(tool is not None for tool in tools)
-        concrete_tools = [tool for tool in tools if tool is not None]
-        manifest = fastmcp_tool_manifest(concrete_tools)
-        assert [tool["name"] for tool in manifest["tools"]] == [
-            "contract_probe_status",
-            "contract_probe_validate",
-        ]
-        assert "runtime" not in json.dumps(manifest)
-        assert "ctx" not in json.dumps(manifest)
-        assert fastmcp_tool_fingerprint(concrete_tools).startswith("b3:")
-
-        async with Client(probe_mcp) as client:
-            listed = await client.list_tools()
-            assert {tool.name for tool in listed} == {
-                "contract_probe_status",
-                "contract_probe_validate",
-            }
-            status = await client.call_tool("contract_probe_status", {})
-            assert status.structured_content == StatusToolOutput(
-                ready=True,
-                workspace_id="workspace-probe",
-                agent_instance_id="agent-probe",
-                snapshot=None,
-                versions={"adapter": "1.0"},
-                supported_languages=("python", "rust"),
-                supported_request_forms=("probe",),
-                capability_statuses=(),
-                freshness_state="CURRENT",
-                service_limits={},
-                notices=(),
-            ).model_dump(mode="json")
-            validated = await client.call_tool(
-                "contract_probe_validate", {"request": {"kind": "probe"}}
-            )
-            assert validated.structured_content is not None
-            assert validated.structured_content["normalized_request"] == {"kind": "probe"}
-
-    asyncio.run(exercise())
-
-
-def test_cli_inspect_matches_in_process_protocol_manifest(tmp_path: Path) -> None:
+def test_cli_inspect_matches_production_protocol_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     output = tmp_path / "mcp.json"
+    environment = {
+        **os.environ,
+        "CODEFABRIC_CPG_DAEMON_TARGET": "unix:///tmp/codefabric-inspect.sock",
+        "CODEFABRIC_WORKSPACE_ID": "workspace-inspect",
+        "CODEFABRIC_AGENT_INSTANCE_ID": "agent-inspect",
+        "CODEFABRIC_CPG_CAPABILITY_TOKEN": "inspect-secret",
+    }
     subprocess.run(
         [
             "uv",
@@ -286,7 +158,7 @@ def test_cli_inspect_matches_in_process_protocol_manifest(tmp_path: Path) -> Non
             str(ROOT / "codefabric-cpg-mcp"),
             "fastmcp",
             "inspect",
-            str(PROBE_SERVER),
+            str(PRODUCTION_SERVER),
             "--format",
             "mcp",
             "--output",
@@ -295,13 +167,18 @@ def test_cli_inspect_matches_in_process_protocol_manifest(tmp_path: Path) -> Non
         cwd=ROOT,
         check=True,
         capture_output=True,
+        env=environment,
         text=True,
     )
     cli = json.loads(output.read_text(encoding="utf-8"))
+    for name, value in environment.items():
+        if name.startswith("CODEFABRIC_"):
+            monkeypatch.setenv(name, value)
+    process_settings.cache_clear()
 
     async def in_process() -> dict[str, object]:
-        tools = await probe_mcp.list_tools()
-        return fastmcp_tool_manifest(tools)
+        async with Client(mcp) as client:
+            return fastmcp_protocol_manifest(await client.list_tools())
 
     expected = asyncio.run(in_process())
     cli_tools = cli["tools"] if isinstance(cli, dict) else []

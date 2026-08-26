@@ -355,7 +355,7 @@ pub struct ArtifactReadyEvent {
     #[prost(string, tag = "7")]
     pub lease_token: ::prost::alloc::string::String,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TerminalEvent {
     #[prost(message, optional, tag = "1")]
     pub header: ::core::option::Option<QueryEventHeader>,
@@ -381,15 +381,36 @@ pub struct TerminalEvent {
     pub result_byte_count: u64,
     #[prost(string, tag = "12")]
     pub cleanup_state: ::prost::alloc::string::String,
+    #[prost(string, tag = "13")]
+    pub semantic_execution_state: ::prost::alloc::string::String,
+    #[prost(string, tag = "14")]
+    pub completeness_state: ::prost::alloc::string::String,
+    #[prost(bool, tag = "15")]
+    pub truncated: bool,
+    #[prost(message, repeated, tag = "16")]
+    pub query_statuses: ::prost::alloc::vec::Vec<QueryStatusSummary>,
+    #[prost(string, repeated, tag = "17")]
+    pub notices: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryStatusSummary {
+    #[prost(string, tag = "1")]
+    pub query_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub execution_state: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", optional, tag = "3")]
+    pub canonical_error_record_json: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
+    #[prost(string, repeated, tag = "4")]
+    pub notices: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QueryEvent {
     #[prost(oneof = "query_event::Event", tags = "1, 2, 3, 4, 5")]
     pub event: ::core::option::Option<query_event::Event>,
 }
 /// Nested message and enum types in `QueryEvent`.
 pub mod query_event {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Event {
         #[prost(message, tag = "1")]
         SnapshotPinned(super::SnapshotPinnedEvent),

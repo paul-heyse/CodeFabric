@@ -16,7 +16,12 @@ import grpc
 from ..contracts.json import canonicalize_json, canonicalize_value, checksum
 from ..contracts.model_registries import CpgdFeature
 from ..contracts.schemas import schema_fingerprints
-from ..contracts.wire_models import JSON_OBJECT_ADAPTER, JsonObject
+from ..contracts.wire_models import (
+    JSON_OBJECT_ADAPTER,
+    JsonObject,
+    QueryToolInput,
+    ValidateToolInput,
+)
 from ..settings import Settings
 from .channel import create_local_channel
 from .generated import cpg_query_service_pb2 as query_pb
@@ -46,6 +51,18 @@ class DaemonProtocolError(RuntimeError):
     """The daemon returned an internally inconsistent accepted-protocol result."""
 
 
+class DaemonQueryError(DaemonProtocolError):
+    """One daemon-authored canonical public error record."""
+
+    def __init__(self, canonical_record: bytes) -> None:
+        canonical = canonicalize_json(canonical_record)
+        if canonical != canonical_record:
+            raise DaemonProtocolError("daemon error record is not canonical JSON")
+        self.canonical_bytes = canonical
+        self.record = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
+        super().__init__(canonical.decode("utf-8"))
+
+
 @dataclass(frozen=True, slots=True)
 class DaemonQueryResult:
     """Verified canonical result bytes and terminal daemon metadata."""
@@ -60,9 +77,14 @@ class DaemonQueryResult:
     lease_expires_at_unix_ms: int
     result_row_count: int
     result_byte_count: int
+    execution_state: str
     freshness_state: str
     availability_state: str
+    completeness_state: str
     limit_state: str
+    truncated: bool
+    query_statuses: tuple[JsonObject, ...]
+    notices: tuple[str, ...]
 
 
 class CpgDaemonClient:
@@ -75,7 +97,9 @@ class CpgDaemonClient:
         self.host_profile_digest = host_capability_profile_digest(settings.max_request_bytes)
         self.handshake_response: Any | None = None
         self._connect_lock = asyncio.Lock()
-        self._leased_artifacts: dict[str, tuple[str, str, int, int]] = {}
+        # Capability material cached only so a later resource read can ask the
+        # daemon. Presence here never proves that the daemon still recognizes a lease.
+        self._lease_cache: dict[str, tuple[str, str, int, int]] = {}
 
     async def connect(self) -> None:
         """Perform the mandatory version/capability handshake exactly once."""
@@ -143,7 +167,7 @@ class CpgDaemonClient:
 
         try:
             for artifact_id, (lease_token, _checksum, _expires_at, _byte_count) in tuple(
-                self._leased_artifacts.items()
+                self._lease_cache.items()
             ):
                 try:
                     await self.stub.ReleaseResult(
@@ -158,7 +182,7 @@ class CpgDaemonClient:
                     # must not be skipped because one best-effort release raced it.
                     pass
                 finally:
-                    self._leased_artifacts.pop(artifact_id, None)
+                    self._lease_cache.pop(artifact_id, None)
         finally:
             await self.channel.close()
 
@@ -182,7 +206,7 @@ class CpgDaemonClient:
         }:
             raise DaemonProtocolError("daemon did not acknowledge query cancellation")
 
-    def canonical_request(self, request: dict[str, Any]) -> bytes:
+    def canonical_request(self, request: JsonObject) -> bytes:
         """Validate the bounded JSON domain and return RFC 8785 request bytes."""
 
         value = JSON_OBJECT_ADAPTER.validate_python(request, strict=True)
@@ -191,22 +215,10 @@ class CpgDaemonClient:
             raise ValueError("semantic request exceeds the configured byte limit")
         return canonical
 
-    @staticmethod
-    def _freshness(request: JsonObject) -> Any:
-        value = request.get("freshness_policy")
-        if not isinstance(value, str):
-            return query_pb.FRESHNESS_POLICY_UNSPECIFIED
-        return {
-            "best_available_snapshot": query_pb.FRESHNESS_POLICY_BEST_AVAILABLE_SNAPSHOT,
-            "wait_for_current": query_pb.FRESHNESS_POLICY_AWAIT_LATEST,
-            "current_required": query_pb.FRESHNESS_POLICY_REQUIRE_SOURCE_CURRENT,
-        }.get(value, query_pb.FRESHNESS_POLICY_UNSPECIFIED)
-
-    async def validate(self, request: dict[str, Any]) -> tuple[Any, JsonObject]:
+    async def validate(self, tool_input: ValidateToolInput) -> tuple[Any, JsonObject]:
         """Validate one canonical semantic request without executing it."""
 
-        canonical = self.canonical_request(request)
-        value = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
+        canonical = self.canonical_request(tool_input.request)
         response = await self.stub.ValidateQuery(
             query_pb.ValidateQueryRequest(
                 agent_instance_id=self.settings.agent_instance_id,
@@ -214,7 +226,7 @@ class CpgDaemonClient:
                 semantic_query_version=SEMANTIC_QUERY_VERSION,
                 canonical_request_json=canonical,
                 request_checksum=checksum(canonical),
-                freshness_policy=self._freshness(value),
+                freshness_policy=query_pb.FRESHNESS_POLICY_UNSPECIFIED,
                 host_capability_profile_digest=self.host_profile_digest,
             ),
             timeout=self.settings.query_timeout_seconds,
@@ -249,11 +261,10 @@ class CpgDaemonClient:
             raise DaemonProtocolError("daemon status identity differs")
         return response, cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
 
-    async def execute(self, request: dict[str, Any], delivery: str) -> DaemonQueryResult:
+    async def execute(self, tool_input: QueryToolInput) -> DaemonQueryResult:
         """Execute, stream, verify, read, and release one immutable result artifact."""
 
-        canonical = self.canonical_request(request)
-        value = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
+        canonical = self.canonical_request(tool_input.request)
         request_digest = checksum(canonical)
         started = await self.stub.StartQuery(
             query_pb.StartQueryRequest(
@@ -261,16 +272,15 @@ class CpgDaemonClient:
                 workspace_id=self.settings.workspace_id,
                 mcp_call_id=f"mcp:{secrets.token_hex(16)}",
                 rpc_attempt_id=f"rpc:{secrets.token_hex(16)}",
-                semantic_request_id=str(value.get("semantic_request_id", "")),
                 semantic_query_version=SEMANTIC_QUERY_VERSION,
                 canonical_request_json=canonical,
                 request_checksum=request_digest,
-                freshness_policy=self._freshness(value),
+                freshness_policy=query_pb.FRESHNESS_POLICY_UNSPECIFIED,
                 delivery_preference={
                     "inline": query_pb.DELIVERY_PREFERENCE_INLINE,
                     "resource": query_pb.DELIVERY_PREFERENCE_RESOURCE,
                     "automatic": query_pb.DELIVERY_PREFERENCE_AUTO,
-                }[delivery],
+                }[tool_input.delivery],
                 host_capability_profile_digest=self.host_profile_digest,
                 deadline_unix_ms=int((time.time() + self.settings.query_timeout_seconds) * 1000),
                 idempotency_key=f"{self.settings.agent_instance_id}:{request_digest}",
@@ -320,18 +330,33 @@ class CpgDaemonClient:
             terminal is not None
             and terminal.execution_state != query_pb.QUERY_EXECUTION_STATE_SUCCEEDED
         ):
-            raise DaemonProtocolError("daemon query terminated without a successful result")
+            if terminal.canonical_error_record_json:
+                raise DaemonQueryError(terminal.canonical_error_record_json)
+            raise DaemonProtocolError("daemon query terminated without a public error record")
         if artifact is None or terminal is None or snapshot is None:
             raise DaemonProtocolError(
                 "query stream ended without snapshot, artifact, and terminal events"
             )
 
-        use_resource = delivery == "resource" or (
-            delivery == "automatic"
+        if not terminal.semantic_execution_state or not terminal.completeness_state:
+            raise DaemonProtocolError("terminal event omitted semantic response states")
+        query_statuses = tuple(
+            cast(
+                JsonObject,
+                {
+                    "query_id": status.query_id,
+                    "state": status.execution_state,
+                    "message": self._query_status_message(status.canonical_error_record_json),
+                },
+            )
+            for status in terminal.query_statuses
+        )
+        use_resource = tool_input.delivery == "resource" or (
+            tool_input.delivery == "automatic"
             and terminal.result_byte_count > self.settings.inline_result_bytes
         )
         if use_resource:
-            self._leased_artifacts[artifact.artifact_id] = (
+            self._lease_cache[artifact.artifact_id] = (
                 artifact.lease_token,
                 artifact.artifact_checksum,
                 artifact.lease_expires_at_unix_ms,
@@ -348,9 +373,14 @@ class CpgDaemonClient:
                 lease_expires_at_unix_ms=artifact.lease_expires_at_unix_ms,
                 result_row_count=terminal.result_row_count,
                 result_byte_count=terminal.result_byte_count,
+                execution_state=terminal.semantic_execution_state,
                 freshness_state=terminal.freshness_state,
                 availability_state=terminal.availability_state,
+                completeness_state=terminal.completeness_state,
                 limit_state=terminal.limit_state,
+                truncated=terminal.truncated,
+                query_statuses=query_statuses,
+                notices=tuple(terminal.notices),
             )
 
         payload = await self._read_and_release(
@@ -362,21 +392,47 @@ class CpgDaemonClient:
         canonical_payload = canonicalize_json(payload)
         if canonical_payload != payload:
             raise DaemonProtocolError("result artifact is not canonical JSON")
+        response = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(payload, strict=True))
+        expected_states = {
+            "execution_state": terminal.semantic_execution_state,
+            "availability_state": terminal.availability_state,
+            "completeness_state": terminal.completeness_state,
+            "freshness_state": terminal.freshness_state,
+            "limit_state": terminal.limit_state,
+        }
+        if any(response.get(name) != value for name, value in expected_states.items()):
+            raise DaemonProtocolError("terminal states differ from the canonical response")
         return DaemonQueryResult(
             semantic_request_id=started.effective_semantic_request_id,
             daemon_query_id=started.daemon_query_id,
             canonical_bytes=payload,
-            response=cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(payload, strict=True)),
+            response=response,
             snapshot=snapshot,
             checksum=artifact.artifact_checksum,
             artifact_id=artifact.artifact_id,
             lease_expires_at_unix_ms=artifact.lease_expires_at_unix_ms,
             result_row_count=terminal.result_row_count,
             result_byte_count=terminal.result_byte_count,
+            execution_state=terminal.semantic_execution_state,
             freshness_state=terminal.freshness_state,
             availability_state=terminal.availability_state,
+            completeness_state=terminal.completeness_state,
             limit_state=terminal.limit_state,
+            truncated=terminal.truncated,
+            query_statuses=query_statuses,
+            notices=tuple(terminal.notices),
         )
+
+    @staticmethod
+    def _query_status_message(canonical_error_record: bytes) -> str | None:
+        if not canonical_error_record:
+            return None
+        record = DaemonQueryError(canonical_error_record).record
+        for field in ("safe_message", "detail"):
+            value = record.get(field)
+            if isinstance(value, str):
+                return value
+        return None
 
     async def _read_and_release(
         self,
@@ -389,26 +445,40 @@ class CpgDaemonClient:
 
         chunks: list[bytes] = []
         offset = 0
-        while True:
+        maximum_bytes = self.settings.inline_result_bytes
+        maximum_round_trips = max(1, (result_byte_count + maximum_bytes - 1) // maximum_bytes + 1)
+        maximum_chunks = maximum_round_trips
+        chunk_count = 0
+        for _attempt in range(maximum_round_trips):
             stream = self.stub.ReadResult(
                 query_pb.ReadResultRequest(
                     artifact_id=artifact_id,
                     offset=offset,
-                    maximum_bytes=self.settings.inline_result_bytes,
+                    maximum_bytes=maximum_bytes,
                     lease_token=lease_token,
                     accepted_compression=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
                 ),
                 timeout=self.settings.query_timeout_seconds,
             )
             final = False
+            prior_offset = offset
             async for chunk in stream:
+                chunk_count += 1
+                if chunk_count > maximum_chunks:
+                    raise DaemonProtocolError("result read exceeded its bounded chunk contract")
                 if chunk.offset != offset or checksum(chunk.payload) != chunk.payload_checksum:
                     raise DaemonProtocolError("result chunk offset or checksum differs")
+                if not chunk.payload and not chunk.final_chunk:
+                    raise DaemonProtocolError("result stream made no forward progress")
                 chunks.append(chunk.payload)
                 offset += len(chunk.payload)
                 final = chunk.final_chunk
             if final:
                 break
+            if offset == prior_offset:
+                raise DaemonProtocolError("result read made no forward progress")
+        else:
+            raise DaemonProtocolError("result read exceeded its bounded retry contract")
         payload = b"".join(chunks)
         if checksum(payload) != artifact_checksum or len(payload) != result_byte_count:
             raise DaemonProtocolError("assembled artifact identity differs")
@@ -421,26 +491,35 @@ class CpgDaemonClient:
         )
         if not released.released:
             raise DaemonProtocolError("result artifact lease was not released")
-        self._leased_artifacts.pop(artifact_id, None)
+        self._lease_cache.pop(artifact_id, None)
         return payload
 
     async def read_resource(self, artifact_id: str) -> bytes:
         """Resolve one process-owned result resource exactly once."""
 
-        lease = self._leased_artifacts.get(artifact_id)
+        lease = self._lease_cache.get(artifact_id)
         if lease is None:
             raise DaemonProtocolError("result resource is absent or already released")
         lease_token, artifact_checksum, _expires_at, result_byte_count = lease
-        payload = await self._read_and_release(
-            artifact_id,
-            lease_token,
-            artifact_checksum,
-            result_byte_count=result_byte_count,
-        )
+        try:
+            payload = await self._read_and_release(
+                artifact_id,
+                lease_token,
+                artifact_checksum,
+                result_byte_count=result_byte_count,
+            )
+        except grpc.RpcError as error:
+            self._lease_cache.pop(artifact_id, None)
+            raise DaemonProtocolError("daemon rejected or revoked the result lease") from error
         canonical_payload = canonicalize_json(payload)
         if canonical_payload != payload:
             raise DaemonProtocolError("result resource is not canonical JSON")
         return payload
 
 
-__all__ = ["CpgDaemonClient", "DaemonProtocolError", "DaemonQueryResult"]
+__all__ = [
+    "CpgDaemonClient",
+    "DaemonProtocolError",
+    "DaemonQueryError",
+    "DaemonQueryResult",
+]

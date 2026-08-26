@@ -1454,6 +1454,73 @@
             {
               "default_value": null,
               "has_presence": false,
+              "json_name": "queryId",
+              "label": "LABEL_OPTIONAL",
+              "name": "query_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "executionState",
+              "label": "LABEL_OPTIONAL",
+              "name": "execution_state",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "canonicalErrorRecordJson",
+              "label": "LABEL_OPTIONAL",
+              "name": "canonical_error_record_json",
+              "number": 3,
+              "oneof": "_canonical_error_record_json",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "notices",
+              "label": "LABEL_REPEATED",
+              "name": "notices",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v1.QueryStatusSummary",
+          "oneofs": [
+            {
+              "name": "_canonical_error_record_json",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
               "json_name": "artifactId",
               "label": "LABEL_OPTIONAL",
               "name": "artifact_id",
@@ -2722,6 +2789,71 @@
               "label": "LABEL_OPTIONAL",
               "name": "cleanup_state",
               "number": 12,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "semanticExecutionState",
+              "label": "LABEL_OPTIONAL",
+              "name": "semantic_execution_state",
+              "number": 13,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "completenessState",
+              "label": "LABEL_OPTIONAL",
+              "name": "completeness_state",
+              "number": 14,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "truncated",
+              "label": "LABEL_OPTIONAL",
+              "name": "truncated",
+              "number": 15,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "queryStatuses",
+              "label": "LABEL_REPEATED",
+              "name": "query_statuses",
+              "number": 16,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v1.QueryStatusSummary"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "notices",
+              "label": "LABEL_REPEATED",
+              "name": "notices",
+              "number": 17,
               "oneof": null,
               "options": {},
               "proto3_optional": false,

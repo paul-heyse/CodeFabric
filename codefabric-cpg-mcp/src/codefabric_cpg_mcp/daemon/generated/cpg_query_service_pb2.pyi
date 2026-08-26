@@ -469,7 +469,7 @@ class ArtifactReadyEvent(_message.Message):
     def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., artifact_id: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., lease_expires_at_unix_ms: _Optional[int] = ..., lease_token: _Optional[str] = ...) -> None: ...
 
 class TerminalEvent(_message.Message):
-    __slots__ = ("header", "execution_state", "availability_state", "freshness_state", "limit_state", "dependency_state", "canonical_response_checksum", "canonical_error_record_json", "artifact_id", "result_row_count", "result_byte_count", "cleanup_state")
+    __slots__ = ("header", "execution_state", "availability_state", "freshness_state", "limit_state", "dependency_state", "canonical_response_checksum", "canonical_error_record_json", "artifact_id", "result_row_count", "result_byte_count", "cleanup_state", "semantic_execution_state", "completeness_state", "truncated", "query_statuses", "notices")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
     AVAILABILITY_STATE_FIELD_NUMBER: _ClassVar[int]
@@ -482,6 +482,11 @@ class TerminalEvent(_message.Message):
     RESULT_ROW_COUNT_FIELD_NUMBER: _ClassVar[int]
     RESULT_BYTE_COUNT_FIELD_NUMBER: _ClassVar[int]
     CLEANUP_STATE_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
+    COMPLETENESS_STATE_FIELD_NUMBER: _ClassVar[int]
+    TRUNCATED_FIELD_NUMBER: _ClassVar[int]
+    QUERY_STATUSES_FIELD_NUMBER: _ClassVar[int]
+    NOTICES_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
     execution_state: QueryExecutionState
     availability_state: str
@@ -494,7 +499,24 @@ class TerminalEvent(_message.Message):
     result_row_count: int
     result_byte_count: int
     cleanup_state: str
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., execution_state: _Optional[_Union[QueryExecutionState, str]] = ..., availability_state: _Optional[str] = ..., freshness_state: _Optional[str] = ..., limit_state: _Optional[str] = ..., dependency_state: _Optional[str] = ..., canonical_response_checksum: _Optional[str] = ..., canonical_error_record_json: _Optional[bytes] = ..., artifact_id: _Optional[str] = ..., result_row_count: _Optional[int] = ..., result_byte_count: _Optional[int] = ..., cleanup_state: _Optional[str] = ...) -> None: ...
+    semantic_execution_state: str
+    completeness_state: str
+    truncated: bool
+    query_statuses: _containers.RepeatedCompositeFieldContainer[QueryStatusSummary]
+    notices: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., execution_state: _Optional[_Union[QueryExecutionState, str]] = ..., availability_state: _Optional[str] = ..., freshness_state: _Optional[str] = ..., limit_state: _Optional[str] = ..., dependency_state: _Optional[str] = ..., canonical_response_checksum: _Optional[str] = ..., canonical_error_record_json: _Optional[bytes] = ..., artifact_id: _Optional[str] = ..., result_row_count: _Optional[int] = ..., result_byte_count: _Optional[int] = ..., cleanup_state: _Optional[str] = ..., semantic_execution_state: _Optional[str] = ..., completeness_state: _Optional[str] = ..., truncated: _Optional[bool] = ..., query_statuses: _Optional[_Iterable[_Union[QueryStatusSummary, _Mapping]]] = ..., notices: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class QueryStatusSummary(_message.Message):
+    __slots__ = ("query_id", "execution_state", "canonical_error_record_json", "notices")
+    QUERY_ID_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
+    CANONICAL_ERROR_RECORD_JSON_FIELD_NUMBER: _ClassVar[int]
+    NOTICES_FIELD_NUMBER: _ClassVar[int]
+    query_id: str
+    execution_state: str
+    canonical_error_record_json: bytes
+    notices: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, query_id: _Optional[str] = ..., execution_state: _Optional[str] = ..., canonical_error_record_json: _Optional[bytes] = ..., notices: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class QueryEvent(_message.Message):
     __slots__ = ("snapshot_pinned", "progress", "response_chunk", "artifact_ready", "terminal")

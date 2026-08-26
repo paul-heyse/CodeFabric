@@ -236,7 +236,7 @@
       "artifact_id": "codefabric.adapter.fastmcp-input.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/adapter/fastmcp-input.schema.json",
-      "canonical_digest": "b3:4e0d415cfabfb972644c55de5e254defd54fb3b8d11e5e7b1cb99db2875df7e8",
+      "canonical_digest": "b3:564702edd7539e65ed0c124d4d403f7eed9ed70c0b7bae13cb2992a939173908",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
       "owner": "contracts",
@@ -252,7 +252,7 @@
         "max_outputs": 16,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:8d3fa82b47453804df84e09e17100f0c8b83fc48d834f82444141865729a3fcc",
+      "source_digest": "b3:98b6c2c27d14f0d02999b21f6eeef47fe0e610602bce9f4a5f4c726066172be7",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -261,7 +261,7 @@
       "artifact_id": "codefabric.adapter.fastmcp-output.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/adapter/fastmcp-output.schema.json",
-      "canonical_digest": "b3:d7bdc648b2d32324403acfb02b6c5c498e92f9040b3b4d45a247a75cb6fea15e",
+      "canonical_digest": "b3:17f3b39a61421c5989754b66b4125dbce065e92427d9118d880164053513bda1",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
       "owner": "contracts",
@@ -277,7 +277,7 @@
         "max_outputs": 16,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:e5ff5bebca0142a0626446471e498c083e318d5ee483e19e2e6e9d640ce05130",
+      "source_digest": "b3:74baae9a7c9b6b69043ecc5195a071f39d5a9bac8bf379829ba6d802f65ad573",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -286,7 +286,7 @@
       "artifact_id": "codefabric.adapter.fastmcp-public-meta.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/adapter/fastmcp-public-meta.schema.json",
-      "canonical_digest": "b3:39b08d1fb58cebc739c78ca86a69a79d4202a35baab470caa3a3c0a89fa99b61",
+      "canonical_digest": "b3:dfdcd8615e490126f8aae8b016959af1075f091b72351b54d0c80ea6b0200416",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
       "owner": "contracts",
@@ -302,7 +302,7 @@
         "max_outputs": 16,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:c8bb9bf4e7afdf66bf062f5e866ea201f3226df62776f9a1c8f49ea7b767b3e1",
+      "source_digest": "b3:bcf1d7ceaccb4b7c4aa4fc94bc3359c2319b9d9a0a0f9087bea6b0f164a55c48",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -311,7 +311,7 @@
       "artifact_id": "codefabric.adapter.model-ir",
       "artifact_kind": "manifest",
       "authority_path": "contracts/adapter/adapter-model-ir.json",
-      "canonical_digest": "b3:fc4c1fc4d8e8ae9933c15ba6d146a729915b1b1d611d9ebba92b9c53f868d52d",
+      "canonical_digest": "b3:39bd0a65cd2fed1d6c0ae5215c471fb398cf54d4a0a9467567f1a5e99aaf9810",
       "compatible_suite_major": 1,
       "compilation_unit": "adapter",
       "owner": "contracts",
@@ -327,7 +327,7 @@
         "max_outputs": 16,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:8d689318b8ee7d1ec3b6e0d0a68961a5b04f35a9a38fe40819cff8f0e55b3b8c",
+      "source_digest": "b3:e8572d05a57be81326b49cf6515d455a96c6df1fe9e0d9f65c3efdd27ce7c6a4",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -428,7 +428,7 @@
       "artifact_id": "codefabric.bundles.query-language-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/query-language-bundle.json",
-      "canonical_digest": "b3:8afc3615a1ac71910e3b529b131663a73c95b44289294f18f69f4bbcc5a66d37",
+      "canonical_digest": "b3:0f90b2967d66d3e1400a4dd46a63fb5f15884ede26efb124a9ebaf2c0677a9a4",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -442,7 +442,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:f69d68e0c98a4e2937568d973d81affe613c1ce56e47f48405c560d561b98cef",
+      "source_digest": "b3:bf79d50c81af63a7321a7a559d010ed1308d81b9f2d98994d993b9c2e05e0ad1",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -474,7 +474,7 @@
       "artifact_id": "codefabric.bundles.tool-contract-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/tool-contract-bundle.json",
-      "canonical_digest": "b3:b57ffd25d74b2d3870fb53c7edb4201f1335f556504f793cd64eba67be9daedb",
+      "canonical_digest": "b3:51f62afc6c96469f4784a4291c8f5081a7bb03202af4e7962e64cd9acbff163b",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -488,7 +488,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:82da8c121e7c67896f9d8fa40c62f867b3b1d56f9adae879dc9560197e6b60b8",
+      "source_digest": "b3:f4541191ddf11658047010667ed56cedfb5df69b20ddba6ade2c76ee44ed8341",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -497,7 +497,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:4d1b25b18a8a219de003e94df9427491e8fb18161374505c10fee6d2752b711d",
+      "canonical_digest": "b3:3518608d911f78e9ab2e242147af04cb60e19e55fc22e5b7e2893dc0ce01195f",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -511,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:4c80d752031d59fca431dcc41bf3177d49b8d67381e3be047dd472df3e998890",
+      "source_digest": "b3:8fd9681bba59451feff11aae9872345f81bebff2407649a96df121eb7df61448",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1360,7 +1360,7 @@
       "artifact_id": "codefabric.rpc.cpg-query-service",
       "artifact_kind": "protobuf-schema",
       "authority_path": "contracts/rpc/cpg_query_service.proto",
-      "canonical_digest": "b3:1419b6e036ca3f73c45694ff82ae21e4f25c4302c258560c3fe7aca01485415e",
+      "canonical_digest": "b3:a85731f6c68cfe48eff2dd73aa26201f8791f7ce1035b324dcf739b8f50cef17",
       "compatible_suite_major": 1,
       "compilation_unit": "proto",
       "owner": "contracts",
@@ -1376,7 +1376,7 @@
         "max_outputs": 64,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:05dd31c0d0cd2f40efcf3dbbff27433c133ac3bb29e8b177cd734fd35ec31b39",
+      "source_digest": "b3:f87f09b6d8a39927fee8a4693c7b0b274807ebc6f06ef3a231b91b1acf74f510",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -1708,7 +1708,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:c0076e622a250f2ae92281cfbe5e7785f787f3e14fa6cc262d977998c3b8bf3c",
+      "canonical_digest": "b3:b0d1029ce03a2deaaace261e7aab4ec8d3337b0d6d08979bbb9770a48e8a7aae",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -1722,7 +1722,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:bd966d4a528b6edd9ab25a3c463506812861419d8a5e321fa45ed3e88d382c04",
+      "source_digest": "b3:aa838bb87a4daf747d6d0a6ec334a6a288be2c489312dab1d3e8859ad7a14283",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -2789,7 +2789,7 @@
       "artifact_id": "evidence:rules-no-framework-internal-contract-imports",
       "artifact_kind": "evidence",
       "authority_path": "rules/no-framework-internal-contract-imports.yml",
-      "canonical_digest": "b3:f8557e525cd69ed856a42fa6636fda89eb59389d995272ce6e7f2ce3b2e1bd3d",
+      "canonical_digest": "b3:239f41a578691d78b3ea7d42c2f21b43c0d3db2e0ca04ad5807051be865a67ad",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rules",
@@ -2803,7 +2803,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:97be8746d75b559c8c8e4c236999e8f8fd0d2d5baa7bae99eb38220fd97d7047",
+      "source_digest": "b3:86dc4924b079bc4956ecd03f7f036318ea911b12005dd6315c0dff3ccc3f1825",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -3017,7 +3017,7 @@
       }
     },
     {
-      "action_key": "b3:fbdffe52c0df0bde60404ebece0ffd854c92e5842e97f1506236897890debe3f",
+      "action_key": "b3:2fa8bb55d7bbebfa1dc07971b4b32056f6767331f880fb4557420061c861d400",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -3038,19 +3038,19 @@
       "rule_version": "external-pydantic-fastmcp-v1",
       "tool_identity": {
         "fastmcp_version": "3.4.7",
-        "lock_digest": "b3:edecd82d69bbf3f1d2416c727f25d67680136416dd461878838fd6dd8372b3ac",
+        "lock_digest": "b3:050d161204b71e0e53d4a4156af52df229aad73b32c68c05b514bc28e6053f37",
         "mcp_version": "1.29.0",
-        "project_digest": "b3:e47b1e7e59dc6fb722143ab4d1171456485acdb9682d9b459f30d57ea2be0112",
+        "project_digest": "b3:3fbe2752b43abf1ce5ddd2f145cfa804ad3df2a40fc6b72e228a28ee775e9b2f",
         "pydantic_version": "2.13.4",
         "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
         "python_version": "3.14.7",
         "ruff_digest": "b3:ed298c066aa3bc5cf37ad821e2265f628fb74cfc5504eab4bf62401e344b08e4",
         "ruff_version": "ruff 0.16.3",
-        "script_digest": "b3:ee6ad5d8953231431f81492e95fb89f8a2e22d5d4c5ff7ba573e79711a0c159a"
+        "script_digest": "b3:c9f157b03d264987339e0375a0664846d2ee56da339400519fdf99982f0c38cf"
       }
     },
     {
-      "action_key": "b3:0945128b538bf813e73ab226780130c61963be022aa408c05a4ab598689acc9b",
+      "action_key": "b3:1a4570048c23eed6d14f5c709d8b11604b569711da532efd10a35da9f58da1cd",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -3081,12 +3081,12 @@
       "rule_version": "one-fds-grpc-tools-compile-fds-v1",
       "tool_identity": {
         "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
-        "descriptor_sha256": "cc8d49b1cb141556d7e107c31df3dd8b2b84e624577c39784d5f3019f16796ec",
+        "descriptor_sha256": "d9919fc17f1aaae8d16c10ce434a42b74e645531c8b28c344c008eb142bf0880",
         "python": {
           "grpcio": "1.83.0",
           "grpcio-tools": "1.83.0",
-          "lock_digest": "b3:edecd82d69bbf3f1d2416c727f25d67680136416dd461878838fd6dd8372b3ac",
-          "project_digest": "b3:e47b1e7e59dc6fb722143ab4d1171456485acdb9682d9b459f30d57ea2be0112",
+          "lock_digest": "b3:050d161204b71e0e53d4a4156af52df229aad73b32c68c05b514bc28e6053f37",
+          "project_digest": "b3:3fbe2752b43abf1ce5ddd2f145cfa804ad3df2a40fc6b72e228a28ee775e9b2f",
           "protobuf": "7.36.0",
           "protoc": "libprotoc 35.1",
           "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
@@ -3108,7 +3108,7 @@
         },
         "schema": 4,
         "sources": {
-          "contracts/rpc/cpg_query_service.proto": "b3:05dd31c0d0cd2f40efcf3dbbff27433c133ac3bb29e8b177cd734fd35ec31b39",
+          "contracts/rpc/cpg_query_service.proto": "b3:f87f09b6d8a39927fee8a4693c7b0b274807ebc6f06ef3a231b91b1acf74f510",
           "contracts/rpc/provider_control.proto": "b3:88e322e42cc6475bfa810a4a3b4479a1620bef22e3156b3b82469abc4fd36e38",
           "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
           "contracts/rpc/rustc_extractor.proto": "b3:3fb3384fa6dfd521b4ed4690102d5e00e8c7fda7f4a95c5c2543d81bd156fac6"

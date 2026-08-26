@@ -4,6 +4,8 @@ from collections.abc import Iterator
 
 import pytest
 
+from codefabric_cpg_mcp.settings import process_settings
+
 SETTING_ENV_NAMES = (
     "CODEFABRIC_CPG_DAEMON_TARGET",
     "CODEFABRIC_DAEMON_TARGET",
@@ -27,4 +29,6 @@ def clean_adapter_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
 
     for name in SETTING_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
+    process_settings.cache_clear()
     yield
+    process_settings.cache_clear()

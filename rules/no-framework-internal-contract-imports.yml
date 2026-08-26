@@ -9,7 +9,7 @@ rule:
   any:
     - all:
         - kind: import_from_statement
-        - regex: "^from (fastmcp([.]|\\s)|pydantic[.]_internal)"
+        - regex: "^from (fastmcp([.]|\\s)|mcp([.]|\\s)|pydantic[.]_internal)"
     - all:
         - kind: import_statement
-        - regex: "^import (fastmcp([.]|\\s)|pydantic[.]_internal)"
+        - regex: "^import (fastmcp([.]|\\s)|mcp([.]|\\s)|pydantic[.]_internal)"

@@ -302,6 +302,20 @@ message TerminalEvent {
   uint64 result_row_count = 10;
   uint64 result_byte_count = 11;
   string cleanup_state = 12;
+  // Registry-native semantic response states. Presentation adapters pass these
+  // values through rather than narrowing or reconstructing them.
+  string semantic_execution_state = 13;
+  string completeness_state = 14;
+  bool truncated = 15;
+  repeated QueryStatusSummary query_statuses = 16;
+  repeated string notices = 17;
+}
+
+message QueryStatusSummary {
+  string query_id = 1;
+  string execution_state = 2;
+  optional bytes canonical_error_record_json = 3;
+  repeated string notices = 4;
 }
 
 // Exactly one of the five AC-G-58 event variants is present.

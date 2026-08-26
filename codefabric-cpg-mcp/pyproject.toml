@@ -12,6 +12,7 @@ dependencies = [
   "blake3==1.0.9",
   "fastmcp==3.4.7",
   "grpcio==1.83.0",
+  "mcp==1.29.0",
   "protobuf==7.36.0",
   "pydantic==2.13.4",
   "pydantic-settings==2.15.0",
