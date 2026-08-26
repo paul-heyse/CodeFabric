@@ -1605,7 +1605,7 @@ fn bound_query_id(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::PathBuf;
@@ -1628,12 +1628,19 @@ mod tests {
     use tower::service_fn;
 
     use super::*;
+    use crate::continuous::{ContinuousWorkspaceConfig, ContinuousWorkspaceEngine};
     use crate::daemon::{
         AdminCommand, DaemonConfig, ReloadableConfig, StaticConfig, administer,
         serve_with_query_backend, wait_for_discovery,
     };
+    use crate::fabric::SnapshotOverlayProviderFactory as _;
     use crate::fact_ingest::{EntityRow, FactScope, ValidatedFactBatch, encode_entities};
+    use crate::git_state::{GitCandidatePlanner, GitStateObservations, GixGitStateAdapter};
     use crate::identity::{IdentityDomain, encode_public_id};
+    use crate::lifecycle::{
+        LifecycleConfig, OverlayFlushPolicy, UpdateWaveScheduler, WatchHint, WatchHintBatch,
+        WatchHintKind, prove_serving_rebuild_equivalence,
+    };
     use crate::operational_store::{OperationalStore, OperationalStoreError};
     use crate::query_service::{
         PersistedQueryArtifactBundle, QueryArtifactPhase, ResultArtifactStore, VersionExplanation,
@@ -1655,7 +1662,7 @@ mod tests {
         ServingSnapshotCandidate, ServingSnapshotRuntime, SnapshotLeaseManager,
     };
     use crate::source_image::{SourceCapturePolicy, SourceImageStore};
-    use crate::workspace_registry::WorkspaceRecord;
+    use crate::workspace_registry::{WorkspaceRecord, WorkspaceRegistry};
 
     const WORKSPACE: [u8; 16] = [0x11; 16];
     const CONTEXT: [u8; 16] = crate::identity::SOURCE_CONTEXT_ID;
@@ -1718,9 +1725,17 @@ mod tests {
     }
 
     fn snapshot_body(source_generation: u64) -> ServingSnapshotManifestBody {
+        snapshot_body_for(WORKSPACE, source_generation, digest(1))
+    }
+
+    fn snapshot_body_for(
+        workspace_id: [u8; 16],
+        source_generation: u64,
+        inventory_digest: String,
+    ) -> ServingSnapshotManifestBody {
         ServingSnapshotManifestBody {
             manifest_version: "1.0".into(),
-            workspace_id: encode_public_id(IdentityDomain::Workspace, None, WORKSPACE).unwrap(),
+            workspace_id: encode_public_id(IdentityDomain::Workspace, None, workspace_id).unwrap(),
             repository_id: None,
             worktree_id: None,
             registration_revision: 1,
@@ -1728,7 +1743,7 @@ mod tests {
                 source_generation,
                 admitted_event_sequence: source_generation,
                 reconciled_event_sequence: source_generation,
-                inventory_digest: digest(1),
+                inventory_digest,
                 authorization_fingerprint: digest(2),
                 inclusion_policy_fingerprint: digest(3),
                 path_profile_version: "1".into(),
@@ -1741,7 +1756,7 @@ mod tests {
                 context_set_id: encode_public_id(
                     IdentityDomain::ContextSet,
                     None,
-                    crate::identity::context_set_identity(WORKSPACE, &[CONTEXT])
+                    crate::identity::context_set_identity(workspace_id, &[CONTEXT])
                         .unwrap()
                         .id,
                 )
@@ -1934,6 +1949,35 @@ mod tests {
         )
     }
 
+    fn candidate_from_effective_batches(
+        publication: [u8; 16],
+        workspace_id: [u8; 16],
+        source_generation: u64,
+        inventory_digest: [u8; 32],
+        batches: Vec<(i16, RecordBatch)>,
+    ) -> Arc<ServingSnapshotCandidate> {
+        let catalog = Arc::new(SnapshotProviderCatalog::from_batches_for_snapshot_tests(
+            publication,
+            workspace_id,
+            batches,
+            [0; 32],
+            i64::try_from(source_generation).unwrap(),
+            vec![CONTEXT],
+        ));
+        Arc::new(
+            ServingSnapshotCandidate::build(
+                snapshot_body_for(
+                    workspace_id,
+                    source_generation,
+                    crate::integrity::frame_digest(inventory_digest),
+                ),
+                catalog,
+                &[],
+            )
+            .unwrap(),
+        )
+    }
+
     fn operational_store() -> (TempDir, OperationalStore, SourceImageStore) {
         let directory = tempdir().unwrap();
         let mut store = OperationalStore::open(&directory.path().join("state.sqlite3")).unwrap();
@@ -1985,6 +2029,381 @@ mod tests {
         )
         .unwrap();
         (directory, store, images)
+    }
+
+    fn comparison_operational_store(
+        workspace_id: [u8; 16],
+    ) -> (TempDir, OperationalStore, SourceImageStore) {
+        let directory = tempdir().unwrap();
+        let mut store = OperationalStore::open(&directory.path().join("state.sqlite3")).unwrap();
+        let context_set = crate::identity::context_set_identity(workspace_id, &[CONTEXT])
+            .unwrap()
+            .id;
+        store
+            .write_transaction(|transaction| {
+                transaction.execute(
+                    "INSERT INTO workspace_registration(workspace_id,
+                     workspace_registration_nonce, registration_revision,
+                     administrative_key, root_path_bytes, root_path_display,
+                     root_directory_file_identity, platform_code,
+                     case_sensitivity_mode, authorization_revision,
+                     allowed_source_disclosure_rules, repository_id, worktree_id,
+                     authorization_fingerprint, context_fingerprint, status_code,
+                     created_at, updated_at)
+                     VALUES (?1, ?2, 1, ?3, X'2f', '/', ?4, 10, 'sensitive', 1,
+                             X'', NULL, NULL, ?5, ?6, ?7, '0', '0')",
+                    params![
+                        workspace_id.as_slice(),
+                        [1_u8; 16].as_slice(),
+                        b"comparison".as_slice(),
+                        [2_u8; 16].as_slice(),
+                        [3_u8; 32].as_slice(),
+                        [4_u8; 32].as_slice(),
+                        i64::from(WorkspaceRegistryLifecycle::Bootstrapping as u16),
+                    ],
+                )?;
+                transaction.execute(
+                    "INSERT INTO worktree_state(workspace_id, worktree_id, repository_id,
+                     work_dir_path_bytes, work_dir_path_display, git_dir_path_bytes,
+                     git_dir_path_display, lifecycle_state_code, source_trust_state_code,
+                     event_stream_health_code, git_acceleration_status_code,
+                     active_snapshot_id, analysis_context_set_id, source_generation,
+                     event_watermark, newest_dirty_generation, durable_generation,
+                     reconcile_required, updated_at, last_diagnostic_id, inventory_digest)
+                     VALUES (?1, NULL, NULL, X'2f', '/', NULL, NULL, 30, 30, 10, 10,
+                             NULL, ?2, 1, 1, 0, 1, 0, '0', NULL, ?3)",
+                    params![
+                        workspace_id.as_slice(),
+                        context_set.as_slice(),
+                        [0x55_u8; 32].as_slice(),
+                    ],
+                )?;
+                Ok::<_, OperationalStoreError>(())
+            })
+            .unwrap();
+        let images = SourceImageStore::open(
+            &directory.path().join("source-images"),
+            SourceCapturePolicy::default(),
+        )
+        .unwrap();
+        (directory, store, images)
+    }
+
+    struct ComparisonSessionFixture {
+        _directory: TempDir,
+        _store: OperationalStore,
+        _images: SourceImageStore,
+        session: ServingQuerySession,
+    }
+
+    fn comparison_session(candidate: Arc<ServingSnapshotCandidate>) -> ComparisonSessionFixture {
+        let workspace_id = candidate.manifest().raw_workspace_id().unwrap();
+        let (directory, mut store, mut images) = comparison_operational_store(workspace_id);
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate,
+            directory.path(),
+        );
+        ComparisonSessionFixture {
+            _directory: directory,
+            _store: store,
+            _images: images,
+            session,
+        }
+    }
+
+    async fn materialize_effective_batches(
+        overlay: &crate::fabric::ConsolidatedOverlay,
+    ) -> Vec<(i16, RecordBatch)> {
+        let mut materialized = vec![(11, generated_batch(11, 1))];
+        for table_code in std::iter::once(10).chain(
+            serving_projection_specs()
+                .iter()
+                .map(|projection| projection.source_table_code),
+        ) {
+            let spec = table_spec(table_code).unwrap();
+            let empty = RecordBatch::new_empty(Arc::clone(&spec.arrow_schema));
+            let base: Arc<dyn TableProvider> = Arc::new(
+                MemTable::try_new(Arc::clone(&spec.arrow_schema), vec![vec![empty]]).unwrap(),
+            );
+            let effective = overlay.wrap(spec, base).unwrap();
+            let batches = SessionContext::new()
+                .read_table(effective)
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            let batch = if batches.is_empty() {
+                RecordBatch::new_empty(Arc::clone(&spec.arrow_schema))
+            } else {
+                arrow_select::concat::concat_batches(&spec.arrow_schema, &batches).unwrap()
+            };
+            materialized.push((table_code, batch));
+        }
+        materialized
+    }
+
+    fn wp72_lifecycle_config() -> LifecycleConfig {
+        LifecycleConfig {
+            debounce_timeout: Duration::from_millis(20),
+            tick_rate: Duration::from_millis(5),
+            ingress_capacity: 32,
+            maximum_paths_per_batch: 128,
+            gather_window: Duration::from_millis(5),
+            dirty_path_bulk_threshold: 8,
+            await_current_timeout: Duration::from_secs(1),
+            maximum_capture_bytes: 1024 * 1024,
+            stable_read_retry_count: 2,
+            source_blob_lease_ttl: Duration::from_secs(60),
+            overlay_flush_policy: OverlayFlushPolicy {
+                maximum_rows: 100_000,
+                maximum_bytes: 64 * 1024 * 1024,
+                maximum_touched_owners: 1_000,
+                maximum_generations: 32,
+            },
+        }
+    }
+
+    fn wp72_engine(
+        root: &std::path::Path,
+        state_root: &std::path::Path,
+        workspace_nonce: [u8; 16],
+    ) -> (
+        OperationalStore,
+        ContinuousWorkspaceEngine<GixGitStateAdapter>,
+        [u8; 16],
+    ) {
+        let mut store = OperationalStore::open(&state_root.join("operational.sqlite")).unwrap();
+        let workspace_id = WorkspaceRegistry::new(&mut store)
+            .add_directory_fixture(root, workspace_nonce)
+            .unwrap()
+            .workspace_id;
+        let lifecycle = wp72_lifecycle_config();
+        let scheduler = UpdateWaveScheduler::new(workspace_id, root, 0, 0, 0, lifecycle).unwrap();
+        let source_images = SourceImageStore::open(
+            &state_root.join("source-blobs"),
+            SourceCapturePolicy {
+                maximum_bytes: lifecycle.maximum_capture_bytes,
+                stable_read_retries: lifecycle.stable_read_retry_count,
+                lease_ttl: lifecycle.source_blob_lease_ttl,
+            },
+        )
+        .unwrap();
+        let engine = ContinuousWorkspaceEngine::new(
+            scheduler,
+            source_images,
+            GitCandidatePlanner::without_cache(GixGitStateAdapter),
+            ContinuousWorkspaceConfig {
+                analysis_context_id: CONTEXT,
+                registered_git_identity: None,
+                git_observations: GitStateObservations {
+                    inclusion_policy_fingerprint: [0x31; 32],
+                    attributes_fingerprint: [0x32; 32],
+                    worktree_inventory_digest: [0; 32],
+                },
+                prior_git_vector: None,
+                overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: false,
+            },
+        );
+        (store, engine, workspace_id)
+    }
+
+    async fn assert_wp72_clean_rebuild(
+        root: &std::path::Path,
+        workspace_nonce: [u8; 16],
+        incremental: &ContinuousWorkspaceEngine<GixGitStateAdapter>,
+        stage: u8,
+    ) {
+        let clean_state = tempdir().unwrap();
+        let (mut clean_store, mut clean, clean_workspace_id) =
+            wp72_engine(root, clean_state.path(), workspace_nonce);
+        let rebuilt = clean
+            .rebuild_from_zero(&mut clean_store)
+            .unwrap()
+            .expect("zero-state rebuild publishes");
+        let incremental_overlay = incremental.current_overlay().unwrap();
+        assert_eq!(incremental.scheduler().workspace_id(), clean_workspace_id);
+        assert_eq!(
+            incremental.current_inventory_digest(),
+            clean.current_inventory_digest()
+        );
+        let incremental_candidate = candidate_from_effective_batches(
+            [stage; 16],
+            clean_workspace_id,
+            incremental.scheduler().current_source_generation(),
+            incremental.current_inventory_digest(),
+            materialize_effective_batches(&incremental_overlay).await,
+        );
+        let rebuilt_candidate = candidate_from_effective_batches(
+            [stage | 0x80; 16],
+            clean_workspace_id,
+            rebuilt.wave.source_generation,
+            clean.current_inventory_digest(),
+            materialize_effective_batches(&rebuilt.overlay).await,
+        );
+        let incremental_session = comparison_session(incremental_candidate);
+        let rebuilt_session = comparison_session(rebuilt_candidate);
+        prove_serving_rebuild_equivalence(&incremental_session.session, &rebuilt_session.session)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One ordered corpus proves true rebuild convergence after every terminal state.
+    async fn wp72_behavioral_acceptance() {
+        let fixture = tempdir().unwrap();
+        let root = fixture.path().join("workspace");
+        let state_root = fixture.path().join("incremental-state");
+        fs::create_dir_all(root.join("generated")).unwrap();
+        fs::create_dir_all(&state_root).unwrap();
+        fs::write(root.join("a.py"), b"value = 1\n").unwrap();
+        fs::write(root.join("b.rs"), b"pub fn value() -> i32 { 1 }\n").unwrap();
+        fs::write(root.join("generated/bindings.py"), b"BOUND = 1\n").unwrap();
+        let workspace_nonce = [0x72; 16];
+        let (mut store, mut engine, workspace_id) =
+            wp72_engine(&root, &state_root, workspace_nonce);
+
+        engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: Vec::new(),
+                    rescan_required: true,
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .expect("initial publication");
+        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 1).await;
+
+        fs::write(root.join("a.py"), b"def broken(:\n").unwrap();
+        engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: vec![WatchHint {
+                        path_bytes: b"a.py".to_vec(),
+                        kind: WatchHintKind::CreateOrModify,
+                    }],
+                    rescan_required: false,
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .expect("parse-break publication");
+        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 2).await;
+
+        fs::write(root.join("a.py"), b"value = 2\n").unwrap();
+        fs::rename(root.join("b.rs"), root.join("renamed.rs")).unwrap();
+        fs::write(root.join("generated/bindings.py"), b"BOUND = 2\n").unwrap();
+        engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: vec![
+                        WatchHint {
+                            path_bytes: b"a.py".to_vec(),
+                            kind: WatchHintKind::CreateOrModify,
+                        },
+                        WatchHint {
+                            path_bytes: b"b.rs".to_vec(),
+                            kind: WatchHintKind::RenameSource,
+                        },
+                        WatchHint {
+                            path_bytes: b"renamed.rs".to_vec(),
+                            kind: WatchHintKind::RenameTarget,
+                        },
+                        WatchHint {
+                            path_bytes: b"generated/bindings.py".to_vec(),
+                            kind: WatchHintKind::CreateOrModify,
+                        },
+                    ],
+                    rescan_required: true,
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .expect("repair/rename/burst publication");
+        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 3).await;
+
+        let recovery = crate::lifecycle::recover_workspace(
+            &store.reader_factory().open().unwrap(),
+            workspace_id,
+        )
+        .unwrap();
+        assert!(!recovery.restart_paths.is_empty());
+        let recovered_inventory_digest = engine.current_inventory_digest();
+        drop(engine);
+        let lifecycle = wp72_lifecycle_config();
+        let mut scheduler = UpdateWaveScheduler::new(
+            workspace_id,
+            &root,
+            recovery.source_generation,
+            recovery.event_watermark,
+            recovery.event_watermark,
+            lifecycle,
+        )
+        .unwrap();
+        scheduler.restore_recovery(&recovery).unwrap();
+        let source_images = SourceImageStore::open(
+            &state_root.join("source-blobs"),
+            SourceCapturePolicy {
+                maximum_bytes: lifecycle.maximum_capture_bytes,
+                stable_read_retries: lifecycle.stable_read_retry_count,
+                lease_ttl: lifecycle.source_blob_lease_ttl,
+            },
+        )
+        .unwrap();
+        let mut engine = ContinuousWorkspaceEngine::new(
+            scheduler,
+            source_images,
+            GitCandidatePlanner::without_cache(GixGitStateAdapter),
+            ContinuousWorkspaceConfig {
+                analysis_context_id: CONTEXT,
+                registered_git_identity: None,
+                git_observations: GitStateObservations {
+                    inclusion_policy_fingerprint: [0x31; 32],
+                    attributes_fingerprint: [0x32; 32],
+                    worktree_inventory_digest: recovered_inventory_digest,
+                },
+                prior_git_vector: None,
+                overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: false,
+            },
+        );
+        engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: Vec::new(),
+                    rescan_required: false,
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .expect("restart replay publication");
+        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 4).await;
+
+        fs::remove_file(root.join("a.py")).unwrap();
+        engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: vec![WatchHint {
+                        path_bytes: b"a.py".to_vec(),
+                        kind: WatchHintKind::Remove,
+                    }],
+                    rescan_required: false,
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .expect("delete publication");
+        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 5).await;
     }
 
     fn workspace_record() -> WorkspaceRecord {

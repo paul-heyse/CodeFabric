@@ -219,6 +219,26 @@ pub struct ServingProjectionSpec {
     pub projection_role: ServingProjectionRole,
 }
 
+/// Closed normalization applied to operational foreign keys before effective-state comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComparisonForeignKeyNormalization {
+    /// Replace provider-run-derived evidence and observation locators with one digest of the
+    /// complete projected semantic evidence row.
+    EvidenceContentIdentityV1,
+}
+
+/// Schema-registry-owned canonical comparison projection for one effective table.
+///
+/// The released comparison-ignore registry remains the sole column-exclusion authority. This
+/// record supplies the governed primary sort key and any required operational foreign-key
+/// normalization without duplicating ignored field names per table.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ComparisonProjectionSpec {
+    pub table_code: i16,
+    pub primary_sort_key: &'static [&'static str],
+    pub foreign_key_normalization: Option<ComparisonForeignKeyNormalization>,
+}
+
 /// Closed implementation role for one generated control projection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlProjectionRole {
@@ -741,6 +761,23 @@ pub fn table_scope_spec(table_code: i16) -> Option<&'static TableScopeSpec> {
 #[must_use]
 pub const fn serving_projection_specs() -> &'static [ServingProjectionSpec] {
     GENERATED_SERVING_PROJECTION_SPECS
+}
+
+/// Resolve the canonical comparison projection for every current effective serving table and
+/// diagnostic evidence table.
+#[must_use]
+pub fn comparison_projection_spec(table_code: i16) -> Option<ComparisonProjectionSpec> {
+    let included = table_code == 10
+        || serving_projection_specs()
+            .iter()
+            .any(|projection| projection.source_table_code == table_code);
+    let table = included.then(|| table_spec(table_code)).flatten()?;
+    Some(ComparisonProjectionSpec {
+        table_code,
+        primary_sort_key: table.primary_key,
+        foreign_key_normalization: (table_code == 130)
+            .then_some(ComparisonForeignKeyNormalization::EvidenceContentIdentityV1),
+    })
 }
 
 /// Return every generated control projection.

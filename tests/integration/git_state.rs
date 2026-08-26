@@ -11,12 +11,13 @@ use std::time::Duration;
 use codefabric::cancellation::Cancellation;
 use codefabric::git_state::{
     GitBlockingExecutor, GitCandidateCache, GitCandidateMode, GitCandidateOrigin,
-    GitCandidatePlanner, GitCandidatePlanningRequest, GitHashAlgorithm, GitInventoryClassification,
-    GitOperationState, GitStateAdapter, GitStateError, GitStateObservations, GitTrustPolicy,
-    GixGitStateAdapter, HeadKind, RegisteredGitIdentity, apply_to_source_inventory,
-    candidate_cache_key, supported_hash_algorithms, topology_digest,
+    GitCandidatePlanner, GitCandidatePlanningRequest, GitCandidateSet, GitHashAlgorithm,
+    GitInventoryClassification, GitInventoryResult, GitOperationState, GitStateAdapter,
+    GitStateError, GitStateObservations, GitStateSnapshot, GitStateVector, GitTrustPolicy,
+    GitWorktreeIdentity, GixGitStateAdapter, HeadKind, RegisteredGitIdentity,
+    apply_to_source_inventory, candidate_cache_key, supported_hash_algorithms, topology_digest,
 };
-use codefabric::inventory::{InventoryLimits, InventoryWalker};
+use codefabric::inventory::{InclusionState, InventoryLimits, InventoryWalker, SourceInventory};
 use codefabric::operational_store::OperationalStore;
 use codefabric::registries::GIT_INVENTORY_CLASSIFICATION_VALUES;
 use codefabric::registries::{GitAccelerationStatus, UpdateCandidateStrategy};
@@ -32,6 +33,56 @@ const OBSERVATIONS: GitStateObservations = GitStateObservations {
     attributes_fingerprint: [0x32; 32],
     worktree_inventory_digest: [0x33; 32],
 };
+
+#[derive(Clone, Copy, Debug)]
+struct DisabledGitStateAdapter;
+
+impl GitStateAdapter for DisabledGitStateAdapter {
+    fn open_worktree(
+        &self,
+        _root: &Path,
+        _registered: RegisteredGitIdentity,
+        _policy: &GitTrustPolicy,
+    ) -> Result<GitStateSnapshot, GitStateError> {
+        Err(GitStateError::Unavailable("gix-disabled"))
+    }
+
+    fn capture_state(
+        &self,
+        _identity: &GitWorktreeIdentity,
+        _observations: GitStateObservations,
+    ) -> Result<GitStateVector, GitStateError> {
+        Err(GitStateError::Unavailable("gix-disabled"))
+    }
+
+    fn inventory(
+        &self,
+        _identity: &GitWorktreeIdentity,
+        _observations: GitStateObservations,
+        _cancel: &Cancellation,
+    ) -> Result<GitInventoryResult, GitStateError> {
+        Err(GitStateError::Unavailable("gix-disabled"))
+    }
+
+    fn status_candidates(
+        &self,
+        _identity: &GitWorktreeIdentity,
+        _observations: GitStateObservations,
+        _cancel: &Cancellation,
+    ) -> Result<GitCandidateSet, GitStateError> {
+        Err(GitStateError::Unavailable("gix-disabled"))
+    }
+
+    fn tree_diff_candidates(
+        &self,
+        _identity: &GitWorktreeIdentity,
+        _prior: &GitStateVector,
+        _observations: GitStateObservations,
+        _cancel: &Cancellation,
+    ) -> Result<GitCandidateSet, GitStateError> {
+        Err(GitStateError::Unavailable("gix-disabled"))
+    }
+}
 
 fn git(path: &Path, arguments: &[&OsStr]) -> Vec<u8> {
     let output = Command::new("git")
@@ -1126,4 +1177,120 @@ fn wp53_negative_zero_state() {
     );
     assert!(plan.requires_generic_inventory());
     assert_eq!(plan.acceleration, GitAccelerationStatus::NotAGitWorktree);
+}
+
+fn terminal_inventory(inventory: &SourceInventory) -> BTreeMap<Vec<u8>, Option<[u8; 32]>> {
+    inventory
+        .records
+        .iter()
+        .filter(|record| record.inclusion == InclusionState::Included)
+        .map(|record| {
+            (
+                record.path.raw_relative_path_bytes.clone(),
+                record.content_digest,
+            )
+        })
+        .collect()
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // One operational oracle proves all four required acceleration configurations.
+fn wp72_operational_acceptance() {
+    let fixture = tempfile::tempdir().expect("WP72 Git parity fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    fs::write(root.join(".gitignore"), b"ignored.bin\n").expect("ignore policy");
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    fs::write(root.join("untracked.py"), b"value = 1\n").expect("untracked source");
+    fs::write(root.join("ignored.bin"), b"ignored\n").expect("ignored file");
+
+    let database = fixture.path().join("authoritative.sqlite3");
+    let mut store = OperationalStore::open(&database).expect("authoritative store");
+    let workspace = WorkspaceRegistry::new(&mut store)
+        .add(&root, WorkspaceSourceRegistration::Directory)
+        .expect("workspace registration");
+    let secure_root = open_workspace_root(&mut store, workspace.workspace_id).expect("secure root");
+    let authoritative = InventoryWalker::new(InventoryLimits::default())
+        .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
+        .expect("authoritative inventory");
+
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("gix repository open");
+    let git_inventory = adapter
+        .inventory(
+            &snapshot.selected_worktree,
+            GitStateObservations {
+                worktree_inventory_digest: authoritative.digest,
+                ..OBSERVATIONS
+            },
+            &Cancellation::default(),
+        )
+        .expect("gix inventory");
+    let mut accelerated_inventory = authoritative.clone();
+    apply_to_source_inventory(&git_inventory, &mut accelerated_inventory, &mut store)
+        .expect("apply advisory classifications");
+    assert_eq!(
+        terminal_inventory(&authoritative),
+        terminal_inventory(&accelerated_inventory),
+        "Git classification must not alter authoritative bytes or inclusion"
+    );
+
+    let observations = GitStateObservations {
+        worktree_inventory_digest: authoritative.digest,
+        ..OBSERVATIONS
+    };
+    let request = GitCandidatePlanningRequest {
+        workspace_id: workspace.workspace_id,
+        registered_identity: REGISTERED,
+        observations,
+        watcher_paths: BTreeSet::new(),
+        rescan_required: true,
+        dirty_path_bulk_threshold: 2,
+        maximum_candidate_paths: 100,
+        source_generation: 1,
+        prior_vector: None,
+        cache_fence_verified: true,
+    };
+    let mut cached = GitCandidatePlanner::new(GixGitStateAdapter, 4, 4);
+    let first = cached.plan(&root, &request, Some(&mut store), &Cancellation::default());
+    let cached_plan = cached.plan(&root, &request, Some(&mut store), &Cancellation::default());
+    assert!(!first.cache_hit);
+    assert!(cached_plan.cache_hit);
+    assert_eq!(first.candidate_paths, cached_plan.candidate_paths);
+    assert_eq!(first.strategy, cached_plan.strategy);
+
+    let mut cache_disabled = GitCandidatePlanner::without_cache(GixGitStateAdapter);
+    let cache_disabled_plan = cache_disabled.plan(&root, &request, None, &Cancellation::default());
+    assert_eq!(
+        cached_plan.candidate_paths,
+        cache_disabled_plan.candidate_paths
+    );
+    assert_eq!(cached_plan.strategy, cache_disabled_plan.strategy);
+
+    let mut gix_disabled = GitCandidatePlanner::without_cache(DisabledGitStateAdapter);
+    let disabled_plan = gix_disabled.plan(&root, &request, None, &Cancellation::default());
+    assert!(disabled_plan.requires_generic_inventory());
+    assert_eq!(disabled_plan.fallback_reason, Some("git-open-unavailable"));
+
+    let mut rebuilt_store =
+        OperationalStore::open(&fixture.path().join("rebuilt.sqlite3")).expect("rebuild store");
+    let rebuilt_workspace = WorkspaceRegistry::new(&mut rebuilt_store)
+        .add(&root, WorkspaceSourceRegistration::Directory)
+        .expect("rebuild workspace registration");
+    let rebuilt_root = open_workspace_root(&mut rebuilt_store, rebuilt_workspace.workspace_id)
+        .expect("rebuild secure root");
+    let rebuilt = InventoryWalker::new(InventoryLimits::default())
+        .walk_and_persist(
+            &rebuilt_root,
+            &mut rebuilt_store,
+            0,
+            &Cancellation::default(),
+        )
+        .expect("full zero-state inventory");
+    assert_eq!(
+        terminal_inventory(&authoritative),
+        terminal_inventory(&rebuilt)
+    );
 }

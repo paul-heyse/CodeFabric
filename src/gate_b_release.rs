@@ -15,7 +15,8 @@ use thiserror::Error;
 
 use crate::contracts::jcs::canonicalize_slice;
 use crate::gate_b_candidate::{
-    GateBCandidateError, check_candidate_bundle, read_candidate_artifact, verify_candidate_bundle,
+    GateBCandidateError, check_released_candidate_payload, read_candidate_artifact,
+    verify_candidate_bundle,
 };
 use crate::golden_corpus::{
     CORPUS_INDEX_ARTIFACT_ID, CORPUS_INDEX_PATH, CorpusError, CorpusIndex, CorpusIndexEntry,
@@ -657,18 +658,18 @@ pub fn verify_release_chain(repository_root: &Path) -> Result<(), GateBReleaseEr
     Ok(())
 }
 
-/// Re-execute the accepted candidate and compare it to the immutable released corpus.
+/// Re-execute the accepted semantic payload and compare it to the immutable released corpus.
 ///
 /// # Errors
 ///
-/// Returns an error when either the acceptance chain, candidate regeneration, or released Gate B
-/// execution differs.
+/// Returns an error when either the acceptance chain, semantic payload regeneration, or released
+/// Gate B execution differs. Review-time input digests stay frozen in the accepted candidate.
 pub fn check_released_gate_b(
     repository_root: &Path,
     scratch_root: &Path,
 ) -> Result<(), GateBReleaseError> {
     verify_release_chain(repository_root)?;
-    check_candidate_bundle(
+    check_released_candidate_payload(
         repository_root,
         &repository_root.join(LEGACY_CORPUS_DIRECTORY),
         scratch_root,

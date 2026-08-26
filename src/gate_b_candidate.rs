@@ -1406,6 +1406,37 @@ pub fn check_candidate_bundle(
     Ok(())
 }
 
+/// Re-execute the candidate's semantic payload while preserving the accepted bundle as history.
+///
+/// A released candidate records the exact design and generated-authority digests reviewed at
+/// acceptance time. Later, unrelated edits to those inputs must not rewrite that immutable
+/// evidence or require a new acceptance. This check therefore verifies the committed bundle's
+/// complete digest chain, regenerates against the current tree, and byte-compares the semantic
+/// candidate payload. Any scenario, Gate B item, source-profile, or candidate identity drift
+/// remains a failure; review-time input-digest metadata remains frozen in the accepted bundle.
+///
+/// # Errors
+///
+/// Returns an error when the accepted bundle is malformed, current execution fails, or the
+/// regenerated semantic payload differs from the accepted candidate payload.
+pub fn check_released_candidate_payload(
+    repository_root: &Path,
+    corpus_root: &Path,
+    scratch_root: &Path,
+    candidate_root: &Path,
+) -> Result<(), GateBCandidateError> {
+    verify_candidate_bundle(candidate_root)?;
+    let generated = generate_candidate_bundle(repository_root, corpus_root, scratch_root)?;
+    if read_candidate_input(&candidate_root.join(CANDIDATE_FILE))?
+        != generated.files[CANDIDATE_FILE]
+    {
+        return Err(invariant(
+            "accepted candidate semantic payload is not reproducible",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1527,7 +1558,7 @@ mod tests {
         assert_eq!(first, second);
         let committed = repository_root().join(CANDIDATE_DIRECTORY);
         if committed.is_dir() {
-            check_candidate_bundle(
+            check_released_candidate_payload(
                 &repository_root(),
                 &corpus_root(),
                 &temporary.path().join("check-scratch"),

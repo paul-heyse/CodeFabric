@@ -1147,6 +1147,8 @@ The corpus uses semantic versioning independent of the suite:
 
 A released corpus version is immutable. Updates create a new directory or versioned archive and preserve the prior version for rollback tests.
 
+The accepted review candidate and its source-input digests are immutable historical evidence. After release, conformance SHALL verify that chain without regenerating or rewriting it, and SHALL separately re-execute the current implementation to compare the semantic candidate payload (scenario observations, Gate-B items, source profile, and candidate identity) with the accepted payload. A later design-document or generated-authority digest change that leaves that semantic payload unchanged does not require a new owner acceptance; any semantic payload change requires a new versioned candidate and explicit acceptance.
+
 ### Conformance
 
 The full local conformance command SHALL run the corpus from bootstrap through every scenario, compare every required artifact, and finish with the clean-rebuild equivalence test defined in `G-79`.
@@ -1256,6 +1258,8 @@ Adding an ignored field requires a reviewed requirement and a comparator-registr
 #### 79.4 Canonical row representation
 
 Every table SHALL define a canonical comparison projection and primary sort key in the schema registry. The comparison projection removes only registered operational columns and normalizes operational foreign keys such as provider-run IDs into their semantic evidence content. Rows that become exactly equal after this projection retain their multiplicity unless the table contract first proves its governed key is unique; unequal rows are never coalesced merely because an ignored key was removed. Projected rows are ordered lexicographically by the canonical byte encoding of the comparison key; ties are ordered by the canonical encoding of the full projected row.
+
+The v1.3 implementation binding SHALL keep column exclusion single-owned by the released comparison-ignore registry rather than copying exclusion lists into every table record. The schema registry supplies each compared table's governed primary sort key and a closed operational-foreign-key normalization rule. `EVIDENCE_CONTENT_IDENTITY_V1` replaces provider-run-derived evidence and observation locators with an identity computed from the complete projected semantic evidence row; it does not remove or rewrite the governed `fact_id`, semantic evidence fields, certainty, resolution, producer, source span, or payload. This split avoids a second ignore authority while making normalization executable and table-scoped.
 
 Canonical scalar encoding SHALL follow:
 

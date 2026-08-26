@@ -608,6 +608,9 @@ Prove the complete architectural path with deliberately narrow functionality bef
 - One result is streamed and the complete response can also be read as an immutable artifact.
 - A hot update and later durable publication produce the expected canonical state.
 - All IDs, rows, response bytes, and checksums match released golden outputs.
+- The accepted candidate and its review-time source-input digests remain immutable historical
+  evidence. Current conformance replays and compares its semantic payload; unrelated later
+  design-text or generated-authority digest changes do not rewrite the acceptance chain.
 
 ### Explicitly deferred
 
@@ -697,7 +700,8 @@ Add Git fidelity and work avoidance without changing filesystem-byte authority o
 ### Major work packages
 
 1. **Git-native inventory**
-   - pathspec, excludes, attributes, directory walk, tracked/untracked/ignored/conflicted classification, inclusion-policy fingerprint, and metadata watch set.
+   - authoritative descriptor-relative CodeFabric inventory plus read-only gix pathspec, exclude, attribute, tracked/untracked/ignored/conflicted classification, inclusion-policy fingerprint binding, and metadata watch set;
+   - Git classifications and candidate reduction never become a second inclusion or current-byte authority.
 
 2. **Status and index acceleration**
    - bounded candidate-delta DTO;
@@ -735,6 +739,7 @@ Add Git fidelity and work avoidance without changing filesystem-byte authority o
 - Ordinary isolated saves do not trigger full status scans.
 - Every Git candidate set is fenced by its `GitStateVector` and current bytes.
 - Disabling or faulting gix falls back to bounded authoritative inventory with identical semantic state.
+- The convergence oracle uses a new zero-generation engine and operational store, recaptures current bytes, and compares independently pinned effective serving sessions; replayed waves and table checksums are insufficient.
 
 ### Explicitly deferred
 

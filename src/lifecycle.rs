@@ -12,6 +12,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use arrow_array::RecordBatch;
+use arrow_row::{RowConverter, SortField};
+use arrow_schema::SchemaRef;
 use notify_debouncer_full::notify::event::ModifyKind;
 use notify_debouncer_full::notify::{Event, EventKind, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
@@ -27,7 +30,7 @@ use crate::contracts::models::DeploymentProfileDocument;
 use crate::core_facts::{CoreFactEngine, CoreFactError};
 use crate::fabric::{
     ConsolidatedOverlay, FabricError, OverlayConsolidationRequest, OverlayMutation,
-    ServingQueryError, ServingQuerySession, batch_checksum,
+    ServingQueryError, ServingQuerySession,
 };
 use crate::fact_ingest::{CanonicalIngestOutput, FactScope};
 use crate::git_state::{GitCandidatePlan, GitStateVector};
@@ -42,8 +45,11 @@ use crate::registries::{
     registry_state_name,
 };
 use crate::ruff_adapter::{RuffAdapter, RuffSnapshot};
+#[cfg(test)]
+use crate::schema_registry::table_spec;
 use crate::schema_registry::{
-    MaterializationRole, OverlayMutationPolicy, serving_projection_specs, table_spec, table_specs,
+    ComparisonForeignKeyNormalization, MaterializationRole, OverlayMutationPolicy,
+    comparison_projection_spec, serving_projection_specs, table_specs,
 };
 use crate::secure_path::PlatformPath;
 use crate::source_image::{
@@ -2111,18 +2117,270 @@ fn nonnegative_u64(value: i64, label: &str) -> Result<u64, LifecycleError> {
     u64::try_from(value).map_err(|_| LifecycleError::Recovery(format!("{label} is negative")))
 }
 
-/// Canonical full/incremental state comparison, deliberately independent of timing.
+/// Canonical comparison state for one effective table.
+///
+/// `row_multiplicities` is an exact bag rather than a set. `governed_rows` independently proves
+/// that every projected governed key is unique and maps to exactly one complete projected row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonicalTableState {
+    pub canonical_schema: Vec<u8>,
+    pub row_count: u64,
+    pub row_multiplicities: BTreeMap<Vec<u8>, u64>,
+    pub governed_rows: BTreeMap<Vec<u8>, Vec<u8>>,
+}
+
+/// Canonical full/incremental effective state, deliberately independent of timing, partitioning,
+/// physical Delta layout, publication identity, and overlay generation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CanonicalState {
-    pub tables: BTreeMap<String, Vec<Vec<u8>>>,
-    pub diagnostics: Vec<Vec<u8>>,
+    pub tables: BTreeMap<String, CanonicalTableState>,
+}
+
+fn comparison_ignore_fields() -> Result<BTreeSet<String>, LifecycleError> {
+    let registry: crate::contracts::registry_models::AcceptedRegistry<
+        crate::contracts::registry_models::ComparisonIgnoreRecord,
+    > = serde_yaml_ng::from_str(include_str!(
+        "../contracts/comparison/comparison-ignore-registry.yaml"
+    ))
+    .map_err(|error| LifecycleError::RebuildExtraction(error.to_string()))?;
+    crate::contracts::registry_models::validate_comparison_ignores(&registry.records)
+        .map_err(LifecycleError::RebuildExtraction)?;
+    Ok(registry
+        .records
+        .into_iter()
+        .map(|record| record.field_name)
+        .collect())
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    reason = "one comparator extraction keeps schema projection, exact bags, and governed-key uniqueness atomic"
+)]
+#[cfg(test)]
+fn canonical_table_state(
+    table_name: &str,
+    schema: SchemaRef,
+    primary_key: &[&str],
+    batches: &[RecordBatch],
+    ignored_fields: &BTreeSet<String>,
+) -> Result<CanonicalTableState, LifecycleError> {
+    canonical_table_state_with_normalization(
+        table_name,
+        schema,
+        primary_key,
+        batches,
+        ignored_fields,
+        None,
+    )
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    reason = "one comparator extraction keeps schema projection, exact bags, and governed-key uniqueness atomic"
+)]
+fn canonical_table_state_with_normalization(
+    table_name: &str,
+    schema: SchemaRef,
+    primary_key: &[&str],
+    batches: &[RecordBatch],
+    ignored_fields: &BTreeSet<String>,
+    foreign_key_normalization: Option<ComparisonForeignKeyNormalization>,
+) -> Result<CanonicalTableState, LifecycleError> {
+    if batches
+        .iter()
+        .any(|batch| batch.schema().as_ref() != schema.as_ref())
+    {
+        return Err(LifecycleError::SchemaMismatch(format!(
+            "{table_name}: query batches do not share the planned Arrow schema"
+        )));
+    }
+    let projected_indices = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, field)| (!ignored_fields.contains(field.name())).then_some(index))
+        .collect::<Vec<_>>();
+    let projected_schema = Arc::new(
+        schema
+            .project(&projected_indices)
+            .map_err(FabricError::from)?,
+    );
+    let canonical_schema = crate::contracts::jcs::canonicalize_value(
+        &serde_json::to_value(projected_schema.as_ref())
+            .map_err(|error| LifecycleError::RebuildExtraction(error.to_string()))?,
+    )
+    .map_err(|error| LifecycleError::RebuildExtraction(error.to_string()))?;
+
+    let key_names = primary_key
+        .iter()
+        .filter(|name| !ignored_fields.contains(**name))
+        .copied()
+        .collect::<Vec<_>>();
+    if !primary_key.is_empty() && key_names.is_empty() {
+        return Err(LifecycleError::RebuildExtraction(format!(
+            "{table_name}: comparison projection removed the complete governed key"
+        )));
+    }
+    let key_indices = key_names
+        .iter()
+        .map(|name| {
+            projected_schema.index_of(name).map_err(|_| {
+                LifecycleError::SchemaMismatch(format!(
+                    "{table_name}: governed key field {name} is absent from the effective projection"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let row_converter = RowConverter::new(
+        projected_schema
+            .fields()
+            .iter()
+            .map(|field| SortField::new(field.data_type().clone()))
+            .collect(),
+    )
+    .map_err(FabricError::from)?;
+    let key_converter = (!key_indices.is_empty())
+        .then(|| {
+            RowConverter::new(
+                key_indices
+                    .iter()
+                    .map(|&index| SortField::new(projected_schema.field(index).data_type().clone()))
+                    .collect(),
+            )
+            .map_err(FabricError::from)
+        })
+        .transpose()?;
+
+    let mut row_count = 0_u64;
+    let mut row_multiplicities = BTreeMap::<Vec<u8>, u64>::new();
+    let mut governed_rows = BTreeMap::<Vec<u8>, Vec<u8>>::new();
+    for batch in batches {
+        let normalized = normalize_operational_foreign_keys(
+            foreign_key_normalization,
+            Arc::clone(&schema),
+            batch,
+            ignored_fields,
+        )?;
+        let projected = normalized
+            .project(&projected_indices)
+            .map_err(FabricError::from)?;
+        let full_rows = row_converter
+            .convert_columns(projected.columns())
+            .map_err(FabricError::from)?;
+        let key_rows = if let Some(converter) = key_converter.as_ref() {
+            let key_columns = key_indices
+                .iter()
+                .map(|&index| Arc::clone(projected.column(index)))
+                .collect::<Vec<_>>();
+            Some(
+                converter
+                    .convert_columns(&key_columns)
+                    .map_err(FabricError::from)?,
+            )
+        } else {
+            None
+        };
+        row_count = row_count
+            .checked_add(u64::try_from(batch.num_rows()).map_err(|_| {
+                LifecycleError::RebuildExtraction(format!("{table_name}: row count exceeds u64"))
+            })?)
+            .ok_or_else(|| {
+                LifecycleError::RebuildExtraction(format!("{table_name}: row count overflow"))
+            })?;
+        for (row_index, full) in full_rows.iter().enumerate() {
+            let full = full.data().to_vec();
+            *row_multiplicities.entry(full.clone()).or_default() += 1;
+            if let Some(key_rows) = key_rows.as_ref() {
+                let key = key_rows.row(row_index).data().to_vec();
+                if governed_rows.insert(key, full).is_some() {
+                    return Err(LifecycleError::RebuildExtraction(format!(
+                        "{table_name}: duplicate projected governed key"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(CanonicalTableState {
+        canonical_schema,
+        row_count,
+        row_multiplicities,
+        governed_rows,
+    })
+}
+
+fn normalize_operational_foreign_keys(
+    normalization: Option<ComparisonForeignKeyNormalization>,
+    schema: SchemaRef,
+    batch: &RecordBatch,
+    ignored_fields: &BTreeSet<String>,
+) -> Result<RecordBatch, LifecycleError> {
+    if normalization != Some(ComparisonForeignKeyNormalization::EvidenceContentIdentityV1) {
+        return Ok(batch.clone());
+    }
+    let evidence_index = schema
+        .index_of("evidence_id")
+        .map_err(|_| LifecycleError::SchemaMismatch("evidence: evidence_id is absent".into()))?;
+    let observation_index = schema
+        .index_of("observation_id")
+        .map_err(|_| LifecycleError::SchemaMismatch("evidence: observation_id is absent".into()))?;
+    let semantic_indices = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, field)| {
+            (!ignored_fields.contains(field.name())
+                && index != evidence_index
+                && index != observation_index)
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let semantic_converter = RowConverter::new(
+        semantic_indices
+            .iter()
+            .map(|&index| SortField::new(schema.field(index).data_type().clone()))
+            .collect(),
+    )
+    .map_err(FabricError::from)?;
+    let semantic_columns = semantic_indices
+        .iter()
+        .map(|&index| Arc::clone(batch.column(index)))
+        .collect::<Vec<_>>();
+    let semantic_rows = semantic_converter
+        .convert_columns(&semantic_columns)
+        .map_err(FabricError::from)?;
+    let normalized_ids = semantic_rows
+        .iter()
+        .map(|row| {
+            let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+                crate::integrity::IntegrityDomain::ContinuousState,
+            );
+            hasher.update(b"normalized-evidence-identity-v1");
+            hasher.update(&(row.data().len() as u64).to_be_bytes());
+            hasher.update(row.data());
+            let digest = hasher.finalize();
+            let mut identity = [0_u8; 16];
+            identity.copy_from_slice(&digest[..16]);
+            identity
+        })
+        .collect::<Vec<_>>();
+    let normalized_array = crate::fabric::id16_array(normalized_ids.iter().map(Some));
+    let mut columns = batch.columns().to_vec();
+    columns[evidence_index] = Arc::clone(&normalized_array);
+    columns[observation_index] = normalized_array;
+    RecordBatch::try_new(schema, columns)
+        .map_err(FabricError::from)
+        .map_err(Into::into)
 }
 
 impl CanonicalState {
     /// Extract the effective DataFusion state and diagnostics from one pinned serving session.
     ///
-    /// Rows are collapsed with Arrow's canonical row encoder, making the comparison independent
-    /// of partitioning and output row order while retaining generated schema identities.
+    /// Arrow's canonical row encoder makes the comparison independent of partitioning and output
+    /// order without deduplicating rows. Schema bytes retain field order, nullability, field
+    /// metadata, and schema metadata. Only fields named by the released ignore registry are
+    /// projected away.
     ///
     /// # Errors
     ///
@@ -2131,67 +2389,54 @@ impl CanonicalState {
     pub async fn from_serving_session(
         session: &ServingQuerySession,
     ) -> Result<Self, LifecycleError> {
+        let ignored_fields = comparison_ignore_fields()?;
         let mut tables = BTreeMap::new();
         for projection in serving_projection_specs() {
+            let plan = session.table_plan(projection.view_name).await?;
+            let schema = Arc::new(plan.schema().as_arrow().clone());
             let result = session
                 .query(&format!(
                     "SELECT * FROM cpg_serving.\"{}\"",
                     projection.view_name
                 ))
                 .await?;
-            let schema = table_spec(projection.source_table_code)
-                .ok_or_else(|| {
+            let comparison =
+                comparison_projection_spec(projection.source_table_code).ok_or_else(|| {
                     LifecycleError::RebuildExtraction(format!(
-                        "generated serving table {} is absent",
+                        "generated comparison projection {} is absent",
                         projection.source_table_code
                     ))
-                })?
-                .arrow_schema
-                .clone();
-            let batch = if result.batches.is_empty() {
-                arrow_array::RecordBatch::new_empty(schema)
-            } else {
-                arrow_select::concat::concat_batches(&schema, &result.batches)
-                    .map_err(FabricError::from)?
-            };
+                })?;
             tables.insert(
                 projection.view_name.to_owned(),
-                vec![batch_checksum(&batch)?.to_vec()],
+                canonical_table_state_with_normalization(
+                    projection.view_name,
+                    schema,
+                    comparison.primary_sort_key,
+                    &result.batches,
+                    &ignored_fields,
+                    comparison.foreign_key_normalization,
+                )?,
             );
         }
+        let diagnostic_plan = session.table_plan("cpg_base.diagnostic").await?;
+        let diagnostic_schema = Arc::new(diagnostic_plan.schema().as_arrow().clone());
         let diagnostic = session.query("SELECT * FROM cpg_base.diagnostic").await?;
-        let diagnostic_schema = table_spec(10)
-            .ok_or_else(|| LifecycleError::RebuildExtraction("diagnostic table is absent".into()))?
-            .arrow_schema
-            .clone();
-        let diagnostic_batch = if diagnostic.batches.is_empty() {
-            arrow_array::RecordBatch::new_empty(diagnostic_schema)
-        } else {
-            arrow_select::concat::concat_batches(&diagnostic_schema, &diagnostic.batches)
-                .map_err(FabricError::from)?
-        };
-        Ok(Self {
-            tables,
-            diagnostics: vec![batch_checksum(&diagnostic_batch)?.to_vec()],
-        })
-    }
-
-    fn normalized(&self) -> Self {
-        let tables = self
-            .tables
-            .iter()
-            .map(|(table, rows)| {
-                let mut rows = rows.clone();
-                rows.sort();
-                (table.clone(), rows)
-            })
-            .collect();
-        let mut diagnostics = self.diagnostics.clone();
-        diagnostics.sort();
-        Self {
-            tables,
-            diagnostics,
-        }
+        let diagnostic_projection = comparison_projection_spec(10).ok_or_else(|| {
+            LifecycleError::RebuildExtraction("diagnostic comparison projection is absent".into())
+        })?;
+        tables.insert(
+            "diagnostic".to_owned(),
+            canonical_table_state_with_normalization(
+                "diagnostic",
+                diagnostic_schema,
+                diagnostic_projection.primary_sort_key,
+                &diagnostic.batches,
+                &ignored_fields,
+                diagnostic_projection.foreign_key_normalization,
+            )?,
+        );
+        Ok(Self { tables })
     }
 
     #[must_use]
@@ -2199,21 +2444,17 @@ impl CanonicalState {
         let mut hasher = crate::integrity::IntegrityHasher::for_domain(
             crate::integrity::IntegrityDomain::ContinuousState,
         );
-        for (table, rows) in &self.tables {
+        for (table, state) in &self.tables {
             hasher.update(&(table.len() as u64).to_be_bytes());
             hasher.update(table.as_bytes());
-            let mut rows = rows.clone();
-            rows.sort();
-            for row in rows {
+            hasher.update(&(state.canonical_schema.len() as u64).to_be_bytes());
+            hasher.update(&state.canonical_schema);
+            hasher.update(&state.row_count.to_be_bytes());
+            for (row, multiplicity) in &state.row_multiplicities {
                 hasher.update(&(row.len() as u64).to_be_bytes());
-                hasher.update(&row);
+                hasher.update(row);
+                hasher.update(&multiplicity.to_be_bytes());
             }
-        }
-        let mut diagnostics = self.diagnostics.clone();
-        diagnostics.sort();
-        for diagnostic in diagnostics {
-            hasher.update(&(diagnostic.len() as u64).to_be_bytes());
-            hasher.update(&diagnostic);
         }
         hasher.finalize()
     }
@@ -2222,14 +2463,75 @@ impl CanonicalState {
     ///
     /// # Errors
     ///
-    /// Returns [`LifecycleError::RebuildMismatch`] when either canonical state differs.
+    /// Returns a registered schema or row mismatch when either canonical state differs.
     pub fn prove_equivalent(&self, rebuilt: &Self) -> Result<(), LifecycleError> {
-        if self.digest() == rebuilt.digest() && self.normalized() == rebuilt.normalized() {
-            Ok(())
-        } else {
-            Err(LifecycleError::RebuildMismatch)
+        if self.tables.keys().ne(rebuilt.tables.keys()) {
+            return Err(LifecycleError::RowMismatch(
+                "effective table census differs".into(),
+            ));
         }
+        for (name, incremental) in &self.tables {
+            let clean = &rebuilt.tables[name];
+            if incremental.canonical_schema != clean.canonical_schema {
+                return Err(LifecycleError::SchemaMismatch(name.clone()));
+            }
+            if incremental.row_count != clean.row_count
+                || incremental.row_multiplicities != clean.row_multiplicities
+                || incremental.governed_rows != clean.governed_rows
+            {
+                return Err(LifecycleError::RowMismatch(name.clone()));
+            }
+        }
+        Ok(())
     }
+}
+
+/// Compare two independently pinned serving sessions after proving that they describe the same
+/// semantic comparison domain. Publication, snapshot, generation, physical-layout, and Git
+/// acceleration locators are intentionally excluded; the released field registry governs row
+/// projection.
+///
+/// # Errors
+///
+/// Rejects non-current or different semantic domains before extracting either effective state,
+/// then returns exact schema, governed-key, row-count, or bag-multiplicity differences.
+pub async fn prove_serving_rebuild_equivalence(
+    incremental: &ServingQuerySession,
+    rebuilt: &ServingQuerySession,
+) -> Result<(), LifecycleError> {
+    let left = incremental.snapshot_manifest();
+    let right = rebuilt.snapshot_manifest();
+    if left.body.source.source_trust_state != "CURRENT"
+        || right.body.source.source_trust_state != "CURRENT"
+    {
+        return Err(LifecycleError::ComparisonDomainMismatch(
+            "both snapshots must carry CURRENT source trust".into(),
+        ));
+    }
+    let same_domain = left.body.manifest_version == right.body.manifest_version
+        && left.body.workspace_id == right.body.workspace_id
+        && left.body.repository_id == right.body.repository_id
+        && left.body.worktree_id == right.body.worktree_id
+        && left.body.registration_revision == right.body.registration_revision
+        && left.body.source.inventory_digest == right.body.source.inventory_digest
+        && left.body.source.authorization_fingerprint
+            == right.body.source.authorization_fingerprint
+        && left.body.source.inclusion_policy_fingerprint
+            == right.body.source.inclusion_policy_fingerprint
+        && left.body.source.path_profile_version == right.body.source.path_profile_version
+        && left.body.contexts == right.body.contexts
+        && left.body.indexes == right.body.indexes
+        && left.body.bundles == right.body.bundles
+        && left.body.limits_profile_digest == right.body.limits_profile_digest
+        && left.body.source_blob_digests == right.body.source_blob_digests;
+    if !same_domain {
+        return Err(LifecycleError::ComparisonDomainMismatch(
+            "snapshot semantic inputs differ".into(),
+        ));
+    }
+    let incremental = CanonicalState::from_serving_session(incremental).await?;
+    let rebuilt = CanonicalState::from_serving_session(rebuilt).await?;
+    incremental.prove_equivalent(&rebuilt)
 }
 
 #[derive(Debug, Error)]
@@ -2256,8 +2558,12 @@ pub enum LifecycleError {
     AuthoritativeInventoryRequired,
     #[error("STATE_TRANSITION_VIOLATION:LIFECYCLE_TRANSITION_INVALID:{0}")]
     Transition(String),
-    #[error("LIFECYCLE_REBUILD_MISMATCH")]
-    RebuildMismatch,
+    #[error("COMPARISON_DOMAIN_MISMATCH:{0}")]
+    ComparisonDomainMismatch(String),
+    #[error("SCHEMA_MISMATCH:{0}")]
+    SchemaMismatch(String),
+    #[error("ROW_MISMATCH:{0}")]
+    RowMismatch(String),
     #[error("COMPARATOR_ERROR:LIFECYCLE_REBUILD_EXTRACTION:{0}")]
     RebuildExtraction(String),
     #[error("INTERNAL_INVARIANT_VIOLATION:LIFECYCLE_RECOVERY_INVALID:{0}")]
@@ -3152,13 +3458,40 @@ mod tests {
 
     #[test]
     fn wp48_operational_acceptance() {
+        let schema = Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+            "id",
+            arrow_schema::DataType::Utf8,
+            false,
+        )]));
+        let left_batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![Arc::new(arrow_array::StringArray::from(vec!["b", "a"]))],
+        )
+        .unwrap();
+        let right_batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![Arc::new(arrow_array::StringArray::from(vec!["a", "b"]))],
+        )
+        .unwrap();
+        let ignored = BTreeSet::new();
         let left = CanonicalState {
-            tables: BTreeMap::from([("entity".into(), vec![b"b".to_vec(), b"a".to_vec()])]),
-            diagnostics: vec![b"d".to_vec()],
+            tables: BTreeMap::from([(
+                "entity".into(),
+                canonical_table_state(
+                    "entity",
+                    Arc::clone(&schema),
+                    &["id"],
+                    &[left_batch],
+                    &ignored,
+                )
+                .unwrap(),
+            )]),
         };
         let right = CanonicalState {
-            tables: BTreeMap::from([("entity".into(), vec![b"a".to_vec(), b"b".to_vec()])]),
-            diagnostics: vec![b"d".to_vec()],
+            tables: BTreeMap::from([(
+                "entity".into(),
+                canonical_table_state("entity", schema, &["id"], &[right_batch], &ignored).unwrap(),
+            )]),
         };
         assert_eq!(left.digest(), right.digest());
         assert!(left.prove_equivalent(&right).is_ok());
@@ -3168,14 +3501,272 @@ mod tests {
 
     #[test]
     fn wp48_negative_zero_state() {
+        let schema = Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+            "id",
+            arrow_schema::DataType::Utf8,
+            false,
+        )]));
+        let batch = |value: &'static str| {
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![Arc::new(arrow_array::StringArray::from(vec![value]))],
+            )
+            .unwrap()
+        };
+        let ignored = BTreeSet::new();
         let incremental = CanonicalState {
-            tables: BTreeMap::from([("entity".into(), vec![b"a".to_vec()])]),
-            diagnostics: Vec::new(),
+            tables: BTreeMap::from([(
+                "entity".into(),
+                canonical_table_state(
+                    "entity",
+                    Arc::clone(&schema),
+                    &["id"],
+                    &[batch("a")],
+                    &ignored,
+                )
+                .unwrap(),
+            )]),
         };
         let rebuilt = CanonicalState {
-            tables: BTreeMap::from([("entity".into(), vec![b"b".to_vec()])]),
-            diagnostics: Vec::new(),
+            tables: BTreeMap::from([(
+                "entity".into(),
+                canonical_table_state(
+                    "entity",
+                    Arc::clone(&schema),
+                    &["id"],
+                    &[batch("b")],
+                    &ignored,
+                )
+                .unwrap(),
+            )]),
         };
         assert!(incremental.prove_equivalent(&rebuilt).is_err());
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // One negative oracle holds the complete AC-G-79 counterexample matrix.
+    fn wp72_negative_zero_state() {
+        use arrow_array::{Float64Array, StringArray};
+        use arrow_schema::{DataType, Field, Schema};
+
+        let schema_with_metadata = |metadata_value: &str| {
+            Arc::new(Schema::new_with_metadata(
+                vec![
+                    Field::new("id", DataType::Utf8, false),
+                    Field::new("value", DataType::Float64, true),
+                    Field::new("operation_id", DataType::Utf8, false),
+                ],
+                std::collections::HashMap::from([("contract".into(), metadata_value.into())]),
+            ))
+        };
+        let batch =
+            |schema: SchemaRef, ids: Vec<&'static str>, values: Vec<Option<f64>>, op: &str| {
+                let row_count = ids.len();
+                RecordBatch::try_new(
+                    schema,
+                    vec![
+                        Arc::new(StringArray::from(ids)),
+                        Arc::new(Float64Array::from(values)),
+                        Arc::new(StringArray::from(vec![op; row_count])),
+                    ],
+                )
+                .unwrap()
+            };
+        let ignored = BTreeSet::from(["operation_id".to_owned()]);
+        let schema = schema_with_metadata("v1");
+
+        // Equal distinct sets and counts are insufficient: multiplicity is part of state.
+        let left_bag = batch(
+            Arc::clone(&schema),
+            vec!["a", "a", "b"],
+            vec![Some(1.0), Some(1.0), Some(2.0)],
+            "left",
+        );
+        let right_bag = batch(
+            Arc::clone(&schema),
+            vec!["a", "b", "b"],
+            vec![Some(1.0), Some(2.0), Some(2.0)],
+            "right",
+        );
+        let left = canonical_table_state(
+            "ungoverned",
+            Arc::clone(&schema),
+            &[],
+            &[left_bag],
+            &ignored,
+        )
+        .unwrap();
+        let right = canonical_table_state(
+            "ungoverned",
+            Arc::clone(&schema),
+            &[],
+            &[right_bag],
+            &ignored,
+        )
+        .unwrap();
+        assert_ne!(left.row_multiplicities, right.row_multiplicities);
+
+        // Null, NaN, missing/tombstoned rows, extra overlay rows, and Git-path divergence remain
+        // ordinary logical row differences.
+        let state = |ids, values, op| CanonicalState {
+            tables: BTreeMap::from([(
+                "facts".into(),
+                canonical_table_state(
+                    "facts",
+                    Arc::clone(&schema),
+                    &["id"],
+                    &[batch(Arc::clone(&schema), ids, values, op)],
+                    &ignored,
+                )
+                .unwrap(),
+            )]),
+        };
+        let baseline = state(
+            vec!["a", "b", "c"],
+            vec![Some(1.0), None, Some(f64::NAN)],
+            "one",
+        );
+        assert!(
+            baseline
+                .prove_equivalent(&state(
+                    vec!["a", "b", "c"],
+                    vec![Some(1.0), Some(0.0), Some(f64::NAN)],
+                    "two",
+                ))
+                .is_err()
+        );
+        assert!(
+            baseline
+                .prove_equivalent(&state(
+                    vec!["a", "b", "c"],
+                    vec![Some(1.0), None, Some(3.0)],
+                    "two",
+                ))
+                .is_err()
+        );
+        assert!(
+            baseline
+                .prove_equivalent(&state(
+                    vec!["a", "b", "git-diverged"],
+                    vec![Some(1.0), None, Some(f64::NAN)],
+                    "two",
+                ))
+                .is_err()
+        );
+        assert!(
+            baseline
+                .prove_equivalent(&state(
+                    vec!["a", "b"],
+                    vec![Some(1.0), None],
+                    "tombstone-corruption",
+                ))
+                .is_err()
+        );
+        assert!(
+            baseline
+                .prove_equivalent(&state(
+                    vec!["a", "b", "c", "overlay-extra"],
+                    vec![Some(1.0), None, Some(f64::NAN), Some(4.0)],
+                    "overlay-extra",
+                ))
+                .is_err()
+        );
+        assert!(
+            baseline
+                .prove_equivalent(&state(
+                    vec!["a", "b", "c"],
+                    vec![Some(1.0), None, Some(f64::NAN)],
+                    "different-operation",
+                ))
+                .is_ok()
+        );
+
+        let schema_v2 = schema_with_metadata("v2");
+        let schema_state = CanonicalState {
+            tables: BTreeMap::from([(
+                "facts".into(),
+                canonical_table_state(
+                    "facts",
+                    Arc::clone(&schema_v2),
+                    &["id"],
+                    &[batch(
+                        schema_v2,
+                        vec!["a", "b", "c"],
+                        vec![Some(1.0), None, Some(f64::NAN)],
+                        "one",
+                    )],
+                    &ignored,
+                )
+                .unwrap(),
+            )]),
+        };
+        assert!(matches!(
+            baseline.prove_equivalent(&schema_state),
+            Err(LifecycleError::SchemaMismatch(_))
+        ));
+
+        let duplicate = batch(
+            Arc::clone(&schema),
+            vec!["a", "a", "b"],
+            vec![Some(1.0), Some(2.0), Some(3.0)],
+            "dup",
+        );
+        assert!(canonical_table_state("facts", schema, &["id"], &[duplicate], &ignored).is_err());
+        assert_eq!(comparison_ignore_fields().unwrap(), {
+            let parsed: crate::contracts::registry_models::AcceptedRegistry<
+                crate::contracts::registry_models::ComparisonIgnoreRecord,
+            > = serde_yaml_ng::from_str(include_str!(
+                "../contracts/comparison/comparison-ignore-registry.yaml"
+            ))
+            .unwrap();
+            parsed
+                .records
+                .into_iter()
+                .map(|record| record.field_name)
+                .collect()
+        });
+    }
+
+    #[test]
+    fn wp72_structural_acceptance() {
+        let registry: crate::contracts::registry_models::AcceptedRegistry<
+            crate::contracts::registry_models::ComparisonIgnoreRecord,
+        > = serde_yaml_ng::from_str(include_str!(
+            "../contracts/comparison/comparison-ignore-registry.yaml"
+        ))
+        .unwrap();
+        crate::contracts::registry_models::validate_comparison_ignores(&registry.records).unwrap();
+        assert_eq!(registry.records.len(), 32);
+        assert!(registry.records.iter().all(|record| !record.semantic));
+        let ignored = comparison_ignore_fields().unwrap();
+        for projection in serving_projection_specs() {
+            let spec = table_spec(projection.source_table_code).unwrap();
+            let comparison = comparison_projection_spec(projection.source_table_code).unwrap();
+            assert_eq!(comparison.primary_sort_key, spec.primary_key);
+            assert!(
+                comparison
+                    .primary_sort_key
+                    .iter()
+                    .any(|field| !ignored.contains(*field)),
+                "{} loses its complete governed key after comparison projection",
+                projection.view_name
+            );
+            let canonical_schema = crate::contracts::jcs::canonicalize_value(
+                &serde_json::to_value(spec.arrow_schema.as_ref()).unwrap(),
+            )
+            .unwrap();
+            assert!(!canonical_schema.is_empty());
+        }
+        let diagnostic = comparison_projection_spec(10).unwrap();
+        assert!(!diagnostic.primary_sort_key.is_empty());
+        assert_eq!(
+            comparison_projection_spec(130)
+                .unwrap()
+                .foreign_key_normalization,
+            Some(ComparisonForeignKeyNormalization::EvidenceContentIdentityV1)
+        );
+        assert!(ignored.contains("provider_run_id"));
+        assert!(ignored.contains("source_generation"));
+        assert!(!ignored.contains("fact_id"));
     }
 }

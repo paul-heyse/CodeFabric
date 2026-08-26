@@ -1976,10 +1976,10 @@ current file owner
 
 For a healthy Git worktree:
 
-- use gix pathspec, exclude, attribute, and directory-walk semantics;
-- include tracked source files;
-- include untracked non-ignored source files;
-- exclude ignored untracked files unless CodeFabric policy explicitly overrides;
+- use gix pathspec, exclude, attribute, and directory-walk semantics to classify candidate paths;
+- retain descriptor-relative CodeFabric inventory as the authoritative inclusion and byte-capture boundary;
+- classify tracked, untracked non-ignored, and untracked ignored files without allowing optional gix availability to change terminal inclusion;
+- apply only the application-owned CodeFabric inclusion policy to decide whether a classified path is included;
 - never traverse `.git` as source;
 - classify submodules and nested repositories as separate topology domains.
 
@@ -2404,8 +2404,8 @@ Recommended default inclusion:
 | Tracked source file | Include |
 | Tracked file matching a later ignore pattern | Include; tracked state wins |
 | Untracked source file not ignored | Include |
-| Untracked ignored file | Exclude |
-| Explicitly CodeFabric-included ignored source | Optional policy override |
+| Untracked ignored file | Classify as Git-ignored; include or exclude only through the same CodeFabric policy used by degraded fallback |
+| Explicitly CodeFabric-included ignored source | Include |
 | `.git` internal file | Exclude from source CPG; watch selected metadata separately |
 | Build/cache output | Exclude through Git and CodeFabric policy |
 | Submodule contents | Separate workspace policy |
@@ -2420,7 +2420,7 @@ CodeFabric's explicit security and root-boundary policy always has higher author
 
 ## 47. Git-aware directory walking
 
-Cold-start and authoritative-rescan inventory SHOULD use gix worktree dirwalk/exclude/attribute stacks when the workspace is a Git worktree.
+Cold-start and authoritative-rescan inventory SHALL use the bounded descriptor-relative CodeFabric inventory walker. When gix is healthy, a subsequent read-only pass MAY attach Git-native path, tracked/untracked/ignored, attribute, blob-OID, and topology classifications to those authoritative records and MAY reduce later candidate work. A path SHALL NOT disappear from terminal inventory solely because optional gix acceleration is enabled.
 
 Benefits:
 
@@ -2428,15 +2428,15 @@ Benefits:
 - repository excludes;
 - worktree-specific excludes;
 - Git-compatible path semantics;
-- early pruning of ignored build/cache directories;
+- early pruning of build/cache directories only when the same application-owned CodeFabric policy excludes them;
 - consistent untracked-file classification;
 - reduced hashing and parsing.
 
-Fallback:
+Acceleration fallback:
 
 ```text
 not a Git worktree
-  → existing generic CodeFabric inventory walker
+  → the same bounded CodeFabric inventory walker without Git-native classification
 ```
 
 ### 47.1 Boundaries
@@ -4818,6 +4818,8 @@ Equality includes:
 - derived facts;
 - summaries;
 - source spans.
+
+The clean side of this oracle SHALL start with a new zero-generation engine and new operational store containing no prior update wave, hot overlay, candidate cache, or serving snapshot. It SHALL run the authoritative inventory walker, recapture current bytes, reconcile through ordinary publication, construct an independently pinned serving session, and compare that effective session with the incremental session through `AC-G-79`. Replaying an accepted wave or comparing aggregate batch checksums is not a clean rebuild.
 
 Additionally:
 

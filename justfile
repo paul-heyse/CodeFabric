@@ -215,17 +215,17 @@ gate-b-owner-acceptance-check:
     cargo run --locked --bin codefabric-gate-b-candidate -- verify-release .
     @just packet-oracle-check WP76
 
-[doc("Regenerate and verify the unreleased Gate B review candidate")]
+[doc("Verify the immutable Gate B candidate chain and reproduce its current semantic payload")]
 [group('test')]
 gate-b-candidate-check: wave5-integration-check wave6-integration-check
-    cargo run --locked --bin codefabric-gate-b-candidate -- check . tests/golden/codefabric-golden-v1 target/gate-b-candidate-check-scratch tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1
+    cargo run --locked --bin codefabric-gate-b-candidate -- check-release . target/gate-b-candidate-check-scratch
     @if rg -n 'is_subset' src/golden_corpus.rs src/gate_b_candidate.rs; then echo 'subset-based Gate B authority comparison remains' >&2; exit 1; fi
     @just packet-oracle-check WP71
 
 [doc("Compare continuous effective state with the clean-rebuild oracle")]
 [group('test')]
 rebuild-equivalence-check:
-    cargo nextest run --locked -E 'test(/wp48/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/wp72_(behavioral_acceptance|structural_acceptance|negative_zero_state)/)' --no-tests=fail
 
 [doc("Run the complete Wave-6 continuous-update acceptance surface")]
 [group('test')]
@@ -235,11 +235,17 @@ wave6-integration-check:
 [doc("Compare Git-accelerated candidates and state with authoritative fallback")]
 [group('test')]
 git-parity-check:
-    cargo nextest run --locked --test integration -E 'test(/wp(49|50|51|52|53)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/(wp(49|50|51|52|53)|wp72_operational_acceptance)/)' --no-tests=fail
+
+[doc("Run the complete WP72 true-rebuild, comparator, Git parity, and process-closure oracle set")]
+[group('test')]
+wp72-acceptance-check:
+    @just packet-oracle-check WP72
+    cargo nextest run --locked -E 'test(/wp72_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail
 
 [doc("Run the complete Wave-7 Git-aware lifecycle acceptance surface")]
 [group('test')]
-wave7-integration-check: git-parity-check rebuild-equivalence-check
+wave7-integration-check: git-parity-check rebuild-equivalence-check wp72-acceptance-check source-capture-race-check
 
 [doc("Run every released Wave-2 through Wave-7 integration gate")]
 [group('test')]
@@ -517,6 +523,7 @@ oracle-substance-check:
     @just packet-oracle-check WP68
     @just packet-oracle-check WP69
     @just packet-oracle-check WP70
+    @just packet-oracle-check WP72
 
 [doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
 [group('gate')]
