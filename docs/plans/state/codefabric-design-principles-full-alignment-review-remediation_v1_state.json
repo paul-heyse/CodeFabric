@@ -4,17 +4,17 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "412af14566393c2379ba4e174387361cea5370e8",
   "status": "executing",
-  "current_packet": "WP01",
+  "current_packet": "WP02",
   "packets": {
     "WP01": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "c5aa167",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -65,8 +65,8 @@
   },
   "milestones": {
     "M01": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "c5aa167",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
