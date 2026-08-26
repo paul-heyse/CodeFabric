@@ -3,7 +3,7 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -212,12 +212,43 @@ fn source_path(arguments: &[String]) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn normalized_invocation_digest(real_rustc: &OsStr, arguments: &[OsString]) -> String {
-    let fields = std::iter::once(real_rustc.as_bytes().to_vec()).chain(
-        arguments
-            .iter()
-            .map(|argument| argument.as_bytes().to_vec()),
+fn normalized_invocation_digest(
+    real_rustc: &OsStr,
+    arguments: &[OsString],
+    source_bytes: &[u8],
+) -> String {
+    let mut normalized = Vec::with_capacity(arguments.len() + 1);
+    normalized.push(
+        Path::new(real_rustc)
+            .file_name()
+            .unwrap_or(real_rustc)
+            .as_bytes()
+            .to_vec(),
     );
+    let mut skip_next = false;
+    for argument in arguments {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        let bytes = argument.as_bytes();
+        if bytes == b"--out-dir" || bytes == b"-o" {
+            skip_next = true;
+            continue;
+        }
+        if bytes.starts_with(b"--out-dir=") {
+            continue;
+        }
+        if Path::new(argument)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
+        {
+            normalized.push(format!("source-content:{}", b3(source_bytes)).into_bytes());
+            continue;
+        }
+        normalized.push(bytes.to_vec());
+    }
+    let fields = normalized;
     digest_frames(b"codefabric.rustc.invocation.v1\0", fields)
 }
 
@@ -369,6 +400,25 @@ fn receive_command(
     }
 }
 
+fn receive_terminal_close(
+    commands: &Receiver<MonitorMessage>,
+    deadline_unix_ms: i64,
+) -> Result<(), String> {
+    match commands.recv_timeout(deadline_timeout(deadline_unix_ms)) {
+        Ok(MonitorMessage::Closed) => Ok(()),
+        Ok(MonitorMessage::Transport(error)) => Err(error),
+        Ok(MonitorMessage::Command(_)) => {
+            Err("daemon sent a command after compiler terminal event".to_owned())
+        }
+        Err(RecvTimeoutError::Timeout) => {
+            Err("daemon did not close the accepted compiler stream before deadline".to_owned())
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            Err("compiler command monitor disconnected before terminal close".to_owned())
+        }
+    }
+}
+
 fn send_event(
     sender: &mpsc::Sender<ExtractionEvent>,
     event: Event,
@@ -392,8 +442,7 @@ fn run_protocol(
 ) -> Result<i32, String> {
     let identity: ToolchainIdentity = serde_json::from_slice(identity_bytes)
         .map_err(|error| format!("toolchain identity is invalid: {error}"))?;
-    let invocation_digest = normalized_invocation_digest(real_rustc, arguments);
-    let arguments = arguments
+    let argument_strings = arguments
         .iter()
         .map(|argument| {
             argument
@@ -402,14 +451,15 @@ fn run_protocol(
                 .ok_or_else(|| "rustc analysis arguments must be UTF-8".to_owned())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let source = source_path(&arguments)
+    let source = source_path(&argument_strings)
         .ok_or_else(|| "analysis invocation has no Rust source input".to_owned())?;
     let source_bytes = std::fs::read(&source)
         .map_err(|error| format!("failed to read compiler source input: {error}"))?;
+    let invocation_digest = normalized_invocation_digest(real_rustc, arguments, &source_bytes);
     let rust_mir_capability_code = rust_mir_capability_code()?;
     let rust_mir_observation = rust_mir_observation_contract()?;
     let rust_mir_observation_family_code = u32::from(rust_mir_observation.observation_family_code);
-    let target = target_identity(&arguments, &invocation_digest);
+    let target = target_identity(&argument_strings, &invocation_digest);
     let compilation_unit_id = format!(
         "unit:{}",
         short_identity(
@@ -548,9 +598,9 @@ fn run_protocol(
         _ => return Err("daemon did not accept the compilation begin".to_owned()),
     }
 
-    let mut rustc_arguments = Vec::with_capacity(arguments.len() + 1);
+    let mut rustc_arguments = Vec::with_capacity(argument_strings.len() + 1);
     rustc_arguments.push(real_rustc.to_string_lossy().into_owned());
-    rustc_arguments.extend(arguments);
+    rustc_arguments.extend(argument_strings);
     let extracted = crate::rustc_link::extract_owned(&rustc_arguments);
     let compiler_exit_status = i32::from(extracted.is_err());
     let items = extracted.unwrap_or_default();
@@ -688,6 +738,7 @@ fn run_protocol(
     end.overall_stream_digest = overall_stream_digest(&digest_events);
     send_event(&event_sender, Event::CompilationEnd(end), &mut events)?;
     drop(event_sender);
+    receive_terminal_close(&monitor_receiver, deadline)?;
     Ok(if was_cancelled {
         130
     } else {
@@ -704,6 +755,13 @@ pub(crate) fn run(
     let Some(environment) = WrapperEnvironment::resolve()? else {
         return passthrough(real_rustc, arguments).map_err(WrapperError::from);
     };
+    if !arguments.iter().any(|argument| {
+        Path::new(argument)
+            .extension()
+            .is_some_and(|extension| extension == "rs")
+    }) {
+        return passthrough(real_rustc, arguments).map_err(WrapperError::from);
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -732,6 +790,25 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn normalized_invocation_excludes_operational_output_paths() {
+        let first = vec![
+            OsString::from("source.rs"),
+            OsString::from("--crate-name=fixture"),
+            OsString::from("--out-dir=/tmp/first"),
+        ];
+        let second = vec![
+            OsString::from("source.rs"),
+            OsString::from("--crate-name=fixture"),
+            OsString::from("--out-dir"),
+            OsString::from("/tmp/second"),
+        ];
+        assert_eq!(
+            normalized_invocation_digest(OsStr::new("/first/toolchain/rustc"), &first, b"source"),
+            normalized_invocation_digest(OsStr::new("/second/toolchain/rustc"), &second, b"source")
+        );
+    }
 
     type MockCommandStream =
         Pin<Box<dyn Stream<Item = Result<ExtractorCommand, Status>> + Send + 'static>>;

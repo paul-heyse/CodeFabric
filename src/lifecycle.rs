@@ -3545,7 +3545,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::too_many_lines)] // One negative oracle holds the complete AC-G-79 counterexample matrix.
-    fn wp72_negative_zero_state() {
+    fn clean_rebuild_equivalence_adversarial() {
         use arrow_array::{Float64Array, StringArray};
         use arrow_schema::{DataType, Field, Schema};
 

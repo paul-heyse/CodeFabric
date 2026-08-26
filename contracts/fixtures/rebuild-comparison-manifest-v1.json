@@ -1,0 +1,31 @@
+{
+  "artifact_id": "codefabric.fixtures.rebuild-comparison-manifest-v1",
+  "comparison_contract": "AC-G-79",
+  "comparison_algorithm": "duplicate-sensitive-canonical-arrow-bag-v1",
+  "domain_fields": [
+    "manifest_version",
+    "workspace_id",
+    "repository_id",
+    "worktree_id",
+    "registration_revision",
+    "source.inventory_digest",
+    "source.authorization_fingerprint",
+    "source.inclusion_policy_fingerprint",
+    "source.path_profile_version",
+    "contexts",
+    "indexes",
+    "bundles",
+    "limits_profile_digest",
+    "source_blob_digests"
+  ],
+  "independence_requirements": [
+    "distinct-operational-store-root",
+    "distinct-source-image-root",
+    "distinct-overlay-and-candidate-state",
+    "distinct-publication-root",
+    "distinct-serving-snapshot-runtime",
+    "shared-immutable-frozen-source-inputs-only"
+  ],
+  "excluded_operational_fields_authority": "contracts/comparison/comparison-ignore-registry.yaml",
+  "forbidden_equality_oracles": ["checksum-only", "distinct-set", "EXCEPT", "EXCEPT ALL"]
+}

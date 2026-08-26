@@ -19,6 +19,7 @@
 **Primary durable data plane:** Arrow, DataFusion, Delta Lake / delta-rs
 **Git state baseline:** `gix = 0.86.0` minimum; read-only application policy; no repository mutation, checkout, network, credentials, hooks, or external filters in the lifecycle daemon
 **Audit integration (2026-08-20):** Plan-audit F-008; fixed safe descriptor API and strict local trust-profile mechanics.
+**Implementation clarification (2026-08-26):** Review-remediation WP05; required independent rebuilds to execute the same semantic-provider success/withdrawal policy and compare explicit capability/diagnostic state through serving projections.
 **Companion specifications:**
 
 - `code_property_graph_present_state_fact_ontology_specification_v1.3.md`
@@ -4820,6 +4821,15 @@ Equality includes:
 - source spans.
 
 The clean side of this oracle SHALL start with a new zero-generation engine and new operational store containing no prior update wave, hot overlay, candidate cache, or serving snapshot. It SHALL run the authoritative inventory walker, recapture current bytes, reconcile through ordinary publication, construct an independently pinned serving session, and compare that effective session with the incremental session through `AC-G-79`. Replaying an accepted wave or comparing aggregate batch checksums is not a clean rebuild.
+
+Both sides SHALL execute the same governed provider-eligibility and capability policy. A
+semantic-success profile runs its real admitted Pyrefly/rustc providers independently and
+reconciles their application-owned Arrow streams. A provider-withdrawal or provider-diagnostic
+profile emits the same explicit non-current capability/completeness, reason, unknown remainder,
+and diagnostic/evidence rows on both sides; it SHALL NOT globally disable semantic capability
+requirements or treat absent provider rows as equality. The effective comparison reads canonical
+serving projections and the required diagnostic table through independently pinned DataFusion
+sessions, applying only the released `AC-G-79` operational normalization.
 
 Additionally:
 

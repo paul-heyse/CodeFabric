@@ -211,7 +211,11 @@ def validate_dependencies(root: Path = ROOT) -> tuple[int, int]:
     resources = {
         packet: _known_touch_resources(block) for packet, block in blocks.items()
     }
-    dispositions = _load_overlap_dispositions(root)
+    dispositions = {
+        key: value
+        for key, value in _load_overlap_dispositions(root).items()
+        if key[1] <= blocks.keys()
+    }
     required: set[tuple[str, frozenset[str]]] = set()
     packets = sorted(blocks)
     ancestors = {packet: _ancestors(dependencies, packet) for packet in packets}
@@ -246,7 +250,7 @@ def _oracle_contracts(plan_path: Path) -> dict[str, list[tuple[str, str]]]:
     seen_criteria: set[str] = set()
     for packet, block in artifact_contracts._packet_blocks(plan_path).items():
         if not re.search(
-            r"\*\*Target invariants\.\*\*.+?Design\s+references:",
+            r"\*\*Target invariants\.\*\*.+?\*\*Design(?: and library)? references\.\*\*",
             block,
             re.DOTALL,
         ):
@@ -256,6 +260,21 @@ def _oracle_contracts(plan_path: Path) -> dict[str, list[tuple[str, str]]]:
             r"Governed criterion:\s*`([^`]+)`",
             block,
         )
+        if not pairs:
+            catalog = re.search(
+                r"Oracle catalog:\s*(.*?)(?=\n\n- \*\*Behavioral)",
+                block,
+                re.DOTALL,
+            )
+            oracles = (
+                re.findall(r"Executable oracle:\s*`([^`]+)`", catalog.group(1))
+                if catalog is not None
+                else []
+            )
+            pairs = [
+                (oracle, f"PC-{packet}-{ORACLE_KINDS[index]}")
+                for index, oracle in enumerate(oracles)
+            ]
         if len(pairs) != 4:
             raise PlanAssuranceError(
                 f"{packet} must map exactly four oracle/criterion pairs"

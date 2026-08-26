@@ -847,9 +847,18 @@ fn select_mutations(
             }
             Some(prior) if prior.source_generation == mutation.source_generation => {
                 if prior.payload_digest != mutation.payload_digest {
+                    let action_name = |action: &MutationAction| match action {
+                        MutationAction::OwnerReplacement { .. } => "owner-replacement",
+                        MutationAction::OwnerTombstone { .. } => "owner-tombstone",
+                        MutationAction::PrimaryKeyUpsert { .. } => "primary-key-upsert",
+                        MutationAction::PrimaryKeyTombstone { .. } => "primary-key-tombstone",
+                        MutationAction::FullTableReplacement { .. } => "full-table-replacement",
+                    };
                     return Err(FabricError::OverlayGenerationConflict(format!(
-                        "equal generation has conflicting payload for table {}",
-                        mutation.table_code
+                        "equal generation has conflicting payload for table {} scope {key:?}: {} versus {}",
+                        mutation.table_code,
+                        action_name(&prior.action),
+                        action_name(&mutation.action),
                     )));
                 }
             }

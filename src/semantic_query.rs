@@ -4455,6 +4455,11 @@ async fn execute_request_in_context_inner(
                 )
             }
         };
+        let output_batches = canonical_dependency_batches(
+            &output_schema,
+            output_batches,
+            &block.typed.source_pointer,
+        )?;
         for entity_id in &values.entity_ids {
             entities.insert(
                 entity_id.clone(),
@@ -4651,6 +4656,41 @@ fn limited_batches(batches: &[RecordBatch], maximum_rows: usize) -> Vec<RecordBa
         remaining -= rows;
     }
     selected
+}
+
+fn canonical_dependency_batches(
+    schema: &SchemaRef,
+    batches: Vec<RecordBatch>,
+    source_pointer: &str,
+) -> Result<Vec<RecordBatch>, SemanticQueryError> {
+    batches
+        .into_iter()
+        .map(|batch| {
+            if batch.num_columns() != schema.fields().len()
+                || batch.schema().fields().iter().zip(schema.fields()).any(
+                    |(observed, expected)| {
+                        observed.name() != expected.name()
+                            || observed.data_type() != expected.data_type()
+                    },
+                )
+            {
+                return Err(phase_error(
+                    "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                    "response_verification",
+                    source_pointer,
+                    "physical output columns differ from the typed Arrow contract",
+                ));
+            }
+            RecordBatch::try_new(Arc::clone(schema), batch.columns().to_vec()).map_err(|error| {
+                phase_error(
+                    "QUERY_OUTPUT_SCHEMA_MISMATCH",
+                    "response_verification",
+                    source_pointer,
+                    error.to_string(),
+                )
+            })
+        })
+        .collect()
 }
 
 fn fixed_id_at(

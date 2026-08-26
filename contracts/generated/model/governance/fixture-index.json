@@ -81,6 +81,11 @@
       "source_digest": "b3:00032baa22167b457b340be34e108bc911b7ea79181db014c8b554ec7cfda3bb"
     },
     {
+      "class": "property",
+      "path": "contracts/fixtures/rebuild-comparison-manifest-v1.json",
+      "source_digest": "b3:8767637b9cea14244f6f35b584fc176119e0bb29837151d2171ace0371e69b57"
+    },
+    {
       "class": "normative-kat",
       "path": "contracts/fixtures/registries/enum-flag-v1-vectors.json",
       "source_digest": "b3:f0d3fe83fdd54674ff9b431b74f4ab65fea076388da6279ed15fcff2b623fc48"

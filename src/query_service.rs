@@ -1737,7 +1737,12 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
             event: Some(Event::Terminal(TerminalEvent {
                 header: Some(event_header(&query_id, 3, None)),
                 execution_state: QueryExecutionState::Succeeded as i32,
-                availability_state: "AVAILABLE".to_owned(),
+                availability_state: crate::registries::registry_state_name(
+                    crate::registries::QUERY_AVAILABILITY_STATE_VALUES,
+                    executed.response.availability_state as u16,
+                )
+                .expect("generated query availability state")
+                .to_owned(),
                 freshness_state: crate::registries::registry_state_name(
                     crate::registries::FRESHNESS_STATE_VALUES,
                     executed.response.freshness_state as u16,

@@ -227,17 +227,23 @@ gate-b-owner-acceptance-check:
     cargo run --locked --bin codefabric-gate-b-candidate -- verify-release .
     @just packet-oracle-check WP76
 
-[doc("Verify the immutable Gate B candidate chain and reproduce its current semantic payload")]
+[doc("Execute the production Gate B vertical and verify the unreleased candidate contract")]
 [group('test')]
-gate-b-candidate-check: wave5-integration-check wave6-integration-check
-    cargo run --locked --bin codefabric-gate-b-candidate -- check-release . target/gate-b-candidate-check-scratch
-    @if rg -n 'is_subset' src/golden_corpus.rs src/gate_b_candidate.rs; then echo 'subset-based Gate B authority comparison remains' >&2; exit 1; fi
-    @just packet-oracle-check WP71
+gate-b-candidate-check:
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    cargo nextest run --locked --lib -E 'test(/(gate_b_vertical_slice_produces_all_eleven_planes|gate_b_candidate_independent_oracle_contract|gate_b_vertical_slice_adversarial|gate_b_candidate_operational_gate)/)' --no-tests=fail
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest -q codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_adapter_contracts.py
+    @if rg -n 'fn derive_expectations|fn candidate_contracts|expectations\.clone\(\)' src/gate_b_candidate.rs; then echo 'descriptor/self-confirming Gate B proof remains on the current candidate path' >&2; exit 1; fi
+    @if test -d tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; fi
+    @just packet-oracle-check WP06
 
 [doc("Compare continuous effective state with the clean-rebuild oracle")]
 [group('test')]
 rebuild-equivalence-check:
-    cargo nextest run --locked --lib -E 'test(/wp72_(behavioral_acceptance|structural_acceptance|negative_zero_state)/)' --no-tests=fail
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked --lib -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance)/)' --no-tests=fail
 
 [doc("Run the complete Wave-6 continuous-update acceptance surface")]
 [group('test')]
@@ -252,8 +258,10 @@ git-parity-check:
 [doc("Run the complete WP72 true-rebuild, comparator, Git parity, and process-closure oracle set")]
 [group('test')]
 wp72-acceptance-check:
-    @just packet-oracle-check WP72
-    cargo nextest run --locked -E 'test(/wp72_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail
+    @just packet-oracle-check WP05
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance|wp72_operational_acceptance)/)' --no-tests=fail
 
 [doc("Run the complete Wave-7 Git-aware lifecycle acceptance surface")]
 [group('test')]
@@ -794,8 +802,8 @@ model-release-census-candidate:
 [confirm("Generate the immutable unreleased Gate B review candidate for accountable-owner review. Continue?")]
 [doc("MUTATES: emit a new Gate B candidate bundle without accepting or releasing it")]
 [group('mutating')]
-gate-b-candidate-emit output_dir="tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1":
-    cargo run --locked --bin codefabric-gate-b-candidate -- emit . tests/golden/codefabric-golden-v1 target/gate-b-candidate-emit-scratch "{{output_dir}}"
+gate-b-candidate-emit output_dir="tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1":
+    cargo run --locked --bin codefabric-gate-b-candidate -- emit . tests/golden/codefabric-golden-v2 target/gate-b-candidate-emit-scratch "{{output_dir}}"
 
 [confirm("Accept the exact reviewed Gate B candidate and publish immutable corpus v2. Continue?")]
 [doc("MUTATES: record accountable-owner acceptance and publish immutable Gate B corpus v2 exactly once")]

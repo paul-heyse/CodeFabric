@@ -1,6 +1,8 @@
 #![deny(unsafe_code)]
 
+mod protocol;
 mod pyrefly_link;
+mod server;
 
 use std::ffi::OsString;
 use std::io::{self, Write};
@@ -28,16 +30,24 @@ fn run(
     args: impl IntoIterator<Item = OsString>,
     _stdout: &mut impl Write,
     stderr: &mut impl Write,
-) -> Result<(), &'static str> {
+) -> Result<(), String> {
     assert!(IDENTITY.contains(PYREFLY_LOCK_SOURCE_BLAKE3));
     assert!(pyrefly_link::query_surface_smoke() > 0);
-    match parse_command(args)? {
+    match parse_command(args).map_err(str::to_owned)? {
         Command::Identity => {
-            writeln!(stderr, "{}", IDENTITY.trim()).map_err(|_| "failed to write identity")?;
+            writeln!(stderr, "{}", IDENTITY.trim())
+                .map_err(|_| "failed to write identity".to_owned())?;
         }
         Command::Serve => {
-            // Wave 0 proves the isolated process and unstable-API link only.
-            // The application-owned protocol arrives in its roadmap packet.
+            let endpoint = std::env::var("CODEFABRIC_PYREFLY_ENDPOINT")
+                .map_err(|_| "CODEFABRIC_PYREFLY_ENDPOINT is required".to_owned())?;
+            let socket = endpoint
+                .strip_prefix("unix://")
+                .ok_or_else(|| "Pyrefly endpoint must use unix://".to_owned())?;
+            if socket.is_empty() {
+                return Err("Pyrefly endpoint path is empty".to_owned());
+            }
+            server::serve(std::path::Path::new(socket))?;
         }
     }
     Ok(())
@@ -74,12 +84,13 @@ mod tests {
     }
 
     #[test]
-    fn serve_stub_is_protocol_silent() {
+    fn serve_requires_the_private_uds_endpoint() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
 
-        run([OsString::from("--serve")], &mut stdout, &mut stderr).unwrap();
+        let result = run([OsString::from("--serve")], &mut stdout, &mut stderr);
 
+        assert!(result.is_err());
         assert_eq!(stdout, Vec::<u8>::new());
         assert_eq!(stderr, Vec::<u8>::new());
     }

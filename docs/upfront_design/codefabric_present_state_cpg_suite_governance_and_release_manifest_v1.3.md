@@ -10,6 +10,7 @@
 **Supersedes:** CodeFabric synchronized specification suite 1.2 plus the standalone architecture-completion override
 **Audit integration (2026-08-20):** Plan-audit F-001; clarified executable phrase mappings and owner approval of initial machine-contract allocations.
 **Implementation clarification (2026-08-20):** WP06; fixed the registry-YAML to canonical-JSON projection policy so YAML-only constructs cannot acquire implicit machine semantics.
+**Implementation clarification (2026-08-26):** Review-remediation WP05/WP06; distinguished exact per-run candidate integrity from cross-run functional equivalence and made provider/evidence operational normalization explicit.
 
 ---
 
@@ -1147,7 +1148,9 @@ The corpus uses semantic versioning independent of the suite:
 
 A released corpus version is immutable. Updates create a new directory or versioned archive and preserve the prior version for rollback tests.
 
-The accepted review candidate and its source-input digests are immutable historical evidence. After release, conformance SHALL verify that chain without regenerating or rewriting it, and SHALL separately re-execute the current implementation to compare the semantic candidate payload (scenario observations, Gate-B items, source profile, and candidate identity) with the accepted payload. A later design-document or generated-authority digest change that leaves that semantic payload unchanged does not require a new owner acceptance; any semantic payload change requires a new versioned candidate and explicit acceptance.
+The accepted review candidate, its exact produced bytes/checksums, and its source-input digests are immutable historical evidence. After release, conformance SHALL verify that chain without regenerating or rewriting it, and SHALL separately re-execute the current implementation to compare the governed functional candidate projection with the accepted projection. That projection retains scenario outcomes, canonical Arrow schemas and duplicate-sensitive rows, canonical facts/unknowns, capability/completeness state, public query and MCP semantics, terminal artifact state, and every correlation assertion. It excludes only newly allocated operational locators and fields authorized by `AC-G-79`, such as provider-run, publication, snapshot, result-artifact, RPC/MCP request, and pointer-generation identities.
+
+Every re-execution SHALL still validate its own exact byte contracts before projection: canonical JSON, Arrow IPC/schema digests, Delta version and manifest integrity, event sequence/checksums, response/artifact checksums, and within-run request/execution/snapshot/publication correlation. Functional comparison is not permission to omit the exact accepted bytes, weaken a semantic identity, add an inline ignore, or accept an internally inconsistent run. A later design-document or generated-authority digest change that leaves the governed functional projection unchanged does not require a new owner acceptance; any functional projection change requires a new versioned candidate and explicit acceptance.
 
 ### Conformance
 
@@ -2281,6 +2284,18 @@ invention.
 ### Gate B — Vertical golden slice
 
 One Python owner, one Rust MIR owner, one unknown fact, one property fact, one relation fact, one derived projection, one hot-overlay update, one durable publication, one semantic query, one streamed result, and one artifact result pass end to end.
+
+Gate B records the exact actual bytes, table versions, manifests, checksums, protocol events,
+query response, MCP payload, diagnostics, and artifact bundle produced by one coherent execution.
+All publication, snapshot, provider-run, query, and artifact identities SHALL correlate inside
+that execution, and the detached candidate digest SHALL make those reviewed bytes immutable.
+
+A later conformance execution is a new allocation, not a replay of operational identity. It
+SHALL validate its own byte and correlation contracts, then compare the `AC-G-79`-governed
+functional projection with the accepted candidate. Requiring two independently allocated runs
+to have byte-identical operational IDs or checksums is not Gate B evidence; allowing canonical
+rows, capability/unknown state, query meaning, or terminal artifact outcomes to drift is also
+not Gate B evidence.
 
 ### Gate C — Continuous-update equivalence
 

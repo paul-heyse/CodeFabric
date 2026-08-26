@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "schema_id": "codefabric.pyrefly.module.v1",
+  "provider_id": "pyrefly-python",
+  "observation_family_code": 110,
+  "encoding": "arrow-ipc-file",
+  "fields": [
+    {"name": "module_id", "type": "utf8", "nullable": false},
+    {"name": "module_name", "type": "utf8", "nullable": false},
+    {"name": "type_table_json", "type": "binary", "nullable": false},
+    {"name": "callees_json", "type": "binary", "nullable": false},
+    {"name": "diagnostics_json", "type": "binary", "nullable": false}
+  ]
+}

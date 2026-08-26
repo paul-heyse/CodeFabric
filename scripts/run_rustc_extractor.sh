@@ -10,7 +10,11 @@ test -x "$binary" || {
   exit 1
 }
 
-sysroot="$(cd "$extractor_root" && rustc --print sysroot)"
+# Cargo exports its invoking toolchain to child processes. A stable-root daemon
+# therefore carries `RUSTUP_TOOLCHAIN=stable` even after changing into the
+# extractor directory, which would defeat the extractor's dated-nightly file.
+# Resolve the governed compiler-private sysroot explicitly.
+sysroot="$(rustup run nightly-2026-08-18 rustc --print sysroot)"
 case "$(uname -s)" in
   Darwin)
     export DYLD_LIBRARY_PATH="${sysroot}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"

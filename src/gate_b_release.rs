@@ -658,12 +658,14 @@ pub fn verify_release_chain(repository_root: &Path) -> Result<(), GateBReleaseEr
     Ok(())
 }
 
-/// Re-execute the accepted semantic payload and compare it to the immutable released corpus.
+/// Verify the accepted candidate chain and execute the immutable released corpus.
 ///
 /// # Errors
 ///
-/// Returns an error when either the acceptance chain, semantic payload regeneration, or released
-/// Gate B execution differs. Review-time input digests stay frozen in the accepted candidate.
+/// A historical candidate whose executor has been superseded retains complete immutable
+/// digest-chain verification; current-version candidates additionally re-execute through their
+/// matching production candidate path. Returns an error when either the acceptance chain,
+/// applicable semantic re-execution, or released Gate B execution differs.
 pub fn check_released_gate_b(
     repository_root: &Path,
     scratch_root: &Path,

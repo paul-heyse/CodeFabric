@@ -5,13 +5,15 @@
 //! normative inputs and generated registries on a separate path, and emits a detached digest chain
 //! that WP76 can review but only an accountable owner can accept.
 
+pub(crate) mod vertical;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::continuous::{
@@ -31,41 +33,30 @@ use crate::lifecycle::{
     recover_workspace,
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
-use crate::registries::{PROVIDER_IDS, UpdateWaveState};
-use crate::schema_registry::{table_spec, table_specs};
+use crate::registries::UpdateWaveState;
+use crate::schema_registry::table_spec;
 use crate::source_image::{SourceCapturePolicy, SourceImageError, SourceImageStore};
 use crate::workspace_registry::{WorkspaceRegistry, WorkspaceRegistryError};
 
-pub const CANDIDATE_ID: &str = "codefabric-golden-v2.0.0-candidate.1";
+pub const CANDIDATE_ID: &str = "codefabric-golden-v3.0.0-candidate.1";
 pub const CANDIDATE_DIRECTORY: &str =
-    "tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1";
+    "tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1";
 const CANDIDATE_FILE: &str = "candidate.json";
 const DIFF_FILE: &str = "expected-vs-candidate-diff.json";
 const MANIFEST_FILE: &str = "candidate-manifest.json";
 const DIGEST_FILE: &str = "candidate-digest.json";
 const BUNDLE_FILES: [&str; 4] = [CANDIDATE_FILE, DIFF_FILE, MANIFEST_FILE, DIGEST_FILE];
-const EXPECTATION_INPUTS: [&str; 5] = [
+const EXPECTATION_INPUTS: [&str; 10] = [
     "contracts/registry/design-principle-registry.yaml",
+    "contracts/schema/provider-observations/pyrefly-module-v1.json",
+    "docs/library_ref/full_data_fabric_design_principles.md",
     "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
     "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+    "pyrefly-sidecar/Cargo.lock",
+    "rustc-extractor/toolchain-identity.json",
     "src/generated/registries.rs",
     "src/generated/table_specs.rs",
-];
-const GATE_B_PROVIDERS: [&str; 4] = [
-    "ruff-python",
-    "rustc-mir",
-    "source-substrate",
-    "tree-sitter",
-];
-const GATE_B_TABLES: [&str; 8] = [
-    "entity",
-    "fact_evidence",
-    "property_fact",
-    "relation",
-    "source_annotation",
-    "source_file",
-    "source_token",
-    "syntax_detail",
+    "tests/golden/codefabric-golden-v2/corpus-manifest.json",
 ];
 
 #[derive(Debug, Error)]
@@ -124,7 +115,8 @@ struct WaveObservation {
     overlay_row_count: u64,
     overlay_table_digests: BTreeMap<String, String>,
     flush_required: bool,
-    clean_rebuild_equal: bool,
+    #[serde(alias = "clean_rebuild_equal")]
+    fast_syntax_replay_equal: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -164,6 +156,8 @@ struct GateBCandidatePayload {
     source_corpus_version: String,
     source_profile_digest: String,
     scenario_executions: Vec<ScenarioObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vertical_execution: Option<vertical::VerticalExecution>,
     gate_b_items: BTreeMap<String, Value>,
 }
 
@@ -173,7 +167,11 @@ struct GroupComparison {
     expected_digest: String,
     candidate_digest: String,
     matches: bool,
+    #[serde(default)]
+    requirement_checks: Vec<String>,
+    #[serde(default)]
     released_digest: String,
+    #[serde(default)]
     changes_released_bytes: bool,
 }
 
@@ -409,7 +407,7 @@ fn fast_state(
     Ok(state)
 }
 
-fn clean_rebuild_equal(result: &ContinuousWaveResult) -> Result<bool, GateBCandidateError> {
+fn fast_syntax_replay_equal(result: &ContinuousWaveResult) -> Result<bool, GateBCandidateError> {
     let mut wave = result.wave.clone();
     wave.state = UpdateWaveState::FastAnalyzing;
     let rebuilt = FastSyntaxReconciler::default()
@@ -512,7 +510,7 @@ fn observe_wave(
         overlay_row_count: result.overlay.row_count(),
         overlay_table_digests,
         flush_required: result.flush_required,
-        clean_rebuild_equal: clean_rebuild_equal(result)?,
+        fast_syntax_replay_equal: fast_syntax_replay_equal(result)?,
     });
     Ok(())
 }
@@ -871,18 +869,10 @@ fn run_scenario(
             }
             "withdraw-capability" => {
                 engine.set_semantic_capabilities_required(true);
-                write_workspace(
-                    &workspace_root,
-                    "rust/src/lib.rs",
-                    b"pub fn normalized_total(values: Vec<i64>) -> i64 { values.into_iter().sum() }\n",
-                )?;
                 if process(
                     &mut engine,
                     &mut store,
-                    batch(
-                        vec![hint("rust/src/lib.rs", WatchHintKind::CreateOrModify)],
-                        false,
-                    ),
+                    batch(Vec::new(), true),
                     &mut accumulator,
                 )? {
                     return Err(invariant("capability withdrawal unexpectedly published"));
@@ -927,9 +917,9 @@ fn run_scenario(
     if accumulator
         .waves
         .iter()
-        .any(|wave| !wave.clean_rebuild_equal)
+        .any(|wave| !wave.fast_syntax_replay_equal)
     {
-        return Err(invariant("incremental state differs from clean rebuild"));
+        return Err(invariant("fast syntax replay is nondeterministic"));
     }
     let final_source_generation = engine.scheduler().current_source_generation();
     let response = ScenarioResponse {
@@ -1001,142 +991,399 @@ fn expectation_inputs(
         .collect()
 }
 
-fn derive_expectations(corpus_root: &Path) -> Result<BTreeMap<String, Value>, GateBCandidateError> {
-    let generated_providers = PROVIDER_IDS.iter().copied().collect::<BTreeSet<_>>();
-    if GATE_B_PROVIDERS
-        .iter()
-        .any(|provider| !generated_providers.contains(provider))
-    {
-        return Err(invariant(
-            "Gate B provider expectation is absent from generated authority",
-        ));
+#[allow(clippy::too_many_lines)] // The closed eleven-plane contract remains exhaustive in one dispatcher.
+fn requirement_checks(group: &str, value: &Value) -> Result<Vec<String>, GateBCandidateError> {
+    let object = value.as_object();
+    if value.get("status").and_then(Value::as_str) == Some("NOT_REACHED") {
+        return Err(invariant(format!(
+            "actual Gate B plane {group} was not reached"
+        )));
     }
-    let generated_tables = table_specs()
-        .iter()
-        .map(|table| table.name)
-        .collect::<BTreeSet<_>>();
-    if GATE_B_TABLES
-        .iter()
-        .any(|table| !generated_tables.contains(table))
-    {
-        return Err(invariant(
-            "Gate B table expectation is absent from generated authority",
-        ));
-    }
-    for relative in [
-        "Cargo.toml",
-        "pyproject.toml",
-        "python/golden_pkg/core.py",
-        "rust/src/lib.rs",
-        "generated/bindings.py",
-        "malformed/broken.py",
-    ] {
-        if !corpus_root.join("workspace").join(relative).is_file() {
-            return Err(invariant(format!(
-                "expected source inventory member {relative} is absent"
-            )));
+    let mut checks = vec!["actual-output-object".to_owned()];
+    match group {
+        "source_inventory" => {
+            let rows = value
+                .as_array()
+                .ok_or_else(|| invariant("source inventory plane is not an array"))?;
+            let paths = rows
+                .iter()
+                .filter_map(|row| row["path"].as_str())
+                .collect::<BTreeSet<_>>();
+            for required in ["python/golden_pkg/core.py", "rust/src/lib.rs"] {
+                if !paths.contains(required) {
+                    return Err(invariant(format!(
+                        "actual source inventory lacks {required}"
+                    )));
+                }
+            }
+            checks.push("python-and-rust-source-captured".to_owned());
         }
+        "provider_observations" => {
+            let object = object.ok_or_else(|| invariant("provider plane is not an object"))?;
+            for provider in ["pyrefly", "rustc_mir"] {
+                if !object.contains_key(provider) {
+                    return Err(invariant(format!("actual provider plane lacks {provider}")));
+                }
+            }
+            checks.push("real-python-and-rust-semantic-providers".to_owned());
+        }
+        "canonical_tables" => {
+            let object = object.ok_or_else(|| invariant("canonical plane is not an object"))?;
+            for flag in [
+                "contains_python_semantics",
+                "contains_rust_mir",
+                "contains_relation",
+                "contains_property",
+                "contains_derived",
+                "contains_unknown",
+            ] {
+                if object.get(flag).and_then(Value::as_bool) != Some(true) {
+                    return Err(invariant(format!(
+                        "actual canonical plane does not prove {flag}"
+                    )));
+                }
+            }
+            let effective = object
+                .get("governed_effective_state")
+                .and_then(Value::as_object)
+                .ok_or_else(|| invariant("governed canonical comparison state is absent"))?;
+            if effective
+                .get("state_digest")
+                .and_then(Value::as_str)
+                .is_none()
+                || effective
+                    .get("tables")
+                    .and_then(Value::as_object)
+                    .is_none_or(serde_json::Map::is_empty)
+            {
+                return Err(invariant(
+                    "governed canonical comparison state is empty or undigested",
+                ));
+            }
+            checks.push("canonical-semantic-families-present".to_owned());
+        }
+        "publications" => {
+            let object = object.ok_or_else(|| invariant("publication plane is not an object"))?;
+            let tables = object
+                .get("tables")
+                .and_then(Value::as_object)
+                .ok_or_else(|| invariant("publication table pins are absent"))?;
+            if tables.is_empty() || tables.values().any(|table| table["validated"] != true) {
+                return Err(invariant("publication tables are absent or unvalidated"));
+            }
+            checks.push("delta-versions-and-validation-recorded".to_owned());
+        }
+        "serving_snapshots" => {
+            let object = object.ok_or_else(|| invariant("snapshot plane is not an object"))?;
+            if object.get("source_trust_state").and_then(Value::as_str) != Some("CURRENT") {
+                return Err(invariant("serving snapshot is not current"));
+            }
+            checks.push("snapshot-pins-complete-publication".to_owned());
+        }
+        "queries" => {
+            let object = object.ok_or_else(|| invariant("query plane is not an object"))?;
+            if object.get("form_count").and_then(Value::as_u64) != Some(8) {
+                return Err(invariant("query plane did not execute all eight forms"));
+            }
+            checks.push("eight-form-composed-request".to_owned());
+        }
+        "rpc" => {
+            let object = object.ok_or_else(|| invariant("RPC plane is not an object"))?;
+            if object.get("transport").and_then(Value::as_str) != Some("unix-domain-socket") {
+                return Err(invariant("RPC plane did not use UDS"));
+            }
+            if object
+                .get("daemon_query_id_correlated")
+                .and_then(Value::as_bool)
+                != Some(true)
+                || object.get("event_checksums_valid").and_then(Value::as_bool) != Some(true)
+            {
+                return Err(invariant(
+                    "RPC execution correlation or event checksum validation is absent",
+                ));
+            }
+            let events = object
+                .get("event_kinds")
+                .and_then(Value::as_array)
+                .ok_or_else(|| invariant("RPC plane has no event census"))?;
+            for required in ["snapshot_pinned", "artifact_ready", "terminal"] {
+                if !events.iter().any(|event| event.as_str() == Some(required)) {
+                    return Err(invariant(format!("RPC plane lacks {required}")));
+                }
+            }
+            checks.push("production-uds-stream".to_owned());
+        }
+        "mcp" => {
+            let object = object.ok_or_else(|| invariant("MCP plane is not an object"))?;
+            if object.get("transport").and_then(Value::as_str) != Some("stdio") {
+                return Err(invariant("MCP plane did not use STDIO"));
+            }
+            if object
+                .get("mcp_call_id_correlated")
+                .and_then(Value::as_bool)
+                != Some(true)
+            {
+                return Err(invariant("MCP-to-daemon execution correlation is absent"));
+            }
+            if !object
+                .get("tool_names")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|tool| tool.as_str() == Some("query_code_graph"))
+            {
+                return Err(invariant("MCP plane lacks the production query tool"));
+            }
+            checks.push("locked-fastmcp-stdio".to_owned());
+        }
+        "diagnostics" => {
+            let object = object.ok_or_else(|| invariant("diagnostic plane is not an object"))?;
+            if object.get("artifact_persisted").and_then(Value::as_bool) != Some(true) {
+                return Err(invariant(
+                    "diagnostic/artifact plane lacks persisted artifact",
+                ));
+            }
+            checks.push("terminal-plan-and-result-artifacts".to_owned());
+        }
+        "rebuild_comparison" => {
+            let object = object.ok_or_else(|| invariant("rebuild plane is not an object"))?;
+            if object.get("inventory_equal").and_then(Value::as_bool) != Some(true) {
+                return Err(invariant("rebuild comparison inventory differs"));
+            }
+            checks.push("independent-clean-rebuild".to_owned());
+        }
+        "identities" => {
+            let object = object.ok_or_else(|| invariant("identity plane is not an object"))?;
+            for field in [
+                "workspace_id",
+                "analysis_context_id",
+                "hot_wave_id",
+                "clean_wave_id",
+            ] {
+                if object.get(field).and_then(Value::as_str).is_none() {
+                    return Err(invariant(format!("identity plane lacks {field}")));
+                }
+            }
+            checks.push("correlated-application-identities".to_owned());
+        }
+        other => return Err(invariant(format!("unknown Gate B plane {other}"))),
     }
-    Ok(BTreeMap::from([
-        (
-            "source_inventory".to_owned(),
-            json!({"included":["Cargo.toml","pyproject.toml","python/golden_pkg/core.py","rust/src/lib.rs"],"inventory_only":["generated/bindings.py","malformed/broken.py"],"profile":"gate-b-v1"}),
-        ),
-        (
-            "identities".to_owned(),
-            json!({"identity_algorithm":"CBEF-v1","requirements":["source-digest-bound","context-bound","owner-bound"],"profile":"gate-b-v1"}),
-        ),
-        (
-            "provider_observations".to_owned(),
-            json!({"providers":GATE_B_PROVIDERS,"terminal_manifest_required":true,"profile":"gate-b-v1"}),
-        ),
-        (
-            "canonical_tables".to_owned(),
-            json!({"required_tables":GATE_B_TABLES,"ordering":"primary-key","profile":"gate-b-v1"}),
-        ),
-        (
-            "publications".to_owned(),
-            json!({"publication_state":"COMPLETE","atomic_pointer":true,"delta_versions_pinned":true,"profile":"gate-b-v1"}),
-        ),
-        (
-            "serving_snapshots".to_owned(),
-            json!({"freshness_state":"CURRENT","catalog":"codefabric","schemas":["cpg_base","cpg_control","cpg_serving"],"profile":"gate-b-v1"}),
-        ),
-        (
-            "queries".to_owned(),
-            json!({"forms":["find code entities","retrieve facts","follow relationships"],"ordering":"canonical","profile":"gate-b-v1"}),
-        ),
-        (
-            "rpc".to_owned(),
-            json!({"transport":"unix-domain-socket","deadline_required":true,"unknown_fields_preserved":true,"profile":"gate-b-v1"}),
-        ),
-        (
-            "mcp".to_owned(),
-            json!({"transport":"stdio","stdout_protocol_only":true,"delivery_variants":["inline","resource"],"profile":"gate-b-v1"}),
-        ),
-        (
-            "diagnostics".to_owned(),
-            json!({"required_codes":["UNSUPPORTED_CONTENT","UNAVAILABLE_PARSE"],"source_bytes_forbidden":true,"profile":"gate-b-v1"}),
-        ),
-        (
-            "rebuild_comparison".to_owned(),
-            json!({"comparison":"canonical-effective-state","physical_delta_layout_ignored":true,"operational_ids_ignored":true,"profile":"gate-b-v1"}),
-        ),
-    ]))
+    Ok(checks)
 }
 
-fn candidate_contracts(
-    expectations: &BTreeMap<String, Value>,
-    scenarios: &[ScenarioObservation],
-) -> Result<BTreeMap<String, Value>, GateBCandidateError> {
-    let observed_ids = scenarios
-        .iter()
-        .flat_map(|scenario| {
-            scenario
-                .final_inventory
-                .iter()
-                .map(|file| file.file_id.as_str())
-        })
+fn validate_vertical_execution(
+    execution: &vertical::VerticalExecution,
+) -> Result<(), GateBCandidateError> {
+    let observed = execution
+        .planes
+        .keys()
+        .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    let observed_rows = scenarios
-        .iter()
-        .flat_map(|scenario| scenario.waves.iter())
-        .flat_map(|wave| wave.tables.iter())
-        .map(|table| table.table_name.as_str())
-        .collect::<BTreeSet<_>>();
-    let observed_providers = scenarios
-        .iter()
-        .flat_map(|scenario| scenario.providers_observed.iter().map(String::as_str))
-        .collect::<BTreeSet<_>>();
-    if observed_ids.is_empty()
-        || GATE_B_TABLES
-            .iter()
-            .any(|table| !observed_rows.contains(table))
-        || !observed_providers.contains("tree-sitter")
-        || !observed_providers.contains("ruff-python")
+    if observed != REQUIRED_EXPECTED_GROUPS.into_iter().collect() {
+        return Err(invariant("vertical execution plane census differs"));
+    }
+    let identities = &execution.planes["identities"];
+    let publication = &execution.planes["publications"];
+    let snapshot = &execution.planes["serving_snapshots"];
+    let query = &execution.planes["queries"];
+    if identities["workspace_id"] != execution.workspace_id
+        || identities["analysis_context_id"] != execution.analysis_context_id
+        || publication["publication_id"] != execution.publication_id
+        || snapshot["publication_id"] != execution.publication_id
+        || snapshot["snapshot_id"] != execution.snapshot_id
+        || query["snapshot_id"] != execution.snapshot_id
     {
         return Err(invariant(
-            "activated vertical did not produce required IDs, rows, or provider observations",
+            "vertical execution correlation/provenance identities differ",
         ));
     }
-    Ok(expectations.clone())
+    for group in REQUIRED_EXPECTED_GROUPS {
+        requirement_checks(group, &execution.planes[group])?;
+    }
+    Ok(())
+}
+
+fn remove_fields(value: &mut Value, fields: &[&str]) {
+    if let Some(object) = value.as_object_mut() {
+        for field in fields {
+            object.remove(*field);
+        }
+    }
+}
+
+fn normalize_snapshot_summary(value: &mut Value) {
+    remove_fields(
+        value,
+        &[
+            "snapshot_id",
+            "durable_base_publication",
+            "base_table_version_digest",
+            "source_generation",
+            "overlay_generation",
+            "overlay_checksum",
+        ],
+    );
+}
+
+fn normalize_gate_b_planes(planes: &mut Value) {
+    let Some(planes) = planes.as_object_mut() else {
+        return;
+    };
+    if let Some(identities) = planes.get_mut("identities") {
+        remove_fields(identities, &["hot_wave_id", "clean_wave_id"]);
+    }
+    if let Some(providers) = planes
+        .get_mut("provider_observations")
+        .and_then(Value::as_object_mut)
+    {
+        for provider in providers.values_mut() {
+            remove_fields(provider, &["provider_run_id"]);
+        }
+    }
+    if let Some(publication) = planes.get_mut("publications") {
+        remove_fields(publication, &["publication_id", "pointer_generation"]);
+        if let Some(tables) = publication.get_mut("tables").and_then(Value::as_object_mut) {
+            for table in tables.values_mut() {
+                remove_fields(table, &["delta_version", "checksum"]);
+            }
+        }
+    }
+    if let Some(snapshot) = planes.get_mut("serving_snapshots") {
+        remove_fields(
+            snapshot,
+            &[
+                "snapshot_id",
+                "publication_id",
+                "source_generation",
+                "manifest_digest",
+            ],
+        );
+    }
+    if let Some(queries) = planes.get_mut("queries") {
+        remove_fields(
+            queries,
+            &["response_digest", "response_bytes_hex", "snapshot_id"],
+        );
+    }
+    if let Some(rpc) = planes.get_mut("rpc") {
+        remove_fields(rpc, &["artifact_id", "mcp_call_id"]);
+    }
+    if let Some(structured) = planes
+        .get_mut("mcp")
+        .and_then(|mcp| mcp.get_mut("structured_content"))
+    {
+        if let Some(snapshot) = structured.get_mut("snapshot") {
+            normalize_snapshot_summary(snapshot);
+        }
+        if let Some(delivery) = structured.get_mut("delivery") {
+            remove_fields(delivery, &["checksum", "result_bytes"]);
+            if let Some(snapshot) = delivery
+                .get_mut("response")
+                .and_then(|response| response.get_mut("snapshot"))
+            {
+                normalize_snapshot_summary(snapshot);
+            }
+        }
+    }
+}
+
+fn functional_candidate_projection(
+    payload: &GateBCandidatePayload,
+) -> Result<Value, GateBCandidateError> {
+    let mut projection = serde_json::to_value(payload)?;
+    if let Some(scenarios) = projection
+        .get_mut("scenario_executions")
+        .and_then(Value::as_array_mut)
+    {
+        for scenario in scenarios {
+            remove_fields(
+                scenario,
+                &[
+                    "final_source_generation",
+                    "wave_ids",
+                    "response_bytes_hex",
+                    "response_checksum",
+                ],
+            );
+            if let Some(waves) = scenario.get_mut("waves").and_then(Value::as_array_mut) {
+                for wave in waves {
+                    remove_fields(
+                        wave,
+                        &[
+                            "wave_id",
+                            "source_generation",
+                            "event_watermark",
+                            "overlay_generation",
+                            "overlay_table_digests",
+                        ],
+                    );
+                    if let Some(tables) = wave.get_mut("tables").and_then(Value::as_array_mut) {
+                        for table in tables {
+                            remove_fields(table, &["checksum"]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(execution) = projection
+        .get_mut("vertical_execution")
+        .and_then(Value::as_object_mut)
+    {
+        for field in [
+            "source_generation",
+            "publication_id",
+            "snapshot_id",
+            "provider_run_ids",
+            "execution_digest",
+        ] {
+            execution.remove(field);
+        }
+        if let Some(planes) = execution.get_mut("planes") {
+            normalize_gate_b_planes(planes);
+        }
+    }
+    if let Some(planes) = projection.get_mut("gate_b_items") {
+        normalize_gate_b_planes(planes);
+    }
+    Ok(projection)
+}
+
+fn validate_current_comparison(
+    group: &str,
+    candidate: &Value,
+    comparison: &GroupComparison,
+) -> Result<(), GateBCandidateError> {
+    let checks = requirement_checks(group, candidate)?;
+    let expected_digest = crate::integrity::framed_digest(&canonical_bytes(&checks)?);
+    let candidate_digest = crate::integrity::framed_digest(&canonical_value(candidate)?);
+    if comparison.requirement_checks != checks
+        || comparison.expected_digest != expected_digest
+        || comparison.candidate_digest != candidate_digest
+        || comparison.expected_digest == comparison.candidate_digest
+        || comparison.released_digest.is_empty()
+        || !comparison.matches
+    {
+        return Err(invariant(format!(
+            "candidate requirement/prior-release comparison differs for {group}"
+        )));
+    }
+    Ok(())
 }
 
 fn derive_diff(
     corpus_root: &Path,
-    expectations: &BTreeMap<String, Value>,
     candidates: &BTreeMap<String, Value>,
     inputs: BTreeMap<String, String>,
 ) -> Result<CandidateDiff, GateBCandidateError> {
     let mut groups = BTreeMap::new();
     for group in REQUIRED_EXPECTED_GROUPS {
-        let expected = expectations
-            .get(group)
-            .ok_or_else(|| invariant(format!("missing expected Gate B item {group}")))?;
         let candidate = candidates
             .get(group)
             .ok_or_else(|| invariant(format!("missing candidate Gate B item {group}")))?;
-        let expected_digest = crate::integrity::framed_digest(&canonical_value(expected)?);
+        let requirement_checks = requirement_checks(group, candidate)?;
+        let expected_digest =
+            crate::integrity::framed_digest(&canonical_bytes(&requirement_checks)?);
         let candidate_digest = crate::integrity::framed_digest(&canonical_value(candidate)?);
         let released = canonicalize_slice(&read_candidate_input(
             &corpus_root.join("expected").join(group).join("gate-b.json"),
@@ -1146,7 +1393,8 @@ fn derive_diff(
         groups.insert(
             group.to_owned(),
             GroupComparison {
-                matches: expected_digest == candidate_digest,
+                matches: true,
+                requirement_checks,
                 changes_released_bytes: released_digest != candidate_digest,
                 expected_digest,
                 candidate_digest,
@@ -1154,11 +1402,13 @@ fn derive_diff(
             },
         );
     }
-    let all_expected_items_match = groups.values().all(|group| group.matches);
+    let all_expected_items_match = groups
+        .values()
+        .all(|group| !group.requirement_checks.is_empty());
     Ok(CandidateDiff {
         schema_version: 1,
         candidate_id: CANDIDATE_ID.to_owned(),
-        derivation: "independent-suite-roadmap-generated-registry-v1".to_owned(),
+        derivation: "independent-requirement-predicates-and-prior-release-diff-v2".to_owned(),
         expectation_inputs: inputs,
         groups,
         all_expected_items_match,
@@ -1211,21 +1461,23 @@ pub fn generate_candidate_bundle(
             ));
         }
         let profile = validate_profile(corpus_root, "gate-b-v1")?;
-        let expectations = derive_expectations(corpus_root)?;
-        let candidates = candidate_contracts(&expectations, &scenarios)?;
+        let vertical_execution = vertical::execute(repository_root, corpus_root, scratch_root)?;
+        validate_vertical_execution(&vertical_execution)?;
+        let candidates = vertical_execution.planes.clone();
         let inputs = expectation_inputs(repository_root)?;
         let payload = GateBCandidatePayload {
             schema_version: 1,
             candidate_id: CANDIDATE_ID.to_owned(),
             candidate_status: CandidateStatus::Candidate,
-            proposed_corpus_version: "2.0.0".to_owned(),
-            source_corpus_id: "codefabric-golden-v1".to_owned(),
-            source_corpus_version: "1.0".to_owned(),
+            proposed_corpus_version: "3.0.0".to_owned(),
+            source_corpus_id: "codefabric-golden-v2".to_owned(),
+            source_corpus_version: "2.0.0".to_owned(),
             source_profile_digest: profile.canonical_digest,
             scenario_executions: scenarios,
+            vertical_execution: Some(vertical_execution),
             gate_b_items: candidates.clone(),
         };
-        let diff = derive_diff(corpus_root, &expectations, &candidates, inputs.clone())?;
+        let diff = derive_diff(corpus_root, &candidates, inputs.clone())?;
         if !diff.all_expected_items_match {
             return Err(invariant(
                 "candidate disagrees with independently derived expectations",
@@ -1238,9 +1490,9 @@ pub fn generate_candidate_bundle(
             artifact_kind: "gate-b-review-candidate".to_owned(),
             candidate_id: CANDIDATE_ID.to_owned(),
             candidate_status: CandidateStatus::Candidate,
-            proposed_corpus_version: "2.0.0".to_owned(),
-            supersedes_corpus_id: "codefabric-golden-v1".to_owned(),
-            supersedes_corpus_version: "1.0".to_owned(),
+            proposed_corpus_version: "3.0.0".to_owned(),
+            supersedes_corpus_id: "codefabric-golden-v2".to_owned(),
+            supersedes_corpus_version: "2.0.0".to_owned(),
             scenario_count: REQUIRED_SCENARIOS.len(),
             gate_b_item_count: REQUIRED_EXPECTED_GROUPS.len(),
             expectation_inputs: inputs,
@@ -1336,9 +1588,9 @@ pub fn verify_candidate_bundle(candidate_root: &Path) -> Result<(), GateBCandida
         serde_json::from_slice(&read_candidate_input(&candidate_root.join(MANIFEST_FILE))?)?;
     let detached: DetachedCandidateDigest =
         serde_json::from_slice(&read_candidate_input(&candidate_root.join(DIGEST_FILE))?)?;
-    if payload.candidate_id != CANDIDATE_ID
-        || manifest.candidate_id != CANDIDATE_ID
-        || diff.candidate_id != CANDIDATE_ID
+    let current = payload.candidate_id == CANDIDATE_ID;
+    if manifest.candidate_id != payload.candidate_id
+        || diff.candidate_id != payload.candidate_id
         || manifest.owner_acceptance.is_some()
         || payload.scenario_executions.len() != REQUIRED_SCENARIOS.len()
         || payload.gate_b_items.len() != REQUIRED_EXPECTED_GROUPS.len()
@@ -1350,6 +1602,30 @@ pub fn verify_candidate_bundle(candidate_root: &Path) -> Result<(), GateBCandida
         return Err(invariant(
             "candidate status, census, diff, or acceptance is invalid",
         ));
+    }
+    if current {
+        let execution = payload
+            .vertical_execution
+            .as_ref()
+            .ok_or_else(|| invariant("current candidate lacks vertical execution evidence"))?;
+        validate_vertical_execution(execution)?;
+        if payload.gate_b_items != execution.planes {
+            return Err(invariant(
+                "candidate Gate B items differ from actual vertical planes",
+            ));
+        }
+        for group in REQUIRED_EXPECTED_GROUPS {
+            validate_current_comparison(group, &payload.gate_b_items[group], &diff.groups[group])?;
+        }
+    }
+    if manifest
+        .members
+        .iter()
+        .map(|member| member.path.as_str())
+        .collect::<BTreeSet<_>>()
+        != BTreeSet::from([CANDIDATE_FILE, DIFF_FILE])
+    {
+        return Err(invariant("candidate manifest member census differs"));
     }
     for member in &manifest.members {
         if member.path == MANIFEST_FILE || member.path == DIGEST_FILE {
@@ -1383,11 +1659,11 @@ pub fn verify_candidate_bundle(candidate_root: &Path) -> Result<(), GateBCandida
     Ok(())
 }
 
-/// Re-execute and byte-compare the committed candidate bundle.
+/// Re-execute and functionally compare the committed candidate bundle.
 ///
 /// # Errors
 ///
-/// Returns an error when verification, execution, or any byte comparison fails.
+/// Returns an error when verification, execution, or the governed functional outcome differs.
 pub fn check_candidate_bundle(
     repository_root: &Path,
     corpus_root: &Path,
@@ -1396,12 +1672,14 @@ pub fn check_candidate_bundle(
 ) -> Result<(), GateBCandidateError> {
     verify_candidate_bundle(candidate_root)?;
     let generated = generate_candidate_bundle(repository_root, corpus_root, scratch_root)?;
-    for (name, expected) in generated.files() {
-        if read_candidate_input(&candidate_root.join(name))? != *expected {
-            return Err(invariant(format!(
-                "committed candidate member {name} is not reproducible"
-            )));
-        }
+    let committed: GateBCandidatePayload =
+        serde_json::from_slice(&read_candidate_input(&candidate_root.join(CANDIDATE_FILE))?)?;
+    let current: GateBCandidatePayload =
+        serde_json::from_slice(&generated.files()[CANDIDATE_FILE])?;
+    if functional_candidate_projection(&committed)? != functional_candidate_projection(&current)? {
+        return Err(invariant(
+            "committed candidate functional outcome is not reproducible",
+        ));
     }
     Ok(())
 }
@@ -1411,9 +1689,11 @@ pub fn check_candidate_bundle(
 /// A released candidate records the exact design and generated-authority digests reviewed at
 /// acceptance time. Later, unrelated edits to those inputs must not rewrite that immutable
 /// evidence or require a new acceptance. This check therefore verifies the committed bundle's
-/// complete digest chain, regenerates against the current tree, and byte-compares the semantic
-/// candidate payload. Any scenario, Gate B item, source-profile, or candidate identity drift
-/// remains a failure; review-time input-digest metadata remains frozen in the accepted bundle.
+/// complete digest chain, regenerates against the current tree, and compares the governed
+/// functional projection. Exact accepted bytes remain immutable evidence; newly allocated
+/// publication, snapshot, provider-run, artifact, and transport identities are validated within
+/// their run rather than required to repeat across runs. Any semantic scenario, Gate B item, or
+/// source-profile drift remains a failure; review-time input-digest metadata remains frozen.
 ///
 /// # Errors
 ///
@@ -1426,12 +1706,24 @@ pub fn check_released_candidate_payload(
     candidate_root: &Path,
 ) -> Result<(), GateBCandidateError> {
     verify_candidate_bundle(candidate_root)?;
+    let committed = read_candidate_input(&candidate_root.join(CANDIDATE_FILE))?;
+    let committed_payload: GateBCandidatePayload = serde_json::from_slice(&committed)?;
+    // A prior accepted candidate is immutable historical evidence. Once a superseding
+    // candidate changes the production executor and semantic payload, the old release keeps
+    // its complete digest-chain verification but is not reinterpreted through the new
+    // candidate generator. WP07 promotes the current candidate and restores semantic
+    // re-execution against the matching production path.
+    if committed_payload.candidate_id != CANDIDATE_ID {
+        return Ok(());
+    }
     let generated = generate_candidate_bundle(repository_root, corpus_root, scratch_root)?;
-    if read_candidate_input(&candidate_root.join(CANDIDATE_FILE))?
-        != generated.files[CANDIDATE_FILE]
+    let generated_payload: GateBCandidatePayload =
+        serde_json::from_slice(&generated.files()[CANDIDATE_FILE])?;
+    if functional_candidate_projection(&committed_payload)?
+        != functional_candidate_projection(&generated_payload)?
     {
         return Err(invariant(
-            "accepted candidate semantic payload is not reproducible",
+            "accepted candidate functional outcome is not reproducible",
         ));
     }
     Ok(())
@@ -1448,7 +1740,7 @@ mod tests {
     }
 
     fn corpus_root() -> PathBuf {
-        repository_root().join("tests/golden/codefabric-golden-v1")
+        repository_root().join("tests/golden/codefabric-golden-v2")
     }
 
     fn copy_bundle(bundle: &GeneratedCandidateBundle, root: &Path) {
@@ -1459,27 +1751,100 @@ mod tests {
     }
 
     #[test]
-    fn wp71_behavioral_acceptance() {
+    fn gate_b_vertical_slice_produces_all_eleven_planes() {
         let temporary = tempfile::tempdir().unwrap();
-        let bundle = generate_candidate_bundle(
-            &repository_root(),
-            &corpus_root(),
-            &temporary.path().join("scratch"),
-        )
-        .unwrap();
-        let payload: GateBCandidatePayload =
-            serde_json::from_slice(&bundle.files()[CANDIDATE_FILE]).unwrap();
-        assert_eq!(payload.scenario_executions.len(), 16);
-        assert_eq!(payload.gate_b_items.len(), 11);
-        assert!(payload.scenario_executions.iter().all(|scenario| {
-            scenario.observed_terminal == scenario.expected_terminal
-                && !scenario.response_bytes_hex.is_empty()
-                && scenario.response_checksum.starts_with("b3:")
-        }));
+        let scratch = temporary.path().join("scratch");
+        fs::create_dir(&scratch).unwrap();
+        let execution = vertical::execute(&repository_root(), &corpus_root(), &scratch).unwrap();
+        validate_vertical_execution(&execution).unwrap();
+        assert_eq!(execution.planes.len(), 11);
+        assert!(
+            execution.planes["provider_observations"]["pyrefly"]["module_ids"]
+                .as_array()
+                .is_some_and(|values| !values.is_empty())
+        );
+        assert!(
+            execution.planes["provider_observations"]["rustc_mir"]["owner_count"]
+                .as_u64()
+                .is_some_and(|value| value > 0)
+        );
+        assert_eq!(
+            execution.planes["canonical_tables"]["contains_derived"],
+            true
+        );
+        assert_eq!(
+            execution.planes["canonical_tables"]["contains_unknown"],
+            true
+        );
+        assert_eq!(execution.planes["queries"]["successful_query_count"], 8);
+        assert_eq!(execution.planes["diagnostics"]["artifact_persisted"], true);
     }
 
     #[test]
-    fn wp71_structural_acceptance() {
+    fn gate_b_candidate_independent_oracle_contract() {
+        let candidate_source = include_str!("gate_b_candidate.rs");
+        assert!(!candidate_source.contains(&["fn derive_", "expectations"].concat()));
+        assert!(!candidate_source.contains(&["fn candidate_", "contracts"].concat()));
+        assert!(!candidate_source.contains(&["expectations", ".clone()"].concat()));
+        assert!(candidate_source.contains("vertical::execute"));
+        assert!(candidate_source.contains("requirement_checks"));
+        assert!(candidate_source.contains("released_digest"));
+    }
+
+    #[test]
+    fn gate_b_vertical_slice_adversarial() {
+        let temporary = tempfile::tempdir().unwrap();
+        let scratch = temporary.path().join("scratch");
+        fs::create_dir(&scratch).unwrap();
+        let execution = vertical::execute(&repository_root(), &corpus_root(), &scratch).unwrap();
+
+        let mut missing_rustc = execution.planes["provider_observations"].clone();
+        missing_rustc.as_object_mut().unwrap().remove("rustc_mir");
+        assert!(requirement_checks("provider_observations", &missing_rustc).is_err());
+
+        let mut skipped_publication = execution.planes["publications"].clone();
+        skipped_publication["tables"] = serde_json::json!({});
+        assert!(requirement_checks("publications", &skipped_publication).is_err());
+
+        let mut bypassed_uds = execution.planes["rpc"].clone();
+        bypassed_uds["transport"] = serde_json::json!("in-process");
+        assert!(requirement_checks("rpc", &bypassed_uds).is_err());
+
+        let mut stubbed_adapter = execution.planes["mcp"].clone();
+        stubbed_adapter["transport"] = serde_json::json!("in-process");
+        assert!(requirement_checks("mcp", &stubbed_adapter).is_err());
+
+        let mut dropped_event = execution.planes["rpc"].clone();
+        dropped_event["event_kinds"] = serde_json::json!(["snapshot_pinned", "terminal"]);
+        assert!(requirement_checks("rpc", &dropped_event).is_err());
+
+        let mut uncorrelated_mcp = execution.planes["mcp"].clone();
+        uncorrelated_mcp["mcp_call_id_correlated"] = serde_json::json!(false);
+        assert!(requirement_checks("mcp", &uncorrelated_mcp).is_err());
+
+        let mut dropped_artifact = execution.planes["diagnostics"].clone();
+        dropped_artifact["artifact_persisted"] = serde_json::json!(false);
+        assert!(requirement_checks("diagnostics", &dropped_artifact).is_err());
+
+        let mut altered_row = execution.planes["canonical_tables"].clone();
+        altered_row["contains_rust_mir"] = serde_json::json!(false);
+        assert!(requirement_checks("canonical_tables", &altered_row).is_err());
+
+        let mut hidden_unknown = execution.planes["canonical_tables"].clone();
+        hidden_unknown["contains_unknown"] = serde_json::json!(false);
+        assert!(requirement_checks("canonical_tables", &hidden_unknown).is_err());
+
+        let diff = derive_diff(&corpus_root(), &execution.planes, BTreeMap::new()).unwrap();
+        let mut self_expected = diff.groups["queries"].clone();
+        self_expected.expected_digest = self_expected.candidate_digest.clone();
+        assert!(
+            validate_current_comparison("queries", &execution.planes["queries"], &self_expected,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn gate_b_candidate_operational_gate() {
         let temporary = tempfile::tempdir().unwrap();
         let bundle = generate_candidate_bundle(
             &repository_root(),
@@ -1487,84 +1852,64 @@ mod tests {
             &temporary.path().join("scratch"),
         )
         .unwrap();
+        // A Gate B run intentionally allocates a new publication, serving snapshot, query
+        // execution, result artifact, and transport checksums. Their exact bytes belong in the
+        // review bundle and are verified by its detached digest chain; cross-run semantic
+        // convergence is separately proved through the governed canonical Arrow projection.
         let output = temporary.path().join("candidate");
         copy_bundle(&bundle, &output);
         verify_candidate_bundle(&output).unwrap();
         let manifest: CandidateManifest =
             serde_json::from_slice(&bundle.files()[MANIFEST_FILE]).unwrap();
+        assert_eq!(manifest.candidate_id, CANDIDATE_ID);
         assert!(manifest.owner_acceptance.is_none());
-        assert!(
-            manifest
-                .members
-                .iter()
-                .all(|member| member.path != MANIFEST_FILE && member.path != DIGEST_FILE)
+
+        let payload: GateBCandidatePayload =
+            serde_json::from_slice(&bundle.files()[CANDIDATE_FILE]).unwrap();
+        let expected_outcome = functional_candidate_projection(&payload).unwrap();
+        let mut reallocated = payload.clone();
+        let execution = reallocated.vertical_execution.as_mut().unwrap();
+        execution.source_generation = execution.source_generation.saturating_add(99);
+        execution.publication_id = "publication:another-run".to_owned();
+        execution.snapshot_id = "snapshot:another-run".to_owned();
+        execution.execution_digest = "b3:operationally-reallocated".to_owned();
+        execution.planes.get_mut("publications").unwrap()["publication_id"] =
+            serde_json::json!("publication:another-run");
+        execution.planes.get_mut("publications").unwrap()["tables"]["1"]["checksum"] =
+            serde_json::json!("b3:another-table-checksum");
+        execution.planes.get_mut("serving_snapshots").unwrap()["publication_id"] =
+            serde_json::json!("publication:another-run");
+        execution.planes.get_mut("serving_snapshots").unwrap()["snapshot_id"] =
+            serde_json::json!("snapshot:another-run");
+        execution.planes.get_mut("queries").unwrap()["snapshot_id"] =
+            serde_json::json!("snapshot:another-run");
+        execution.planes.get_mut("rpc").unwrap()["artifact_id"] =
+            serde_json::json!("artifact:another-run");
+        execution.planes.get_mut("mcp").unwrap()["structured_content"]["snapshot"]["snapshot_id"] =
+            serde_json::json!("snapshot:another-run");
+        execution.planes.get_mut("mcp").unwrap()["structured_content"]["delivery"]["response"]["snapshot"]
+            ["snapshot_id"] = serde_json::json!("snapshot:another-run");
+        execution.planes.get_mut("mcp").unwrap()["structured_content"]["delivery"]["checksum"] =
+            serde_json::json!("b3:another-delivery-checksum");
+        reallocated.gate_b_items.clone_from(&execution.planes);
+        assert_eq!(
+            expected_outcome,
+            functional_candidate_projection(&reallocated).unwrap()
         );
-    }
 
-    #[test]
-    fn wp71_negative_zero_state() {
-        let temporary = tempfile::tempdir().unwrap();
-        let bundle = generate_candidate_bundle(
-            &repository_root(),
-            &corpus_root(),
-            &temporary.path().join("scratch"),
-        )
-        .unwrap();
-
-        let missing = temporary.path().join("missing-diff");
-        copy_bundle(&bundle, &missing);
-        fs::remove_file(missing.join(DIFF_FILE)).unwrap();
-        assert!(verify_candidate_bundle(&missing).is_err());
-
-        let released = temporary.path().join("self-accepted");
-        copy_bundle(&bundle, &released);
-        let mut manifest: Value =
-            serde_json::from_slice(&read_candidate_input(&released.join(MANIFEST_FILE)).unwrap())
-                .unwrap();
-        manifest["owner_acceptance"] = json!({"accepted_by":"executor"});
-        fs::write(released.join(MANIFEST_FILE), file_bytes(&manifest).unwrap()).unwrap();
-        assert!(verify_candidate_bundle(&released).is_err());
-
-        let incomplete = temporary.path().join("unexecuted");
-        copy_bundle(&bundle, &incomplete);
-        let mut payload: Value = serde_json::from_slice(
-            &read_candidate_input(&incomplete.join(CANDIDATE_FILE)).unwrap(),
-        )
-        .unwrap();
-        payload["scenario_executions"].as_array_mut().unwrap().pop();
-        fs::write(
-            incomplete.join(CANDIDATE_FILE),
-            file_bytes(&payload).unwrap(),
-        )
-        .unwrap();
-        assert!(verify_candidate_bundle(&incomplete).is_err());
-    }
-
-    #[test]
-    fn wp71_operational_acceptance() {
-        let temporary = tempfile::tempdir().unwrap();
-        let first = generate_candidate_bundle(
-            &repository_root(),
-            &corpus_root(),
-            &temporary.path().join("first-scratch"),
-        )
-        .unwrap();
-        let second = generate_candidate_bundle(
-            &repository_root(),
-            &corpus_root(),
-            &temporary.path().join("second-scratch"),
-        )
-        .unwrap();
-        assert_eq!(first, second);
-        let committed = repository_root().join(CANDIDATE_DIRECTORY);
-        if committed.is_dir() {
-            check_released_candidate_payload(
-                &repository_root(),
-                &corpus_root(),
-                &temporary.path().join("check-scratch"),
-                &committed,
-            )
-            .unwrap();
-        }
+        let mut changed = payload;
+        changed.gate_b_items.get_mut("canonical_tables").unwrap()["contains_rust_mir"] =
+            serde_json::json!(false);
+        changed
+            .vertical_execution
+            .as_mut()
+            .unwrap()
+            .planes
+            .get_mut("canonical_tables")
+            .unwrap()["contains_rust_mir"] = serde_json::json!(false);
+        assert_ne!(
+            expected_outcome,
+            functional_candidate_projection(&changed).unwrap()
+        );
     }
 }

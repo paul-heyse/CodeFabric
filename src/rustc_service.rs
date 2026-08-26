@@ -187,7 +187,7 @@ pub struct AcceptedRustcCompilation {
 #[derive(Clone, Debug)]
 struct ActiveRun {
     compilation_unit_id: String,
-    commands: mpsc::Sender<Result<ExtractorCommand, Status>>,
+    commands: Option<mpsc::Sender<Result<ExtractorCommand, Status>>>,
     cancelled: bool,
     terminal_state: Option<ProviderRunState>,
 }
@@ -619,7 +619,7 @@ impl RustcObservationService {
                 None
             } else {
                 run.cancelled = true;
-                Some(run.commands.clone())
+                run.commands.clone()
             }
         };
         if let Some(sender) = command_sender {
@@ -652,6 +652,7 @@ impl RustcObservationService {
             .get_mut(&self.admission.provider_run_id)
         {
             run.terminal_state = Some(state);
+            run.commands.take();
         }
     }
 
@@ -704,7 +705,7 @@ impl RustcObservationService {
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(ActiveRun {
                         compilation_unit_id: begin.compilation_unit_id.clone(),
-                        commands: output.clone(),
+                        commands: Some(output.clone()),
                         cancelled: false,
                         terminal_state: None,
                     });
@@ -1151,7 +1152,7 @@ mod tests {
             admission.provider_run_id.clone(),
             ActiveRun {
                 compilation_unit_id: begin.compilation_unit_id.clone(),
-                commands,
+                commands: Some(commands),
                 cancelled: false,
                 terminal_state: None,
             },

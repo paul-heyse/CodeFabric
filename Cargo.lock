@@ -1184,6 +1184,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-cast",
+ "arrow-ipc",
  "arrow-ord",
  "arrow-row",
  "arrow-schema",

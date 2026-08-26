@@ -1928,14 +1928,15 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::Duration;
 
     use arrow_array::builder::{BinaryBuilder, FixedSizeBinaryBuilder};
     use arrow_array::{
-        BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array, ListArray, StringArray,
-        TimestampMicrosecondArray, UInt64Array, new_null_array,
+        Array, BinaryArray, BooleanArray, FixedSizeBinaryArray, Float64Array, Int16Array,
+        Int32Array, Int64Array, ListArray, StringArray, TimestampMicrosecondArray, UInt64Array,
+        new_null_array,
     };
     use arrow_buffer::OffsetBuffer;
     use arrow_schema::TimeUnit;
@@ -1949,17 +1950,21 @@ mod tests {
 
     use super::*;
     use crate::continuous::{ContinuousWorkspaceConfig, ContinuousWorkspaceEngine};
+    use crate::core_facts::CoreFactEngine;
     use crate::daemon::{
         AdminCommand, DaemonConfig, ReloadableConfig, StaticConfig, administer,
         serve_with_query_backend, wait_for_discovery,
     };
-    use crate::fabric::SnapshotOverlayProviderFactory as _;
+    use crate::fabric::{SnapshotOverlayProviderFactory as _, batch_checksum};
     use crate::fact_ingest::{EntityRow, FactScope, ValidatedFactBatch, encode_entities};
     use crate::git_state::{GitCandidatePlanner, GitStateObservations, GixGitStateAdapter};
+    use crate::golden_corpus::{
+        RELEASED_CORPUS_DIRECTORY, ScenarioDefinition, ScenarioTerminal, load_scenarios,
+    };
     use crate::identity::{IdentityDomain, encode_public_id};
     use crate::lifecycle::{
-        LifecycleConfig, OverlayFlushPolicy, UpdateWaveScheduler, WatchHint, WatchHintBatch,
-        WatchHintKind, prove_serving_rebuild_equivalence,
+        LifecycleConfig, OverlayFlushPolicy, UpdateWaveScheduler, WatchHintBatch,
+        prove_serving_rebuild_equivalence,
     };
     use crate::operational_store::{OperationalStore, OperationalStoreError};
     use crate::query_service::{
@@ -2053,6 +2058,15 @@ mod tests {
         source_generation: u64,
         inventory_digest: String,
     ) -> ServingSnapshotManifestBody {
+        snapshot_body_for_context(workspace_id, CONTEXT, source_generation, inventory_digest)
+    }
+
+    fn snapshot_body_for_context(
+        workspace_id: [u8; 16],
+        analysis_context_id: [u8; 16],
+        source_generation: u64,
+        inventory_digest: String,
+    ) -> ServingSnapshotManifestBody {
         ServingSnapshotManifestBody {
             manifest_version: "1.0".into(),
             workspace_id: encode_public_id(IdentityDomain::Workspace, None, workspace_id).unwrap(),
@@ -2076,7 +2090,7 @@ mod tests {
                 context_set_id: encode_public_id(
                     IdentityDomain::ContextSet,
                     None,
-                    crate::identity::context_set_identity(workspace_id, &[CONTEXT])
+                    crate::identity::context_set_identity(workspace_id, &[analysis_context_id])
                         .unwrap()
                         .id,
                 )
@@ -2087,7 +2101,7 @@ mod tests {
                     analysis_context_id: encode_public_id(
                         IdentityDomain::AnalysisContext,
                         None,
-                        CONTEXT,
+                        analysis_context_id,
                     )
                     .unwrap(),
                     context_manifest_digest: digest(9),
@@ -2277,33 +2291,214 @@ mod tests {
         Arc::new(ServingSnapshotCandidate::build(body, catalog, &[]).unwrap())
     }
 
-    fn candidate_from_effective_batches(
-        publication: [u8; 16],
-        workspace_id: [u8; 16],
+    fn id16_value(batch: &RecordBatch, column: &str, row: usize) -> [u8; 16] {
+        let values = batch.column_by_name(column).unwrap();
+        assert!(!values.is_null(row), "{column} cannot be null");
+        let bytes = values
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .map_or_else(
+                || {
+                    values
+                        .as_any()
+                        .downcast_ref::<BinaryArray>()
+                        .unwrap()
+                        .value(row)
+                },
+                |array| array.value(row),
+            );
+        bytes.try_into().unwrap()
+    }
+
+    fn overlay_source_generation(overlay: &crate::fabric::ConsolidatedOverlay) -> u64 {
+        let mut observed = None;
+        for batch in overlay
+            .tables()
+            .flat_map(|table| table.replacement_batches())
+            .filter(|batch| batch.num_rows() > 0)
+        {
+            let generations = batch
+                .column_by_name("source_generation")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            for row in 0..generations.len() {
+                let generation = u64::try_from(generations.value(row)).unwrap();
+                if let Some(prior) = observed {
+                    assert_eq!(prior, generation);
+                }
+                observed = Some(generation);
+            }
+        }
+        observed.expect("consolidated overlay has no effective rows")
+    }
+
+    #[allow(clippy::too_many_arguments)] // The helper receives the complete independent publication identity and payload.
+    #[allow(clippy::too_many_lines)] // One test publication keeps Delta commit, reopen, and serving activation ordered.
+    async fn published_candidate_from_overlay(
+        source_root: &Path,
+        state_root: &Path,
+        workspace_nonce: [u8; 16],
+        publication_id: [u8; 16],
         source_generation: u64,
         inventory_digest: [u8; 32],
-        batches: Vec<(i16, RecordBatch)>,
-    ) -> Arc<ServingSnapshotCandidate> {
-        let catalog = Arc::new(SnapshotProviderCatalog::from_batches_for_snapshot_tests(
-            publication,
-            workspace_id,
-            batches,
-            [0; 32],
-            i64::try_from(source_generation).unwrap(),
-            vec![CONTEXT],
-        ));
-        Arc::new(
+        overlay: &crate::fabric::ConsolidatedOverlay,
+        semantic_outputs: &[crate::fact_ingest::CanonicalIngestOutput],
+    ) -> ComparisonSessionFixture {
+        let mut store = OperationalStore::open(&state_root.join("operational.sqlite")).unwrap();
+        let record = WorkspaceRegistry::new(&mut store)
+            .add_directory_fixture(source_root, workspace_nonce)
+            .unwrap();
+        assert_eq!(record.workspace_id, overlay.workspace_id());
+        let analysis_context_id = overlay.analysis_context_id();
+        let mut fabric = super::super::bootstrap_workspace(&state_root.join("delta"), &record)
+            .await
+            .unwrap();
+        let generation = i64::try_from(source_generation).unwrap();
+        for table in overlay.tables() {
+            for batch in table.replacement_batches() {
+                if batch.num_rows() == 0 || batch.schema().index_of("owner_id").is_err() {
+                    continue;
+                }
+                let owners = (0..batch.num_rows())
+                    .map(|row| id16_value(batch, "owner_id", row))
+                    .collect::<BTreeSet<_>>();
+                for owner_id in owners {
+                    let mask = BooleanArray::from(
+                        (0..batch.num_rows())
+                            .map(|row| id16_value(batch, "owner_id", row) == owner_id)
+                            .collect::<Vec<_>>(),
+                    );
+                    let owner_batch =
+                        arrow_select::filter::filter_record_batch(batch, &mask).unwrap();
+                    let scope = FactScope {
+                        workspace_id: id16_value(&owner_batch, "workspace_id", 0),
+                        analysis_context_id: id16_value(&owner_batch, "analysis_context_id", 0),
+                        source_generation: owner_batch
+                            .column_by_name("source_generation")
+                            .unwrap()
+                            .as_any()
+                            .downcast_ref::<Int64Array>()
+                            .unwrap()
+                            .value(0),
+                        owner_id,
+                    };
+                    assert_eq!(scope.workspace_id, record.workspace_id);
+                    assert_eq!(scope.analysis_context_id, analysis_context_id);
+                    assert_eq!(scope.source_generation, generation);
+                    let validated =
+                        ValidatedFactBatch::validate(table.table_code(), owner_batch, scope)
+                            .unwrap();
+                    let mut operation = crate::identity::semantic_fingerprint(
+                        crate::identity::SemanticFingerprintDomain::PublicationOperation,
+                    );
+                    operation.update(&publication_id);
+                    operation.update(&table.table_code().to_be_bytes());
+                    operation.update(&scope.owner_id);
+                    let request = super::super::OwnerMutationRequest {
+                        scope: scope.batch_scope(),
+                        publication_id,
+                        operation_id: operation.finalize_id16(),
+                        table_code: table.table_code(),
+                        owner_ids: vec![scope.owner_id],
+                        expected_predecessor: fabric.table(table.table_code()).unwrap().version(),
+                    };
+                    fabric
+                        .replace_owner_rows(&mut store, &request, &validated)
+                        .await
+                        .unwrap();
+                }
+            }
+        }
+        let mut semantic_digest_input = Vec::new();
+        for canonical in semantic_outputs {
+            for (&table_code, validated) in &canonical.batches {
+                if validated.num_rows() == 0 {
+                    continue;
+                }
+                let scope = validated.scope();
+                assert_eq!(scope.workspace_id, record.workspace_id);
+                assert_eq!(scope.analysis_context_id, analysis_context_id);
+                assert_eq!(scope.source_generation, generation);
+                semantic_digest_input.extend_from_slice(
+                    &batch_checksum(validated.batch()).expect("semantic batch checksum"),
+                );
+                let mut operation = crate::identity::semantic_fingerprint(
+                    crate::identity::SemanticFingerprintDomain::PublicationOperation,
+                );
+                operation.update(&publication_id);
+                operation.update(&table_code.to_be_bytes());
+                operation.update(&scope.owner_id);
+                let request = super::super::OwnerMutationRequest {
+                    scope: scope.batch_scope(),
+                    publication_id,
+                    operation_id: operation.finalize_id16(),
+                    table_code,
+                    owner_ids: vec![scope.owner_id],
+                    expected_predecessor: fabric.table(table_code).unwrap().version(),
+                };
+                fabric
+                    .replace_owner_rows(&mut store, &request, validated)
+                    .await
+                    .unwrap();
+            }
+        }
+        let contexts = vec![analysis_context_id];
+        let request = super::super::PublicationRequest {
+            operation_id: publication_id.map(|byte| byte ^ 0x55),
+            pins: super::super::PublicationPins {
+                publication_id,
+                workspace_id: record.workspace_id,
+                repository_id: None,
+                worktree_id: None,
+                source_generation: generation,
+                source_inventory_digest: inventory_digest,
+                analysis_context_set_id: crate::identity::context_set_identity(
+                    record.workspace_id,
+                    &contexts,
+                )
+                .unwrap()
+                .id,
+                analysis_context_ids: contexts,
+                git_state_fingerprint: None,
+                inclusion_policy_fingerprint: [0x31; 32],
+                base_fact_digest: overlay.checksum(),
+                derived_fact_digest: (!semantic_digest_input.is_empty())
+                    .then(|| crate::integrity::digest_bytes(&semantic_digest_input)),
+                ontology_version: "1.3".into(),
+                schema_bundle_version: "1.0.0".into(),
+                provider_bundle_version: "1.0.0".into(),
+                derivation_bundle_version: "1.0.0".into(),
+                toolchain_bundle_version: "1.0.0".into(),
+            },
+            expected_pointer: None,
+            expected_publication_table_version: fabric.table(5).unwrap().version(),
+            expected_manifest_table_version: fabric.table(6).unwrap().version(),
+            expected_pointer_table_version: fabric.table(7).unwrap().version(),
+            started_at_micros: 1_000,
+            completed_at_micros: 1_500,
+        };
+        let publication = fabric.publish(&mut store, &request, &[]).await.unwrap();
+        let providers = Arc::new(
+            SnapshotProviderCatalog::build(&publication, &super::super::EmptySnapshotOverlay)
+                .await
+                .unwrap(),
+        );
+        let candidate = Arc::new(
             ServingSnapshotCandidate::build(
-                snapshot_body_for(
-                    workspace_id,
+                snapshot_body_for_context(
+                    record.workspace_id,
+                    analysis_context_id,
                     source_generation,
                     crate::integrity::frame_digest(inventory_digest),
                 ),
-                catalog,
+                providers,
                 &[],
             )
             .unwrap(),
-        )
+        );
+        comparison_session(candidate)
     }
 
     fn operational_store() -> (TempDir, OperationalStore, SourceImageStore) {
@@ -2443,37 +2638,6 @@ mod tests {
         }
     }
 
-    async fn materialize_effective_batches(
-        overlay: &crate::fabric::ConsolidatedOverlay,
-    ) -> Vec<(i16, RecordBatch)> {
-        let mut materialized = vec![(11, generated_batch(11, 1))];
-        for table_code in std::iter::once(10).chain(
-            serving_projection_specs()
-                .iter()
-                .map(|projection| projection.source_table_code),
-        ) {
-            let spec = table_spec(table_code).unwrap();
-            let empty = RecordBatch::new_empty(Arc::clone(&spec.arrow_schema));
-            let base: Arc<dyn TableProvider> = Arc::new(
-                MemTable::try_new(Arc::clone(&spec.arrow_schema), vec![vec![empty]]).unwrap(),
-            );
-            let effective = overlay.wrap(spec, base).unwrap();
-            let batches = SessionContext::new()
-                .read_table(effective)
-                .unwrap()
-                .collect()
-                .await
-                .unwrap();
-            let batch = if batches.is_empty() {
-                RecordBatch::new_empty(Arc::clone(&spec.arrow_schema))
-            } else {
-                arrow_select::concat::concat_batches(&spec.arrow_schema, &batches).unwrap()
-            };
-            materialized.push((table_code, batch));
-        }
-        materialized
-    }
-
     fn wp72_lifecycle_config() -> LifecycleConfig {
         LifecycleConfig {
             debounce_timeout: Duration::from_millis(20),
@@ -2499,6 +2663,9 @@ mod tests {
         root: &std::path::Path,
         state_root: &std::path::Path,
         workspace_nonce: [u8; 16],
+        analysis_context_id: [u8; 16],
+        semantic_capabilities_required: bool,
+        lifecycle: LifecycleConfig,
     ) -> (
         OperationalStore,
         ContinuousWorkspaceEngine<GixGitStateAdapter>,
@@ -2509,7 +2676,6 @@ mod tests {
             .add_directory_fixture(root, workspace_nonce)
             .unwrap()
             .workspace_id;
-        let lifecycle = wp72_lifecycle_config();
         let scheduler = UpdateWaveScheduler::new(workspace_id, root, 0, 0, 0, lifecycle).unwrap();
         let source_images = SourceImageStore::open(
             &state_root.join("source-blobs"),
@@ -2525,7 +2691,7 @@ mod tests {
             source_images,
             GitCandidatePlanner::without_cache(GixGitStateAdapter),
             ContinuousWorkspaceConfig {
-                analysis_context_id: CONTEXT,
+                analysis_context_id,
                 registered_git_identity: None,
                 git_observations: GitStateObservations {
                     inclusion_policy_fingerprint: [0x31; 32],
@@ -2534,7 +2700,7 @@ mod tests {
                 },
                 prior_git_vector: None,
                 overlay_memory_limit_bytes: 64 * 1024 * 1024,
-                semantic_capabilities_required: false,
+                semantic_capabilities_required,
             },
         );
         (store, engine, workspace_id)
@@ -2545,10 +2711,18 @@ mod tests {
         workspace_nonce: [u8; 16],
         incremental: &ContinuousWorkspaceEngine<GixGitStateAdapter>,
         stage: u8,
+        analysis_context_id: [u8; 16],
+        lifecycle: LifecycleConfig,
     ) {
         let clean_state = tempdir().unwrap();
-        let (mut clean_store, mut clean, clean_workspace_id) =
-            wp72_engine(root, clean_state.path(), workspace_nonce);
+        let (mut clean_store, mut clean, clean_workspace_id) = wp72_engine(
+            root,
+            clean_state.path(),
+            workspace_nonce,
+            analysis_context_id,
+            false,
+            lifecycle,
+        );
         let rebuilt = clean
             .rebuild_from_zero(&mut clean_store)
             .unwrap()
@@ -2559,25 +2733,153 @@ mod tests {
             incremental.current_inventory_digest(),
             clean.current_inventory_digest()
         );
-        let incremental_candidate = candidate_from_effective_batches(
+        // Provider protocols use Unix-domain sockets, whose pathname limit is much lower than
+        // ordinary filesystem paths on macOS. Keep these otherwise independent roots short.
+        let incremental_publication = tempfile::Builder::new()
+            .prefix("cf-wp5-i-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let clean_publication = tempfile::Builder::new()
+            .prefix("cf-wp5-c-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let run_semantic_providers =
+            std::env::var_os("CODEFABRIC_FULL_REBUILD_PROVIDERS").is_some_and(|value| value == "1");
+        let incremental_semantics = if run_semantic_providers {
+            real_semantic_outputs(
+                root,
+                &incremental_publication.path().join("providers"),
+                incremental.scheduler().workspace_id(),
+                analysis_context_id,
+                incremental.scheduler().current_source_generation(),
+            )
+            .await
+        } else {
+            Vec::new()
+        };
+        let clean_semantics = if run_semantic_providers {
+            real_semantic_outputs(
+                root,
+                &clean_publication.path().join("providers"),
+                clean_workspace_id,
+                analysis_context_id,
+                rebuilt.wave.source_generation,
+            )
+            .await
+        } else {
+            Vec::new()
+        };
+        if run_semantic_providers {
+            assert!(!incremental_semantics.is_empty());
+            assert!(!clean_semantics.is_empty());
+        }
+        let incremental_session = published_candidate_from_overlay(
+            root,
+            incremental_publication.path(),
+            workspace_nonce,
             [stage; 16],
-            clean_workspace_id,
             incremental.scheduler().current_source_generation(),
             incremental.current_inventory_digest(),
-            materialize_effective_batches(&incremental_overlay).await,
-        );
-        let rebuilt_candidate = candidate_from_effective_batches(
+            &incremental_overlay,
+            &incremental_semantics,
+        )
+        .await;
+        let rebuilt_session = published_candidate_from_overlay(
+            root,
+            clean_publication.path(),
+            workspace_nonce,
             [stage | 0x80; 16],
-            clean_workspace_id,
             rebuilt.wave.source_generation,
             clean.current_inventory_digest(),
-            materialize_effective_batches(&rebuilt.overlay).await,
-        );
-        let incremental_session = comparison_session(incremental_candidate);
-        let rebuilt_session = comparison_session(rebuilt_candidate);
+            &rebuilt.overlay,
+            &clean_semantics,
+        )
+        .await;
         prove_serving_rebuild_equivalence(&incremental_session.session, &rebuilt_session.session)
             .await
             .unwrap();
+    }
+
+    async fn real_semantic_outputs(
+        root: &Path,
+        state_root: &Path,
+        workspace_id: [u8; 16],
+        analysis_context_id: [u8; 16],
+        source_generation: u64,
+    ) -> Vec<crate::fact_ingest::CanonicalIngestOutput> {
+        fs::create_dir_all(state_root).unwrap();
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let pyrefly = crate::gate_b_candidate::vertical::run_pyrefly(
+            repository_root,
+            state_root,
+            workspace_id,
+            analysis_context_id,
+            source_generation,
+            &root.join("python/golden_pkg/core.py"),
+            &root.join("malformed/broken.py"),
+        )
+        .await
+        .unwrap();
+        let rustc = crate::gate_b_candidate::vertical::run_rustc(
+            repository_root,
+            state_root,
+            root,
+            workspace_id,
+            analysis_context_id,
+            source_generation,
+        )
+        .await
+        .unwrap();
+        let engine = CoreFactEngine::default();
+        let mut outputs = engine.reconcile_pyrefly_run(&pyrefly).unwrap();
+        outputs.extend(engine.reconcile_rustc_compilation(&rustc).unwrap());
+        outputs
+    }
+
+    fn withdrawn_semantic_gaps(
+        workspace_id: [u8; 16],
+        analysis_context_id: [u8; 16],
+        source_generation: i64,
+    ) -> Vec<crate::fact_ingest::CanonicalIngestOutput> {
+        let engine = CoreFactEngine::default();
+        [
+            (
+                "COMPUTED_TYPES",
+                crate::registries::Language::Python,
+                crate::registries::OwnerKind::Module,
+            ),
+            (
+                "RUST_MIR",
+                crate::registries::Language::Rust,
+                crate::registries::OwnerKind::CrateOrBuildUnit,
+            ),
+        ]
+        .into_iter()
+        .map(|(capability, language, owner_kind)| {
+            let output = engine
+                .reconcile_provider_unavailable(
+                    workspace_id,
+                    analysis_context_id,
+                    source_generation,
+                    capability,
+                    language,
+                    owner_kind,
+                )
+                .unwrap();
+            let states = output.batches[&9]
+                .batch()
+                .column_by_name("owner_capability_state_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int16Array>()
+                .unwrap();
+            assert_eq!(
+                states.value(0),
+                crate::registries::OwnerCapabilityState::UnavailableProvider as i16
+            );
+            output
+        })
+        .collect()
     }
 
     #[tokio::test]
@@ -2599,158 +2901,430 @@ mod tests {
         }
     }
 
+    fn copy_scenario_workspace(source: &Path, destination: &Path) {
+        fs::create_dir(destination).unwrap();
+        let mut entries = fs::read_dir(source)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in entries {
+            let kind = entry.file_type().unwrap();
+            assert!(
+                !kind.is_symlink(),
+                "released scenario inputs cannot be symlinks"
+            );
+            let target = destination.join(entry.file_name());
+            if kind.is_dir() {
+                copy_scenario_workspace(&entry.path(), &target);
+            } else {
+                assert!(kind.is_file());
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_lines)] // The closed edit vocabulary stays visibly exhaustive against the released corpus.
+    fn apply_released_scenario_edits(root: &Path, definition: &ScenarioDefinition) -> [u8; 16] {
+        let analysis_context_id = CONTEXT;
+        for edit in &definition.edits {
+            match edit.as_str() {
+                "replace-python-body" => fs::write(
+                    root.join("python/golden_pkg/core.py"),
+                    b"def normalized_total(values: list[int]) -> int:\n    return sum(values) + 1\n",
+                )
+                .unwrap(),
+                "add-python-import" => fs::write(
+                    root.join("python/golden_pkg/core.py"),
+                    b"from collections import deque\n\ndef normalized_total(values: list[int]) -> int:\n    return sum(deque(values))\n",
+                )
+                .unwrap(),
+                "break-python" => fs::write(
+                    root.join("python/golden_pkg/core.py"),
+                    b"def normalized_total(:\n    pass\n",
+                )
+                .unwrap(),
+                "repair-python" => fs::write(
+                    root.join("python/golden_pkg/core.py"),
+                    b"def normalized_total(values: list[int]) -> int:\n    return sum(sorted(values))\n",
+                )
+                .unwrap(),
+                "replace-rust-body" => fs::write(
+                    root.join("rust/src/lib.rs"),
+                    b"pub fn normalized_total(values: Vec<i64>) -> i64 { values.into_iter().sum::<i64>() + 1 }\n",
+                )
+                .unwrap(),
+                "change-rust-signature" => fs::write(
+                    root.join("rust/src/lib.rs"),
+                    b"pub fn normalized_total(values: &[i64]) -> i64 { values.iter().sum() }\n",
+                )
+                .unwrap(),
+                "break-rust" => fs::write(
+                    root.join("rust/src/lib.rs"),
+                    b"pub fn normalized_total( -> i64 { 0 }\n",
+                )
+                .unwrap(),
+                "repair-rust" => fs::write(
+                    root.join("rust/src/lib.rs"),
+                    b"pub fn normalized_total(values: Vec<i64>) -> i64 { values.into_iter().sum() }\n",
+                )
+                .unwrap(),
+                "withdraw-capability" | "rescan" | "restart-daemon" => {}
+                "rename-and-case-change" => {
+                    let temporary = root.join("rust/src/lib.rename-tmp");
+                    fs::rename(root.join("rust/src/lib.rs"), &temporary).unwrap();
+                    fs::rename(temporary, root.join("rust/src/Lib.rs")).unwrap();
+                }
+                "multi-file-save" => {
+                    fs::write(
+                        root.join("python/golden_pkg/core.py"),
+                        b"def normalized_total(values: list[int]) -> int:\n    return sum(values)\n",
+                    )
+                    .unwrap();
+                    fs::write(
+                        root.join("rust/src/lib.rs"),
+                        b"pub fn normalized_total(values: Vec<i64>) -> i64 { values.into_iter().sum() }\n",
+                    )
+                    .unwrap();
+                }
+                "change-context" => {
+                    fs::write(
+                        root.join(".codefabric/contexts/default.yaml"),
+                        b"context_id: golden-default\nlanguages: [python, rust]\nprofile: CORE_SOURCE_V1\nrevision: 2\n",
+                    )
+                    .unwrap();
+                }
+                "change-generated-source" => fs::write(
+                    root.join("generated/bindings.py"),
+                    b"GENERATED_PROTOCOL_VERSION = 2\n",
+                )
+                .unwrap(),
+                "drop-watch-hint" => fs::write(
+                    root.join("python/golden_pkg/core.py"),
+                    b"def normalized_total(values: list[int]) -> int:\n    return sum(values) + 11\n",
+                )
+                .unwrap(),
+                "flush-overlay" => fs::write(
+                    root.join("python/golden_pkg/core.py"),
+                    b"def normalized_total(values: list[int]) -> int:\n    return sum(values) + 12\n",
+                )
+                .unwrap(),
+                "redact-source" => fs::remove_file(root.join("ffi/boundary.py")).unwrap(),
+                other => panic!("released scenario contains unimplemented edit {other}"),
+            }
+        }
+        analysis_context_id
+    }
+
+    fn rebuild_lifecycle(definition: &ScenarioDefinition) -> LifecycleConfig {
+        let mut lifecycle = wp72_lifecycle_config();
+        if definition.edits.iter().any(|edit| edit == "flush-overlay") {
+            lifecycle.overlay_flush_policy.maximum_rows = 1;
+        }
+        lifecycle
+    }
+
     #[tokio::test]
-    #[allow(clippy::too_many_lines)] // One ordered corpus proves true rebuild convergence after every terminal state.
-    async fn wp72_behavioral_acceptance() {
+    #[allow(clippy::too_many_lines)] // One closed loop composes all released scenarios with true zero-state rebuilds.
+    async fn full_golden_scenario_clean_rebuild_equivalence() {
+        let corpus_root = Path::new(env!("CARGO_MANIFEST_DIR")).join(RELEASED_CORPUS_DIRECTORY);
+        let definitions = load_scenarios(&corpus_root).unwrap();
+        assert_eq!(definitions.len(), 16);
+        let requested_scenario = std::env::var("CODEFABRIC_REBUILD_SCENARIO").ok();
+        let mut executed_scenarios = 0_usize;
+        for (ordinal, definition) in definitions.iter().enumerate() {
+            if requested_scenario
+                .as_deref()
+                .is_some_and(|requested| requested != definition.scenario_id)
+            {
+                continue;
+            }
+            executed_scenarios = executed_scenarios.saturating_add(1);
+            let fixture = tempdir().unwrap();
+            let root = fixture.path().join("workspace");
+            let state_root = fixture.path().join("incremental-state");
+            copy_scenario_workspace(&corpus_root.join("workspace"), &root);
+            fs::create_dir(&state_root).unwrap();
+            let lifecycle = rebuild_lifecycle(definition);
+            let workspace_nonce = [0x72; 16];
+            let (mut store, mut engine, workspace_id) = wp72_engine(
+                &root,
+                &state_root,
+                workspace_nonce,
+                CONTEXT,
+                false,
+                lifecycle,
+            );
+            let initial = engine
+                .process_batch(
+                    &mut store,
+                    WatchHintBatch {
+                        hints: Vec::new(),
+                        rescan_required: true,
+                    },
+                    &BTreeMap::new(),
+                )
+                .unwrap()
+                .expect("released scenario bootstrap must publish");
+
+            let analysis_context_id = apply_released_scenario_edits(&root, definition);
+            if analysis_context_id != CONTEXT {
+                engine.replace_analysis_context(analysis_context_id);
+            }
+            let withdrawal = definition
+                .edits
+                .iter()
+                .any(|edit| edit == "withdraw-capability");
+            if withdrawal {
+                engine.set_semantic_capabilities_required(true);
+            }
+            if definition.edits.iter().any(|edit| edit == "restart-daemon") {
+                let recovery = crate::lifecycle::recover_workspace(
+                    &store.reader_factory().open().unwrap(),
+                    workspace_id,
+                )
+                .unwrap();
+                let mut scheduler = UpdateWaveScheduler::new(
+                    workspace_id,
+                    &root,
+                    recovery.source_generation,
+                    recovery.event_watermark,
+                    recovery.event_watermark,
+                    lifecycle,
+                )
+                .unwrap();
+                scheduler.restore_recovery(&recovery).unwrap();
+                let source_images = SourceImageStore::open(
+                    &state_root.join("source-blobs"),
+                    SourceCapturePolicy {
+                        maximum_bytes: lifecycle.maximum_capture_bytes,
+                        stable_read_retries: lifecycle.stable_read_retry_count,
+                        lease_ttl: lifecycle.source_blob_lease_ttl,
+                    },
+                )
+                .unwrap();
+                engine = ContinuousWorkspaceEngine::new(
+                    scheduler,
+                    source_images,
+                    GitCandidatePlanner::without_cache(GixGitStateAdapter),
+                    ContinuousWorkspaceConfig {
+                        analysis_context_id,
+                        registered_git_identity: None,
+                        git_observations: GitStateObservations {
+                            inclusion_policy_fingerprint: [0x31; 32],
+                            attributes_fingerprint: [0x32; 32],
+                            worktree_inventory_digest: engine.current_inventory_digest(),
+                        },
+                        prior_git_vector: None,
+                        overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                        semantic_capabilities_required: withdrawal,
+                    },
+                );
+            }
+
+            let terminal = if definition.edits.is_empty() {
+                Some(initial)
+            } else {
+                engine
+                    .process_batch(
+                        &mut store,
+                        WatchHintBatch {
+                            hints: Vec::new(),
+                            rescan_required: true,
+                        },
+                        &BTreeMap::new(),
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "scenario {} terminal wave failed: {error}",
+                            definition.scenario_id
+                        )
+                    })
+            };
+            if withdrawal {
+                assert!(terminal.is_none());
+                assert_eq!(definition.expected_terminal, ScenarioTerminal::Partial);
+                assert_eq!(
+                    engine.scheduler().freshness().state(),
+                    crate::lifecycle::FreshnessState::PotentiallyStale
+                );
+                let clean_state = tempdir().unwrap();
+                let (mut clean_store, mut clean, clean_workspace_id) = wp72_engine(
+                    &root,
+                    clean_state.path(),
+                    workspace_nonce,
+                    analysis_context_id,
+                    true,
+                    lifecycle,
+                );
+                assert_eq!(workspace_id, clean_workspace_id);
+                assert!(clean.rebuild_from_zero(&mut clean_store).unwrap().is_none());
+                assert_eq!(
+                    clean.scheduler().freshness().state(),
+                    crate::lifecycle::FreshnessState::PotentiallyStale
+                );
+                assert_eq!(
+                    engine.current_inventory_digest(),
+                    clean.current_inventory_digest()
+                );
+                let clean_gap_state = tempdir().unwrap();
+                let (mut clean_gap_store, mut clean_gap, clean_gap_workspace_id) = wp72_engine(
+                    &root,
+                    clean_gap_state.path(),
+                    workspace_nonce,
+                    analysis_context_id,
+                    false,
+                    lifecycle,
+                );
+                let rebuilt_gap = clean_gap
+                    .rebuild_from_zero(&mut clean_gap_store)
+                    .unwrap()
+                    .expect("withdrawal clean side publishes fast facts plus explicit gaps");
+                assert_eq!(workspace_id, clean_gap_workspace_id);
+                let incremental_overlay = engine.current_overlay().unwrap();
+                let source_generation = overlay_source_generation(&incremental_overlay);
+                let incremental_gaps = withdrawn_semantic_gaps(
+                    workspace_id,
+                    analysis_context_id,
+                    i64::try_from(source_generation).unwrap(),
+                );
+                let clean_gaps = withdrawn_semantic_gaps(
+                    clean_gap_workspace_id,
+                    analysis_context_id,
+                    i64::try_from(rebuilt_gap.wave.source_generation).unwrap(),
+                );
+                let incremental_publication = tempfile::Builder::new()
+                    .prefix("cf-wp5-wi-")
+                    .tempdir_in("/tmp")
+                    .unwrap();
+                let clean_publication = tempfile::Builder::new()
+                    .prefix("cf-wp5-wc-")
+                    .tempdir_in("/tmp")
+                    .unwrap();
+                let incremental_session = published_candidate_from_overlay(
+                    &root,
+                    incremental_publication.path(),
+                    workspace_nonce,
+                    [0x75; 16],
+                    source_generation,
+                    engine.current_inventory_digest(),
+                    &incremental_overlay,
+                    &incremental_gaps,
+                )
+                .await;
+                let clean_session = published_candidate_from_overlay(
+                    &root,
+                    clean_publication.path(),
+                    workspace_nonce,
+                    [0xf5; 16],
+                    rebuilt_gap.wave.source_generation,
+                    clean_gap.current_inventory_digest(),
+                    &rebuilt_gap.overlay,
+                    &clean_gaps,
+                )
+                .await;
+                prove_serving_rebuild_equivalence(
+                    &incremental_session.session,
+                    &clean_session.session,
+                )
+                .await
+                .unwrap();
+                continue;
+            }
+            let terminal = terminal.expect("current scenario must publish a terminal overlay");
+            assert_eq!(definition.expected_terminal, ScenarioTerminal::Current);
+            if definition.edits.iter().any(|edit| edit == "flush-overlay") {
+                assert!(terminal.flush_required);
+            }
+            assert_wp72_clean_rebuild(
+                &root,
+                workspace_nonce,
+                &engine,
+                u8::try_from(ordinal + 1).unwrap(),
+                analysis_context_id,
+                lifecycle,
+            )
+            .await;
+        }
+        assert_eq!(
+            executed_scenarios,
+            requested_scenario.as_ref().map_or(definitions.len(), |_| 1),
+            "requested clean-rebuild scenario is absent"
+        );
+    }
+
+    #[tokio::test]
+    async fn clean_rebuild_independence_contract() {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!(
+            "../../contracts/fixtures/rebuild-comparison-manifest-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(manifest["comparison_contract"], "AC-G-79");
+        assert_eq!(
+            manifest["independence_requirements"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+        assert_eq!(
+            manifest["excluded_operational_fields_authority"],
+            "contracts/comparison/comparison-ignore-registry.yaml"
+        );
         let fixture = tempdir().unwrap();
         let root = fixture.path().join("workspace");
-        let state_root = fixture.path().join("incremental-state");
-        fs::create_dir_all(root.join("generated")).unwrap();
-        fs::create_dir_all(&state_root).unwrap();
-        fs::write(root.join("a.py"), b"value = 1\n").unwrap();
-        fs::write(root.join("b.rs"), b"pub fn value() -> i32 { 1 }\n").unwrap();
-        fs::write(root.join("generated/bindings.py"), b"BOUND = 1\n").unwrap();
-        let workspace_nonce = [0x72; 16];
-        let (mut store, mut engine, workspace_id) =
-            wp72_engine(&root, &state_root, workspace_nonce);
-
-        engine
-            .process_batch(
-                &mut store,
-                WatchHintBatch {
-                    hints: Vec::new(),
-                    rescan_required: true,
-                },
-                &BTreeMap::new(),
-            )
-            .unwrap()
-            .expect("initial publication");
-        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 1).await;
-
-        fs::write(root.join("a.py"), b"def broken(:\n").unwrap();
-        engine
-            .process_batch(
-                &mut store,
-                WatchHintBatch {
-                    hints: vec![WatchHint {
-                        path_bytes: b"a.py".to_vec(),
-                        kind: WatchHintKind::CreateOrModify,
-                    }],
-                    rescan_required: false,
-                },
-                &BTreeMap::new(),
-            )
-            .unwrap()
-            .expect("parse-break publication");
-        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 2).await;
-
-        fs::write(root.join("a.py"), b"value = 2\n").unwrap();
-        fs::rename(root.join("b.rs"), root.join("renamed.rs")).unwrap();
-        fs::write(root.join("generated/bindings.py"), b"BOUND = 2\n").unwrap();
-        engine
-            .process_batch(
-                &mut store,
-                WatchHintBatch {
-                    hints: vec![
-                        WatchHint {
-                            path_bytes: b"a.py".to_vec(),
-                            kind: WatchHintKind::CreateOrModify,
-                        },
-                        WatchHint {
-                            path_bytes: b"b.rs".to_vec(),
-                            kind: WatchHintKind::RenameSource,
-                        },
-                        WatchHint {
-                            path_bytes: b"renamed.rs".to_vec(),
-                            kind: WatchHintKind::RenameTarget,
-                        },
-                        WatchHint {
-                            path_bytes: b"generated/bindings.py".to_vec(),
-                            kind: WatchHintKind::CreateOrModify,
-                        },
-                    ],
-                    rescan_required: true,
-                },
-                &BTreeMap::new(),
-            )
-            .unwrap()
-            .expect("repair/rename/burst publication");
-        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 3).await;
-
-        let recovery = crate::lifecycle::recover_workspace(
-            &store.reader_factory().open().unwrap(),
-            workspace_id,
-        )
-        .unwrap();
-        assert!(!recovery.restart_paths.is_empty());
-        let recovered_inventory_digest = engine.current_inventory_digest();
-        drop(engine);
+        let corpus_root = Path::new(env!("CARGO_MANIFEST_DIR")).join(RELEASED_CORPUS_DIRECTORY);
+        copy_scenario_workspace(&corpus_root.join("workspace"), &root);
+        let incremental_root = fixture.path().join("incremental");
+        let clean_root = fixture.path().join("clean");
+        fs::create_dir(&incremental_root).unwrap();
+        fs::create_dir(&clean_root).unwrap();
         let lifecycle = wp72_lifecycle_config();
-        let mut scheduler = UpdateWaveScheduler::new(
-            workspace_id,
+        let (mut left_store, mut left, left_workspace) = wp72_engine(
             &root,
-            recovery.source_generation,
-            recovery.event_watermark,
-            recovery.event_watermark,
+            &incremental_root,
+            [0x72; 16],
+            CONTEXT,
+            false,
             lifecycle,
-        )
-        .unwrap();
-        scheduler.restore_recovery(&recovery).unwrap();
-        let source_images = SourceImageStore::open(
-            &state_root.join("source-blobs"),
-            SourceCapturePolicy {
-                maximum_bytes: lifecycle.maximum_capture_bytes,
-                stable_read_retries: lifecycle.stable_read_retry_count,
-                lease_ttl: lifecycle.source_blob_lease_ttl,
-            },
-        )
-        .unwrap();
-        let mut engine = ContinuousWorkspaceEngine::new(
-            scheduler,
-            source_images,
-            GitCandidatePlanner::without_cache(GixGitStateAdapter),
-            ContinuousWorkspaceConfig {
-                analysis_context_id: CONTEXT,
-                registered_git_identity: None,
-                git_observations: GitStateObservations {
-                    inclusion_policy_fingerprint: [0x31; 32],
-                    attributes_fingerprint: [0x32; 32],
-                    worktree_inventory_digest: recovered_inventory_digest,
-                },
-                prior_git_vector: None,
-                overlay_memory_limit_bytes: 64 * 1024 * 1024,
-                semantic_capabilities_required: false,
-            },
         );
-        engine
-            .process_batch(
-                &mut store,
-                WatchHintBatch {
-                    hints: Vec::new(),
-                    rescan_required: false,
-                },
-                &BTreeMap::new(),
-            )
+        left.rebuild_from_zero(&mut left_store)
             .unwrap()
-            .expect("restart replay publication");
-        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 4).await;
+            .expect("incremental fixture publishes");
+        let (mut right_store, mut right, right_workspace) =
+            wp72_engine(&root, &clean_root, [0x72; 16], CONTEXT, false, lifecycle);
+        right
+            .rebuild_from_zero(&mut right_store)
+            .unwrap()
+            .expect("clean fixture publishes");
+        assert_eq!(left_workspace, right_workspace);
+        assert_ne!(incremental_root, clean_root);
+        assert_ne!(
+            incremental_root.join("operational.sqlite"),
+            clean_root.join("operational.sqlite")
+        );
+        assert!(incremental_root.join("source-blobs").is_dir());
+        assert!(clean_root.join("source-blobs").is_dir());
+        assert_ne!(left.current_inventory_digest(), [0; 32]);
+        assert_eq!(
+            left.current_inventory_digest(),
+            right.current_inventory_digest()
+        );
+        assert_wp72_clean_rebuild(&root, [0x72; 16], &left, 0x7f, CONTEXT, lifecycle).await;
+    }
 
-        fs::remove_file(root.join("a.py")).unwrap();
-        engine
-            .process_batch(
-                &mut store,
-                WatchHintBatch {
-                    hints: vec![WatchHint {
-                        path_bytes: b"a.py".to_vec(),
-                        kind: WatchHintKind::Remove,
-                    }],
-                    rescan_required: false,
-                },
-                &BTreeMap::new(),
-            )
-            .unwrap()
-            .expect("delete publication");
-        assert_wp72_clean_rebuild(&root, workspace_nonce, &engine, 5).await;
+    #[test]
+    fn clean_rebuild_operational_gate() {
+        let justfile = include_str!("../../justfile");
+        for oracle in [
+            "full_golden_scenario_clean_rebuild_equivalence",
+            "clean_rebuild_independence_contract",
+            "clean_rebuild_equivalence_adversarial",
+            "clean_rebuild_operational_gate",
+        ] {
+            assert!(justfile.contains(oracle));
+        }
+        assert!(justfile.contains("--no-tests=fail"));
     }
 
     fn workspace_record() -> WorkspaceRecord {

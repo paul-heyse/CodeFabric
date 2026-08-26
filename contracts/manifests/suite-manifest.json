@@ -812,7 +812,7 @@
       "artifact_id": "codefabric.manifests.fixture-oracles",
       "artifact_kind": "manifest",
       "authority_path": "contracts/manifests/fixture-oracles.json",
-      "canonical_digest": "b3:10990e4f3fbf50b2a0ede148dd76562853e91ad842f479a222de55b262d8f78d",
+      "canonical_digest": "b3:ee4f20abff231080c12f44d35a5a6642dc839d10ef259caa5638b4a00bb02da7",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -826,7 +826,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:858637af5dac883272aad7810e5a3210086e06cc9fbf5bda17e6ea0457d99886",
+      "source_digest": "b3:cae5885095364bb1826ad020fd24193db472e454f361e302f376e7567b1fb64a",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -2116,6 +2116,29 @@
         "profile": "aggregate-governance-bounded-v1"
       },
       "source_digest": "b3:00032baa22167b457b340be34e108bc911b7ea79181db014c8b554ec7cfda3bb",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:contracts-fixtures-rebuild-comparison-manifest-v1",
+      "artifact_kind": "evidence",
+      "authority_path": "contracts/fixtures/rebuild-comparison-manifest-v1.json",
+      "canonical_digest": "b3:6dfa64d25abdeddf768332ff728ef6060ef8b4060e890b0dfa48f11411de481c",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "contracts",
+      "projection_profile": "json-jcs-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:8767637b9cea14244f6f35b584fc176119e0bb29837151d2171ace0371e69b57",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"

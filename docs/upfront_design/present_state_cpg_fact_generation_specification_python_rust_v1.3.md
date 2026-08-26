@@ -16,6 +16,7 @@
 **Scope:** Generation of present-state facts and mechanically derived facts only
 **Out of scope:** History, runtime observation, environment inventory, test-impact analysis, refactor analysis, risk scoring, recommendations, and other evaluative conclusions
 **Audit integration (2026-08-20):** Plan-audit F-001; fixed provider wire packages, event mappings, registry shape, and shared credit authority.
+**Implementation clarification (2026-08-26):** Review-remediation WP05/WP06; separated provider-native run/module/compiler locators from application-owned canonical owner identity and normalized sandbox source locators at the DTO boundary.
 
 ---
 
@@ -535,6 +536,14 @@ Pyrefly SHALL be isolated behind a stable process/DTO boundary because:
 - its allocator/threading/crash behavior should be isolated;
 - response-local type indexes and internal IDs are not product identity.
 
+The application DTO SHALL identify a module with the admitted application-owned module ID/name,
+workspace, analysis context, source digest, and file identity. Pyrefly module digests, response
+indexes, query handles, provider-run IDs, and sandbox/lease paths remain observation evidence and
+correlation data; they SHALL NOT enter the canonical module-owner recipe. Any provider-rendered
+absolute path retained in an application DTO or cold payload SHALL be replaced at the sidecar
+boundary with the stable admitted source/module locator while preserving the provider-native
+diagnostic meaning.
+
 Recommended request groups:
 
 ```text
@@ -749,6 +758,14 @@ Anonymous entities use owner-relative normalized structural anchors. When source
 ### 13.4 Rust compiler identity
 
 Session-local `DefId`, `CrateNum`, MIR block/local ordinals, and pointer addresses SHALL not escape. The rustc adapter emits stable compiler keys where available and explicit canonical key components otherwise.
+
+The compiler protocol's `compilation_unit_id`, wrapper invocation digest, provider owner ID, and
+owner-content digest are run/evidence identities, not canonical fact identity. When no stronger
+compiler-stable key is available, a canonical MIR owner recipe SHALL use the admitted canonical
+package/target/crate identity plus the callable's application-owned semantic name and context.
+Sandbox-private target/output paths and the real-rustc executable path are normalized out of the
+invocation profile; the source input contributes its content digest rather than its temporary
+workspace spelling.
 
 ### 13.5 Context separation
 
@@ -4281,6 +4298,12 @@ Rules:
 - a newer generation supersedes the run; completed stale output is discarded;
 - protocol/schema/bundle mismatch fails before analysis.
 
+The `ModuleEnd` module digest and `RunTerminal` digest list close and authenticate provider
+evidence; neither is a canonical owner or fact-identity input. A module that returns bounded
+parse/type diagnostics without current semantic output SHALL emit an explicit non-current
+capability/completeness record with its governed reason and retained diagnostic payload. It
+SHALL NOT be represented as an empty successful semantic result.
+
 One sidecar process MAY host multiple read-only contexts if its negotiated memory profile permits, but it SHALL serialize context mutation and use bounded per-context analysis concurrency.
 ## AC-G-31 — rustc extractor protocol
 ### Decision
@@ -4393,6 +4416,12 @@ Acceptance rules:
     connection alone is never authorization.
 
 `compilation_unit_id` is canonical over workspace, Rust context, package, target, crate type, and compiler invocation profile. Session-local `CrateNum` and `DefId` never become persistent IDs.
+
+Here “canonical” means deterministic protocol correlation for the admitted compilation profile,
+not canonical CPG owner/fact identity. Reconciliation derives the latter from the stable
+application target/callable recipe; compiler transaction IDs and provider owner-content digests
+remain evidence. Equivalent source compiled in independent sandbox/output roots SHALL therefore
+produce equal canonical owners and facts even when its protocol transaction identities differ.
 ## AC-G-32 — Common asynchronous provider execution interface
 ### Decision
 

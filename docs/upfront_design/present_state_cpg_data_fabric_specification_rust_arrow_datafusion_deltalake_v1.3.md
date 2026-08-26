@@ -15,6 +15,7 @@
 **Logical scope:** Present-state Python and Rust code-property-graph facts and mechanically derived facts
 **Excluded semantic scope:** Git/history analytics, runtime observation, test-impact assessment, refactor assessment, risk scoring, recommendations, and other evaluative conclusions
 **Audit integration (2026-08-20):** Plan-audit F-006/F-007; separated table policy axes and adopted pinned delta-rs application transactions.
+**Implementation clarification (2026-08-26):** Review-remediation WP05/WP06; clarified semantic evidence normalization and path-independent cold-provider payloads for independent serving-state comparison.
 
 ---
 
@@ -1432,6 +1433,15 @@ cold_payload optional
 ```
 
 `fact_id` is unambiguous because both relation and property tables use the same canonical fact-ID domain and `fact_form_code` is explicit.
+
+`provider_run_id`, provider observation locators, and their derived `evidence_id` values preserve
+within-run provenance but are operational foreign keys for clean-rebuild comparison. The
+registered evidence-content normalization SHALL replace those locators with an identity over
+the complete projected semantic evidence row while retaining `fact_id`, owner, provider/version,
+certainty, resolution, source span, conflict disposition, and `cold_payload`. Because the payload
+remains semantic evidence, provider adapters SHALL encode it with admitted application source
+locators rather than sandbox-private absolute paths; the comparator SHALL NOT solve path leakage
+by dropping the payload.
 
 ---
 

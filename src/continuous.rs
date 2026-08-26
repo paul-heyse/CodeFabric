@@ -11,6 +11,7 @@ use crate::git_state::{
     GitCandidatePlan, GitCandidatePlanner, GitCandidatePlanningRequest, GitStateAdapter,
     GitStateError, GitStateObservations, GitStateVector, RegisteredGitIdentity,
 };
+use crate::identity::PlatformCode;
 use crate::inventory::{
     InclusionState, InventoryError, InventoryFileUpsert, InventoryLimits, InventoryWalker,
     advance_inventory_generation,
@@ -21,9 +22,19 @@ use crate::lifecycle::{
     WatchHintBatch, fast_output_mutations, removed_owner_mutations,
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
-use crate::secure_path::open_workspace_root;
+use crate::secure_path::{PlatformPath, open_workspace_root};
 use crate::source_image::SourceImageStore;
 use crate::tree_sitter_adapter::TreeSitterEdit;
+
+#[cfg(target_os = "macos")]
+const fn host_platform_code() -> PlatformCode {
+    PlatformCode::MacOs
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn host_platform_code() -> PlatformCode {
+    PlatformCode::Unix
+}
 
 /// Stable inputs that are not owned by watcher or Git libraries.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -344,11 +355,20 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
         )?;
 
         let mut mutations = fast_output_mutations(&fast_outputs)?;
+        let current_owners = fast_outputs
+            .iter()
+            .flat_map(|output| output.canonical.batches.values())
+            .map(|batch| batch.scope().owner_id)
+            .collect::<BTreeSet<_>>();
         let removed_owners = wave
             .items
             .iter()
             .filter(|item| item.captured.is_none())
             .filter_map(|item| prior_owners.get(&item.path_bytes).copied())
+            // A rename can preserve canonical owner identity. In that case the same wave's
+            // current-byte output is authoritative and an old-path tombstone would conflict
+            // with that replacement at an equal generation.
+            .filter(|owner_id| !current_owners.contains(owner_id))
             .collect::<BTreeSet<_>>();
         mutations.extend(removed_owner_mutations(
             wave.workspace_id,
@@ -433,14 +453,28 @@ fn generic_inventory_selection(
         source_generation,
         &Cancellation::default(),
     )?;
-    let mut paths = prior_paths;
-    paths.extend(
-        inventory
-            .records
-            .iter()
-            .filter(|record| record.inclusion == InclusionState::Included)
-            .map(|record| record.path.raw_relative_path_bytes.clone()),
-    );
+    // Union by the governed path comparison key, not raw display bytes. On a case-insensitive
+    // filesystem an old spelling can still open the renamed file; admitting both spellings would
+    // capture the same canonical owner twice and create equal-generation replacement conflicts.
+    // Current authoritative inventory wins over a prior spelling for the same comparison key.
+    let mut paths_by_comparison_key = BTreeMap::<Vec<u8>, Vec<u8>>::new();
+    for path in prior_paths {
+        let platform_path =
+            PlatformPath::from_raw_relative_bytes(host_platform_code(), path.clone())?;
+        let workspace_path = root.workspace_path(&platform_path)?;
+        paths_by_comparison_key.insert(workspace_path.comparison_key_bytes, path);
+    }
+    for record in inventory
+        .records
+        .iter()
+        .filter(|record| record.inclusion == InclusionState::Included)
+    {
+        paths_by_comparison_key.insert(
+            record.path.comparison_key_bytes.clone(),
+            record.path.raw_relative_path_bytes.clone(),
+        );
+    }
+    let paths = paths_by_comparison_key.into_values().collect();
     Ok(GenericInventorySelection {
         paths,
         prior_owners,

@@ -21,6 +21,30 @@ failure-output = "immediate-final"
 [profile.ci.junit]
 path = "junit.xml"
 
+# AC-G-79 deliberately creates and reopens independent Delta publications for every
+# released terminal scenario. Keep the ordinary 60-second slow-test signal, but allow
+# this one dedicated assurance oracle to finish instead of treating its expected I/O as
+# a hung unit test.
+[[profile.default.overrides]]
+filter = 'test(full_golden_scenario_clean_rebuild_equivalence)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+[[profile.ci.overrides]]
+filter = 'test(full_golden_scenario_clean_rebuild_equivalence)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+# The Gate B vertical compiles a real nightly Rust owner, executes a real Pyrefly
+# sidecar, publishes Delta tables, and crosses daemon plus locked STDIO process
+# boundaries. Retain one-minute slow signals while allowing that bounded vertical
+# to complete.
+[[profile.default.overrides]]
+filter = 'test(gate_b_vertical_slice_produces_all_eleven_planes) | test(gate_b_vertical_slice_adversarial) | test(gate_b_candidate_operational_gate)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+[[profile.ci.overrides]]
+filter = 'test(gate_b_vertical_slice_produces_all_eleven_planes) | test(gate_b_vertical_slice_adversarial) | test(gate_b_candidate_operational_gate)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 # When tests come to share a database, port, or other scarce resource, constrain them
 # with a test group rather than serializing the whole suite (spec section 18.3):
 #

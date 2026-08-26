@@ -103,7 +103,7 @@ def test_wp54_behavioral_acceptance(tmp_path: Path) -> None:
         entry["status"] in {"in_progress", "complete"}
         for entry in state["packets"].values()
     )
-    assert declared == 92
+    assert declared == len(state["packets"]) * 4
     assert implemented == required_packets * 4
     requirements = set(artifact_contracts.REVIEW_REQUIREMENTS)
     documented = artifact_contracts.documented_review_artifacts()
@@ -112,11 +112,31 @@ def test_wp54_behavioral_acceptance(tmp_path: Path) -> None:
 
 def test_wp54_structural_acceptance() -> None:
     packets, _ = assurance.validate_dependencies()
-    assert packets == 23
     plan_path = artifact_contracts.active_plan_path()
     contracts = assurance._oracle_contracts(plan_path)
-    assert len(contracts) == 23
+    assert packets == len(contracts)
     assert all(len(pairs) == 4 for pairs in contracts.values())
+
+
+def test_ordered_oracle_catalog_gets_stable_criterion_ids(tmp_path: Path) -> None:
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "### WP01 — Example\n\n"
+        "**Target invariants.** GI-01.\n\n"
+        "**Design and library references.** QRY §1.\n\n"
+        "**Acceptance Checks.**\n\n"
+        "Oracle catalog: Executable oracle: `example_behavior`; "
+        "Executable oracle: `example_structure`; Executable oracle: `example_negative`; "
+        "Executable oracle: `example_operation`.\n\n"
+        "- **Behavioral — Executable oracle:** example.\n",
+        encoding="utf-8",
+    )
+    assert assurance._oracle_contracts(plan)["WP01"] == [
+        ("example_behavior", "PC-WP01-BEH"),
+        ("example_structure", "PC-WP01-STR"),
+        ("example_negative", "PC-WP01-NEG"),
+        ("example_operation", "PC-WP01-OPS"),
+    ]
 
 
 def test_wp54_negative_zero_state(tmp_path: Path) -> None:

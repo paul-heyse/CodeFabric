@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use arrow_array::{Array as _, BooleanArray, ListArray, StringArray, UInt64Array};
+use arrow_array::{Array as _, BinaryArray, BooleanArray, ListArray, StringArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use thiserror::Error;
 
@@ -34,6 +34,7 @@ use crate::model_generated::schema_tables::{
 use crate::provider_raw_kinds::{
     PROVIDER_GRAMMAR_INVENTORIES, ProviderRawKindDisposition, RUFF_PYTHON_FRONTEND,
 };
+use crate::pyrefly_service::AcceptedPyreflyRun;
 use crate::registries::{
     CAPABILITY_IDS, Completeness, Directness, EvidenceCertainty, Language, OwnerCapabilityState,
     OwnerKind, ProviderCode, ProviderObservationFamily, ResolutionClass, UNKNOWN_IDS,
@@ -668,6 +669,126 @@ impl CoreFactEngine {
             .ingest(scope, streams, provider_precedence)?)
     }
 
+    /// Materialize a governed provider-unavailable capability gap through ordinary Arrow ingress.
+    ///
+    /// This is the explicit-unknown terminal used when an applicable semantic provider is
+    /// withdrawn. It publishes owner/capability rows rather than treating absent provider output
+    /// as an empty fact set.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an unknown capability or invalid scope/identity/generated Arrow batch.
+    pub fn reconcile_provider_unavailable(
+        &self,
+        workspace_id: [u8; 16],
+        analysis_context_id: [u8; 16],
+        source_generation: i64,
+        capability_name: &'static str,
+        language: Language,
+        owner_kind: OwnerKind,
+    ) -> Result<CanonicalIngestOutput, CoreFactError> {
+        let capability = capability_code(capability_name)
+            .and_then(|code| i16::try_from(code).ok())
+            .ok_or_else(|| CoreFactError::UnknownCapability(capability_name.to_owned()))?;
+        let capability_bits = capability_mask(&[capability_name])
+            .and_then(|mask| i64::try_from(mask).ok())
+            .ok_or_else(|| CoreFactError::UnknownCapability(capability_name.to_owned()))?;
+        let owner_key = semantic_key(
+            crate::identity::SemanticFingerprintDomain::SourceObservation,
+            &[b"provider-unavailable", capability_name.as_bytes()],
+        );
+        let owner_id = semantic_owner_identity(
+            workspace_id,
+            analysis_context_id,
+            "capability-gap",
+            owner_key,
+        )
+        .map_err(FactIngestError::from)?
+        .id;
+        let scope = FactScope {
+            workspace_id,
+            analysis_context_id,
+            source_generation,
+            owner_id,
+        };
+        let owner = encode_owners(&[OwnerRow {
+            scope,
+            parent_owner_id: None,
+            owner_kind_code: owner_kind as i16,
+            language: language as i16,
+            file_id: None,
+            semantic_entity_id: None,
+            start_byte: None,
+            end_byte: None,
+            source_fingerprint: None,
+            semantic_fingerprint: None,
+            capability_mask: capability_bits,
+        }])?;
+        let status = encode_capability_statuses(&[CapabilityStatusRow {
+            scope,
+            snapshot_id: None,
+            capability_code: capability,
+            owner_capability_state_code: OwnerCapabilityState::UnavailableProvider as i16,
+            completeness_state_code: Completeness::Unavailable as i16,
+            provider_run_id: None,
+            producer_code: None,
+            reason_code: Some(30),
+            diagnostic_id: None,
+            fallback_source_available: false,
+            coverage_scope_fingerprint: crate::identity::capability_scope_fingerprint(
+                workspace_id,
+                analysis_context_id,
+                owner_id,
+                source_generation,
+                capability_name,
+            ),
+        }])?;
+        let provider_code = ProviderCode::SourceSubstrate as i16;
+        let provider_run_id = stable_id16(
+            [
+                b"provider-unavailable:".as_slice(),
+                capability_name.as_bytes(),
+            ]
+            .concat()
+            .as_slice(),
+        );
+        let batches = vec![
+            ProviderFactBatch {
+                table_code: 8,
+                batch: owner,
+            },
+            ProviderFactBatch {
+                table_code: 9,
+                batch: status,
+            },
+        ];
+        let stream = ProviderFactStream {
+            manifest: ProviderFactManifest {
+                stream_id: provider_run_id,
+                workspace_id,
+                analysis_context_id,
+                source_generation,
+                provider_code,
+                provider_version: "provider-unavailable-v1".to_owned(),
+                provider_run_id,
+                emitted_at_micros: 0,
+                schema_fingerprints: batches
+                    .iter()
+                    .map(|batch| {
+                        required_table_digest(batch.table_code)
+                            .map(|digest| (batch.table_code, digest))
+                    })
+                    .collect::<Result<_, _>>()?,
+                declared_rows: 2,
+            },
+            batches,
+            terminal: StreamTerminal::Partial,
+        };
+        Ok(self
+            .reconciliation
+            .ingest(scope, &[stream], &BTreeMap::from([(provider_code, 0)]))?)
+    }
+
     /// Decode a completely verified compiler stream and reconcile each MIR owner through
     /// the same canonical fact ingress used by in-process providers.
     ///
@@ -698,6 +819,9 @@ impl CoreFactEngine {
                 FactIngestError::Protocol("RUST_MIR capability mask is invalid".into())
             })?;
         let precedence = BTreeMap::from([(provider_code, 0)]);
+        let target = compilation.begin.target.as_ref().ok_or_else(|| {
+            FactIngestError::Protocol("rustc compilation target identity is absent".into())
+        })?;
         let callable = entity_kind("CALLABLE")
             .ok_or_else(|| FactIngestError::Protocol("CALLABLE allocation is absent".into()))?;
         let name_property = property_kind("NAME")
@@ -711,9 +835,12 @@ impl CoreFactEngine {
             let mir = decode_rustc_owner(owner)?;
             let owner_key = semantic_key(
                 crate::identity::SemanticFingerprintDomain::RustcCanonicalOwner,
+                // Compiler transaction and provider owner IDs remain correlation evidence.
+                // Canonical identity is application-owned from the admitted target vocabulary
+                // and callable name, independent of invocation/output roots.
                 &[
-                    compilation.begin.compilation_unit_id.as_bytes(),
-                    mir.protocol_owner_id.as_bytes(),
+                    target.crate_name.as_bytes(),
+                    target.crate_type.as_bytes(),
                     mir.name.as_bytes(),
                 ],
             );
@@ -858,7 +985,10 @@ impl CoreFactEngine {
                 start_byte: None,
                 end_byte: None,
                 source_fingerprint: None,
-                semantic_fingerprint: Some(digest32(&owner.end.owner_content_digest)?),
+                // OwnerContentDigest covers the protocol envelope and therefore the
+                // operational compilation-unit identity. Canonical semantic state is
+                // fingerprinted from the admitted MIR payload itself.
+                semantic_fingerprint: Some(digest32(&mir.chunk_digest)?),
                 capability_mask: capability_bits,
             }])?;
             let capability_batch = encode_capability_statuses(&[CapabilityStatusRow {
@@ -931,6 +1061,374 @@ impl CoreFactEngine {
         Ok(outputs)
     }
 
+    /// Reconcile one fully verified Pyrefly sidecar stream into canonical module semantics.
+    ///
+    /// The Arrow DTO retains the complete type table and call-target observation as cold
+    /// evidence while the canonical layer publishes the module entity, name, type-table
+    /// property, provenance, and explicit capability coverage through the ordinary ingest
+    /// boundary.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed module DTOs, unknown capability allocations, scope drift, identity
+    /// failures, or any generated canonical-batch validation failure.
+    #[allow(clippy::too_many_lines)] // One provider stream keeps semantic facts and provenance atomic.
+    pub fn reconcile_pyrefly_run(
+        &self,
+        run: &AcceptedPyreflyRun,
+    ) -> Result<Vec<CanonicalIngestOutput>, CoreFactError> {
+        let source_generation = i64::try_from(run.source_generation)
+            .map_err(|_| FactIngestError::Protocol("source generation exceeds i64".into()))?;
+        let provider_code = ProviderCode::PyreflyPython as i16;
+        let provider_run_id = stable_id16(run.provider_run_id.as_bytes());
+        let provider_version = "pyrefly-1.2.0+1933169ad8ee9e4d4114112eb56ef0811fb0a094";
+        let capability_names = run
+            .capability_codes
+            .iter()
+            .map(|code| {
+                CAPABILITY_IDS
+                    .iter()
+                    .zip(crate::registries::CAPABILITY_CODES)
+                    .find_map(|(name, candidate)| (u32::from(*candidate) == *code).then_some(*name))
+                    .ok_or_else(|| {
+                        FactIngestError::Protocol(format!(
+                            "Pyrefly capability code {code} is unregistered"
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let capability_bits = capability_mask(&capability_names)
+            .and_then(|mask| i64::try_from(mask).ok())
+            .ok_or_else(|| {
+                FactIngestError::Protocol("Pyrefly capability mask is invalid".into())
+            })?;
+        let module_kind = entity_kind("MODULE")
+            .ok_or_else(|| FactIngestError::Protocol("MODULE allocation is absent".into()))?;
+        let name_property = property_kind("NAME")
+            .ok_or_else(|| FactIngestError::Protocol("NAME allocation is absent".into()))?;
+        let qualified_name_property = property_kind("QUALIFIED_NAME").ok_or_else(|| {
+            FactIngestError::Protocol("QUALIFIED_NAME allocation is absent".into())
+        })?;
+        let module_code = u16::try_from(module_kind.code)
+            .map_err(|_| FactIngestError::Protocol("MODULE code is invalid".into()))?;
+        let name_property_code = u16::try_from(name_property.code)
+            .map_err(|_| FactIngestError::Protocol("NAME code is invalid".into()))?;
+        let qualified_name_property_code = u16::try_from(qualified_name_property.code)
+            .map_err(|_| FactIngestError::Protocol("QUALIFIED_NAME code is invalid".into()))?;
+        let entity_form = crate::registries::fact_kind_code("ENTITY_EXISTENCE")
+            .and_then(|code| i16::try_from(code).ok())
+            .ok_or_else(|| FactIngestError::Protocol("entity fact form is absent".into()))?;
+        let property_form = crate::registries::fact_kind_code("PROPERTY")
+            .and_then(|code| i16::try_from(code).ok())
+            .ok_or_else(|| FactIngestError::Protocol("property fact form is absent".into()))?;
+        let precedence = BTreeMap::from([(provider_code, 0)]);
+        let mut outputs = Vec::with_capacity(run.modules.len());
+        for module in &run.modules {
+            let observed_id = module
+                .batch
+                .column_by_name("module_id")
+                .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+                .map(|array| array.value(0))
+                .ok_or_else(|| FactIngestError::Protocol("Pyrefly module_id is absent".into()))?;
+            let type_table_bytes = module
+                .batch
+                .column_by_name("type_table_json")
+                .and_then(|array| array.as_any().downcast_ref::<BinaryArray>())
+                .map(|array| array.value(0))
+                .ok_or_else(|| {
+                    FactIngestError::Protocol("Pyrefly type_table_json is absent".into())
+                })?;
+            let diagnostics_bytes = module
+                .batch
+                .column_by_name("diagnostics_json")
+                .and_then(|array| array.as_any().downcast_ref::<BinaryArray>())
+                .map(|array| array.value(0))
+                .ok_or_else(|| {
+                    FactIngestError::Protocol("Pyrefly diagnostics_json is absent".into())
+                })?;
+            if observed_id != module.module_id {
+                return Err(FactIngestError::Protocol(
+                    "Pyrefly application DTO module identity differs".into(),
+                )
+                .into());
+            }
+            let _: serde_json::Value = serde_json::from_slice(type_table_bytes).map_err(|_| {
+                FactIngestError::Protocol("Pyrefly type table is not valid JSON".into())
+            })?;
+            let diagnostics: serde_json::Value = serde_json::from_slice(diagnostics_bytes)
+                .map_err(|_| {
+                    FactIngestError::Protocol("Pyrefly diagnostics are not valid JSON".into())
+                })?;
+            let has_diagnostics = match &diagnostics {
+                serde_json::Value::Array(values) => !values.is_empty(),
+                serde_json::Value::Object(values) => !values.is_empty(),
+                serde_json::Value::Null => false,
+                _ => true,
+            };
+            let owner_key = semantic_key(
+                crate::identity::SemanticFingerprintDomain::SourceObservation,
+                &[module.module_id.as_bytes(), module.module_name.as_bytes()],
+            );
+            let owner_identity = semantic_owner_identity(
+                run.canonical_workspace_id,
+                run.canonical_analysis_context_id,
+                "module",
+                owner_key,
+            )
+            .map_err(FactIngestError::from)?;
+            let scope = FactScope {
+                workspace_id: run.canonical_workspace_id,
+                analysis_context_id: run.canonical_analysis_context_id,
+                source_generation,
+                owner_id: owner_identity.id,
+            };
+            let entity_identity = semantic_entity_identity(
+                scope.workspace_id,
+                scope.analysis_context_id,
+                module_code,
+                scope.owner_id,
+                module.module_name.as_bytes().to_vec(),
+            )
+            .map_err(FactIngestError::from)?;
+            let name_identity = text_property_fact_identity(
+                scope.workspace_id,
+                scope.analysis_context_id,
+                name_property_code,
+                entity_identity.id,
+                &module.module_name,
+            )
+            .map_err(FactIngestError::from)?;
+            let qualified_name_identity = text_property_fact_identity(
+                scope.workspace_id,
+                scope.analysis_context_id,
+                qualified_name_property_code,
+                entity_identity.id,
+                &module.module_name,
+            )
+            .map_err(FactIngestError::from)?;
+            let entity = EntityRow {
+                scope,
+                entity_id: entity_identity.id,
+                language: Language::Python as i16,
+                entity_family_code: module_kind.family_code,
+                entity_kind_code: module_kind.code,
+                raw_kind_code: None,
+                file_id: None,
+                start_byte: None,
+                end_byte: None,
+                name: Some(module.module_name.clone()),
+                qualified_name: Some(module.module_name.clone()),
+                parent_entity_id: None,
+                type_id: None,
+                flags: 0,
+                fact_hash64: digest_hash64(entity_identity.full_digest),
+            };
+            let properties = vec![
+                PropertyFactRow {
+                    scope,
+                    fact_id: name_identity.id,
+                    subject_entity_id: entity_identity.id,
+                    property_kind_code: name_property.code,
+                    program_point_entity_id: None,
+                    value: PropertyValue::Text(module.module_name.clone()),
+                    directness_code: Directness::Direct as i16,
+                    certainty_code: EvidenceCertainty::StaticSemantic as i16,
+                    resolution_code: ResolutionClass::Exact as i16,
+                    producer_code: provider_code,
+                    derivation_code: None,
+                    file_id: None,
+                    start_byte: None,
+                    end_byte: None,
+                    fact_hash64: digest_hash64(name_identity.full_digest),
+                },
+                PropertyFactRow {
+                    scope,
+                    fact_id: qualified_name_identity.id,
+                    subject_entity_id: entity_identity.id,
+                    property_kind_code: qualified_name_property.code,
+                    program_point_entity_id: None,
+                    value: PropertyValue::Text(module.module_name.clone()),
+                    directness_code: Directness::Direct as i16,
+                    certainty_code: EvidenceCertainty::StaticSemantic as i16,
+                    resolution_code: ResolutionClass::StaticallyResolved as i16,
+                    producer_code: provider_code,
+                    derivation_code: None,
+                    file_id: None,
+                    start_byte: None,
+                    end_byte: None,
+                    fact_hash64: digest_hash64(qualified_name_identity.full_digest),
+                },
+            ];
+            let observation_ids = [
+                stable_id16(
+                    [module.chunk_digest.as_bytes(), b"\0entity"]
+                        .concat()
+                        .as_slice(),
+                ),
+                stable_id16(
+                    [module.chunk_digest.as_bytes(), b"\0property:name"]
+                        .concat()
+                        .as_slice(),
+                ),
+                stable_id16(
+                    [module.chunk_digest.as_bytes(), b"\0property:qualified-name"]
+                        .concat()
+                        .as_slice(),
+                ),
+            ];
+            let fact_ids = [
+                entity_identity.id,
+                name_identity.id,
+                qualified_name_identity.id,
+            ];
+            let evidence = observation_ids
+                .into_iter()
+                .zip(fact_ids)
+                .enumerate()
+                .map(|(index, (observation_id, fact_id))| FactEvidenceRow {
+                    evidence_id: crate::identity::fact_evidence_id(
+                        provider_run_id,
+                        observation_id,
+                        fact_id,
+                    ),
+                    scope,
+                    fact_id,
+                    fact_form_code: if index == 0 {
+                        entity_form
+                    } else {
+                        property_form
+                    },
+                    provider_code,
+                    provider_version: provider_version.to_owned(),
+                    provider_run_id,
+                    observation_id,
+                    raw_kind_code: None,
+                    file_id: None,
+                    start_byte: None,
+                    end_byte: None,
+                    certainty_code: EvidenceCertainty::StaticSemantic as i16,
+                    resolution_code: ResolutionClass::StaticallyResolved as i16,
+                    conflict_disposition_code: 10,
+                    cold_payload: (index == 0).then(|| module.arrow_ipc.clone()),
+                })
+                .collect::<Vec<_>>();
+            let capability_rows = run
+                .capability_codes
+                .iter()
+                .map(|code| {
+                    let capability_name = capability_names
+                        .iter()
+                        .zip(&run.capability_codes)
+                        .find_map(|(name, candidate)| (candidate == code).then_some(*name))
+                        .ok_or_else(|| {
+                            FactIngestError::Protocol(
+                                "validated Pyrefly capability code has no governed name".into(),
+                            )
+                        })?;
+                    Ok(CapabilityStatusRow {
+                        scope,
+                        snapshot_id: None,
+                        capability_code: i16::try_from(*code).map_err(|_| {
+                            FactIngestError::Protocol("Pyrefly capability code exceeds i16".into())
+                        })?,
+                        owner_capability_state_code: if has_diagnostics {
+                            OwnerCapabilityState::UnavailableParse as i16
+                        } else {
+                            OwnerCapabilityState::Current as i16
+                        },
+                        completeness_state_code: if has_diagnostics {
+                            Completeness::Indeterminate as i16
+                        } else {
+                            Completeness::Complete as i16
+                        },
+                        provider_run_id: Some(provider_run_id),
+                        producer_code: Some(provider_code),
+                        // SOURCE_INVALID is the governed reason-class allocation for a module
+                        // whose real semantic provider returned diagnostics rather than current
+                        // complete evidence. The full diagnostic DTO remains in cold evidence.
+                        reason_code: has_diagnostics.then_some(90),
+                        diagnostic_id: None,
+                        fallback_source_available: !has_diagnostics,
+                        coverage_scope_fingerprint: crate::identity::capability_scope_fingerprint(
+                            scope.workspace_id,
+                            scope.analysis_context_id,
+                            scope.owner_id,
+                            scope.source_generation,
+                            capability_name,
+                        ),
+                    })
+                })
+                .collect::<Result<Vec<_>, FactIngestError>>()?;
+            let batches = vec![
+                ProviderFactBatch {
+                    table_code: 8,
+                    batch: encode_owners(&[OwnerRow {
+                        scope,
+                        parent_owner_id: None,
+                        owner_kind_code: OwnerKind::Module as i16,
+                        language: Language::Python as i16,
+                        file_id: None,
+                        semantic_entity_id: Some(entity_identity.id),
+                        start_byte: None,
+                        end_byte: None,
+                        source_fingerprint: None,
+                        // The provider module digest retains native Pyrefly evidence, including
+                        // operational source-path spellings. Canonical owner state is deliberately
+                        // application-owned and therefore derived only from the stable owner
+                        // recipe above.
+                        semantic_fingerprint: Some(owner_identity.full_digest),
+                        capability_mask: capability_bits,
+                    }])?,
+                },
+                ProviderFactBatch {
+                    table_code: 9,
+                    batch: encode_capability_statuses(&capability_rows)?,
+                },
+                ProviderFactBatch {
+                    table_code: 100,
+                    batch: encode_entities(&[entity])?,
+                },
+                ProviderFactBatch {
+                    table_code: 110,
+                    batch: encode_relations(&[])?,
+                },
+                ProviderFactBatch {
+                    table_code: 120,
+                    batch: encode_properties(&properties)?,
+                },
+                ProviderFactBatch {
+                    table_code: 130,
+                    batch: encode_evidence(&evidence)?,
+                },
+            ];
+            let declared_rows = batches.iter().map(|batch| batch.batch.num_rows()).sum();
+            let stream = ProviderFactStream {
+                manifest: ProviderFactManifest {
+                    stream_id: digest_id16(&module.module_digest)?,
+                    workspace_id: scope.workspace_id,
+                    analysis_context_id: scope.analysis_context_id,
+                    source_generation,
+                    provider_code,
+                    provider_version: provider_version.to_owned(),
+                    provider_run_id,
+                    emitted_at_micros: 0,
+                    schema_fingerprints: batches
+                        .iter()
+                        .map(|batch| {
+                            required_table_digest(batch.table_code)
+                                .map(|digest| (batch.table_code, digest))
+                        })
+                        .collect::<Result<BTreeMap<_, _>, _>>()?,
+                    declared_rows,
+                },
+                batches,
+                terminal: StreamTerminal::Completed,
+            };
+            outputs.push(self.reconciliation.ingest(scope, &[stream], &precedence)?);
+        }
+        Ok(outputs)
+    }
+
     /// Atomically publish all validated canonical batches through the generated
     /// owner-replacement policy and durable publication protocol.
     ///
@@ -973,10 +1471,6 @@ impl CoreFactEngine {
         let mut writes = Vec::with_capacity(capacity);
         for canonical in canonicals {
             for (table_code, batch) in canonical.batches {
-                let expected_predecessor = fabric
-                    .table(table_code)
-                    .ok_or(CoreFactError::MissingFactTable(table_code))?
-                    .version();
                 let scope = batch.scope();
                 if !owner_tables.insert((table_code, scope.owner_id)) {
                     return Err(CoreFactError::DuplicateOwnerTable {
@@ -988,17 +1482,34 @@ impl CoreFactEngine {
                     request: OwnerMutationRequest {
                         scope: scope.batch_scope(),
                         publication_id: request.pins.publication_id,
-                        operation_id: request.operation_id,
+                        operation_id: stable_id16(
+                            [
+                                request.operation_id.as_slice(),
+                                table_code.to_be_bytes().as_slice(),
+                                scope.owner_id.as_slice(),
+                            ]
+                            .concat()
+                            .as_slice(),
+                        ),
                         table_code,
                         owner_ids: vec![scope.owner_id],
-                        expected_predecessor,
+                        expected_predecessor: None,
                     },
                     batch,
                 });
             }
         }
         writes.sort_by_key(|write| (write.request.table_code, write.request.owner_ids[0]));
-        Ok(fabric.publish(journal, request, &writes).await?)
+        for mut write in writes {
+            write.request.expected_predecessor = fabric
+                .table(write.request.table_code)
+                .ok_or(CoreFactError::MissingFactTable(write.request.table_code))?
+                .version();
+            fabric
+                .replace_owner_rows(journal, &write.request, &write.batch)
+                .await?;
+        }
+        Ok(fabric.publish(journal, request, &[]).await?)
     }
 
     /// Freeze one durable publication into the exact DataFusion/Delta provider graph
@@ -1051,7 +1562,6 @@ impl CoreFactEngine {
 
 #[derive(Debug)]
 struct RustcMirObservation {
-    protocol_owner_id: String,
     name: String,
     arrow_ipc: Vec<u8>,
     chunk_digest: String,
@@ -1069,6 +1579,11 @@ fn decode_rustc_owner(owner: &AcceptedRustcOwner) -> Result<RustcMirObservation,
         .as_ref()
         .map(|key| key.owner_id.clone())
         .ok_or_else(|| FactIngestError::Protocol("compiler owner key is absent".into()))?;
+    if protocol_owner_id.is_empty() {
+        return Err(FactIngestError::Protocol(
+            "compiler owner identity is empty".into(),
+        ));
+    }
     let chunk = &owner.chunks[0];
     let contract = rustc_mir_observation_contract()?;
     if chunk.observation_family_code != u32::from(ProviderObservationFamily::RustMirOwner as u16)
@@ -1136,7 +1651,6 @@ fn decode_rustc_owner(owner: &AcceptedRustcOwner) -> Result<RustcMirObservation,
         ));
     }
     Ok(RustcMirObservation {
-        protocol_owner_id,
         name: rows.remove(0),
         arrow_ipc: chunk.arrow_ipc.clone(),
         chunk_digest: chunk.chunk_digest.clone(),

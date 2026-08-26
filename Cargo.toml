@@ -64,6 +64,7 @@ data-fabric = [
     "dep:arrow-array",
     "dep:arrow-buffer",
     "dep:arrow-cast",
+    "dep:arrow-ipc",
     "dep:arrow-ord",
     "dep:arrow-row",
     "dep:arrow-schema",
@@ -112,8 +113,11 @@ daemon = [
     "repository-state",
     "rpc",
     "dep:notify-debouncer-full",
+    "dep:hyper-util",
     "dep:petgraph",
+    "dep:tokio-stream",
     "dep:toml",
+    "dep:tower",
     "dep:tracing",
 ]
 local-workstation = ["daemon", "compatibility-probes"]
@@ -127,6 +131,7 @@ arrow = { version = "=59.2.0", optional = true }
 arrow-array = { version = "=59.2.0", optional = true }
 arrow-buffer = { version = "=59.2.0", optional = true }
 arrow-cast = { version = "=59.2.0", optional = true }
+arrow-ipc = { version = "=59.2.0", optional = true }
 arrow-ord = { version = "=59.2.0", optional = true }
 arrow-row = { version = "=59.2.0", optional = true }
 arrow-schema = { version = "=59.2.0", optional = true }
@@ -140,6 +145,7 @@ datafusion = { version = "=55.0.0", optional = true }
 deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "43a0cf10a313e5077c48637ad786a05359136bbb", default-features = false, features = ["rustls", "datafusion"], optional = true }
 futures = { version = "0.3", optional = true }
 gix = { version = "=0.86.0", default-features = false, features = ["sha1", "sha256", "revision", "index", "status", "attributes", "excludes", "dirwalk", "blob-diff", "interrupt", "parallel", "auto-chain-error", "tracing"], optional = true }
+hyper-util = { version = "=0.1.20", features = ["tokio"], optional = true }
 notify-debouncer-full = { version = "=0.7.0", optional = true }
 object_store = { version = "=0.13.2", optional = true }
 parquet = { version = "=59.2.0", features = ["arrow", "async", "object_store"], optional = true }
@@ -164,10 +170,12 @@ thiserror = { version = "=2.0.20", optional = true }
 unicode-casefold = { version = "=0.2.0", optional = true }
 unicode-normalization = { version = "=0.1.25", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"], optional = true }
+tokio-stream = { version = "=0.1.18", features = ["net"], optional = true }
 toml = { version = "=1.1.4", default-features = false, features = ["std", "parse", "serde"], optional = true }
 tonic = { version = "=0.14.6", features = ["transport"], optional = true }
 tonic-prost = { version = "=0.14.6", optional = true }
 tonic-prost-build = { version = "=0.14.6", optional = true }
+tower = { version = "=0.5.3", features = ["util"], optional = true }
 tracing = { version = "0.1", optional = true }
 tree-sitter = { version = "=0.26.12", optional = true }
 tree-sitter-python = { version = "=0.25.0", optional = true }
