@@ -5,6 +5,8 @@
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-schemas.json",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/fingerprints.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query_forms.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/wire_models.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi",

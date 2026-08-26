@@ -191,10 +191,21 @@
           {
             "query_id": "fixture-query",
             "request": "find code entities",
-            "label": null,
-            "input": null,
-            "where": null,
-            "limit": null
+            "looking_for": "the Rust function named build_graph",
+            "where": [
+              "entities in the current authorized workspace"
+            ],
+            "return": {
+              "include": [
+                "canonical semantic identity",
+                "qualified name",
+                "source location"
+              ],
+              "limit": {
+                "maximum_results": 50,
+                "when_exceeded": "return the deterministic first results and mark the query incomplete"
+              }
+            }
           }
         ],
         "response_projection": null,
@@ -261,29 +272,36 @@
         "bound_snapshot_id": null,
         "semantic_request_id": "fixture-request",
         "workspace_id": "workspace:00000000000000000000000000000000",
-        "snapshot_requirement": {},
-        "context_selection": {},
-        "authorization_scope": {},
-        "source_boundary": {},
         "queries": [
           {
             "node_kind": "find-entities",
             "query_id": "fixture-query",
-            "label": null,
-            "inputs": [],
-            "ontology_ids": [],
-            "conditions": [],
-            "context_partition_policy": "all",
-            "certainty_filters": [],
-            "coverage_requirement": {},
-            "soft_limits": {},
-            "requested_output_roles": [],
-            "canonical_ordering": []
+            "source_pointer": "/queries/0",
+            "input_roles": [],
+            "output_role": "entities",
+            "dependencies": [],
+            "bound_semantics": {
+              "looking_for": "the Rust function named build_graph"
+            },
+            "coverage_prerequisites": [
+              "snapshot_pinned"
+            ],
+            "coverage_effects": [
+              "entity_rows_observed"
+            ],
+            "canonical_order": [
+              "source_file_path",
+              "span_start",
+              "semantic_kind",
+              "qualified_name",
+              "entity_id"
+            ],
+            "resource_contract": {
+              "maximum_results": 50,
+              "cancellation_required": true
+            }
           }
         ],
-        "deterministic_ordering": [],
-        "response_projection": {},
-        "cost_budget": {},
         "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000"
       }
     }

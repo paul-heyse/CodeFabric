@@ -106,3 +106,153 @@ records:
     disposition: plan_owned
     owner: repository-infrastructure-owner
     current_packet: WP73
+  - path: codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query_forms.py
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: codefabric-cpg-mcp/tests/test_proto.py
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: codefabric-cpg-mcp/tests/test_contract_json.py
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/bundles/query-language-bundle.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/bundles/schema-bundle.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/bundles/toolchain-bundle.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/bundles.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/module-aggregators.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/package-data.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/requirements.jsonl
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/suite-manifest.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/toolchain-identity.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/traceability.jsonl
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/validation.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/generated/model/schema/public-schema-golden-instances.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/manifests/requirements.jsonl
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/manifests/suite-manifest.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/manifests/traceability.jsonl
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/query/planspec.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/query/query-form-contract.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/schema/cpg-semantic-query-request.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/toolchain/toolchain-identity.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: src/bin/codefabric_model/schema_driver.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: src/generated/model.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: src/generated/model_query_forms.rs
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: src/query_service.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: src/semantic_query.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: tooling/model/fixtures/public-schema-golden-instances.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01

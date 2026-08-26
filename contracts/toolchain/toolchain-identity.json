@@ -26,7 +26,7 @@
   },
   "families": [
     {
-      "action_key": "b3:cb9fac12145727c62b378d29c49a397e1e4cd979b0aa028b7a3b16e338b876df",
+      "action_key": "b3:4b184a83db6bc37f3220c7dbc56232ad4c9902753ebbb95b5ace428eaa78bbd6",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -61,9 +61,11 @@
       }
     },
     {
-      "action_key": "b3:bb15645291b8a53806d16fd766c2b20a75c6da72c6f6d331037ff42d5e441c53",
+      "action_key": "b3:30b78b4edead85436a53c13b1e428d6d3fed4a4d920d480205cc54451a5e4a86",
       "family": "schemas",
       "outputs": [
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",
+        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query_forms.py",
         "contracts/generated/model/schema/operational-store.sql",
         "contracts/generated/model/schema/public-schema-golden-instances.json",
         "contracts/generated/model/schema/schema-evolution-policy.json",
@@ -78,12 +80,13 @@
         "contracts/schema/serving-snapshot.schema.json",
         "contracts/schema/source-context.schema.json",
         "src/generated/fact_row_encoders.rs",
+        "src/generated/model_query_forms.rs",
         "src/generated/model_schema_tables.rs",
         "src/generated/table_specs.rs"
       ],
       "resource_profile": {
         "max_output_bytes": 8388608,
-        "max_outputs": 16,
+        "max_outputs": 20,
         "max_source_bytes": 16777216
       },
       "rule_version": "schema-contract-driver-v1",
@@ -93,7 +96,7 @@
       }
     },
     {
-      "action_key": "b3:587c60559b2c1693a989f5e933a5309c2f473d0281b295cdf18c6a12a58b2b27",
+      "action_key": "b3:2f8c729b265337fa6b28c94fe4d1e4e4ce9a57f9dfb4fcce525045678613f872",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -126,7 +129,7 @@
       }
     },
     {
-      "action_key": "b3:af126f382e2509713f83a93ee452b1aa54bda3a8dbc3539c1a816da6606bf60d",
+      "action_key": "b3:b0995c6844899a3b178b79e1e5c8db534c5ef831c1f826ed8c071bf53070dbda",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",

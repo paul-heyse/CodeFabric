@@ -1,0 +1,170 @@
+{
+  "artifact_id": "codefabric.query.form-contract",
+  "artifact_kind": "semantic-contract",
+  "version": "1.0",
+  "compatible_suite_major": 1,
+  "status": "released",
+  "canonical_digest": "b3:5d51a8c12e633c5eb118f0e75774465af519e721806c17c0cc75641502415b18",
+  "registry_domain": "QUERY_FORM",
+  "specification": "composable semantic CPG fact query",
+  "specification_version": "1.3",
+  "result_roles": [
+    "entities",
+    "facts",
+    "paths",
+    "pattern_bindings",
+    "groups",
+    "summary",
+    "source_contexts"
+  ],
+  "forms": [
+    {
+      "code": 10,
+      "name": "FIND_ENTITIES",
+      "slug": "find code entities",
+      "rust_variant": "FindEntities",
+      "node_kind": "find-entities",
+      "owner_section": 13,
+      "output_role": "entities",
+      "accepted_input_roles": ["entities", "facts"],
+      "canonical_order": ["source_file_path", "span_start", "semantic_kind", "qualified_name", "entity_id"],
+      "fields": [
+        {"name": "looking_for", "rust_name": "looking_for", "field_type": "bounded_string", "required": true},
+        {"name": "within", "rust_name": "within", "field_type": "semantic_reference_list", "required": false},
+        {"name": "where", "rust_name": "where_conditions", "field_type": "bounded_string_list", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    },
+    {
+      "code": 20,
+      "name": "RETRIEVE_FACTS",
+      "slug": "retrieve facts about code",
+      "rust_variant": "RetrieveFacts",
+      "node_kind": "retrieve-facts",
+      "owner_section": 14,
+      "output_role": "facts",
+      "accepted_input_roles": ["entities", "facts"],
+      "canonical_order": ["semantic_owner", "source_location", "fact_class", "relationship", "subject_id", "object_or_value", "fact_id"],
+      "fields": [
+        {"name": "about", "rust_name": "about", "field_type": "semantic_reference_list", "required": true},
+        {"name": "facts", "rust_name": "facts", "field_type": "bounded_string_list", "required": true},
+        {"name": "at", "rust_name": "at", "field_type": "bounded_string", "required": false},
+        {"name": "where", "rust_name": "where_conditions", "field_type": "bounded_string_list", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    },
+    {
+      "code": 30,
+      "name": "FOLLOW_RELATIONSHIPS",
+      "slug": "follow code relationships",
+      "rust_variant": "FollowRelationships",
+      "node_kind": "follow-relationships",
+      "owner_section": 15,
+      "output_role": "facts",
+      "accepted_input_roles": ["entities", "facts"],
+      "canonical_order": ["semantic_owner", "source_location", "fact_class", "relationship", "subject_id", "object_id", "fact_id"],
+      "fields": [
+        {"name": "starting_from", "rust_name": "starting_from", "field_type": "semantic_reference_list", "required": true},
+        {"name": "relationship", "rust_name": "relationship", "field_type": "bounded_string", "required": true},
+        {"name": "direction", "rust_name": "direction", "field_type": "bounded_string", "required": false},
+        {"name": "distance", "rust_name": "distance", "field_type": "bounded_string", "required": false},
+        {"name": "stop_when", "rust_name": "stop_when", "field_type": "bounded_string_list", "required": false},
+        {"name": "where", "rust_name": "where_conditions", "field_type": "bounded_string_list", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    },
+    {
+      "code": 40,
+      "name": "FIND_PATHS",
+      "slug": "find connecting fact paths",
+      "rust_variant": "FindPaths",
+      "node_kind": "find-paths",
+      "owner_section": 16,
+      "output_role": "paths",
+      "accepted_input_roles": ["entities"],
+      "canonical_order": ["path_length", "start_id", "end_id", "ordered_fact_ids"],
+      "fields": [
+        {"name": "starting_from", "rust_name": "starting_from", "field_type": "semantic_reference_list", "required": true},
+        {"name": "ending_at", "rust_name": "ending_at", "field_type": "semantic_reference_list", "required": true},
+        {"name": "through", "rust_name": "through", "field_type": "bounded_string_list", "required": true},
+        {"name": "path_policy", "rust_name": "path_policy", "field_type": "bounded_string", "required": true},
+        {"name": "direction", "rust_name": "direction", "field_type": "bounded_string", "required": false},
+        {"name": "maximum_length", "rust_name": "maximum_length", "field_type": "positive_integer", "required": false},
+        {"name": "where", "rust_name": "where_conditions", "field_type": "bounded_string_list", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    },
+    {
+      "code": 50,
+      "name": "MATCH_PATTERN",
+      "slug": "match a code fact pattern",
+      "rust_variant": "MatchPattern",
+      "node_kind": "match-pattern",
+      "owner_section": 17,
+      "output_role": "pattern_bindings",
+      "accepted_input_roles": ["entities"],
+      "canonical_order": ["binding_row"],
+      "fields": [
+        {"name": "bindings", "rust_name": "bindings", "field_type": "pattern_binding_list", "required": true},
+        {"name": "relationships", "rust_name": "relationships", "field_type": "pattern_relationship_list", "required": true},
+        {"name": "where", "rust_name": "where_conditions", "field_type": "bounded_string_list", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    },
+    {
+      "code": 60,
+      "name": "COMBINE_RESULTS",
+      "slug": "combine result sets",
+      "rust_variant": "CombineResults",
+      "node_kind": "combine-results",
+      "owner_section": 18,
+      "output_role": "groups",
+      "accepted_input_roles": ["entities", "facts", "paths", "pattern_bindings", "groups", "source_contexts"],
+      "canonical_order": ["group_key"],
+      "fields": [
+        {"name": "inputs", "rust_name": "inputs", "field_type": "prior_result_list", "required": true},
+        {"name": "combination", "rust_name": "combination", "field_type": "bounded_string", "required": true},
+        {"name": "identity", "rust_name": "identity", "field_type": "bounded_string", "required": false},
+        {"name": "preserve_origin", "rust_name": "preserve_origin", "field_type": "bounded_string", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    },
+    {
+      "code": 70,
+      "name": "SUMMARIZE_FACTS",
+      "slug": "summarize objective facts",
+      "rust_variant": "SummarizeFacts",
+      "node_kind": "summarize-facts",
+      "owner_section": 19,
+      "output_role": "summary",
+      "accepted_input_roles": ["facts", "groups"],
+      "canonical_order": ["group_key", "summary_name"],
+      "fields": [
+        {"name": "input", "rust_name": "input", "field_type": "semantic_reference_list", "required": true},
+        {"name": "summaries", "rust_name": "summaries", "field_type": "bounded_string_list", "required": true},
+        {"name": "group_by", "rust_name": "group_by", "field_type": "bounded_string_list", "required": false},
+        {"name": "include_support", "rust_name": "include_support", "field_type": "bounded_string", "required": false},
+        {"name": "where", "rust_name": "where_conditions", "field_type": "bounded_string_list", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    },
+    {
+      "code": 80,
+      "name": "RETRIEVE_SOURCE_CONTEXT",
+      "slug": "retrieve source and syntax context",
+      "rust_variant": "RetrieveSourceContext",
+      "node_kind": "retrieve-source-context",
+      "owner_section": 20,
+      "output_role": "source_contexts",
+      "accepted_input_roles": ["entities", "facts", "paths", "pattern_bindings"],
+      "canonical_order": ["source_file_path", "span_start", "span_end"],
+      "fields": [
+        {"name": "for", "rust_name": "for_inputs", "field_type": "semantic_reference_list", "required": true},
+        {"name": "context", "rust_name": "context", "field_type": "bounded_string_list", "required": true},
+        {"name": "text_handling", "rust_name": "text_handling", "field_type": "bounded_string", "required": false},
+        {"name": "where", "rust_name": "where_conditions", "field_type": "bounded_string_list", "required": false},
+        {"name": "return", "rust_name": "return_spec", "field_type": "return_spec", "required": false}
+      ]
+    }
+  ]
+}

@@ -51,7 +51,8 @@ use crate::security::{
 use crate::semantic_query::QueryForm;
 use crate::semantic_query::{
     ExecutedSemanticResponse, FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse,
-    ValidatedSemanticRequest, execute_request_in_context, snapshot_response, validate_request,
+    ValidatedSemanticRequest, execute_request_in_context, require_registered_executors,
+    snapshot_response, validate_request,
 };
 
 const RESULT_LEASE_SECONDS: i64 = 1_800;
@@ -810,7 +811,7 @@ fn supported_query_forms() -> Vec<String> {
     QUERY_FORM_VALUES
         .iter()
         .filter_map(|entry| QueryForm::try_from(entry.code).ok())
-        .filter(|form| form.currently_supported())
+        .filter(|form| form.executor_registered())
         .map(|form| form.registry_slug().to_owned())
         .collect()
 }
@@ -1633,6 +1634,8 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         validate_checksum(&request.request_checksum, &request.canonical_request_json)?;
         let validated = validate_request(&request.canonical_request_json)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
+        require_registered_executors(&validated)
+            .map_err(|error| Status::failed_precondition(error.to_string()))?;
         if validated.request.workspace_id != request.workspace_id {
             return Err(Status::invalid_argument(
                 "request workspace differs from RPC workspace",
@@ -1716,6 +1719,8 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         validate_checksum(&request.request_checksum, &request.canonical_request_json)?;
         let validated = validate_request(&request.canonical_request_json)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
+        require_registered_executors(&validated)
+            .map_err(|error| Status::failed_precondition(error.to_string()))?;
         if validated.request.workspace_id != request.workspace_id {
             return Err(Status::invalid_argument(
                 "request workspace differs from RPC workspace",

@@ -14,6 +14,11 @@ use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice, canonicalize
 use crate::fabric::{
     QueryExecutionContext, QueryPlanArtifact, ServingQueryError, ServingQuerySession,
 };
+pub use crate::model_generated::query_forms::{
+    PatternBinding, PatternRelationship, PriorResultReference, QUERY_FORM_CONTRACT_DIGEST,
+    QUERY_FORM_CONTRACT_ID, QUERY_FORM_CONTRACT_VERSION, QUERY_FORM_CONTRACTS, QueryFormDescriptor,
+    ResultRole, ReturnLimit, ReturnSpec, SemanticQueryClause, SemanticReference,
+};
 pub use crate::registries::QueryForm;
 use crate::registries::{
     COMPLETENESS_STATE_VALUES, CompletenessState, DEPENDENCY_STATE_VALUES, DependencyState,
@@ -60,17 +65,30 @@ pub enum FreshnessPolicy {
 
 impl QueryForm {
     pub(crate) const fn currently_supported(self) -> bool {
-        matches!(
-            self,
+        match self {
             Self::FindEntities
-                | Self::RetrieveFacts
-                | Self::FollowRelationships
-                | Self::FindPaths
-                | Self::MatchPattern
-                | Self::CombineResults
-                | Self::SummarizeFacts
-                | Self::RetrieveSourceContext
-        )
+            | Self::RetrieveFacts
+            | Self::FollowRelationships
+            | Self::FindPaths
+            | Self::MatchPattern
+            | Self::CombineResults
+            | Self::SummarizeFacts
+            | Self::RetrieveSourceContext => true,
+        }
+    }
+
+    #[allow(clippy::match_same_arms)]
+    pub(crate) const fn executor_registered(self) -> bool {
+        match self {
+            Self::FindEntities
+            | Self::RetrieveFacts
+            | Self::FollowRelationships
+            | Self::FindPaths
+            | Self::MatchPattern
+            | Self::CombineResults
+            | Self::SummarizeFacts
+            | Self::RetrieveSourceContext => false,
+        }
     }
 
     pub(crate) fn registry_slug(self) -> &'static str {
@@ -170,64 +188,12 @@ impl<'de> Deserialize<'de> for QueryForm {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct QueryInput {
-    #[serde(default)]
-    pub entity_ids: Vec<String>,
-    #[serde(default)]
-    pub fact_ids: Vec<String>,
-    #[serde(default)]
-    pub results: Vec<PriorResultReference>,
-}
-
-/// One typed dependency on the result role produced by an earlier query block.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct PriorResultReference {
-    pub results_of: String,
-    pub select: ResultRole,
-}
-
-/// Semantic value family carried across query-block edges.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResultRole {
-    Entities,
-    Facts,
-    Paths,
-    PatternBindings,
-    Groups,
-    Summary,
-    SourceContexts,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct QueryPredicate {
-    #[serde(default)]
-    pub entity_kind_codes: Vec<u32>,
-    #[serde(default)]
-    pub relation_kind_codes: Vec<u32>,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryLimit {
     pub first: usize,
     #[serde(default)]
     pub offset: usize,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct SemanticQueryClause {
-    pub query_id: String,
-    pub request: QueryForm,
-    pub label: Option<String>,
-    pub input: Option<QueryInput>,
-    pub r#where: Option<QueryPredicate>,
-    pub limit: Option<QueryLimit>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -576,34 +542,35 @@ pub fn type_request(
     let mut ids = BTreeSet::new();
     let mut forms = BTreeMap::new();
     let total_rows = request.queries.iter().try_fold(0_usize, |total, query| {
-        if !valid_id(&query.query_id, 128) || !ids.insert(query.query_id.as_str()) {
+        let query_id = query.query_id();
+        let form = query.form();
+        if !valid_id(query_id, 128) || !ids.insert(query_id) {
             return Err(SemanticQueryError::Invalid(
                 "query IDs must be unique bounded identifiers".to_owned(),
             ));
         }
-        if !query.request.currently_supported() {
+        if !form.currently_supported() {
             return Err(SemanticQueryError::Invalid(
                 "query form is registered but not active in the current execution profile"
                     .to_owned(),
             ));
         }
-        forms.insert(query.query_id.clone(), query.request);
-        resolve_phrase(query.request, query.label.as_deref())?;
-        if let Some(input) = &query.input
-            && input
-                .entity_ids
-                .iter()
-                .chain(&input.fact_ids)
-                .any(|identity| !valid_id(identity, 192))
+        forms.insert(query_id.to_owned(), form);
+        resolve_phrase(form, query.label())?;
+        if query
+            .direct_entity_ids()
+            .into_iter()
+            .chain(query.direct_fact_ids())
+            .any(|identity| !valid_id(identity, 192))
         {
             return Err(SemanticQueryError::Invalid(
                 "query input contains an invalid public identity".to_owned(),
             ));
         }
-        let limit = query.limit.unwrap_or(QueryLimit {
-            first: 100,
+        let limit = QueryLimit {
+            first: query.maximum_results(),
             offset: 0,
-        });
+        };
         if limit.first == 0 || limit.first > MAX_ROWS_PER_QUERY || limit.offset > 1_000_000 {
             return Err(SemanticQueryError::Invalid(
                 "query pagination is outside the accepted bound".to_owned(),
@@ -640,13 +607,12 @@ pub fn type_request(
     let mut dependencies = BTreeMap::<String, Vec<String>>::new();
     let mut fan_out = BTreeMap::<String, usize>::new();
     for query in &request.queries {
-        let references = query
-            .input
-            .as_ref()
-            .map_or(&[][..], |input| input.results.as_slice());
+        let query_id = query.query_id();
+        let form = query.form();
+        let references = query.result_references();
         let mut seen = BTreeSet::new();
-        for reference in references {
-            if reference.results_of == query.query_id || !seen.insert(&reference.results_of) {
+        for reference in &references {
+            if reference.results_of == query_id || !seen.insert(&reference.results_of) {
                 return Err(SemanticQueryError::Invalid(
                     "query dependency is self-referential or duplicated".to_owned(),
                 ));
@@ -654,23 +620,21 @@ pub fn type_request(
             let producer = forms.get(&reference.results_of).ok_or_else(|| {
                 SemanticQueryError::Invalid("query dependency names an unknown block".to_owned())
             })?;
-            if producer.output_role() != reference.select
-                || !query.request.accepts_role(reference.select)
-            {
+            if producer.output_role() != reference.select || !form.accepts_role(reference.select) {
                 return Err(SemanticQueryError::Invalid(format!(
                     "query dependency {} has incompatible result role at /queries/{}/input/results",
                     reference.results_of,
                     request
                         .queries
                         .iter()
-                        .position(|candidate| candidate.query_id == query.query_id)
+                        .position(|candidate| candidate.query_id() == query_id)
                         .unwrap_or_default()
                 )));
             }
             *fan_out.entry(reference.results_of.clone()).or_default() += 1;
         }
         dependencies.insert(
-            query.query_id.clone(),
+            query_id.to_owned(),
             references
                 .iter()
                 .map(|reference| reference.results_of.clone())
@@ -713,35 +677,32 @@ pub fn type_request(
         .iter()
         .enumerate()
         .map(|(index, query)| {
-            let limit = query.limit.unwrap_or(QueryLimit {
-                first: 100,
+            let query_id = query.query_id();
+            let form = query.form();
+            let references = query.result_references();
+            let limit = QueryLimit {
+                first: query.maximum_results(),
                 offset: 0,
-            });
-            let input_roles = query
-                .input
-                .as_ref()
-                .map_or(&[][..], |input| input.results.as_slice())
+            };
+            let input_roles = references
                 .iter()
                 .map(|reference| reference.select)
                 .collect::<Vec<_>>();
             Ok(TypedQueryBlock {
-                block_id: query.query_id.clone(),
+                block_id: query_id.to_owned(),
                 source_pointer: format!("/queries/{index}"),
-                form: query.request,
+                form,
                 input_roles,
-                output_role: query.request.output_role(),
-                dependencies: dependencies
-                    .get(&query.query_id)
-                    .cloned()
-                    .unwrap_or_default(),
-                fan_in: query.input.as_ref().map_or(0, |input| input.results.len()),
-                fan_out: fan_out.get(&query.query_id).copied().unwrap_or_default(),
+                output_role: form.output_role(),
+                dependencies: dependencies.get(query_id).cloned().unwrap_or_default(),
+                fan_in: references.len(),
+                fan_out: fan_out.get(query_id).copied().unwrap_or_default(),
                 coverage_prerequisites: BTreeSet::from(["snapshot_pinned".to_owned()]),
                 coverage_effects: BTreeSet::from([format!(
                     "{}_rows_observed",
-                    query.request.registry_slug().replace(' ', "_")
+                    form.registry_slug().replace(' ', "_")
                 )]),
-                canonical_order: canonical_order(query.request),
+                canonical_order: canonical_order(form),
                 limit,
                 maximum_memory_bytes: limit
                     .first
@@ -771,6 +732,32 @@ pub fn type_request(
 /// Returns any parsing, policy, role, topology, or resource-contract failure.
 pub fn validate_request(bytes: &[u8]) -> Result<ValidatedSemanticRequest, SemanticQueryError> {
     type_request(parse_request(bytes)?)
+}
+
+/// Reject a syntactically and semantically valid request when any form lacks a proved executor.
+///
+/// This fence is called by the production service before snapshot acquisition, so generated
+/// contract coverage never becomes an unsupported capability advertisement.
+///
+/// # Errors
+///
+/// Returns the governed unsupported-capability error when any requested form lacks a registered
+/// production executor.
+pub fn require_registered_executors(
+    request: &ValidatedSemanticRequest,
+) -> Result<(), SemanticQueryError> {
+    if let Some(form) = request
+        .blocks
+        .iter()
+        .map(|block| block.form)
+        .find(|form| !form.executor_registered())
+    {
+        return Err(SemanticQueryError::Invalid(format!(
+            "query form '{}' is governed but its production executor is not registered",
+            form.registry_slug()
+        )));
+    }
+    Ok(())
 }
 
 fn id16_bytes(value: &str, expected_prefix: &str) -> Result<[u8; 16], SemanticQueryError> {
@@ -820,106 +807,23 @@ async fn lower_relational_block(
     let table = typed.form.table()?;
     let identity_column = typed.form.order_key()?;
     let mut predicates = Vec::new();
-    if let Some(input) = &query.input {
-        match typed.form {
-            QueryForm::FindEntities => {
-                let values = input
-                    .entity_ids
-                    .iter()
-                    .map(|value| id16_scalar(value, "entity:"))
-                    .collect::<Result<Vec<_>, _>>()?;
-                if let Some(predicate) = any_of("entity_id", values) {
-                    predicates.push(predicate);
-                }
-                if !input.fact_ids.is_empty() {
-                    return Err(SemanticQueryError::Invalid(
-                        "find-entities fact inputs require an explicit typed dependency".to_owned(),
-                    ));
-                }
-            }
-            QueryForm::RetrieveFacts | QueryForm::FollowRelationships => {
-                let values = input
-                    .fact_ids
-                    .iter()
-                    .map(|value| id16_scalar(value, "fact:"))
-                    .collect::<Result<Vec<_>, _>>()?;
-                if let Some(predicate) = any_of("fact_id", values) {
-                    predicates.push(predicate);
-                }
-                if !input.entity_ids.is_empty() {
-                    return Err(SemanticQueryError::Invalid(
-                        "entity-to-fact selection requires an explicit typed dependency".to_owned(),
-                    ));
-                }
-            }
-            _ => {
-                return Err(SemanticQueryError::Invalid(
-                    "graph form reached relational lowering".to_owned(),
-                ));
-            }
+    let (column, identities, prefix) = match typed.form {
+        QueryForm::FindEntities => ("entity_id", query.direct_entity_ids(), "entity:"),
+        QueryForm::RetrieveFacts | QueryForm::FollowRelationships => {
+            ("fact_id", query.direct_fact_ids(), "fact:")
         }
-    }
-    if let Some(filter) = &query.r#where {
-        match typed.form {
-            QueryForm::FindEntities => {
-                if !filter.relation_kind_codes.is_empty() {
-                    return Err(SemanticQueryError::Invalid(
-                        "relation predicate cannot bind to an entity scan".to_owned(),
-                    ));
-                }
-                if let Some(predicate) = any_of(
-                    "entity_kind_code",
-                    filter
-                        .entity_kind_codes
-                        .iter()
-                        .map(|value| {
-                            i16::try_from(*value)
-                                .map(|value| ScalarValue::Int16(Some(value)))
-                                .map_err(|_| {
-                                    SemanticQueryError::Invalid(
-                                        "entity kind code exceeds Code16".to_owned(),
-                                    )
-                                })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                ) {
-                    predicates.push(predicate);
-                }
-            }
-            QueryForm::FollowRelationships => {
-                if !filter.entity_kind_codes.is_empty() {
-                    return Err(SemanticQueryError::Invalid(
-                        "entity predicate cannot bind to a relation scan".to_owned(),
-                    ));
-                }
-                if let Some(predicate) = any_of(
-                    "relation_kind_code",
-                    filter
-                        .relation_kind_codes
-                        .iter()
-                        .map(|value| {
-                            i16::try_from(*value)
-                                .map(|value| ScalarValue::Int16(Some(value)))
-                                .map_err(|_| {
-                                    SemanticQueryError::Invalid(
-                                        "relation kind code exceeds Code16".to_owned(),
-                                    )
-                                })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                ) {
-                    predicates.push(predicate);
-                }
-            }
-            QueryForm::RetrieveFacts => {
-                if !filter.entity_kind_codes.is_empty() || !filter.relation_kind_codes.is_empty() {
-                    return Err(SemanticQueryError::Invalid(
-                        "kind predicates do not apply to property facts".to_owned(),
-                    ));
-                }
-            }
-            _ => unreachable!("inactive graph forms are rejected during typing"),
+        _ => {
+            return Err(SemanticQueryError::Invalid(
+                "graph form reached relational lowering".to_owned(),
+            ));
         }
+    };
+    let values = identities
+        .into_iter()
+        .map(|value| id16_scalar(value, prefix))
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(predicate) = any_of(column, values) {
+        predicates.push(predicate);
     }
     let mut builder = LogicalPlanBuilder::from(session.table_plan(table).await?);
     if let Some(predicate) = all_of(predicates) {
@@ -1110,7 +1014,7 @@ pub async fn bind_request(
             .request
             .queries
             .iter()
-            .find(|query| query.query_id == block.block_id)
+            .find(|query| query.query_id() == block.block_id)
             .ok_or_else(|| {
                 SemanticQueryError::Invalid(
                     "typed block does not retain its parsed query".to_owned(),
@@ -1341,10 +1245,12 @@ fn graph_inputs(
     completed: &BTreeMap<String, BlockValues>,
 ) -> BlockValues {
     let mut values = BlockValues::default();
-    if let Some(input) = &query.input {
-        values.entity_ids.extend(input.entity_ids.clone());
-        values.fact_ids.extend(input.fact_ids.clone());
-    }
+    values
+        .entity_ids
+        .extend(query.direct_entity_ids().into_iter().map(str::to_owned));
+    values
+        .fact_ids
+        .extend(query.direct_fact_ids().into_iter().map(str::to_owned));
     for dependency in dependencies {
         if let Some(produced) = completed.get(dependency) {
             values.entity_ids.extend(produced.entity_ids.clone());
@@ -1635,7 +1541,7 @@ pub async fn execute_request_in_context(
             .request
             .queries
             .iter()
-            .find(|query| query.query_id == *block_id)
+            .find(|query| query.query_id() == *block_id)
             .ok_or_else(|| {
                 SemanticQueryError::Invalid(
                     "typed execution order names no parsed block".to_owned(),
@@ -1660,13 +1566,13 @@ pub async fn execute_request_in_context(
                     .await?;
                 plan_artifacts.push(result.artifact.clone());
                 let produced_rows = result.artifact.output_row_count;
-                let mut ids = response_ids(&result.batches, query.request)?;
+                let mut ids = response_ids(&result.batches, query.form())?;
                 let limit_reached = produced_rows > block.typed.limit.first;
                 ids.truncate(block.typed.limit.first);
                 let output_row_count = ids.len();
                 let result_checksum = b3(ids.join("\0").as_bytes());
                 let mut values = BlockValues::default();
-                match query.request {
+                match query.form() {
                     QueryForm::FindEntities => values.entity_ids = ids,
                     QueryForm::RetrieveFacts | QueryForm::FollowRelationships => {
                         values.fact_ids = ids;
@@ -1761,7 +1667,7 @@ pub async fn execute_request_in_context(
                 BTreeMap::from([("group_id".to_owned(), group_id.clone())]),
             );
         }
-        let phrase = resolve_phrase(query.request, query.label.as_deref())?;
+        let phrase = resolve_phrase(query.form(), query.label())?;
         let mut resolved_semantics = match &block.operator {
             BoundOperator::Relational {
                 table,
@@ -1791,8 +1697,8 @@ pub async fn execute_request_in_context(
             );
         }
         results.push(QueryResultRecord {
-            query_id: query.query_id.clone(),
-            request: query.request,
+            query_id: query.query_id().to_owned(),
+            request: query.form(),
             execution_state: QueryExecutionState::Complete,
             availability_state: if completeness_state == CompletenessState::Indeterminate {
                 QueryAvailabilityState::Partial
@@ -2073,14 +1979,14 @@ mod tests {
             "workspace_id": "workspace:00000000000000000000000000000000",
             "freshness_policy": "best_available_snapshot",
             "queries": [
-                {"query_id":"entities","request":"find code entities","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
-                {"query_id":"properties","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
-                {"query_id":"relations","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
-                {"query_id":"paths","request":"find connecting fact paths","label":null,"input":{"results":[{"results_of":"entities","select":"entities"}]},"where":null,"limit":{"first":10,"offset":0}},
-                {"query_id":"patterns","request":"match a code fact pattern","label":null,"input":{"results":[{"results_of":"entities","select":"entities"}]},"where":null,"limit":{"first":10,"offset":0}},
-                {"query_id":"combined","request":"combine result sets","label":null,"input":{"results":[{"results_of":"properties","select":"facts"},{"results_of":"relations","select":"facts"}]},"where":null,"limit":{"first":10,"offset":0}},
-                {"query_id":"summary","request":"summarize objective facts","label":null,"input":{"results":[{"results_of":"combined","select":"groups"}]},"where":null,"limit":{"first":10,"offset":0}},
-                {"query_id":"context","request":"retrieve source and syntax context","label":null,"input":{"results":[{"results_of":"paths","select":"paths"}]},"where":null,"limit":{"first":10,"offset":0}}
+                {"query_id":"entities","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"properties","request":"retrieve facts about code","label":null,"about":[{"results_of":"entities","select":"entities"}],"facts":["declared properties"],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"relations","request":"follow code relationships","label":null,"starting_from":[{"results_of":"entities","select":"entities"}],"relationship":"outgoing fact relationships","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"paths","request":"find connecting fact paths","label":null,"starting_from":[{"results_of":"entities","select":"entities"}],"ending_at":["matching destination entities"],"through":["relation facts"],"path_policy":"one shortest witness path","maximum_length":4,"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"patterns","request":"match a code fact pattern","label":null,"bindings":[{"name":"source","looking_for":"code entities","within":{"results_of":"entities","select":"entities"}}],"relationships":[],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"combined","request":"combine result sets","label":null,"inputs":[{"results_of":"properties","select":"facts"},{"results_of":"relations","select":"facts"}],"combination":"union by fact identity","return":{"limit":{"maximum_results":10}}},
+                {"query_id":"summary","request":"summarize objective facts","label":null,"input":[{"results_of":"combined","select":"groups"}],"summaries":["count facts by kind"],"return":{"limit":{"maximum_results":10}}},
+                {"query_id":"context","request":"retrieve source and syntax context","label":null,"for":[{"results_of":"paths","select":"paths"}],"context":["source location"],"return":{"limit":{"maximum_results":10}}}
             ],
             "response_projection": {"canonical_semantic_identity":true,"coverage":true},
             "cost_budget": {"maximum_rows":80}
@@ -2120,9 +2026,9 @@ mod tests {
           "workspace_id":"workspace:00000000000000000000000000000000",
           "freshness_policy":"best_available_snapshot",
           "queries":[
-            {"query_id":"q1","request":"find code entities","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
-            {"query_id":"q2","request":"retrieve facts about code","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}},
-            {"query_id":"q3","request":"follow code relationships","label":null,"input":null,"where":null,"limit":{"first":10,"offset":0}}
+            {"query_id":"q1","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":10}}},
+            {"query_id":"q2","request":"retrieve facts about code","label":null,"about":[{"results_of":"q1","select":"entities"}],"facts":["declared properties"],"return":{"limit":{"maximum_results":10}}},
+            {"query_id":"q3","request":"follow code relationships","label":null,"starting_from":[{"results_of":"q1","select":"entities"}],"relationship":"outgoing fact relationships","return":{"limit":{"maximum_results":10}}}
           ],
           "response_projection":null,
           "cost_budget":{"maximum_rows":30}
@@ -2135,6 +2041,118 @@ mod tests {
         let validated = validate_request(&request()).unwrap();
         assert_eq!(validated.request.queries.len(), 3);
         assert!(validated.request_digest.starts_with("b3:"));
+    }
+
+    #[test]
+    fn qry_v13_form_contract_conformance() {
+        let parsed = parse_request(&eight_form_request()).unwrap();
+        assert_eq!(parsed.request.queries.len(), 8);
+        assert_eq!(
+            parsed
+                .request
+                .queries
+                .iter()
+                .map(SemanticQueryClause::form)
+                .collect::<BTreeSet<_>>(),
+            QUERY_FORM_VALUES
+                .iter()
+                .map(|entry| QueryForm::try_from(entry.code).unwrap())
+                .collect()
+        );
+        let mut wrong_variant: serde_json::Value =
+            serde_json::from_slice(&eight_form_request()).unwrap();
+        wrong_variant["queries"][3]["facts"] = serde_json::json!(["not a path field"]);
+        assert!(parse_request(&canonicalize_value(&wrong_variant).unwrap()).is_err());
+        let mut missing_required: serde_json::Value =
+            serde_json::from_slice(&eight_form_request()).unwrap();
+        missing_required["queries"][7]
+            .as_object_mut()
+            .unwrap()
+            .remove("context");
+        assert!(parse_request(&canonicalize_value(&missing_required).unwrap()).is_err());
+    }
+
+    #[test]
+    fn query_form_projection_parity() {
+        assert_eq!(QUERY_FORM_CONTRACTS.len(), QUERY_FORM_VALUES.len());
+        for (contract, registry) in QUERY_FORM_CONTRACTS.iter().zip(QUERY_FORM_VALUES) {
+            assert_eq!(contract.code, registry.code);
+            assert_eq!(contract.slug, registry.slug);
+            assert!(contract.owner_section >= 13 && contract.owner_section <= 20);
+            assert!(!contract.node_kind.is_empty());
+            assert!(!contract.canonical_order.is_empty());
+        }
+        assert_eq!(QUERY_FORM_CONTRACT_ID, "codefabric.query.form-contract");
+        assert_eq!(QUERY_FORM_CONTRACT_VERSION, "1.0");
+        assert!(QUERY_FORM_CONTRACT_DIGEST.starts_with("b3:"));
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../contracts/schema/cpg-semantic-query-request.schema.json"
+        ))
+        .unwrap();
+        let schema_slugs = schema["properties"]["queries"]["items"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|variant| variant["properties"]["request"]["const"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            schema_slugs,
+            QUERY_FORM_VALUES
+                .iter()
+                .map(|entry| entry.slug)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn qry_v13_connecting_path_schema_falsification() {
+        let parsed = parse_request(&eight_form_request()).unwrap();
+        let SemanticQueryClause::FindPaths {
+            starting_from,
+            ending_at,
+            through,
+            path_policy,
+            maximum_length,
+            ..
+        } = &parsed.request.queries[3]
+        else {
+            panic!("path fixture changed variant");
+        };
+        assert_eq!(starting_from.len(), 1);
+        assert_eq!(ending_at.len(), 1);
+        assert_eq!(
+            through.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["relation facts"]
+        );
+        assert_eq!(path_policy, "one shortest witness path");
+        assert_eq!(*maximum_length, Some(4));
+        for retired in [
+            "retrieve facts",
+            "follow relationships",
+            "find paths",
+            "summarize facts",
+            "fetch source context",
+        ] {
+            let changed = String::from_utf8(eight_form_request())
+                .unwrap()
+                .replace("find connecting fact paths", retired);
+            assert!(
+                parse_request(changed.as_bytes()).is_err(),
+                "accepted {retired}"
+            );
+        }
+    }
+
+    #[test]
+    fn query_form_contract_operational_gate() {
+        let typed = validate_request(&eight_form_request()).unwrap();
+        assert!(require_registered_executors(&typed).is_err());
+        assert!(
+            typed
+                .blocks
+                .iter()
+                .all(|block| !block.form.executor_registered())
+        );
     }
 
     #[test]
@@ -2183,7 +2201,7 @@ mod tests {
                 .request
                 .queries
                 .iter()
-                .map(|query| query.request)
+                .map(SemanticQueryClause::form)
                 .collect::<Vec<_>>(),
             vec![
                 QueryForm::FindEntities,
@@ -2198,8 +2216,8 @@ mod tests {
         let filtered = String::from_utf8(request())
             .unwrap()
             .replace(
-                r#""query_id":"q1","request":"find code entities","label":null,"input":null,"where":null"#,
-                r#""query_id":"q1","request":"find code entities","label":null,"input":null,"where":{"entity_kind_codes":[10],"relation_kind_codes":[]}"#,
+                r#""looking_for":"syntax nodes""#,
+                r#""looking_for":"syntax nodes","where":["entities whose semantic kind is function"]"#,
             )
             .replace(
                 "\"response_projection\":null",
@@ -2210,13 +2228,18 @@ mod tests {
         assert_eq!(typed.blocks[0].form, QueryForm::FindEntities);
         assert_eq!(typed.blocks[0].output_role, ResultRole::Entities);
         assert_eq!(typed.blocks[0].canonical_order, ["entity_id"]);
+        let SemanticQueryClause::FindEntities {
+            where_conditions, ..
+        } = &typed.request.queries[0]
+        else {
+            panic!("first query changed variant");
+        };
         assert_eq!(
-            typed.request.queries[0]
-                .r#where
-                .as_ref()
-                .unwrap()
-                .entity_kind_codes,
-            [10]
+            where_conditions
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["entities whose semantic kind is function"]
         );
         assert_eq!(
             typed.request.response_projection,
@@ -2229,14 +2252,10 @@ mod tests {
 
     #[test]
     fn wp62_structural_acceptance() {
-        let dependent = String::from_utf8(request()).unwrap().replace(
-            r#""query_id":"q2","request":"retrieve facts about code","label":null,"input":null"#,
-            r#""query_id":"q2","request":"retrieve facts about code","label":null,"input":{"results":[{"results_of":"q1","select":"entities"}]}"#,
-        );
-        let typed = validate_request(dependent.as_bytes()).unwrap();
+        let typed = validate_request(&request()).unwrap();
         assert_eq!(typed.execution_order, ["q1", "q2", "q3"]);
         assert_eq!(typed.blocks[0].output_role, ResultRole::Entities);
-        assert_eq!(typed.blocks[0].fan_out, 1);
+        assert_eq!(typed.blocks[0].fan_out, 2);
         assert_eq!(typed.blocks[1].input_roles, [ResultRole::Entities]);
         assert_eq!(typed.blocks[1].source_pointer, "/queries/1");
         assert!(typed.blocks.iter().all(|block| {
@@ -2255,29 +2274,23 @@ mod tests {
         let error = validate_request(evaluative.as_bytes()).unwrap_err();
         assert!(error.to_string().contains("evaluative intent"));
 
-        let cycle = String::from_utf8(request())
-            .unwrap()
-            .replace(
-                r#""query_id":"q1","request":"find code entities","label":null,"input":null"#,
-                r#""query_id":"q1","request":"find code entities","label":null,"input":{"results":[{"results_of":"q2","select":"facts"}]}"#,
-            )
-            .replace(
-                r#""query_id":"q2","request":"retrieve facts about code","label":null,"input":null"#,
-                r#""query_id":"q2","request":"retrieve facts about code","label":null,"input":{"results":[{"results_of":"q1","select":"entities"}]}"#,
-            );
+        let mut cycle: serde_json::Value = serde_json::from_slice(&request()).unwrap();
+        cycle["queries"][0]["within"] = serde_json::json!([
+            {"results_of":"q2","select":"facts"}
+        ]);
         assert!(
-            validate_request(cycle.as_bytes())
+            validate_request(&canonicalize_value(&cycle).unwrap())
                 .unwrap_err()
                 .to_string()
                 .contains("cycle")
         );
 
-        let mismatch = String::from_utf8(request()).unwrap().replace(
-            r#""query_id":"q2","request":"retrieve facts about code","label":null,"input":null"#,
-            r#""query_id":"q2","request":"retrieve facts about code","label":null,"input":{"results":[{"results_of":"q1","select":"facts"}]}"#,
-        );
+        let mut mismatch: serde_json::Value = serde_json::from_slice(&request()).unwrap();
+        mismatch["queries"][1]["about"] = serde_json::json!([
+            {"results_of":"q1","select":"facts"}
+        ]);
         assert!(
-            validate_request(mismatch.as_bytes())
+            validate_request(&canonicalize_value(&mismatch).unwrap())
                 .unwrap_err()
                 .to_string()
                 .contains("incompatible result role")
@@ -2393,12 +2406,9 @@ mod tests {
     #[test]
     fn wp75_negative_zero_state() {
         let mut cycle: serde_json::Value = serde_json::from_slice(&eight_form_request()).unwrap();
-        cycle["queries"][0]["input"] = serde_json::json!({
-            "results":[{"results_of":"properties","select":"facts"}]
-        });
-        cycle["queries"][1]["input"] = serde_json::json!({
-            "results":[{"results_of":"entities","select":"entities"}]
-        });
+        cycle["queries"][0]["within"] = serde_json::json!([
+            {"results_of":"properties","select":"facts"}
+        ]);
         assert!(
             validate_request(&canonicalize_value(&cycle).unwrap())
                 .unwrap_err()
@@ -2408,9 +2418,9 @@ mod tests {
 
         let mut mismatch: serde_json::Value =
             serde_json::from_slice(&eight_form_request()).unwrap();
-        mismatch["queries"][3]["input"] = serde_json::json!({
-            "results":[{"results_of":"properties","select":"facts"}]
-        });
+        mismatch["queries"][3]["starting_from"] = serde_json::json!([
+            {"results_of":"properties","select":"facts"}
+        ]);
         assert!(
             validate_request(&canonicalize_value(&mismatch).unwrap())
                 .unwrap_err()

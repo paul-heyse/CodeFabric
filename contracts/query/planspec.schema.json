@@ -1,11 +1,226 @@
 {
+  "$defs": {
+    "pattern_binding": {
+      "additionalProperties": false,
+      "properties": {
+        "looking_for": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "where": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "within": {
+          "oneOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/prior_result_reference"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "entity_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "entity_id"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "fact_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "fact_id"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "looking_for"
+      ],
+      "type": "object"
+    },
+    "pattern_relationship": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "distance": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "from": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "relationship": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "prior_result_reference": {
+      "additionalProperties": false,
+      "properties": {
+        "results_of": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "select": {
+          "$ref": "#/$defs/result_role"
+        }
+      },
+      "required": [
+        "results_of",
+        "select"
+      ],
+      "type": "object"
+    },
+    "result_role": {
+      "enum": [
+        "entities",
+        "facts",
+        "paths",
+        "pattern_bindings",
+        "groups",
+        "summary",
+        "source_contexts"
+      ],
+      "type": "string"
+    },
+    "return_limit": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum_results": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "per": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "when_exceeded": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "maximum_results"
+      ],
+      "type": "object"
+    },
+    "return_spec": {
+      "additionalProperties": false,
+      "properties": {
+        "deduplicate_by": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "exclude": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "group_by": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "include": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "include_query_result": {
+          "type": "boolean"
+        },
+        "limit": {
+          "$ref": "#/$defs/return_limit"
+        },
+        "order_by": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "result_shape": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "supporting_facts": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://codefabric.dev/contracts/query/planspec.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "authorization_scope": {
-      "type": "object"
-    },
     "binding_state": {
       "enum": [
         "unbound",
@@ -14,31 +229,14 @@
       "type": "string"
     },
     "bound_snapshot_id": {
-      "anyOf": [
-        {
-          "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
+      "type": [
+        "string",
+        "null"
       ]
     },
     "canonical_digest": {
-      "pattern": "^(b3|blake3):[0-9a-f]{64}$",
+      "pattern": "^b3:[0-9a-f]{64}$",
       "type": "string"
-    },
-    "context_selection": {
-      "type": "object"
-    },
-    "cost_budget": {
-      "type": "object"
-    },
-    "deterministic_ordering": {
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
     },
     "plan_spec_version": {
       "const": "1.0"
@@ -49,662 +247,597 @@
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "source_file_path",
+                  "span_start",
+                  "semantic_kind",
+                  "qualified_name",
+                  "entity_id"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "coverage_prerequisites": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "entities",
+                    "facts"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
               "node_kind": {
                 "const": "find-entities"
               },
-              "ontology_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
+              "output_role": {
+                "const": "entities"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "semantic_owner",
+                  "source_location",
+                  "fact_class",
+                  "relationship",
+                  "subject_id",
+                  "object_or_value",
+                  "fact_id"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "coverage_prerequisites": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "entities",
+                    "facts"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
               "node_kind": {
                 "const": "retrieve-facts"
               },
-              "ontology_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
+              "output_role": {
+                "const": "facts"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "semantic_owner",
+                  "source_location",
+                  "fact_class",
+                  "relationship",
+                  "subject_id",
+                  "object_id",
+                  "fact_id"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "coverage_prerequisites": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "entities",
+                    "facts"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
               "node_kind": {
                 "const": "follow-relationships"
               },
-              "ontology_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
+              "output_role": {
+                "const": "facts"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "path_length",
+                  "start_id",
+                  "end_id",
+                  "ordered_fact_ids"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "coverage_prerequisites": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "entities"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
               "node_kind": {
                 "const": "find-paths"
               },
-              "ontology_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
+              "output_role": {
+                "const": "paths"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "binding_row"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "coverage_prerequisites": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "entities"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
               "node_kind": {
                 "const": "match-pattern"
               },
-              "ontology_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
+              "output_role": {
+                "const": "pattern_bindings"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "group_key"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "coverage_prerequisites": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "entities",
+                    "facts",
+                    "paths",
+                    "pattern_bindings",
+                    "groups",
+                    "source_contexts"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
               "node_kind": {
-                "const": "combine-sets"
+                "const": "combine-results"
               },
-              "ontology_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
+              "output_role": {
+                "const": "groups"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "group_key",
+                  "summary_name"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "coverage_prerequisites": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "facts",
+                    "groups"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
               "node_kind": {
                 "const": "summarize-facts"
               },
-              "ontology_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
+              "output_role": {
+                "const": "summary"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "canonical_ordering": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "certainty_filters": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "conditions": {
-                "items": {
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "context_partition_policy": {
-                "type": "string"
-              },
-              "coverage_requirement": {
+              "bound_semantics": {
                 "type": "object"
               },
-              "inputs": {
+              "canonical_order": {
+                "const": [
+                  "source_file_path",
+                  "span_start",
+                  "span_end"
+                ]
+              },
+              "coverage_effects": {
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "node_kind": {
-                "const": "fetch-source-context"
-              },
-              "ontology_ids": {
+              "coverage_prerequisites": {
                 "items": {
                   "type": "string"
                 },
-                "type": "array",
-                "uniqueItems": true
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "type": "array"
+              },
+              "input_roles": {
+                "items": {
+                  "enum": [
+                    "entities",
+                    "facts",
+                    "paths",
+                    "pattern_bindings"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "node_kind": {
+                "const": "retrieve-source-context"
+              },
+              "output_role": {
+                "const": "source_contexts"
               },
               "query_id": {
                 "type": "string"
               },
-              "requested_output_roles": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              "soft_limits": {
+              "resource_contract": {
                 "type": "object"
+              },
+              "source_pointer": {
+                "type": "string"
               }
             },
             "required": [
               "node_kind",
               "query_id",
-              "label",
-              "inputs",
-              "ontology_ids",
-              "conditions",
-              "context_partition_policy",
-              "certainty_filters",
-              "coverage_requirement",
-              "soft_limits",
-              "requested_output_roles",
-              "canonical_ordering"
+              "source_pointer",
+              "input_roles",
+              "output_role",
+              "dependencies",
+              "bound_semantics",
+              "coverage_prerequisites",
+              "coverage_effects",
+              "canonical_order",
+              "resource_contract"
             ],
             "type": "object"
           }
         ]
       },
-      "minItems": 1,
       "type": "array"
-    },
-    "response_projection": {
-      "type": "object"
     },
     "semantic_request_id": {
       "type": "string"
     },
-    "snapshot_requirement": {
-      "type": "object"
-    },
-    "source_boundary": {
-      "type": "object"
-    },
     "workspace_id": {
-      "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
       "type": "string"
     }
   },
@@ -714,14 +847,7 @@
     "bound_snapshot_id",
     "semantic_request_id",
     "workspace_id",
-    "snapshot_requirement",
-    "context_selection",
-    "authorization_scope",
-    "source_boundary",
     "queries",
-    "deterministic_ordering",
-    "response_projection",
-    "cost_budget",
     "canonical_digest"
   ],
   "title": "Semantic query PlanSpec",
@@ -736,7 +862,7 @@
   },
   "x-codefabric-generated": {
     "driver": "schema-contract-driver-v1",
-    "source_artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:08f951a0ea254c62b42d15075bea2746c7fb66272ec2198dd6b14343bdeb884f"
+    "source_artifact_id": "codefabric.query.form-contract",
+    "source_digest": "b3:f3c0135610654a79f2226aacedde7b9ea8c957a8c50359000fb1ccb88cd06d58"
   }
 }

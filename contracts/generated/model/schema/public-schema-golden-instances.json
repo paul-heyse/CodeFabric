@@ -184,12 +184,23 @@
         "freshness_policy": "current_required",
         "queries": [
           {
-            "input": null,
-            "label": null,
-            "limit": null,
+            "looking_for": "the Rust function named build_graph",
             "query_id": "fixture-query",
             "request": "find code entities",
-            "where": null
+            "return": {
+              "include": [
+                "canonical semantic identity",
+                "qualified name",
+                "source location"
+              ],
+              "limit": {
+                "maximum_results": 50,
+                "when_exceeded": "return the deterministic first results and mark the query incomplete"
+              }
+            },
+            "where": [
+              "entities in the current authorized workspace"
+            ]
           }
         ],
         "response_projection": null,
@@ -254,34 +265,41 @@
     },
     {
       "instance": {
-        "authorization_scope": {},
         "binding_state": "unbound",
         "bound_snapshot_id": null,
         "canonical_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
-        "context_selection": {},
-        "cost_budget": {},
-        "deterministic_ordering": [],
         "plan_spec_version": "1.0",
         "queries": [
           {
-            "canonical_ordering": [],
-            "certainty_filters": [],
-            "conditions": [],
-            "context_partition_policy": "all",
-            "coverage_requirement": {},
-            "inputs": [],
-            "label": null,
+            "bound_semantics": {
+              "looking_for": "the Rust function named build_graph"
+            },
+            "canonical_order": [
+              "source_file_path",
+              "span_start",
+              "semantic_kind",
+              "qualified_name",
+              "entity_id"
+            ],
+            "coverage_effects": [
+              "entity_rows_observed"
+            ],
+            "coverage_prerequisites": [
+              "snapshot_pinned"
+            ],
+            "dependencies": [],
+            "input_roles": [],
             "node_kind": "find-entities",
-            "ontology_ids": [],
+            "output_role": "entities",
             "query_id": "fixture-query",
-            "requested_output_roles": [],
-            "soft_limits": {}
+            "resource_contract": {
+              "cancellation_required": true,
+              "maximum_results": 50
+            },
+            "source_pointer": "/queries/0"
           }
         ],
-        "response_projection": {},
         "semantic_request_id": "fixture-request",
-        "snapshot_requirement": {},
-        "source_boundary": {},
         "workspace_id": "workspace:00000000000000000000000000000000"
       },
       "schema_kind": "plan-spec",

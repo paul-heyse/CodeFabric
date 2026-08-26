@@ -10,6 +10,12 @@ from google.protobuf import descriptor_pb2, descriptor_pool
 from google.protobuf.message import Message
 from jsonschema import Draft202012Validator
 
+from codefabric_cpg_mcp.contracts.query_forms import (
+    QUERY_FORM_CONTRACT_DIGEST,
+    QUERY_FORM_CONTRACT_ID,
+    QUERY_FORM_NODE_KINDS,
+    QUERY_FORMS,
+)
 from codefabric_cpg_mcp.daemon.channel import (
     GRPC_DEFAULT_AUTHORITY,
     GRPC_MESSAGE_OPTIONS,
@@ -151,6 +157,29 @@ def test_wp67_structural_acceptance_admin_protocol_schema_examples() -> None:
     validator = Draft202012Validator(schema)
     assert all(validator.is_valid(value) for value in examples["valid"])
     assert all(not validator.is_valid(value) for value in examples["invalid"])
+
+
+def test_query_form_projection_parity() -> None:
+    contract = json.loads(
+        (
+            ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json"
+        ).read_text(encoding="utf-8")
+    )
+    schema = json.loads(
+        (ROOT / "contracts/schema/cpg-semantic-query-request.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    Draft202012Validator.check_schema(schema)
+    assert contract["artifact_id"] == QUERY_FORM_CONTRACT_ID
+    assert contract["canonical_digest"] == QUERY_FORM_CONTRACT_DIGEST
+    assert tuple(form["slug"] for form in contract["forms"]) == QUERY_FORMS
+    assert {form["slug"]: form["node_kind"] for form in contract["forms"]} == QUERY_FORM_NODE_KINDS
+    schema_slugs = tuple(
+        variant["properties"]["request"]["const"]
+        for variant in schema["properties"]["queries"]["items"]["oneOf"]
+    )
+    assert schema_slugs == QUERY_FORMS
 
 
 def test_pre_profile_provider_job_wire_remains_decodable() -> None:

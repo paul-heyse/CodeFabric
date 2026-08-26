@@ -2,6 +2,7 @@
   "python": [
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/fingerprints.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query_forms.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/wire_models.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
     "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi",
@@ -25,6 +26,7 @@
     "src/generated/digest_frames.rs",
     "src/generated/fact_row_encoders.rs",
     "src/generated/model_identity_recipes.rs",
+    "src/generated/model_query_forms.rs",
     "src/generated/model_schema_tables.rs",
     "src/generated/provider_raw_kinds.rs",
     "src/generated/registries.rs",

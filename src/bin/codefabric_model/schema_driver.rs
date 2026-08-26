@@ -20,6 +20,12 @@ use super::model_control::StableId;
 use super::repository_model::read_stable;
 
 const SCHEMA_IR_PATH: &str = "contracts/schema/schema-contract-ir.json";
+const QUERY_FORM_CONTRACT_PATH: &str = "contracts/query/query-form-contract.json";
+const RUST_QUERY_FORM_BINDINGS_PATH: &str = "src/generated/model_query_forms.rs";
+const PYTHON_QUERY_FORM_BINDINGS_PATH: &str =
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query_forms.py";
+const PYTHON_QUERY_FORM_CONTRACT_PATH: &str =
+    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json";
 const TABLE_MANIFEST_PATH: &str = "contracts/generated/model/schema/table-specs.json";
 const DDL_PATH: &str = "contracts/generated/model/schema/operational-store.sql";
 const RUST_BINDINGS_PATH: &str = "src/generated/model_schema_tables.rs";
@@ -39,6 +45,139 @@ const FACT_REGISTRY_PATH: &str = "contracts/registry/ontology-fact-registry.yaml
 const CAPABILITY_REGISTRY_PATH: &str = "contracts/registry/capability-registry.yaml";
 const MAX_AUTHORITY_BYTES: usize = 16 * 1024 * 1024;
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum QueryFieldType {
+    BoundedString,
+    BoundedStringList,
+    SemanticReferenceList,
+    PriorResultList,
+    PatternBindingList,
+    PatternRelationshipList,
+    PositiveInteger,
+    ReturnSpec,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryFormFieldContract {
+    name: String,
+    rust_name: String,
+    field_type: QueryFieldType,
+    required: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryFormContractEntry {
+    code: u16,
+    name: String,
+    slug: String,
+    rust_variant: String,
+    node_kind: String,
+    owner_section: u16,
+    output_role: String,
+    accepted_input_roles: Vec<String>,
+    canonical_order: Vec<String>,
+    fields: Vec<QueryFormFieldContract>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryFormContract {
+    artifact_id: String,
+    artifact_kind: String,
+    version: String,
+    compatible_suite_major: u64,
+    status: String,
+    canonical_digest: String,
+    registry_domain: String,
+    specification: String,
+    specification_version: String,
+    result_roles: Vec<String>,
+    forms: Vec<QueryFormContractEntry>,
+}
+
+impl QueryFormContract {
+    fn validate(
+        &self,
+        source_bytes: &[u8],
+        enum_registry_bytes: &[u8],
+    ) -> Result<(), SchemaDriverError> {
+        if self.artifact_id != "codefabric.query.form-contract"
+            || self.artifact_kind != "semantic-contract"
+            || self.version != "1.0"
+            || self.compatible_suite_major != 1
+            || self.status != "released"
+            || self.registry_domain != "QUERY_FORM"
+            || self.specification != "composable semantic CPG fact query"
+            || self.specification_version != "1.3"
+        {
+            return invalid("$", "invalid query-form contract header");
+        }
+        if detached_query_form_identity(source_bytes)? != self.canonical_digest {
+            return invalid("$.canonical_digest", "detached query-form identity differs");
+        }
+        let expected_roles = BTreeSet::from([
+            "entities",
+            "facts",
+            "paths",
+            "pattern_bindings",
+            "groups",
+            "summary",
+            "source_contexts",
+        ]);
+        if self
+            .result_roles
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>()
+            != expected_roles
+        {
+            return invalid("$.result_roles", "result-role census differs");
+        }
+        if self.forms.len() != 8 {
+            return invalid("$.forms", "all eight QRY 1.3 forms are required");
+        }
+        let mut codes = BTreeSet::new();
+        let mut names = BTreeSet::new();
+        let mut slugs = BTreeSet::new();
+        let mut variants = BTreeSet::new();
+        let mut node_kinds = BTreeSet::new();
+        let mut owners = BTreeSet::new();
+        for (index, form) in self.forms.iter().enumerate() {
+            let path = format!("$.forms[{index}]");
+            if !codes.insert(form.code)
+                || !names.insert(form.name.as_str())
+                || !slugs.insert(form.slug.as_str())
+                || !variants.insert(form.rust_variant.as_str())
+                || !node_kinds.insert(form.node_kind.as_str())
+                || !owners.insert(form.owner_section)
+                || !expected_roles.contains(form.output_role.as_str())
+                || form.canonical_order.is_empty()
+            {
+                return invalid(&path, "duplicate or invalid query-form identity");
+            }
+            let mut field_names = BTreeSet::new();
+            let mut rust_names = BTreeSet::new();
+            for field in &form.fields {
+                if !field_names.insert(field.name.as_str())
+                    || !rust_names.insert(field.rust_name.as_str())
+                    || !identifier(field.rust_name.trim_start_matches("r#"))
+                {
+                    return invalid(&format!("{path}.fields"), "duplicate or invalid form field");
+                }
+            }
+        }
+        if codes != BTreeSet::from([10, 20, 30, 40, 50, 60, 70, 80])
+            || owners != BTreeSet::from([13, 14, 15, 16, 17, 18, 19, 20])
+        {
+            return invalid("$.forms", "QRY form codes or owner sections differ");
+        }
+        validate_query_form_registry(self, enum_registry_bytes)
+    }
+}
 
 /// Header carried temporarily by the legacy native authority during detached-identity cutover.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1077,8 +1216,11 @@ fn validate_semantic_authorities(
 pub struct SchemaPlan {
     descriptor: DriverDescriptor,
     ir: SchemaContractIr,
+    query_forms: QueryFormContract,
+    query_form_bytes: Vec<u8>,
     public_schema_instances: Value,
     source_digest: String,
+    query_form_source_digest: String,
     semantic_digest: String,
     source_fence: DriverSourceFence,
 }
@@ -1123,11 +1265,28 @@ impl SchemaDriver {
                 safe(PUBLIC_SCHEMA_INSTANCES_PATH)?,
                 pretty(&plan.public_schema_instances)?,
             ),
+            (
+                safe(RUST_QUERY_FORM_BINDINGS_PATH)?,
+                rustfmt_source(render_query_form_rust(&plan.query_forms).as_bytes())?,
+            ),
+            (
+                safe(PYTHON_QUERY_FORM_BINDINGS_PATH)?,
+                render_query_form_python(&plan.query_forms).into_bytes(),
+            ),
+            (
+                safe(PYTHON_QUERY_FORM_CONTRACT_PATH)?,
+                plan.query_form_bytes.clone(),
+            ),
         ];
         for schema in &plan.ir.public_schemas {
             outputs.push((
                 safe(&schema.path)?,
-                render_public_schema(schema, &plan.source_digest)?,
+                render_public_schema(
+                    schema,
+                    &plan.source_digest,
+                    &plan.query_forms,
+                    &plan.query_form_source_digest,
+                )?,
             ));
         }
         outputs.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1180,6 +1339,21 @@ impl ModelDriver for SchemaDriver {
                 PUBLIC_SCHEMA_INSTANCES_PATH,
                 DriverOutputRole::CanonicalProjection,
             )?,
+            Self::output(
+                "output:model-query-form-rust",
+                RUST_QUERY_FORM_BINDINGS_PATH,
+                DriverOutputRole::RustBinding,
+            )?,
+            Self::output(
+                "output:model-query-form-python",
+                PYTHON_QUERY_FORM_BINDINGS_PATH,
+                DriverOutputRole::PythonBinding,
+            )?,
+            Self::output(
+                "output:model-query-form-python-contract",
+                PYTHON_QUERY_FORM_CONTRACT_PATH,
+                DriverOutputRole::CanonicalProjection,
+            )?,
         ];
         let descriptor = DriverDescriptor {
             driver_id: StableId::parse("driver:schema-contract-v1".to_owned())
@@ -1189,6 +1363,7 @@ impl ModelDriver for SchemaDriver {
             rule_version: "schema-contract-driver-v1".to_owned(),
             sources: [
                 SCHEMA_IR_PATH,
+                QUERY_FORM_CONTRACT_PATH,
                 ENUM_REGISTRY_PATH,
                 ENTITY_REGISTRY_PATH,
                 RELATION_REGISTRY_PATH,
@@ -1208,7 +1383,7 @@ impl ModelDriver for SchemaDriver {
             resource_profile: DriverResourceProfile {
                 max_source_bytes: MAX_AUTHORITY_BYTES,
                 max_output_bytes: 8 * 1024 * 1024,
-                max_outputs: 16,
+                max_outputs: 20,
             },
         };
         descriptor.validate()?;
@@ -1224,6 +1399,19 @@ impl ModelDriver for SchemaDriver {
         ir.validate()
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         validate_semantic_authorities(repository_root, &ir)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let query_form_bytes = read_stable(
+            &repository_root.join(QUERY_FORM_CONTRACT_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?;
+        let query_forms = decode_query_form_contract(&query_form_bytes)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let enum_registry_bytes = read_stable(
+            &repository_root.join(ENUM_REGISTRY_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?;
+        query_forms
+            .validate(&query_form_bytes, &enum_registry_bytes)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         let public_schema_instances: Value = serde_json::from_slice(&read_stable(
             &repository_root.join(PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH),
@@ -1253,6 +1441,9 @@ impl ModelDriver for SchemaDriver {
         Ok(SchemaPlan {
             descriptor,
             ir,
+            query_forms,
+            query_form_source_digest: codefabric::integrity::framed_digest(&query_form_bytes),
+            query_form_bytes,
             public_schema_instances,
             source_digest: codefabric::integrity::framed_digest(&bytes),
             semantic_digest,
@@ -1423,19 +1614,544 @@ fn render_table_manifest(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError
     }))
 }
 
+fn query_reference_schema() -> Value {
+    json!({
+        "oneOf": [
+            {"type": "string", "minLength": 1, "maxLength": 4096},
+            {"$ref": "#/$defs/prior_result_reference"},
+            {"type": "object", "additionalProperties": false, "required": ["entity_id"], "properties": {"entity_id": {"type": "string", "minLength": 1}}},
+            {"type": "object", "additionalProperties": false, "required": ["fact_id"], "properties": {"fact_id": {"type": "string", "minLength": 1}}}
+        ]
+    })
+}
+
+fn rust_query_field_type(field: &QueryFormFieldContract) -> String {
+    let base = match field.field_type {
+        QueryFieldType::BoundedString => "String",
+        QueryFieldType::BoundedStringList => "Vec<String>",
+        QueryFieldType::SemanticReferenceList => "Vec<SemanticReference>",
+        QueryFieldType::PriorResultList => "Vec<PriorResultReference>",
+        QueryFieldType::PatternBindingList => "Vec<PatternBinding>",
+        QueryFieldType::PatternRelationshipList => "Vec<PatternRelationship>",
+        QueryFieldType::PositiveInteger => "usize",
+        QueryFieldType::ReturnSpec => "ReturnSpec",
+    };
+    if field.required {
+        base.to_owned()
+    } else if matches!(
+        field.field_type,
+        QueryFieldType::BoundedStringList
+            | QueryFieldType::SemanticReferenceList
+            | QueryFieldType::PriorResultList
+            | QueryFieldType::PatternBindingList
+            | QueryFieldType::PatternRelationshipList
+    ) {
+        base.to_owned()
+    } else {
+        format!("Option<{base}>")
+    }
+}
+
+fn render_query_form_rust(contract: &QueryFormContract) -> String {
+    let mut output = format!(
+        "// @generated by codefabric-model from {} {} ({}); do not edit.\n\
+         #![allow(clippy::match_same_arms)]\n\
+         use serde::{{Deserialize, Serialize}};\n\
+         use crate::registries::QueryForm;\n\n\
+         pub const QUERY_FORM_CONTRACT_ID: &str = {:?};\n\
+         pub const QUERY_FORM_CONTRACT_VERSION: &str = {:?};\n\
+         pub const QUERY_FORM_CONTRACT_DIGEST: &str = {:?};\n\n",
+        contract.artifact_id,
+        contract.version,
+        contract.canonical_digest,
+        contract.artifact_id,
+        contract.version,
+        contract.canonical_digest,
+    );
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]\n\
+         #[serde(rename_all = \"snake_case\")]\n\
+         pub enum ResultRole { Entities, Facts, Paths, PatternBindings, Groups, Summary, SourceContexts }\n\n\
+         #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]\n\
+         #[serde(deny_unknown_fields)]\n\
+         pub struct PriorResultReference { pub results_of: String, pub select: ResultRole }\n\n\
+         #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]\n\
+         #[serde(untagged)]\n\
+         pub enum SemanticReference {\n\
+             Phrase(String),\n\
+             PriorResult(PriorResultReference),\n\
+             Entity { entity_id: String },\n\
+             Fact { fact_id: String },\n\
+         }\n\n\
+         #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]\n\
+         #[serde(deny_unknown_fields)]\n\
+         pub struct ReturnLimit { pub maximum_results: usize, pub per: Option<String>, pub when_exceeded: Option<String> }\n\n\
+         #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]\n\
+         #[serde(deny_unknown_fields)]\n\
+         pub struct ReturnSpec {\n\
+             #[serde(default)] pub include: Vec<String>,\n\
+             #[serde(default)] pub exclude: Vec<String>,\n\
+             pub result_shape: Option<String>,\n\
+             #[serde(default)] pub group_by: Vec<String>,\n\
+             #[serde(default)] pub order_by: Vec<String>,\n\
+             pub deduplicate_by: Option<String>,\n\
+             pub supporting_facts: Option<String>,\n\
+             pub include_query_result: Option<bool>,\n\
+             pub limit: Option<ReturnLimit>,\n\
+         }\n\n\
+         #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]\n\
+         #[serde(deny_unknown_fields)]\n\
+         pub struct PatternBinding {\n\
+             pub name: String, pub looking_for: String, pub within: Option<SemanticReference>,\n\
+             #[serde(default, rename = \"where\")] pub where_conditions: Vec<String>,\n\
+         }\n\n\
+         #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]\n\
+         #[serde(deny_unknown_fields)]\n\
+         pub struct PatternRelationship {\n\
+             pub from: String, pub to: String, pub relationship: String,\n\
+             pub direction: Option<String>, pub distance: Option<String>,\n\
+         }\n\n\
+         #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]\n\
+         #[serde(tag = \"request\", deny_unknown_fields)]\n\
+         pub enum SemanticQueryClause {\n",
+    );
+    for form in &contract.forms {
+        writeln!(output, "    #[serde(rename = {:?})]", form.slug).unwrap();
+        writeln!(output, "    {} {{", form.rust_variant).unwrap();
+        output.push_str("        query_id: String,\n        label: Option<String>,\n");
+        for field in &form.fields {
+            if field.name != field.rust_name {
+                writeln!(output, "        #[serde(rename = {:?})]", field.name).unwrap();
+            }
+            if !field.required
+                && matches!(
+                    field.field_type,
+                    QueryFieldType::BoundedStringList
+                        | QueryFieldType::SemanticReferenceList
+                        | QueryFieldType::PriorResultList
+                        | QueryFieldType::PatternBindingList
+                        | QueryFieldType::PatternRelationshipList
+                )
+            {
+                output.push_str("        #[serde(default)]\n");
+            }
+            writeln!(
+                output,
+                "        {}: {},",
+                field.rust_name,
+                rust_query_field_type(field)
+            )
+            .unwrap();
+        }
+        output.push_str("    },\n");
+    }
+    output.push_str("}\n\nimpl SemanticQueryClause {\n");
+    output.push_str("    #[must_use]\n    pub fn query_id(&self) -> &str { match self {\n");
+    for form in &contract.forms {
+        writeln!(
+            output,
+            "        Self::{} {{ query_id, .. }} => query_id,",
+            form.rust_variant
+        )
+        .unwrap();
+    }
+    output.push_str(
+        "    } }\n    #[must_use]\n    pub const fn form(&self) -> QueryForm { match self {\n",
+    );
+    for form in &contract.forms {
+        writeln!(
+            output,
+            "        Self::{} {{ .. }} => QueryForm::{},",
+            form.rust_variant, form.rust_variant
+        )
+        .unwrap();
+    }
+    output.push_str(
+        "    } }\n    #[must_use]\n    pub fn label(&self) -> Option<&str> { match self {\n",
+    );
+    for form in &contract.forms {
+        writeln!(
+            output,
+            "        Self::{} {{ label, .. }} => label.as_deref(),",
+            form.rust_variant
+        )
+        .unwrap();
+    }
+    output.push_str("    } }\n    #[must_use]\n    pub const fn output_role(&self) -> ResultRole { match self {\n");
+    for form in &contract.forms {
+        writeln!(
+            output,
+            "        Self::{} {{ .. }} => ResultRole::{},",
+            form.rust_variant,
+            upper_camel(&form.output_role)
+        )
+        .unwrap();
+    }
+    output.push_str(
+        "    } }\n    #[must_use]\n    pub fn maximum_results(&self) -> usize {\n        let spec = match self {\n",
+    );
+    for form in &contract.forms {
+        let field = form
+            .fields
+            .iter()
+            .find(|field| field.field_type == QueryFieldType::ReturnSpec);
+        if field.is_some() {
+            writeln!(
+                output,
+                "            Self::{} {{ return_spec, .. }} => return_spec.as_ref(),",
+                form.rust_variant
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                output,
+                "            Self::{} {{ .. }} => None,",
+                form.rust_variant
+            )
+            .unwrap();
+        }
+    }
+    output.push_str("        }; spec.and_then(|value| value.limit.as_ref()).map_or(100, |limit| limit.maximum_results)\n    }\n");
+    output.push_str("    #[must_use]\n    pub fn result_references(&self) -> Vec<&PriorResultReference> { let mut result = Vec::new(); match self {\n");
+    for form in &contract.forms {
+        let fields = form
+            .fields
+            .iter()
+            .filter(|field| {
+                matches!(
+                    field.field_type,
+                    QueryFieldType::SemanticReferenceList
+                        | QueryFieldType::PriorResultList
+                        | QueryFieldType::PatternBindingList
+                )
+            })
+            .collect::<Vec<_>>();
+        if fields.is_empty() {
+            writeln!(
+                output,
+                "            Self::{} {{ .. }} => {{}},",
+                form.rust_variant
+            )
+            .unwrap();
+            continue;
+        }
+        write!(output, "            Self::{} {{ ", form.rust_variant).unwrap();
+        for field in &fields {
+            write!(output, "{}, ", field.rust_name).unwrap();
+        }
+        output.push_str(".. } => {\n");
+        for field in fields {
+            match field.field_type {
+                QueryFieldType::SemanticReferenceList => writeln!(output, "                for value in {0} {{ if let SemanticReference::PriorResult(reference) = value {{ result.push(reference); }} }}", field.rust_name).unwrap(),
+                QueryFieldType::PriorResultList => writeln!(output, "                result.extend({}.iter());", field.rust_name).unwrap(),
+                QueryFieldType::PatternBindingList => writeln!(output, "                for binding in {0} {{ if let Some(SemanticReference::PriorResult(reference)) = &binding.within {{ result.push(reference); }} }}", field.rust_name).unwrap(),
+                _ => unreachable!(),
+            }
+        }
+        output.push_str("            },\n");
+    }
+    output.push_str("        } result }\n");
+    output.push_str("    #[must_use]\n    pub fn direct_entity_ids(&self) -> Vec<&str> { self.semantic_references().into_iter().filter_map(|value| if let SemanticReference::Entity { entity_id } = value { Some(entity_id.as_str()) } else { None }).collect() }\n");
+    output.push_str("    #[must_use]\n    pub fn direct_fact_ids(&self) -> Vec<&str> { self.semantic_references().into_iter().filter_map(|value| if let SemanticReference::Fact { fact_id } = value { Some(fact_id.as_str()) } else { None }).collect() }\n");
+    output.push_str("    #[must_use]\n    pub fn semantic_references(&self) -> Vec<&SemanticReference> { let mut result = Vec::new(); match self {\n");
+    for form in &contract.forms {
+        let fields = form
+            .fields
+            .iter()
+            .filter(|field| {
+                matches!(
+                    field.field_type,
+                    QueryFieldType::SemanticReferenceList | QueryFieldType::PatternBindingList
+                )
+            })
+            .collect::<Vec<_>>();
+        if fields.is_empty() {
+            writeln!(
+                output,
+                "            Self::{} {{ .. }} => {{}},",
+                form.rust_variant
+            )
+            .unwrap();
+            continue;
+        }
+        write!(output, "            Self::{} {{ ", form.rust_variant).unwrap();
+        for field in &fields {
+            write!(output, "{}, ", field.rust_name).unwrap();
+        }
+        output.push_str(".. } => {\n");
+        for field in fields {
+            match field.field_type {
+                QueryFieldType::SemanticReferenceList => writeln!(output, "                result.extend({}.iter());", field.rust_name).unwrap(),
+                QueryFieldType::PatternBindingList => writeln!(output, "                result.extend({0}.iter().filter_map(|binding| binding.within.as_ref()));", field.rust_name).unwrap(),
+                _ => unreachable!(),
+            }
+        }
+        output.push_str("            },\n");
+    }
+    output.push_str("        } result }\n}\n\n");
+    output.push_str("#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub struct QueryFormDescriptor { pub code: u16, pub slug: &'static str, pub node_kind: &'static str, pub output_role: ResultRole, pub accepted_input_roles: &'static [ResultRole], pub canonical_order: &'static [&'static str], pub owner_section: u16 }\n\n");
+    output.push_str("pub const QUERY_FORM_CONTRACTS: &[QueryFormDescriptor] = &[\n");
+    for form in &contract.forms {
+        let roles = form
+            .accepted_input_roles
+            .iter()
+            .map(|role| format!("ResultRole::{}", upper_camel(role)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let order = form
+            .canonical_order
+            .iter()
+            .map(|value| format!("{value:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(output, "    QueryFormDescriptor {{ code: {}, slug: {:?}, node_kind: {:?}, output_role: ResultRole::{}, accepted_input_roles: &[{}], canonical_order: &[{}], owner_section: {} }},", form.code, form.slug, form.node_kind, upper_camel(&form.output_role), roles, order, form.owner_section).unwrap();
+    }
+    output.push_str("];\n");
+    output
+}
+
+fn upper_camel(value: &str) -> String {
+    value
+        .split('_')
+        .map(|part| {
+            let mut chars = part.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().collect::<String>() + chars.as_str()
+            })
+        })
+        .collect()
+}
+
+fn render_query_form_python(contract: &QueryFormContract) -> String {
+    let slugs = contract
+        .forms
+        .iter()
+        .map(|form| format!("    {:?},", form.slug))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let literals = contract
+        .forms
+        .iter()
+        .map(|form| format!("    {:?},", form.slug))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let node_kinds = contract
+        .forms
+        .iter()
+        .map(|form| format!("    {:?}: {:?},", form.slug, form.node_kind))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "# @generated by codefabric-model from {} {} ({}); do not edit.\nfrom typing import Final, Literal\n\nQUERY_FORM_CONTRACT_ID: Final = {:?}\nQUERY_FORM_CONTRACT_VERSION: Final = {:?}\nQUERY_FORM_CONTRACT_DIGEST: Final = (\n    {:?}\n)\nQUERY_FORMS: Final = (\n{}\n)\ntype QueryForm = Literal[\n{}\n]\nQUERY_FORM_NODE_KINDS: Final = {{\n{}\n}}\n",
+        contract.artifact_id,
+        contract.version,
+        contract.canonical_digest,
+        contract.artifact_id,
+        contract.version,
+        contract.canonical_digest,
+        slugs,
+        literals,
+        node_kinds,
+    )
+}
+
+fn query_field_schema(field_type: QueryFieldType) -> Value {
+    match field_type {
+        QueryFieldType::BoundedString => {
+            json!({"type": "string", "minLength": 1, "maxLength": 4096})
+        }
+        QueryFieldType::BoundedStringList => {
+            json!({"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1, "maxLength": 4096}})
+        }
+        QueryFieldType::SemanticReferenceList => {
+            json!({"type": "array", "maxItems": 256, "items": query_reference_schema()})
+        }
+        QueryFieldType::PriorResultList => {
+            json!({"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/prior_result_reference"}})
+        }
+        QueryFieldType::PatternBindingList => {
+            json!({"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/pattern_binding"}})
+        }
+        QueryFieldType::PatternRelationshipList => {
+            json!({"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/pattern_relationship"}})
+        }
+        QueryFieldType::PositiveInteger => {
+            json!({"type": "integer", "minimum": 1, "maximum": 10000})
+        }
+        QueryFieldType::ReturnSpec => json!({"$ref": "#/$defs/return_spec"}),
+    }
+}
+
+fn query_schema_defs(contract: &QueryFormContract) -> Value {
+    json!({
+        "result_role": {"type": "string", "enum": contract.result_roles},
+        "prior_result_reference": {
+            "type": "object", "additionalProperties": false,
+            "required": ["results_of", "select"],
+            "properties": {
+                "results_of": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"},
+                "select": {"$ref": "#/$defs/result_role"}
+            }
+        },
+        "return_limit": {
+            "type": "object", "additionalProperties": false,
+            "required": ["maximum_results"],
+            "properties": {
+                "maximum_results": {"type": "integer", "minimum": 1, "maximum": 10000},
+                "per": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "when_exceeded": {"type": "string", "minLength": 1, "maxLength": 4096}
+            }
+        },
+        "return_spec": {
+            "type": "object", "additionalProperties": false,
+            "properties": {
+                "include": {"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+                "exclude": {"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+                "result_shape": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "group_by": {"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+                "order_by": {"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+                "deduplicate_by": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "supporting_facts": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "include_query_result": {"type": "boolean"},
+                "limit": {"$ref": "#/$defs/return_limit"}
+            }
+        },
+        "pattern_binding": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "looking_for"],
+            "properties": {
+                "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"},
+                "looking_for": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "within": query_reference_schema(),
+                "where": {"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1, "maxLength": 4096}}
+            }
+        },
+        "pattern_relationship": {
+            "type": "object", "additionalProperties": false,
+            "required": ["from", "to", "relationship"],
+            "properties": {
+                "from": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"},
+                "to": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"},
+                "relationship": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "direction": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "distance": {"type": "string", "minLength": 1, "maxLength": 4096}
+            }
+        }
+    })
+}
+
+fn query_variant_schema(form: &QueryFormContractEntry) -> Value {
+    let mut properties = serde_json::Map::from_iter([
+        (
+            "query_id".to_owned(),
+            json!({"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"}),
+        ),
+        ("request".to_owned(), json!({"const": form.slug})),
+        (
+            "label".to_owned(),
+            json!({"type": "string", "minLength": 1, "maxLength": 4096}),
+        ),
+    ]);
+    let mut required = vec![
+        Value::String("query_id".to_owned()),
+        Value::String("request".to_owned()),
+    ];
+    for field in &form.fields {
+        let mut schema = query_field_schema(field.field_type);
+        if field.required
+            && matches!(
+                field.field_type,
+                QueryFieldType::BoundedStringList
+                    | QueryFieldType::SemanticReferenceList
+                    | QueryFieldType::PriorResultList
+                    | QueryFieldType::PatternBindingList
+                    | QueryFieldType::PatternRelationshipList
+            )
+        {
+            schema
+                .as_object_mut()
+                .expect("array schema")
+                .insert("minItems".to_owned(), Value::from(1));
+        }
+        properties.insert(field.name.clone(), schema);
+        if field.required {
+            required.push(Value::String(field.name.clone()));
+        }
+    }
+    json!({"type": "object", "additionalProperties": false, "required": required, "properties": properties})
+}
+
+fn render_query_request_schema(contract: &QueryFormContract) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["specification", "version", "semantic_request_id", "workspace_id", "freshness_policy", "queries"],
+        "properties": {
+            "specification": {"const": contract.specification},
+            "version": {"const": contract.specification_version},
+            "semantic_request_id": {"type": "string", "minLength": 1},
+            "workspace_id": {"type": "string", "pattern": "^workspace:[0-9a-f]{32}$"},
+            "freshness_policy": {"type": "string", "enum": ["current_required", "wait_for_current", "best_available_snapshot"]},
+            "queries": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"oneOf": contract.forms.iter().map(query_variant_schema).collect::<Vec<_>>() }},
+            "response_projection": {"type": ["object", "null"]},
+            "cost_budget": {"type": ["object", "null"]}
+        },
+        "$defs": query_schema_defs(contract)
+    })
+}
+
+fn render_plan_spec_schema(contract: &QueryFormContract) -> Value {
+    let queries = contract.forms.iter().map(|form| json!({
+        "type": "object", "additionalProperties": false,
+        "required": ["node_kind", "query_id", "source_pointer", "input_roles", "output_role", "dependencies", "bound_semantics", "coverage_prerequisites", "coverage_effects", "canonical_order", "resource_contract"],
+        "properties": {
+            "node_kind": {"const": form.node_kind},
+            "query_id": {"type": "string"},
+            "source_pointer": {"type": "string"},
+            "input_roles": {"type": "array", "items": {"type": "string", "enum": form.accepted_input_roles}},
+            "output_role": {"const": form.output_role},
+            "dependencies": {"type": "array", "items": {"$ref": "#/$defs/prior_result_reference"}},
+            "bound_semantics": {"type": "object"},
+            "coverage_prerequisites": {"type": "array", "items": {"type": "string"}},
+            "coverage_effects": {"type": "array", "items": {"type": "string"}},
+            "canonical_order": {"const": form.canonical_order},
+            "resource_contract": {"type": "object"}
+        }
+    })).collect::<Vec<_>>();
+    json!({
+        "type": "object", "additionalProperties": false,
+        "required": ["plan_spec_version", "binding_state", "bound_snapshot_id", "semantic_request_id", "workspace_id", "queries", "canonical_digest"],
+        "properties": {
+            "plan_spec_version": {"const": "1.0"},
+            "binding_state": {"type": "string", "enum": ["unbound", "snapshot-bound"]},
+            "bound_snapshot_id": {"type": ["string", "null"]},
+            "semantic_request_id": {"type": "string"},
+            "workspace_id": {"type": "string"},
+            "queries": {"type": "array", "items": {"oneOf": queries}},
+            "canonical_digest": {"type": "string", "pattern": "^b3:[0-9a-f]{64}$"}
+        },
+        "$defs": query_schema_defs(contract)
+    })
+}
+
 fn render_public_schema(
     contract: &PublicSchemaContract,
     source_digest: &str,
+    query_forms: &QueryFormContract,
+    query_form_source_digest: &str,
 ) -> Result<Vec<u8>, SchemaDriverError> {
-    let mut body =
-        contract
-            .schema
-            .as_object()
-            .cloned()
-            .ok_or_else(|| SchemaDriverError::Invalid {
-                path: format!("$.public_schemas[{}].schema", contract.schema_kind),
-                detail: "schema body is not an object".to_owned(),
-            })?;
+    let schema = match contract.schema_kind.as_str() {
+        "cpg-semantic-query-request" => render_query_request_schema(query_forms),
+        "plan-spec" => render_plan_spec_schema(query_forms),
+        _ => contract.schema.clone(),
+    };
+    let mut body = schema
+        .as_object()
+        .cloned()
+        .ok_or_else(|| SchemaDriverError::Invalid {
+            path: format!("$.public_schemas[{}].schema", contract.schema_kind),
+            detail: "schema body is not an object".to_owned(),
+        })?;
     body.insert("$schema".to_owned(), Value::String(DIALECT.to_owned()));
     body.insert(
         "$id".to_owned(),
@@ -1453,12 +2169,20 @@ fn render_public_schema(
             "generator_revision": "codefabric-model-schema-driver-v1",
         }),
     );
+    let (authority_id, authority_digest) = if matches!(
+        contract.schema_kind.as_str(),
+        "cpg-semantic-query-request" | "plan-spec"
+    ) {
+        (query_forms.artifact_id.as_str(), query_form_source_digest)
+    } else {
+        ("codefabric.schema.contract-ir", source_digest)
+    };
     body.insert(
         "x-codefabric-generated".to_owned(),
         json!({
             "driver": "schema-contract-driver-v1",
-            "source_artifact_id": "codefabric.schema.contract-ir",
-            "source_digest": source_digest,
+            "source_artifact_id": authority_id,
+            "source_digest": authority_digest,
         }),
     );
     pretty(&Value::Object(body))
@@ -2121,6 +2845,85 @@ fn decode_ir(bytes: &[u8]) -> Result<SchemaContractIr, SchemaDriverError> {
     serde_json::from_value(value).map_err(SchemaDriverError::Json)
 }
 
+fn decode_query_form_contract(bytes: &[u8]) -> Result<QueryFormContract, SchemaDriverError> {
+    let value = codefabric::contracts::jcs::decode_strict(bytes)?;
+    serde_json::from_value(value).map_err(SchemaDriverError::Json)
+}
+
+fn detached_query_form_identity(bytes: &[u8]) -> Result<String, SchemaDriverError> {
+    let mut value = codefabric::contracts::jcs::decode_strict(bytes)?;
+    value
+        .as_object_mut()
+        .ok_or_else(|| SchemaDriverError::Invalid {
+            path: "$".to_owned(),
+            detail: "typed query-form contract root is not an object".to_owned(),
+        })?
+        .remove("canonical_digest");
+    let canonical = codefabric::contracts::jcs::canonicalize_value(&value)?;
+    Ok(codefabric::integrity::framed_digest(&canonical))
+}
+
+fn validate_query_form_registry(
+    contract: &QueryFormContract,
+    bytes: &[u8],
+) -> Result<(), SchemaDriverError> {
+    let registry: serde_yaml_ng::Value =
+        serde_yaml_ng::from_slice(bytes).map_err(|source| SchemaDriverError::Invalid {
+            path: ENUM_REGISTRY_PATH.to_owned(),
+            detail: source.to_string(),
+        })?;
+    let records = registry
+        .get("records")
+        .and_then(serde_yaml_ng::Value::as_sequence)
+        .ok_or_else(|| SchemaDriverError::Invalid {
+            path: ENUM_REGISTRY_PATH.to_owned(),
+            detail: "registry records are absent".to_owned(),
+        })?;
+    let query_form = records
+        .iter()
+        .find(|record| {
+            record.get("domain").and_then(serde_yaml_ng::Value::as_str) == Some("QUERY_FORM")
+        })
+        .ok_or_else(|| SchemaDriverError::Invalid {
+            path: ENUM_REGISTRY_PATH.to_owned(),
+            detail: "QUERY_FORM domain is absent".to_owned(),
+        })?;
+    let values = query_form
+        .get("values")
+        .and_then(serde_yaml_ng::Value::as_sequence)
+        .ok_or_else(|| SchemaDriverError::Invalid {
+            path: ENUM_REGISTRY_PATH.to_owned(),
+            detail: "QUERY_FORM values are absent".to_owned(),
+        })?;
+    let projected = values
+        .iter()
+        .map(|value| {
+            let code = value.get("code").and_then(serde_yaml_ng::Value::as_u64);
+            let name = value.get("name").and_then(serde_yaml_ng::Value::as_str);
+            let slug = value.get("slug").and_then(serde_yaml_ng::Value::as_str);
+            (code, name, slug)
+        })
+        .collect::<Vec<_>>();
+    let expected = contract
+        .forms
+        .iter()
+        .map(|form| {
+            (
+                Some(u64::from(form.code)),
+                Some(form.name.as_str()),
+                Some(form.slug.as_str()),
+            )
+        })
+        .collect::<Vec<_>>();
+    if projected != expected {
+        return invalid(
+            "$.forms",
+            "query-form contract differs from the QUERY_FORM registry",
+        );
+    }
+    Ok(())
+}
+
 /// Compile the schema Contract IR through its closed family-native model and return the detached
 /// semantic identity used by aggregate provenance.
 ///
@@ -2313,7 +3116,7 @@ mod tests {
                 .count(),
             8
         );
-        assert_eq!(descriptor.sources.len(), 8);
+        assert_eq!(descriptor.sources.len(), 9);
         assert_eq!(descriptor.output_roots.len(), 2);
     }
 

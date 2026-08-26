@@ -18,7 +18,7 @@
     },
     {
       "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
-      "canonical_digest": "b3:db1fbde36bfaec8f826e657df5cfb876e9543e8bd893fe1c4f5c6477709c8349",
+      "canonical_digest": "b3:419b3df50ec5820800e14286fa33158b5297cc7aa6e349bf194ac7930cd413f1",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -59,7 +59,7 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:068ce7bdd173f0db6e352f995256d9e384f00cae8a15cc6b8d4b0730425ac77c",
+  "bundle_digest": "b3:ad2dbfd31a21c6e9a9f7a53e7a3119940488b4ef88301f31e201d5b997a0a19a",
   "bundle_kind": "schema",
   "bundle_major": 1,
   "bundle_version": "1.0",

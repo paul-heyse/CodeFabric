@@ -1,4 +1,222 @@
 {
+  "$defs": {
+    "pattern_binding": {
+      "additionalProperties": false,
+      "properties": {
+        "looking_for": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "where": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "within": {
+          "oneOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/prior_result_reference"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "entity_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "entity_id"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "fact_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "fact_id"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "looking_for"
+      ],
+      "type": "object"
+    },
+    "pattern_relationship": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "distance": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "from": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "relationship": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "prior_result_reference": {
+      "additionalProperties": false,
+      "properties": {
+        "results_of": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "select": {
+          "$ref": "#/$defs/result_role"
+        }
+      },
+      "required": [
+        "results_of",
+        "select"
+      ],
+      "type": "object"
+    },
+    "result_role": {
+      "enum": [
+        "entities",
+        "facts",
+        "paths",
+        "pattern_bindings",
+        "groups",
+        "summary",
+        "source_contexts"
+      ],
+      "type": "string"
+    },
+    "return_limit": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum_results": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "per": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "when_exceeded": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "maximum_results"
+      ],
+      "type": "object"
+    },
+    "return_spec": {
+      "additionalProperties": false,
+      "properties": {
+        "deduplicate_by": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "exclude": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "group_by": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "include": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "include_query_result": {
+          "type": "boolean"
+        },
+        "limit": {
+          "$ref": "#/$defs/return_limit"
+        },
+        "order_by": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "result_shape": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "supporting_facts": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://codefabric.dev/contracts/schema/cpg-semantic-query-request.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -23,365 +241,733 @@
           {
             "additionalProperties": false,
             "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "looking_for": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
               "query_id": {
-                "minLength": 1,
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
                 "type": "string"
               },
               "request": {
                 "const": "find code entities"
               },
+              "return": {
+                "$ref": "#/$defs/return_spec"
+              },
               "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
+              },
+              "within": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/prior_result_reference"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "entity_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fact_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fact_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "maxItems": 256,
+                "type": "array"
               }
             },
             "required": [
               "query_id",
               "request",
-              "label",
-              "input",
-              "where",
-              "limit"
+              "looking_for"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "about": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/prior_result_reference"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "entity_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fact_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fact_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
+              },
+              "at": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "facts": {
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
               },
               "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
               "query_id": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "request": {
+                "const": "retrieve facts about code"
+              },
+              "return": {
+                "$ref": "#/$defs/return_spec"
+              },
+              "where": {
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
+              }
+            },
+            "required": [
+              "query_id",
+              "request",
+              "about",
+              "facts"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "direction": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "distance": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "label": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "query_id": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "relationship": {
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
               "request": {
-                "const": "retrieve facts"
+                "const": "follow code relationships"
+              },
+              "return": {
+                "$ref": "#/$defs/return_spec"
+              },
+              "starting_from": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/prior_result_reference"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "entity_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fact_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fact_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
+              },
+              "stop_when": {
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
               },
               "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
               }
             },
             "required": [
               "query_id",
               "request",
-              "label",
-              "input",
-              "where",
-              "limit"
+              "starting_from",
+              "relationship"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "direction": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "ending_at": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/prior_result_reference"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "entity_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fact_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fact_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
               },
               "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "maximum_length": {
+                "maximum": 10000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "path_policy": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
               "query_id": {
-                "minLength": 1,
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
                 "type": "string"
               },
               "request": {
-                "const": "follow relationships"
+                "const": "find connecting fact paths"
+              },
+              "return": {
+                "$ref": "#/$defs/return_spec"
+              },
+              "starting_from": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/prior_result_reference"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "entity_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fact_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fact_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
+              },
+              "through": {
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
               },
               "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
               }
             },
             "required": [
               "query_id",
               "request",
-              "label",
-              "input",
-              "where",
-              "limit"
+              "starting_from",
+              "ending_at",
+              "through",
+              "path_policy"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "bindings": {
+                "items": {
+                  "$ref": "#/$defs/pattern_binding"
+                },
+                "maxItems": 128,
+                "minItems": 1,
+                "type": "array"
               },
               "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "query_id": {
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
-              "request": {
-                "const": "find paths"
-              },
-              "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "query_id",
-              "request",
-              "label",
-              "input",
-              "where",
-              "limit"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
               "query_id": {
-                "minLength": 1,
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
                 "type": "string"
+              },
+              "relationships": {
+                "items": {
+                  "$ref": "#/$defs/pattern_relationship"
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
               },
               "request": {
                 "const": "match a code fact pattern"
               },
+              "return": {
+                "$ref": "#/$defs/return_spec"
+              },
               "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
               }
             },
             "required": [
               "query_id",
               "request",
-              "label",
-              "input",
-              "where",
-              "limit"
+              "bindings",
+              "relationships"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "combination": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "identity": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "inputs": {
+                "items": {
+                  "$ref": "#/$defs/prior_result_reference"
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
               },
               "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "preserve_origin": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
               "query_id": {
-                "minLength": 1,
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
                 "type": "string"
               },
               "request": {
                 "const": "combine result sets"
               },
-              "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "return": {
+                "$ref": "#/$defs/return_spec"
               }
             },
             "required": [
               "query_id",
               "request",
-              "label",
-              "input",
-              "where",
-              "limit"
+              "inputs",
+              "combination"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "group_by": {
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
               },
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "query_id": {
+              "include_support": {
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
+              "input": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/prior_result_reference"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "entity_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fact_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fact_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
+              },
+              "label": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "query_id": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
               "request": {
-                "const": "summarize facts"
+                "const": "summarize objective facts"
+              },
+              "return": {
+                "$ref": "#/$defs/return_spec"
+              },
+              "summaries": {
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
               },
               "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
               }
             },
             "required": [
               "query_id",
               "request",
-              "label",
               "input",
-              "where",
-              "limit"
+              "summaries"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "input": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+              "context": {
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
+              },
+              "for": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/prior_result_reference"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "entity_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fact_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fact_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "type": "array"
               },
               "label": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "limit": {
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "query_id": {
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
+              "query_id": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
               "request": {
-                "const": "fetch source context"
+                "const": "retrieve source and syntax context"
+              },
+              "return": {
+                "$ref": "#/$defs/return_spec"
+              },
+              "text_handling": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
               },
               "where": {
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "items": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
               }
             },
             "required": [
               "query_id",
               "request",
-              "label",
-              "input",
-              "where",
-              "limit"
+              "for",
+              "context"
             ],
             "type": "object"
           }
         ]
       },
+      "maxItems": 32,
       "minItems": 1,
       "type": "array"
     },
@@ -392,6 +978,7 @@
       ]
     },
     "semantic_request_id": {
+      "minLength": 1,
       "type": "string"
     },
     "specification": {
@@ -401,7 +988,7 @@
       "const": "1.3"
     },
     "workspace_id": {
-      "pattern": "^(workspace|repository|worktree|context|context-set|snapshot|publication):[0-9a-f]{32}$|^context:source$|^(entity|fact):[a-z0-9-]+:[0-9a-f]{32}$",
+      "pattern": "^workspace:[0-9a-f]{32}$",
       "type": "string"
     }
   },
@@ -411,9 +998,7 @@
     "semantic_request_id",
     "workspace_id",
     "freshness_policy",
-    "queries",
-    "response_projection",
-    "cost_budget"
+    "queries"
   ],
   "title": "CPG semantic query request",
   "type": "object",
@@ -427,7 +1012,7 @@
   },
   "x-codefabric-generated": {
     "driver": "schema-contract-driver-v1",
-    "source_artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:08f951a0ea254c62b42d15075bea2746c7fb66272ec2198dd6b14343bdeb884f"
+    "source_artifact_id": "codefabric.query.form-contract",
+    "source_digest": "b3:f3c0135610654a79f2226aacedde7b9ea8c957a8c50359000fb1ccb88cd06d58"
   }
 }

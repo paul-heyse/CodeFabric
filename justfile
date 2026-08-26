@@ -185,6 +185,13 @@ query-daemon-activation-check:
 semantic-query-conformance-check:
     cargo nextest run --locked --lib -E 'test(/(wp75_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|production_eight_form_semantic_query_conformance|wp39_operational_acceptance)/)' --no-tests=fail
 
+[doc("Prove the generated QRY 1.3 form authority, Rust/Python projections, and retired-slug zero state")]
+[group('test')]
+query-form-contract-check:
+    cargo nextest run --locked --lib -E 'test(/(qry_v13_form_contract_conformance|query_form_projection_parity|qry_v13_connecting_path_schema_falsification|query_form_contract_operational_gate)/)' --no-tests=fail
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py -k query_form_projection_parity
+    just model-repro-check
+
 [doc("Prove parameter-neutral plan identity and partition-independent Arrow result checksums")]
 [group('test')]
 query-determinism-check:

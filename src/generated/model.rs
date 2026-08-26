@@ -3,5 +3,7 @@
 
 #[path = "model_identity_recipes.rs"]
 pub(crate) mod identity_recipes;
+#[path = "model_query_forms.rs"]
+pub(crate) mod query_forms;
 #[path = "model_schema_tables.rs"]
 pub(crate) mod schema_tables;
