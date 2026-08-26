@@ -1,7 +1,7 @@
 {
   "artifact_id": "codefabric.manifests.fixture-oracles",
   "artifact_kind": "manifest",
-  "canonical_digest": "b3:10990e4f3fbf50b2a0ede148dd76562853e91ad842f479a222de55b262d8f78d",
+  "canonical_digest": "b3:ee4f20abff231080c12f44d35a5a6642dc839d10ef259caa5638b4a00bb02da7",
   "compatible_suite_major": 1,
   "digest_projection": "json-jcs-v1",
   "generator_revision": "codefabric-model/1.0",
@@ -124,6 +124,14 @@
       "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "contracts/fixtures/proto/production_wire.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "contracts/fixtures/query-terminal-envelopes-v1.json",
       "version": "1.0"
     },
     {

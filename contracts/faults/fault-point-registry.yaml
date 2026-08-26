@@ -91,8 +91,26 @@ records:
     production_exposable: false
     expected_invariants: [committed-pointer-recoverable, publication-idempotent]
     scenarios: [publication-restart-recovery]
+  - code: QUERY_RESULT_INSERTION
+    owner: data-fabric
+    allowed_actions: [return_error]
+    production_exposable: false
+    expected_invariants: [terminal-fallback-preserves-evidence, no-terminal-before-journal]
+    scenarios: [query-terminal-artifact-closure]
+  - code: QUERY_PRIMARY_PAYLOAD_PERSISTENCE
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [bounded-fallback-envelope, no-empty-failure-artifact]
+    scenarios: [query-terminal-artifact-closure, query-terminal-restart-recovery]
+  - code: QUERY_TERMINAL_JOURNAL_COMMIT
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [no-governed-terminal-claim, conflicting-terminal-fails-closed]
+    scenarios: [query-terminal-artifact-closure, query-terminal-restart-recovery]
 owner_acceptance:
   approver: lifecycle-owner
   accepted_at: "2026-08-21"
-  construction_rule: Append-only deterministic source, mutation, publication, and overlay durability seams
+  construction_rule: Append-only deterministic source, mutation, publication, overlay, and query-terminal durability seams
   source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

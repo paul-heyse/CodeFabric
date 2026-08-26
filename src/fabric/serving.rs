@@ -215,6 +215,173 @@ pub struct QueryExecutionContext {
     pub mcp_call_id: String,
 }
 
+/// Availability of one phase artifact in an execution that may terminate early.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum QueryArtifactStageState {
+    NotReached,
+    Available,
+    Partial,
+    Complete,
+    UnavailableWithReason,
+}
+
+/// Immutable evidence captured as soon as one governed execution stage is reached.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryArtifactStage {
+    pub block_id: String,
+    pub stage: String,
+    pub state: QueryArtifactStageState,
+    pub artifact: Option<String>,
+    pub unavailable_reason: Option<String>,
+    pub metrics: BTreeMap<String, u64>,
+}
+
+/// Phase-complete snapshot of every execution artifact available at a point in time.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryExecutionArtifactEvidence {
+    pub execution: QueryExecutionContext,
+    pub lifecycle_phase: String,
+    pub failing_stage: Option<String>,
+    pub stages: Vec<QueryArtifactStage>,
+    pub plan_artifacts: Vec<QueryPlanArtifact>,
+    pub snapshot_id: Option<String>,
+    pub publication_id: Option<String>,
+    pub source_table_versions: BTreeMap<u16, u64>,
+    pub coverage_state: BTreeMap<String, u64>,
+    pub partial_metrics: BTreeMap<String, u64>,
+}
+
+/// Shared append-only artifact accumulator allocated with execution identity before planning.
+#[derive(Clone, Debug)]
+pub struct QueryExecutionArtifactAccumulator {
+    inner: Arc<std::sync::Mutex<QueryExecutionArtifactEvidence>>,
+}
+
+impl QueryExecutionArtifactAccumulator {
+    #[must_use]
+    pub fn new(execution: QueryExecutionContext) -> Self {
+        let stages = [
+            "binding",
+            "logical_planning",
+            "logical_optimization",
+            "physical_planning",
+            "physical_execution",
+            "response_encoding",
+        ]
+        .into_iter()
+        .map(|stage| QueryArtifactStage {
+            block_id: "request".to_owned(),
+            stage: stage.to_owned(),
+            state: QueryArtifactStageState::NotReached,
+            artifact: None,
+            unavailable_reason: None,
+            metrics: BTreeMap::new(),
+        })
+        .collect();
+        Self {
+            inner: Arc::new(std::sync::Mutex::new(QueryExecutionArtifactEvidence {
+                execution,
+                lifecycle_phase: "accepted".to_owned(),
+                failing_stage: None,
+                stages,
+                plan_artifacts: Vec::new(),
+                snapshot_id: None,
+                publication_id: None,
+                source_table_versions: BTreeMap::new(),
+                coverage_state: BTreeMap::new(),
+                partial_metrics: BTreeMap::new(),
+            })),
+        }
+    }
+
+    pub fn set_phase(&self, phase: impl Into<String>) {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lifecycle_phase = phase.into();
+    }
+
+    pub fn set_failure(&self, stage: impl Into<String>) {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .failing_stage = Some(stage.into());
+    }
+
+    pub fn pin_snapshot(&self, manifest: &crate::snapshot::ServingSnapshotManifest) {
+        let mut evidence = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        evidence.snapshot_id = Some(manifest.snapshot_id.clone());
+        evidence.publication_id = Some(manifest.body.base_publication.publication_id.clone());
+        evidence.source_table_versions = manifest
+            .body
+            .base_publication
+            .tables
+            .iter()
+            .map(|table| (table.table_code, table.delta_version))
+            .collect();
+    }
+
+    pub fn record_stage(&self, stage: QueryArtifactStage) {
+        let mut evidence = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (name, value) in &stage.metrics {
+            evidence
+                .partial_metrics
+                .entry(name.clone())
+                .and_modify(|current| *current = (*current).max(*value))
+                .or_insert(*value);
+        }
+        if let Some(existing) = evidence
+            .stages
+            .iter_mut()
+            .find(|existing| existing.block_id == stage.block_id && existing.stage == stage.stage)
+        {
+            *existing = stage;
+        } else {
+            evidence.stages.push(stage);
+        }
+    }
+
+    pub fn record_plan(&self, artifact: QueryPlanArtifact) {
+        let mut evidence = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(existing) = evidence.plan_artifacts.iter_mut().find(|existing| {
+            existing.bound_query_id == artifact.bound_query_id
+                && existing.execution_id == artifact.execution_id
+        }) {
+            *existing = artifact;
+        } else {
+            evidence.plan_artifacts.push(artifact);
+        }
+    }
+
+    pub fn record_coverage(&self, name: impl Into<String>, value: u64) {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .coverage_state
+            .insert(name.into(), value);
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> QueryExecutionArtifactEvidence {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
 /// One emitted §110 query proof artifact without non-deterministic timing observations.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -425,7 +592,8 @@ impl ServingQuerySession {
             semantic_request_id: "direct-sql".to_owned(),
             mcp_call_id: "not-applicable".to_owned(),
         };
-        self.execute_plan(sql, plan, &execution).await
+        let artifacts = QueryExecutionArtifactAccumulator::new(execution.clone());
+        self.execute_plan(sql, plan, &execution, &artifacts).await
     }
 
     /// Resolve one immutable serving table into an application-owned logical-plan input.
@@ -468,8 +636,26 @@ impl ServingQuerySession {
         plan: LogicalPlan,
         execution: &QueryExecutionContext,
     ) -> Result<ServingQueryResult, ServingQueryError> {
+        let artifacts = QueryExecutionArtifactAccumulator::new(execution.clone());
+        self.query_plan_in_execution_observed(plan_identity, plan, execution, &artifacts)
+            .await
+    }
+
+    /// Execute a native plan while appending phase evidence to the caller-owned accumulator.
+    ///
+    /// # Errors
+    ///
+    /// Rejects the same plan and execution failures as [`Self::query_plan_in_execution`].
+    pub async fn query_plan_in_execution_observed(
+        &self,
+        plan_identity: &str,
+        plan: LogicalPlan,
+        execution: &QueryExecutionContext,
+        artifacts: &QueryExecutionArtifactAccumulator,
+    ) -> Result<ServingQueryResult, ServingQueryError> {
         validate_plan_allowlist(&plan)?;
-        self.execute_plan(plan_identity, plan, execution).await
+        self.execute_plan(plan_identity, plan, execution, artifacts)
+            .await
     }
 
     /// Apply the post-lowering structural policy without executing the plan.
@@ -484,18 +670,69 @@ impl ServingQuerySession {
     #[allow(clippy::too_many_lines)] // Keeps one execution, metric capture, and result-accounting lifetime explicit.
     async fn execute_plan(
         &self,
-        _request_label: &str,
+        request_label: &str,
         plan: LogicalPlan,
         execution: &QueryExecutionContext,
+        artifacts: &QueryExecutionArtifactAccumulator,
     ) -> Result<ServingQueryResult, ServingQueryError> {
         let state = self.context.state();
         let logical_plan = format!("{}", plan.display_indent_schema());
+        artifacts.record_stage(QueryArtifactStage {
+            block_id: request_label.to_owned(),
+            stage: "logical_planning".to_owned(),
+            state: QueryArtifactStageState::Complete,
+            artifact: Some(logical_plan.clone()),
+            unavailable_reason: None,
+            metrics: BTreeMap::new(),
+        });
         let plan_template_id = logical_plan_template_id(&plan)?;
-        let optimized = state.optimize(&plan)?;
+        let optimized = state.optimize(&plan).map_err(|error| {
+            artifacts.set_failure("logical_optimization");
+            artifacts.record_stage(QueryArtifactStage {
+                block_id: request_label.to_owned(),
+                stage: "logical_optimization".to_owned(),
+                state: QueryArtifactStageState::UnavailableWithReason,
+                artifact: None,
+                unavailable_reason: Some(error.to_string()),
+                metrics: BTreeMap::new(),
+            });
+            ServingQueryError::from(error)
+        })?;
+        let optimized_logical_plan = format!("{}", optimized.display_indent_schema());
+        artifacts.record_stage(QueryArtifactStage {
+            block_id: request_label.to_owned(),
+            stage: "logical_optimization".to_owned(),
+            state: QueryArtifactStageState::Complete,
+            artifact: Some(optimized_logical_plan.clone()),
+            unavailable_reason: None,
+            metrics: BTreeMap::new(),
+        });
         validate_plan_allowlist(&optimized)?;
-        let physical = state.create_physical_plan(&optimized).await?;
+        let physical = state
+            .create_physical_plan(&optimized)
+            .await
+            .map_err(|error| {
+                artifacts.set_failure("physical_planning");
+                artifacts.record_stage(QueryArtifactStage {
+                    block_id: request_label.to_owned(),
+                    stage: "physical_planning".to_owned(),
+                    state: QueryArtifactStageState::UnavailableWithReason,
+                    artifact: None,
+                    unavailable_reason: Some(error.to_string()),
+                    metrics: BTreeMap::new(),
+                });
+                ServingQueryError::from(error)
+            })?;
         let output_partition_count = physical.output_partitioning().partition_count();
         let physical_plan = displayable(physical.as_ref()).indent(true).to_string();
+        artifacts.record_stage(QueryArtifactStage {
+            block_id: request_label.to_owned(),
+            stage: "physical_planning".to_owned(),
+            state: QueryArtifactStageState::Complete,
+            artifact: Some(physical_plan.clone()),
+            unavailable_reason: None,
+            metrics: BTreeMap::new(),
+        });
         let output_schema = physical_output_schema(physical.as_ref());
         let reservation = Arc::new(
             MemoryConsumer::new("serving-query-result")
@@ -503,11 +740,46 @@ impl ServingQuerySession {
         );
         let task_context = datafusion::execution::TaskContext::from(&state)
             .with_task_id(execution.execution_id.clone());
-        let mut stream = execute_stream(Arc::clone(&physical), Arc::new(task_context))?;
+        let mut stream =
+            execute_stream(Arc::clone(&physical), Arc::new(task_context)).map_err(|error| {
+                artifacts.set_failure("physical_execution");
+                artifacts.record_stage(QueryArtifactStage {
+                    block_id: request_label.to_owned(),
+                    stage: "physical_execution".to_owned(),
+                    state: QueryArtifactStageState::UnavailableWithReason,
+                    artifact: Some(physical_plan.clone()),
+                    unavailable_reason: Some(error.to_string()),
+                    metrics: BTreeMap::new(),
+                });
+                ServingQueryError::from(error)
+            })?;
         let mut batches = Vec::new();
         let mut output_row_count = 0_usize;
         let mut output_bytes = 0_usize;
-        while let Some(batch) = stream.next().await.transpose()? {
+        while let Some(next) = stream.next().await {
+            let batch = match next {
+                Ok(batch) => batch,
+                Err(error) => {
+                    let metrics = physical_metric_map(physical.as_ref());
+                    artifacts.set_failure("physical_execution");
+                    artifacts.record_stage(QueryArtifactStage {
+                        block_id: request_label.to_owned(),
+                        stage: "physical_execution".to_owned(),
+                        state: QueryArtifactStageState::Partial,
+                        artifact: Some(
+                            datafusion::physical_plan::display::DisplayableExecutionPlan::with_full_metrics(
+                                physical.as_ref(),
+                            )
+                            .set_show_schema(true)
+                            .indent(true)
+                            .to_string(),
+                        ),
+                        unavailable_reason: Some(error.to_string()),
+                        metrics,
+                    });
+                    return Err(ServingQueryError::from(error));
+                }
+            };
             output_row_count = output_row_count
                 .checked_add(batch.num_rows())
                 .ok_or_else(|| {
@@ -524,6 +796,22 @@ impl ServingQuerySession {
                 || batch_count > self.limits.max_output_batches
             {
                 drop(stream);
+                artifacts.set_failure("physical_execution");
+                artifacts.record_stage(QueryArtifactStage {
+                    block_id: request_label.to_owned(),
+                    stage: "physical_execution".to_owned(),
+                    state: QueryArtifactStageState::Partial,
+                    artifact: Some(
+                        datafusion::physical_plan::display::DisplayableExecutionPlan::with_full_metrics(
+                            physical.as_ref(),
+                        )
+                        .set_show_schema(true)
+                        .indent(true)
+                        .to_string(),
+                    ),
+                    unavailable_reason: Some("query output exceeded the generated budget".to_owned()),
+                    metrics: physical_metric_map(physical.as_ref()),
+                });
                 return Err(ServingQueryError::ResourceLimit(format!(
                     "query output exceeds generated rows/bytes/batches budget: \
                      {output_row_count}/{output_bytes}/{batch_count}"
@@ -574,6 +862,14 @@ impl ServingQuerySession {
             .set_show_schema(true)
             .pgjson(true)
             .to_string();
+        artifacts.record_stage(QueryArtifactStage {
+            block_id: request_label.to_owned(),
+            stage: "physical_execution".to_owned(),
+            state: QueryArtifactStageState::Complete,
+            artifact: Some(physical_plan_with_full_metrics.clone()),
+            unavailable_reason: None,
+            metrics: physical_metric_map(physical.as_ref()),
+        });
         {
             let mut evidence = self
                 .evidence
@@ -625,7 +921,7 @@ impl ServingQuerySession {
                 .control_schema_generation_fingerprint
                 .clone(),
             logical_plan,
-            optimized_logical_plan: format!("{}", optimized.display_indent_schema()),
+            optimized_logical_plan,
             physical_plan,
             physical_plan_with_full_metrics,
             physical_plan_pg_json,
@@ -673,6 +969,7 @@ impl ServingQuerySession {
                 ),
             ]),
         };
+        artifacts.record_plan(artifact.clone());
         Ok(ServingQueryResult {
             batches,
             artifact,
@@ -697,7 +994,8 @@ impl ServingQuerySession {
             semantic_request_id: "direct-sql".to_owned(),
             mcp_call_id: "not-applicable".to_owned(),
         };
-        self.execute_plan(sql, plan, &execution).await
+        let artifacts = QueryExecutionArtifactAccumulator::new(execution.clone());
+        self.execute_plan(sql, plan, &execution, &artifacts).await
     }
 
     #[cfg(test)]
@@ -783,6 +1081,28 @@ fn physical_metrics(plan: &dyn ExecutionPlan) -> ObservedPhysicalMetrics {
     plan.children().into_iter().fold(local, |total, child| {
         total.add(physical_metrics(child.as_ref()))
     })
+}
+
+fn physical_metric_map(plan: &dyn ExecutionPlan) -> BTreeMap<String, u64> {
+    let metrics = physical_metrics(plan);
+    BTreeMap::from([
+        ("output_rows".to_owned(), metrics.output_rows),
+        ("spill_count".to_owned(), metrics.spill_count),
+        ("spilled_bytes".to_owned(), metrics.spilled_bytes),
+        (
+            "pruning_metric_count".to_owned(),
+            metrics.pruning_metric_count,
+        ),
+        ("pruned_row_groups".to_owned(), metrics.pruned_row_groups),
+        (
+            "repartition_operator_count".to_owned(),
+            metrics.repartition_operator_count,
+        ),
+        (
+            "repartition_output_rows".to_owned(),
+            metrics.repartition_output_rows,
+        ),
+    ])
 }
 
 fn physical_output_schema(plan: &dyn ExecutionPlan) -> Vec<String> {
@@ -2630,16 +2950,32 @@ mod tests {
         };
         let artifacts =
             ResultArtifactStore::new(directory.path().join("result-artifacts")).unwrap();
+        let plan_artifact = query.artifact;
+        let evidence = QueryExecutionArtifactEvidence {
+            execution: execution.clone(),
+            lifecycle_phase: "complete".into(),
+            failing_stage: None,
+            stages: Vec::new(),
+            plan_artifacts: vec![plan_artifact.clone()],
+            snapshot_id: Some(plan_artifact.snapshot_id.clone()),
+            publication_id: Some(plan_artifact.publication_id.clone()),
+            source_table_versions: plan_artifact.source_table_versions.clone(),
+            coverage_state: BTreeMap::new(),
+            partial_metrics: plan_artifact.execution_metrics.clone(),
+        };
+        let created_at = crate::query_service::now_millis();
         artifacts
             .persist_query_artifact(&PersistedQueryArtifactBundle {
-                artifact_schema_version: "codefabric.query-execution-artifact.v1".into(),
+                artifact_schema_version: "codefabric.query-execution-artifact.v2".into(),
+                workspace_id: "workspace:00000000000000000000000000000000".into(),
                 execution,
                 phase: QueryArtifactPhase::Succeeded,
-                plan_artifacts: vec![query.artifact],
+                evidence,
+                plan_artifacts: vec![plan_artifact],
                 result_artifact_id: Some("result:wp66".into()),
                 public_error_code: None,
-                created_at_unix_ms: 1,
-                expires_at_unix_ms: 60_001,
+                created_at_unix_ms: created_at,
+                expires_at_unix_ms: created_at + 60_000,
             })
             .unwrap();
         let table = fabric.table(100).unwrap();

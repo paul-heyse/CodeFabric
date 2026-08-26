@@ -76,6 +76,11 @@
       "source_digest": "b3:689e7d7db3c3607de93d2eb06e424ffab45cfacad9e1d6ae721c794a21d0d101"
     },
     {
+      "class": "property",
+      "path": "contracts/fixtures/query-terminal-envelopes-v1.json",
+      "source_digest": "b3:00032baa22167b457b340be34e108bc911b7ea79181db014c8b554ec7cfda3bb"
+    },
+    {
       "class": "normative-kat",
       "path": "contracts/fixtures/registries/enum-flag-v1-vectors.json",
       "source_digest": "b3:f0d3fe83fdd54674ff9b431b74f4ab65fea076388da6279ed15fcff2b623fc48"

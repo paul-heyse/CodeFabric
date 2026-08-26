@@ -205,7 +205,7 @@ query-determinism-check:
 [doc("Prove execution-scoped persisted plan artifacts use the exact served plan without diagnostic re-execution")]
 [group('test')]
 query-artifact-single-execution-check:
-    @just packet-oracle-check WP65
+    cargo nextest run --locked --lib -E 'test(/(query_failure_artifact_closure|query_terminal_journal_authority|query_artifact_no_diagnostic_reexecution|query_artifact_failure_operational_gate)/)' --no-tests=fail
     @if rg -n 'AnalyzeExec::new|LogicalPlan::Analyze|EXPLAIN ANALYZE' src/query_service.rs src/semantic_query.rs src/fabric/serving.rs; then echo 'governed serving must not construct AnalyzeExec or EXPLAIN ANALYZE' >&2; exit 1; fi
 
 [doc("Prove the semantic query path contains no legacy SQL builder, string state fields, or order-sensitive checksum")]

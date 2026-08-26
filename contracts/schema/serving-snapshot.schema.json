@@ -432,7 +432,7 @@
   "x-codefabric-generated": {
     "driver": "schema-contract-driver-v1",
     "source_artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:08f951a0ea254c62b42d15075bea2746c7fb66272ec2198dd6b14343bdeb884f"
+    "source_digest": "b3:73c8bb48ccd414224e25b4079ec0f6d64f778e01dfa863c049519edd2232cb47"
   },
   "x-codefabric-identity": {
     "excluded_from_body": [

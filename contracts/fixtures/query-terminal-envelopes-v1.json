@@ -1,0 +1,51 @@
+{
+  "artifact_id": "codefabric.fixtures.query-terminal-envelopes-v1",
+  "artifact_schema_version": "2.0",
+  "stage_state_values": [
+    "NOT_REACHED",
+    "AVAILABLE",
+    "PARTIAL",
+    "COMPLETE",
+    "UNAVAILABLE_WITH_REASON"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "success",
+      "terminal_phase": "SUCCEEDED",
+      "payload_status": "PRIMARY_AVAILABLE",
+      "required_complete_stages": ["binding", "logical_planning", "logical_optimization", "physical_planning", "physical_execution", "response_encoding"]
+    },
+    {
+      "scenario_id": "pre-plan-cancellation",
+      "terminal_phase": "CANCELLED",
+      "payload_status": "PRIMARY_AVAILABLE",
+      "required_not_reached_stages": ["binding", "logical_planning", "logical_optimization", "physical_planning", "physical_execution", "response_encoding"]
+    },
+    {
+      "scenario_id": "post-physical-cancellation",
+      "terminal_phase": "CANCELLED",
+      "payload_status": "PRIMARY_AVAILABLE",
+      "required_complete_stages": ["binding", "logical_planning", "logical_optimization", "physical_planning"],
+      "required_partial_stages": ["physical_execution"]
+    },
+    {
+      "scenario_id": "partial-stream-failure",
+      "terminal_phase": "FAILED",
+      "payload_status": "PRIMARY_AVAILABLE",
+      "required_complete_stages": ["binding", "logical_planning", "logical_optimization", "physical_planning"],
+      "required_partial_stages": ["physical_execution"]
+    },
+    {
+      "scenario_id": "primary-store-failure",
+      "terminal_phase": "FAILED",
+      "payload_status": "FALLBACK_ONLY",
+      "required_failing_stage": "artifact_persistence"
+    },
+    {
+      "scenario_id": "crash-recovery",
+      "terminal_phase": "FAILED",
+      "payload_status": "PRIMARY_AVAILABLE",
+      "recovery_requirements": ["remove-uncommitted-staging", "verify-journal-lease-join", "verify-payload-checksum", "preserve-terminal-meaning"]
+    }
+  ]
+}

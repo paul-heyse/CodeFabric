@@ -22,7 +22,9 @@ use thiserror::Error;
 
 use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice, canonicalize_value};
 use crate::fabric::{
-    QueryExecutionContext, QueryPlanArtifact, ServingQueryError, ServingQuerySession,
+    QueryArtifactStage, QueryArtifactStageState, QueryExecutionArtifactAccumulator,
+    QueryExecutionArtifactEvidence, QueryExecutionContext, QueryPlanArtifact, ServingQueryError,
+    ServingQuerySession,
 };
 pub use crate::model_generated::query_forms::{
     PatternBinding, PatternRelationship, PriorResultReference, QUERY_FORM_CONTRACT_DIGEST,
@@ -485,6 +487,23 @@ pub struct ExecutedSemanticResponse {
     pub canonical_bytes: Vec<u8>,
     pub response_digest: String,
     pub plan_artifacts: Vec<QueryPlanArtifact>,
+}
+
+/// Phase-aware backend outcome that never discards artifacts captured before termination.
+#[derive(Debug)]
+pub enum SemanticTerminalOutcome {
+    Succeeded {
+        response: Box<ExecutedSemanticResponse>,
+        evidence: QueryExecutionArtifactEvidence,
+    },
+    Failed {
+        error: SemanticQueryError,
+        evidence: QueryExecutionArtifactEvidence,
+    },
+    Cancelled {
+        error: SemanticQueryError,
+        evidence: QueryExecutionArtifactEvidence,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -3130,6 +3149,7 @@ async fn load_graph_projection(
     session: &ServingQuerySession,
     execution: &QueryExecutionContext,
     graph_plan: &GraphOperatorPlan,
+    artifacts: &QueryExecutionArtifactAccumulator,
 ) -> Result<(QueryGraph, QueryPlanArtifact), SemanticQueryError> {
     let mut builder = LogicalPlanBuilder::from(session.table_plan("relations").await?);
     if !graph_plan.relationship_kind_codes.is_empty() {
@@ -3174,10 +3194,11 @@ async fn load_graph_projection(
         .build()?;
     session.validate_query_plan(&plan)?;
     let result = session
-        .query_plan_in_execution(
+        .query_plan_in_execution_observed(
             &format!("{}-graph-input", graph_plan.block_id),
             plan,
             execution,
+            artifacts,
         )
         .await?;
     let mut edges = Vec::new();
@@ -4160,7 +4181,21 @@ pub async fn execute_request_with_cancellation(
         semantic_request_id: validated.request.semantic_request_id.clone(),
         mcp_call_id: "not-applicable".to_owned(),
     };
-    execute_request_in_context(session, validated, freshness, cancellation, execution).await
+    let artifacts = QueryExecutionArtifactAccumulator::new(execution.clone());
+    match execute_request_in_context(
+        session,
+        validated,
+        freshness,
+        cancellation,
+        execution,
+        artifacts,
+    )
+    .await
+    {
+        SemanticTerminalOutcome::Succeeded { response, .. } => Ok(*response),
+        SemanticTerminalOutcome::Failed { error, .. }
+        | SemanticTerminalOutcome::Cancelled { error, .. } => Err(error),
+    }
 }
 
 /// Execute one request under a boundary-allocated execution identity.
@@ -4176,9 +4211,68 @@ pub async fn execute_request_in_context(
     freshness: FreshnessState,
     cancellation: crate::cancellation::Cancellation,
     execution: QueryExecutionContext,
+    artifacts: QueryExecutionArtifactAccumulator,
+) -> SemanticTerminalOutcome {
+    artifacts.set_phase("snapshot_binding");
+    let outcome = execute_request_in_context_inner(
+        session,
+        validated,
+        freshness,
+        cancellation.clone(),
+        execution,
+        &artifacts,
+    )
+    .await;
+    if outcome.is_err() && artifacts.snapshot().failing_stage.is_none() {
+        let phase = artifacts.snapshot().lifecycle_phase;
+        artifacts.set_failure(phase);
+    }
+    let evidence = artifacts.snapshot();
+    match outcome {
+        Ok(response) => SemanticTerminalOutcome::Succeeded {
+            response: Box::new(response),
+            evidence,
+        },
+        Err(error) if cancellation.is_cancelled() => {
+            SemanticTerminalOutcome::Cancelled { error, evidence }
+        }
+        Err(error) => SemanticTerminalOutcome::Failed { error, evidence },
+    }
+}
+
+#[allow(clippy::too_many_lines)] // One pinned session keeps DAG state and phase evidence snapshot-coherent.
+async fn execute_request_in_context_inner(
+    session: &ServingQuerySession,
+    validated: ValidatedSemanticRequest,
+    freshness: FreshnessState,
+    cancellation: crate::cancellation::Cancellation,
+    execution: QueryExecutionContext,
+    artifacts: &QueryExecutionArtifactAccumulator,
 ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
     let manifest = session.snapshot_manifest();
-    let bound = bind_request(session, &validated).await?;
+    artifacts.pin_snapshot(&manifest);
+    let bound = bind_request(session, &validated)
+        .await
+        .inspect_err(|error| {
+            artifacts.set_failure("binding");
+            artifacts.record_stage(QueryArtifactStage {
+                block_id: "request".to_owned(),
+                stage: "binding".to_owned(),
+                state: QueryArtifactStageState::UnavailableWithReason,
+                artifact: None,
+                unavailable_reason: Some(error.to_string()),
+                metrics: BTreeMap::new(),
+            });
+        })?;
+    artifacts.set_phase("execution");
+    artifacts.record_stage(QueryArtifactStage {
+        block_id: "request".to_owned(),
+        stage: "binding".to_owned(),
+        state: QueryArtifactStageState::Complete,
+        artifact: Some(format!("{bound:?}")),
+        unavailable_reason: None,
+        metrics: BTreeMap::new(),
+    });
     let mut plan_artifacts = Vec::new();
     let mut results = Vec::with_capacity(validated.request.queries.len());
     let mut entities = BTreeMap::new();
@@ -4188,6 +4282,7 @@ pub async fn execute_request_in_context(
     let mut source_contexts = BTreeMap::new();
     let mut completed = BTreeMap::<String, CompletedBlock>::new();
     for block_id in &bound.execution_order {
+        artifacts.set_phase(format!("block:{block_id}:execution"));
         let block = bound
             .blocks
             .iter()
@@ -4221,7 +4316,12 @@ pub async fn execute_request_in_context(
                     runtime_relational_plan(session, block, query, plan_spec, &completed).await?;
                 let output_schema = Arc::new(plan.schema().as_arrow().clone());
                 let result = session
-                    .query_plan_in_execution(&block.typed.block_id, plan, &execution)
+                    .query_plan_in_execution_observed(
+                        &block.typed.block_id,
+                        plan,
+                        &execution,
+                        artifacts,
+                    )
                     .await?;
                 plan_artifacts.push(result.artifact.clone());
                 let produced_rows = result.artifact.output_row_count;
@@ -4303,7 +4403,7 @@ pub async fn execute_request_in_context(
             BoundOperator::Graph(plan) => {
                 let input = graph_inputs(query, &completed)?;
                 let (graph, mut artifact) =
-                    load_graph_projection(session, &execution, plan).await?;
+                    load_graph_projection(session, &execution, plan, artifacts).await?;
                 let executed = execute_graph_operator(plan, &input, &graph, &cancellation)?;
                 let output_row_count = executed.batches.iter().map(RecordBatch::num_rows).sum();
                 let mut checksums = Vec::with_capacity(executed.batches.len() * 32);
@@ -4332,6 +4432,7 @@ pub async fn execute_request_in_context(
                     plan.output_schema
                 )
                 .expect("writing to String cannot fail");
+                artifacts.record_plan(artifact.clone());
                 plan_artifacts.push(artifact);
                 let notices = if executed.completeness == CompletenessState::Indeterminate {
                     vec![
@@ -4462,7 +4563,12 @@ pub async fn execute_request_in_context(
                 completeness: completeness_state,
             },
         );
+        artifacts.record_coverage(
+            format!("block:{block_id}:output_rows"),
+            u64::try_from(output_row_count).unwrap_or(u64::MAX),
+        );
     }
+    artifacts.set_phase("response_encoding");
     let snapshot = snapshot_response(&manifest, freshness);
     let aggregate_limit = if results
         .iter()
@@ -4513,6 +4619,18 @@ pub async fn execute_request_in_context(
     let value = serde_json::to_value(&response)
         .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?;
     let canonical_bytes = canonicalize_value(&value)?;
+    artifacts.record_stage(QueryArtifactStage {
+        block_id: "response".to_owned(),
+        stage: "response_encoding".to_owned(),
+        state: QueryArtifactStageState::Complete,
+        artifact: Some(b3(&canonical_bytes)),
+        unavailable_reason: None,
+        metrics: BTreeMap::from([(
+            "canonical_response_bytes".to_owned(),
+            u64::try_from(canonical_bytes.len()).unwrap_or(u64::MAX),
+        )]),
+    });
+    artifacts.set_phase("complete");
     Ok(ExecutedSemanticResponse {
         response_digest: b3(&canonical_bytes),
         response,

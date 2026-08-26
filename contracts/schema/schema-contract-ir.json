@@ -4291,6 +4291,93 @@
       }
     },
     {
+      "name": "query_execution_terminal",
+      "columns": [
+        {
+          "name": "execution_id",
+          "sqlite_type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "workspace_id",
+          "sqlite_type": "BLOB",
+          "nullable": false
+        },
+        {
+          "name": "semantic_request_id",
+          "sqlite_type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "mcp_call_id",
+          "sqlite_type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "terminal_phase",
+          "sqlite_type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "failing_stage",
+          "sqlite_type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "bundle_checksum",
+          "sqlite_type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "primary_payload_uri",
+          "sqlite_type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "payload_status",
+          "sqlite_type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "fallback_envelope_bytes",
+          "sqlite_type": "BLOB",
+          "nullable": true
+        },
+        {
+          "name": "snapshot_id",
+          "sqlite_type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "publication_id",
+          "sqlite_type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "source_table_versions_bytes",
+          "sqlite_type": "BLOB",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "sqlite_type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "expires_at",
+          "sqlite_type": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "primary_key": [
+        "execution_id"
+      ],
+      "workspace_scope": {
+        "kind": "DIRECT",
+        "workspace_column": "workspace_id"
+      }
+    },
+    {
       "name": "serving_snapshot_manifest",
       "columns": [
         {

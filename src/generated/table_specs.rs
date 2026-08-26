@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:08f951a0ea254c62b42d15075bea2746c7fb66272ec2198dd6b14343bdeb884f; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:73c8bb48ccd414224e25b4079ec0f6d64f778e01dfa863c049519edd2232cb47; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
@@ -4822,6 +4822,91 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
             parent_table: "snapshot_lease",
             child_column: "lease_id",
             parent_column: "lease_id",
+            workspace_column: "workspace_id",
+        }),
+    },
+    GeneratedOperationalTableSpec {
+        name: "query_execution_terminal",
+        sqlite_ddl: "CREATE TABLE query_execution_terminal (\n  execution_id TEXT NOT NULL,\n  workspace_id BLOB NOT NULL,\n  semantic_request_id TEXT NOT NULL,\n  mcp_call_id TEXT NOT NULL,\n  terminal_phase TEXT NOT NULL,\n  failing_stage TEXT,\n  bundle_checksum TEXT NOT NULL,\n  primary_payload_uri TEXT,\n  payload_status TEXT NOT NULL,\n  fallback_envelope_bytes BLOB,\n  snapshot_id TEXT,\n  publication_id TEXT,\n  source_table_versions_bytes BLOB NOT NULL,\n  created_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  PRIMARY KEY (execution_id)\n) STRICT;\n",
+        columns: &[
+            GeneratedOperationalColumn {
+                name: "execution_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "workspace_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "semantic_request_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "mcp_call_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "terminal_phase",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "failing_stage",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "bundle_checksum",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "primary_payload_uri",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "payload_status",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "fallback_envelope_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "snapshot_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "publication_id",
+                sqlite_type: OperationalSqliteType::Text,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "source_table_versions_bytes",
+                sqlite_type: OperationalSqliteType::Blob,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "created_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "expires_at",
+                sqlite_type: OperationalSqliteType::Integer,
+                nullable: false,
+            },
+        ],
+        primary_key: &["execution_id"],
+        workspace_scope: Some(OperationalWorkspaceScope::Direct {
             workspace_column: "workspace_id",
         }),
     },

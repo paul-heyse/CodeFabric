@@ -9,14 +9,16 @@ use std::time::Duration;
 
 use arrow_schema::DataType;
 use rusqlite::backup::Backup;
-use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior, params,
+};
 use thiserror::Error;
 
 use crate::contracts::index::model_artifact_index;
 use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
 use crate::snapshot::ServingSnapshotManifest;
 
-const SCHEMA_VERSION: u32 = 9;
+const SCHEMA_VERSION: u32 = 10;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str =
     include_str!("../contracts/generated/model/schema/operational-store.sql");
@@ -79,6 +81,48 @@ pub struct ProviderRunRecord {
     pub diagnostic_id: Option<Vec<u8>>,
 }
 
+/// One immutable authoritative terminal record for an allocated query execution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueryExecutionTerminalRecord {
+    pub execution_id: String,
+    pub workspace_id: Vec<u8>,
+    pub semantic_request_id: String,
+    pub mcp_call_id: String,
+    pub terminal_phase: String,
+    pub failing_stage: Option<String>,
+    pub bundle_checksum: String,
+    pub primary_payload_uri: Option<String>,
+    pub payload_status: String,
+    pub fallback_envelope_bytes: Option<Vec<u8>>,
+    pub snapshot_id: Option<String>,
+    pub publication_id: Option<String>,
+    pub source_table_versions_bytes: Vec<u8>,
+    pub created_at: i64,
+    pub expires_at: i64,
+}
+
+fn query_execution_terminal_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<QueryExecutionTerminalRecord> {
+    Ok(QueryExecutionTerminalRecord {
+        execution_id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        semantic_request_id: row.get(2)?,
+        mcp_call_id: row.get(3)?,
+        terminal_phase: row.get(4)?,
+        failing_stage: row.get(5)?,
+        bundle_checksum: row.get(6)?,
+        primary_payload_uri: row.get(7)?,
+        payload_status: row.get(8)?,
+        fallback_envelope_bytes: row.get(9)?,
+        snapshot_id: row.get(10)?,
+        publication_id: row.get(11)?,
+        source_table_versions_bytes: row.get(12)?,
+        created_at: row.get(13)?,
+        expires_at: row.get(14)?,
+    })
+}
+
 /// Stable operational-store failures.
 #[derive(Debug, Error)]
 pub enum OperationalStoreError {
@@ -102,6 +146,8 @@ pub enum OperationalStoreError {
     MutationRecord(String),
     #[error("provider run record conflict: {0}")]
     ProviderRunRecord(String),
+    #[error("query execution terminal record conflict: {0}")]
+    QueryExecutionTerminalRecord(String),
 }
 
 #[derive(Debug)]
@@ -476,6 +522,169 @@ impl OperationalStore {
         })
     }
 
+    /// Commit one terminal meaning and its primary payload lease atomically.
+    ///
+    /// # Errors
+    ///
+    /// A repeated identical checksum is idempotent; any conflicting terminal meaning fails
+    /// closed and leaves the existing row unchanged.
+    pub fn commit_query_execution_terminal(
+        &mut self,
+        record: &QueryExecutionTerminalRecord,
+    ) -> Result<(), OperationalStoreError> {
+        if record.execution_id.is_empty()
+            || record.workspace_id.is_empty()
+            || record.bundle_checksum.is_empty()
+            || record.source_table_versions_bytes.is_empty()
+        {
+            return Err(OperationalStoreError::QueryExecutionTerminalRecord(
+                "required terminal identity or provenance is empty".to_owned(),
+            ));
+        }
+        self.write_transaction(|transaction| {
+            let existing = transaction
+                .query_row(
+                    "SELECT execution_id, workspace_id, semantic_request_id, mcp_call_id,
+                       terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
+                       payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
+                       source_table_versions_bytes, created_at, expires_at
+                     FROM query_execution_terminal WHERE execution_id=?1",
+                    [&record.execution_id],
+                    query_execution_terminal_from_row,
+                )
+                .optional()?;
+            if let Some(existing) = existing {
+                if existing == *record {
+                    return Ok(());
+                }
+                return Err(OperationalStoreError::QueryExecutionTerminalRecord(
+                    record.execution_id.clone(),
+                ));
+            }
+            transaction.execute(
+                "INSERT INTO query_execution_terminal(
+                   execution_id, workspace_id, semantic_request_id, mcp_call_id,
+                   terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
+                   payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
+                   source_table_versions_bytes, created_at, expires_at
+                 ) VALUES (
+                   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+                 )",
+                params![
+                    record.execution_id,
+                    record.workspace_id,
+                    record.semantic_request_id,
+                    record.mcp_call_id,
+                    record.terminal_phase,
+                    record.failing_stage,
+                    record.bundle_checksum,
+                    record.primary_payload_uri,
+                    record.payload_status,
+                    record.fallback_envelope_bytes,
+                    record.snapshot_id,
+                    record.publication_id,
+                    record.source_table_versions_bytes,
+                    record.created_at,
+                    record.expires_at,
+                ],
+            )?;
+            if let Some(uri) = &record.primary_payload_uri {
+                transaction.execute(
+                    "INSERT INTO result_artifact_lease(lease_id, artifact_uri, checksum, expires_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        record.execution_id.as_bytes(),
+                        uri,
+                        record.bundle_checksum.as_bytes(),
+                        record.expires_at,
+                    ],
+                )?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Read one authoritative terminal record by execution identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `SQLite` error when the journal cannot be queried.
+    pub fn read_query_execution_terminal(
+        &self,
+        execution_id: &str,
+    ) -> Result<Option<QueryExecutionTerminalRecord>, OperationalStoreError> {
+        self.connection
+            .query_row(
+                "SELECT execution_id, workspace_id, semantic_request_id, mcp_call_id,
+                   terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
+                   payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
+                   source_table_versions_bytes, created_at, expires_at
+                 FROM query_execution_terminal WHERE execution_id=?1",
+                [execution_id],
+                query_execution_terminal_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Read a bounded canonical terminal census for recovery and explain traversal.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `SQLite` error when the journal cannot be queried.
+    pub fn query_execution_terminals(
+        &self,
+        maximum: usize,
+    ) -> Result<Vec<QueryExecutionTerminalRecord>, OperationalStoreError> {
+        let maximum = i64::try_from(maximum).unwrap_or(i64::MAX);
+        let mut statement = self.connection.prepare(
+            "SELECT execution_id, workspace_id, semantic_request_id, mcp_call_id,
+               terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
+               payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
+               source_table_versions_bytes, created_at, expires_at
+             FROM query_execution_terminal ORDER BY execution_id LIMIT ?1",
+        )?;
+        statement
+            .query_map([maximum], query_execution_terminal_from_row)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Verify that the payload lease projection matches one terminal-journal authority row.
+    ///
+    /// Fallback-only terminal records intentionally have no payload lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `SQLite` error when the lease projection cannot be queried.
+    pub fn query_execution_terminal_lease_matches(
+        &self,
+        record: &QueryExecutionTerminalRecord,
+    ) -> Result<bool, OperationalStoreError> {
+        let lease = self
+            .connection
+            .query_row(
+                "SELECT artifact_uri, checksum, expires_at
+                 FROM result_artifact_lease WHERE lease_id=?1",
+                [record.execution_id.as_bytes()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        match (&record.primary_payload_uri, lease) {
+            (None, None) => Ok(true),
+            (Some(uri), Some((lease_uri, checksum, expires_at))) => Ok(lease_uri == *uri
+                && checksum == record.bundle_checksum.as_bytes()
+                && expires_at == record.expires_at),
+            _ => Ok(false),
+        }
+    }
+
     /// Checkpoint the WAL during drain without changing journal mode.
     ///
     /// # Errors
@@ -523,6 +732,7 @@ impl OperationalStore {
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
             }
             2 => {
                 migrate_v2_to_v3(&transaction)?;
@@ -532,6 +742,7 @@ impl OperationalStore {
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
             }
             3 => {
                 migrate_v3_to_v4(&transaction)?;
@@ -540,6 +751,7 @@ impl OperationalStore {
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
             }
             4 => {
                 migrate_v4_to_v5(&transaction)?;
@@ -547,23 +759,31 @@ impl OperationalStore {
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
             }
             5 => {
                 migrate_v5_to_v6(&transaction)?;
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
             }
             6 => {
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
             }
             7 => {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
             }
-            8 => migrate_v8_to_v9(&transaction)?,
+            8 => {
+                migrate_v8_to_v9(&transaction)?;
+                migrate_v9_to_v10(&transaction)?;
+            }
+            9 => migrate_v9_to_v10(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -963,6 +1183,18 @@ fn migrate_v8_to_v9(transaction: &Transaction<'_>) -> Result<(), OperationalStor
          FROM table_mutation_operation_v8;
          DROP TABLE table_mutation_operation_v8;",
     )?;
+    Ok(())
+}
+
+fn migrate_v9_to_v10(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    let already_present = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+        ["query_execution_terminal"],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !already_present {
+        transaction.execute_batch(&generated_table_ddl("query_execution_terminal")?)?;
+    }
     Ok(())
 }
 

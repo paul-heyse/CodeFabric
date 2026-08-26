@@ -61,7 +61,7 @@
       }
     },
     {
-      "action_key": "b3:96bf8e15edd035334c4eb0d71b31503eb139dfeb1af04a6771669bdb96f02666",
+      "action_key": "b3:cdbaa693c0d365060d54591eb93203a5e3a49aa2d4ff13b567595dcc175cec35",
       "family": "schemas",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",

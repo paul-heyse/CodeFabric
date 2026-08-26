@@ -2358,6 +2358,11 @@ mod tests {
                 .into_iter()
                 .map(crate::fabric::OverlayRebaseFaultPoint::code),
         );
+        executable.extend(
+            crate::query_service::QueryArtifactFaultPoint::ALL
+                .into_iter()
+                .map(crate::query_service::QueryArtifactFaultPoint::code),
+        );
         assert_eq!(released, executable);
     }
 }

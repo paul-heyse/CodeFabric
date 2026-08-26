@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:08f951a0ea254c62b42d15075bea2746c7fb66272ec2198dd6b14343bdeb884f; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:73c8bb48ccd414224e25b4079ec0f6d64f778e01dfa863c049519edd2232cb47; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///

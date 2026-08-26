@@ -8,6 +8,8 @@ use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,11 +23,17 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tracing::Instrument as _;
 
-use crate::fabric::{FabricTable, QueryExecutionContext, QueryPlanArtifact, ServingQuerySession};
+use crate::fabric::{
+    FabricTable, QueryExecutionArtifactAccumulator, QueryExecutionArtifactEvidence,
+    QueryExecutionContext, QueryPlanArtifact, ServingQuerySession,
+};
+#[cfg(test)]
+use crate::fabric::{QueryArtifactStage, QueryArtifactStageState};
 use crate::golden_corpus::CoreSourceCoverage;
 use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
 use crate::integrity::{frame_digest, framed_digest};
 use crate::lifecycle::{FreshnessAdmission, FreshnessBarrier, FreshnessState};
+use crate::operational_store::{OperationalStore, QueryExecutionTerminalRecord};
 use crate::registries::CpgdFeatureMask;
 use crate::registries::QUERY_FORM_VALUES;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryService;
@@ -48,9 +56,11 @@ use crate::rpc::{
 use crate::security::{
     KeyedAuthenticator, SecurityMacDomain, authenticator_hex, local_token_digest,
 };
+#[cfg(test)]
+use crate::semantic_query::ExecutedSemanticResponse;
 use crate::semantic_query::QueryForm;
 use crate::semantic_query::{
-    ExecutedSemanticResponse, FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse,
+    FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse, SemanticTerminalOutcome,
     ValidatedSemanticRequest, execute_request_in_context, require_registered_executors,
     snapshot_response, validate_request,
 };
@@ -60,7 +70,7 @@ const RESULT_LEASE_SECONDS: i64 = 1_800;
 type QueryStream = Pin<Box<dyn Stream<Item = Result<QueryEvent, Status>> + Send>>;
 type ArtifactStream = Pin<Box<dyn Stream<Item = Result<ResultChunk, Status>> + Send>>;
 
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| {
@@ -109,8 +119,10 @@ pub enum QueryArtifactPhase {
 #[serde(deny_unknown_fields)]
 pub struct PersistedQueryArtifactBundle {
     pub artifact_schema_version: String,
+    pub workspace_id: String,
     pub execution: QueryExecutionContext,
     pub phase: QueryArtifactPhase,
+    pub evidence: QueryExecutionArtifactEvidence,
     pub plan_artifacts: Vec<QueryPlanArtifact>,
     pub result_artifact_id: Option<String>,
     pub public_error_code: Option<String>,
@@ -130,10 +142,46 @@ pub struct VersionExplanation {
     pub scanned_artifact_count: usize,
 }
 
+/// Closed deterministic failure seams for terminal-artifact durability tests.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum QueryArtifactFaultPoint {
+    ResultInsertion = 1,
+    PrimaryPayloadPersistence = 2,
+    TerminalJournalCommit = 3,
+}
+
+impl QueryArtifactFaultPoint {
+    pub const ALL: [Self; 3] = [
+        Self::ResultInsertion,
+        Self::PrimaryPayloadPersistence,
+        Self::TerminalJournalCommit,
+    ];
+
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::ResultInsertion => "QUERY_RESULT_INSERTION",
+            Self::PrimaryPayloadPersistence => "QUERY_PRIMARY_PAYLOAD_PERSISTENCE",
+            Self::TerminalJournalCommit => "QUERY_TERMINAL_JOURNAL_COMMIT",
+        }
+    }
+}
+
+/// Restart reconciliation evidence for the terminal journal and its payload projections.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct QueryArtifactRecoveryReport {
+    pub removed_staged_payloads: usize,
+    pub verified_terminal_records: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct ResultArtifactStore {
     root: PathBuf,
     lease_secret: [u8; 32],
+    terminal_journal: Arc<std::sync::Mutex<OperationalStore>>,
+    #[cfg(test)]
+    fault_point: Arc<AtomicU8>,
 }
 
 impl ResultArtifactStore {
@@ -146,9 +194,108 @@ impl ResultArtifactStore {
     pub fn new(root: PathBuf) -> Result<Self, std::io::Error> {
         fs::create_dir_all(&root)?;
         fs::create_dir_all(root.join("query-plan-artifacts"))?;
+        let terminal_journal = OperationalStore::open(&root.join("query-terminal.sqlite"))
+            .map_err(std::io::Error::other)?;
         let mut lease_secret = [0_u8; 32];
         fs::File::open("/dev/urandom")?.read_exact(&mut lease_secret)?;
-        Ok(Self { root, lease_secret })
+        let store = Self {
+            root,
+            lease_secret,
+            terminal_journal: Arc::new(std::sync::Mutex::new(terminal_journal)),
+            #[cfg(test)]
+            fault_point: Arc::new(AtomicU8::new(0)),
+        };
+        store.reconcile_terminal_artifacts()?;
+        Ok(store)
+    }
+
+    #[cfg(test)]
+    fn inject_fault(&self, fault_point: Option<QueryArtifactFaultPoint>) {
+        self.fault_point.store(
+            fault_point.map_or(0, |fault_point| fault_point as u8),
+            Ordering::Release,
+        );
+    }
+
+    #[cfg(test)]
+    fn fault_is(&self, fault_point: QueryArtifactFaultPoint) -> bool {
+        self.fault_point.load(Ordering::Acquire) == fault_point as u8
+    }
+
+    fn reconcile_terminal_artifacts(&self) -> Result<QueryArtifactRecoveryReport, std::io::Error> {
+        let mut report = QueryArtifactRecoveryReport::default();
+        let plan_artifact_root = self.root.join("query-plan-artifacts");
+        for directory in [self.root.as_path(), plan_artifact_root.as_path()] {
+            for entry in fs::read_dir(directory)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with('.') && name.ends_with(".tmp") {
+                    fs::remove_file(entry.path())?;
+                    report.removed_staged_payloads =
+                        report.removed_staged_payloads.saturating_add(1);
+                }
+            }
+        }
+        let journal = self
+            .terminal_journal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let records = journal
+            .query_execution_terminals(100_001)
+            .map_err(std::io::Error::other)?;
+        if records.len() > 100_000 {
+            return Err(std::io::Error::other(
+                "query terminal recovery exceeds the bounded journal census",
+            ));
+        }
+        for record in records {
+            if !journal
+                .query_execution_terminal_lease_matches(&record)
+                .map_err(std::io::Error::other)?
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "query terminal lease differs from journal authority for {}",
+                        record.execution_id
+                    ),
+                ));
+            }
+            if let Some(fallback) = &record.fallback_envelope_bytes {
+                if framed_digest(fallback) != record.bundle_checksum {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "query terminal fallback differs from journal authority for {}",
+                            record.execution_id
+                        ),
+                    ));
+                }
+            } else if record.expires_at > now_millis() {
+                let uri = record.primary_payload_uri.as_ref().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "query terminal has no retained payload for {}",
+                            record.execution_id
+                        ),
+                    )
+                })?;
+                let payload = fs::read(uri)?;
+                if framed_digest(&payload) != record.bundle_checksum {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "query terminal primary payload differs for {}",
+                            record.execution_id
+                        ),
+                    ));
+                }
+            }
+            report.verified_terminal_records = report.verified_terminal_records.saturating_add(1);
+        }
+        Ok(report)
     }
 
     fn query_handle_token(
@@ -166,51 +313,130 @@ impl ResultArtifactStore {
         authenticator.finalize().to_vec()
     }
 
-    fn query_artifact_path(&self, execution_id: &str) -> PathBuf {
-        let digest = framed_digest(execution_id.as_bytes());
-        self.root
-            .join("query-plan-artifacts")
-            .join(format!("{}.json", &digest[3..]))
+    fn query_artifact_path(&self, bundle_checksum: &str) -> PathBuf {
+        self.root.join("query-plan-artifacts").join(format!(
+            "{}.json",
+            bundle_checksum.trim_start_matches("b3:")
+        ))
     }
 
+    #[allow(clippy::too_many_lines)] // Keeps payload, fallback, and journal ordering in one auditable transaction boundary.
     pub(crate) fn persist_query_artifact(
         &self,
         artifact: &PersistedQueryArtifactBundle,
-    ) -> Result<(), Status> {
-        let value = serde_json::to_value(artifact)
+    ) -> Result<QueryArtifactPhase, Status> {
+        const MAX_FALLBACK_BYTES: usize = 16 * 1024 * 1024;
+        let mut persisted = artifact.clone();
+        let value = serde_json::to_value(&persisted)
             .map_err(|_| Status::internal("query artifact serialization failed"))?;
         let bytes = crate::contracts::jcs::canonicalize_value(&value).map_err(|error| {
             Status::internal(format!("query artifact canonicalization failed: {error}"))
         })?;
-        let final_path = self.query_artifact_path(&artifact.execution.execution_id);
-        if final_path.exists() {
-            let existing = fs::read(&final_path)
-                .map_err(|_| Status::internal("query artifact read failed"))?;
-            if existing == bytes {
-                return Ok(());
+        let bundle_checksum = framed_digest(&bytes);
+        let final_path = self.query_artifact_path(&bundle_checksum);
+        let primary = (|| -> Result<(), Status> {
+            #[cfg(test)]
+            if self.fault_is(QueryArtifactFaultPoint::PrimaryPayloadPersistence) {
+                return Err(Status::internal("injected primary query payload failure"));
             }
-            return Err(Status::already_exists(
-                "query execution already has a different terminal artifact",
+            if final_path.exists() {
+                let existing = fs::read(&final_path)
+                    .map_err(|_| Status::internal("query artifact read failed"))?;
+                if existing == bytes {
+                    return Ok(());
+                }
+                return Err(Status::data_loss("query artifact checksum collision"));
+            }
+            let file_name = final_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| Status::internal("query artifact filename is invalid"))?;
+            let temporary =
+                final_path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary)
+                .map_err(|_| Status::internal("query artifact staging failed"))?;
+            file.write_all(&bytes)
+                .and_then(|()| file.sync_all())
+                .map_err(|_| Status::internal("query artifact staging write failed"))?;
+            fs::rename(&temporary, &final_path)
+                .map_err(|_| Status::internal("query artifact publication failed"))?;
+            Ok(())
+        })();
+        let (primary_payload_uri, payload_status, fallback_envelope_bytes) = match primary {
+            Ok(()) => (
+                Some(final_path.to_string_lossy().into_owned()),
+                "PRIMARY_AVAILABLE".to_owned(),
+                None,
+            ),
+            Err(error) if error.code() != tonic::Code::DataLoss => {
+                persisted.phase = QueryArtifactPhase::Failed;
+                persisted.public_error_code = Some("INTERNAL".to_owned());
+                "terminal_persistence".clone_into(&mut persisted.evidence.lifecycle_phase);
+                persisted.evidence.failing_stage = Some("artifact_persistence".to_owned());
+                let fallback = crate::contracts::jcs::canonicalize_value(
+                    &serde_json::to_value(&persisted)
+                        .map_err(|_| Status::internal("fallback serialization failed"))?,
+                )
+                .map_err(|_| Status::internal("fallback canonicalization failed"))?;
+                if fallback.len() > MAX_FALLBACK_BYTES {
+                    return Err(Status::resource_exhausted(
+                        "query terminal fallback exceeds the bounded SQLite envelope",
+                    ));
+                }
+                (None, "FALLBACK_ONLY".to_owned(), Some(fallback))
+            }
+            Err(error) => return Err(error),
+        };
+        let source_table_versions_bytes = crate::contracts::jcs::canonicalize_value(
+            &serde_json::to_value(&persisted.evidence.source_table_versions)
+                .map_err(|_| Status::internal("source table pin serialization failed"))?,
+        )
+        .map_err(|_| Status::internal("source table pin canonicalization failed"))?;
+        let record = QueryExecutionTerminalRecord {
+            execution_id: persisted.execution.execution_id.clone(),
+            workspace_id: persisted.workspace_id.as_bytes().to_vec(),
+            semantic_request_id: persisted.execution.semantic_request_id.clone(),
+            mcp_call_id: persisted.execution.mcp_call_id.clone(),
+            terminal_phase: format!("{:?}", persisted.phase).to_ascii_uppercase(),
+            failing_stage: persisted.evidence.failing_stage.clone(),
+            bundle_checksum: fallback_envelope_bytes.as_ref().map_or_else(
+                || bundle_checksum.clone(),
+                |fallback| framed_digest(fallback),
+            ),
+            primary_payload_uri,
+            payload_status,
+            fallback_envelope_bytes,
+            snapshot_id: persisted.evidence.snapshot_id.clone(),
+            publication_id: persisted.evidence.publication_id.clone(),
+            source_table_versions_bytes,
+            created_at: persisted.created_at_unix_ms,
+            expires_at: persisted.expires_at_unix_ms,
+        };
+        #[cfg(test)]
+        if self.fault_is(QueryArtifactFaultPoint::TerminalJournalCommit) {
+            return Err(Status::unavailable(
+                "injected query terminal journal commit failure",
             ));
         }
-        let file_name = final_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| Status::internal("query artifact filename is invalid"))?;
-        let temporary =
-            final_path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)
-            .map_err(|_| Status::internal("query artifact staging failed"))?;
-        file.write_all(&bytes)
-            .and_then(|()| file.sync_all())
-            .map_err(|_| Status::internal("query artifact staging write failed"))?;
-        fs::rename(&temporary, &final_path)
-            .map_err(|_| Status::internal("query artifact publication failed"))?;
-        Ok(())
+        self.terminal_journal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .commit_query_execution_terminal(&record)
+            .map(|()| persisted.phase)
+            .map_err(|error| match error {
+                crate::operational_store::OperationalStoreError::QueryExecutionTerminalRecord(
+                    _,
+                ) => Status::already_exists(
+                    "query execution already has a different terminal meaning",
+                ),
+                other => {
+                    Status::unavailable(format!("query terminal journal commit failed: {other}"))
+                }
+            })
     }
 
     /// Read and validate one execution-scoped artifact bundle from durable storage.
@@ -222,13 +448,35 @@ impl ResultArtifactStore {
         &self,
         execution_id: &str,
     ) -> Result<PersistedQueryArtifactBundle, Status> {
-        let bytes =
-            fs::read(self.query_artifact_path(execution_id)).map_err(|error| {
-                match error.kind() {
-                    std::io::ErrorKind::NotFound => Status::not_found("query artifact not found"),
-                    _ => Status::internal("query artifact read failed"),
-                }
-            })?;
+        let record = self
+            .terminal_journal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .read_query_execution_terminal(execution_id)
+            .map_err(|_| Status::unavailable("query terminal journal read failed"))?
+            .ok_or_else(|| Status::not_found("query terminal record not found"))?;
+        if record.expires_at <= now_millis() {
+            return Err(Status::failed_precondition(
+                "query provenance gap: terminal payload lease expired",
+            ));
+        }
+        let bytes = if let Some(uri) = &record.primary_payload_uri {
+            match fs::read(uri) {
+                Ok(bytes) => bytes,
+                Err(_) => record.fallback_envelope_bytes.clone().ok_or_else(|| {
+                    Status::data_loss("query provenance gap: primary payload is missing")
+                })?,
+            }
+        } else {
+            record.fallback_envelope_bytes.clone().ok_or_else(|| {
+                Status::data_loss("query provenance gap: fallback payload is missing")
+            })?
+        };
+        if framed_digest(&bytes) != record.bundle_checksum {
+            return Err(Status::data_loss(
+                "query terminal payload checksum differs from journal authority",
+            ));
+        }
         let artifact: PersistedQueryArtifactBundle = serde_json::from_slice(&bytes)
             .map_err(|_| Status::data_loss("query artifact schema is invalid"))?;
         if artifact.execution.execution_id != execution_id {
@@ -300,35 +548,29 @@ impl ResultArtifactStore {
         let delta_commit_info = serde_json::to_value(commit)
             .map_err(|_| Status::internal("Delta commit-info serialization failed"))?;
 
-        let mut paths = fs::read_dir(self.root.join("query-plan-artifacts"))
-            .map_err(|_| Status::internal("query artifact directory read failed"))?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension == "json")
-            })
-            .collect::<Vec<_>>();
-        paths.sort();
-        if paths.len() > MAX_EXPLAIN_ARTIFACTS {
+        let records = self
+            .terminal_journal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .query_execution_terminals(MAX_EXPLAIN_ARTIFACTS + 1)
+            .map_err(|_| Status::unavailable("query terminal journal census failed"))?;
+        if records.len() > MAX_EXPLAIN_ARTIFACTS {
             return Err(Status::resource_exhausted(
                 "query artifact explanation scan exceeds the bounded census",
             ));
         }
-        let scanned_artifact_count = paths.len();
+        let scanned_artifact_count = records.len();
         let mut executions = Vec::new();
-        for path in paths {
-            let bytes = fs::read(path)
-                .map_err(|_| Status::internal("query artifact explanation read failed"))?;
-            let artifact: PersistedQueryArtifactBundle = serde_json::from_slice(&bytes)
-                .map_err(|_| Status::data_loss("query artifact explanation schema is invalid"))?;
-            if artifact.plan_artifacts.iter().any(|plan| {
-                plan.source_table_versions
-                    .get(&u16::try_from(table.table_code).unwrap_or(u16::MAX))
-                    .copied()
-                    == Some(delta_version)
-            }) {
-                executions.push(artifact);
+        for record in records {
+            let table_versions: BTreeMap<u16, u64> =
+                serde_json::from_slice(&record.source_table_versions_bytes)
+                    .map_err(|_| Status::data_loss("query terminal table pins are malformed"))?;
+            if table_versions
+                .get(&u16::try_from(table.table_code).unwrap_or(u16::MAX))
+                .copied()
+                == Some(delta_version)
+            {
+                executions.push(self.read_query_artifact(&record.execution_id)?);
             }
         }
         executions.sort_by(|left, right| {
@@ -353,6 +595,10 @@ impl ResultArtifactStore {
         workspace_id: &str,
         snapshot_id: &str,
     ) -> Result<ResultArtifact, Status> {
+        #[cfg(test)]
+        if self.fault_is(QueryArtifactFaultPoint::ResultInsertion) {
+            return Err(Status::internal("injected result insertion failure"));
+        }
         let checksum = framed_digest(&bytes);
         let mut identity = semantic_fingerprint(SemanticFingerprintDomain::ResultArtifact);
         for field in [workspace_id, agent_id, snapshot_id, checksum.as_str()] {
@@ -407,7 +653,8 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
         freshness: FreshnessState,
         cancellation: crate::cancellation::Cancellation,
         execution: QueryExecutionContext,
-    ) -> Result<ExecutedSemanticResponse, SemanticQueryError>;
+        artifacts: QueryExecutionArtifactAccumulator,
+    ) -> SemanticTerminalOutcome;
 
     async fn public_snapshot(
         &self,
@@ -651,8 +898,10 @@ impl SemanticQueryBackend for ServingQuerySession {
         freshness: FreshnessState,
         cancellation: crate::cancellation::Cancellation,
         execution: QueryExecutionContext,
-    ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
-        execute_request_in_context(self, request, freshness, cancellation, execution).await
+        artifacts: QueryExecutionArtifactAccumulator,
+    ) -> SemanticTerminalOutcome {
+        execute_request_in_context(self, request, freshness, cancellation, execution, artifacts)
+            .await
     }
 
     async fn public_snapshot(
@@ -720,14 +969,25 @@ impl SemanticQueryBackend for WorkspaceQueryBackend {
         freshness: FreshnessState,
         cancellation: crate::cancellation::Cancellation,
         execution: QueryExecutionContext,
-    ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
-        let session = self.session(&request.request.workspace_id).await?;
+        artifacts: QueryExecutionArtifactAccumulator,
+    ) -> SemanticTerminalOutcome {
+        let session = match self.session(&request.request.workspace_id).await {
+            Ok(session) => session,
+            Err(error) => {
+                artifacts.set_failure("snapshot_binding");
+                return SemanticTerminalOutcome::Failed {
+                    error,
+                    evidence: artifacts.snapshot(),
+                };
+            }
+        };
         execute_request_in_context(
             session.as_ref(),
             request,
             freshness,
             cancellation,
             execution,
+            artifacts,
         )
         .await
     }
@@ -750,6 +1010,7 @@ struct QueryHandleState {
 #[derive(Debug)]
 struct QueryHandle {
     execution: QueryExecutionContext,
+    artifacts: QueryExecutionArtifactAccumulator,
     resume_token: Vec<u8>,
     cancel_token: Vec<u8>,
     agent_instance_id: String,
@@ -859,13 +1120,19 @@ async fn cancel_active_queries(
             continue;
         }
         handle.cancelled.store(true, Ordering::Release);
-        let _ = artifacts.persist_query_artifact(&terminal_query_artifact(
-            handle.execution.clone(),
+        handle.artifacts.set_phase("cancelled_during_shutdown");
+        handle.artifacts.set_failure("cancellation");
+        let committed = artifacts.persist_query_artifact(&terminal_query_artifact(
+            &handle.workspace_id,
+            handle.artifacts.snapshot(),
             QueryArtifactPhase::Cancelled,
-            Vec::new(),
             None,
             Some("CANCELLED".to_owned()),
         ));
+        if committed.is_err() {
+            suppress_terminal_claim(&handle).await;
+            continue;
+        }
         append_terminal(
             &handle,
             QueryEvent {
@@ -1048,18 +1315,20 @@ fn public_boundary_error(
 }
 
 fn terminal_query_artifact(
-    execution: QueryExecutionContext,
+    workspace_id: &str,
+    evidence: QueryExecutionArtifactEvidence,
     phase: QueryArtifactPhase,
-    plan_artifacts: Vec<QueryPlanArtifact>,
     result_artifact_id: Option<String>,
     public_error_code: Option<String>,
 ) -> PersistedQueryArtifactBundle {
     let created_at_unix_ms = now_millis();
     PersistedQueryArtifactBundle {
-        artifact_schema_version: "codefabric.query-execution-artifact-bundle.v1".to_owned(),
-        execution,
+        artifact_schema_version: "codefabric.query-execution-artifact-bundle.v2".to_owned(),
+        workspace_id: workspace_id.to_owned(),
+        execution: evidence.execution.clone(),
         phase,
-        plan_artifacts,
+        plan_artifacts: evidence.plan_artifacts.clone(),
+        evidence,
         result_artifact_id,
         public_error_code,
         created_at_unix_ms,
@@ -1123,6 +1392,97 @@ async fn append_terminal(handle: &QueryHandle, event: QueryEvent, state: QueryEx
     }
 }
 
+async fn suppress_terminal_claim(handle: &QueryHandle) {
+    let mut current = handle.state.lock().await;
+    if current.terminal_state.is_none() {
+        current.terminal_state = Some(QueryExecutionState::Failed);
+        drop(current);
+        handle.changed.notify_waiters();
+    }
+}
+
+async fn finalize_unsuccessful_query(
+    artifacts: &ResultArtifactStore,
+    handle: &QueryHandle,
+    query_id: &str,
+    mut evidence: QueryExecutionArtifactEvidence,
+    requested_phase: QueryArtifactPhase,
+    error: PublicBoundaryError,
+    freshness: FreshnessState,
+) {
+    if evidence.failing_stage.is_none() {
+        evidence.failing_stage = Some(
+            match requested_phase {
+                QueryArtifactPhase::Cancelled => "cancellation",
+                QueryArtifactPhase::Failed => "execution",
+                QueryArtifactPhase::Succeeded => "terminal_persistence",
+            }
+            .to_owned(),
+        );
+    }
+    let persisted = artifacts.persist_query_artifact(&terminal_query_artifact(
+        &handle.workspace_id,
+        evidence.clone(),
+        requested_phase,
+        None,
+        Some(error.code.to_owned()),
+    ));
+    let Ok(persisted_phase) = persisted else {
+        suppress_terminal_claim(handle).await;
+        return;
+    };
+    let execution_state = if persisted_phase == QueryArtifactPhase::Cancelled {
+        QueryExecutionState::Cancelled
+    } else {
+        QueryExecutionState::Failed
+    };
+    append_terminal(
+        handle,
+        QueryEvent {
+            event: Some(Event::Terminal(TerminalEvent {
+                header: Some(event_header(query_id, 1, evidence.snapshot_id)),
+                execution_state: execution_state as i32,
+                availability_state: if error.status.code() == tonic::Code::Unavailable {
+                    "UNAVAILABLE"
+                } else {
+                    "FAILED"
+                }
+                .to_owned(),
+                freshness_state: match freshness {
+                    FreshnessState::Current => "CURRENT",
+                    FreshnessState::PotentiallyStale => "POTENTIALLY_STALE",
+                    FreshnessState::Unavailable => "UNAVAILABLE",
+                }
+                .to_owned(),
+                limit_state: "NOT_APPLIED".to_owned(),
+                dependency_state: "NOT_EXECUTED".to_owned(),
+                canonical_response_checksum: None,
+                canonical_error_record_json: Some(error.canonical_record_json.into_bytes()),
+                artifact_id: None,
+                result_row_count: evidence
+                    .partial_metrics
+                    .get("output_rows")
+                    .copied()
+                    .unwrap_or_default(),
+                result_byte_count: 0,
+                cleanup_state: "COMPLETE".to_owned(),
+                semantic_execution_state: if execution_state == QueryExecutionState::Cancelled {
+                    "CANCELLED"
+                } else {
+                    "FAILED"
+                }
+                .to_owned(),
+                completeness_state: "UNAVAILABLE".to_owned(),
+                truncated: false,
+                query_statuses: Vec::new(),
+                notices: Vec::new(),
+            })),
+        },
+        execution_state,
+    )
+    .await;
+}
+
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // One spawned query owns this complete immutable execution context and terminal sequence.
 async fn execute_accepted_query<B: SemanticQueryBackend>(
     backend: Arc<B>,
@@ -1165,16 +1525,12 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                         admitted_freshness,
                         cancellation,
                         handle.execution.clone(),
+                        handle.artifacts.clone(),
                     ),
                 )
                 .await
                 {
-                    Ok(Ok(executed)) => Ok(executed),
-                    Ok(Err(error)) => Err(public_boundary_error(
-                        "INTERNAL",
-                        crate::registries::Phase::Execution,
-                        &error.to_string(),
-                    )),
+                    Ok(outcome) => Ok(outcome),
                     Err(_) => Err(public_boundary_error(
                         "FRESHNESS_DEADLINE_EXCEEDED",
                         crate::registries::Phase::Execution,
@@ -1202,121 +1558,142 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
     if handle.cancelled.load(Ordering::Acquire) {
         return;
     }
-    let executed = match executed {
-        Ok(executed) => executed,
-        Err(error) => {
-            let _ = artifacts.persist_query_artifact(&terminal_query_artifact(
-                handle.execution.clone(),
-                QueryArtifactPhase::Failed,
-                Vec::new(),
-                None,
-                Some(error.code.to_owned()),
-            ));
-            let execution_state = QueryExecutionState::Failed;
-            let freshness_state = match freshness.state() {
-                FreshnessState::Current => "CURRENT",
-                FreshnessState::PotentiallyStale => "POTENTIALLY_STALE",
-                FreshnessState::Unavailable => "UNAVAILABLE",
-            };
-            append_terminal(
+    let (executed, evidence) = match executed {
+        Ok(SemanticTerminalOutcome::Succeeded { response, evidence }) => (response, evidence),
+        Ok(SemanticTerminalOutcome::Failed { error, evidence }) => {
+            let boundary = public_boundary_error(
+                "INTERNAL",
+                crate::registries::Phase::Execution,
+                &error.to_string(),
+            );
+            finalize_unsuccessful_query(
+                &artifacts,
                 &handle,
-                QueryEvent {
-                    event: Some(Event::Terminal(TerminalEvent {
-                        header: Some(event_header(&query_id, 1, None)),
-                        execution_state: execution_state as i32,
-                        availability_state: if error.status.code() == tonic::Code::Unavailable {
-                            "UNAVAILABLE"
-                        } else {
-                            "FAILED"
-                        }
-                        .to_owned(),
-                        freshness_state: freshness_state.to_owned(),
-                        limit_state: "NOT_APPLIED".to_owned(),
-                        dependency_state: "NOT_EXECUTED".to_owned(),
-                        canonical_response_checksum: None,
-                        canonical_error_record_json: Some(error.canonical_record_json.into_bytes()),
-                        artifact_id: None,
-                        result_row_count: 0,
-                        result_byte_count: 0,
-                        cleanup_state: "COMPLETE".to_owned(),
-                        semantic_execution_state: "FAILED".to_owned(),
-                        completeness_state: "UNAVAILABLE".to_owned(),
-                        truncated: false,
-                        query_statuses: Vec::new(),
-                        notices: Vec::new(),
-                    })),
-                },
-                execution_state,
+                &query_id,
+                evidence,
+                QueryArtifactPhase::Failed,
+                boundary,
+                freshness.state(),
+            )
+            .await;
+            return;
+        }
+        Ok(SemanticTerminalOutcome::Cancelled { error, evidence }) => {
+            let boundary = public_boundary_error(
+                "CANCELLED",
+                crate::registries::Phase::Execution,
+                &error.to_string(),
+            );
+            finalize_unsuccessful_query(
+                &artifacts,
+                &handle,
+                &query_id,
+                evidence,
+                QueryArtifactPhase::Cancelled,
+                boundary,
+                freshness.state(),
+            )
+            .await;
+            return;
+        }
+        Err(error) => {
+            finalize_unsuccessful_query(
+                &artifacts,
+                &handle,
+                &query_id,
+                handle.artifacts.snapshot(),
+                QueryArtifactPhase::Failed,
+                error,
+                freshness.state(),
             )
             .await;
             return;
         }
     };
     let snapshot_id = executed.response.snapshot.snapshot_id.clone();
-    let Ok(artifact) = artifacts.insert(
+    let artifact = match artifacts.insert(
         executed.canonical_bytes,
         &handle.agent_instance_id,
         &handle.workspace_id,
         &snapshot_id,
-    ) else {
-        append_terminal(
-            &handle,
-            QueryEvent {
-                event: Some(Event::Terminal(TerminalEvent {
-                    header: Some(event_header(&query_id, 1, Some(snapshot_id))),
-                    execution_state: QueryExecutionState::Failed as i32,
-                    availability_state: "UNAVAILABLE".to_owned(),
-                    freshness_state: "UNKNOWN".to_owned(),
-                    limit_state: "NOT_APPLIED".to_owned(),
-                    dependency_state: "SATISFIED".to_owned(),
-                    canonical_response_checksum: None,
-                    canonical_error_record_json: None,
-                    artifact_id: None,
-                    result_row_count: 0,
-                    result_byte_count: 0,
-                    cleanup_state: "COMPLETE".to_owned(),
-                    semantic_execution_state: "FAILED".to_owned(),
-                    completeness_state: "UNAVAILABLE".to_owned(),
-                    truncated: false,
-                    query_statuses: Vec::new(),
-                    notices: Vec::new(),
-                })),
-            },
-            QueryExecutionState::Failed,
-        )
-        .await;
-        return;
+    ) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            let mut failed_evidence = evidence;
+            "result_artifact_persistence".clone_into(&mut failed_evidence.lifecycle_phase);
+            failed_evidence.failing_stage = Some("result_insertion".to_owned());
+            let boundary = public_boundary_error(
+                "INTERNAL",
+                crate::registries::Phase::Execution,
+                error.message(),
+            );
+            finalize_unsuccessful_query(
+                &artifacts,
+                &handle,
+                &query_id,
+                failed_evidence,
+                QueryArtifactPhase::Failed,
+                boundary,
+                freshness.state(),
+            )
+            .await;
+            return;
+        }
     };
     if handle.cancelled.load(Ordering::Acquire) {
         return;
     }
-    let Ok(snapshot_bytes) = crate::contracts::jcs::canonicalize_value(
-        &serde_json::to_value(&executed.response.snapshot).unwrap_or(serde_json::Value::Null),
-    ) else {
+    let snapshot_bytes = match serde_json::to_value(&executed.response.snapshot)
+        .map_err(|error| error.to_string())
+        .and_then(|value| {
+            crate::contracts::jcs::canonicalize_value(&value).map_err(|error| error.to_string())
+        }) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let mut failed_evidence = evidence;
+            "terminal_persistence".clone_into(&mut failed_evidence.lifecycle_phase);
+            failed_evidence.failing_stage = Some("snapshot_metadata_encoding".to_owned());
+            finalize_unsuccessful_query(
+                &artifacts,
+                &handle,
+                &query_id,
+                failed_evidence,
+                QueryArtifactPhase::Failed,
+                public_boundary_error("INTERNAL", crate::registries::Phase::Execution, &error),
+                freshness.state(),
+            )
+            .await;
+            return;
+        }
+    };
+    let Ok(persisted_phase) = artifacts.persist_query_artifact(&terminal_query_artifact(
+        &handle.workspace_id,
+        evidence,
+        QueryArtifactPhase::Succeeded,
+        Some(artifact.id.clone()),
+        None,
+    )) else {
+        suppress_terminal_claim(&handle).await;
         return;
     };
-    if artifacts
-        .persist_query_artifact(&terminal_query_artifact(
-            handle.execution.clone(),
-            QueryArtifactPhase::Succeeded,
-            executed.plan_artifacts.clone(),
-            Some(artifact.id.clone()),
-            None,
-        ))
-        .is_err()
-    {
+    if persisted_phase != QueryArtifactPhase::Succeeded {
+        let boundary = public_boundary_error(
+            "INTERNAL",
+            crate::registries::Phase::Execution,
+            "primary query artifact publication failed; fallback terminal envelope committed",
+        );
         append_terminal(
             &handle,
             QueryEvent {
                 event: Some(Event::Terminal(TerminalEvent {
-                    header: Some(event_header(&query_id, 1, Some(snapshot_id))),
+                    header: Some(event_header(&query_id, 1, Some(snapshot_id.clone()))),
                     execution_state: QueryExecutionState::Failed as i32,
                     availability_state: "UNAVAILABLE".to_owned(),
                     freshness_state: "UNKNOWN".to_owned(),
                     limit_state: "NOT_APPLIED".to_owned(),
                     dependency_state: "SATISFIED".to_owned(),
                     canonical_response_checksum: None,
-                    canonical_error_record_json: None,
+                    canonical_error_record_json: Some(boundary.canonical_record_json.into_bytes()),
                     artifact_id: None,
                     result_row_count: 0,
                     result_byte_count: 0,
@@ -1759,6 +2136,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         let response_cancel_token = cancel_token.clone();
         let handle = Arc::new(QueryHandle {
             execution: execution.clone(),
+            artifacts: QueryExecutionArtifactAccumulator::new(execution.clone()),
             resume_token: resume_token.clone(),
             cancel_token,
             agent_instance_id: request.agent_instance_id,
@@ -1916,11 +2294,13 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             }));
         }
         handle.cancelled.store(true, Ordering::Release);
+        handle.artifacts.set_phase("cancelled_by_client");
+        handle.artifacts.set_failure("cancellation");
         self.artifacts
             .persist_query_artifact(&terminal_query_artifact(
-                handle.execution.clone(),
+                &handle.workspace_id,
+                handle.artifacts.snapshot(),
                 QueryArtifactPhase::Cancelled,
-                Vec::new(),
                 None,
                 Some("CANCELLED".to_owned()),
             ))?;
@@ -2198,7 +2578,8 @@ mod tests {
             freshness: FreshnessState,
             _cancellation: crate::cancellation::Cancellation,
             _execution: QueryExecutionContext,
-        ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
+            artifacts: QueryExecutionArtifactAccumulator,
+        ) -> SemanticTerminalOutcome {
             let response = SemanticQueryResponse {
                 specification: "composable semantic CPG fact query response",
                 version: "1.3",
@@ -2242,13 +2623,18 @@ mod tests {
             };
             let canonical_bytes = crate::contracts::jcs::canonicalize_value(
                 &serde_json::to_value(&response).unwrap(),
-            )?;
-            Ok(ExecutedSemanticResponse {
-                response_digest: framed_digest(&canonical_bytes),
-                response,
-                canonical_bytes,
-                plan_artifacts: Vec::new(),
-            })
+            )
+            .unwrap();
+            artifacts.set_phase("complete");
+            SemanticTerminalOutcome::Succeeded {
+                evidence: artifacts.snapshot(),
+                response: Box::new(ExecutedSemanticResponse {
+                    response_digest: framed_digest(&canonical_bytes),
+                    response,
+                    canonical_bytes,
+                    plan_artifacts: Vec::new(),
+                }),
+            }
         }
 
         async fn public_snapshot(
@@ -2271,7 +2657,8 @@ mod tests {
             freshness: FreshnessState,
             cancellation: crate::cancellation::Cancellation,
             execution: QueryExecutionContext,
-        ) -> Result<ExecutedSemanticResponse, SemanticQueryError> {
+            artifacts: QueryExecutionArtifactAccumulator,
+        ) -> SemanticTerminalOutcome {
             self.started.notify_one();
             loop {
                 tokio::select! {
@@ -2279,13 +2666,25 @@ mod tests {
                     () = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
                         if cancellation.is_cancelled() {
                             self.cancelled.notify_one();
-                            return Err(SemanticQueryError::Invalid("query cancelled".to_owned()));
+                            artifacts.set_phase("cancelled");
+                            artifacts.set_failure("cancellation");
+                            return SemanticTerminalOutcome::Cancelled {
+                                error: SemanticQueryError::Invalid("query cancelled".to_owned()),
+                                evidence: artifacts.snapshot(),
+                            };
                         }
                     }
                 }
             }
-            SemanticQueryBackend::execute(&FakeBackend, request, freshness, cancellation, execution)
-                .await
+            SemanticQueryBackend::execute(
+                &FakeBackend,
+                request,
+                freshness,
+                cancellation,
+                execution,
+                artifacts,
+            )
+            .await
         }
 
         async fn public_snapshot(
@@ -2393,6 +2792,413 @@ mod tests {
             .await
             .unwrap()
             .into_inner()
+    }
+
+    fn staged_terminal_evidence(
+        execution_id: &str,
+        failing_stage: &str,
+        partial: bool,
+    ) -> QueryExecutionArtifactEvidence {
+        let execution = QueryExecutionContext {
+            execution_id: execution_id.to_owned(),
+            semantic_request_id: format!("request:{execution_id}"),
+            mcp_call_id: format!("mcp:{execution_id}"),
+        };
+        let artifacts = QueryExecutionArtifactAccumulator::new(execution);
+        artifacts.set_phase(format!("failed_after_{failing_stage}"));
+        artifacts.set_failure(failing_stage);
+        for stage in [
+            "binding",
+            "logical_planning",
+            "logical_optimization",
+            "physical_planning",
+            "physical_execution",
+        ] {
+            let reached = stage == failing_stage
+                || (failing_stage == "first_batch" && stage == "physical_execution")
+                || (failing_stage == "stream_drop" && stage == "physical_execution");
+            if reached {
+                artifacts.record_stage(QueryArtifactStage {
+                    block_id: "request".to_owned(),
+                    stage: if matches!(failing_stage, "first_batch" | "stream_drop") {
+                        "physical_execution".to_owned()
+                    } else {
+                        stage.to_owned()
+                    },
+                    state: if partial {
+                        QueryArtifactStageState::Partial
+                    } else {
+                        QueryArtifactStageState::UnavailableWithReason
+                    },
+                    artifact: partial.then(|| "exact physical plan with metrics".to_owned()),
+                    unavailable_reason: Some(format!("injected failure after {failing_stage}")),
+                    metrics: partial
+                        .then(|| ("output_batches".to_owned(), 1))
+                        .into_iter()
+                        .collect(),
+                });
+                break;
+            }
+            artifacts.record_stage(QueryArtifactStage {
+                block_id: "request".to_owned(),
+                stage: stage.to_owned(),
+                state: QueryArtifactStageState::Complete,
+                artifact: Some(format!("captured {stage}")),
+                unavailable_reason: None,
+                metrics: BTreeMap::new(),
+            });
+        }
+        artifacts.snapshot()
+    }
+
+    fn failure_bundle(
+        workspace_id: &str,
+        evidence: QueryExecutionArtifactEvidence,
+    ) -> PersistedQueryArtifactBundle {
+        terminal_query_artifact(
+            workspace_id,
+            evidence,
+            QueryArtifactPhase::Failed,
+            None,
+            Some("INTERNAL".to_owned()),
+        )
+    }
+
+    struct CountingBackend {
+        executions: Arc<AtomicU64>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl SemanticQueryBackend for CountingBackend {
+        async fn execute(
+            &self,
+            request: ValidatedSemanticRequest,
+            freshness: FreshnessState,
+            cancellation: crate::cancellation::Cancellation,
+            execution: QueryExecutionContext,
+            artifacts: QueryExecutionArtifactAccumulator,
+        ) -> SemanticTerminalOutcome {
+            self.executions.fetch_add(1, Ordering::AcqRel);
+            if self.fail {
+                artifacts.set_phase("logical_planning");
+                artifacts.set_failure("logical_planning");
+                artifacts.record_stage(QueryArtifactStage {
+                    block_id: "request".to_owned(),
+                    stage: "logical_planning".to_owned(),
+                    state: QueryArtifactStageState::UnavailableWithReason,
+                    artifact: None,
+                    unavailable_reason: Some("counted injected failure".to_owned()),
+                    metrics: BTreeMap::new(),
+                });
+                return SemanticTerminalOutcome::Failed {
+                    error: SemanticQueryError::Invalid("counted injected failure".to_owned()),
+                    evidence: artifacts.snapshot(),
+                };
+            }
+            SemanticQueryBackend::execute(
+                &FakeBackend,
+                request,
+                freshness,
+                cancellation,
+                execution,
+                artifacts,
+            )
+            .await
+        }
+
+        async fn public_snapshot(
+            &self,
+            workspace_id: &str,
+        ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
+            SemanticQueryBackend::public_snapshot(&FakeBackend, workspace_id).await
+        }
+    }
+
+    #[test]
+    fn query_failure_artifact_closure() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
+        let workspace_id = "workspace:00000000000000000000000000000000";
+        let stage_cases = [
+            ("binding", false),
+            ("logical_planning", false),
+            ("logical_optimization", false),
+            ("physical_planning", false),
+            ("first_batch", true),
+            ("stream_drop", true),
+        ];
+        for (ordinal, (stage, partial)) in stage_cases.into_iter().enumerate() {
+            let execution_id = format!("execution:closure-{ordinal}");
+            let evidence = staged_terminal_evidence(&execution_id, stage, partial);
+            store
+                .persist_query_artifact(&failure_bundle(workspace_id, evidence))
+                .unwrap();
+            let persisted = store.read_query_artifact(&execution_id).unwrap();
+            assert_eq!(persisted.phase, QueryArtifactPhase::Failed);
+            assert_eq!(persisted.evidence.failing_stage.as_deref(), Some(stage));
+            let physical = persisted
+                .evidence
+                .stages
+                .iter()
+                .find(|candidate| candidate.stage == "physical_execution")
+                .unwrap();
+            if partial {
+                assert_eq!(physical.state, QueryArtifactStageState::Partial);
+                assert_eq!(physical.metrics.get("output_batches"), Some(&1));
+            }
+        }
+
+        let result_execution = "execution:closure-result-insertion";
+        store.inject_fault(Some(QueryArtifactFaultPoint::ResultInsertion));
+        assert_eq!(
+            store
+                .insert(vec![1], "agent", workspace_id, "snapshot")
+                .unwrap_err()
+                .code(),
+            tonic::Code::Internal
+        );
+        store.inject_fault(None);
+        let result_evidence = staged_terminal_evidence(result_execution, "result_insertion", false);
+        store
+            .persist_query_artifact(&failure_bundle(workspace_id, result_evidence))
+            .unwrap();
+        assert_eq!(
+            store
+                .read_query_artifact(result_execution)
+                .unwrap()
+                .evidence
+                .failing_stage
+                .as_deref(),
+            Some("result_insertion")
+        );
+
+        let payload_execution = "execution:closure-primary-payload";
+        let payload_evidence =
+            staged_terminal_evidence(payload_execution, "response_encoding", false);
+        let success = terminal_query_artifact(
+            workspace_id,
+            payload_evidence,
+            QueryArtifactPhase::Succeeded,
+            Some("result:fallback".to_owned()),
+            None,
+        );
+        store.inject_fault(Some(QueryArtifactFaultPoint::PrimaryPayloadPersistence));
+        assert_eq!(
+            store.persist_query_artifact(&success).unwrap(),
+            QueryArtifactPhase::Failed
+        );
+        store.inject_fault(None);
+        let payload = store.read_query_artifact(payload_execution).unwrap();
+        assert_eq!(payload.phase, QueryArtifactPhase::Failed);
+        assert_eq!(
+            payload.evidence.failing_stage.as_deref(),
+            Some("artifact_persistence")
+        );
+        assert_eq!(
+            store
+                .terminal_journal
+                .lock()
+                .unwrap()
+                .query_execution_terminals(100)
+                .unwrap()
+                .len(),
+            8
+        );
+    }
+
+    #[tokio::test]
+    async fn query_terminal_journal_authority() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../contracts/fixtures/query-terminal-envelopes-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture["artifact_schema_version"], "2.0");
+        assert_eq!(fixture["scenarios"].as_array().unwrap().len(), 6);
+        assert_eq!(
+            fixture["stage_state_values"],
+            serde_json::json!([
+                "NOT_REACHED",
+                "AVAILABLE",
+                "PARTIAL",
+                "COMPLETE",
+                "UNAVAILABLE_WITH_REASON"
+            ])
+        );
+        let root = tempfile::tempdir().unwrap();
+        let service = ProductionQueryService::new(
+            Arc::new(FakeBackend),
+            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+        register_host(&service, "journal-agent").await;
+        let started = start_test_query(&service, "journal-agent", "terminal-journal").await;
+        let events = service
+            .stream_query(Request::new(StreamQueryRequest {
+                daemon_query_id: started.daemon_query_id.clone(),
+                resume_token: started.resume_token,
+                after_sequence: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let events = futures::StreamExt::collect::<Vec<_>>(events).await;
+        assert!(matches!(
+            events.last().unwrap().as_ref().unwrap().event.as_ref(),
+            Some(Event::Terminal(_))
+        ));
+        let journal = service.artifacts.terminal_journal.lock().unwrap();
+        let record = journal
+            .read_query_execution_terminal(&started.daemon_query_id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            journal
+                .query_execution_terminal_lease_matches(&record)
+                .unwrap()
+        );
+        assert_eq!(record.payload_status, "PRIMARY_AVAILABLE");
+        let payload_uri = record.primary_payload_uri.as_ref().unwrap();
+        assert!(payload_uri.ends_with(&format!(
+            "{}.json",
+            record.bundle_checksum.trim_start_matches("b3:")
+        )));
+        drop(journal);
+        let bundle = service
+            .artifacts
+            .read_query_artifact(&started.daemon_query_id)
+            .unwrap();
+        assert!(bundle.evidence.stages.iter().all(|stage| matches!(
+            stage.state,
+            QueryArtifactStageState::NotReached
+                | QueryArtifactStageState::Available
+                | QueryArtifactStageState::Partial
+                | QueryArtifactStageState::Complete
+                | QueryArtifactStageState::UnavailableWithReason
+        )));
+    }
+
+    #[tokio::test]
+    async fn query_artifact_no_diagnostic_reexecution() {
+        for fail in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let executions = Arc::new(AtomicU64::new(0));
+            let service = ProductionQueryService::new(
+                Arc::new(CountingBackend {
+                    executions: Arc::clone(&executions),
+                    fail,
+                }),
+                ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
+                authorization(),
+                FreshnessBarrier::default(),
+                std::time::Duration::from_secs(2),
+            );
+            let agent = if fail { "count-fail" } else { "count-success" };
+            register_host(&service, agent).await;
+            let started = start_test_query(&service, agent, agent).await;
+            let events = service
+                .stream_query(Request::new(StreamQueryRequest {
+                    daemon_query_id: started.daemon_query_id,
+                    resume_token: started.resume_token,
+                    after_sequence: 0,
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            let _events = futures::StreamExt::collect::<Vec<_>>(events).await;
+            assert_eq!(executions.load(Ordering::Acquire), 1);
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let store = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
+        let evidence = staged_terminal_evidence("execution:idempotent", "binding", false);
+        let artifact = failure_bundle("workspace:00000000000000000000000000000000", evidence);
+        store.persist_query_artifact(&artifact).unwrap();
+        store.persist_query_artifact(&artifact).unwrap();
+        let mut conflicting = artifact;
+        conflicting.phase = QueryArtifactPhase::Cancelled;
+        assert_eq!(
+            store
+                .persist_query_artifact(&conflicting)
+                .unwrap_err()
+                .code(),
+            tonic::Code::AlreadyExists
+        );
+        let record = store
+            .terminal_journal
+            .lock()
+            .unwrap()
+            .read_query_execution_terminal("execution:idempotent")
+            .unwrap()
+            .unwrap();
+        fs::remove_file(record.primary_payload_uri.unwrap()).unwrap();
+        assert_eq!(
+            store
+                .read_query_artifact("execution:idempotent")
+                .unwrap_err()
+                .code(),
+            tonic::Code::DataLoss
+        );
+
+        let journal_evidence =
+            staged_terminal_evidence("execution:journal-fault", "binding", false);
+        store.inject_fault(Some(QueryArtifactFaultPoint::TerminalJournalCommit));
+        assert_eq!(
+            store
+                .persist_query_artifact(&failure_bundle(
+                    "workspace:00000000000000000000000000000000",
+                    journal_evidence,
+                ))
+                .unwrap_err()
+                .code(),
+            tonic::Code::Unavailable
+        );
+        store.inject_fault(None);
+        assert_eq!(
+            store
+                .read_query_artifact("execution:journal-fault")
+                .unwrap_err()
+                .code(),
+            tonic::Code::NotFound
+        );
+    }
+
+    #[test]
+    fn query_artifact_failure_operational_gate() {
+        let root = tempfile::tempdir().unwrap();
+        let execution_id = "execution:restart-recovery";
+        {
+            let store = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
+            let evidence = staged_terminal_evidence(execution_id, "stream_drop", true);
+            store
+                .persist_query_artifact(&failure_bundle(
+                    "workspace:00000000000000000000000000000000",
+                    evidence,
+                ))
+                .unwrap();
+            fs::write(root.path().join(".result.crash.tmp"), b"staged").unwrap();
+            fs::write(
+                root.path().join("query-plan-artifacts/.payload.crash.tmp"),
+                b"staged",
+            )
+            .unwrap();
+        }
+        let recovered = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
+        assert!(!root.path().join(".result.crash.tmp").exists());
+        assert!(
+            !root
+                .path()
+                .join("query-plan-artifacts/.payload.crash.tmp")
+                .exists()
+        );
+        let recovered_bundle = recovered.read_query_artifact(execution_id).unwrap();
+        assert_eq!(recovered_bundle.phase, QueryArtifactPhase::Failed);
+        assert_eq!(
+            recovered_bundle.evidence.failing_stage.as_deref(),
+            Some("stream_drop")
+        );
     }
 
     #[tokio::test]
@@ -2761,7 +3567,7 @@ mod tests {
                 .read_query_artifact(&execution_id)
                 .unwrap_err()
                 .code(),
-            tonic::Code::NotFound
+            tonic::Code::DataLoss
         );
     }
 

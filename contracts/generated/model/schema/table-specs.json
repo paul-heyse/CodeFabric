@@ -1780,6 +1780,94 @@
     {
       "columns": [
         {
+          "name": "execution_id",
+          "nullable": false,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "workspace_id",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "semantic_request_id",
+          "nullable": false,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "mcp_call_id",
+          "nullable": false,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "terminal_phase",
+          "nullable": false,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "failing_stage",
+          "nullable": true,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "bundle_checksum",
+          "nullable": false,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "primary_payload_uri",
+          "nullable": true,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "payload_status",
+          "nullable": false,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "fallback_envelope_bytes",
+          "nullable": true,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "snapshot_id",
+          "nullable": true,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "publication_id",
+          "nullable": true,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "name": "source_table_versions_bytes",
+          "nullable": false,
+          "sqlite_type": "BLOB"
+        },
+        {
+          "name": "created_at",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        },
+        {
+          "name": "expires_at",
+          "nullable": false,
+          "sqlite_type": "INTEGER"
+        }
+      ],
+      "name": "query_execution_terminal",
+      "primary_key": [
+        "execution_id"
+      ],
+      "unique": [],
+      "workspace_scope": {
+        "kind": "DIRECT",
+        "workspace_column": "workspace_id"
+      }
+    },
+    {
+      "columns": [
+        {
           "name": "snapshot_id",
           "nullable": false,
           "sqlite_type": "BLOB"
@@ -2222,7 +2310,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:08f951a0ea254c62b42d15075bea2746c7fb66272ec2198dd6b14343bdeb884f"
+    "source_digest": "b3:73c8bb48ccd414224e25b4079ec0f6d64f778e01dfa863c049519edd2232cb47"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [

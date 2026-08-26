@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir semantic=b3:318d847df8511bf7466998a8e658916eb8491829def32b0e1d9b41150bfc9983 source=b3:08f951a0ea254c62b42d15075bea2746c7fb66272ec2198dd6b14343bdeb884f; schema-contract-driver-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir semantic=b3:c0b6fbf8048427822165c928b69e54cc831f9fc81ba14e9806f29309a63bd553 source=b3:73c8bb48ccd414224e25b4079ec0f6d64f778e01dfa863c049519edd2232cb47; schema-contract-driver-v1; do not edit.
 -- Cross-store Arrow/Delta foreign keys are generated as application contracts, not SQLite reference clauses.
 
 CREATE TABLE workspace_registration (
@@ -337,6 +337,25 @@ CREATE TABLE result_artifact_lease (
   checksum BLOB NOT NULL,
   expires_at INTEGER NOT NULL,
   PRIMARY KEY (lease_id)
+) STRICT;
+
+CREATE TABLE query_execution_terminal (
+  execution_id TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  semantic_request_id TEXT NOT NULL,
+  mcp_call_id TEXT NOT NULL,
+  terminal_phase TEXT NOT NULL,
+  failing_stage TEXT,
+  bundle_checksum TEXT NOT NULL,
+  primary_payload_uri TEXT,
+  payload_status TEXT NOT NULL,
+  fallback_envelope_bytes BLOB,
+  snapshot_id TEXT,
+  publication_id TEXT,
+  source_table_versions_bytes BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (execution_id)
 ) STRICT;
 
 CREATE TABLE serving_snapshot_manifest (
