@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP76",
+  "current_packet": "WP72",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -234,18 +234,20 @@
       "blockers": []
     },
     "WP76": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "a0a3cd281cceb1347dc5e5a1add6bee45c7d8c71",
       "deviations": [
-        "The accountable repository owner explicitly accepted the exact WP71 candidate presented in the preceding checkpoint and directed execution to continue; WP76 records that human decision in its versioned acceptance authority rather than treating executor output as approval."
+        "The accountable repository owner explicitly accepted the exact WP71 candidate presented in the preceding checkpoint and invoked just gate-b-owner-accept; WP76 records that human decision in its versioned acceptance authority rather than treating executor output as approval.",
+        "Release consumers resolve the owner-accepted corpus through tests/golden/corpus-index.json instead of hard-coding the new version directory, preserving immutable historical corpora while making the released selection atomic and explicit."
       ],
-      "failed_approaches": [],
-      "blockers": [
-        "The accountable repository owner must invoke just gate-b-owner-accept; the accepted plan explicitly prohibits the executor from invoking that acceptance action."
-      ]
+      "failed_approaches": [
+        "The first just ci-pr run exposed tooling/data_fabric_revision_benchmark.rs as an unlinked source to cargo-shear. The source is intentionally copied into isolated old/new revision worktrees, so Cargo metadata now classifies that exact path with a rationale instead of linking it into the live package and invalidating its cross-revision contract.",
+        "The next just ci-pr run correctly rejected stale generated model identities after the Cargo metadata change. just model-sync refreshed the dependent action keys and toolchain identities, and model assurance plus the complete PR gate passed at the proving commit."
+      ],
+      "blockers": []
     },
     "WP72": {
-      "status": "not_started",
+      "status": "ready",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -324,7 +326,9 @@
     }
   },
   "baseline_failures": [],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    "WP76 completion required explicit cargo-shear classification for tooling/data_fabric_revision_benchmark.rs because it is an isolated cross-revision test source, followed by regeneration of model identities derived from Cargo.toml."
+  ],
   "plan_deviations": [
     {
       "kind": "planned_design_input_evolution",
@@ -388,6 +392,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "The accountable repository owner invokes just gate-b-owner-accept to materialize the already approved candidate decision. Then verify and commit the immutable corpus-v2 release, complete WP76, and proceed to WP72.",
-  "updated_at": "2026-08-26T03:59:11Z"
+  "next_action": "Implement WP72 true zero-state rebuild equivalence, shared InventoryWalker Git parity across gix/cache-disabled configurations, superseding status evidence, and M14 closeout.",
+  "updated_at": "2026-08-26T04:22:02Z"
 }
