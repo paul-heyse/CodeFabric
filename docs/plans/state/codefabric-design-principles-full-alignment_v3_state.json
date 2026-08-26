@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP68",
+  "current_packet": "WP70",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -182,10 +182,14 @@
       "blockers": []
     },
     "WP68": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "53c3903dc153d1cb16d49fb692e908f5349c822a",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "The first real-stub UDS tests used pytest's full temporary path, which exceeded macOS's 103-byte Unix-socket limit; each test now uses a unique bounded /tmp socket and removes only that exact path after server shutdown.",
+        "The first accepted tool fingerprint covered FastMCP's internal tool objects, but the production protocol adds version metadata during MCP listing. The governed fingerprint helper and accepted baseline now consume the actual protocol-facing Tool records, and CLI inspection is differential against that same production surface.",
+        "Launching model-check and focused nextest together produced a Cargo/model lock cycle; only those diagnostic processes were terminated, and both proofs were rerun sequentially to successful completion."
+      ],
       "blockers": []
     },
     "WP69": {
@@ -262,8 +266,8 @@
       "blockers": []
     },
     "M13": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "53c3903dc153d1cb16d49fb692e908f5349c822a",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -366,6 +370,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Implement WP68 as a strictly presentational FastMCP adapter over the hardened generated gRPC boundary, including the four packet oracles and adapter wheel proof.",
-  "updated_at": "2026-08-26T01:00:21Z"
+  "next_action": "Implement WP70 repository assurance and evidence hardening, then prove its four packet oracles and required governance gates.",
+  "updated_at": "2026-08-26T01:34:10Z"
 }
