@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "released",
-  "canonical_digest": "b3:8269406f9fefe2cad662da9d5542e21eabff2a3875e00d86dfa6198eabe77e48",
+  "canonical_digest": "b3:318d847df8511bf7466998a8e658916eb8491829def32b0e1d9b41150bfc9983",
   "generator_revision": "codefabric-schema-contracts-v1",
   "schema_version": 1,
   "ontology_version": "1.3",

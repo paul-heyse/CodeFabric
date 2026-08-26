@@ -66,6 +66,7 @@
           "source_generation": 0,
           "source_trust_state": "CURRENT"
         },
+        "source_blob_digests": [],
         "workspace_id": "workspace:00000000000000000000000000000000",
         "worktree_id": "worktree:00000000000000000000000000000000"
       },
