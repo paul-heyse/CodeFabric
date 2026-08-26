@@ -279,6 +279,7 @@ impl OperationalStore {
     /// # Errors
     ///
     /// Returns an ownership or `SQLite` error.
+    #[allow(clippy::too_many_lines)] // Retention is one transaction over the closed operational-table set.
     pub fn cleanup_terminal_before(
         &mut self,
         cutoff: &str,
@@ -652,6 +653,7 @@ fn delta_version(version: Option<i64>) -> Result<Option<u64>, OperationalStoreEr
 }
 
 impl OperationalStore {
+    #[allow(clippy::too_many_lines)] // Mutation replay and first-write validation share one immediate transaction.
     fn prepare_mutation(
         &mut self,
         spec: &MutationPhaseSpec,

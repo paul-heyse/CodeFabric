@@ -186,14 +186,14 @@ impl SameUserInterceptor {
             gid: credentials.gid(),
             pid: credentials.pid().and_then(|pid| u32::try_from(pid).ok()),
         };
-        self.authorize_identity(identity).map_err(|status| {
+        Self::authorize_identity(self.expected_uid, identity).map_err(|status| {
             io::Error::new(io::ErrorKind::PermissionDenied, status.message().to_owned())
         })?;
         Ok(identity)
     }
 
-    fn authorize_identity(&self, identity: VerifiedPeerIdentity) -> Result<(), Status> {
-        if identity.uid != self.expected_uid {
+    fn authorize_identity(expected_uid: u32, identity: VerifiedPeerIdentity) -> Result<(), Status> {
+        if identity.uid != expected_uid {
             return Err(Status::permission_denied("Unix peer UID is not authorized"));
         }
         Ok(())
@@ -206,7 +206,7 @@ impl Interceptor for SameUserInterceptor {
             .extensions()
             .get::<VerifiedPeerIdentity>()
             .ok_or_else(|| Status::unauthenticated("Unix peer identity is missing"))?;
-        self.authorize_identity(*identity)?;
+        Self::authorize_identity(self.expected_uid, *identity)?;
         Ok(request)
     }
 }

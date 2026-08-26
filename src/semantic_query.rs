@@ -60,7 +60,17 @@ pub enum FreshnessPolicy {
 
 impl QueryForm {
     pub(crate) const fn currently_supported(self) -> bool {
-        true
+        matches!(
+            self,
+            Self::FindEntities
+                | Self::RetrieveFacts
+                | Self::FollowRelationships
+                | Self::FindPaths
+                | Self::MatchPattern
+                | Self::CombineResults
+                | Self::SummarizeFacts
+                | Self::RetrieveSourceContext
+        )
     }
 
     pub(crate) fn registry_slug(self) -> &'static str {
@@ -94,16 +104,16 @@ impl QueryForm {
         }
     }
 
-    fn plan_node_kind(self) -> Result<&'static str, SemanticQueryError> {
+    const fn plan_node_kind(self) -> &'static str {
         match self {
-            Self::FindEntities => Ok("find-entities"),
-            Self::RetrieveFacts => Ok("retrieve-facts"),
-            Self::FollowRelationships => Ok("follow-relationships"),
-            Self::FindPaths => Ok("find-paths"),
-            Self::MatchPattern => Ok("match-pattern"),
-            Self::CombineResults => Ok("combine-results"),
-            Self::SummarizeFacts => Ok("summarize-facts"),
-            Self::RetrieveSourceContext => Ok("retrieve-source-context"),
+            Self::FindEntities => "find-entities",
+            Self::RetrieveFacts => "retrieve-facts",
+            Self::FollowRelationships => "follow-relationships",
+            Self::FindPaths => "find-paths",
+            Self::MatchPattern => "match-pattern",
+            Self::CombineResults => "combine-results",
+            Self::SummarizeFacts => "summarize-facts",
+            Self::RetrieveSourceContext => "retrieve-source-context",
         }
     }
 
@@ -464,7 +474,7 @@ fn resolve_phrase(
             "semantic phrase is empty or exceeds its bound".to_owned(),
         ));
     }
-    let plan_node_kind = form.plan_node_kind()?;
+    let plan_node_kind = form.plan_node_kind();
     let mut matches = PHRASE_ENTRIES.iter().filter(|entry| {
         (entry.canonical_text == label || entry.accepted_aliases.contains(&label))
             && entry.plan_node_kind == plan_node_kind
@@ -538,6 +548,7 @@ fn canonical_order(form: QueryForm) -> Vec<&'static str> {
 ///
 /// Rejects unknown/inactive forms, cycles, role mismatches, invalid source identifiers,
 /// evaluative intent, and requests outside the bounded execution profile.
+#[allow(clippy::too_many_lines)] // One pass validates the complete request DAG and role contract.
 pub fn type_request(
     parsed: ParsedSemanticRequest,
 ) -> Result<TypedSemanticRequest, SemanticQueryError> {
@@ -578,17 +589,16 @@ pub fn type_request(
         }
         forms.insert(query.query_id.clone(), query.request);
         resolve_phrase(query.request, query.label.as_deref())?;
-        if let Some(input) = &query.input {
-            if input
+        if let Some(input) = &query.input
+            && input
                 .entity_ids
                 .iter()
                 .chain(&input.fact_ids)
                 .any(|identity| !valid_id(identity, 192))
-            {
-                return Err(SemanticQueryError::Invalid(
-                    "query input contains an invalid public identity".to_owned(),
-                ));
-            }
+        {
+            return Err(SemanticQueryError::Invalid(
+                "query input contains an invalid public identity".to_owned(),
+            ));
         }
         let limit = query.limit.unwrap_or(QueryLimit {
             first: 100,
@@ -681,9 +691,11 @@ pub fn type_request(
         execution_order.push(block.clone());
         for (candidate, candidate_dependencies) in &dependencies {
             if candidate_dependencies.contains(&block) {
-                let degree = indegree
-                    .get_mut(candidate)
-                    .expect("dependency graph and indegree map are one IR");
+                let degree = indegree.get_mut(candidate).ok_or_else(|| {
+                    SemanticQueryError::Invalid(
+                        "dependency graph and indegree map diverged".to_owned(),
+                    )
+                })?;
                 *degree -= 1;
                 if *degree == 0 {
                     ready.insert(candidate.clone());
@@ -774,7 +786,7 @@ fn id16_bytes(value: &str, expected_prefix: &str) -> Result<[u8; 16], SemanticQu
         ));
     }
     let mut bytes = [0_u8; 16];
-    for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let pair = std::str::from_utf8(pair)
             .map_err(|_| SemanticQueryError::Invalid("identity is not UTF-8 hex".to_owned()))?;
         bytes[index] = u8::from_str_radix(pair, 16)
@@ -799,6 +811,7 @@ fn all_of(expressions: Vec<Expr>) -> Option<Expr> {
     expressions.into_iter().reduce(Expr::and)
 }
 
+#[allow(clippy::too_many_lines)] // All relational forms share one policy-enforced DataFusion lowering fence.
 async fn lower_relational_block(
     session: &ServingQuerySession,
     typed: &TypedQueryBlock,
@@ -1005,7 +1018,7 @@ fn semantic_plan_template(
             }),
             BoundOperator::Graph(plan) => serde_json::json!({
                 "family": "application_graph",
-                "node": plan.form.plan_node_kind()?,
+                "node": plan.form.plan_node_kind(),
                 "input_roles": plan.input_roles,
                 "output_role": plan.output_role,
                 "output_schema": serde_json::to_value(plan.output_schema.as_ref())
@@ -1098,7 +1111,11 @@ pub async fn bind_request(
             .queries
             .iter()
             .find(|query| query.query_id == block.block_id)
-            .expect("typed block retains its parsed query");
+            .ok_or_else(|| {
+                SemanticQueryError::Invalid(
+                    "typed block does not retain its parsed query".to_owned(),
+                )
+            })?;
         if matches!(
             block.form,
             QueryForm::FindEntities | QueryForm::RetrieveFacts | QueryForm::FollowRelationships
@@ -1130,6 +1147,7 @@ pub async fn bind_request(
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::struct_field_names)] // The suffix distinguishes the three governed identity domains.
 struct GraphEdge {
     fact_id: [u8; 16],
     source_id: [u8; 16],
@@ -1137,6 +1155,7 @@ struct GraphEdge {
 }
 
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_field_names)] // Each collection is named for its governed result identity domain.
 struct BlockValues {
     entity_ids: Vec<String>,
     fact_ids: Vec<String>,
@@ -1278,7 +1297,7 @@ fn shortest_path(
             .push(edge.target_id);
     }
     for targets in adjacency.values_mut() {
-        targets.sort();
+        targets.sort_unstable();
         targets.dedup();
     }
     let mut queue = VecDeque::from([(start, vec![start])]);
@@ -1287,7 +1306,7 @@ fn shortest_path(
     let mut depth_bound_reached = false;
     while let Some((current, path)) = queue.pop_front() {
         polls = polls.saturating_add(1);
-        if polls % cancellation.check_interval() == 0 && cancellation.is_cancelled() {
+        if polls.is_multiple_of(cancellation.check_interval()) && cancellation.is_cancelled() {
             return Err(SemanticQueryError::Invalid(
                 "graph execution was cancelled".to_owned(),
             ));
@@ -1350,6 +1369,7 @@ fn graph_inputs(
     values
 }
 
+#[allow(clippy::too_many_lines)] // One bounded kernel exhaustively implements the five graph-form operators.
 fn execute_graph_operator(
     plan: &GraphOperatorPlan,
     input: &BlockValues,
@@ -1394,7 +1414,7 @@ fn execute_graph_operator(
                         .iter()
                         .flat_map(|edge| [edge.source_id, edge.target_id]),
                 );
-                entities.sort();
+                entities.sort_unstable();
                 entities.dedup();
             }
             for pair in entities.windows(2) {
@@ -1406,7 +1426,7 @@ fn execute_graph_operator(
                 if let Some(path) = searched.path {
                     let bytes = path
                         .iter()
-                        .flat_map(|identity| identity.as_slice())
+                        .flat_map(<[u8; 16]>::as_slice)
                         .copied()
                         .collect::<Vec<_>>();
                     let (identity, public) = graph_result_identity(plan.form, &[&bytes]);
@@ -1608,13 +1628,19 @@ pub async fn execute_request_in_context(
             .blocks
             .iter()
             .find(|block| block.typed.block_id == *block_id)
-            .expect("bound execution order names a bound block");
+            .ok_or_else(|| {
+                SemanticQueryError::Invalid("bound execution order names no bound block".to_owned())
+            })?;
         let query = validated
             .request
             .queries
             .iter()
             .find(|query| query.query_id == *block_id)
-            .expect("typed execution order names a parsed block");
+            .ok_or_else(|| {
+                SemanticQueryError::Invalid(
+                    "typed execution order names no parsed block".to_owned(),
+                )
+            })?;
         let (
             values,
             coverage,
@@ -1753,7 +1779,7 @@ pub async fn execute_request_in_context(
                 ("operator_family".to_owned(), "application-graph".to_owned()),
                 (
                     "plan_node".to_owned(),
-                    plan.form.plan_node_kind()?.to_owned(),
+                    plan.form.plan_node_kind().to_owned(),
                 ),
             ]),
         };

@@ -2525,6 +2525,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the replay acceptance test intentionally exercises the full production lifecycle"
+    )]
     async fn wp64_production_replay_is_partition_and_batch_independent() {
         let (first_directory, mut first_store, mut first_images) = operational_store();
         let first_runtime = ServingSnapshotRuntime::default();
@@ -2831,11 +2835,7 @@ mod tests {
         administer(&discovery, AdminCommand::Stop).await.unwrap();
         let exit = daemon.await.unwrap().unwrap();
         assert!(!exit.drained);
-        assert!(
-            exit.shutdown_steps
-                .iter()
-                .any(|step| *step == "await-workers")
-        );
+        assert!(exit.shutdown_steps.contains(&"await-workers"));
     }
 
     #[tokio::test]

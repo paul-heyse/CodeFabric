@@ -136,7 +136,10 @@ impl ProviderJob {
 
 /// The only Protobuf-to-domain provider job conversion boundary.
 pub mod rpc_adapter {
-    use super::*;
+    use super::{
+        ProviderBlobReference, ProviderDirectWork, ProviderJob, ProviderResourceEstimate,
+        ProviderScope, ProviderSourceSnapshotLease, wire,
+    };
 
     /// Decode an admitted wire job without retaining generated message types.
     #[must_use]
@@ -760,6 +763,7 @@ fn wire_identity(
 ///
 /// Rejects unregistered event mappings, missing or mismatched identity headers,
 /// unknown terminal states, and malformed terminal digests.
+#[allow(clippy::too_many_lines)] // The closed wire event union is mapped exhaustively at one DTO fence.
 pub fn map_wire_event(
     event: wire::ProviderEvent,
     context: &WireEventContext,

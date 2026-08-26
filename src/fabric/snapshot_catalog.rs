@@ -683,6 +683,7 @@ impl SnapshotProviderCatalog {
     ///
     /// Rejects an incomplete/unvalidated manifest, unresolved exact version, schema,
     /// row-count, owner-count, checksum, overlay, or private-catalog inconsistency.
+    #[allow(clippy::result_large_err)] // The phase-carrying envelope deliberately retains typed construction evidence.
     pub async fn build(
         publication: &PublicationOutcome,
         overlay: &dyn SnapshotOverlayProviderFactory,

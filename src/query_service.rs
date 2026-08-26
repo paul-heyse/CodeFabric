@@ -249,10 +249,10 @@ impl ResultArtifactStore {
             .map_err(|_| Status::internal("query artifact directory read failed"))?;
         for entry in entries {
             let entry = entry.map_err(|_| Status::internal("query artifact entry read failed"))?;
-            if !entry
+            if entry
                 .path()
                 .extension()
-                .is_some_and(|extension| extension == "json")
+                .is_none_or(|extension| extension != "json")
             {
                 continue;
             }
@@ -676,6 +676,10 @@ pub struct WorkspaceQueryBackend {
 
 impl WorkspaceQueryBackend {
     /// Install or atomically replace the exact leased session for one workspace.
+    ///
+    /// # Errors
+    ///
+    /// Reserved for session-admission failures as the workspace router gains durable admission.
     pub async fn install(
         &self,
         session: Arc<ServingQuerySession>,
@@ -1002,7 +1006,6 @@ fn grpc_code(name: &str) -> tonic::Code {
         "DATA_LOSS" => tonic::Code::DataLoss,
         "DEADLINE_EXCEEDED" => tonic::Code::DeadlineExceeded,
         "FAILED_PRECONDITION" => tonic::Code::FailedPrecondition,
-        "INTERNAL" => tonic::Code::Internal,
         "INVALID_ARGUMENT" => tonic::Code::InvalidArgument,
         "NOT_FOUND" => tonic::Code::NotFound,
         "OUT_OF_RANGE" => tonic::Code::OutOfRange,
@@ -1439,6 +1442,7 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
     }
 }
 
+#[allow(clippy::too_many_lines)] // One generated service implementation keeps the RPC boundary exhaustive.
 #[tonic::async_trait]
 impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
     async fn handshake(

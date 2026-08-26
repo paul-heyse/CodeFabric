@@ -232,9 +232,13 @@ mod tests {
         let single = int_batch(vec![1]);
         let duplicate = int_batch(vec![1, 1]);
         assert_ne!(
-            result_checksum_v1(single.schema().as_ref(), &[single.clone()], LIMIT)
-                .unwrap()
-                .checksum,
+            result_checksum_v1(
+                single.schema().as_ref(),
+                std::slice::from_ref(&single),
+                LIMIT
+            )
+            .unwrap()
+            .checksum,
             result_checksum_v1(duplicate.schema().as_ref(), &[duplicate], LIMIT)
                 .unwrap()
                 .checksum
@@ -353,7 +357,7 @@ mod tests {
                 Arc::new(Float64Array::from(values)) as ArrayRef,
             )])
             .unwrap();
-            result_checksum_v1(batch.schema().as_ref(), &[batch.clone()], LIMIT)
+            result_checksum_v1(batch.schema().as_ref(), std::slice::from_ref(&batch), LIMIT)
                 .unwrap()
                 .checksum
         };
@@ -382,7 +386,8 @@ mod tests {
     fn wp64_operational_acceptance() {
         let batch = int_batch(vec![9, 4, 7]);
         let recorded =
-            result_checksum_v1(batch.schema().as_ref(), &[batch.clone()], LIMIT).unwrap();
+            result_checksum_v1(batch.schema().as_ref(), std::slice::from_ref(&batch), LIMIT)
+                .unwrap();
         let replayed = result_checksum_v1(batch.schema().as_ref(), &[batch], LIMIT).unwrap();
         assert_eq!(recorded, replayed);
         assert!(recorded.checksum.starts_with("b3:"));

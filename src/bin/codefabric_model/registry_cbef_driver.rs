@@ -2500,7 +2500,8 @@ fn render_rust_feature_masks(
             let mask = 1_u64 << bit;
             writeln!(
                 output,
-                "    pub const {feature}: Self = Self({mask:#018x});"
+                "    pub const {feature}: Self = Self({});",
+                rust_u64_literal(mask)
             )
             .unwrap();
             if requirement != "disabled" {
@@ -2512,12 +2513,14 @@ fn render_rust_feature_masks(
         }
         writeln!(
             output,
-            "    pub const SUPPORTED: Self = Self({supported:#018x});"
+            "    pub const SUPPORTED: Self = Self({});",
+            rust_u64_literal(supported)
         )
         .unwrap();
         writeln!(
             output,
-            "    pub const REQUIRED: Self = Self({required:#018x});"
+            "    pub const REQUIRED: Self = Self({});",
+            rust_u64_literal(required)
         )
         .unwrap();
         output.push_str(

@@ -694,6 +694,7 @@ impl SourceImageStore {
     /// # Errors
     ///
     /// Returns a persistence or immutable-blob I/O failure.
+    #[allow(clippy::too_many_lines)] // GC is one bounded lease/blob/index transaction and filesystem sweep.
     pub fn collect_garbage(
         &mut self,
         store: &mut OperationalStore,
