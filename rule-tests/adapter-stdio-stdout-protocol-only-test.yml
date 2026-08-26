@@ -1,0 +1,9 @@
+id: adapter-stdio-stdout-protocol-only
+valid:
+  - |
+      def identity():
+          print("identity", file=sys.stderr)
+invalid:
+  - |
+      def diagnostic():
+          print("daemon unavailable")

@@ -1,0 +1,11 @@
+id: delta-handle-factory-only
+snapshots:
+  ? |
+    async fn open(uri: Url) {
+        DeltaTableBuilder::from_url(uri).unwrap().load().await;
+    }
+  : labels:
+    - source: DeltaTableBuilder::from_url
+      style: primary
+      start: 30
+      end: 57

@@ -1,0 +1,11 @@
+id: gix-boundary-only
+snapshots:
+  ? |
+    fn open_repository() {
+        let _repository = gix::open(".");
+    }
+  : labels:
+    - source: gix::open
+      style: primary
+      start: 45
+      end: 54

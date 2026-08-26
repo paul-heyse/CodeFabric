@@ -2926,14 +2926,13 @@ mod tests {
 
     #[test]
     fn wp63_structural_acceptance() {
-        let daemon = include_str!("daemon.rs");
-        let coordinator = include_str!("coordinator.rs");
-        assert!(daemon.contains("ProductionQueryService::new("));
-        assert!(daemon.contains("serve_query_uds("));
-        assert!(daemon.contains("WorkspaceQueryBackend"));
-        assert!(daemon.contains("query_socket_endpoint"));
-        assert!(coordinator.contains("build_continuous_engine("));
-        assert!(coordinator.contains("ContinuousWorkspaceEngine::new("));
+        fn implements_backend<T: SemanticQueryBackend>() {}
+        fn implements_rpc<T: CpgQueryService>() {}
+
+        implements_backend::<WorkspaceQueryBackend>();
+        implements_rpc::<ProductionQueryService<WorkspaceQueryBackend>>();
+        let backend = WorkspaceQueryBackend::default();
+        assert_eq!(backend.sessions.try_read().unwrap().len(), 0);
     }
 
     #[tokio::test]

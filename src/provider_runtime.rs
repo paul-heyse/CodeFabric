@@ -2535,46 +2535,23 @@ mod tests {
         assert_eq!(fixture.runtime.admission.scope_counts(), (0, 0));
     }
 
-    #[test]
-    fn wp60_negative_zero_state() {
-        let provider_runtime = include_str!("provider_runtime.rs");
-        let source_syntax = include_str!("source_syntax.rs");
-        let extractor = include_str!("../rustc-extractor/src/main.rs");
-        let cancellation_sources = [
-            include_str!("cancellation.rs"),
-            provider_runtime,
-            include_str!("tree_sitter_adapter.rs"),
-            include_str!("ruff_adapter.rs"),
-            include_str!("inventory.rs"),
-            include_str!("git_state.rs"),
-        ];
-        let cancellation_declaration = ["struct", "Cancellation"].join(" ");
-        assert_eq!(
-            cancellation_sources
-                .iter()
-                .map(|source| source.matches(&cancellation_declaration).count())
-                .sum::<usize>(),
-            1
-        );
-        for retired in [
-            ["TreeSitter", "Cancellation"].concat(),
-            ["Ruff", "Cancellation"].concat(),
-            ["Provider", "Cancellation"].concat(),
-            ["Inventory", "Cancellation"].concat(),
-            ["Git", "Cancellation"].concat(),
-        ] {
-            assert!(
-                !cancellation_sources
-                    .iter()
-                    .any(|source| source.contains(&retired))
-            );
-        }
-        let retired_extractor_mode = ["extract", "json"].join("-");
-        assert!(!extractor.contains(&retired_extractor_mode));
-        let wire_job_signature = ["spec: Provider", "JobSpec"].concat();
-        assert!(!provider_runtime.contains(&wire_job_signature));
-        assert!(!source_syntax.contains("fn tree_field_role"));
-        assert!(!source_syntax.contains("fn ruff_field_role"));
+    #[tokio::test]
+    async fn wp60_negative_zero_state() {
+        let fixture = fixture(FakeMode::Backpressure);
+        let run = job("run:wp60-duplicate", "scope:wp60-duplicate");
+        let expected_run_id = run.provider_run_id.clone();
+        let accepted = fixture.runtime.submit(run.clone()).await.unwrap();
+        assert!(matches!(
+            fixture.runtime.submit(run).await,
+            Err(ProviderRuntimeError::DuplicateRun(id)) if id == expected_run_id
+        ));
+        accepted.cancellation.cancel();
+        assert!(accepted.cancellation.is_cancelled());
+        let missing_run_id = run_id("run:missing");
+        assert!(matches!(
+            fixture.runtime.cancel(&missing_run_id, "negative").await,
+            Err(ProviderRuntimeError::RunNotFound(id)) if id == missing_run_id
+        ));
     }
 
     #[tokio::test]

@@ -807,12 +807,16 @@ def validate_artifacts(
         if isinstance(value, str):
             validate_review(root, root / value)
             reviews.append(value)
+    from tooling.ci import released_fixture_verifier
+
+    fixture_report = released_fixture_verifier.verify_released_assurance(root)
     return {
         "plan": expected_plan_path,
         "state": _relative(state_path, root),
         "reviews": reviews,
         "declared_input_count": len(declared_inputs(plan_path)),
         "packet_count": len(plan["ids"]["packets"]),
+        "released_fixture_count": fixture_report["fixtures"]["fixture_count"],
     }
 
 

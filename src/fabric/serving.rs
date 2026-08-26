@@ -3237,9 +3237,6 @@ mod tests {
         let debug = format!("{session:?}");
         assert!(debug.contains("ServingQuerySession"));
         assert!(debug.contains("evidence"));
-        let source = include_str!("serving.rs");
-        assert!(!source.contains(&["CONTROL", "TABLES"].join("_")));
-        assert!(!source.contains(&["(100", "entities"].join(", \"")));
     }
 
     #[tokio::test]

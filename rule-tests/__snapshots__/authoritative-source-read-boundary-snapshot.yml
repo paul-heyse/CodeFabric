@@ -1,0 +1,38 @@
+id: authoritative-source-read-boundary
+snapshots:
+  ? |
+    fn read_source(path: &Path) {
+        let _bytes = std::fs::read(path);
+    }
+  : labels:
+    - source: std::fs::read(path)
+      style: primary
+      start: 47
+      end: 66
+  ? |
+    fn read_source(path: &Path) {
+        let _file = File::open(path);
+    }
+  : labels:
+    - source: File::open(path)
+      style: primary
+      start: 46
+      end: 62
+  ? |
+    fn read_source(path: &Path) {
+        let _file = std::fs::OpenOptions::new().read(true).open(path);
+    }
+  : labels:
+    - source: std::fs::OpenOptions::new()
+      style: primary
+      start: 46
+      end: 73
+  ? |
+    fn read_source(path: &Path) {
+        let _text = fs::read_to_string(path);
+    }
+  : labels:
+    - source: fs::read_to_string(path)
+      style: primary
+      start: 46
+      end: 70

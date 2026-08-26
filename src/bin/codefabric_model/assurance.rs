@@ -686,15 +686,6 @@ mod tests {
     }
 
     #[test]
-    fn model_assurance_cannot_read_its_generated_report_as_oracle() {
-        let source = include_str!("assurance.rs");
-        let generated_report = ["proof-coverage", "-current.json"].concat();
-        let legacy_loader = ["load_", "manifest"].concat();
-        assert!(!source.contains(&generated_report));
-        assert!(!source.contains(&legacy_loader));
-    }
-
-    #[test]
     fn model_changed_profile_matches_full_detection_on_perturbation_corpus() {
         let inventory = inventory();
         let changed = inventory.profile(AssuranceProfile::Changed).unwrap();

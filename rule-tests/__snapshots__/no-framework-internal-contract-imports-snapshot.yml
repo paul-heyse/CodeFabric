@@ -1,0 +1,9 @@
+id: no-framework-internal-contract-imports
+snapshots:
+  ? |
+    from fastmcp.server.server import FastMCP
+  : labels:
+    - source: from fastmcp.server.server import FastMCP
+      style: primary
+      start: 0
+      end: 41

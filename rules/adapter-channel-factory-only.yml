@@ -1,0 +1,12 @@
+id: adapter-channel-factory-only
+language: Python
+severity: error
+message: Direct gRPC channel construction belongs only in daemon/channel.py.
+note: Other adapter modules consume the CpgDaemonClient boundary.
+files:
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/**/*.py
+ignores:
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/channel.py
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/**/*.py
+rule:
+  pattern: grpc.aio.insecure_channel($$$ARGS)

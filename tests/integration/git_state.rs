@@ -687,18 +687,6 @@ fn wp17_negative_zero_state() {
             .any(|path| path.ends_with(b".lock"))
     );
 
-    let source = include_str!("../../src/git_state.rs");
-    for forbidden in [
-        ["edit", "_reference"].concat(),
-        ["write", "_object"].concat(),
-        ["check", "out("].concat(),
-        ["std::process::", "Command"].concat(),
-    ] {
-        assert!(
-            !source.contains(&forbidden),
-            "forbidden production API {forbidden}"
-        );
-    }
     let mut rejected = GitTrustPolicy::local_read_only();
     rejected.global_configuration = true;
     assert!(matches!(
@@ -738,17 +726,94 @@ async fn wp17_operational_acceptance() {
 
 #[test]
 fn wp49_behavioral_acceptance() {
-    wp17_behavioral_acceptance();
+    // PC-WP49-BEH: repository/worktree topology and HEAD state are application-owned DTOs.
+    let fixture = tempfile::tempdir().expect("WP49 repository fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    let adapter = GixGitStateAdapter;
+    let policy = GitTrustPolicy::local_read_only();
+
+    let unborn = adapter
+        .open_worktree(&root, REGISTERED, &policy)
+        .expect("open unborn repository");
+    assert_eq!(
+        adapter
+            .capture_state(&unborn.selected_worktree, OBSERVATIONS)
+            .expect("capture unborn state")
+            .head_kind,
+        HeadKind::Unborn
+    );
+
+    commit_file(&root, "src/lib.rs", b"fn wp49_fixture() {}\n");
+    git(&root, &args(["checkout", "--detach"]));
+    let detached = adapter
+        .open_worktree(&root, REGISTERED, &policy)
+        .expect("open detached worktree");
+    let state = adapter
+        .capture_state(&detached.selected_worktree, OBSERVATIONS)
+        .expect("capture detached state");
+    assert_eq!(state.head_kind, HeadKind::Detached);
+    assert!(state.head_target.is_some());
+    assert!(state.head_tree.is_some());
+
+    let bare = fixture.path().join("bare.git");
+    fs::create_dir(&bare).expect("bare repository root");
+    git(&bare, &args(["init", "--bare"]));
+    let bare = adapter
+        .open_worktree(&bare, REGISTERED, &policy)
+        .expect("open bare repository");
+    assert!(bare.selected_worktree.is_bare);
+    assert!(bare.selected_worktree.work_dir.is_none());
 }
 
 #[test]
 fn wp49_structural_acceptance() {
-    wp17_structural_acceptance();
+    // PC-WP49-STR: the DTO carries the complete identity and observation fence.
+    let fixture = tempfile::tempdir().expect("WP49 structural fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open repository");
+    let state = adapter
+        .capture_state(&snapshot.selected_worktree, OBSERVATIONS)
+        .expect("capture fenced state");
+
+    assert_eq!(state.repository_id, REGISTERED.repository_id);
+    assert_eq!(state.worktree_id, REGISTERED.worktree_id);
+    assert_eq!(state.inclusion_policy_fingerprint, [0x31; 32]);
+    assert_eq!(state.attributes_fingerprint, [0x32; 32]);
+    assert_eq!(state.worktree_inventory_digest, [0x33; 32]);
+    assert_eq!(state.index_entry_count, Some(1));
+    assert!(state.index_fingerprint.is_some());
 }
 
 #[test]
 fn wp49_negative_zero_state() {
-    wp17_negative_zero_state();
+    // PC-WP49-NEG: adapter reads are mutation-free and reject widened Git trust.
+    let fixture = tempfile::tempdir().expect("WP49 negative fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    let before = snapshot_path(&root.join(".git"));
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("read-only open");
+    adapter
+        .capture_state(&snapshot.selected_worktree, OBSERVATIONS)
+        .expect("read-only capture");
+    assert_eq!(before, snapshot_path(&root.join(".git")));
+    assert!(!before.keys().any(|path| path.ends_with(b".lock")));
+
+    let mut untrusted = GitTrustPolicy::local_read_only();
+    untrusted.global_configuration = true;
+    assert!(matches!(
+        adapter.open_worktree(&root, REGISTERED, &untrusted),
+        Err(GitStateError::TrustPolicy)
+    ));
 }
 
 #[tokio::test]
@@ -767,7 +832,66 @@ async fn wp49_operational_acceptance() {
 
 #[test]
 fn wp50_behavioral_acceptance() {
-    wp17_structural_acceptance();
+    // PC-WP50-BEH: the Git inventory classifies candidates while secure reads retain authority.
+    let fixture = tempfile::tempdir().expect("WP50 inventory fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    fs::write(root.join(".gitignore"), b"ignored.bin\n").expect("ignore policy");
+    commit_file(&root, "tracked.rs", b"fn tracked() {}\n");
+    fs::write(root.join("ignored.bin"), b"ignored\n").expect("ignored fixture");
+    fs::write(root.join("untracked.py"), b"value = 1\n").expect("untracked fixture");
+
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open inventory fixture");
+    let git = adapter
+        .inventory(
+            &snapshot.selected_worktree,
+            OBSERVATIONS,
+            &Cancellation::default(),
+        )
+        .expect("Git inventory");
+    let classification = |path: &[u8]| {
+        git.entries
+            .iter()
+            .find(|entry| entry.repo_path_bytes == path)
+            .map(|entry| entry.classification)
+    };
+    assert_eq!(
+        classification(b"tracked.rs"),
+        Some(GitInventoryClassification::Tracked)
+    );
+    assert_eq!(
+        classification(b"ignored.bin"),
+        Some(GitInventoryClassification::UntrackedIgnored)
+    );
+    assert_eq!(
+        classification(b"untracked.py"),
+        Some(GitInventoryClassification::UntrackedNotIgnored)
+    );
+
+    let mut store = OperationalStore::open(&fixture.path().join("state.sqlite3")).expect("store");
+    let workspace = WorkspaceRegistry::new(&mut store)
+        .add(&root, WorkspaceSourceRegistration::Directory)
+        .expect("registered workspace");
+    let secure_root =
+        open_workspace_root(&mut store, workspace.workspace_id).expect("secure source root");
+    let mut authoritative = InventoryWalker::new(InventoryLimits::default())
+        .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
+        .expect("authoritative inventory");
+    apply_to_source_inventory(&git, &mut authoritative, &mut store)
+        .expect("advisory classification overlay");
+    let tracked = authoritative
+        .records
+        .iter()
+        .find(|record| record.path.raw_relative_path_bytes == b"tracked.rs")
+        .expect("tracked authoritative row");
+    assert!(tracked.content_digest.is_some());
+    assert_eq!(
+        tracked.classification as u16,
+        GitInventoryClassification::Tracked as u16
+    );
 }
 
 #[test]
@@ -926,7 +1050,34 @@ fn wp52_negative_zero_state() {
 
 #[test]
 fn wp52_operational_acceptance() {
-    wp52_behavioral_acceptance();
+    // PC-WP52-OPS: a bulk branch transition is fenced by the prior state vector.
+    let fixture = tempfile::tempdir().expect("WP52 branch fixture");
+    let root = fixture.path().join("repository");
+    init_repository(&root, None);
+    commit_file(&root, "base.rs", b"fn base() {}\n");
+    let adapter = GixGitStateAdapter;
+    let snapshot = adapter
+        .open_worktree(&root, REGISTERED, &GitTrustPolicy::local_read_only())
+        .expect("open branch fixture");
+    let main = adapter
+        .capture_state(&snapshot.selected_worktree, OBSERVATIONS)
+        .expect("capture main vector");
+
+    git(&root, &args(["checkout", "-b", "topic"]));
+    commit_file(&root, "topic.rs", b"fn topic() {}\n");
+    let candidates = adapter
+        .tree_diff_candidates(
+            &snapshot.selected_worktree,
+            &main,
+            OBSERVATIONS,
+            &Cancellation::default(),
+        )
+        .expect("branch tree diff");
+    assert!(candidates.candidates.iter().any(|candidate| {
+        candidate.repo_path_bytes == b"topic.rs" && candidate.origin == GitCandidateOrigin::HeadTree
+    }));
+    assert_eq!(candidates.vector.worktree_id, REGISTERED.worktree_id);
+    assert_ne!(candidates.vector.head_tree, main.head_tree);
 }
 
 #[test]

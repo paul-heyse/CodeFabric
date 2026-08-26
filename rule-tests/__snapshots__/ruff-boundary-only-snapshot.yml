@@ -1,0 +1,27 @@
+id: ruff-boundary-only
+snapshots:
+  ? |
+    fn index(tokens: &ruff_python_ast::token::Tokens, source: &str) {
+        let _index = ruff_python_index::Indexer::from_tokens(tokens, source);
+    }
+  : labels:
+    - source: ruff_python_ast::token::Tokens
+      style: primary
+      start: 18
+      end: 48
+  ? |
+    fn leak(node: ruff_python_ast::AnyNodeRef<'_>) -> usize {
+        node.range().len().to_usize()
+    }
+  : labels:
+    - source: ruff_python_ast::AnyNodeRef
+      style: primary
+      start: 14
+      end: 41
+  ? |
+    use ruff_python_parser::Parsed;
+  : labels:
+    - source: use ruff_python_parser::Parsed;
+      style: primary
+      start: 0
+      end: 31

@@ -1,0 +1,10 @@
+id: adapter-channel-factory-only
+snapshots:
+  ? |
+    def bypass(target):
+        return grpc.aio.insecure_channel(target)
+  : labels:
+    - source: grpc.aio.insecure_channel(target)
+      style: primary
+      start: 31
+      end: 64

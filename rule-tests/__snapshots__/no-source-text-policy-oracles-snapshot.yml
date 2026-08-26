@@ -1,0 +1,36 @@
+id: no-source-text-policy-oracles
+snapshots:
+  ? |
+    fn policy_by_substring() {
+        let source = include_str!("../../src/daemon.rs");
+        assert!(!source.contains("forbidden_call"));
+    }
+  : labels:
+    - source: include_str!("../../src/daemon.rs")
+      style: primary
+      start: 44
+      end: 79
+    - source: |-
+        fn policy_by_substring() {
+            let source = include_str!("../../src/daemon.rs");
+            assert!(!source.contains("forbidden_call"));
+        }
+      style: secondary
+      start: 0
+      end: 131
+  ? |
+    fn rule_yaml_by_substring() {
+        assert!(include_str!("../rules/boundary.yml").contains("ignores:"));
+    }
+  : labels:
+    - source: assert!(include_str!("../rules/boundary.yml").contains("ignores:"))
+      style: primary
+      start: 34
+      end: 101
+    - source: |-
+        fn rule_yaml_by_substring() {
+            assert!(include_str!("../rules/boundary.yml").contains("ignores:"));
+        }
+      style: secondary
+      start: 0
+      end: 104

@@ -1,0 +1,13 @@
+id: adapter-stdio-stdout-protocol-only
+language: Python
+severity: error
+message: Adapter process diagnostics must go to stderr so stdout remains MCP protocol-only.
+note: Pass file=sys.stderr for administrative output; FastMCP owns protocol stdout.
+files:
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/__main__.py
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/server.py
+rule:
+  all:
+    - pattern: print($$$ARGS)
+    - not:
+        regex: 'file\s*=\s*sys\.stderr'

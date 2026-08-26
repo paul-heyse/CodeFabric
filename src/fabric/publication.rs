@@ -191,6 +191,18 @@ impl PublicationFaultPoint {
         Self::BeforePointerCommit,
         Self::AfterPointerCommit,
     ];
+
+    /// Stable registry code for this executable injection seam.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::AfterStaging => "PUBLICATION_AFTER_STAGING",
+            Self::AfterOwnerWrites => "PUBLICATION_AFTER_OWNER_WRITES",
+            Self::AfterManifestWrite => "PUBLICATION_AFTER_MANIFEST_WRITE",
+            Self::BeforePointerCommit => "PUBLICATION_BEFORE_POINTER_COMMIT",
+            Self::AfterPointerCommit => "PUBLICATION_AFTER_POINTER_COMMIT",
+        }
+    }
 }
 
 const fn state_code(state: DurablePublicationState) -> i16 {
@@ -1865,8 +1877,6 @@ mod tests {
             race.current_publication().await.unwrap(),
             Some(first.pointer)
         );
-        let source = include_str!("publication.rs");
-        assert!(!source.contains(&["blind", "retry"].join("_")));
     }
 
     #[tokio::test]

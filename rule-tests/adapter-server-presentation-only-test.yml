@@ -1,0 +1,15 @@
+id: adapter-server-presentation-only
+valid:
+  - |
+      async def execute(ctx: Context):
+          client = await daemon(ctx)
+          return await client.execute(request)
+invalid:
+  - |
+      import sqlite3
+  - |
+      def execute_locally():
+          return open("facts.arrow", "rb")
+  - |
+      def direct_channel(target):
+          return grpc.aio.insecure_channel(target)

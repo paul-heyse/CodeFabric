@@ -1,0 +1,10 @@
+id: adapter-stdio-stdout-protocol-only
+snapshots:
+  ? |
+    def diagnostic():
+        print("daemon unavailable")
+  : labels:
+    - source: print("daemon unavailable")
+      style: primary
+      start: 22
+      end: 49

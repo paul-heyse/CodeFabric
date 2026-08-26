@@ -1631,6 +1631,16 @@ impl OverlayRebaseFaultPoint {
         Self::AfterPublicationCas,
         Self::BeforeSnapshotActivation,
     ];
+
+    /// Stable registry code for this executable injection seam.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::AfterFlushCapture => "OVERLAY_REBASE_AFTER_FLUSH_CAPTURE",
+            Self::AfterPublicationCas => "OVERLAY_REBASE_AFTER_PUBLICATION_CAS",
+            Self::BeforeSnapshotActivation => "OVERLAY_REBASE_BEFORE_SNAPSHOT_ACTIVATION",
+        }
+    }
 }
 
 /// All dependencies and predecessor observations for one three-snapshot rebase.

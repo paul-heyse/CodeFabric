@@ -1,0 +1,19 @@
+id: no-source-text-policy-oracles
+valid:
+  - |
+      fn decoded_contract() {
+          let value: serde_json::Value = serde_json::from_str(include_str!("fixture.json")).unwrap();
+          assert_eq!(value["status"], "released");
+      }
+  - |
+      const GENERATED_SQL: &str = include_str!("generated/operational-store.sql");
+invalid:
+  - |
+      fn policy_by_substring() {
+          let source = include_str!("../../src/daemon.rs");
+          assert!(!source.contains("forbidden_call"));
+      }
+  - |
+      fn rule_yaml_by_substring() {
+          assert!(include_str!("../rules/boundary.yml").contains("ignores:"));
+      }

@@ -411,6 +411,18 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
     let traceability = traceability(&requirements);
     let fixtures = fixture_index(&before_model);
     let fixture_oracles = fixture_oracle_records(&before_model);
+    let mut fixture_manifest = json!({
+        "artifact_id": "codefabric.manifests.fixture-oracles",
+        "artifact_kind": "manifest",
+        "version": "1.0",
+        "compatible_suite_major": 1,
+        "status": "released",
+        "schema_version": 1,
+        "digest_projection": "json-jcs-v1",
+        "generator_revision": "codefabric-model/1.0",
+        "records": fixture_oracles,
+    });
+    fixture_manifest["canonical_digest"] = Value::String(canonical_digest(&fixture_manifest)?);
     let package_data = package_data(&tree);
     let aggregators = module_aggregators(&tree);
     let rust_aggregator = rustfmt_source(&rust_module_aggregator(&tree))?;
@@ -471,18 +483,7 @@ pub fn check_family(repository_root: &Path) -> Result<AggregateReport, Aggregate
         ),
         (
             "contracts/manifests/fixture-oracles.json",
-            pretty_json(&json!({
-                "artifact_id": "codefabric.manifests.fixture-oracles",
-                "artifact_kind": "manifest",
-                "version": "1.0",
-                "compatible_suite_major": 1,
-                "status": "released",
-                "schema_version": 1,
-                "canonical_digest": format!("b3:{}", "0".repeat(64)),
-                "digest_projection": "json-jcs-v1",
-                "generator_revision": "codefabric-model/1.0",
-                "records": fixture_oracles,
-            }))?,
+            pretty_json(&fixture_manifest)?,
         ),
     ] {
         tree.insert(path, "action:governance", bytes, false)?;
@@ -1997,13 +1998,6 @@ mod tests {
         };
         assert!(bundle_membership(&artifact).is_empty());
         assert!(bundles(&[artifact]).unwrap().is_empty());
-    }
-
-    #[test]
-    fn model_generated_aggregates_have_no_manual_member_list_input() {
-        let source = include_str!("aggregate_driver.rs");
-        assert!(!source.contains(&["BUNDLE", "_MEMBERS"].concat()));
-        assert!(!source.contains(&["PUBLIC_SCHEMA", "_ARTIFACTS"].concat()));
     }
 
     #[test]

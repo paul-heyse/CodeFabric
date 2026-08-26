@@ -1,0 +1,25 @@
+id: model-no-legacy-control-plane
+snapshots:
+  ? |
+    const INDEX: &[u8] = include_bytes!("artifact-index.json");
+  : labels:
+    - source: include_bytes!("artifact-index.json")
+      style: primary
+      start: 21
+      end: 58
+  ? |
+    fn legacy() {
+        std::process::Command::new("target/debug/codefabric-contracts").spawn().unwrap();
+    }
+  : labels:
+    - source: std::process::Command::new("target/debug/codefabric-contracts").spawn().unwrap()
+      style: primary
+      start: 18
+      end: 98
+  ? |
+    use crate::contracts::compiler::compile;
+  : labels:
+    - source: use crate::contracts::compiler::compile;
+      style: primary
+      start: 0
+      end: 40

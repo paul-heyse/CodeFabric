@@ -1,0 +1,11 @@
+id: model-no-positional-cbef-construction
+snapshots:
+  ? |
+    fn identity(fields: Vec<CbefField>) {
+        let record = CbefRecord { domain: IdentityDomain::Entity, fields };
+    }
+  : labels:
+    - source: 'CbefRecord { domain: IdentityDomain::Entity, fields }'
+      style: primary
+      start: 55
+      end: 108

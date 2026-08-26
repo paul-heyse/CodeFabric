@@ -1,0 +1,9 @@
+id: adapter-channel-factory-only
+valid:
+  - |
+      async def connect(client: CpgDaemonClient):
+          await client.connect()
+invalid:
+  - |
+      def bypass(target):
+          return grpc.aio.insecure_channel(target)

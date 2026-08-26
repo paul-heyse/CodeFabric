@@ -1,0 +1,17 @@
+id: no-source-text-policy-oracles
+language: Rust
+severity: error
+message: Tests must prove behavior or decoded contracts, not scan production source text.
+note: Use a structural rule for syntax policy and deserialize JSON/YAML fixtures before asserting semantics.
+files:
+  - src/**/*.rs
+  - tests/**/*.rs
+  - rustc-extractor/src/**/*.rs
+  - pyrefly-sidecar/src/**/*.rs
+rule:
+  all:
+    - kind: macro_invocation
+    - regex: 'include_str!\s*\([^)]*(\.rs|\.py|Cargo\.toml|rules/[^)]*\.ya?ml)'
+    - inside:
+        kind: function_item
+        stopBy: end

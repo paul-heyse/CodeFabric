@@ -1,0 +1,27 @@
+id: tree-sitter-boundary-only
+snapshots:
+  ? |
+    fn language() {
+        let _language = tree_sitter_python::LANGUAGE;
+    }
+  : labels:
+    - source: tree_sitter_python::LANGUAGE
+      style: primary
+      start: 36
+      end: 64
+  ? |
+    fn leak(node: tree_sitter::Node<'_>) -> usize {
+        node.start_byte()
+    }
+  : labels:
+    - source: tree_sitter::Node
+      style: primary
+      start: 14
+      end: 31
+  ? |
+    use tree_sitter::{Node, Tree};
+  : labels:
+    - source: use tree_sitter::{Node, Tree};
+      style: primary
+      start: 0
+      end: 30

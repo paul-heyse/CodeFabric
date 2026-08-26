@@ -2488,12 +2488,6 @@ mod tests {
             ),
             Err(FactIngestError::SourceSnapshotMismatch(_))
         ));
-
-        let fabric_source = include_str!("fabric.rs");
-        assert!(!fabric_source.contains("pub delta: DeltaTable"));
-        assert!(!fabric_source.contains("pub provider: Arc<dyn TableProvider>"));
-        let boundary_rule = include_str!("../rules/deltalake-boundary-only.yml");
-        assert!(boundary_rule.contains("ignores:\n  - src/fabric.rs"));
     }
 
     #[test]
@@ -2680,8 +2674,6 @@ mod tests {
             )
             .is_err()
         );
-        let prohibited = ["with_skip_", "validation"].concat();
-        assert!(!include_str!("fact_ingest.rs").contains(&prohibited));
     }
 
     #[tokio::test]

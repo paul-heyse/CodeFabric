@@ -27,6 +27,11 @@ records:
     disposition: owner_work_preserve
     owner: repository-owner
     recovery: Preserve the owner deletion; the committed baseline remains recoverable from commit 80d63b7.
+  - path: docs/library_ref/apple-rust-linker.md
+    status_at_wp73: "??"
+    disposition: owner_work_preserve
+    owner: repository-owner
+    recovery: Preserve the exact untracked owner bytes; do not stage or overwrite outside an owner-approved library-reference update.
   - path: docs/spec_index/library-routing.md
     status_at_wp73: " M"
     disposition: planned_integration_preserve

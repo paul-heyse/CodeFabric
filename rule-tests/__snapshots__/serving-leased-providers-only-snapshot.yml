@@ -1,0 +1,29 @@
+id: serving-leased-providers-only
+snapshots:
+  ? |
+    async fn session(path: &str) {
+        let handle = DeltaHandleFactory::open(path, Some(1), DeltaAccessProfile::QueryServing).await;
+    }
+  : labels:
+    - source: DeltaHandleFactory::open(path, Some(1), DeltaAccessProfile::QueryServing)
+      style: primary
+      start: 48
+      end: 121
+  ? |
+    async fn session(publication: &PublicationOutcome, overlay: &Overlay) {
+        let providers = SnapshotProviderCatalog::build(publication, overlay).await;
+    }
+  : labels:
+    - source: SnapshotProviderCatalog::build(publication, overlay)
+      style: primary
+      start: 92
+      end: 144
+  ? |
+    async fn session(table: &DeltaTable, spec: &TableSpec) {
+        let provider = exact_provider(table, spec, DeltaAccessProfile::QueryServing).await;
+    }
+  : labels:
+    - source: exact_provider(table, spec, DeltaAccessProfile::QueryServing)
+      style: primary
+      start: 76
+      end: 137

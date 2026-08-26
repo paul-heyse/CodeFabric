@@ -107,6 +107,131 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/__snapshots__/adapter-channel-factory-only-snapshot.yml",
+      "source_digest": "b3:6b7f340c3531439d6d5d18f87397527f7375da5a7da218b5f9cf4f5258a454ad"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/adapter-server-presentation-only-snapshot.yml",
+      "source_digest": "b3:66a18e0265aed676ca29f9dcad20b44a284c2a4070ecc5e197474d8d1eb002d4"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/adapter-settings-process-owner-only-snapshot.yml",
+      "source_digest": "b3:f95a22943929d747f7ed329ffd2f15daacd22093255285901c226ddef7678629"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/adapter-stdio-stdout-protocol-only-snapshot.yml",
+      "source_digest": "b3:f98567b41c20b90892b5957109f5ea63cf6158853866fd121f7d34e24a89fad9"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/authoritative-source-read-boundary-snapshot.yml",
+      "source_digest": "b3:e3d74bb0b0db27f2e8b9ff1dd59a2bde9310c8e1a9b9e373310a7150f520cdf7"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/delta-handle-factory-only-snapshot.yml",
+      "source_digest": "b3:3f4c372b740d2659a5628a8279c4836744d4dc3c91e237d9a0f87380286a2428"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/deltalake-boundary-only-snapshot.yml",
+      "source_digest": "b3:c1093c0a88ae4ddad8ee4296803f38060a7af0475b2c36653fc44c9286a78473"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/gix-boundary-only-snapshot.yml",
+      "source_digest": "b3:ae2b5ea0f07328c6ff221020433518b44d3834cd17e172a10595ab5c473dda8b"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/gix-read-only-snapshot.yml",
+      "source_digest": "b3:c9683a61abaa2ceca86edac9564f610513248c99ce67e61061eac3fe7393fcc6"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/model-no-direct-authority-write-snapshot.yml",
+      "source_digest": "b3:98521ddacafc489fe87e1b5fd8faa5f62e14507c8a942d3b862970beef32a637"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/model-no-legacy-control-plane-snapshot.yml",
+      "source_digest": "b3:1552849c7836677d7f929c65f609e81db48f0625c81b5dd526e7c442dfe3747e"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/model-no-positional-cbef-construction-snapshot.yml",
+      "source_digest": "b3:4e5e78dfb1b35832c0336f8efb8eb6dfb84d37b059d81ef0690de617dafe3ff6"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/model-no-raw-governed-code-or-flag-snapshot.yml",
+      "source_digest": "b3:ce4180c381860f07ddd6f7d62b8a4ab805141adcd1c908e711a89638fe5ff188"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/no-framework-internal-contract-imports-snapshot.yml",
+      "source_digest": "b3:d0a1400ad8369c970fb0286fd625a9f424845856f45588cca3ad773b68275afe"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/no-pyrefly-public-api-snapshot.yml",
+      "source_digest": "b3:84652f775cc376a852df217c35f98078bf2cc3c22baa70a9789857ef5e65cda2"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/no-source-text-policy-oracles-snapshot.yml",
+      "source_digest": "b3:2f05616273228aeccf50e23ca6d4ca937bb0f34bb67c767c0ff393dbc3d7386a"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/provider-observation-boundary-only-snapshot.yml",
+      "source_digest": "b3:306bd57146f2cf1daabff66c5e78e68a25cc2969193020efc50eb454466e5437"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ruff-boundary-only-snapshot.yml",
+      "source_digest": "b3:ba89155466ddf8e700b1d09df9217dc68d95fd6a6c4e31c72b04ad82cb07fa29"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/serving-leased-providers-only-snapshot.yml",
+      "source_digest": "b3:da6292b662b6ecd2f03e2369908e9982ce4fe7fa1b6bfd08322604110c4ede6b"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/serving-projections-generated-only-snapshot.yml",
+      "source_digest": "b3:957b42f6a4f38e7fc37f838c2f6eccd74b84c57df477cc7c8d19bce545ffcb4c"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/tree-sitter-boundary-only-snapshot.yml",
+      "source_digest": "b3:36db79789906fa9f960553179a34b80bc51ab9008754ef687858469099b77f64"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/adapter-channel-factory-only-test.yml",
+      "source_digest": "b3:b42f2f4c45f33743df5f900d8aaa4990cb10bf0840a550650dbb73609f8e9a90"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/adapter-server-presentation-only-test.yml",
+      "source_digest": "b3:db06915de98f56a318e2da4c3867274eaf0808a8192e4ffc0d45d57ff2125092"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/adapter-settings-process-owner-only-test.yml",
+      "source_digest": "b3:a1b48c4384ccda762eb613e08c5f85b768e649a06d9dd66dc89154b5c60b6d26"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/adapter-stdio-stdout-protocol-only-test.yml",
+      "source_digest": "b3:9a9cf08d46f6cf394628477ecf05f1660e5f55e53bf3b9fd8e5ff25d5bd60940"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/authoritative-source-read-boundary-test.yml",
       "source_digest": "b3:071e05aa3bcb2399a54efaffcd452e4d21cc621e8f320060c80266827cfd7a74"
     },
@@ -162,6 +287,11 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/no-source-text-policy-oracles-test.yml",
+      "source_digest": "b3:27c4e8e8132339f85ffb1b1b36f90fef14b35be7d6520fad3b31c0b5ba52f73f"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/provider-observation-boundary-only-test.yml",
       "source_digest": "b3:32a0cf3d643437d4493cecce2923bf6f1000b2203432c1ac25c98a62ee7c8ca4"
     },
@@ -187,8 +317,28 @@
     },
     {
       "class": "property",
+      "path": "rules/adapter-channel-factory-only.yml",
+      "source_digest": "b3:0204eb3e487ebc896f3bcd5eb51e52b6956cf4e0e2d7b9e07b55c364df0e3a3c"
+    },
+    {
+      "class": "property",
+      "path": "rules/adapter-server-presentation-only.yml",
+      "source_digest": "b3:ee18cc39aa649b664295617abefcd2cef6cd80f9b105990f6e75be07adfb7c22"
+    },
+    {
+      "class": "property",
+      "path": "rules/adapter-settings-process-owner-only.yml",
+      "source_digest": "b3:b1b11f8b69f2d0f5392ea3772e1a95b6ef62b1c937d53ce9a04a5c7b121bcf15"
+    },
+    {
+      "class": "property",
+      "path": "rules/adapter-stdio-stdout-protocol-only.yml",
+      "source_digest": "b3:8f6c73d4b8a165af1ec5ea347dae7b0cbad4978973e62e00010c5e79ee1de1c8"
+    },
+    {
+      "class": "property",
       "path": "rules/authoritative-source-read-boundary.yml",
-      "source_digest": "b3:15bee5434968f4f2ca68e2e07dd27d04c1fdf95717d8d06d9d9f34a25a7888d9"
+      "source_digest": "b3:b57319c8fff9ac24cfe7b0b4c11cd890826344975e2f5e26a7811a138d690853"
     },
     {
       "class": "property",
@@ -242,8 +392,13 @@
     },
     {
       "class": "property",
+      "path": "rules/no-source-text-policy-oracles.yml",
+      "source_digest": "b3:b1bb109e65664f61fce9fac4ab5e65ff22052cb73fe42a783a8bad0963e34c1e"
+    },
+    {
+      "class": "property",
       "path": "rules/provider-observation-boundary-only.yml",
-      "source_digest": "b3:a29a77c39c364f189e45eee1ea839ebe30b472ca0e35c1b15be8f5371dda2d7a"
+      "source_digest": "b3:26f263081ae7a9a5e31555fa7e72cbfe4bb4a7cff15a778f89c186cd28dd73de"
     },
     {
       "class": "property",

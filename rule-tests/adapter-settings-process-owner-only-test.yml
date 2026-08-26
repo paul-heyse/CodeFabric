@@ -1,0 +1,13 @@
+id: adapter-settings-process-owner-only
+valid:
+  - |
+      def lifespan():
+          settings = process_settings()
+          return settings
+invalid:
+  - |
+      def lifespan():
+          return Settings()
+  - |
+      def target():
+          return os.environ["CODEFABRIC_DAEMON_TARGET"]

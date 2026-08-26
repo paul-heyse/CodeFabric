@@ -1,0 +1,25 @@
+id: adapter-server-presentation-only
+snapshots:
+  ? |
+    def direct_channel(target):
+        return grpc.aio.insecure_channel(target)
+  : labels:
+    - source: grpc.aio.insecure_channel(target)
+      style: primary
+      start: 39
+      end: 72
+  ? |
+    def execute_locally():
+        return open("facts.arrow", "rb")
+  : labels:
+    - source: open("facts.arrow", "rb")
+      style: primary
+      start: 34
+      end: 59
+  ? |
+    import sqlite3
+  : labels:
+    - source: import sqlite3
+      style: primary
+      start: 0
+      end: 14

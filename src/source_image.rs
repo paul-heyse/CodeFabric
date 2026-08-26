@@ -34,6 +34,13 @@ pub const ORDINARY_SOURCE_MAXIMUM_BYTES: u64 = 16 * 1024 * 1024;
 pub const EXPLICIT_SOURCE_MAXIMUM_BYTES: u64 = 64 * 1024 * 1024;
 /// Default stable-read retry count.
 pub const DEFAULT_STABLE_READ_RETRIES: u8 = 3;
+/// Closed fault seam census for source capture, blob publication, leases, and reclamation.
+pub const SOURCE_IMAGE_FAULT_POINT_CODES: [&str; 4] = [
+    "SOURCE_CAPTURE_AFTER_FIRST_READ",
+    "SOURCE_BLOB_BEFORE_RENAME",
+    "SOURCE_LEASE_AFTER_ORPHAN",
+    "SOURCE_GC_BEFORE_DELETE",
+];
 
 /// Source language controls encoding admission without changing original bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

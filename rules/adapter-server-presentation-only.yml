@@ -1,0 +1,17 @@
+id: adapter-server-presentation-only
+language: Python
+severity: error
+message: The FastMCP server may present daemon results but may not own storage or query execution.
+note: Domain state, SQL, Arrow, Delta, and direct gRPC channel construction belong behind CpgDaemonClient.
+files:
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/server.py
+rule:
+  any:
+    - all:
+        - kind: import_statement
+        - regex: '^import (sqlite3|pyarrow|datafusion|deltalake)'
+    - all:
+        - kind: import_from_statement
+        - regex: '^from (sqlite3|pyarrow|datafusion|deltalake)'
+    - pattern: grpc.aio.insecure_channel($$$ARGS)
+    - pattern: open($$$ARGS)

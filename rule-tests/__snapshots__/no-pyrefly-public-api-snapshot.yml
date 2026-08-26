@@ -1,0 +1,29 @@
+id: no-pyrefly-public-api
+snapshots:
+  ? |
+    pub fn leaked_query() -> pyrefly::query::Query {
+        todo!()
+    }
+  : labels:
+    - source: pyrefly::query::Query
+      style: primary
+      start: 25
+      end: 46
+    - source: |-
+        pub fn leaked_query() -> pyrefly::query::Query {
+            todo!()
+        }
+      style: secondary
+      start: 0
+      end: 62
+    - source: pub
+      style: secondary
+      start: 0
+      end: 3
+    - source: |-
+        pub fn leaked_query() -> pyrefly::query::Query {
+            todo!()
+        }
+      style: secondary
+      start: 0
+      end: 62

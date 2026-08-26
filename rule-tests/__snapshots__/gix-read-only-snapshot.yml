@@ -1,0 +1,29 @@
+id: gix-read-only
+snapshots:
+  ? |
+    fn mutate(repository: &Repository) {
+        repository.edit_reference("refs/heads/main", Default::default());
+    }
+  : labels:
+    - source: repository.edit_reference("refs/heads/main", Default::default())
+      style: primary
+      start: 41
+      end: 105
+  ? |
+    fn persist(outcome: &mut Outcome) {
+        outcome.write_changes();
+    }
+  : labels:
+    - source: outcome.write_changes()
+      style: primary
+      start: 40
+      end: 63
+  ? |
+    fn shell_out() {
+        Command::new("git");
+    }
+  : labels:
+    - source: Command::new("git")
+      style: primary
+      start: 21
+      end: 40

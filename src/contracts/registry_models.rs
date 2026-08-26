@@ -2325,4 +2325,39 @@ mod tests {
             .retain(|transition| transition.to != "DEGRADED");
         assert!(validate_state_machines(&unreachable).is_err());
     }
+
+    /// PC-WP70-STR/OPS: every released fault record names an executable seam.
+    #[cfg(feature = "daemon")]
+    #[test]
+    fn wp70_fault_registry_runtime_census() {
+        let registry: AcceptedRegistry<FaultPointRecord> = serde_yaml_ng::from_str(include_str!(
+            "../../contracts/faults/fault-point-registry.yaml"
+        ))
+        .unwrap();
+        validate_fault_points(&registry.records).unwrap();
+        let released = registry
+            .records
+            .iter()
+            .map(|record| record.code.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut executable = crate::source_image::SOURCE_IMAGE_FAULT_POINT_CODES
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        executable.extend(
+            crate::fabric::MutationFaultPoint::ALL
+                .into_iter()
+                .map(crate::fabric::MutationFaultPoint::code),
+        );
+        executable.extend(
+            crate::fabric::PublicationFaultPoint::ALL
+                .into_iter()
+                .map(crate::fabric::PublicationFaultPoint::code),
+        );
+        executable.extend(
+            crate::fabric::OverlayRebaseFaultPoint::ALL
+                .into_iter()
+                .map(crate::fabric::OverlayRebaseFaultPoint::code),
+        );
+        assert_eq!(released, executable);
+    }
 }

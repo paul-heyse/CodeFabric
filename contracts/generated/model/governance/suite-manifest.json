@@ -497,7 +497,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:3518608d911f78e9ab2e242147af04cb60e19e55fc22e5b7e2893dc0ce01195f",
+      "canonical_digest": "b3:43b74fb5d07fad4ea15bdc57635829ae03fff11300133bea973b766278f3346e",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -511,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:8fd9681bba59451feff11aae9872345f81bebff2407649a96df121eb7df61448",
+      "source_digest": "b3:5d0115ff4a75d95d6820eae6fcc5a9dd3f3a771978fbbe31e7ebdee9b23bdc18",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -568,7 +568,7 @@
       "artifact_id": "codefabric.faults.fault-point-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/faults/fault-point-registry.yaml",
-      "canonical_digest": "b3:61f3562945bfb6608b0cf9462c599692d3bd15142301f78b4b1683a60ac4e06c",
+      "canonical_digest": "b3:55b123ea87831200f09c70b407e82e915df4133c116b5b39e44dd872fddcafdd",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "owner": "contracts",
@@ -584,7 +584,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:cb6b3fe0a31dc59168125c748d5fa0934ad8c5d751c9241299c8f86ce748097b",
+      "source_digest": "b3:0cabff965ee9448b52339dcc6fb8308b2b1705a2c8cd467be4b0f03516ad7d20",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -593,7 +593,7 @@
       "artifact_id": "codefabric.governance.design-principle-baseline",
       "artifact_kind": "governance-ledger",
       "authority_path": "contracts/governance/design-principle-baseline.yaml",
-      "canonical_digest": "b3:6ae6c0809730c3eefb628d5473b8f1b70d68e934008613958bf59d3d208c03bf",
+      "canonical_digest": "b3:06371244caf5eeecafadd19a125a11e6f55bce93c6fab686368febbd61b99ce6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -607,7 +607,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:e85e8f7f6395c548164f45f0ab156d673ae7d4edf7434c22a143c8afe7da40ca",
+      "source_digest": "b3:b3c69f2e0e5f281b19be1153a5710b49848dd3884ad6b55b3326414bbfe0cd3d",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -616,7 +616,7 @@
       "artifact_id": "codefabric.governance.design-principle-detector-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/design-principle-detector-registry.yaml",
-      "canonical_digest": "b3:98494778c32b2fdbf7a7617c14cddb37b3d0ae604bd101b874469a724fb382dd",
+      "canonical_digest": "b3:ad76d00acf596c065583332958ceba8e7ac6660ad062c01813f72eb827dc6a46",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "owner": "contracts",
@@ -632,7 +632,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:cf8bc0f175ee75b212469e41d1bdff252b3981906ac405cd69432f03e88d8297",
+      "source_digest": "b3:c14d775729fb0382dcf5e42acc709c62d6b36174b0bd3b33c686eab60ffe48a4",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -812,7 +812,7 @@
       "artifact_id": "codefabric.manifests.fixture-oracles",
       "artifact_kind": "manifest",
       "authority_path": "contracts/manifests/fixture-oracles.json",
-      "canonical_digest": "b3:765d77608e60c4d9c8739d07fcee4d14997c54016c96f7613fbbda48e0ac900f",
+      "canonical_digest": "b3:d32cfd4bf24e34a2a9825eb8d01075d18f58b7625891d4de05103de47d4ce777",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -826,7 +826,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:4e6fa9e69a065c507e9708011099e9127e77d3c32e14bf05a3fc7c6c11e0be9e",
+      "source_digest": "b3:a08748f402bf7ab858ec53688bf3a6141b91240e301ad80c300e18f7f11fd1c4",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1708,7 +1708,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:b0d1029ce03a2deaaace261e7aab4ec8d3337b0d6d08979bbb9770a48e8a7aae",
+      "canonical_digest": "b3:dcab130acffffe16b9d86ec2b01f86caf41caf3355964521236077dcc94fbdc6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -1722,7 +1722,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:aa838bb87a4daf747d6d0a6ec334a6a288be2c489312dab1d3e8859ad7a14283",
+      "source_digest": "b3:ded13852e2953465b76c406558296d2da88941d757e6d50a3aff0c7dcef6cfe2",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -2211,6 +2211,581 @@
       "version": "1.0"
     },
     {
+      "artifact_id": "evidence:rule-tests---snapshots---adapter-channel-factory-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/adapter-channel-factory-only-snapshot.yml",
+      "canonical_digest": "b3:0c6455c9401e93d0e9738a39de2528a34ffed58437f53901ed0fbfe56636753c",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:6b7f340c3531439d6d5d18f87397527f7375da5a7da218b5f9cf4f5258a454ad",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---adapter-server-presentation-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/adapter-server-presentation-only-snapshot.yml",
+      "canonical_digest": "b3:1990c7d490e50f1ee3dce4a22d099f663bffc0d7b2245c553d9f374b8e5c0205",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:66a18e0265aed676ca29f9dcad20b44a284c2a4070ecc5e197474d8d1eb002d4",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---adapter-settings-process-owner-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/adapter-settings-process-owner-only-snapshot.yml",
+      "canonical_digest": "b3:0d256c9c0da55a9bd0c675710b06d8a34997f92de19cb234967ce92de5c29f35",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:f95a22943929d747f7ed329ffd2f15daacd22093255285901c226ddef7678629",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---adapter-stdio-stdout-protocol-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/adapter-stdio-stdout-protocol-only-snapshot.yml",
+      "canonical_digest": "b3:8c6af11d1434b9e1d7faff910b82c63b5dd50b0ab85795df5ce88b867e079253",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:f98567b41c20b90892b5957109f5ea63cf6158853866fd121f7d34e24a89fad9",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---authoritative-source-read-boundary-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/authoritative-source-read-boundary-snapshot.yml",
+      "canonical_digest": "b3:312d4df01c33cf8e99e395daa867db7661a5ca71385e24d36b68b67f1abe6e5c",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:e3d74bb0b0db27f2e8b9ff1dd59a2bde9310c8e1a9b9e373310a7150f520cdf7",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---delta-handle-factory-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/delta-handle-factory-only-snapshot.yml",
+      "canonical_digest": "b3:158570bbe23e8751ab0200d5fcf557930d6ce53f875e3405436128698476c39a",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:3f4c372b740d2659a5628a8279c4836744d4dc3c91e237d9a0f87380286a2428",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---deltalake-boundary-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/deltalake-boundary-only-snapshot.yml",
+      "canonical_digest": "b3:735c112b7794b990143f1260c1d0ae2e78ad032d697c12cd43cb053fdb2c6d07",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:c1093c0a88ae4ddad8ee4296803f38060a7af0475b2c36653fc44c9286a78473",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---gix-boundary-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/gix-boundary-only-snapshot.yml",
+      "canonical_digest": "b3:5a9e98f3b3c9c35ceee492fa7417200cd9bf8f98674e9abd5ee1aa5c106c2060",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:ae2b5ea0f07328c6ff221020433518b44d3834cd17e172a10595ab5c473dda8b",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---gix-read-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/gix-read-only-snapshot.yml",
+      "canonical_digest": "b3:d1b0b4b6879287985de96b73ca769b6122f44eaf98115a078f2574dfaacbfff1",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:c9683a61abaa2ceca86edac9564f610513248c99ce67e61061eac3fe7393fcc6",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---model-no-direct-authority-write-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/model-no-direct-authority-write-snapshot.yml",
+      "canonical_digest": "b3:1caa8f0e74a0ae6080822064f4020f52de08a2d01c9693a9f0399dc0a5853206",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:98521ddacafc489fe87e1b5fd8faa5f62e14507c8a942d3b862970beef32a637",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---model-no-legacy-control-plane-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/model-no-legacy-control-plane-snapshot.yml",
+      "canonical_digest": "b3:bcae7ed3f5e3dd9c629d7101b44f0bb55d29c1b2f7897055f1e1e03cfaddfd03",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:1552849c7836677d7f929c65f609e81db48f0625c81b5dd526e7c442dfe3747e",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---model-no-positional-cbef-construction-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/model-no-positional-cbef-construction-snapshot.yml",
+      "canonical_digest": "b3:6e97976c5734b3284fa4c6d9f1682cb42ed991dd6eeb22faa56b2035834e7fac",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:4e5e78dfb1b35832c0336f8efb8eb6dfb84d37b059d81ef0690de617dafe3ff6",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---model-no-raw-governed-code-or-flag-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/model-no-raw-governed-code-or-flag-snapshot.yml",
+      "canonical_digest": "b3:563ceb95fae5baf3de55724eb7cef852bf91f151eaa945d3287db62002232abe",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:ce4180c381860f07ddd6f7d62b8a4ab805141adcd1c908e711a89638fe5ff188",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---no-framework-internal-contract-imports-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/no-framework-internal-contract-imports-snapshot.yml",
+      "canonical_digest": "b3:6ac9c40c6b79beb3573d10b2ccd8c06610fe65f6696177e7f5e98a46683d6238",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:d0a1400ad8369c970fb0286fd625a9f424845856f45588cca3ad773b68275afe",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---no-pyrefly-public-api-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/no-pyrefly-public-api-snapshot.yml",
+      "canonical_digest": "b3:76765028a3142ab1dc719a7c2f0483a8d22cd6bc1738445c19634b2cdb0d9118",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:84652f775cc376a852df217c35f98078bf2cc3c22baa70a9789857ef5e65cda2",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---no-source-text-policy-oracles-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/no-source-text-policy-oracles-snapshot.yml",
+      "canonical_digest": "b3:7b1bca3b870ea2bc90b6a743c41f3e93be803b31e438261f43a51fb733e0f175",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:2f05616273228aeccf50e23ca6d4ca937bb0f34bb67c767c0ff393dbc3d7386a",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---provider-observation-boundary-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/provider-observation-boundary-only-snapshot.yml",
+      "canonical_digest": "b3:3b883330a5d103867c6c27fb08684bd8dda3168b7434bdbff739a7bef10cca79",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:306bd57146f2cf1daabff66c5e78e68a25cc2969193020efc50eb454466e5437",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---ruff-boundary-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/ruff-boundary-only-snapshot.yml",
+      "canonical_digest": "b3:0f19d2cf9dd22331016404cfa8f022e66a35ad190ea1af8b6d42db6a36ac178b",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:ba89155466ddf8e700b1d09df9217dc68d95fd6a6c4e31c72b04ad82cb07fa29",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---serving-leased-providers-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/serving-leased-providers-only-snapshot.yml",
+      "canonical_digest": "b3:23c47b3b1a5577d5243c36a895093d975842ba964e382054ff8549f47cb192ac",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:da6292b662b6ecd2f03e2369908e9982ce4fe7fa1b6bfd08322604110c4ede6b",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---serving-projections-generated-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/serving-projections-generated-only-snapshot.yml",
+      "canonical_digest": "b3:1d00455fd9d01a711e4faf04e6726d4905808b0dc77efed2651f432bc828f8bc",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:957b42f6a4f38e7fc37f838c2f6eccd74b84c57df477cc7c8d19bce545ffcb4c",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests---snapshots---tree-sitter-boundary-only-snapshot",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/__snapshots__/tree-sitter-boundary-only-snapshot.yml",
+      "canonical_digest": "b3:cb00651e7238a8311f053d544ba12214289025dfb1201c7825c3bb908c444527",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:36db79789906fa9f960553179a34b80bc51ab9008754ef687858469099b77f64",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests-adapter-channel-factory-only-test",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/adapter-channel-factory-only-test.yml",
+      "canonical_digest": "b3:8defeeadfb672ab07c19448ca3b6d4e96b784204953d57cb9afd26e91626ae6c",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:b42f2f4c45f33743df5f900d8aaa4990cb10bf0840a550650dbb73609f8e9a90",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests-adapter-server-presentation-only-test",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/adapter-server-presentation-only-test.yml",
+      "canonical_digest": "b3:9f82ae958c54c180e1fe1e132fc8e516bd8a37517267dca99fe0129f6f0145f4",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:db06915de98f56a318e2da4c3867274eaf0808a8192e4ffc0d45d57ff2125092",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests-adapter-settings-process-owner-only-test",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/adapter-settings-process-owner-only-test.yml",
+      "canonical_digest": "b3:f37bbc3c48e2c15f274fbe2fd269bfe61ab69435a1084e16da0ad1091dce6663",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:a1b48c4384ccda762eb613e08c5f85b768e649a06d9dd66dc89154b5c60b6d26",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rule-tests-adapter-stdio-stdout-protocol-only-test",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/adapter-stdio-stdout-protocol-only-test.yml",
+      "canonical_digest": "b3:8f2645f15bf3dce0034199c0d1f184b1b3d5630ba6a20d38f5236b92ce0f7441",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:9a9cf08d46f6cf394628477ecf05f1660e5f55e53bf3b9fd8e5ff25d5bd60940",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
       "artifact_id": "evidence:rule-tests-authoritative-source-read-boundary-test",
       "artifact_kind": "evidence",
       "authority_path": "rule-tests/authoritative-source-read-boundary-test.yml",
@@ -2464,6 +3039,29 @@
       "version": "1.0"
     },
     {
+      "artifact_id": "evidence:rule-tests-no-source-text-policy-oracles-test",
+      "artifact_kind": "evidence",
+      "authority_path": "rule-tests/no-source-text-policy-oracles-test.yml",
+      "canonical_digest": "b3:b8a8a895bcf42f76440d562fdfe555f4467020f31946244b00a46f0c6b2386a0",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rule-tests",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:27c4e8e8132339f85ffb1b1b36f90fef14b35be7d6520fad3b31c0b5ba52f73f",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
       "artifact_id": "evidence:rule-tests-provider-observation-boundary-only-test",
       "artifact_kind": "evidence",
       "authority_path": "rule-tests/provider-observation-boundary-only-test.yml",
@@ -2579,10 +3177,10 @@
       "version": "1.0"
     },
     {
-      "artifact_id": "evidence:rules-authoritative-source-read-boundary",
+      "artifact_id": "evidence:rules-adapter-channel-factory-only",
       "artifact_kind": "evidence",
-      "authority_path": "rules/authoritative-source-read-boundary.yml",
-      "canonical_digest": "b3:f83de7b310db42ace27ca4f64d683e5075dbb93d3f5af5d36ffe26a424843ab5",
+      "authority_path": "rules/adapter-channel-factory-only.yml",
+      "canonical_digest": "b3:413b41bd42f337eb0c7699a55f7c2221a0ed5b0288b7195a0638ba5fdaa1d421",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rules",
@@ -2596,7 +3194,99 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:15bee5434968f4f2ca68e2e07dd27d04c1fdf95717d8d06d9d9f34a25a7888d9",
+      "source_digest": "b3:0204eb3e487ebc896f3bcd5eb51e52b6956cf4e0e2d7b9e07b55c364df0e3a3c",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rules-adapter-server-presentation-only",
+      "artifact_kind": "evidence",
+      "authority_path": "rules/adapter-server-presentation-only.yml",
+      "canonical_digest": "b3:9da6ebdd844ef46f0f3fc2a54d45a9e42699090f52813a38db6e9f6574737805",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rules",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:ee18cc39aa649b664295617abefcd2cef6cd80f9b105990f6e75be07adfb7c22",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rules-adapter-settings-process-owner-only",
+      "artifact_kind": "evidence",
+      "authority_path": "rules/adapter-settings-process-owner-only.yml",
+      "canonical_digest": "b3:90e470d0f6cbff61eee88209eeb53eda3e3c6227434535086ccbef63c58abcb5",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rules",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:b1b11f8b69f2d0f5392ea3772e1a95b6ef62b1c937d53ce9a04a5c7b121bcf15",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rules-adapter-stdio-stdout-protocol-only",
+      "artifact_kind": "evidence",
+      "authority_path": "rules/adapter-stdio-stdout-protocol-only.yml",
+      "canonical_digest": "b3:1edcbd0985ba51565d700869b2d84fbdaed9d31f8a8b6560f398fc0af3e1ac08",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rules",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:8f6c73d4b8a165af1ec5ea347dae7b0cbad4978973e62e00010c5e79ee1de1c8",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rules-authoritative-source-read-boundary",
+      "artifact_kind": "evidence",
+      "authority_path": "rules/authoritative-source-read-boundary.yml",
+      "canonical_digest": "b3:aea502861406b9ef08c2c9210ee03c9675531dec1c44ee8e776f3f5e9c8e7f8d",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rules",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:b57319c8fff9ac24cfe7b0b4c11cd890826344975e2f5e26a7811a138d690853",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -2832,10 +3522,10 @@
       "version": "1.0"
     },
     {
-      "artifact_id": "evidence:rules-provider-observation-boundary-only",
+      "artifact_id": "evidence:rules-no-source-text-policy-oracles",
       "artifact_kind": "evidence",
-      "authority_path": "rules/provider-observation-boundary-only.yml",
-      "canonical_digest": "b3:eea4906b31e8cb5622aa4212917519b6503519c4108963c6352047ed169ad773",
+      "authority_path": "rules/no-source-text-policy-oracles.yml",
+      "canonical_digest": "b3:ef549aa8b1c48d918dc2a19ecc81e9ba1c4a8482839ca032eaa8b3a4db2f0907",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rules",
@@ -2849,7 +3539,30 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:a29a77c39c364f189e45eee1ea839ebe30b472ca0e35c1b15be8f5371dda2d7a",
+      "source_digest": "b3:b1bb109e65664f61fce9fac4ab5e65ff22052cb73fe42a783a8bad0963e34c1e",
+      "source_role": "evidence-authority",
+      "status": "accepted",
+      "version": "1.0"
+    },
+    {
+      "artifact_id": "evidence:rules-provider-observation-boundary-only",
+      "artifact_kind": "evidence",
+      "authority_path": "rules/provider-observation-boundary-only.yml",
+      "canonical_digest": "b3:0775f2550185f9c89c2872260d24527cf88974c772e2da66069604f368895baf",
+      "compatible_suite_major": 1,
+      "compilation_unit": "governance",
+      "owner": "ast-grep-rules",
+      "projection_profile": "yaml-ac-g-53-v1",
+      "provenance": [
+        "accepted-release-census",
+        "current-stable-source-bytes",
+        "detached-family-native-semantic-projection"
+      ],
+      "release_status": "unreleased",
+      "resource_profile": {
+        "profile": "aggregate-governance-bounded-v1"
+      },
+      "source_digest": "b3:26f263081ae7a9a5e31555fa7e72cbfe4bb4a7cff15a778f89c186cd28dd73de",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -2950,7 +3663,7 @@
   "compatible_suite_major": 1,
   "families": [
     {
-      "action_key": "b3:940e5e620bc7eb1b3c25c361245c470087f0ac01ab754723af1c57b7ba2a93cb",
+      "action_key": "b3:89bf7a7cdbe372542c0108fb413814db197cfc829ac6d96d454c05cfd907dedc",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -2985,7 +3698,7 @@
       }
     },
     {
-      "action_key": "b3:b2752875e460efc06bc93fc3c1d668c71fba79eeb09122bc8af405b74c0e1d42",
+      "action_key": "b3:489993a9f61dba889d919b055182f3dcf41012fe8c3aab42549c288228cc5fa6",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",
@@ -3017,7 +3730,7 @@
       }
     },
     {
-      "action_key": "b3:2fa8bb55d7bbebfa1dc07971b4b32056f6767331f880fb4557420061c861d400",
+      "action_key": "b3:d9e518a827acbe7a21fffcba3ec295c690bdccf15b297213105c5d6bba167f43",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -3050,7 +3763,7 @@
       }
     },
     {
-      "action_key": "b3:1a4570048c23eed6d14f5c709d8b11604b569711da532efd10a35da9f58da1cd",
+      "action_key": "b3:713d9446d120f3c6da3465c3657b7545f2ae6fa2feb4b97e28173e76acc36088",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",

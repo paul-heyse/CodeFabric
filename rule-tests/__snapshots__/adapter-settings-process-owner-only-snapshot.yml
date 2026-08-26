@@ -1,0 +1,18 @@
+id: adapter-settings-process-owner-only
+snapshots:
+  ? |
+    def lifespan():
+        return Settings()
+  : labels:
+    - source: Settings()
+      style: primary
+      start: 27
+      end: 37
+  ? |
+    def target():
+        return os.environ["CODEFABRIC_DAEMON_TARGET"]
+  : labels:
+    - source: os.environ["CODEFABRIC_DAEMON_TARGET"]
+      style: primary
+      start: 25
+      end: 63

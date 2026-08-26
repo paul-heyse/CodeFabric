@@ -1,0 +1,11 @@
+id: deltalake-boundary-only
+snapshots:
+  ? |
+    fn transaction() {
+        let _value = deltalake::kernel::Transaction::new("app".to_owned(), 1);
+    }
+  : labels:
+    - source: deltalake::kernel::Transaction::new
+      style: primary
+      start: 36
+      end: 71

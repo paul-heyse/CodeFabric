@@ -1,0 +1,27 @@
+id: model-no-raw-governed-code-or-flag
+snapshots:
+  ? |
+    const OCCURRENCE_SYNTAX: u16 = 30;
+  : labels:
+    - source: 'const OCCURRENCE_SYNTAX: u16 = 30;'
+      style: primary
+      start: 0
+      end: 34
+  ? |
+    fn row() -> Input {
+        Input { occurrence_family_code: 30 }
+    }
+  : labels:
+    - source: 'occurrence_family_code: 30'
+      style: primary
+      start: 32
+      end: 58
+  ? |
+    fn row() -> SyntaxDetailRow {
+        SyntaxDetailRow { provider_node_flags: 1 << 4 }
+    }
+  : labels:
+    - source: 'provider_node_flags: 1 << 4'
+      style: primary
+      start: 52
+      end: 79

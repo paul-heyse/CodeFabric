@@ -1331,7 +1331,7 @@ maintenance_schedule = "daily-idle"
     }
 
     #[test]
-    fn wp67_structural_acceptance_admin_protocol_matches_schema_examples() {
+    fn wp67_structural_acceptance() {
         let schema: serde_json::Value = serde_json::from_slice(include_bytes!(
             "../contracts/rpc/admin-line-protocol.schema.json"
         ))
@@ -1365,8 +1365,6 @@ maintenance_schedule = "daily-idle"
                 "invalid schema example was accepted by Rust: {value}"
             );
         }
-        let forbidden_inline_peer_check = [".peer", "_cred()"].concat();
-        assert!(!include_str!("daemon.rs").contains(&forbidden_inline_peer_check));
     }
 
     #[test]

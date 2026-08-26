@@ -227,6 +227,10 @@ git-parity-check:
 [group('test')]
 wave7-integration-check: git-parity-check rebuild-equivalence-check
 
+[doc("Run every released Wave-2 through Wave-7 integration gate")]
+[group('test')]
+wave-acceptance-check: wave2-integration-check wave3-integration-check wave4-integration-check wave5-integration-check wave6-integration-check wave7-integration-check
+
 [doc("Validate that a vacuum dry-run cannot include retained snapshot files")]
 [group('test')]
 vacuum-dry-run-check:
@@ -342,7 +346,7 @@ model-explain target:
 [doc("Run repository structural governance rules")]
 [group('gate')]
 governance-scan: public-error-closure-check
-    ast-grep test --skip-snapshot-tests
+    ast-grep test
     ast-grep scan \
       --globs '!contracts/generated/**' \
       --globs '!src/generated/**' \
@@ -495,12 +499,21 @@ oracle-substance-check:
     @just packet-oracle-check WP54
     @just packet-oracle-check WP55
     @just packet-oracle-check WP56
+    @just packet-oracle-check WP67
+    @just packet-oracle-check WP68
     @just packet-oracle-check WP69
+    @just packet-oracle-check WP70
 
 [doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
 [group('gate')]
 plan-dependency-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py dependency-check
+
+[doc("Execute every released negative fixture and cited assurance registry")]
+[group('gate')]
+released-fixture-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_released_fixture_verifier.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/released_fixture_verifier.py
 
 [doc("Validate purpose-classified hash APIs and the semantic fingerprint registry")]
 [group('gate')]
@@ -550,7 +563,7 @@ model-handoff-check:
 
 [doc("Run model-derived structural, artifact, provenance, and zero-state governance")]
 [group('gate')]
-governance: governance-scan model-design-contract-check model-assurance-check model-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check
+governance: governance-scan model-design-contract-check model-assurance-check model-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check released-fixture-check oracle-substance-check plan-dependency-check design-principle-traceability-check alignment-detector-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
@@ -558,7 +571,7 @@ ci-fast: root-ci-fast extractor-ci-fast sidecar-ci-fast adapter-ci-fast governan
 
 [doc("ci-fast plus policy, the ci nextest profile, and snapshot review state")]
 [group('gate')]
-ci-pr: ci-fast policy sidecar-policy
+ci-pr: ci-fast policy sidecar-policy wave-acceptance-check
     cargo nextest run -P ci
     cargo test --doc
     cargo insta pending-snapshots

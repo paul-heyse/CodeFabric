@@ -10,22 +10,33 @@ ignores:
   - src/daemon.rs
   - src/identity.rs
   - src/operational_store.rs
-  # Released golden artifacts and result artifacts are contract/storage boundaries, not source.
-  - src/golden_corpus.rs
-  - src/query_service.rs
   - src/contracts/**/*.rs
   - src/bin/codefabric_model/**/*.rs
 rule:
-  any:
-    - pattern: std::fs::read($PATH)
-    - pattern: fs::read($PATH)
-    - pattern: tokio::fs::read($PATH)
-    - pattern: std::fs::read_to_string($PATH)
-    - pattern: fs::read_to_string($PATH)
-    - pattern: tokio::fs::read_to_string($PATH)
-    - pattern: std::fs::File::open($PATH)
-    - pattern: fs::File::open($PATH)
-    - pattern: File::open($PATH)
-    - pattern: std::fs::OpenOptions::new()
-    - pattern: fs::OpenOptions::new()
-    - pattern: OpenOptions::new()
+  all:
+    - any:
+        - pattern: std::fs::read($PATH)
+        - pattern: fs::read($PATH)
+        - pattern: tokio::fs::read($PATH)
+        - pattern: std::fs::read_to_string($PATH)
+        - pattern: fs::read_to_string($PATH)
+        - pattern: tokio::fs::read_to_string($PATH)
+        - pattern: std::fs::File::open($PATH)
+        - pattern: fs::File::open($PATH)
+        - pattern: File::open($PATH)
+        - pattern: std::fs::OpenOptions::new()
+        - pattern: fs::OpenOptions::new()
+        - pattern: OpenOptions::new()
+    - not:
+        inside:
+          any:
+            # The golden corpus is an owner-accepted contract input, never workspace source.
+            - pattern: 'fn read($PATH: &Path) -> Result<Vec<u8>, CorpusError> { $$$BODY }'
+            # ResultArtifactStore owns private daemon artifacts below its configured state root.
+            - all:
+                - kind: impl_item
+                - has:
+                    kind: type_identifier
+                    regex: '^ResultArtifactStore$'
+                    stopBy: end
+          stopBy: end

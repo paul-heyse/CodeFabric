@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:61f3562945bfb6608b0cf9462c599692d3bd15142301f78b4b1683a60ac4e06c"
+canonical_digest: "b3:83a1495e3c92d14d93410d5f1fa3e57216ca409682ad1003e8081112ad9601e4"
 digest_projection: yaml-ac-g-53-v1
 generator_revision: codefabric-contracts/1.0
 records:
@@ -49,8 +49,50 @@ records:
     production_exposable: false
     expected_invariants: [effective-content-validated, active-snapshot-unchanged]
     scenarios: [overlay-three-snapshot-rebase]
+  - code: MUTATION_AFTER_DELETE_COMMIT
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [owner-replacement-recoverable, no-mixed-owner-generation]
+    scenarios: [owner-replacement-recovery]
+  - code: MUTATION_BEFORE_APPEND_COMMIT
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [owner-replacement-recoverable, delete-commit-observable]
+    scenarios: [owner-replacement-recovery]
+  - code: PUBLICATION_AFTER_STAGING
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [staging-is-not-current, active-pointer-unchanged]
+    scenarios: [publication-restart-recovery]
+  - code: PUBLICATION_AFTER_OWNER_WRITES
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [owner-writes-not-current, active-pointer-unchanged]
+    scenarios: [publication-restart-recovery]
+  - code: PUBLICATION_AFTER_MANIFEST_WRITE
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [manifest-without-pointer-invisible, active-pointer-unchanged]
+    scenarios: [publication-restart-recovery]
+  - code: PUBLICATION_BEFORE_POINTER_COMMIT
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [candidate-validated-before-activation, active-pointer-unchanged]
+    scenarios: [publication-restart-recovery]
+  - code: PUBLICATION_AFTER_POINTER_COMMIT
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [committed-pointer-recoverable, publication-idempotent]
+    scenarios: [publication-restart-recovery]
 owner_acceptance:
   approver: lifecycle-owner
   accepted_at: "2026-08-21"
-  construction_rule: Append-only deterministic Wave-2 source capture and Wave-3 overlay-rebase durability seams
+  construction_rule: Append-only deterministic source, mutation, publication, and overlay durability seams
   source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

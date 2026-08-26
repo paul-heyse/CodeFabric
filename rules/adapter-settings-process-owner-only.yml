@@ -1,0 +1,15 @@
+id: adapter-settings-process-owner-only
+language: Python
+severity: error
+message: Adapter settings must be loaded only by the process-lifetime settings owner.
+note: Use process_settings(); do not re-read environment state in server, entrypoint, or channel code.
+files:
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/server.py
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/__main__.py
+  - codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/channel.py
+rule:
+  any:
+    - pattern: Settings($$$ARGS)
+    - pattern: os.getenv($$$ARGS)
+    - pattern: os.environ[$KEY]
+    - pattern: os.environ.get($$$ARGS)

@@ -865,13 +865,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn model_proto_plan_contains_no_wave0_filename_dispatch() {
-        let source = include_str!("../../../tooling/model/proto_driver.py");
-        assert!(!source.contains("wave0"));
-        assert!(!source.contains("SOURCE_RELATIVE"));
-    }
-
-    #[test]
     fn model_proto_rejects_import_escape_duplicate_output_and_package_collision() {
         let duplicate = vec![
             ExternalOutputPlan {
@@ -894,7 +887,6 @@ mod tests {
     #[test]
     fn model_proto_has_one_descriptor_compiler_identity() {
         assert_eq!(PROTOCOL_VERSION, "codefabric-external-proto-driver-v2");
-        assert!(include_str!("../../../tooling/proto/generate.rs").contains("compile_fds"));
     }
 
     #[test]
@@ -906,10 +898,6 @@ mod tests {
 
     #[test]
     fn model_proto_provenance_never_serializes_host_specific_executable_paths() {
-        let source = include_str!("proto_driver.rs");
-        assert!(!source.contains("\"binary_path\""));
-        assert!(source.contains("\"binary_digest\""));
-
         let identity = ProtoPythonToolIdentity {
             python_path: "/host-specific/venv/python".to_owned(),
             python_digest: "b3:python".to_owned(),

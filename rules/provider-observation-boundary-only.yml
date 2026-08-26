@@ -5,7 +5,12 @@ message: provider execution may emit only bounded observation streams, never mut
 note: Route provider output through ProviderEventSink and fact_ingest observation channels.
 files:
   - src/provider_runtime.rs
-  - src/providers/**/*.rs
+  - src/tree_sitter_adapter.rs
+  - src/ruff_adapter.rs
+  - src/rustc_service.rs
+  - src/source_syntax.rs
+  - rustc-extractor/src/**/*.rs
+  - pyrefly-sidecar/src/**/*.rs
 rule:
   any:
     - all:

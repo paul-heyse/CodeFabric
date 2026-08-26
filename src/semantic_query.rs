@@ -2219,23 +2219,6 @@ mod tests {
                 && !block.canonical_order.is_empty()
                 && !block.coverage_effects.is_empty()
         }));
-        let source = include_str!("semantic_query.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap();
-        for legacy in [
-            "execution_state: &'static str",
-            "availability_state: &'static str",
-            "completeness_state: &'static str",
-            "freshness_state: &'static str",
-            "limit_state: &'static str",
-            "dependency_state: &'static str",
-        ] {
-            assert!(
-                !source.contains(legacy),
-                "legacy state field remains: {legacy}"
-            );
-        }
     }
 
     #[test]

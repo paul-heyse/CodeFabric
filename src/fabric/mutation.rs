@@ -152,6 +152,15 @@ pub enum MutationFaultPoint {
 impl MutationFaultPoint {
     /// Closed fault registry used by recovery tests.
     pub const ALL: [Self; 2] = [Self::AfterDeleteCommit, Self::BeforeAppendCommit];
+
+    /// Stable registry code for this executable injection seam.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::AfterDeleteCommit => "MUTATION_AFTER_DELETE_COMMIT",
+            Self::BeforeAppendCommit => "MUTATION_BEFORE_APPEND_COMMIT",
+        }
+    }
 }
 
 /// Exact committed result for publication-table assembly.
@@ -1228,9 +1237,6 @@ mod tests {
                 .await,
             Err(FabricError::TableInvariant { .. } | FabricError::MutationConflict(_))
         ));
-        let source = include_str!("mutation.rs");
-        let forbidden = ["blind", "retry"].join("_");
-        assert!(!source.contains(&forbidden));
     }
 
     #[tokio::test]
@@ -1282,16 +1288,5 @@ mod tests {
         wp21_behavioral_acceptance();
         wp21_negative_zero_state();
         wp21_operational_acceptance();
-    }
-
-    #[test]
-    fn wp05_structural_coordinator_retry_ownership() {
-        let source = include_str!("mutation.rs");
-        let retry_configuration = [".with_max_", "retries(0)"].concat();
-        assert_eq!(source.matches(&retry_configuration).count(), 1);
-        assert!(source.contains(".with_application_transaction(Transaction::new("));
-        assert!(source.contains("transaction_version("));
-        assert!(source.contains("reconcile_prepared("));
-        assert!(!source.contains(&["blind", "retry"].join("_")));
     }
 }
