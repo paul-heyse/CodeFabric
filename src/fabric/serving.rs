@@ -1918,6 +1918,15 @@ mod tests {
         source_generation: u64,
         entity_rows: usize,
     ) -> Arc<ServingSnapshotCandidate> {
+        candidate_with_source_trust(publication, source_generation, entity_rows, "CURRENT")
+    }
+
+    fn candidate_with_source_trust(
+        publication: [u8; 16],
+        source_generation: u64,
+        entity_rows: usize,
+        source_trust_state: &str,
+    ) -> Arc<ServingSnapshotCandidate> {
         let row_generation = i64::try_from(source_generation).unwrap();
         let batches = std::iter::once(11)
             .chain(
@@ -1943,10 +1952,9 @@ mod tests {
             row_generation,
             vec![CONTEXT],
         ));
-        Arc::new(
-            ServingSnapshotCandidate::build(snapshot_body(source_generation), catalog, &[])
-                .unwrap(),
-        )
+        let mut body = snapshot_body(source_generation);
+        body.source.source_trust_state = source_trust_state.into();
+        Arc::new(ServingSnapshotCandidate::build(body, catalog, &[]).unwrap())
     }
 
     fn candidate_from_effective_batches(
@@ -2250,6 +2258,25 @@ mod tests {
         prove_serving_rebuild_equivalence(&incremental_session.session, &rebuilt_session.session)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn wp72_rejects_either_noncurrent_comparison_input() {
+        let current = comparison_session(candidate_with_source_trust([0x71; 16], 1, 1, "CURRENT"));
+        let noncurrent =
+            comparison_session(candidate_with_source_trust([0x72; 16], 1, 1, "UNKNOWN"));
+
+        for (left, right) in [
+            (&current.session, &noncurrent.session),
+            (&noncurrent.session, &current.session),
+        ] {
+            assert!(matches!(
+                prove_serving_rebuild_equivalence(left, right).await,
+                Err(crate::lifecycle::LifecycleError::ComparisonDomainMismatch(
+                    _
+                ))
+            ));
+        }
     }
 
     #[tokio::test]
