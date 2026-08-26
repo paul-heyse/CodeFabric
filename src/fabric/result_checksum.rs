@@ -167,7 +167,7 @@ mod tests {
         MapArray, RecordBatchOptions, StringArray, StructArray,
     };
     use arrow_buffer::OffsetBuffer;
-    use arrow_schema::Field;
+    use arrow_schema::{Field, UnionFields, UnionMode};
 
     use super::*;
 
@@ -176,6 +176,24 @@ mod tests {
     fn int_batch(values: Vec<i64>) -> RecordBatch {
         RecordBatch::try_from_iter([("value", Arc::new(Int64Array::from(values)) as ArrayRef)])
             .unwrap()
+    }
+
+    fn unordered_map_type() -> DataType {
+        let entries = DataType::Struct(
+            vec![
+                Arc::new(Field::new("keys", DataType::Utf8, false)),
+                Arc::new(Field::new("values", DataType::Int64, true)),
+            ]
+            .into(),
+        );
+        DataType::Map(Arc::new(Field::new("entries", entries, false)), false)
+    }
+
+    fn assert_rejects_nested_unordered_map(data_type: &DataType) {
+        assert!(matches!(
+            validate_data_type(data_type),
+            Err(ResultChecksumError::UnorderedMap)
+        ));
     }
 
     #[test]
@@ -380,6 +398,65 @@ mod tests {
                 .row_count,
             2
         );
+
+        assert_rejects_nested_unordered_map(&DataType::Struct(
+            vec![Arc::new(Field::new("nested", unordered_map_type(), true))].into(),
+        ));
+        assert_rejects_nested_unordered_map(&DataType::Union(
+            UnionFields::try_new(
+                vec![0],
+                vec![Arc::new(Field::new("nested", unordered_map_type(), true))],
+            )
+            .unwrap(),
+            UnionMode::Sparse,
+        ));
+        assert_rejects_nested_unordered_map(&DataType::List(Arc::new(Field::new(
+            "nested",
+            unordered_map_type(),
+            true,
+        ))));
+        assert_rejects_nested_unordered_map(&DataType::Dictionary(
+            Box::new(DataType::Int8),
+            Box::new(unordered_map_type()),
+        ));
+
+        let schema_only = result_checksum_v1(empty_schema.as_ref(), &[], LIMIT).unwrap();
+        let exact_schema_limit = schema_only.canonical_schema.len();
+        assert!(result_checksum_v1(empty_schema.as_ref(), &[], exact_schema_limit).is_ok());
+        assert!(matches!(
+            result_checksum_v1(empty_schema.as_ref(), &[], exact_schema_limit - 1),
+            Err(ResultChecksumError::ResourceLimit)
+        ));
+
+        let row_batch = int_batch(vec![1]);
+        let row_schema = row_batch.schema();
+        let row_schema_only = result_checksum_v1(row_schema.as_ref(), &[], LIMIT).unwrap();
+        let converter = RowConverter::new(
+            row_schema
+                .fields()
+                .iter()
+                .map(|field| SortField::new(field.data_type().clone()))
+                .collect(),
+        )
+        .unwrap();
+        let encoded = converter.convert_columns(row_batch.columns()).unwrap();
+        let exact_row_limit = row_schema_only.canonical_schema.len() + encoded.row(0).data().len();
+        assert!(
+            result_checksum_v1(
+                row_schema.as_ref(),
+                std::slice::from_ref(&row_batch),
+                exact_row_limit
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            result_checksum_v1(
+                row_schema.as_ref(),
+                std::slice::from_ref(&row_batch),
+                exact_row_limit - 1,
+            ),
+            Err(ResultChecksumError::ResourceLimit)
+        ));
     }
 
     #[test]
