@@ -18,18 +18,17 @@ use crate::gate_b_candidate::{
     GateBCandidateError, check_candidate_bundle, read_candidate_artifact, verify_candidate_bundle,
 };
 use crate::golden_corpus::{
-    CorpusError, CorpusManifest, CorpusStatus, CorpusSupersedes, CoverageProfile,
-    GATE_B_PROFILE_ID, LEGACY_CORPUS_ID, LEGACY_CORPUS_VERSION, OwnerAcceptance,
-    RELEASED_CORPUS_ID, RELEASED_CORPUS_VERSION, compute_required_profile,
-    execute_gate_b_artifacts, validate_profile,
+    CORPUS_INDEX_ARTIFACT_ID, CORPUS_INDEX_PATH, CorpusError, CorpusIndex, CorpusIndexEntry,
+    CorpusManifest, CorpusStatus, CorpusSupersedes, CoverageProfile, GATE_B_PROFILE_ID,
+    LEGACY_CORPUS_DIRECTORY, LEGACY_CORPUS_ID, LEGACY_CORPUS_VERSION, OwnerAcceptance,
+    RELEASED_CORPUS_DIRECTORY, RELEASED_CORPUS_ID, RELEASED_CORPUS_VERSION,
+    compute_required_profile, current_released_corpus_root, execute_gate_b_artifacts,
+    validate_profile,
 };
 
-pub const LEGACY_CORPUS_DIRECTORY: &str = "tests/golden/codefabric-golden-v1";
-pub const RELEASED_CORPUS_DIRECTORY: &str = "tests/golden/codefabric-golden-v2";
 pub const CANDIDATE_DIRECTORY: &str =
     "tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1";
 pub const ACCEPTANCE_ARTIFACT: &str = "tests/golden/codefabric-golden-v2/owner-acceptance.json";
-pub const CORPUS_INDEX: &str = "tests/golden/corpus-index.json";
 pub const AUTHORITY_REGISTRY: &str = "tests/golden/acceptance-authorities/gate-b-owner-v1.json";
 
 const CANDIDATE_FILE: &str = "candidate.json";
@@ -38,7 +37,6 @@ const CANDIDATE_DIGEST_FILE: &str = "candidate-digest.json";
 const EXPECTED_DIFF_FILE: &str = "expected-vs-candidate-diff.json";
 const ACCEPTANCE_FILE: &str = "owner-acceptance.json";
 const MANIFEST_FILE: &str = "corpus-manifest.json";
-const INDEX_ARTIFACT_ID: &str = "codefabric.golden.corpus-index";
 const ACCEPTANCE_ARTIFACT_ID: &str = "codefabric.acceptance.gate-b-v2";
 const EXPECTED_CANDIDATE_ID: &str = "codefabric-golden-v2.0.0-candidate.1";
 const EXPECTED_AUTHORITY_ID: &str = "codefabric.acceptance.gate-b-authority-v1";
@@ -162,32 +160,6 @@ pub struct GateBOwnerAcceptance {
     released_profile_id: String,
     released_profile_digest: String,
     acceptance_digest: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-struct CorpusIndexEntry {
-    corpus_id: String,
-    corpus_version: String,
-    corpus_status: CorpusStatus,
-    path: String,
-    manifest_digest: String,
-    profile_id: String,
-    profile_digest: String,
-    acceptance_digest: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-struct CorpusIndex {
-    schema_version: u16,
-    artifact_id: String,
-    artifact_kind: String,
-    version: String,
-    status: CorpusStatus,
-    current_corpus_id: String,
-    current_corpus_version: String,
-    entries: Vec<CorpusIndexEntry>,
 }
 
 fn invariant(message: impl std::fmt::Display) -> GateBReleaseError {
@@ -486,7 +458,7 @@ fn build_release(
     let legacy_manifest_bytes = read_candidate_artifact(&legacy.join(MANIFEST_FILE))?;
     let index = CorpusIndex {
         schema_version: 1,
-        artifact_id: INDEX_ARTIFACT_ID.to_owned(),
+        artifact_id: CORPUS_INDEX_ARTIFACT_ID.to_owned(),
         artifact_kind: "golden-corpus-index".to_owned(),
         version: "1.0".to_owned(),
         status: CorpusStatus::Released,
@@ -538,7 +510,7 @@ pub fn accept_candidate(
     }
     let candidate_root = repository_root.join(candidate_relative);
     let release_root = repository_root.join(RELEASED_CORPUS_DIRECTORY);
-    let index_path = repository_root.join(CORPUS_INDEX);
+    let index_path = repository_root.join(CORPUS_INDEX_PATH);
     let stage_root = repository_root.join(RELEASE_STAGE);
     if release_root.exists() || index_path.exists() || stage_root.exists() {
         return Err(invariant(
@@ -588,7 +560,7 @@ pub fn verify_release_chain(repository_root: &Path) -> Result<(), GateBReleaseEr
     let corpus_root = repository_root.join(RELEASED_CORPUS_DIRECTORY);
     let acceptance: GateBOwnerAcceptance = decode(&corpus_root.join(ACCEPTANCE_FILE))?;
     let manifest: CorpusManifest = decode(&corpus_root.join(MANIFEST_FILE))?;
-    let index: CorpusIndex = decode(&repository_root.join(CORPUS_INDEX))?;
+    let index: CorpusIndex = decode(&repository_root.join(CORPUS_INDEX_PATH))?;
     let profile = validate_profile(&corpus_root, GATE_B_PROFILE_ID)?;
     let legacy_root = repository_root.join(LEGACY_CORPUS_DIRECTORY);
     let legacy_profile = validate_profile(&legacy_root, GATE_B_PROFILE_ID)?;
@@ -650,7 +622,7 @@ pub fn verify_release_chain(repository_root: &Path) -> Result<(), GateBReleaseEr
         },
     ];
     if index.schema_version != 1
-        || index.artifact_id != INDEX_ARTIFACT_ID
+        || index.artifact_id != CORPUS_INDEX_ARTIFACT_ID
         || index.artifact_kind != "golden-corpus-index"
         || index.version != "1.0"
         || index.status != CorpusStatus::Released
@@ -678,6 +650,9 @@ pub fn verify_release_chain(repository_root: &Path) -> Result<(), GateBReleaseEr
         != 11
     {
         return Err(invariant("released Gate B item census differs"));
+    }
+    if current_released_corpus_root(repository_root)? != corpus_root {
+        return Err(invariant("current corpus resolver differs"));
     }
     Ok(())
 }
@@ -761,6 +736,11 @@ mod tests {
     #[test]
     fn wp76_structural_acceptance() {
         let temporary = fixture_repository();
+        let legacy_manifest_path = temporary
+            .path()
+            .join(LEGACY_CORPUS_DIRECTORY)
+            .join(MANIFEST_FILE);
+        let legacy_manifest_before = read_candidate_artifact(&legacy_manifest_path).unwrap();
         let before = validate_profile(
             &temporary.path().join(LEGACY_CORPUS_DIRECTORY),
             GATE_B_PROFILE_ID,
@@ -779,6 +759,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(before, after);
+        assert_eq!(
+            legacy_manifest_before,
+            read_candidate_artifact(&legacy_manifest_path).unwrap()
+        );
         assert!(valid_digest(&accepted.acceptance_digest));
         verify_release_chain(temporary.path()).unwrap();
     }
@@ -816,7 +800,7 @@ mod tests {
         assert!(verify_release_chain(rejected.path()).is_err());
 
         let missing = accepted_fixture();
-        fs::remove_file(missing.path().join(CORPUS_INDEX)).unwrap();
+        fs::remove_file(missing.path().join(CORPUS_INDEX_PATH)).unwrap();
         assert!(verify_release_chain(missing.path()).is_err());
     }
 
@@ -844,6 +828,6 @@ mod tests {
         let temporary = accepted_fixture();
         verify_release_chain(temporary.path()).unwrap();
         assert!(temporary.path().join(RELEASED_CORPUS_DIRECTORY).is_dir());
-        assert!(temporary.path().join(CORPUS_INDEX).is_file());
+        assert!(temporary.path().join(CORPUS_INDEX_PATH).is_file());
     }
 }

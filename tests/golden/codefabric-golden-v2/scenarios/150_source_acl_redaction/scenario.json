@@ -1,0 +1,1 @@
+{"scenario_id":"150_source_acl_redaction","edits":["redact-source"],"expected_terminal":"CURRENT"}

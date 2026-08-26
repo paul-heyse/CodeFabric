@@ -146,7 +146,8 @@ fn data_fabric_current_reference_routing_contract() {
 #[test]
 fn data_fabric_gate_b_empty_differential() {
     let root = repository_root();
-    let corpus = root.join("tests/golden/codefabric-golden-v1");
+    let corpus = codefabric::golden_corpus::current_released_corpus_root(&root)
+        .expect("resolve owner-accepted current golden corpus");
     let execution = codefabric::golden_corpus::execute_gate_b_artifacts(&corpus)
         .expect("execute all Gate-B fact contracts");
     assert_eq!(execution.artifact_digests.len(), 11);

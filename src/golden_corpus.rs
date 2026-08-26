@@ -21,6 +21,10 @@ pub const LEGACY_CORPUS_VERSION: &str = "1.0";
 pub const RELEASED_CORPUS_ID: &str = "codefabric-golden-v2";
 pub const RELEASED_CORPUS_VERSION: &str = "2.0.0";
 pub const GATE_B_PROFILE_ID: &str = "gate-b-v1";
+pub const LEGACY_CORPUS_DIRECTORY: &str = "tests/golden/codefabric-golden-v1";
+pub const RELEASED_CORPUS_DIRECTORY: &str = "tests/golden/codefabric-golden-v2";
+pub const CORPUS_INDEX_PATH: &str = "tests/golden/corpus-index.json";
+pub(crate) const CORPUS_INDEX_ARTIFACT_ID: &str = "codefabric.golden.corpus-index";
 pub(crate) const REQUIRED_EXPECTED_GROUPS: [&str; 11] = [
     "canonical_tables",
     "diagnostics",
@@ -155,6 +159,32 @@ pub struct OwnerAcceptance {
     pub acceptance_basis: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CorpusIndexEntry {
+    pub(crate) corpus_id: String,
+    pub(crate) corpus_version: String,
+    pub(crate) corpus_status: CorpusStatus,
+    pub(crate) path: String,
+    pub(crate) manifest_digest: String,
+    pub(crate) profile_id: String,
+    pub(crate) profile_digest: String,
+    pub(crate) acceptance_digest: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CorpusIndex {
+    pub(crate) schema_version: u16,
+    pub(crate) artifact_id: String,
+    pub(crate) artifact_kind: String,
+    pub(crate) version: String,
+    pub(crate) status: CorpusStatus,
+    pub(crate) current_corpus_id: String,
+    pub(crate) current_corpus_version: String,
+    pub(crate) entries: Vec<CorpusIndexEntry>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValidatedCoverageProfile {
     pub profile_id: String,
@@ -221,6 +251,71 @@ fn safe_relative(value: &str) -> Result<&Path, CorpusError> {
         )));
     }
     Ok(path)
+}
+
+/// Resolve and validate the immutable corpus selected by the atomic current-version index.
+///
+/// # Errors
+///
+/// Returns an error when the index, current entry, manifest identity, acceptance digest, or
+/// owner-accepted profile differs from the supported released corpus contract.
+pub fn current_released_corpus_root(repository_root: &Path) -> Result<PathBuf, CorpusError> {
+    let index_path = repository_root.join(CORPUS_INDEX_PATH);
+    let index: CorpusIndex = serde_json::from_slice(&read(&index_path)?)
+        .map_err(|error| CorpusError::Manifest(error.to_string()))?;
+    if index.schema_version != 1
+        || index.artifact_id != CORPUS_INDEX_ARTIFACT_ID
+        || index.artifact_kind != "golden-corpus-index"
+        || index.version != "1.0"
+        || index.status != CorpusStatus::Released
+        || index.current_corpus_id != RELEASED_CORPUS_ID
+        || index.current_corpus_version != RELEASED_CORPUS_VERSION
+    {
+        return Err(CorpusError::Invariant(
+            "golden corpus current-version index differs".to_owned(),
+        ));
+    }
+    let current = index
+        .entries
+        .iter()
+        .find(|entry| {
+            entry.corpus_id == index.current_corpus_id
+                && entry.corpus_version == index.current_corpus_version
+        })
+        .ok_or_else(|| CorpusError::Invariant("current corpus index entry is absent".to_owned()))?;
+    if current.corpus_status != CorpusStatus::Released
+        || current.path != RELEASED_CORPUS_DIRECTORY
+        || current.profile_id != GATE_B_PROFILE_ID
+        || !current
+            .acceptance_digest
+            .as_deref()
+            .is_some_and(valid_digest)
+    {
+        return Err(CorpusError::Invariant(
+            "current corpus index entry differs".to_owned(),
+        ));
+    }
+    let corpus_root = repository_root.join(safe_relative(&current.path)?);
+    let manifest_bytes = read(&corpus_root.join("corpus-manifest.json"))?;
+    if crate::integrity::framed_digest(&manifest_bytes) != current.manifest_digest {
+        return Err(CorpusError::Invariant(
+            "current corpus manifest digest differs".to_owned(),
+        ));
+    }
+    let manifest: CorpusManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|error| CorpusError::Manifest(error.to_string()))?;
+    let profile = validate_profile(&corpus_root, &current.profile_id)?;
+    if manifest.corpus_id != current.corpus_id
+        || manifest.corpus_version != current.corpus_version
+        || manifest.corpus_status != current.corpus_status
+        || manifest.acceptance_digest != current.acceptance_digest
+        || profile.canonical_digest != current.profile_digest
+    {
+        return Err(CorpusError::Invariant(
+            "current corpus manifest and index entry differ".to_owned(),
+        ));
+    }
+    Ok(corpus_root)
 }
 
 fn collect_files(

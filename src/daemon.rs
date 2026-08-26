@@ -22,7 +22,7 @@ use crate::coordinator::{
     persisted_workspace_health,
 };
 use crate::fabric::{CommonRepositoryRecord, FabricError, bootstrap_workspace_with_repository};
-use crate::golden_corpus::{CorpusError, core_source_v1_coverage};
+use crate::golden_corpus::{CorpusError, core_source_v1_coverage, current_released_corpus_root};
 use crate::identity::{IdentityDomain, encode_public_id};
 use crate::operational_store::{OperationalReaderFactory, OperationalStore, OperationalStoreError};
 use crate::query_service::{
@@ -982,9 +982,8 @@ pub(crate) async fn serve_with_query_backend(
     let query_token = query_capability_token(&config.static_config)?;
     let query_authorization = QueryAuthorization::new(&query_token, claims.into_values().collect())
         .map_err(|status| DaemonError::Config(status.to_string()))?;
-    let coverage = core_source_v1_coverage(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/codefabric-golden-v1"),
-    )?;
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let coverage = core_source_v1_coverage(&current_released_corpus_root(repository_root)?)?;
     let result_root = config.static_config.state_root.join("query-results");
     let query_service = ProductionQueryService::new(
         query_backend,

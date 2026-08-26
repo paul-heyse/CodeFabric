@@ -26,7 +26,7 @@
   },
   "families": [
     {
-      "action_key": "b3:f16181e2411307debc64886ecbe9bda13bfe6192ae0041f444fc263b314ad220",
+      "action_key": "b3:d2fa7384a60358de613a1e6214219ce39f4c18ca57bc79aec8d6cd409d324b2d",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
