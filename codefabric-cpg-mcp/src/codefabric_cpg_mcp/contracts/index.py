@@ -112,7 +112,12 @@ def model_artifact_index_bytes() -> bytes:
 def model_artifact_index() -> ModelArtifactIndex:
     """Validate canonical bytes and decode the closed model once."""
 
-    resource = model_artifact_index_bytes()
+    return decode_model_artifact_index(model_artifact_index_bytes())
+
+
+def decode_model_artifact_index(resource: bytes) -> ModelArtifactIndex:
+    """Decode exact canonical bytes through the one Rust/Python index contract."""
+
     if canonicalize_json(resource) != resource:
         raise ValueError("model artifact index resource is not canonical JSON")
     index = _MODEL_INDEX_ADAPTER.validate_json(resource, strict=True)

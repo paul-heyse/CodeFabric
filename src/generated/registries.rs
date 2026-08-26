@@ -20,6 +20,144 @@ pub struct FlagEntry {
     pub slug: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CpgdFeatureMask(u64);
+impl CpgdFeatureMask {
+    pub const NONE: Self = Self(0);
+    pub const QUERY_RESUME: Self = Self(0x0000000000000001);
+    pub const RESULT_RESOURCES: Self = Self(0x0000000000000002);
+    pub const ZSTD_PAYLOADS: Self = Self(0x0000000000000004);
+    pub const TRACE_CONTEXT: Self = Self(0x0000000000000008);
+    pub const SUPPORTED: Self = Self(0x000000000000000f);
+    pub const REQUIRED: Self = Self(0x0000000000000001);
+    #[must_use]
+    pub const fn from_wire(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub const fn missing_from(self, available: Self) -> Self {
+        Self(self.0 & !available.0)
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProviderFeatureMask(u64);
+impl ProviderFeatureMask {
+    pub const NONE: Self = Self(0);
+    pub const ACCEPTED_HANDLE_EVENTS: Self = Self(0x0000000000010000);
+    pub const CREDIT_CONTROL: Self = Self(0x0000000000020000);
+    pub const SUPPORTED: Self = Self(0x0000000000030000);
+    pub const REQUIRED: Self = Self(0x0000000000030000);
+    #[must_use]
+    pub const fn from_wire(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub const fn missing_from(self, available: Self) -> Self {
+        Self(self.0 & !available.0)
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PyreflyFeatureMask(u64);
+impl PyreflyFeatureMask {
+    pub const NONE: Self = Self(0);
+    pub const ARROW_IPC_OBSERVATIONS: Self = Self(0x0000000100000000);
+    pub const MULTI_CONTEXT: Self = Self(0x0000000200000000);
+    pub const SUPPORTED: Self = Self(0x0000000300000000);
+    pub const REQUIRED: Self = Self(0x0000000100000000);
+    #[must_use]
+    pub const fn from_wire(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub const fn missing_from(self, available: Self) -> Self {
+        Self(self.0 & !available.0)
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RustcFeatureMask(u64);
+impl RustcFeatureMask {
+    pub const NONE: Self = Self(0);
+    pub const CLOSED_OWNER_STREAM: Self = Self(0x0001000000000000);
+    pub const PARTIAL_COMPILATION: Self = Self(0x0002000000000000);
+    pub const SUPPORTED: Self = Self(0x0001000000000000);
+    pub const REQUIRED: Self = Self(0x0001000000000000);
+    #[must_use]
+    pub const fn from_wire(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub const fn missing_from(self, available: Self) -> Self {
+        Self(self.0 & !available.0)
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum EvidenceCertainty {

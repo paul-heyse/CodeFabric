@@ -345,7 +345,7 @@ class StartQueryRequest(_message.Message):
     def __init__(self, agent_instance_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., mcp_call_id: _Optional[str] = ..., rpc_attempt_id: _Optional[str] = ..., semantic_request_id: _Optional[str] = ..., semantic_query_version: _Optional[str] = ..., canonical_request_json: _Optional[bytes] = ..., request_checksum: _Optional[str] = ..., freshness_policy: _Optional[_Union[FreshnessPolicy, str]] = ..., delivery_preference: _Optional[_Union[DeliveryPreference, str]] = ..., host_capability_profile_digest: _Optional[str] = ..., deadline_unix_ms: _Optional[int] = ..., idempotency_key: _Optional[str] = ..., payload_compression: _Optional[_Union[PayloadCompression, str]] = ...) -> None: ...
 
 class StartQueryResponse(_message.Message):
-    __slots__ = ("daemon_query_id", "resume_token", "accepted_at_unix_ms", "query_execution_state", "queue_class", "queue_position", "negotiated_request_version", "negotiated_response_version", "effective_semantic_request_id")
+    __slots__ = ("daemon_query_id", "resume_token", "accepted_at_unix_ms", "query_execution_state", "queue_class", "queue_position", "negotiated_request_version", "negotiated_response_version", "effective_semantic_request_id", "cancel_token")
     DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
     RESUME_TOKEN_FIELD_NUMBER: _ClassVar[int]
     ACCEPTED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
@@ -355,6 +355,7 @@ class StartQueryResponse(_message.Message):
     NEGOTIATED_REQUEST_VERSION_FIELD_NUMBER: _ClassVar[int]
     NEGOTIATED_RESPONSE_VERSION_FIELD_NUMBER: _ClassVar[int]
     EFFECTIVE_SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    CANCEL_TOKEN_FIELD_NUMBER: _ClassVar[int]
     daemon_query_id: str
     resume_token: bytes
     accepted_at_unix_ms: int
@@ -364,7 +365,8 @@ class StartQueryResponse(_message.Message):
     negotiated_request_version: str
     negotiated_response_version: str
     effective_semantic_request_id: str
-    def __init__(self, daemon_query_id: _Optional[str] = ..., resume_token: _Optional[bytes] = ..., accepted_at_unix_ms: _Optional[int] = ..., query_execution_state: _Optional[_Union[QueryExecutionState, str]] = ..., queue_class: _Optional[str] = ..., queue_position: _Optional[int] = ..., negotiated_request_version: _Optional[str] = ..., negotiated_response_version: _Optional[str] = ..., effective_semantic_request_id: _Optional[str] = ...) -> None: ...
+    cancel_token: bytes
+    def __init__(self, daemon_query_id: _Optional[str] = ..., resume_token: _Optional[bytes] = ..., accepted_at_unix_ms: _Optional[int] = ..., query_execution_state: _Optional[_Union[QueryExecutionState, str]] = ..., queue_class: _Optional[str] = ..., queue_position: _Optional[int] = ..., negotiated_request_version: _Optional[str] = ..., negotiated_response_version: _Optional[str] = ..., effective_semantic_request_id: _Optional[str] = ..., cancel_token: _Optional[bytes] = ...) -> None: ...
 
 class StreamQueryRequest(_message.Message):
     __slots__ = ("daemon_query_id", "resume_token", "after_sequence")

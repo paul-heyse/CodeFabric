@@ -14,6 +14,7 @@ from typing import Any, cast
 import grpc
 
 from ..contracts.json import canonicalize_json, canonicalize_value, checksum
+from ..contracts.model_registries import CpgdFeature
 from ..contracts.schemas import schema_fingerprints
 from ..contracts.wire_models import JSON_OBJECT_ADAPTER, JsonObject
 from ..settings import Settings
@@ -23,15 +24,22 @@ from .generated import cpg_query_service_pb2_grpc as query_grpc
 
 RPC_VERSION = "1.0"
 SEMANTIC_QUERY_VERSION = "1.3"
-_HOST_PROFILE_BYTES = canonicalize_value(
-    {
-        "compression": ["identity"],
-        "delivery": ["inline", "resource", "automatic"],
-        "resource_links": True,
-        "trace_context": True,
-    }
-)
-HOST_PROFILE_DIGEST = checksum(_HOST_PROFILE_BYTES)
+
+
+def host_capability_profile_digest(maximum_frame_bytes: int) -> str:
+    """Derive the governed digest from every typed host-capability field."""
+
+    return checksum(
+        canonicalize_value(
+            {
+                "compression_algorithms": ["identity"],
+                "delivery_modes": ["automatic", "inline", "resource"],
+                "maximum_frame_bytes": maximum_frame_bytes,
+                "supports_resource_links": True,
+                "supports_trace_context": True,
+            }
+        )
+    )
 
 
 class DaemonProtocolError(RuntimeError):
@@ -64,6 +72,7 @@ class CpgDaemonClient:
         self.settings = settings
         self.channel: grpc.aio.Channel = create_local_channel(settings.daemon_target)
         self.stub = query_grpc.CpgQueryServiceStub(self.channel)
+        self.host_profile_digest = host_capability_profile_digest(settings.max_request_bytes)
         self.handshake_response: Any | None = None
         self._connect_lock = asyncio.Lock()
         self._leased_artifacts: dict[str, tuple[str, str, int, int]] = {}
@@ -97,6 +106,8 @@ class CpgDaemonClient:
                 query_pb.SchemaFingerprint(schema_id=name, version="1.3", digest=digest)
                 for name, digest in sorted(cast(dict[str, str], fingerprints).items())
             ],
+            required_feature_bits=int(CpgdFeature.REQUIRED),
+            optional_feature_bits=int(CpgdFeature.SUPPORTED & ~CpgdFeature.REQUIRED),
             desired_workspace_ids=[self.settings.workspace_id],
             host_capabilities=query_pb.HostCapabilityProfile(
                 delivery_modes=[
@@ -108,7 +119,7 @@ class CpgDaemonClient:
                 supports_resource_links=True,
                 supports_trace_context=True,
                 maximum_frame_bytes=self.settings.max_request_bytes,
-                profile_digest=HOST_PROFILE_DIGEST,
+                profile_digest=self.host_profile_digest,
             ),
             credential_proof=query_pb.CredentialProof(
                 credential_id=self.settings.agent_instance_id,
@@ -121,6 +132,8 @@ class CpgDaemonClient:
             response.negotiated_rpc_version != RPC_VERSION
             or response.negotiated_semantic_query_version != SEMANTIC_QUERY_VERSION
             or response.negotiated_compression != query_pb.PAYLOAD_COMPRESSION_IDENTITY
+            or response.negotiated_feature_bits & int(CpgdFeature.REQUIRED)
+            != int(CpgdFeature.REQUIRED)
         ):
             raise DaemonProtocolError("daemon negotiated an unsupported protocol profile")
         self.handshake_response = response
@@ -202,7 +215,7 @@ class CpgDaemonClient:
                 canonical_request_json=canonical,
                 request_checksum=checksum(canonical),
                 freshness_policy=self._freshness(value),
-                host_capability_profile_digest=HOST_PROFILE_DIGEST,
+                host_capability_profile_digest=self.host_profile_digest,
             ),
             timeout=self.settings.query_timeout_seconds,
         )
@@ -258,7 +271,7 @@ class CpgDaemonClient:
                     "resource": query_pb.DELIVERY_PREFERENCE_RESOURCE,
                     "automatic": query_pb.DELIVERY_PREFERENCE_AUTO,
                 }[delivery],
-                host_capability_profile_digest=HOST_PROFILE_DIGEST,
+                host_capability_profile_digest=self.host_profile_digest,
                 deadline_unix_ms=int((time.time() + self.settings.query_timeout_seconds) * 1000),
                 idempotency_key=f"{self.settings.agent_instance_id}:{request_digest}",
                 payload_compression=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
@@ -298,7 +311,7 @@ class CpgDaemonClient:
                     terminal = event.terminal
         except BaseException:
             cancellation = asyncio.create_task(
-                self.cancel(started.daemon_query_id, started.resume_token, "adapter interrupted")
+                self.cancel(started.daemon_query_id, started.cancel_token, "adapter interrupted")
             )
             with suppress(BaseException):
                 await asyncio.shield(cancellation)

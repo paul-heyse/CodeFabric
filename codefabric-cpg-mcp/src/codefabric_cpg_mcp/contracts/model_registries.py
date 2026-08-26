@@ -3,6 +3,40 @@ from enum import IntEnum, IntFlag
 from types import MappingProxyType
 
 
+class CpgdFeature(IntFlag):
+    NONE = 0
+    QUERY_RESUME = 1
+    RESULT_RESOURCES = 2
+    ZSTD_PAYLOADS = 4
+    TRACE_CONTEXT = 8
+    SUPPORTED = 15
+    REQUIRED = 1
+
+
+class ProviderFeature(IntFlag):
+    NONE = 0
+    ACCEPTED_HANDLE_EVENTS = 65536
+    CREDIT_CONTROL = 131072
+    SUPPORTED = 196608
+    REQUIRED = 196608
+
+
+class PyreflyFeature(IntFlag):
+    NONE = 0
+    ARROW_IPC_OBSERVATIONS = 4294967296
+    MULTI_CONTEXT = 8589934592
+    SUPPORTED = 12884901888
+    REQUIRED = 4294967296
+
+
+class RustcFeature(IntFlag):
+    NONE = 0
+    CLOSED_OWNER_STREAM = 281474976710656
+    PARTIAL_COMPILATION = 562949953421312
+    SUPPORTED = 281474976710656
+    REQUIRED = 281474976710656
+
+
 class IdentityDomain(IntEnum):
     WORKSPACE = 1
     REPOSITORY = 2

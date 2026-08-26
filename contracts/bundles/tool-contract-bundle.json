@@ -53,14 +53,14 @@
     },
     {
       "artifact_id": "codefabric.rpc.cpg-query-service",
-      "canonical_digest": "b3:758603c19dbd3402b79ffebb5e6559f6f9ca8cbe53f7062ee66f6220ffb0526f",
+      "canonical_digest": "b3:1419b6e036ca3f73c45694ff82ae21e4f25c4302c258560c3fe7aca01485415e",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     },
     {
       "artifact_id": "codefabric.rpc.feature-registry",
-      "canonical_digest": "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41",
+      "canonical_digest": "b3:fa99a434e2b675050fb94be8e1a913c6b0d46efeba71fa463ad6fd5a0717d18f",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -73,7 +73,7 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:60abd82daeafd1519c36149324a4cf2a706c2d73fbd20aee1d85ed1ffa8d5d9b",
+  "bundle_digest": "b3:9e07f2d9c4610c45368500d1330b81716b1fad6ca2adecc4f268ba82b9e65a55",
   "bundle_kind": "tool-contract",
   "bundle_major": 1,
   "bundle_version": "1.0",

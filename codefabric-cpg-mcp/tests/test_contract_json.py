@@ -8,6 +8,7 @@ import pytest
 from blake3 import blake3
 
 from codefabric_cpg_mcp.contracts.index import (
+    decode_model_artifact_index,
     model_artifact_index,
     model_artifact_index_bytes,
     model_artifact_index_digest,
@@ -135,3 +136,44 @@ def test_packaged_model_index_has_the_exact_compiled_census_and_bytes() -> None:
     for artifact in index.artifacts:
         validate_checksum(artifact.canonical_digest)
         validate_checksum(artifact.source_digest)
+
+
+def _model_index_mutation(mutation: str) -> bytes:
+    resource = model_artifact_index_bytes()
+    if mutation == "none":
+        return resource
+    value = json.loads(resource)
+    if mutation == "unknown-root-field":
+        value["unexpected"] = True
+    elif mutation == "unsafe-authority-path":
+        value["artifacts"][0]["authority_path"] = "../escape.json"
+    elif mutation == "mixed-resource-profile":
+        value["artifacts"][0]["resource_profile"]["max_source_bytes"] = 1
+    elif mutation == "unsorted-artifacts":
+        value["artifacts"][0], value["artifacts"][1] = (
+            value["artifacts"][1],
+            value["artifacts"][0],
+        )
+    elif mutation == "unsorted-output-paths":
+        value["outputs"][0], value["outputs"][1] = (
+            value["outputs"][1],
+            value["outputs"][0],
+        )
+    else:
+        raise AssertionError(f"unknown differential mutation {mutation}")
+    return canonicalize_value(value)
+
+
+def test_wp67_structural_acceptance_model_index_python_differential_corpus() -> None:
+    cases = json.loads(
+        (ROOT / "contracts/fixtures/model-index-decode-differential.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for case in cases["cases"]:
+        try:
+            decode_model_artifact_index(_model_index_mutation(case["mutation"]))
+            accepted = True
+        except CanonicalJsonError, ValueError:
+            accepted = False
+        assert accepted is case["accepted"], case["mutation"]

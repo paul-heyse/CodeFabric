@@ -2439,6 +2439,99 @@ fn emit_runtime_enum(output: &mut String, name: &str, values: &[EnumValue]) {
     output.push_str("        }\n    }\n}\n");
 }
 
+fn feature_records(
+    values: &BTreeMap<String, Value>,
+) -> Result<Vec<&serde_json::Map<String, Value>>, RegistryCbefError> {
+    registry_value(values, "codefabric.rpc.feature-registry")?["records"]
+        .as_array()
+        .ok_or_else(|| RegistryCbefError::RegistryModel("feature records".to_owned()))?
+        .iter()
+        .filter(|record| record.get("bit").is_some())
+        .map(|record| {
+            record
+                .as_object()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("typed feature record".to_owned()))
+        })
+        .collect()
+}
+
+fn render_rust_feature_masks(
+    output: &mut String,
+    values: &BTreeMap<String, Value>,
+) -> Result<(), RegistryCbefError> {
+    let records = feature_records(values)?;
+    let domains = records
+        .iter()
+        .map(|record| {
+            record["domain"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("feature domain".to_owned()))
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    for domain in domains {
+        let type_name = format!("{}FeatureMask", runtime_pascal(domain));
+        writeln!(
+            output,
+            "#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]\npub struct {type_name}(u64);"
+        )
+        .unwrap();
+        writeln!(output, "impl {type_name} {{").unwrap();
+        output.push_str("    pub const NONE: Self = Self(0);\n");
+        let mut supported = 0_u64;
+        let mut required = 0_u64;
+        for record in records
+            .iter()
+            .filter(|record| record["domain"].as_str() == Some(domain))
+        {
+            let bit = record["bit"]
+                .as_u64()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("feature bit".to_owned()))?;
+            if bit >= 64 {
+                return Err(RegistryCbefError::RegistryModel(
+                    "feature bit exceeds the u64 wire mask".to_owned(),
+                ));
+            }
+            let feature = record["feature"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("feature name".to_owned()))?;
+            let requirement = record["requirement"].as_str().ok_or_else(|| {
+                RegistryCbefError::RegistryModel("feature requirement".to_owned())
+            })?;
+            let mask = 1_u64 << bit;
+            writeln!(
+                output,
+                "    pub const {feature}: Self = Self({mask:#018x});"
+            )
+            .unwrap();
+            if requirement != "disabled" {
+                supported |= mask;
+            }
+            if requirement == "required" {
+                required |= mask;
+            }
+        }
+        writeln!(
+            output,
+            "    pub const SUPPORTED: Self = Self({supported:#018x});"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "    pub const REQUIRED: Self = Self({required:#018x});"
+        )
+        .unwrap();
+        output.push_str(
+            "    #[must_use]\n    pub const fn from_wire(bits: u64) -> Self { Self(bits) }\n\
+             \n    #[must_use]\n    pub const fn bits(self) -> u64 { self.0 }\n\
+             \n    #[must_use]\n    pub const fn union(self, other: Self) -> Self { Self(self.0 | other.0) }\n\
+             \n    #[must_use]\n    pub const fn missing_from(self, available: Self) -> Self { Self(self.0 & !available.0) }\n\
+             \n    #[must_use]\n    pub const fn is_empty(self) -> bool { self.0 == 0 }\n",
+        );
+        output.push_str("}\n\n");
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)] // One typed pass makes the complete runtime API exhaustive.
 fn render_rust_runtime_registries(
     values: &BTreeMap<String, Value>,
@@ -2460,6 +2553,7 @@ fn render_rust_runtime_registries(
          #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct FlagEntry { pub mask: u64, pub name: &'static str, pub slug: &'static str }\n\n",
     );
+    render_rust_feature_masks(&mut output, values)?;
     for domain in &enums.records {
         emit_runtime_enum(&mut output, &domain.domain, &domain.values);
         writeln!(
@@ -3031,6 +3125,48 @@ fn render_python_registries(
 from enum import IntEnum, IntFlag\n\
 from types import MappingProxyType\n\n\n",
     );
+    let feature_records = feature_records(values)?;
+    let feature_domains = feature_records
+        .iter()
+        .map(|record| {
+            record["domain"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("feature domain".to_owned()))
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    for domain in feature_domains {
+        writeln!(output, "class {}Feature(IntFlag):", runtime_pascal(domain)).unwrap();
+        output.push_str("    NONE = 0\n");
+        let mut supported = 0_u64;
+        let mut required = 0_u64;
+        for record in feature_records
+            .iter()
+            .filter(|record| record["domain"].as_str() == Some(domain))
+        {
+            let bit = record["bit"]
+                .as_u64()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("feature bit".to_owned()))?;
+            let feature = record["feature"]
+                .as_str()
+                .ok_or_else(|| RegistryCbefError::RegistryModel("feature name".to_owned()))?;
+            let requirement = record["requirement"].as_str().ok_or_else(|| {
+                RegistryCbefError::RegistryModel("feature requirement".to_owned())
+            })?;
+            let mask = 1_u64 << bit;
+            writeln!(output, "    {feature} = {mask}").unwrap();
+            if requirement != "disabled" {
+                supported |= mask;
+            }
+            if requirement == "required" {
+                required |= mask;
+            }
+        }
+        writeln!(
+            output,
+            "    SUPPORTED = {supported}\n    REQUIRED = {required}\n\n"
+        )
+        .unwrap();
+    }
     output.push_str("class IdentityDomain(IntEnum):\n");
     for domain in &cbef.domains {
         writeln!(output, "    {} = {}", domain.name, domain.code).unwrap();

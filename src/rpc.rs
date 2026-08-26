@@ -10,24 +10,65 @@ use tonic::service::Interceptor;
 use tonic::transport::server::Connected;
 use tonic::{Request, Status};
 
+use crate::registries::{CpgdFeatureMask, RustcFeatureMask};
+
 /// Maximum encoded and decoded control-message size on both client and server.
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum uncompressed query-event or result payload chunk.
 pub const MAX_PAYLOAD_CHUNK_BYTES: usize = 1024 * 1024;
 
-/// Negotiate feature bits while rejecting any unsupported required capability.
+/// Wire-mask behavior required by the one registry-generated feature family type.
+pub trait WireFeatureMask: Copy {
+    fn from_wire(bits: u64) -> Self;
+    fn bits(self) -> u64;
+}
+
+impl WireFeatureMask for CpgdFeatureMask {
+    fn from_wire(bits: u64) -> Self {
+        Self::from_wire(bits)
+    }
+
+    fn bits(self) -> u64 {
+        self.bits()
+    }
+}
+
+impl WireFeatureMask for RustcFeatureMask {
+    fn from_wire(bits: u64) -> Self {
+        Self::from_wire(bits)
+    }
+
+    fn bits(self) -> u64 {
+        self.bits()
+    }
+}
+
+/// Negotiate one typed feature family while enforcing both peers' required capabilities.
 ///
 /// # Errors
 ///
-/// Returns `FailedPrecondition` when the peer requires an unknown feature bit.
-pub fn negotiate_feature_bits(required: u64, optional: u64, supported: u64) -> Result<u64, Status> {
-    let unsupported = required & !supported;
+/// Returns `FailedPrecondition` when the client requires an unsupported bit or omits a bit the
+/// service registry marks required.
+pub fn negotiate_feature_bits<M: WireFeatureMask>(
+    client_required: M,
+    client_optional: M,
+    service_supported: M,
+    service_required: M,
+) -> Result<M, Status> {
+    let requested = client_required.bits() | client_optional.bits();
+    let unsupported = client_required.bits() & !service_supported.bits();
     if unsupported != 0 {
         return Err(Status::failed_precondition(format!(
             "unsupported required feature bits: {unsupported:#018x}"
         )));
     }
-    Ok((required | optional) & supported)
+    let missing = service_required.bits() & !requested;
+    if missing != 0 {
+        return Err(Status::failed_precondition(format!(
+            "client omitted service-required feature bits: {missing:#018x}"
+        )));
+    }
+    Ok(M::from_wire(requested & service_supported.bits()))
 }
 
 /// Peer identity captured from the accepted Unix socket before gRPC dispatch.
@@ -73,21 +114,8 @@ impl AuthorizedUnixStream {
     /// Returns the peer-credential syscall error or `PermissionDenied` for a UID
     /// outside the configured local-service policy.
     pub fn authenticate(inner: UnixStream, allowed_uid: u32) -> io::Result<Self> {
-        let credentials = inner.peer_cred()?;
-        if credentials.uid() != allowed_uid {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "Unix peer UID is not authorized",
-            ));
-        }
-        Ok(Self {
-            inner,
-            identity: VerifiedPeerIdentity {
-                uid: credentials.uid(),
-                gid: credentials.gid(),
-                pid: credentials.pid().and_then(|pid| u32::try_from(pid).ok()),
-            },
-        })
+        let identity = SameUserInterceptor::new(allowed_uid).authenticate_stream(&inner)?;
+        Ok(Self { inner, identity })
     }
 }
 
@@ -145,6 +173,31 @@ impl SameUserInterceptor {
     pub const fn new(expected_uid: u32) -> Self {
         Self { expected_uid }
     }
+
+    /// Apply the single local peer-UID policy to one accepted Unix stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns the peer-credential syscall error or `PermissionDenied` for another UID.
+    pub fn authenticate_stream(&self, stream: &UnixStream) -> io::Result<VerifiedPeerIdentity> {
+        let credentials = stream.peer_cred()?;
+        let identity = VerifiedPeerIdentity {
+            uid: credentials.uid(),
+            gid: credentials.gid(),
+            pid: credentials.pid().and_then(|pid| u32::try_from(pid).ok()),
+        };
+        self.authorize_identity(identity).map_err(|status| {
+            io::Error::new(io::ErrorKind::PermissionDenied, status.message().to_owned())
+        })?;
+        Ok(identity)
+    }
+
+    fn authorize_identity(&self, identity: VerifiedPeerIdentity) -> Result<(), Status> {
+        if identity.uid != self.expected_uid {
+            return Err(Status::permission_denied("Unix peer UID is not authorized"));
+        }
+        Ok(())
+    }
 }
 
 impl Interceptor for SameUserInterceptor {
@@ -153,9 +206,7 @@ impl Interceptor for SameUserInterceptor {
             .extensions()
             .get::<VerifiedPeerIdentity>()
             .ok_or_else(|| Status::unauthenticated("Unix peer identity is missing"))?;
-        if identity.uid != self.expected_uid {
-            return Err(Status::permission_denied("Unix peer UID is not authorized"));
-        }
+        self.authorize_identity(*identity)?;
         Ok(request)
     }
 }

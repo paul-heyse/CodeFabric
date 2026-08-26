@@ -1637,15 +1637,15 @@ mod tests {
     use crate::operational_store::{OperationalStore, OperationalStoreError};
     use crate::query_service::{
         PersistedQueryArtifactBundle, QueryArtifactPhase, ResultArtifactStore, VersionExplanation,
-        WorkspaceQueryBackend,
+        WorkspaceQueryBackend, host_capability_profile_digest,
     };
-    use crate::registries::{SnapshotLeaseKind, WorkspaceRegistryLifecycle};
+    use crate::registries::{CpgdFeatureMask, SnapshotLeaseKind, WorkspaceRegistryLifecycle};
     use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_client::CpgQueryServiceClient;
     use crate::rpc::generated::codefabric::cpgd::v1::query_event::Event;
     use crate::rpc::generated::codefabric::cpgd::v1::{
-        CredentialProof, DeliveryPreference, HandshakeRequest, PayloadCompression,
-        ReadResultRequest, StartQueryRequest, StatusRequest, StreamQueryRequest, VersionRange,
-        WorkspaceClaim, WorkspaceReadiness,
+        CredentialProof, DeliveryPreference, HandshakeRequest, HostCapabilityProfile,
+        PayloadCompression, ReadResultRequest, StartQueryRequest, StatusRequest,
+        StreamQueryRequest, VersionRange, WorkspaceClaim, WorkspaceReadiness,
     };
     use crate::snapshot::{
         ServingSnapshotManifestBody, SnapshotBasePublication, SnapshotBundles,
@@ -2690,6 +2690,20 @@ mod tests {
             .unwrap();
 
         let mut client = daemon_query_client(query_socket).await;
+        let mut host_capabilities = HostCapabilityProfile {
+            delivery_modes: vec![
+                DeliveryPreference::Inline as i32,
+                DeliveryPreference::Resource as i32,
+                DeliveryPreference::Auto as i32,
+            ],
+            compression_algorithms: vec![PayloadCompression::Identity as i32],
+            supports_resource_links: true,
+            supports_trace_context: true,
+            maximum_frame_bytes: 1_048_576,
+            profile_digest: String::new(),
+        };
+        host_capabilities.profile_digest =
+            host_capability_profile_digest(&host_capabilities).unwrap();
         let handshake = client
             .handshake(HandshakeRequest {
                 rpc_versions: Some(VersionRange {
@@ -2700,7 +2714,12 @@ mod tests {
                     minimum: "1.3".to_owned(),
                     maximum: "1.3".to_owned(),
                 }),
+                required_feature_bits: CpgdFeatureMask::REQUIRED.bits(),
+                optional_feature_bits: CpgdFeatureMask::SUPPORTED
+                    .missing_from(CpgdFeatureMask::REQUIRED)
+                    .bits(),
                 desired_workspace_ids: vec![workspace_id.clone()],
+                host_capabilities: Some(host_capabilities.clone()),
                 credential_proof: Some(CredentialProof {
                     credential_id: "wp63-credential".to_owned(),
                     capability_token: b"test-query-capability-token".to_vec(),
@@ -2752,6 +2771,7 @@ mod tests {
                 deadline_unix_ms: i64::MAX,
                 idempotency_key: "wp63-eight-form".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
+                host_capability_profile_digest: host_capabilities.profile_digest,
                 ..StartQueryRequest::default()
             })
             .await

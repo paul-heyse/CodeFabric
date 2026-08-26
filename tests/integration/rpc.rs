@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use codefabric::registries::CpgdFeatureMask;
 use codefabric::rpc::generated::codefabric::cpgd::v1::cpg_query_service_client::CpgQueryServiceClient;
 use codefabric::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::{
     CpgQueryService, CpgQueryServiceServer,
@@ -58,9 +59,10 @@ impl CpgQueryService for ProbeService {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         let request = request.into_inner();
         let negotiated = negotiate_feature_bits(
-            request.required_feature_bits,
-            request.optional_feature_bits,
-            SUPPORTED_FEATURES,
+            CpgdFeatureMask::from_wire(request.required_feature_bits),
+            CpgdFeatureMask::from_wire(request.optional_feature_bits),
+            CpgdFeatureMask::from_wire(SUPPORTED_FEATURES),
+            CpgdFeatureMask::NONE,
         )?;
         if request.adapter_version == "delay" {
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -72,7 +74,7 @@ impl CpgQueryService for ProbeService {
         };
         Ok(Response::new(HandshakeResponse {
             daemon_version,
-            negotiated_feature_bits: negotiated,
+            negotiated_feature_bits: negotiated.bits(),
             negotiated_rpc_version: "1.0".to_owned(),
             negotiated_semantic_query_version: "1.3".to_owned(),
             ..HandshakeResponse::default()
@@ -513,8 +515,13 @@ fn wp10_structural_acceptance() {
 
 #[test]
 fn wp10_negative_zero_state() {
-    let status = negotiate_feature_bits(1 << 63, 0, SUPPORTED_FEATURES)
-        .expect_err("unknown required feature bit");
+    let status = negotiate_feature_bits(
+        CpgdFeatureMask::from_wire(1 << 63),
+        CpgdFeatureMask::NONE,
+        CpgdFeatureMask::from_wire(SUPPORTED_FEATURES),
+        CpgdFeatureMask::NONE,
+    )
+    .expect_err("unknown required feature bit");
     assert_eq!(status.code(), tonic::Code::FailedPrecondition);
 }
 

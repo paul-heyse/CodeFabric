@@ -259,6 +259,8 @@ pub struct StartQueryResponse {
     pub negotiated_response_version: ::prost::alloc::string::String,
     #[prost(string, tag = "9")]
     pub effective_semantic_request_id: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "10")]
+    pub cancel_token: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct StreamQueryRequest {

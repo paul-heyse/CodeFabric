@@ -26,7 +26,7 @@
   },
   "families": [
     {
-      "action_key": "b3:a1c33aa314859023cbc6324c32e8736ae97ce21597dc9f77e4d70d38918cb2a6",
+      "action_key": "b3:940e5e620bc7eb1b3c25c361245c470087f0ac01ab754723af1c57b7ba2a93cb",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -61,7 +61,7 @@
       }
     },
     {
-      "action_key": "b3:1c2ec4593f97339f3398c26e90363572a9842b817344c941a388536e96fd0ebf",
+      "action_key": "b3:b2752875e460efc06bc93fc3c1d668c71fba79eeb09122bc8af405b74c0e1d42",
       "family": "schemas",
       "outputs": [
         "contracts/generated/model/schema/operational-store.sql",
@@ -93,7 +93,7 @@
       }
     },
     {
-      "action_key": "b3:b12d290d1206a9e37e5f26604361b44b9b1761f39b8329b2c8c00d5d207b0483",
+      "action_key": "b3:fbdffe52c0df0bde60404ebece0ffd854c92e5842e97f1506236897890debe3f",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -126,7 +126,7 @@
       }
     },
     {
-      "action_key": "b3:f343f4b941f602d364373ad4924ce6075f88a6198ca2cd298a88b5396f915b95",
+      "action_key": "b3:0945128b538bf813e73ab226780130c61963be022aa408c05a4ab598689acc9b",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -157,7 +157,7 @@
       "rule_version": "one-fds-grpc-tools-compile-fds-v1",
       "tool_identity": {
         "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
-        "descriptor_sha256": "dab30a99d17f66011a9d5d29a8d91069f69bc7e3fc02c38dd5f2de00230eaa9a",
+        "descriptor_sha256": "cc8d49b1cb141556d7e107c31df3dd8b2b84e624577c39784d5f3019f16796ec",
         "python": {
           "grpcio": "1.83.0",
           "grpcio-tools": "1.83.0",
@@ -184,7 +184,7 @@
         },
         "schema": 4,
         "sources": {
-          "contracts/rpc/cpg_query_service.proto": "b3:e73c3a48cfc2fa9d492b64dbe8802d6d20bd94387894019d9d09cc6924401f88",
+          "contracts/rpc/cpg_query_service.proto": "b3:05dd31c0d0cd2f40efcf3dbbff27433c133ac3bb29e8b177cd734fd35ec31b39",
           "contracts/rpc/provider_control.proto": "b3:88e322e42cc6475bfa810a4a3b4479a1620bef22e3156b3b82469abc4fd36e38",
           "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
           "contracts/rpc/rustc_extractor.proto": "b3:3fb3384fa6dfd521b4ed4690102d5e00e8c7fda7f4a95c5c2543d81bd156fac6"

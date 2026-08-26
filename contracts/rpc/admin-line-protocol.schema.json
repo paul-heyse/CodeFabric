@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codefabric.dev/contracts/rpc/admin-line-protocol.schema.json",
+  "title": "CodeFabric private administrative newline-JSON protocol",
+  "description": "One request or response JSON value per LF-terminated line; the LF is framing and is not part of the JSON value.",
+  "x-codefabric-framing": {
+    "delimiter": "LF",
+    "maximum_encoded_line_bytes": 65536,
+    "transport": "private-unix-domain-socket"
+  },
+  "x-codefabric-artifact": {
+    "artifact_id": "codefabric.rpc.admin-line-protocol.schema",
+    "artifact_kind": "json-schema",
+    "compatible_suite_major": 1,
+    "status": "released",
+    "version": "1.0"
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/AdminEnvelope"},
+    {"$ref": "#/$defs/AdminResponse"}
+  ],
+  "$defs": {
+    "ByteArray": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 255}
+    },
+    "Id16": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": {"type": "integer", "minimum": 0, "maximum": 255}
+    },
+    "Digest32": {
+      "type": "array",
+      "minItems": 32,
+      "maxItems": 32,
+      "items": {"type": "integer", "minimum": 0, "maximum": 255}
+    },
+    "PublicWorkspaceId": {
+      "type": "string",
+      "pattern": "^workspace:[0-9a-f]{32}$"
+    },
+    "DaemonEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "request"],
+      "properties": {
+        "scope": {"const": "daemon"},
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": {
+            "command": {"enum": ["status", "stop", "drain"]}
+          }
+        }
+      }
+    },
+    "RelinkProof": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["proof", "operator_acknowledged", "inventory_matches"],
+          "properties": {
+            "proof": {"const": "non_git"},
+            "operator_acknowledged": {"type": "boolean"},
+            "inventory_matches": {"type": "boolean"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["proof", "repository_id", "worktree_id", "worktree_administrative_key"],
+          "properties": {
+            "proof": {"const": "git"},
+            "repository_id": {"$ref": "#/$defs/Id16"},
+            "worktree_id": {"$ref": "#/$defs/Id16"},
+            "worktree_administrative_key": {"$ref": "#/$defs/ByteArray"}
+          }
+        }
+      ]
+    },
+    "WorkspaceCommand": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "root"],
+          "properties": {"command": {"const": "add"}, "root": {"type": "string"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": {"command": {"const": "list"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "workspace_id"],
+          "properties": {"command": {"const": "show"}, "workspace_id": {"$ref": "#/$defs/Id16"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "workspace_id", "new_root", "proof"],
+          "properties": {
+            "command": {"const": "relink"},
+            "workspace_id": {"$ref": "#/$defs/Id16"},
+            "new_root": {"type": "string"},
+            "proof": {"$ref": "#/$defs/RelinkProof"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "workspace_id", "profile_manifest"],
+          "properties": {
+            "command": {"const": "configure"},
+            "workspace_id": {"$ref": "#/$defs/Id16"},
+            "profile_manifest": {"type": "string"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "workspace_id"],
+          "properties": {"command": {"enum": ["enable", "disable", "reconcile"]}, "workspace_id": {"$ref": "#/$defs/Id16"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "workspace_id", "policy", "purge_confirmations"],
+          "properties": {
+            "command": {"const": "remove"},
+            "workspace_id": {"$ref": "#/$defs/Id16"},
+            "policy": {"enum": ["retain_data", "purge_data"]},
+            "purge_confirmations": {"type": "integer", "minimum": 0, "maximum": 255}
+          }
+        }
+      ]
+    },
+    "WorkspaceEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "request"],
+      "properties": {
+        "scope": {"const": "workspace"},
+        "request": {"$ref": "#/$defs/WorkspaceCommand"}
+      }
+    },
+    "AdminEnvelope": {
+      "oneOf": [
+        {"$ref": "#/$defs/DaemonEnvelope"},
+        {"$ref": "#/$defs/WorkspaceEnvelope"}
+      ]
+    },
+    "WorkspaceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id", "workspace_registration_nonce", "registration_revision",
+        "administrative_key", "root_path_bytes", "root_path_display",
+        "root_directory_file_identity", "platform_code", "case_sensitivity_mode",
+        "authorization_revision", "allowed_source_disclosure_rules", "repository_id",
+        "worktree_id", "authorization_fingerprint", "context_fingerprint", "status",
+        "created_at", "updated_at"
+      ],
+      "properties": {
+        "workspace_id": {"$ref": "#/$defs/PublicWorkspaceId"},
+        "workspace_registration_nonce": {"$ref": "#/$defs/Id16"},
+        "registration_revision": {"type": "integer", "minimum": 0},
+        "administrative_key": {"$ref": "#/$defs/ByteArray"},
+        "root_path_bytes": {"$ref": "#/$defs/ByteArray"},
+        "root_path_display": {"type": "string"},
+        "root_directory_file_identity": {"$ref": "#/$defs/ByteArray"},
+        "platform_code": {"type": "integer", "minimum": 0, "maximum": 255},
+        "case_sensitivity_mode": {"type": "string"},
+        "authorization_revision": {"type": "integer", "minimum": 0},
+        "allowed_source_disclosure_rules": {"type": "array", "items": {"type": "string"}},
+        "repository_id": {"type": ["string", "null"]},
+        "worktree_id": {"type": ["string", "null"]},
+        "authorization_fingerprint": {"$ref": "#/$defs/Digest32"},
+        "context_fingerprint": {"$ref": "#/$defs/Digest32"},
+        "status": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "created_at": {"type": "string"},
+        "updated_at": {"type": "string"}
+      }
+    },
+    "WorkspaceHealthStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace_id", "lifecycle", "source_trust", "event_stream_health", "git_acceleration", "source_generation", "inventory_digest", "active_snapshot", "readiness", "reconciliation_count"],
+      "properties": {
+        "workspace_id": {"type": "string"},
+        "lifecycle": {"type": "string"},
+        "source_trust": {"type": "string"},
+        "event_stream_health": {"type": "string"},
+        "git_acceleration": {"type": "string"},
+        "source_generation": {"type": "integer", "minimum": 0},
+        "inventory_digest": {"type": ["string", "null"]},
+        "active_snapshot": {"type": ["string", "null"]},
+        "readiness": {"type": "string"},
+        "reconciliation_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "AdminResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "daemon_liveness", "workspace_readiness", "shutdown_mode", "workspaces", "workspace_health", "error_code"],
+      "properties": {
+        "accepted": {"type": "boolean"},
+        "daemon_liveness": {"const": "LIVE"},
+        "workspace_readiness": {"type": "string"},
+        "shutdown_mode": {"enum": [null, "stop", "drain"]},
+        "workspaces": {"type": "array", "items": {"$ref": "#/$defs/WorkspaceRecord"}},
+        "workspace_health": {"type": "array", "items": {"$ref": "#/$defs/WorkspaceHealthStatus"}},
+        "error_code": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

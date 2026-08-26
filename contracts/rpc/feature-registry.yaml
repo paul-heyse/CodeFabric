@@ -3,9 +3,9 @@ artifact_kind: yaml-contract
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:21e0bc0929228a794ee35efd54c19cbcbd83c26684f38b30f8ecf696688f9e41"
+canonical_digest: "b3:fa99a434e2b675050fb94be8e1a913c6b0d46efeba71fa463ad6fd5a0717d18f"
 records:
-  - {domain: CPGD, bit: 0, feature: QUERY_RESUME, requirement: optional, introduced: "1.0"}
+  - {domain: CPGD, bit: 0, feature: QUERY_RESUME, requirement: required, introduced: "1.0"}
   - {domain: CPGD, bit: 1, feature: RESULT_RESOURCES, requirement: optional, introduced: "1.0"}
   - {domain: CPGD, bit: 2, feature: ZSTD_PAYLOADS, requirement: optional, introduced: "1.0"}
   - {domain: CPGD, bit: 3, feature: TRACE_CONTEXT, requirement: optional, introduced: "1.0"}

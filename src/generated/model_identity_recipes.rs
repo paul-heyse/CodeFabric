@@ -714,7 +714,6 @@ pub enum SemanticFingerprintDomain {
     UpdateWaveRemoval,
     UpdateWave,
     FastProviderRun,
-    QueryResume,
     LocalQueryLimits,
     SnapshotBaseTableVersions,
     RustcInvocation,
@@ -823,10 +822,6 @@ impl SemanticFingerprintDomain {
             Self::FastProviderRun => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 102, 97, 115, 116, 45, 112, 114,
                 111, 118, 105, 100, 101, 114, 45, 114, 117, 110, 46, 118, 49, 0,
-            ],
-            Self::QueryResume => &[
-                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 113, 117, 101, 114, 121, 46, 114,
-                101, 115, 117, 109, 101, 46, 118, 49, 0,
             ],
             Self::LocalQueryLimits => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 108, 111, 99, 97, 108, 45, 113,
@@ -1023,6 +1018,8 @@ impl CacheKeyDomain {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecurityMacDomain {
     ResultLease,
+    QueryResumeToken,
+    QueryCancelToken,
     LocalCapabilityToken,
 }
 impl SecurityMacDomain {
@@ -1033,6 +1030,14 @@ impl SecurityMacDomain {
             Self::ResultLease => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 114, 101, 115, 117, 108, 116, 45,
                 108, 101, 97, 115, 101, 46, 118, 49, 0,
+            ],
+            Self::QueryResumeToken => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 113, 117, 101, 114, 121, 45, 114,
+                101, 115, 117, 109, 101, 45, 116, 111, 107, 101, 110, 46, 118, 49, 0,
+            ],
+            Self::QueryCancelToken => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 113, 117, 101, 114, 121, 45, 99,
+                97, 110, 99, 101, 108, 45, 116, 111, 107, 101, 110, 46, 118, 49, 0,
             ],
             Self::LocalCapabilityToken => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 108, 111, 99, 97, 108, 45, 99,

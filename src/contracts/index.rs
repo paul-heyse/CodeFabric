@@ -1,7 +1,7 @@
 //! Typed, cached access to the model-derived packaged artifact index.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -18,18 +18,34 @@ pub static MODEL_ARTIFACT_INDEX_BYTES: &[u8] = include_bytes!(concat!(
 static INDEX: OnceLock<Result<ModelArtifactIndex, ModelArtifactIndexError>> = OnceLock::new();
 static INDEX_DIGEST: OnceLock<String> = OnceLock::new();
 
-/// Bounded family or aggregate resource profile retained with provenance.
+/// One of the two closed resource-profile shapes in the packaged index contract.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ArtifactResourceProfile {
+    /// Named aggregate profile when the family has no external driver.
+    Named(NamedArtifactResourceProfile),
+    /// Explicit bounds for an external model driver.
+    External(ExternalArtifactResourceProfile),
+}
+
+/// Closed named aggregate resource profile.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ArtifactResourceProfile {
-    /// Named aggregate profile when the family has no external driver.
-    pub profile: Option<String>,
+pub struct NamedArtifactResourceProfile {
+    /// Stable profile name.
+    pub profile: String,
+}
+
+/// Closed external-driver resource bounds.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalArtifactResourceProfile {
     /// Maximum source bytes read by one family action.
-    pub max_source_bytes: Option<u64>,
+    pub max_source_bytes: u64,
     /// Maximum bytes emitted by one family action.
-    pub max_output_bytes: Option<u64>,
+    pub max_output_bytes: u64,
     /// Maximum output count emitted by one family action.
-    pub max_outputs: Option<u64>,
+    pub max_outputs: u64,
 }
 
 /// One detached source identity and its model-derived provenance.
@@ -132,15 +148,44 @@ pub enum ModelArtifactIndexError {
     Invariant(String),
 }
 
-fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
-    let canonical = canonicalize_slice(MODEL_ARTIFACT_INDEX_BYTES)
+fn safe_relative_path(path: &Path) -> bool {
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+        && path
+            .to_str()
+            .is_some_and(|value| !value.is_empty() && !value.contains('\\'))
+}
+
+fn valid_resource_profile(profile: &ArtifactResourceProfile) -> bool {
+    match profile {
+        ArtifactResourceProfile::Named(named) => !named.profile.is_empty(),
+        ArtifactResourceProfile::External(ExternalArtifactResourceProfile {
+            max_source_bytes,
+            max_output_bytes,
+            max_outputs,
+        }) => *max_source_bytes > 0 && *max_output_bytes > 0 && *max_outputs > 0,
+    }
+}
+
+/// Decode exact canonical model-index bytes through the one cross-language contract.
+///
+/// # Errors
+///
+/// Returns the same closed canonical, typed-decode, and invariant failure classes used by the
+/// packaged resource accessor.
+pub fn decode_model_artifact_index(
+    bytes: &[u8],
+) -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
+    let canonical = canonicalize_slice(bytes)
         .map_err(|error| ModelArtifactIndexError::Canonical(error.to_string()))?;
-    if canonical != MODEL_ARTIFACT_INDEX_BYTES {
+    if canonical != bytes {
         return Err(ModelArtifactIndexError::Canonical(
             "resource bytes differ from RFC 8785 emission".to_owned(),
         ));
     }
-    let index: ModelArtifactIndex = serde_json::from_slice(MODEL_ARTIFACT_INDEX_BYTES)
+    let index: ModelArtifactIndex = serde_json::from_slice(bytes)
         .map_err(|error| ModelArtifactIndexError::Decode(error.to_string()))?;
     if index.schema_version != 1
         || index.source != "RepositoryModel + accepted release census + complete DesiredTree census"
@@ -164,12 +209,13 @@ fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
             .map_err(|error| ModelArtifactIndexError::Invariant(error.to_string()))?;
         if record.compatible_suite_major != 1
             || record.artifact_kind.is_empty()
-            || record.authority_path.as_os_str().is_empty()
+            || !safe_relative_path(&record.authority_path)
             || record.owner.is_empty()
             || record.version.is_empty()
             || record.projection_profile.is_empty()
             || record.compilation_unit.is_empty()
             || record.provenance.is_empty()
+            || !valid_resource_profile(&record.resource_profile)
             || !matches!(record.release_status.as_str(), "released" | "unreleased")
             || !matches!(
                 record.source_role.as_str(),
@@ -192,11 +238,13 @@ fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
             || !output_ids.insert(record.output_id.as_str())
             || record.output_id.is_empty()
             || record.path.as_os_str().is_empty()
+            || !safe_relative_path(&record.path)
             || record.producer.is_empty()
             || record.lineage.is_empty()
             || record.consumers.is_empty()
             || record.projection.projection_kind.is_empty()
             || record.validators.is_empty()
+            || !valid_resource_profile(&record.resource_profile)
         {
             return Err(ModelArtifactIndexError::Invariant(format!(
                 "output {} has incomplete or unordered model provenance",
@@ -206,6 +254,10 @@ fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
         previous_path = Some(&record.path);
     }
     Ok(index)
+}
+
+fn decode_index() -> Result<ModelArtifactIndex, ModelArtifactIndexError> {
+    decode_model_artifact_index(MODEL_ARTIFACT_INDEX_BYTES)
 }
 
 /// Return the once-decoded model artifact index.
@@ -244,5 +296,58 @@ mod tests {
                 .all(|pair| pair[0].artifact_id < pair[1].artifact_id)
         );
         validate_checksum(model_artifact_index_digest()).unwrap();
+    }
+
+    #[derive(Deserialize)]
+    struct DifferentialCase {
+        mutation: String,
+        accepted: bool,
+    }
+
+    #[derive(Deserialize)]
+    struct DifferentialCorpus {
+        cases: Vec<DifferentialCase>,
+    }
+
+    fn differential_bytes(mutation: &str) -> Vec<u8> {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(MODEL_ARTIFACT_INDEX_BYTES).unwrap();
+        match mutation {
+            "none" => return MODEL_ARTIFACT_INDEX_BYTES.to_vec(),
+            "unknown-root-field" => {
+                value["unexpected"] = serde_json::json!(true);
+            }
+            "unsafe-authority-path" => {
+                value["artifacts"][0]["authority_path"] = serde_json::json!("../escape.json");
+            }
+            "mixed-resource-profile" => {
+                value["artifacts"][0]["resource_profile"]["max_source_bytes"] =
+                    serde_json::json!(1);
+            }
+            "unsorted-artifacts" => {
+                value["artifacts"].as_array_mut().unwrap().swap(0, 1);
+            }
+            "unsorted-output-paths" => {
+                value["outputs"].as_array_mut().unwrap().swap(0, 1);
+            }
+            other => panic!("unknown differential mutation {other}"),
+        }
+        crate::contracts::jcs::canonicalize_value(&value).unwrap()
+    }
+
+    #[test]
+    fn wp67_structural_acceptance_model_index_rust_differential_corpus() {
+        let corpus: DifferentialCorpus = serde_json::from_slice(include_bytes!(
+            "../../contracts/fixtures/model-index-decode-differential.json"
+        ))
+        .unwrap();
+        for case in corpus.cases {
+            assert_eq!(
+                decode_model_artifact_index(&differential_bytes(&case.mutation)).is_ok(),
+                case.accepted,
+                "{}",
+                case.mutation
+            );
+        }
     }
 }

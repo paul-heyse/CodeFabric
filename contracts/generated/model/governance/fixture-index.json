@@ -1,6 +1,11 @@
 {
   "fixtures": [
     {
+      "class": "property",
+      "path": "contracts/fixtures/admin-line-protocol-examples.json",
+      "source_digest": "b3:f0ec3ef2c709e18c48fcf341e749d1e138e411d162b74031f3347ffcee4cc400"
+    },
+    {
       "class": "normative-kat",
       "path": "contracts/fixtures/identity/cbef-v1-vectors.json",
       "source_digest": "b3:923b33877fb2a979893146c98397770318e53459368e50bb0e23a8d6d3385037"
@@ -24,6 +29,11 @@
       "class": "normative-kat",
       "path": "contracts/fixtures/jcs/vectors.json",
       "source_digest": "b3:b2da5982e450cfc1e06ccaa097e9083a89012247220ea92a3a2209f541783396"
+    },
+    {
+      "class": "differential",
+      "path": "contracts/fixtures/model-index-decode-differential.json",
+      "source_digest": "b3:cfa11a3b77fc21c2c7dc43c9ba5cd03e14f19a5ea7c35784ebfe3dc236e07dcf"
     },
     {
       "class": "negative-class",

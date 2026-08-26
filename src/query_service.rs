@@ -26,6 +26,7 @@ use crate::golden_corpus::CoreSourceCoverage;
 use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
 use crate::integrity::{frame_digest, framed_digest};
 use crate::lifecycle::{FreshnessAdmission, FreshnessBarrier, FreshnessState};
+use crate::registries::CpgdFeatureMask;
 use crate::registries::QUERY_FORM_VALUES;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryService;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryServiceServer;
@@ -33,11 +34,12 @@ use crate::rpc::generated::codefabric::cpgd::v1::query_event::Event;
 use crate::rpc::generated::codefabric::cpgd::v1::{
     ArtifactReadyEvent, AttachQueryRequest, BundleIdentity, CancelQueryRequest,
     CancelQueryResponse, CancellationState, DeliveryPreference, EffectiveLimitsProfile,
-    HandshakeRequest, HandshakeResponse, PayloadCompression, QueryEvent, QueryEventHeader,
-    QueryExecutionState, ReadResultRequest, ReadinessSummary, ReleaseResultRequest,
-    ReleaseResultResponse, ResultChunk, SchemaFingerprint, SnapshotPinnedEvent, StartQueryRequest,
-    StartQueryResponse, StatusRequest, StatusResponse, StreamQueryRequest, TerminalEvent,
-    ValidateQueryRequest, ValidateQueryResponse, WorkspaceClaim, WorkspaceReadiness,
+    HandshakeRequest, HandshakeResponse, HostCapabilityProfile, PayloadCompression, QueryEvent,
+    QueryEventHeader, QueryExecutionState, ReadResultRequest, ReadinessSummary,
+    ReleaseResultRequest, ReleaseResultResponse, ResultChunk, SchemaFingerprint,
+    SnapshotPinnedEvent, StartQueryRequest, StartQueryResponse, StatusRequest, StatusResponse,
+    StreamQueryRequest, TerminalEvent, ValidateQueryRequest, ValidateQueryResponse, WorkspaceClaim,
+    WorkspaceReadiness,
 };
 use crate::rpc::{
     AuthorizedUnixStream, MAX_CONTROL_MESSAGE_BYTES, MAX_PAYLOAD_CHUNK_BYTES, SameUserInterceptor,
@@ -52,7 +54,6 @@ use crate::semantic_query::{
     ValidatedSemanticRequest, execute_request_in_context, snapshot_response, validate_request,
 };
 
-const SUPPORTED_FEATURE_BITS: u64 = 0b1111;
 const RESULT_LEASE_SECONDS: i64 = 1_800;
 
 type QueryStream = Pin<Box<dyn Stream<Item = Result<QueryEvent, Status>> + Send>>;
@@ -64,12 +65,6 @@ fn now_millis() -> i64 {
         .map_or(0, |duration| {
             i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
         })
-}
-
-fn opaque_bytes(domain: SemanticFingerprintDomain, value: &str) -> Vec<u8> {
-    let mut fingerprint = semantic_fingerprint(domain);
-    fingerprint.update(value.as_bytes());
-    fingerprint.finalize().to_vec()
 }
 
 fn execution_identity(request: &StartQueryRequest, sequence: u64, accepted_at: i64) -> String {
@@ -155,6 +150,21 @@ impl ResultArtifactStore {
         Ok(Self { root, lease_secret })
     }
 
+    fn query_handle_token(
+        &self,
+        domain: SecurityMacDomain,
+        query_id: &str,
+        agent_id: &str,
+        workspace_id: &str,
+    ) -> Vec<u8> {
+        let mut authenticator = KeyedAuthenticator::new(&self.lease_secret, domain);
+        for field in [query_id, agent_id, workspace_id] {
+            authenticator.update(&(field.len() as u64).to_be_bytes());
+            authenticator.update(field.as_bytes());
+        }
+        authenticator.finalize().to_vec()
+    }
+
     fn query_artifact_path(&self, execution_id: &str) -> PathBuf {
         let digest = framed_digest(execution_id.as_bytes());
         self.root
@@ -168,10 +178,9 @@ impl ResultArtifactStore {
     ) -> Result<(), Status> {
         let value = serde_json::to_value(artifact)
             .map_err(|_| Status::internal("query artifact serialization failed"))?;
-        let bytes = crate::contracts::jcs::canonicalize_value(&value)
-            .map_err(|error| {
-                Status::internal(format!("query artifact canonicalization failed: {error}"))
-            })?;
+        let bytes = crate::contracts::jcs::canonicalize_value(&value).map_err(|error| {
+            Status::internal(format!("query artifact canonicalization failed: {error}"))
+        })?;
         let final_path = self.query_artifact_path(&artifact.execution.execution_id);
         if final_path.exists() {
             let existing = fs::read(&final_path)
@@ -412,6 +421,19 @@ pub struct QueryAuthorization {
     claims: BTreeMap<String, WorkspaceClaim>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspacePermission {
+    Query,
+}
+
+impl WorkspacePermission {
+    const fn claim(self) -> &'static str {
+        match self {
+            Self::Query => "query",
+        }
+    }
+}
+
 impl QueryAuthorization {
     /// Construct a non-empty local capability and closed claim set.
     ///
@@ -426,8 +448,14 @@ impl QueryAuthorization {
         }
         let mut by_workspace = BTreeMap::new();
         for claim in claims {
+            let mut permissions = claim.permission_claims.iter().collect::<Vec<_>>();
+            permissions.sort_unstable();
             if claim.workspace_id.is_empty()
-                || claim.permission_claims.is_empty()
+                || !claim
+                    .permission_claims
+                    .iter()
+                    .any(|permission| permission == WorkspacePermission::Query.claim())
+                || permissions.windows(2).any(|pair| pair[0] == pair[1])
                 || by_workspace
                     .insert(claim.workspace_id.clone(), claim)
                     .is_some()
@@ -475,11 +503,21 @@ impl QueryAuthorization {
             .collect()
     }
 
-    fn authorize_workspace(&self, workspace_id: &str) -> Result<(), Status> {
+    fn authorize_workspace(
+        &self,
+        workspace_id: &str,
+        permission: WorkspacePermission,
+    ) -> Result<(), Status> {
         self.claims
-            .contains_key(workspace_id)
-            .then_some(())
-            .ok_or_else(|| Status::permission_denied("workspace is not authorized"))
+            .get(workspace_id)
+            .filter(|claim| {
+                claim
+                    .permission_claims
+                    .iter()
+                    .any(|candidate| candidate == permission.claim())
+            })
+            .map(|_| ())
+            .ok_or_else(|| Status::permission_denied("workspace action is not authorized"))
     }
 }
 
@@ -511,6 +549,63 @@ fn effective_limits_profile() -> EffectiveLimitsProfile {
         query_orphan_replay_seconds: u32::try_from(values[4]).expect("constant fits u32"),
         profile_digest: limits_profile_digest(values),
     }
+}
+
+pub(crate) fn host_capability_profile_digest(
+    profile: &HostCapabilityProfile,
+) -> Result<String, Status> {
+    let mut delivery_modes = profile
+        .delivery_modes
+        .iter()
+        .map(|value| match DeliveryPreference::try_from(*value) {
+            Ok(DeliveryPreference::Inline) => Ok("inline"),
+            Ok(DeliveryPreference::Resource) => Ok("resource"),
+            Ok(DeliveryPreference::Auto) => Ok("automatic"),
+            _ => Err(Status::failed_precondition(
+                "host capability profile contains an unsupported delivery mode",
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    delivery_modes.sort_unstable();
+    if delivery_modes.is_empty() || delivery_modes.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(Status::failed_precondition(
+            "host capability delivery modes are empty or duplicated",
+        ));
+    }
+    let mut compression_algorithms = profile
+        .compression_algorithms
+        .iter()
+        .map(|value| match PayloadCompression::try_from(*value) {
+            Ok(PayloadCompression::Identity) => Ok("identity"),
+            Ok(PayloadCompression::Zstd) => Ok("zstd"),
+            _ => Err(Status::failed_precondition(
+                "host capability profile contains an unsupported compression",
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    compression_algorithms.sort_unstable();
+    if compression_algorithms.is_empty()
+        || compression_algorithms
+            .windows(2)
+            .any(|pair| pair[0] == pair[1])
+        || !compression_algorithms.contains(&"identity")
+        || profile.maximum_frame_bytes == 0
+        || profile.maximum_frame_bytes > MAX_CONTROL_MESSAGE_BYTES as u64
+    {
+        return Err(Status::failed_precondition(
+            "host capability profile is empty, duplicated, or outside service limits",
+        ));
+    }
+    let value = serde_json::json!({
+        "compression_algorithms": compression_algorithms,
+        "delivery_modes": delivery_modes,
+        "maximum_frame_bytes": profile.maximum_frame_bytes,
+        "supports_resource_links": profile.supports_resource_links,
+        "supports_trace_context": profile.supports_trace_context,
+    });
+    let canonical = crate::contracts::jcs::canonicalize_value(&value)
+        .map_err(|error| Status::internal(format!("host profile canonicalization: {error}")))?;
+    Ok(framed_digest(&canonical))
 }
 
 fn constant_time_equal(left: &[u8; 32], right: &[u8; 32]) -> bool {
@@ -666,6 +761,7 @@ pub struct ProductionQueryService<B> {
     artifact_records: Arc<Mutex<BTreeMap<String, ResultArtifact>>>,
     handles: Arc<Mutex<BTreeMap<String, Arc<QueryHandle>>>>,
     idempotency: Arc<Mutex<BTreeMap<String, String>>>,
+    host_profile_digests: Arc<Mutex<BTreeMap<String, String>>>,
     freshness: FreshnessBarrier,
     freshness_timeout: std::time::Duration,
     query_bundle: BundleIdentity,
@@ -730,6 +826,7 @@ impl<B> ProductionQueryService<B> {
             artifact_records: Arc::new(Mutex::new(BTreeMap::new())),
             handles: Arc::new(Mutex::new(BTreeMap::new())),
             idempotency: Arc::new(Mutex::new(BTreeMap::new())),
+            host_profile_digests: Arc::new(Mutex::new(BTreeMap::new())),
             freshness,
             freshness_timeout,
             query_bundle: query_bundle_identity(),
@@ -1306,11 +1403,26 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 "no accepted RPC or semantic query version overlap",
             ));
         }
+        let host_profile = request
+            .host_capabilities
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("host capability profile is missing"))?;
+        let derived_host_profile_digest = host_capability_profile_digest(host_profile)?;
+        if host_profile.profile_digest != derived_host_profile_digest {
+            return Err(Status::failed_precondition(
+                "host capability profile digest differs from its typed fields",
+            ));
+        }
         let negotiated = negotiate_feature_bits(
-            request.required_feature_bits,
-            request.optional_feature_bits,
-            SUPPORTED_FEATURE_BITS,
+            CpgdFeatureMask::from_wire(request.required_feature_bits),
+            CpgdFeatureMask::from_wire(request.optional_feature_bits),
+            CpgdFeatureMask::SUPPORTED,
+            CpgdFeatureMask::REQUIRED,
         )?;
+        self.host_profile_digests.lock().await.insert(
+            request.agent_instance_id.clone(),
+            derived_host_profile_digest,
+        );
         let active_snapshot = self
             .backend
             .public_snapshot(&claims[0].workspace_id)
@@ -1327,7 +1439,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             rust_build: env!("CARGO_PKG_VERSION").to_owned(),
             negotiated_rpc_version: "1.0".to_owned(),
             negotiated_semantic_query_version: "1.3".to_owned(),
-            negotiated_feature_bits: negotiated,
+            negotiated_feature_bits: negotiated.bits(),
             negotiated_compression: PayloadCompression::Identity as i32,
             installed_bundles: vec![self.query_bundle.clone()],
             active_schema_fingerprints: vec![SchemaFingerprint {
@@ -1355,7 +1467,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
     ) -> Result<Response<StatusResponse>, Status> {
         let request = request.into_inner();
         self.authorization
-            .authorize_workspace(&request.workspace_id)?;
+            .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
         let snapshot = self
             .backend
             .public_snapshot(&request.workspace_id)
@@ -1441,7 +1553,18 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
     ) -> Result<Response<ValidateQueryResponse>, Status> {
         let request = request.into_inner();
         self.authorization
-            .authorize_workspace(&request.workspace_id)?;
+            .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
+        if self
+            .host_profile_digests
+            .lock()
+            .await
+            .get(&request.agent_instance_id)
+            .is_none_or(|digest| digest != &request.host_capability_profile_digest)
+        {
+            return Err(Status::failed_precondition(
+                "query host profile was not validated by the handshake",
+            ));
+        }
         validate_checksum(&request.request_checksum, &request.canonical_request_json)?;
         let validated = validate_request(&request.canonical_request_json)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
@@ -1467,7 +1590,18 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
     ) -> Result<Response<StartQueryResponse>, Status> {
         let request = request.into_inner();
         self.authorization
-            .authorize_workspace(&request.workspace_id)?;
+            .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
+        if self
+            .host_profile_digests
+            .lock()
+            .await
+            .get(&request.agent_instance_id)
+            .is_none_or(|digest| digest != &request.host_capability_profile_digest)
+        {
+            return Err(Status::failed_precondition(
+                "query host profile was not validated by the handshake",
+            ));
+        }
         if request.deadline_unix_ms <= now_millis() {
             return Err(Status::deadline_exceeded("query deadline elapsed"));
         }
@@ -1511,6 +1645,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 negotiated_request_version: "1.3".to_owned(),
                 negotiated_response_version: "1.3".to_owned(),
                 effective_semantic_request_id: request.semantic_request_id.unwrap_or_default(),
+                cancel_token: handle.cancel_token.clone(),
             }));
         }
         validate_checksum(&request.request_checksum, &request.canonical_request_json)?;
@@ -1539,10 +1674,19 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             semantic_request_id: semantic_request_id.clone(),
             mcp_call_id: request.mcp_call_id.clone(),
         };
-        let resume_token = opaque_bytes(SemanticFingerprintDomain::QueryResume, &query_id);
-        // The accepted v1 response exposes one opaque handle token. It therefore
-        // authorizes both replay and cancellation; future protocol majors may split it.
-        let cancel_token = resume_token.clone();
+        let resume_token = self.artifacts.query_handle_token(
+            SecurityMacDomain::QueryResumeToken,
+            &query_id,
+            &request.agent_instance_id,
+            &request.workspace_id,
+        );
+        let cancel_token = self.artifacts.query_handle_token(
+            SecurityMacDomain::QueryCancelToken,
+            &query_id,
+            &request.agent_instance_id,
+            &request.workspace_id,
+        );
+        let response_cancel_token = cancel_token.clone();
         let handle = Arc::new(QueryHandle {
             execution: execution.clone(),
             resume_token: resume_token.clone(),
@@ -1570,7 +1714,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 Arc::clone(&self.backend),
                 Arc::clone(&self.artifacts),
                 Arc::clone(&self.artifact_records),
-                handle,
+                Arc::clone(&handle),
                 query_id.clone(),
                 validated,
                 request.deadline_unix_ms,
@@ -1590,6 +1734,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             negotiated_request_version: "1.3".to_owned(),
             negotiated_response_version: "1.3".to_owned(),
             effective_semantic_request_id: semantic_request_id,
+            cancel_token: response_cancel_token,
         }))
     }
 
@@ -1607,6 +1752,8 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             .get(&request.daemon_query_id)
             .cloned()
             .ok_or_else(|| Status::not_found("query handle not found"))?;
+        self.authorization
+            .authorize_workspace(&handle.workspace_id, WorkspacePermission::Query)?;
         if handle.resume_token != request.resume_token {
             return Err(Status::permission_denied("resume token differs"));
         }
@@ -1621,7 +1768,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
     ) -> Result<Response<Self::AttachQueryStream>, Status> {
         let request = request.into_inner();
         self.authorization
-            .authorize_workspace(&request.workspace_id)?;
+            .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
         let handle = self
             .handles
             .lock()
@@ -1662,7 +1809,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
     ) -> Result<Response<CancelQueryResponse>, Status> {
         let request = request.into_inner();
         self.authorization
-            .authorize_workspace(&request.workspace_id)?;
+            .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
         let Some(handle) = self
             .handles
             .lock()
@@ -1758,6 +1905,9 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             .ok_or_else(|| Status::not_found("result artifact not found"))?;
         if artifact.lease_token != request.lease_token {
             return Err(Status::permission_denied("result lease token differs"));
+        }
+        if artifact.lease_expires_at_unix_ms <= now_millis() {
+            return Err(Status::failed_precondition("result lease has expired"));
         }
         let offset = usize::try_from(request.offset)
             .map_err(|_| Status::out_of_range("result offset is invalid"))?;
@@ -2079,7 +2229,24 @@ mod tests {
         crate::contracts::jcs::canonicalize_slice(br#"{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"rpc-current","workspace_id":"workspace:00000000000000000000000000000000","freshness_policy":"current_required","queries":[{"query_id":"q1","request":"find code entities","label":null,"input":null,"where":null,"limit":{"first":1,"offset":0}}],"response_projection":null,"cost_budget":{"maximum_rows":1}}"#).unwrap()
     }
 
-    fn handshake(token: &[u8]) -> HandshakeRequest {
+    fn test_host_profile() -> HostCapabilityProfile {
+        let mut profile = HostCapabilityProfile {
+            delivery_modes: vec![
+                DeliveryPreference::Inline as i32,
+                DeliveryPreference::Resource as i32,
+                DeliveryPreference::Auto as i32,
+            ],
+            compression_algorithms: vec![PayloadCompression::Identity as i32],
+            supports_resource_links: true,
+            supports_trace_context: true,
+            maximum_frame_bytes: 1_048_576,
+            profile_digest: String::new(),
+        };
+        profile.profile_digest = host_capability_profile_digest(&profile).unwrap();
+        profile
+    }
+
+    fn handshake_for(token: &[u8], agent_instance_id: &str) -> HandshakeRequest {
         HandshakeRequest {
             rpc_versions: Some(VersionRange {
                 minimum: "1.0".to_owned(),
@@ -2089,14 +2256,229 @@ mod tests {
                 minimum: "1.3".to_owned(),
                 maximum: "1.3".to_owned(),
             }),
+            required_feature_bits: CpgdFeatureMask::REQUIRED.bits(),
+            optional_feature_bits: CpgdFeatureMask::SUPPORTED
+                .missing_from(CpgdFeatureMask::REQUIRED)
+                .bits(),
             desired_workspace_ids: vec!["workspace:00000000000000000000000000000000".to_owned()],
+            host_capabilities: Some(test_host_profile()),
             credential_proof: Some(CredentialProof {
                 credential_id: "test-credential".to_owned(),
                 capability_token: token.to_vec(),
             }),
-            agent_instance_id: "test-agent".to_owned(),
+            agent_instance_id: agent_instance_id.to_owned(),
             ..HandshakeRequest::default()
         }
+    }
+
+    fn handshake(token: &[u8]) -> HandshakeRequest {
+        handshake_for(token, "test-agent")
+    }
+
+    fn start_request(agent_instance_id: &str) -> StartQueryRequest {
+        StartQueryRequest {
+            agent_instance_id: agent_instance_id.to_owned(),
+            host_capability_profile_digest: test_host_profile().profile_digest,
+            ..StartQueryRequest::default()
+        }
+    }
+
+    async fn register_host<B: SemanticQueryBackend>(
+        service: &ProductionQueryService<B>,
+        agent_instance_id: &str,
+    ) {
+        service
+            .handshake(Request::new(handshake_for(
+                b"test-capability-token",
+                agent_instance_id,
+            )))
+            .await
+            .unwrap();
+    }
+
+    async fn start_test_query<B: SemanticQueryBackend>(
+        service: &ProductionQueryService<B>,
+        agent_instance_id: &str,
+        idempotency_key: &str,
+    ) -> StartQueryResponse {
+        let canonical = canonical_request();
+        service
+            .start_query(Request::new(StartQueryRequest {
+                agent_instance_id: agent_instance_id.to_owned(),
+                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                semantic_query_version: "1.3".to_owned(),
+                canonical_request_json: canonical.clone(),
+                request_checksum: framed_digest(&canonical),
+                delivery_preference: DeliveryPreference::Resource as i32,
+                deadline_unix_ms: now_millis() + 60_000,
+                idempotency_key: idempotency_key.to_owned(),
+                payload_compression: PayloadCompression::Identity as i32,
+                ..start_request(agent_instance_id)
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+    }
+
+    #[tokio::test]
+    async fn wp67_behavioral_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let service = ProductionQueryService::new(
+            Arc::new(FakeBackend),
+            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+
+        let mut incomplete = handshake_for(b"test-capability-token", "wp67-agent");
+        incomplete.required_feature_bits = CpgdFeatureMask::NONE.bits();
+        incomplete.optional_feature_bits = CpgdFeatureMask::SUPPORTED
+            .missing_from(CpgdFeatureMask::QUERY_RESUME)
+            .bits();
+        let status = service
+            .handshake(Request::new(incomplete))
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+
+        register_host(&service, "wp67-agent").await;
+        let started = start_test_query(&service, "wp67-agent", "wp67-forged-resume").await;
+        let mut legacy_unkeyed = blake3::Hasher::new();
+        legacy_unkeyed.update(b"codefabric.query.resume.v1\0");
+        legacy_unkeyed.update(started.daemon_query_id.as_bytes());
+        let status = service
+            .stream_query(Request::new(StreamQueryRequest {
+                daemon_query_id: started.daemon_query_id,
+                resume_token: legacy_unkeyed.finalize().as_bytes().to_vec(),
+                after_sequence: 0,
+            }))
+            .await
+            .err()
+            .expect("the legacy public derivation must not authenticate");
+        assert_eq!(status.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn wp67_negative_zero_state() {
+        let root = tempfile::tempdir().unwrap();
+        let backend = Arc::new(BlockingBackend {
+            started: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+            cancelled: Arc::new(Notify::new()),
+        });
+        let service = ProductionQueryService::new(
+            Arc::clone(&backend),
+            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+        register_host(&service, "wp67-cancel-agent").await;
+        let started = start_test_query(&service, "wp67-cancel-agent", "wp67-distinct-token").await;
+        backend.started.notified().await;
+        assert_ne!(started.resume_token, started.cancel_token);
+
+        let status = service
+            .cancel_query(Request::new(CancelQueryRequest {
+                daemon_query_id: started.daemon_query_id.clone(),
+                cancel_token: started.resume_token.clone(),
+                agent_instance_id: "wp67-cancel-agent".to_owned(),
+                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                reason: "wrong token class".to_owned(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), tonic::Code::PermissionDenied);
+
+        let expired = ResultArtifact {
+            id: "artifact:wp67-expired".to_owned(),
+            checksum: framed_digest(b"expired"),
+            lease_token: "expired-lease".to_owned(),
+            lease_expires_at_unix_ms: now_millis() - 1,
+            bytes: Arc::from(b"expired".as_slice()),
+        };
+        service
+            .artifact_records
+            .lock()
+            .await
+            .insert(expired.id.clone(), expired.clone());
+        let status = service
+            .read_result(Request::new(ReadResultRequest {
+                artifact_id: expired.id,
+                offset: 0,
+                maximum_bytes: Some(1),
+                lease_token: expired.lease_token,
+                accepted_compression: PayloadCompression::Identity as i32,
+            }))
+            .await
+            .err()
+            .expect("an expired result lease must not produce a stream");
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+
+        service
+            .cancel_query(Request::new(CancelQueryRequest {
+                daemon_query_id: started.daemon_query_id,
+                cancel_token: started.cancel_token,
+                agent_instance_id: "wp67-cancel-agent".to_owned(),
+                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                reason: "test cleanup".to_owned(),
+            }))
+            .await
+            .unwrap();
+        backend.release.notify_one();
+    }
+
+    #[tokio::test]
+    async fn wp67_operational_acceptance() {
+        assert_eq!(CpgdFeatureMask::REQUIRED, CpgdFeatureMask::QUERY_RESUME);
+        assert!(
+            QueryAuthorization::new(
+                b"test-capability-token",
+                vec![WorkspaceClaim {
+                    workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+                    repository_id: None,
+                    worktree_id: None,
+                    workspace_kind: "directory".to_owned(),
+                    readiness: WorkspaceReadiness::Ready as i32,
+                    permission_claims: vec!["status-only".to_owned()],
+                }],
+            )
+            .is_err()
+        );
+
+        let mut reordered_profile = test_host_profile();
+        reordered_profile.delivery_modes.reverse();
+        assert_eq!(
+            host_capability_profile_digest(&reordered_profile).unwrap(),
+            reordered_profile.profile_digest
+        );
+
+        let root = tempfile::tempdir().unwrap();
+        let service = ProductionQueryService::new(
+            Arc::new(FakeBackend),
+            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
+            authorization(),
+            FreshnessBarrier::default(),
+            std::time::Duration::from_secs(2),
+        );
+        let handshake = service
+            .handshake(Request::new(handshake_for(
+                b"test-capability-token",
+                "wp67-operational-agent",
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_ne!(
+            handshake.negotiated_feature_bits & CpgdFeatureMask::REQUIRED.bits(),
+            0
+        );
+        let started =
+            start_test_query(&service, "wp67-operational-agent", "wp67-operational").await;
+        assert_eq!(started.resume_token.len(), 32);
+        assert_eq!(started.cancel_token.len(), 32);
+        assert_ne!(started.resume_token, started.cancel_token);
     }
 
     #[tokio::test]
@@ -2166,6 +2548,7 @@ mod tests {
             FreshnessBarrier::default(),
             std::time::Duration::from_secs(2),
         );
+        register_host(&service, "test-agent").await;
         let canonical = canonical_request();
         let started = service
             .start_query(Request::new(StartQueryRequest {
@@ -2178,7 +2561,7 @@ mod tests {
                 deadline_unix_ms: now_millis() + 60_000,
                 idempotency_key: "same-request".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
-                ..StartQueryRequest::default()
+                ..start_request("test-agent")
             }))
             .await
             .unwrap()
@@ -2240,6 +2623,7 @@ mod tests {
             FreshnessBarrier::default(),
             std::time::Duration::from_secs(2),
         );
+        register_host(&service, "artifact-agent").await;
         let canonical = canonical_request();
         let started = service
             .start_query(Request::new(StartQueryRequest {
@@ -2255,7 +2639,7 @@ mod tests {
                 deadline_unix_ms: now_millis() + 60_000,
                 idempotency_key: "wp65-persist".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
-                ..StartQueryRequest::default()
+                ..start_request("artifact-agent")
             }))
             .await
             .unwrap()
@@ -2321,6 +2705,7 @@ mod tests {
             FreshnessBarrier::default(),
             std::time::Duration::from_secs(2),
         );
+        register_host(&service, "cancel-agent").await;
         let canonical = canonical_request();
         let started = service
             .start_query(Request::new(StartQueryRequest {
@@ -2334,7 +2719,7 @@ mod tests {
                 deadline_unix_ms: now_millis() + 60_000,
                 idempotency_key: "wp65-cancel".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
-                ..StartQueryRequest::default()
+                ..start_request("cancel-agent")
             }))
             .await
             .unwrap()
@@ -2343,7 +2728,7 @@ mod tests {
         service
             .cancel_query(Request::new(CancelQueryRequest {
                 daemon_query_id: started.daemon_query_id.clone(),
-                cancel_token: started.resume_token,
+                cancel_token: started.cancel_token,
                 agent_instance_id: "cancel-agent".to_owned(),
                 workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
                 reason: "drop the stream".to_owned(),
@@ -2371,6 +2756,7 @@ mod tests {
             FreshnessBarrier::default(),
             std::time::Duration::from_secs(2),
         );
+        register_host(&service, "test-agent").await;
         let canonical = canonical_request();
         let status = service
             .start_query(Request::new(StartQueryRequest {
@@ -2382,7 +2768,7 @@ mod tests {
                 deadline_unix_ms: now_millis() - 1,
                 idempotency_key: "expired".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
-                ..StartQueryRequest::default()
+                ..start_request("test-agent")
             }))
             .await
             .unwrap_err();
@@ -2404,6 +2790,7 @@ mod tests {
             FreshnessBarrier::default(),
             std::time::Duration::from_secs(2),
         );
+        register_host(&service, "test-agent").await;
         let canonical = canonical_request();
         let started = service
             .start_query(Request::new(StartQueryRequest {
@@ -2416,7 +2803,7 @@ mod tests {
                 deadline_unix_ms: now_millis() + 60_000,
                 idempotency_key: "cancel-request".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
-                ..StartQueryRequest::default()
+                ..start_request("test-agent")
             }))
             .await
             .unwrap()
@@ -2429,7 +2816,7 @@ mod tests {
         let cancelled = service
             .cancel_query(Request::new(CancelQueryRequest {
                 daemon_query_id: started.daemon_query_id.clone(),
-                cancel_token: started.resume_token.clone(),
+                cancel_token: started.cancel_token.clone(),
                 agent_instance_id: "test-agent".to_owned(),
                 workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
                 reason: "test cancellation".to_owned(),
@@ -2547,6 +2934,10 @@ mod tests {
             tokio::task::yield_now().await;
         }
         let mut client = query_client(socket.clone()).await;
+        client
+            .handshake(handshake(b"test-capability-token"))
+            .await
+            .unwrap();
         let canonical = canonical_request();
         client
             .start_query(StartQueryRequest {
@@ -2559,7 +2950,7 @@ mod tests {
                 deadline_unix_ms: now_millis() + 60_000,
                 idempotency_key: "daemon-shutdown-cancellation".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
-                ..StartQueryRequest::default()
+                ..start_request("test-agent")
             })
             .await
             .unwrap();
@@ -2588,6 +2979,7 @@ mod tests {
             freshness,
             std::time::Duration::from_millis(50),
         );
+        register_host(&service, "test-agent").await;
         let canonical = canonical_current_required_request();
         let started = service
             .start_query(Request::new(StartQueryRequest {
@@ -2600,7 +2992,7 @@ mod tests {
                 deadline_unix_ms: now_millis() + 1_000,
                 idempotency_key: "strict-stale".to_owned(),
                 payload_compression: PayloadCompression::Identity as i32,
-                ..StartQueryRequest::default()
+                ..start_request("test-agent")
             }))
             .await
             .unwrap()

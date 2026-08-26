@@ -8,6 +8,14 @@
   "records": [
     {
       "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "contracts/fixtures/admin-line-protocol-examples.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
       "oracle_class": "normative-kat",
       "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
       "owner": "ontology",
@@ -44,6 +52,14 @@
       "origin": "Model-discovered normative-kat source bytes; answers remain outside routine renderer authority",
       "owner": "semantic-query",
       "path": "contracts/fixtures/jcs/vectors.json",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "differential",
+      "origin": "Model-discovered differential source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "contracts/fixtures/model-index-decode-differential.json",
       "version": "1.0"
     },
     {

@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {"mutation": "none", "accepted": true},
+    {"mutation": "unknown-root-field", "accepted": false},
+    {"mutation": "unsafe-authority-path", "accepted": false},
+    {"mutation": "mixed-resource-profile", "accepted": false},
+    {"mutation": "unsorted-artifacts", "accepted": false},
+    {"mutation": "unsorted-output-paths", "accepted": false}
+  ]
+}

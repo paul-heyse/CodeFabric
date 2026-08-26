@@ -30,6 +30,7 @@ use crate::query_service::{
     WorkspaceQueryBackend, serve_query_uds,
 };
 use crate::registries::WorkspaceRegistryLifecycle;
+use crate::rpc::SameUserInterceptor;
 use crate::rpc::generated::codefabric::cpgd::v1::{WorkspaceClaim, WorkspaceReadiness};
 use crate::workspace_registry::{
     RelinkProof, RemovalPolicy, WorkspaceRecord, WorkspaceRegistry, WorkspaceRegistryError,
@@ -1029,10 +1030,10 @@ pub(crate) async fn serve_with_query_backend(
             .accept()
             .await
             .map_err(|source| DaemonError::Admin(format!("accept: {source}")))?;
-        let credentials = stream
-            .peer_cred()
-            .map_err(|source| DaemonError::Admin(format!("peer credentials: {source}")))?;
-        if credentials.uid() != allowed_uid {
+        if SameUserInterceptor::new(allowed_uid)
+            .authenticate_stream(&stream)
+            .is_err()
+        {
             continue;
         }
         let request = read_request(&mut stream).await?;
@@ -1327,6 +1328,45 @@ maintenance_schedule = "daily-idle"
             actual.static_config.sandbox_policy,
             profile.provider_sandbox
         );
+    }
+
+    #[test]
+    fn wp67_structural_acceptance_admin_protocol_matches_schema_examples() {
+        let schema: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../contracts/rpc/admin-line-protocol.schema.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            schema["$id"],
+            "https://codefabric.dev/contracts/rpc/admin-line-protocol.schema.json"
+        );
+        assert_eq!(schema["x-codefabric-framing"]["delimiter"], "LF");
+        assert_eq!(
+            schema["x-codefabric-framing"]["maximum_encoded_line_bytes"],
+            ADMIN_MESSAGE_MAX_BYTES
+        );
+
+        let examples: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../contracts/fixtures/admin-line-protocol-examples.json"
+        ))
+        .unwrap();
+        for value in examples["valid"].as_array().unwrap() {
+            let accepted = if value.get("scope").is_some() {
+                serde_json::from_value::<AdminEnvelope>(value.clone()).is_ok()
+            } else {
+                serde_json::from_value::<AdminResponse>(value.clone()).is_ok()
+            };
+            assert!(accepted, "valid schema example differs from Rust: {value}");
+        }
+        for value in examples["invalid"].as_array().unwrap() {
+            assert!(
+                serde_json::from_value::<AdminEnvelope>(value.clone()).is_err()
+                    && serde_json::from_value::<AdminResponse>(value.clone()).is_err(),
+                "invalid schema example was accepted by Rust: {value}"
+            );
+        }
+        let forbidden_inline_peer_check = [".peer", "_cred()"].concat();
+        assert!(!include_str!("daemon.rs").contains(&forbidden_inline_peer_check));
     }
 
     #[test]

@@ -1,0 +1,20 @@
+{
+  "valid": [
+    {"scope": "daemon", "request": {"command": "status"}},
+    {"scope": "workspace", "request": {"command": "list"}},
+    {
+      "accepted": true,
+      "daemon_liveness": "LIVE",
+      "workspace_readiness": "NO_WORKSPACES_READY",
+      "shutdown_mode": null,
+      "workspaces": [],
+      "workspace_health": [],
+      "error_code": null
+    }
+  ],
+  "invalid": [
+    {"scope": "daemon", "request": {"command": "status", "extra": true}},
+    {"scope": "query", "request": {"command": "status"}},
+    {"daemon_liveness": "LIVE", "workspace_readiness": "UNKNOWN"}
+  ]
+}

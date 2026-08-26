@@ -2370,6 +2370,19 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "cancelToken",
+              "label": "LABEL_OPTIONAL",
+              "name": "cancel_token",
+              "number": 10,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v1.StartQueryResponse",

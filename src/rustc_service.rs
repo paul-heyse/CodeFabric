@@ -16,6 +16,7 @@ use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
+use crate::registries::RustcFeatureMask;
 use crate::registries::{PROVIDER_ENTRIES, PROVIDER_RESOURCE_PROFILES};
 use crate::rpc::generated::codefabric::provider::v1::{
     CancelAcknowledgement, CancelAcknowledgementState, ChunkAccepted, ChunkRejected,
@@ -890,14 +891,15 @@ impl RustcExtractor for RustcObservationService {
             ));
         }
         let negotiated = negotiate_feature_bits(
-            hello.required_feature_bits,
-            hello.optional_feature_bits,
-            self.policy.supported_feature_bits,
+            RustcFeatureMask::from_wire(hello.required_feature_bits),
+            RustcFeatureMask::from_wire(hello.optional_feature_bits),
+            RustcFeatureMask::from_wire(self.policy.supported_feature_bits),
+            RustcFeatureMask::NONE,
         )?;
         Ok(Response::new(ExtractorHelloAck {
             protocol_major: 1,
             protocol_minor: 0,
-            negotiated_feature_bits: negotiated,
+            negotiated_feature_bits: negotiated.bits(),
             daemon_build: self.policy.daemon_build.clone(),
             output_schema_bundle_digest: self.policy.output_schema_bundle_digest.clone(),
             sandbox_profile_digest: self.policy.sandbox_profile_digest.clone(),

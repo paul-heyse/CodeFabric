@@ -91,6 +91,9 @@ message HostCapabilityProfile {
   bool supports_resource_links = 3;
   bool supports_trace_context = 4;
   uint64 maximum_frame_bytes = 5;
+  // BLAKE3-256 of RFC 8785 canonical JSON over the five preceding typed fields,
+  // with enum values represented by their stable lowercase protocol names and
+  // both repeated fields sorted and duplicate-free.
   string profile_digest = 6;
 }
 
@@ -226,6 +229,7 @@ message StartQueryResponse {
   string negotiated_request_version = 7;
   string negotiated_response_version = 8;
   string effective_semantic_request_id = 9;
+  bytes cancel_token = 10;
 }
 
 message StreamQueryRequest {

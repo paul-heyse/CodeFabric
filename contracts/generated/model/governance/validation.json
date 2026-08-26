@@ -1,8 +1,8 @@
 {
-  "artifact_count": 121,
+  "artifact_count": 124,
   "bundle_count": 8,
   "family": "aggregate",
-  "fixture_count": 51,
+  "fixture_count": 53,
   "forbidden_write_roots": [
     "contracts/acceptance",
     "contracts/fixtures",
@@ -21,5 +21,5 @@
     "tooling/proto"
   ],
   "schema_version": 1,
-  "tree_digest": "b3:b299e6b4f2878829c5195fd68ef71891e0a9fc69490bff11c1acdb9a5156ce9e"
+  "tree_digest": "b3:df3f9391140699ec6fbe32bdb64e39fda70caa8065a8d977b00cd192395d0da4"
 }

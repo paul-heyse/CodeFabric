@@ -1,6 +1,6 @@
 {
   "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
-  "descriptor_sha256": "dab30a99d17f66011a9d5d29a8d91069f69bc7e3fc02c38dd5f2de00230eaa9a",
+  "descriptor_sha256": "cc8d49b1cb141556d7e107c31df3dd8b2b84e624577c39784d5f3019f16796ec",
   "python": {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -27,7 +27,7 @@
   },
   "schema": 4,
   "sources": {
-    "contracts/rpc/cpg_query_service.proto": "b3:e73c3a48cfc2fa9d492b64dbe8802d6d20bd94387894019d9d09cc6924401f88",
+    "contracts/rpc/cpg_query_service.proto": "b3:05dd31c0d0cd2f40efcf3dbbff27433c133ac3bb29e8b177cd734fd35ec31b39",
     "contracts/rpc/provider_control.proto": "b3:88e322e42cc6475bfa810a4a3b4479a1620bef22e3156b3b82469abc4fd36e38",
     "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
     "contracts/rpc/rustc_extractor.proto": "b3:3fb3384fa6dfd521b4ed4690102d5e00e8c7fda7f4a95c5c2543d81bd156fac6"
