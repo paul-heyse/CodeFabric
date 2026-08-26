@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/design_principles_remediation_proposal_2026-08-25_v2.md",
   "baseline_commit": "dd3c0056ce2c01d04c28605b043a9316a6c26383",
   "status": "executing",
-  "current_packet": "WP66",
+  "current_packet": "WP67",
   "packets": {
     "WP73": {
       "status": "complete",
@@ -161,14 +161,17 @@
       "blockers": []
     },
     "WP66": {
-      "status": "ready",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "8242fe0db8726692a5c43e64880a7446b97f0905",
+      "deviations": [
+        "Schema-v8 mutation rows migrate with explicit zero/unknown typed-scope sentinels instead of retaining runtime substring parsing of application_id; all schema-v9 writes carry authoritative workspace, analysis-context, and source-generation columns.",
+        "The bounded explain_version implementation is exposed as the operator-facing ResultArtifactStore API over an exact FabricTable; WP67 owns schema-covering and transporting the broader daemon admin protocol."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP67": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -359,6 +362,6 @@
       "summary": "fc939042ffa2169eb6027e79e55a65da51d30a16 keeps lower-level canonical-schema serialization details private instead of minting an ungoverned public prefix. Public-error closure, all WP61-WP64 packet oracles, M11 integration, and DB10 zero-state were re-proved before the dependency chain returned to complete."
     }
   ],
-  "next_action": "Implement WP66 durable provenance closure, typed mutation scope joins, source-blob manifest links, reachability-aware retention, and explain_version.",
-  "updated_at": "2026-08-25T23:58:01Z"
+  "next_action": "Implement WP67 keyed token separation, lease and workspace authorization enforcement, typed feature negotiation, schema-covered admin protocol, and one cross-language model-index decode contract.",
+  "updated_at": "2026-08-26T00:25:04Z"
 }
