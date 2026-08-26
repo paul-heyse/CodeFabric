@@ -86,7 +86,8 @@ pub mod query_service;
     feature = "daemon",
     feature = "data-fabric",
     feature = "fact-generation",
-    feature = "repository-state"
+    feature = "repository-state",
+    feature = "rpc"
 ))]
 pub mod registries;
 #[cfg(feature = "rpc")]
