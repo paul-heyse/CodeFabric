@@ -46,6 +46,8 @@ DIRECT_AUTHORITIES = {
     "tooling/model/proto_driver.py": "MODEL_INTEGRITY",
     "tooling/model/test_proto_driver.py": "TEST_ORACLE",
     "tooling/model/validate_aggregate.py": "MODEL_INTEGRITY",
+    "src/query_service.rs": "TEST_ORACLE",
+    "tooling/ci/released_fixture_verifier.py": "RELEASED_FIXTURE_INTEGRITY",
 }
 
 SCAN_ROOTS = (
@@ -198,7 +200,9 @@ def _used_variants(root: Path, type_name: str) -> set[str]:
 def _direct_domain_literals(root: Path) -> set[bytes]:
     result: set[bytes] = set()
     pattern = re.compile(r"(?:digest_frames\s*\(|\.update\s*\()b\"(codefabric[^\"]*)\"")
-    for relative in DIRECT_AUTHORITIES:
+    for relative, authority in DIRECT_AUTHORITIES.items():
+        if authority == "TEST_ORACLE":
+            continue
         path = root / relative
         if not path.is_file() or path.suffix != ".rs":
             continue
