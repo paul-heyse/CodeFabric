@@ -497,7 +497,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:4c2b6047e1eaba075e3636ffc3e701f2fb74380db71893be4822c76f041c1dd7",
+      "canonical_digest": "b3:9210d5331d8cd2d01bf7921d3bd9a3c023dbadd0119bb0a231b302ccb9b3e4d2",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -511,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:61e0e98d5c2e83b6bb34e3ca89b01c2db0322fbe23de9be2d866423f72a1e76c",
+      "source_digest": "b3:6557ed47c3c89eb7169fbf649fa6dcdca97c4dc9571ab2eaa7a641ca28fae95e",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -730,7 +730,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:2aeb76e844022bab8a1502b3f7bb7098af3e15ebace119e637c1ee9ec526fbe6",
+      "source_digest": "b3:16c3d63c552328d846d3470fc07cc9d19f70ab39b29fbaf2e6bb13154df648c6",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -1708,7 +1708,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:b8a57bc6f976d1a3d67114267da92bae71c688b0fc18c7bef519c64fc3d0f080",
+      "canonical_digest": "b3:afde3edb55a49143683bc898463adef1f22983b6da1b6578debf40f9b1583153",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -1722,7 +1722,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:aa9b82de994875561ab5a2f26c57c61aba6fe0de77954c379f2365df91b05ae6",
+      "source_digest": "b3:5270a45dc55257b5d45fee9d648a6dde60259a957aaed795f28e6a52097212bd",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -3663,7 +3663,7 @@
   "compatible_suite_major": 1,
   "families": [
     {
-      "action_key": "b3:45a3ef1ab3e3983feef966fe8355a0976815daaff5cf2f9069dd297c9cff8a0e",
+      "action_key": "b3:e854637c16b0a4455e6337e1d4334444d5b9f0eba0528ddb620ec6ca05b905cd",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",

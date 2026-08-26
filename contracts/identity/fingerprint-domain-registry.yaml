@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:cf459d5142e3e6afbf1f7f30d85e87e88b34b4cfcfa987f564732fe9e89937da"
+canonical_digest: "b3:4c7b33224e684c14dff8b6bccab56453447ee4049d6acc958d1f6e56c58c52fa"
 schema_version: 1
 records:
   - {domain_id: UNFRAMED_ID16, purpose: SEMANTIC_FINGERPRINT, domain_string: "", separator: NONE, framing: legacy-unframed-exact-preimage, fields: [preimage_bytes], normalization: {}, compatibility: PERSISTED_FROZEN, authority: "crate::identity::unframed_semantic_id", consumers: [src/core_facts.rs, src/daemon.rs, src/provider_runtime.rs]}
