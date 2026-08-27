@@ -101,7 +101,7 @@ pub struct SemanticLaneReport {
     pub semantic_mutations: Vec<OverlayMutation>,
 }
 
-/// Application port that owns ProviderRuntime submission and terminal-event collection.
+/// Application port that owns `ProviderRuntime` submission and terminal-event collection.
 pub trait SemanticLaneScheduler: Send + Sync {
     /// Schedule every required semantic provider and return only generation-current terminals.
     ///
@@ -481,7 +481,7 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
                     Some(SemanticLaneSource {
                         file_id: source.file_id,
                         raw_relative_path_bytes: source.path.raw_relative_path_bytes.clone(),
-                        language: source.language.clone(),
+                        language: source.language,
                         content_digest: source.digest,
                     })
                 })

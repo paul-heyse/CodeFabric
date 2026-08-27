@@ -1602,6 +1602,11 @@ pub struct TypeTerm {
 pub trait SemanticTypeAdapter<Observation> {
     type Error;
 
+    /// Normalize one provider observation into the application-owned type algebra.
+    ///
+    /// # Errors
+    ///
+    /// Returns the adapter's bounded normalization failure.
     fn normalize(&self, observation: &Observation) -> Result<TypeTerm, Self::Error>;
 }
 

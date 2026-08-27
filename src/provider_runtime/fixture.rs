@@ -30,7 +30,7 @@ pub(crate) struct ProviderSourceBlob {
     pub file_id: [u8; 16],
 }
 
-/// Compatibility-only consumer port colocated with the production ProviderRuntime boundary.
+/// Compatibility-only consumer port colocated with the production `ProviderRuntime` boundary.
 /// Direct process launch remains private to this module until each lane installs its production
 /// driver behind `RegisteredSemanticProviderAdapter`.
 pub(crate) struct CompatibilityProviderRuntimeDispatch<'a> {

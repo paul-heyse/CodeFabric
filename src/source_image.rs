@@ -186,6 +186,12 @@ impl DependencyInputBundle {
     }
 
     #[must_use]
+    /// Return the canonical empty dependency-input bundle.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the closed empty manifest can no longer be canonicalized, which is an
+    /// internal contract defect rather than an input-dependent condition.
     pub fn empty() -> Self {
         Self::pin(Vec::new()).expect("empty dependency manifest is valid")
     }

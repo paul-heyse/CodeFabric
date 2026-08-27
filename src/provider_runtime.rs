@@ -1713,10 +1713,10 @@ impl ProviderRuntimeDispatch {
     ///
     /// Returns a runtime construction error or missing adapter registration.
     pub fn semantic(
-        wave_id: Vec<u8>,
+        wave_id: &[u8],
         adapters: &SemanticProviderAdapterRegistry,
-        generation_oracle: Arc<dyn SourceGenerationOracle>,
-        journal: Arc<dyn ProviderRunJournal>,
+        generation_oracle: &Arc<dyn SourceGenerationOracle>,
+        journal: &Arc<dyn ProviderRunJournal>,
     ) -> Result<Self, ProviderRuntimeError> {
         let mut runtimes = BTreeMap::new();
         for provider_id in ["pyrefly-python", "rustc-mir"] {
@@ -1725,10 +1725,10 @@ impl ProviderRuntimeDispatch {
             })?;
             let runtime = ProviderRuntime::new(
                 provider_id,
-                wave_id.clone(),
+                wave_id.to_owned(),
                 adapter,
-                Arc::clone(&generation_oracle),
-                Arc::clone(&journal),
+                Arc::clone(generation_oracle),
+                Arc::clone(journal),
             )?;
             runtimes.insert(provider_id, runtime);
         }
@@ -3000,13 +3000,11 @@ mod tests {
         let reader = store.reader_factory();
         let generation = Arc::new(Generation(AtomicU64::new(7)));
         let generation_oracle: Arc<dyn SourceGenerationOracle> = generation.clone();
-        let dispatch = ProviderRuntimeDispatch::semantic(
-            vec![0x41; 16],
-            &registry,
-            generation_oracle,
-            Arc::new(OperationalProviderRunJournal::new(store)),
-        )
-        .unwrap();
+        let journal: Arc<dyn ProviderRunJournal> =
+            Arc::new(OperationalProviderRunJournal::new(store));
+        let dispatch =
+            ProviderRuntimeDispatch::semantic(&[0x41; 16], &registry, &generation_oracle, &journal)
+                .unwrap();
         assert_eq!(dispatch.provider_ids(), ["pyrefly-python", "rustc-mir"]);
         for provider_id in dispatch.provider_ids() {
             let mut accepted = dispatch

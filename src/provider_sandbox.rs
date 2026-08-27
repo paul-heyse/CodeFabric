@@ -327,10 +327,10 @@ impl GeneratedSandboxProfile {
             (ProviderTrustProfile::UntrustedSandboxed, SandboxMechanism::LinuxBubblewrap) => {
                 linux_profile(workspace_view, dependency_root, output_root).into_bytes()
             }
-            (ProviderTrustProfile::TrustedLocal, SandboxMechanism::None)
-            | (ProviderTrustProfile::ParsingOnly, SandboxMechanism::None) => {
-                format!("profile={trust_profile:?}\nmechanism=NONE\n").into_bytes()
-            }
+            (
+                ProviderTrustProfile::TrustedLocal | ProviderTrustProfile::ParsingOnly,
+                SandboxMechanism::None,
+            ) => format!("profile={trust_profile:?}\nmechanism=NONE\n").into_bytes(),
             _ => return Err(SandboxError::InvalidProfile("trust and mechanism differ")),
         };
         let sha256_digest = sha256_bytes(&bytes);
@@ -395,6 +395,7 @@ pub struct ProviderLaunchRequest {
 
 /// Platform-specific launch material. Linux accepts an already compiled seccomp descriptor,
 /// never a path that bubblewrap would misinterpret as an inherited file descriptor.
+#[derive(Clone, Copy)]
 pub enum ProviderSandboxLaunchMaterial<'a> {
     DarwinProfile(&'a Path),
     LinuxSeccomp(&'a fs::File),

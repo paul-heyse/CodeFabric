@@ -1298,14 +1298,14 @@ impl OperationalDependencyGraph {
             affected_owners: affected,
             unknown_changed_owners: unknown_changed_owners.clone(),
             traversed_edges,
-            invalidated_table_codes: (!changed.is_empty())
-                .then(|| {
-                    SEMANTIC_INVALIDATION_CONTRACTS
-                        .iter()
-                        .flat_map(|contract| contract.invalidated_table_codes.iter().copied())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            invalidated_table_codes: if changed.is_empty() {
+                BTreeSet::new()
+            } else {
+                SEMANTIC_INVALIDATION_CONTRACTS
+                    .iter()
+                    .flat_map(|contract| contract.invalidated_table_codes.iter().copied())
+                    .collect()
+            },
             full_rebuild_required: !unknown_changed_owners.is_empty(),
         }
     }
