@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP02",
+  "current_packet": "WP03",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -23,14 +23,18 @@
       "blockers": []
     },
     "WP02": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "c3e7fce9894635e8d40c1b75d730e0ac10303105",
+      "deviations": [
+        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP02 closed on root format/check, standard Clippy, the focused Wave 8 selector, audit/artifact checks, and exactly four packet oracles. No registry addition was required, so the conditional model-repro-check did not apply."
+      ],
+      "failed_approaches": [
+        "The first populated wave8-integration-check regex anchored bare oracle names, but nextest evaluates fully qualified test names and selected zero tests; the selector was corrected to module-qualified suffix matching and then passed all four WP02 oracles."
+      ],
       "blockers": []
     },
     "WP03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
