@@ -46,6 +46,7 @@ cargo nextest run \
   --no-default-features \
   --features model-compiler \
   --bin codefabric-model \
+  --no-fail-fast \
   -E "$test_filter"
 
 report="$($repo_root/scripts/model_exec.sh family-check "$family" "$repo_root")"
@@ -117,7 +118,8 @@ case "$family" in
       and .domain_count == 17
       and .enum_domain_count > 0
       and .flag_domain_count > 0
-      and (.rendered_outputs | length) == 10
+      and (.rendered_outputs | length) == 11
+      and (.rendered_outputs | index("contracts/generated/model/governance/transformation-pass-traceability.json")) != null
       and (.tool_identity.action_key | startswith("b3:"))
       and (.tool_identity.executable_digest | startswith("b3:"))
       and .tool_identity.features == ["provider-inventory-tooling"]
@@ -158,7 +160,7 @@ case "$family" in
     jq -e '
       .family == "schemas"
       and .table_count >= 21
-      and .operational_table_count == 26
+      and .operational_table_count == 27
       and .public_schema_count == 8
       and (.rendered_outputs | length) > .public_schema_count
       and (.syntax_detail_fields | index("occurrence_family_code")) != null

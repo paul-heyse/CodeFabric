@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::os::fd::OwnedFd;
-use std::os::unix::fs::PermissionsExt as _;
+use std::os::unix::ffi::OsStrExt as _;
+use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -12,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rusqlite::{OptionalExtension as _, params};
 use rustix::fs::{Mode, OFlags, fchmod, fsync, open, openat, renameat, unlinkat};
 use rustix::io::Errno;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::identity::{
@@ -119,6 +121,292 @@ pub struct SourceImage {
 /// Provider-facing name for the same exact immutable DTO.
 pub type SourceSnapshot = SourceImage;
 
+/// Exact path/digest/mode row exposed to an out-of-process provider.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProviderWorkspaceManifestEntry {
+    pub raw_relative_path_bytes: Vec<u8>,
+    pub blob_digest: String,
+    pub byte_length: u64,
+    pub mode: u32,
+}
+
+/// One pinned dependency file. Bytes are copied into the provider view and never linked.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DependencyInput {
+    pub raw_relative_path_bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
+    pub digest: [u8; 32],
+    pub mode: u32,
+}
+
+/// Immutable, identity-bearing dependency bundle shared by both semantic lanes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DependencyInputBundle {
+    pub entries: Vec<DependencyInput>,
+    pub manifest_digest: [u8; 32],
+}
+
+impl DependencyInputBundle {
+    /// Pin dependency bytes behind exact workspace-relative names.
+    ///
+    /// # Errors
+    ///
+    /// Rejects digest drift, duplicate/non-normal paths, `.git`, or writable modes.
+    pub fn pin(mut entries: Vec<DependencyInput>) -> Result<Self, SourceImageError> {
+        entries.sort_by(|left, right| {
+            left.raw_relative_path_bytes
+                .cmp(&right.raw_relative_path_bytes)
+        });
+        let mut prior = None::<&[u8]>;
+        let mut manifest = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            validate_provider_relative_path(&entry.raw_relative_path_bytes)?;
+            if prior == Some(entry.raw_relative_path_bytes.as_slice())
+                || crate::integrity::digest_bytes(&entry.bytes) != entry.digest
+                || entry.mode & 0o222 != 0
+                || !matches!(entry.mode, 0o400 | 0o500)
+            {
+                return Err(SourceImageError::ProviderWorkspaceView);
+            }
+            prior = Some(&entry.raw_relative_path_bytes);
+            manifest.push(ProviderWorkspaceManifestEntry {
+                raw_relative_path_bytes: entry.raw_relative_path_bytes.clone(),
+                blob_digest: format!("b3:{}", digest_name(&entry.digest)),
+                byte_length: u64::try_from(entry.bytes.len())
+                    .map_err(|_| SourceImageError::ProviderWorkspaceView)?,
+                mode: entry.mode,
+            });
+        }
+        let manifest_bytes = serde_json_canonicalizer::to_vec(&manifest)
+            .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+        Ok(Self {
+            entries,
+            manifest_digest: crate::integrity::digest_bytes(&manifest_bytes),
+        })
+    }
+
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::pin(Vec::new()).expect("empty dependency manifest is valid")
+    }
+}
+
+/// Published provider input roots and their exact manifest identities.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderWorkspaceView {
+    pub workspace_id: [u8; 16],
+    pub source_generation: u64,
+    pub workspace_root: PathBuf,
+    pub dependency_root: PathBuf,
+    pub output_root: PathBuf,
+    pub manifest_path: PathBuf,
+    pub manifest_digest: [u8; 32],
+    pub dependency_manifest_digest: [u8; 32],
+    pub sandbox_profile_digest: String,
+    pub entries: Vec<ProviderWorkspaceManifestEntry>,
+}
+
+#[derive(Serialize)]
+struct ProviderWorkspaceManifest<'a> {
+    version: &'static str,
+    workspace_id: String,
+    source_generation: u64,
+    sandbox_profile_digest: &'a str,
+    dependency_manifest_digest: String,
+    entries: &'a [ProviderWorkspaceManifestEntry],
+}
+
+/// Atomically publish verified provider inputs without symlinks or hard links to live state.
+///
+/// # Errors
+///
+/// Rejects mixed workspace/generation input, digest drift, unsafe paths including `.git`,
+/// writable input modes, or any failed durability/verification step.
+pub fn publish_provider_workspace_view(
+    state_root: &Path,
+    run_key: &str,
+    images: &[&SourceImage],
+    dependencies: &DependencyInputBundle,
+    sandbox_profile_digest: &str,
+) -> Result<ProviderWorkspaceView, SourceImageError> {
+    let first = images
+        .first()
+        .ok_or(SourceImageError::ProviderWorkspaceView)?;
+    if run_key.is_empty() || !valid_provider_profile_digest(sandbox_profile_digest) {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    let workspace_id = first.workspace_id;
+    let source_generation = first.source_generation;
+    let mut entries = images
+        .iter()
+        .map(|image| {
+            if image.workspace_id != workspace_id
+                || image.source_generation != source_generation
+                || image.byte_length != u64::try_from(image.bytes.len()).unwrap_or(u64::MAX)
+                || crate::integrity::digest_bytes(&image.bytes) != image.digest
+                || image.blob.digest != image.digest
+            {
+                return Err(SourceImageError::ProviderWorkspaceView);
+            }
+            validate_provider_relative_path(&image.path.raw_relative_path_bytes)?;
+            let mode = if image.metadata.mode & 0o111 == 0 {
+                0o400
+            } else {
+                0o500
+            };
+            Ok((
+                ProviderWorkspaceManifestEntry {
+                    raw_relative_path_bytes: image.path.raw_relative_path_bytes.clone(),
+                    blob_digest: format!("b3:{}", digest_name(&image.digest)),
+                    byte_length: image.byte_length,
+                    mode,
+                },
+                Arc::clone(&image.bytes),
+            ))
+        })
+        .collect::<Result<Vec<_>, SourceImageError>>()?;
+    entries.sort_by(|left, right| {
+        left.0
+            .raw_relative_path_bytes
+            .cmp(&right.0.raw_relative_path_bytes)
+    });
+    if entries
+        .windows(2)
+        .any(|pair| pair[0].0.raw_relative_path_bytes == pair[1].0.raw_relative_path_bytes)
+    {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    let manifest_entries = entries
+        .iter()
+        .map(|(entry, _)| entry.clone())
+        .collect::<Vec<_>>();
+    let workspace_id_text = encode_public_id(IdentityDomain::Workspace, None, workspace_id)?;
+    let manifest = ProviderWorkspaceManifest {
+        version: "1.0",
+        workspace_id: workspace_id_text,
+        source_generation,
+        sandbox_profile_digest,
+        dependency_manifest_digest: format!("b3:{}", digest_name(&dependencies.manifest_digest)),
+        entries: &manifest_entries,
+    };
+    let manifest_bytes = serde_json_canonicalizer::to_vec(&manifest)
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    let manifest_digest = crate::integrity::digest_bytes(&manifest_bytes);
+    let view_name = digest_name(&manifest_digest);
+    let views_root = state_root.join("provider-views");
+    let final_root = views_root.join(&view_name);
+    let workspace_root = final_root.join("workspace");
+    let dependency_root = final_root.join("dependencies");
+    let manifest_path = final_root.join("manifest.json");
+
+    fs::create_dir_all(&views_root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    fs::set_permissions(&views_root, fs::Permissions::from_mode(0o700))
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    if final_root.exists() {
+        if fs::read(&manifest_path).map_err(|_| SourceImageError::ProviderWorkspaceView)?
+            != manifest_bytes
+        {
+            return Err(SourceImageError::ProviderWorkspaceView);
+        }
+    } else {
+        let stage = views_root.join(format!(
+            ".stage-{view_name}-{}-{}",
+            std::process::id(),
+            u128::from_be_bytes(random_registration_nonce()?)
+        ));
+        let result = (|| {
+            fs::create_dir(&stage).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+            fs::set_permissions(&stage, fs::Permissions::from_mode(0o700))
+                .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+            let staged_workspace = stage.join("workspace");
+            let staged_dependencies = stage.join("dependencies");
+            fs::create_dir(&staged_workspace)
+                .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+            fs::create_dir(&staged_dependencies)
+                .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+            for (entry, bytes) in &entries {
+                write_verified_provider_input(&staged_workspace, entry, bytes)?;
+            }
+            for entry in &dependencies.entries {
+                let manifest_entry = ProviderWorkspaceManifestEntry {
+                    raw_relative_path_bytes: entry.raw_relative_path_bytes.clone(),
+                    blob_digest: format!("b3:{}", digest_name(&entry.digest)),
+                    byte_length: u64::try_from(entry.bytes.len())
+                        .map_err(|_| SourceImageError::ProviderWorkspaceView)?,
+                    mode: entry.mode,
+                };
+                write_verified_provider_input(&staged_dependencies, &manifest_entry, &entry.bytes)?;
+            }
+            let staged_manifest = stage.join("manifest.json");
+            write_immutable_file(&staged_manifest, &manifest_bytes, 0o400)?;
+            make_tree_read_only(&staged_workspace)?;
+            make_tree_read_only(&staged_dependencies)?;
+            fs::File::open(&stage)
+                .and_then(|file| file.sync_all())
+                .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+            fs::rename(&stage, &final_root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+            fs::File::open(&views_root)
+                .and_then(|file| file.sync_all())
+                .map_err(|_| SourceImageError::ProviderWorkspaceView)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_dir_all(&stage);
+        }
+        result?;
+    }
+
+    verify_published_provider_tree(&workspace_root, &entries)?;
+    let dependency_entries = dependencies
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                ProviderWorkspaceManifestEntry {
+                    raw_relative_path_bytes: entry.raw_relative_path_bytes.clone(),
+                    blob_digest: format!("b3:{}", digest_name(&entry.digest)),
+                    byte_length: u64::try_from(entry.bytes.len()).unwrap_or(u64::MAX),
+                    mode: entry.mode,
+                },
+                Arc::clone(&entry.bytes),
+            )
+        })
+        .collect::<Vec<_>>();
+    verify_published_provider_tree(&dependency_root, &dependency_entries)?;
+
+    let run_digest = digest_name(&crate::integrity::digest_bytes(run_key.as_bytes()));
+    let output_root = state_root.join("provider-output").join(run_digest);
+    if output_root.starts_with(&final_root) || final_root.starts_with(&output_root) {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    fs::create_dir_all(&output_root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    fs::set_permissions(&output_root, fs::Permissions::from_mode(0o700))
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    Ok(ProviderWorkspaceView {
+        workspace_id,
+        source_generation,
+        workspace_root,
+        dependency_root,
+        output_root,
+        manifest_path,
+        manifest_digest,
+        dependency_manifest_digest: dependencies.manifest_digest,
+        sandbox_profile_digest: sandbox_profile_digest.into(),
+        entries: manifest_entries,
+    })
+}
+
+fn valid_provider_profile_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .or_else(|| value.strip_prefix("b3:"))
+        .is_some_and(|payload| {
+            payload.len() == 64
+                && payload
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        })
+}
+
 /// Explicit capability evidence for a source image that cannot be admitted.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceCapabilityGap {
@@ -207,6 +495,8 @@ pub enum SourceImageError {
     LeaseInactive,
     #[error("retained serving-snapshot provenance is malformed: {0}")]
     RetainedProvenance(String),
+    #[error("provider workspace view is invalid or could not be published")]
+    ProviderWorkspaceView,
 }
 
 /// Capture policy loaded from the generated deployment profile.
@@ -1267,6 +1557,121 @@ fn digest_name(digest: &[u8; 32]) -> String {
     crate::integrity::frame_digest(*digest)[3..].to_owned()
 }
 
+fn validate_provider_relative_path(path: &[u8]) -> Result<(), SourceImageError> {
+    if path.is_empty()
+        || path.contains(&0)
+        || path.split(|byte| *byte == b'/').any(|component| {
+            component.is_empty()
+                || matches!(component, b"." | b"..")
+                || component.eq_ignore_ascii_case(b".git")
+        })
+    {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    Ok(())
+}
+
+fn provider_input_path(root: &Path, raw_path: &[u8]) -> Result<PathBuf, SourceImageError> {
+    validate_provider_relative_path(raw_path)?;
+    let mut path = root.to_owned();
+    for component in raw_path.split(|byte| *byte == b'/') {
+        path.push(std::ffi::OsStr::from_bytes(component));
+    }
+    Ok(path)
+}
+
+fn write_immutable_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), SourceImageError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true).mode(0o600);
+    let mut file = options
+        .open(path)
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    file.write_all(bytes)
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    file.sync_all()
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)
+}
+
+fn write_verified_provider_input(
+    root: &Path,
+    entry: &ProviderWorkspaceManifestEntry,
+    bytes: &[u8],
+) -> Result<(), SourceImageError> {
+    if format!("b3:{}", digest_name(&crate::integrity::digest_bytes(bytes))) != entry.blob_digest
+        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) != entry.byte_length
+        || !matches!(entry.mode, 0o400 | 0o500)
+    {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    let path = provider_input_path(root, &entry.raw_relative_path_bytes)?;
+    write_immutable_file(&path, bytes, entry.mode)
+}
+
+fn make_tree_read_only(root: &Path) -> Result<(), SourceImageError> {
+    let metadata =
+        fs::symlink_metadata(root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    for child in fs::read_dir(root).map_err(|_| SourceImageError::ProviderWorkspaceView)? {
+        let path = child
+            .map_err(|_| SourceImageError::ProviderWorkspaceView)?
+            .path();
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+        if metadata.file_type().is_symlink() {
+            return Err(SourceImageError::ProviderWorkspaceView);
+        }
+        if metadata.is_dir() {
+            make_tree_read_only(&path)?;
+        }
+    }
+    fs::set_permissions(root, fs::Permissions::from_mode(0o500))
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)
+}
+
+fn verify_published_provider_tree(
+    root: &Path,
+    entries: &[(ProviderWorkspaceManifestEntry, Arc<[u8]>)],
+) -> Result<(), SourceImageError> {
+    let root_metadata =
+        fs::symlink_metadata(root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    if !root_metadata.is_dir()
+        || root_metadata.file_type().is_symlink()
+        || root_metadata.permissions().mode() & 0o222 != 0
+    {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    for (entry, expected) in entries {
+        let path = provider_input_path(root, &entry.raw_relative_path_bytes)?;
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+        if !metadata.is_file()
+            || metadata.file_type().is_symlink()
+            || metadata.permissions().mode() & 0o777 != entry.mode
+        {
+            return Err(SourceImageError::ProviderWorkspaceView);
+        }
+        let actual = fs::read(path).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+        if actual.as_slice() != expected.as_ref()
+            || format!(
+                "b3:{}",
+                digest_name(&crate::integrity::digest_bytes(&actual))
+            ) != entry.blob_digest
+        {
+            return Err(SourceImageError::ProviderWorkspaceView);
+        }
+    }
+    Ok(())
+}
+
 fn digest_name_16(digest: &[u8; 16]) -> String {
     let mut name = String::with_capacity(32);
     for byte in digest {
@@ -1418,6 +1823,7 @@ mod tests {
                 query_language_bundle_id: "query:1".into(),
                 model_pack_bundle_id: "model:1".into(),
                 toolchain_bundle_id: "toolchain:1".into(),
+                sandbox_profile_digests: std::collections::BTreeMap::new(),
             },
             limits_profile_digest: framed(9),
             source_blob_digests: vec![crate::integrity::frame_digest(source_digest)],
@@ -1883,6 +2289,111 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn provider_workspace_view_copies_verified_inputs_and_excludes_git() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace_id = [0x61; 16];
+        let bytes: Arc<[u8]> = Arc::from(b"pub fn answer() -> u8 { 42 }\n".as_slice());
+        let digest = crate::integrity::digest_bytes(&bytes);
+        let path = WorkspacePath::from_components(
+            workspace_id,
+            platform(),
+            crate::identity::CaseSensitivityMode::Sensitive,
+            &[b"source.rs".to_vec()],
+        )
+        .unwrap();
+        let line_bytes = [0_u64, u64::try_from(bytes.len()).unwrap()]
+            .into_iter()
+            .flat_map(u64::to_le_bytes)
+            .collect::<Vec<_>>();
+        let image = SourceImage {
+            workspace_id,
+            worktree_id: None,
+            source_generation: 9,
+            file_id: source_file_identity(&path).unwrap().id,
+            path,
+            language: SourceLanguage::Rust,
+            bytes: Arc::clone(&bytes),
+            digest,
+            byte_length: u64::try_from(bytes.len()).unwrap(),
+            file_kind: SourceFileKind::Regular,
+            blob: BlobReference {
+                digest,
+                relative_name: digest_name(&digest),
+                byte_length: u64::try_from(bytes.len()).unwrap(),
+            },
+            lease: SourceBlobLease {
+                lease_id: [0x62; 16],
+                blob_digest: digest,
+                expires_at: u64::MAX,
+            },
+            encoding: SourceEncoding::Utf8,
+            provider_text: None,
+            line_index: LineIndex {
+                offsets: Arc::from([0, u64::try_from(bytes.len()).unwrap()]),
+                serialized: Arc::from(line_bytes.clone()),
+                digest: crate::integrity::digest_bytes(&line_bytes),
+                format_version: 1,
+                newline_kind: NewlineKind::Lf,
+            },
+            metadata: StableFileMetadata {
+                device: 1,
+                inode: 2,
+                size: u64::try_from(bytes.len()).unwrap(),
+                mode: 0o100_600,
+                modified_seconds: 0,
+                modified_nanoseconds: 0,
+                changed_seconds: 0,
+                changed_nanoseconds: 0,
+            },
+        };
+        let dependency_bytes: Arc<[u8]> = Arc::from(b"dependency-lock".as_slice());
+        let dependencies = DependencyInputBundle::pin(vec![DependencyInput {
+            raw_relative_path_bytes: b"cargo/Cargo.lock".to_vec(),
+            digest: crate::integrity::digest_bytes(&dependency_bytes),
+            bytes: dependency_bytes,
+            mode: 0o400,
+        }])
+        .unwrap();
+        let view = publish_provider_workspace_view(
+            &directory.path().join("provider-state"),
+            "run:provider-view-test",
+            &[&image],
+            &dependencies,
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(view.workspace_root.join("source.rs")).unwrap(),
+            image.bytes.as_ref()
+        );
+        assert_eq!(
+            fs::read(view.dependency_root.join("cargo/Cargo.lock")).unwrap(),
+            b"dependency-lock"
+        );
+        assert!(!view.workspace_root.join(".git").exists());
+        assert!(!view.output_root.starts_with(&view.workspace_root));
+        assert_eq!(
+            fs::metadata(view.workspace_root.join("source.rs"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o400
+        );
+
+        let forbidden = DependencyInputBundle::pin(vec![DependencyInput {
+            raw_relative_path_bytes: b".git/config".to_vec(),
+            bytes: Arc::from(b"forbidden".as_slice()),
+            digest: crate::integrity::digest_bytes(b"forbidden"),
+            mode: 0o400,
+        }]);
+        assert!(matches!(
+            forbidden,
+            Err(SourceImageError::ProviderWorkspaceView)
+        ));
     }
 
     #[test]

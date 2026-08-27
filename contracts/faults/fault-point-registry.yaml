@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:83a1495e3c92d14d93410d5f1fa3e57216ca409682ad1003e8081112ad9601e4"
+canonical_digest: "b3:0ea80137983fbad1c76693054a472a5a832e12c66cac7e5f744a854b859fa579"
 digest_projection: yaml-ac-g-53-v1
 generator_revision: codefabric-contracts/1.0
 records:
@@ -109,8 +109,80 @@ records:
     production_exposable: false
     expected_invariants: [no-governed-terminal-claim, conflicting-terminal-fails-closed]
     scenarios: [query-terminal-artifact-closure, query-terminal-restart-recovery]
+  - code: PROVIDER_ADMISSION
+    owner: fact-generation
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [accepted-handle-before-capacity-wait, rejected-run-never-launches]
+    scenarios: [semantic-provider-admission]
+  - code: PROVIDER_CHILD_LAUNCH
+    owner: fact-generation
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [untrusted-never-launches-unconfined, launch-failure-terminal]
+    scenarios: [semantic-provider-launch]
+  - code: PROVIDER_HANDSHAKE
+    owner: fact-generation
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [identity-mismatch-fails-closed, no-output-before-handshake]
+    scenarios: [semantic-provider-handshake]
+  - code: PROVIDER_STAGE_CREATION
+    owner: lifecycle
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [no-live-workspace-link, output-root-separate]
+    scenarios: [semantic-provider-stage]
+  - code: PROVIDER_CHUNK_WRITE
+    owner: fact-generation
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [partial-chunk-invisible, credit-window-bounded]
+    scenarios: [semantic-provider-chunk]
+  - code: PROVIDER_CHUNK_ACCEPT
+    owner: fact-generation
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [accepted-chunk-digest-verified, credit-return-after-acceptance]
+    scenarios: [semantic-provider-chunk]
+  - code: PROVIDER_CHUNK_REJECT
+    owner: fact-generation
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [rejected-chunk-not-staged, rejection-terminal-evidence]
+    scenarios: [semantic-provider-chunk]
+  - code: PROVIDER_TERMINAL_VERIFY
+    owner: fact-generation
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [no-publication-before-terminal, output-fingerprint-verified]
+    scenarios: [semantic-provider-terminal]
+  - code: PROVIDER_CANCELLATION
+    owner: lifecycle
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [cancellation-bounded, post-cancel-output-discarded]
+    scenarios: [semantic-provider-cancellation]
+  - code: PROVIDER_KILL
+    owner: lifecycle
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [process-group-terminated, terminal-journal-preserved]
+    scenarios: [semantic-provider-cancellation]
+  - code: PROVIDER_CLEANUP
+    owner: lifecycle
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [immutable-input-retained-by-lease, writable-stage-reclaimable]
+    scenarios: [semantic-provider-cleanup]
+  - code: PROVIDER_JOURNAL_TRANSITION
+    owner: lifecycle
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [failed-transition-does-not-advance-state, terminal-evidence-not-silently-lost]
+    scenarios: [semantic-provider-journal]
 owner_acceptance:
   approver: lifecycle-owner
   accepted_at: "2026-08-21"
-  construction_rule: Append-only deterministic source, mutation, publication, overlay, and query-terminal durability seams
+  construction_rule: Append-only deterministic source, provider, mutation, publication, overlay, and query-terminal durability seams
   source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

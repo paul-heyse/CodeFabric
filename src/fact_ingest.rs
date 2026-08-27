@@ -2639,7 +2639,10 @@ mod tests {
     #[test]
     fn wp59_structural_acceptance() {
         let codes = generated_ingest_table_codes();
-        assert_eq!(codes, [8, 9, 10, 100, 110, 120, 130, 140, 150, 160, 170]);
+        assert_eq!(
+            codes,
+            [8, 9, 10, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190]
+        );
         for table_code in codes {
             let spec = table_spec(table_code).expect("generated ingest table");
             validate_fact_batch(

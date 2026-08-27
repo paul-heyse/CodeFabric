@@ -35,6 +35,36 @@ const INTENT_NONE: u8 = 0;
 const INTENT_CANCEL: u8 = 1;
 const INTENT_SUPERSEDE: u8 = 2;
 
+/// Deterministic semantic-provider fault seams governed by AC-G-32/GI-15.
+pub const SEMANTIC_PROVIDER_FAULT_POINT_CODES: [&str; 12] = [
+    "PROVIDER_ADMISSION",
+    "PROVIDER_CHILD_LAUNCH",
+    "PROVIDER_HANDSHAKE",
+    "PROVIDER_STAGE_CREATION",
+    "PROVIDER_CHUNK_WRITE",
+    "PROVIDER_CHUNK_ACCEPT",
+    "PROVIDER_CHUNK_REJECT",
+    "PROVIDER_TERMINAL_VERIFY",
+    "PROVIDER_CANCELLATION",
+    "PROVIDER_KILL",
+    "PROVIDER_CLEANUP",
+    "PROVIDER_JOURNAL_TRANSITION",
+];
+
+/// Bounded observability fields; all labels come from closed registries or lifecycle phases.
+pub const SEMANTIC_PROVIDER_TELEMETRY_FIELDS: [(&str, &str, &str); 10] = [
+    ("provider_phase", "code", "provider-run"),
+    ("input_bytes", "bytes", "provider-run"),
+    ("output_bytes", "bytes", "provider-run"),
+    ("memory_high_water", "bytes", "provider-run"),
+    ("queue_depth", "jobs", "runtime-sample"),
+    ("chunk_count", "chunks", "provider-run"),
+    ("cache_hits", "entries", "provider-run"),
+    ("cancellation_count", "requests", "provider-run"),
+    ("failure_count", "failures", "provider-run"),
+    ("wall_time", "microseconds", "provider-run"),
+];
+
 /// Domain-owned immutable blob reference used by provider admission.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProviderBlobReference {
@@ -71,6 +101,16 @@ pub struct ProviderScope {
     pub scope_id: String,
 }
 
+/// Lane-neutral invocation selected after immutable inputs and containment are pinned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticProviderWork {
+    pub provider_id: String,
+    pub capability_family: String,
+    pub workspace_view: crate::source_image::ProviderWorkspaceView,
+    pub trust_profile: crate::provider_sandbox::ProviderTrustProfile,
+    pub invocation_manifest: Arc<[u8]>,
+}
+
 /// In-process payload selected only after the common wire job has crossed the RPC adapter.
 #[derive(Clone, Debug, Default)]
 pub enum ProviderDirectWork {
@@ -85,6 +125,7 @@ pub enum ProviderDirectWork {
         text: crate::provider_types::ProviderText,
         tree_sitter: crate::tree_sitter_adapter::TreeSitterSnapshot,
     },
+    SemanticProcess(SemanticProviderWork),
 }
 
 /// Application-owned accepted-provider job. Protobuf conversion lives in [`rpc_adapter`].
@@ -105,10 +146,20 @@ pub struct ProviderJob {
     pub required_schema_digests: Vec<String>,
     pub idempotency_key: String,
     pub resource_profile_id: String,
+    pub sandbox_profile_digest: String,
     pub direct_work: ProviderDirectWork,
 }
 
 impl ProviderJob {
+    /// Closed scope/family portion of the common semantic supersession tuple.
+    #[must_use]
+    pub fn semantic_supersession_key(scope: &ProviderScope, capability_family: &str) -> String {
+        format!(
+            "{}:{}:{}",
+            scope.scope_kind, scope.scope_id, capability_family
+        )
+    }
+
     fn fingerprint(&self) -> [u8; 32] {
         let mut bytes = Vec::new();
         for value in [
@@ -118,6 +169,7 @@ impl ProviderJob {
             self.supersession_key.as_bytes(),
             self.idempotency_key.as_bytes(),
             self.resource_profile_id.as_bytes(),
+            self.sandbox_profile_digest.as_bytes(),
         ] {
             bytes.extend_from_slice(&u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
             bytes.extend_from_slice(value);
@@ -195,6 +247,7 @@ pub mod rpc_adapter {
             required_schema_digests: spec.required_schema_digests,
             idempotency_key: spec.idempotency_key,
             resource_profile_id: spec.resource_profile_id,
+            sandbox_profile_digest: spec.sandbox_profile_digest,
             direct_work: ProviderDirectWork::None,
         }
     }
@@ -516,6 +569,125 @@ pub trait ProviderAdapter: Send + Sync {
         events: ProviderEventSink,
         cancellation: Cancellation,
     ) -> Result<ProviderCompletion, ProviderRuntimeError>;
+}
+
+/// Lane implementation port installed behind the shared semantic adapter registrations.
+pub trait SemanticProviderDriver: Send + Sync {
+    /// Execute one already-admitted, immutable, contained provider invocation.
+    ///
+    /// # Errors
+    ///
+    /// Returns only application-owned runtime errors; provider-library types stay behind the lane.
+    fn execute(
+        &self,
+        work: SemanticProviderWork,
+        events: ProviderEventSink,
+        cancellation: Cancellation,
+    ) -> Result<ProviderCompletion, ProviderRuntimeError>;
+}
+
+/// Shared adapter registered for each out-of-process semantic provider.
+pub struct RegisteredSemanticProviderAdapter {
+    provider_id: &'static str,
+    driver: Arc<dyn SemanticProviderDriver>,
+}
+
+impl RegisteredSemanticProviderAdapter {
+    /// Bind one registry provider identity to its lane-owned execution driver.
+    ///
+    /// # Errors
+    ///
+    /// Rejects in-process or unknown provider identities.
+    pub fn new(
+        provider_id: &'static str,
+        driver: Arc<dyn SemanticProviderDriver>,
+    ) -> Result<Self, ProviderRuntimeError> {
+        let provider = PROVIDER_ENTRIES
+            .iter()
+            .find(|entry| entry.provider_id == provider_id)
+            .ok_or_else(|| ProviderRuntimeError::InvalidJob("unknown provider_id".into()))?;
+        if provider.placement == "IN_PROCESS" {
+            return Err(ProviderRuntimeError::InvalidJob(
+                "semantic adapter requires out-of-process placement".into(),
+            ));
+        }
+        Ok(Self {
+            provider_id,
+            driver,
+        })
+    }
+}
+
+impl ProviderAdapter for RegisteredSemanticProviderAdapter {
+    fn run(
+        &self,
+        spec: ProviderJob,
+        events: ProviderEventSink,
+        cancellation: Cancellation,
+    ) -> Result<ProviderCompletion, ProviderRuntimeError> {
+        let ProviderDirectWork::SemanticProcess(work) = spec.direct_work else {
+            return Err(ProviderRuntimeError::InvalidJob(
+                "semantic provider work is absent".into(),
+            ));
+        };
+        let scope = spec.scopes.first().ok_or_else(|| {
+            ProviderRuntimeError::InvalidJob("semantic provider scope is absent".into())
+        })?;
+        if work.provider_id != self.provider_id
+            || work.workspace_view.workspace_id
+                != decode_public_id(IdentityDomain::Workspace, None, &spec.workspace_id)
+                    .map_err(|error| ProviderRuntimeError::InvalidJob(error.to_string()))?
+            || work.workspace_view.source_generation != spec.source_generation
+            || work.workspace_view.sandbox_profile_digest != spec.sandbox_profile_digest
+            || spec.supersession_key
+                != ProviderJob::semantic_supersession_key(scope, &work.capability_family)
+        {
+            return Err(ProviderRuntimeError::InvalidJob(
+                "semantic invocation identity differs from accepted job".into(),
+            ));
+        }
+        events.send_progress(0, 1, "sandbox-admission")?;
+        self.driver.execute(work, events, cancellation)
+    }
+}
+
+/// Exact semantic adapter census. Lanes supply drivers; shared consumers resolve by registry ID.
+#[derive(Clone)]
+pub struct SemanticProviderAdapterRegistry {
+    adapters: BTreeMap<&'static str, Arc<dyn ProviderAdapter>>,
+}
+
+impl SemanticProviderAdapterRegistry {
+    /// Register both governed semantic placements exactly once.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a registry identity or placement mismatch.
+    pub fn new(
+        pyrefly: Arc<dyn SemanticProviderDriver>,
+        rustc: Arc<dyn SemanticProviderDriver>,
+    ) -> Result<Self, ProviderRuntimeError> {
+        let mut adapters = BTreeMap::<&'static str, Arc<dyn ProviderAdapter>>::new();
+        for (provider_id, driver) in [("pyrefly-python", pyrefly), ("rustc-mir", rustc)] {
+            let adapter = RegisteredSemanticProviderAdapter::new(provider_id, driver)?;
+            if adapters.insert(provider_id, Arc::new(adapter)).is_some() {
+                return Err(ProviderRuntimeError::InvalidJob(
+                    "duplicate semantic adapter registration".into(),
+                ));
+            }
+        }
+        Ok(Self { adapters })
+    }
+
+    #[must_use]
+    pub fn provider_ids(&self) -> Vec<&'static str> {
+        self.adapters.keys().copied().collect()
+    }
+
+    #[must_use]
+    pub fn adapter(&self, provider_id: &str) -> Option<Arc<dyn ProviderAdapter>> {
+        self.adapters.get(provider_id).cloned()
+    }
 }
 
 /// Source-generation fence consulted after provider work completes.
@@ -1027,6 +1199,11 @@ impl ProviderRuntime {
                 "supersession identity is required".into(),
             ));
         }
+        if !valid_sandbox_profile_digest(&spec.sandbox_profile_digest) {
+            return Err(ProviderRuntimeError::InvalidJob(
+                "sandbox profile digest is invalid".into(),
+            ));
+        }
         let validated_ids = validated_job_ids(spec)?;
         let mut outcomes = Vec::new();
         let profile_matches = spec.resource_profile_id == self.profile.profile_id;
@@ -1155,6 +1332,7 @@ impl ProviderRuntime {
             source_generation: i64::try_from(spec.source_generation).unwrap_or(i64::MAX),
             input_fingerprint: spec.fingerprint().to_vec(),
             output_fingerprint: None,
+            sandbox_profile_digest: Some(spec.sandbox_profile_digest.clone()),
             state_code: i64::from(ProviderRunState::Queued as u16),
             accepted_at: accepted_at.to_string(),
             terminal_at: None,
@@ -1522,6 +1700,82 @@ impl ProviderRuntime {
     }
 }
 
+/// Registry-selected shared dispatch port used by continuous serving and compatibility verticals.
+#[derive(Clone)]
+pub struct ProviderRuntimeDispatch {
+    runtimes: BTreeMap<&'static str, ProviderRuntime>,
+}
+
+impl ProviderRuntimeDispatch {
+    /// Construct the two semantic runtimes from the generated provider/resource registries.
+    ///
+    /// # Errors
+    ///
+    /// Returns a runtime construction error or missing adapter registration.
+    pub fn semantic(
+        wave_id: Vec<u8>,
+        adapters: &SemanticProviderAdapterRegistry,
+        generation_oracle: Arc<dyn SourceGenerationOracle>,
+        journal: Arc<dyn ProviderRunJournal>,
+    ) -> Result<Self, ProviderRuntimeError> {
+        let mut runtimes = BTreeMap::new();
+        for provider_id in ["pyrefly-python", "rustc-mir"] {
+            let adapter = adapters.adapter(provider_id).ok_or_else(|| {
+                ProviderRuntimeError::InvalidJob("semantic adapter registration is absent".into())
+            })?;
+            let runtime = ProviderRuntime::new(
+                provider_id,
+                wave_id.clone(),
+                adapter,
+                Arc::clone(&generation_oracle),
+                Arc::clone(&journal),
+            )?;
+            runtimes.insert(provider_id, runtime);
+        }
+        Ok(Self { runtimes })
+    }
+
+    #[must_use]
+    pub fn provider_ids(&self) -> Vec<&'static str> {
+        self.runtimes.keys().copied().collect()
+    }
+
+    /// Submit one provider job only after registry selection.
+    ///
+    /// # Errors
+    ///
+    /// Rejects unknown provider IDs and forwards the selected runtime's admission result.
+    pub async fn submit(
+        &self,
+        provider_id: &str,
+        spec: ProviderJob,
+    ) -> Result<AcceptedProviderJob, ProviderRuntimeError> {
+        self.runtimes
+            .get(provider_id)
+            .ok_or_else(|| ProviderRuntimeError::InvalidJob("provider is not registered".into()))?
+            .submit(spec)
+            .await
+    }
+
+    /// Cancel through the same selected runtime that admitted the run.
+    ///
+    /// # Errors
+    ///
+    /// Rejects unknown provider IDs and forwards runtime cancellation errors.
+    pub async fn cancel(
+        &self,
+        provider_id: &str,
+        run_id: &str,
+        reason: &str,
+    ) -> Result<CancelAcknowledgement, ProviderRuntimeError> {
+        self.runtimes
+            .get(provider_id)
+            .ok_or_else(|| ProviderRuntimeError::InvalidJob("provider is not registered".into()))?
+            .cancel(run_id, reason)
+            .await
+    }
+}
+
 #[async_trait]
 pub trait ProviderExecutor: Send + Sync {
     async fn submit(&self, spec: ProviderJob) -> Result<AcceptedProviderJob, ProviderRuntimeError>;
@@ -1696,6 +1950,18 @@ fn parse_blake3_digest(value: &str) -> Result<[u8; 32], ProviderRuntimeError> {
     Ok(digest)
 }
 
+fn valid_sandbox_profile_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .or_else(|| value.strip_prefix("b3:"))
+        .is_some_and(|hex| {
+            hex.len() == 64
+                && hex
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        })
+}
+
 fn decode_lower_hex_id16(value: &str) -> Result<[u8; 16], ()> {
     if value.len() != 32
         || value
@@ -1751,6 +2017,7 @@ fn diagnostic_id(value: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fmt::Write as _;
     use std::sync::atomic::AtomicU64;
     use std::thread;
@@ -1774,6 +2041,23 @@ mod tests {
 
     struct FakeAdapter {
         mode: FakeMode,
+    }
+
+    struct FakeSemanticDriver;
+
+    impl SemanticProviderDriver for FakeSemanticDriver {
+        fn execute(
+            &self,
+            _work: SemanticProviderWork,
+            _events: ProviderEventSink,
+            _cancellation: Cancellation,
+        ) -> Result<ProviderCompletion, ProviderRuntimeError> {
+            Ok(ProviderCompletion {
+                state: ProviderRunState::Succeeded,
+                output_fingerprint: [0x44; 32],
+                diagnostic_code: None,
+            })
+        }
     }
 
     impl ProviderAdapter for FakeAdapter {
@@ -1930,7 +2214,68 @@ mod tests {
             deadline_unix_ms: TEST_NOW + 1_000,
             supersession_key: supersession_key.into(),
             resource_profile_id: "in-process-syntax-standard".into(),
+            sandbox_profile_digest: format!("b3:{}", "11".repeat(32)),
             ..ProviderJob::default()
+        }
+    }
+
+    fn semantic_job(
+        provider_id: &'static str,
+        run_label: &str,
+        workspace_view: crate::source_image::ProviderWorkspaceView,
+    ) -> ProviderJob {
+        let workspace_id =
+            crate::identity::encode_public_id(IdentityDomain::Workspace, None, [2; 16]).unwrap();
+        let scope = ProviderScope {
+            scope_kind: ProviderScopeKind::SemanticOwner as u16,
+            scope_id: "0000000000000000".into(),
+        };
+        let capability_family = match provider_id {
+            "pyrefly-python" => "PYTHON_SEMANTIC",
+            "rustc-mir" => "RUST_SEMANTIC",
+            _ => unreachable!("test only constructs governed semantic providers"),
+        };
+        let provider = PROVIDER_ENTRIES
+            .iter()
+            .find(|entry| entry.provider_id == provider_id)
+            .unwrap();
+        let deadline_unix_ms = system_now_unix_millis() + 60_000;
+        ProviderJob {
+            provider_run_id: run_id(run_label),
+            workspace_id: workspace_id.clone(),
+            analysis_context_id: "context:source".into(),
+            source_generation: 7,
+            source_snapshot_lease: Some(ProviderSourceSnapshotLease {
+                lease_id: format!("lease:{provider_id}"),
+                workspace_id,
+                source_generation: 7,
+                source_manifest_digest: format!("b3:{}", "21".repeat(32)),
+                expires_at_unix_ms: deadline_unix_ms,
+                blobs: Vec::new(),
+            }),
+            requested_capability_codes: Vec::new(),
+            scopes: vec![scope.clone()],
+            priority_class: 10,
+            resource_estimate: Some(ProviderResourceEstimate {
+                input_bytes: 1,
+                expected_output_bytes: 1,
+                cpu_weight: 1,
+                memory_mib: 64,
+            }),
+            deadline_unix_ms,
+            supersession_key: ProviderJob::semantic_supersession_key(&scope, capability_family),
+            required_bundle_digests: Vec::new(),
+            required_schema_digests: Vec::new(),
+            idempotency_key: format!("idempotency:{provider_id}"),
+            resource_profile_id: provider.resource_profile_id.into(),
+            sandbox_profile_digest: workspace_view.sandbox_profile_digest.clone(),
+            direct_work: ProviderDirectWork::SemanticProcess(SemanticProviderWork {
+                provider_id: provider_id.into(),
+                capability_family: capability_family.into(),
+                workspace_view,
+                trust_profile: crate::provider_sandbox::ProviderTrustProfile::TrustedLocal,
+                invocation_manifest: Arc::from(&b"{}"[..]),
+            }),
         }
     }
 
@@ -2594,5 +2939,133 @@ mod tests {
             ProviderRunState::Cancelled
         );
         assert_eq!(fixture.runtime.metrics().cancelled, 1);
+    }
+
+    #[tokio::test]
+    async fn provider_adapter_registration_parity() {
+        let registry = SemanticProviderAdapterRegistry::new(
+            Arc::new(FakeSemanticDriver),
+            Arc::new(FakeSemanticDriver),
+        )
+        .unwrap();
+        assert_eq!(registry.provider_ids(), ["pyrefly-python", "rustc-mir"]);
+        for provider_id in registry.provider_ids() {
+            let provider = PROVIDER_ENTRIES
+                .iter()
+                .find(|entry| entry.provider_id == provider_id)
+                .expect("registered adapter must resolve through provider registry");
+            assert_ne!(provider.placement, "IN_PROCESS");
+            assert!(registry.adapter(provider_id).is_some());
+            assert!(PROVIDER_RESOURCE_PROFILES.iter().any(|profile| {
+                profile.profile_id == provider.resource_profile_id
+                    && profile.provider_ids.contains(&provider.provider_id)
+            }));
+        }
+        let mappings = PROVIDER_EVENT_MAPPINGS
+            .iter()
+            .map(|mapping| mapping.wire_event)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            mappings,
+            BTreeSet::from([
+                "ACCEPTED",
+                "PROGRESS",
+                "SCOPE_BEGIN",
+                "OBSERVATION_CHUNK",
+                "SCOPE_END",
+                "TERMINAL",
+                "CANCEL_ACKNOWLEDGED",
+            ])
+        );
+        assert!(
+            PROVIDER_EVENT_MAPPINGS
+                .iter()
+                .all(|mapping| mapping.mapping_version == "1.0")
+        );
+
+        let directory = tempdir().unwrap();
+        let workspace_view = crate::source_image::ProviderWorkspaceView {
+            workspace_id: [2; 16],
+            source_generation: 7,
+            workspace_root: directory.path().join("view"),
+            dependency_root: directory.path().join("dependencies"),
+            output_root: directory.path().join("output"),
+            manifest_path: directory.path().join("manifest.json"),
+            manifest_digest: [0x31; 32],
+            dependency_manifest_digest: [0x32; 32],
+            sandbox_profile_digest: format!("b3:{}", "33".repeat(32)),
+            entries: Vec::new(),
+        };
+        let store = OperationalStore::open(&directory.path().join("operational.sqlite")).unwrap();
+        let reader = store.reader_factory();
+        let generation = Arc::new(Generation(AtomicU64::new(7)));
+        let generation_oracle: Arc<dyn SourceGenerationOracle> = generation.clone();
+        let dispatch = ProviderRuntimeDispatch::semantic(
+            vec![0x41; 16],
+            &registry,
+            generation_oracle,
+            Arc::new(OperationalProviderRunJournal::new(store)),
+        )
+        .unwrap();
+        assert_eq!(dispatch.provider_ids(), ["pyrefly-python", "rustc-mir"]);
+        for provider_id in dispatch.provider_ids() {
+            let mut accepted = dispatch
+                .submit(
+                    provider_id,
+                    semantic_job(
+                        provider_id,
+                        &format!("runtime-registration:{provider_id}"),
+                        workspace_view.clone(),
+                    ),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                terminal_event(&mut accepted.events).await,
+                ProviderRunState::Succeeded
+            );
+        }
+        generation.0.store(8, Ordering::Release);
+        let mut stale = dispatch
+            .submit(
+                "pyrefly-python",
+                semantic_job(
+                    "pyrefly-python",
+                    "runtime-registration:stale",
+                    workspace_view,
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            terminal_event(&mut stale.events).await,
+            ProviderRunState::StaleResult
+        );
+        let persisted = reader
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*),
+                            SUM(state_code=?1),
+                            SUM(state_code=?2),
+                            COUNT(DISTINCT sandbox_profile_digest)
+                     FROM provider_run",
+                    rusqlite::params![
+                        i64::from(ProviderRunState::Succeeded as u16),
+                        i64::from(ProviderRunState::StaleResult as u16)
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(persisted, (3, 2, 1, 1));
     }
 }

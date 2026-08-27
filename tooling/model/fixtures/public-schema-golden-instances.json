@@ -66,7 +66,8 @@
           "derivation_bundle_id": "fixture-v1",
           "query_language_bundle_id": "fixture-v1",
           "model_pack_bundle_id": "fixture-v1",
-          "toolchain_bundle_id": "fixture-v1"
+          "toolchain_bundle_id": "fixture-v1",
+          "sandbox_profile_digests": {}
         },
         "limits_profile_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000",
         "source_blob_digests": [],

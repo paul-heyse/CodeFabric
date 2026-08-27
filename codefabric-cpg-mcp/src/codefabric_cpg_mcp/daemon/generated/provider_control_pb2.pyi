@@ -172,7 +172,7 @@ class ResourceEstimate(_message.Message):
     def __init__(self, input_bytes: _Optional[int] = ..., expected_output_bytes: _Optional[int] = ..., cpu_weight: _Optional[int] = ..., memory_mib: _Optional[int] = ...) -> None: ...
 
 class ProviderJobSpec(_message.Message):
-    __slots__ = ("provider_run_id", "workspace_id", "analysis_context_id", "source_generation", "source_snapshot_lease", "requested_capability_codes", "scopes", "priority_class", "resource_estimate", "deadline_unix_ms", "supersession_key", "required_bundle_digests", "required_schema_digests", "idempotency_key", "resource_profile_id")
+    __slots__ = ("provider_run_id", "workspace_id", "analysis_context_id", "source_generation", "source_snapshot_lease", "requested_capability_codes", "scopes", "priority_class", "resource_estimate", "deadline_unix_ms", "supersession_key", "required_bundle_digests", "required_schema_digests", "idempotency_key", "resource_profile_id", "sandbox_profile_digest")
     PROVIDER_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     ANALYSIS_CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -188,6 +188,7 @@ class ProviderJobSpec(_message.Message):
     REQUIRED_SCHEMA_DIGESTS_FIELD_NUMBER: _ClassVar[int]
     IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
     RESOURCE_PROFILE_ID_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
     provider_run_id: str
     workspace_id: str
     analysis_context_id: str
@@ -203,7 +204,8 @@ class ProviderJobSpec(_message.Message):
     required_schema_digests: _containers.RepeatedScalarFieldContainer[str]
     idempotency_key: str
     resource_profile_id: str
-    def __init__(self, provider_run_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., source_snapshot_lease: _Optional[_Union[SourceSnapshotLease, _Mapping]] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., scopes: _Optional[_Iterable[_Union[ProviderScope, _Mapping]]] = ..., priority_class: _Optional[_Union[ProviderPriorityClass, str]] = ..., resource_estimate: _Optional[_Union[ResourceEstimate, _Mapping]] = ..., deadline_unix_ms: _Optional[int] = ..., supersession_key: _Optional[str] = ..., required_bundle_digests: _Optional[_Iterable[str]] = ..., required_schema_digests: _Optional[_Iterable[str]] = ..., idempotency_key: _Optional[str] = ..., resource_profile_id: _Optional[str] = ...) -> None: ...
+    sandbox_profile_digest: str
+    def __init__(self, provider_run_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., source_snapshot_lease: _Optional[_Union[SourceSnapshotLease, _Mapping]] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., scopes: _Optional[_Iterable[_Union[ProviderScope, _Mapping]]] = ..., priority_class: _Optional[_Union[ProviderPriorityClass, str]] = ..., resource_estimate: _Optional[_Union[ResourceEstimate, _Mapping]] = ..., deadline_unix_ms: _Optional[int] = ..., supersession_key: _Optional[str] = ..., required_bundle_digests: _Optional[_Iterable[str]] = ..., required_schema_digests: _Optional[_Iterable[str]] = ..., idempotency_key: _Optional[str] = ..., resource_profile_id: _Optional[str] = ..., sandbox_profile_digest: _Optional[str] = ...) -> None: ...
 
 class AcceptedProviderJob(_message.Message):
     __slots__ = ("provider_run_id", "accepted_generation", "state", "accepted_at_unix_ms", "event_resume_token")

@@ -3200,7 +3200,18 @@ mod tests {
                 .count(),
             8
         );
-        assert_eq!(descriptor.sources.len(), 9);
+        assert_eq!(
+            descriptor.sources.len(),
+            9 + super::super::semantic_fragment_driver::FRAGMENT_PATHS.len()
+        );
+        for fragment in super::super::semantic_fragment_driver::FRAGMENT_PATHS {
+            assert!(
+                descriptor
+                    .sources
+                    .iter()
+                    .any(|source| source.display() == fragment)
+            );
+        }
         assert_eq!(descriptor.output_roots.len(), 2);
     }
 

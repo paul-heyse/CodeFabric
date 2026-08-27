@@ -1235,6 +1235,7 @@ mod tests {
                 query_language_bundle_id: "query:1.0".into(),
                 model_pack_bundle_id: "model:1.0".into(),
                 toolchain_bundle_id: "toolchain:1.0".into(),
+                sandbox_profile_digests: std::collections::BTreeMap::new(),
             },
             limits_profile_digest: digest(8),
             source_blob_digests: Vec::new(),

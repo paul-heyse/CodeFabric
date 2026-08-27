@@ -30,6 +30,70 @@ pub(crate) struct ProviderSourceBlob {
     pub file_id: [u8; 16],
 }
 
+/// Compatibility-only consumer port colocated with the production ProviderRuntime boundary.
+/// Direct process launch remains private to this module until each lane installs its production
+/// driver behind `RegisteredSemanticProviderAdapter`.
+pub(crate) struct CompatibilityProviderRuntimeDispatch<'a> {
+    repository_root: &'a Path,
+    state_root: &'a Path,
+    workspace_id: [u8; 16],
+    analysis_context_id: [u8; 16],
+    source_generation: u64,
+}
+
+impl<'a> CompatibilityProviderRuntimeDispatch<'a> {
+    #[must_use]
+    pub(crate) const fn new(
+        repository_root: &'a Path,
+        state_root: &'a Path,
+        workspace_id: [u8; 16],
+        analysis_context_id: [u8; 16],
+        source_generation: u64,
+    ) -> Self {
+        Self {
+            repository_root,
+            state_root,
+            workspace_id,
+            analysis_context_id,
+            source_generation,
+        }
+    }
+
+    pub(crate) async fn pyrefly(
+        &self,
+        source: &ProviderSourceBlob,
+        ffi_source: &ProviderSourceBlob,
+        invalid_source: &ProviderSourceBlob,
+    ) -> Result<AcceptedPyreflyRun, ProviderFixtureError> {
+        run_pyrefly(
+            self.repository_root,
+            self.state_root,
+            self.workspace_id,
+            self.analysis_context_id,
+            self.source_generation,
+            source,
+            ffi_source,
+            invalid_source,
+        )
+        .await
+    }
+
+    pub(crate) async fn rustc(
+        &self,
+        source: &ProviderSourceBlob,
+    ) -> Result<AcceptedRustcCompilation, ProviderFixtureError> {
+        run_rustc(
+            self.repository_root,
+            self.state_root,
+            source,
+            self.workspace_id,
+            self.analysis_context_id,
+            self.source_generation,
+        )
+        .await
+    }
+}
+
 /// Failure while launching or admitting a real provider fixture.
 #[derive(Debug, Error)]
 pub(crate) enum ProviderFixtureError {
@@ -97,7 +161,7 @@ fn provider_binary(
 
 /// Launch the pinned Pyrefly sidecar and return its admitted application DTOs.
 #[allow(clippy::too_many_arguments)] // The fixture makes every admission identity and source role explicit at the call site.
-pub(crate) async fn run_pyrefly(
+async fn run_pyrefly(
     repository_root: &Path,
     state_root: &Path,
     workspace_id: [u8; 16],
@@ -214,7 +278,7 @@ fn extractor_environment(
 
 /// Launch the pinned compiler extractor and return its admitted application DTOs.
 #[allow(clippy::too_many_lines)] // One compiler transaction keeps invocation, stream, and terminal validation ordered.
-pub(crate) async fn run_rustc(
+async fn run_rustc(
     repository_root: &Path,
     state_root: &Path,
     source: &ProviderSourceBlob,

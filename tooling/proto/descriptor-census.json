@@ -4553,6 +4553,19 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 16,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.provider.v1.ProviderJobSpec",

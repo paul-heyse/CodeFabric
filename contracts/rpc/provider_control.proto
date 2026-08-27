@@ -132,6 +132,7 @@ message ProviderJobSpec {
   repeated string required_schema_digests = 13;
   string idempotency_key = 14;
   string resource_profile_id = 15;
+  string sandbox_profile_digest = 16;
 }
 
 message AcceptedProviderJob {

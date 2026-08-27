@@ -1,0 +1,21 @@
+{
+  "artifact_id": "codefabric.benchmark.semantic-profile-baseline",
+  "version": "1.0",
+  "status": "non-normative",
+  "captured_at": "2026-08-27T15:00:00Z",
+  "capture_context_fingerprint": "sha256:591aef433ae3f81cc63ba770657bef94ddb6dbeac9c0a3c1f71c9863053c09db",
+  "capture_machine_fingerprint": "sha256:586d1dae101fc0c7d39c3c422b33237238dad1e75f5a238eccfacb487af62cae",
+  "workloads": {
+    "medium": {
+      "bytes": 1048576,
+      "cold_milliseconds": 0.4656,
+      "warm_milliseconds": 0.4766
+    },
+    "small": {
+      "bytes": 65536,
+      "cold_milliseconds": 0.04,
+      "warm_milliseconds": 0.031
+    }
+  },
+  "interpretation": "Observation seed only. No threshold, regression verdict, or release gate is implied."
+}

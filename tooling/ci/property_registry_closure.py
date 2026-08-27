@@ -62,14 +62,14 @@ def _qualified_column(
     return table_name, column_name
 
 
-def _merge_records(
-    target: list[dict[str, Any]], additions: object, key: str
-) -> None:
+def _merge_records(target: list[dict[str, Any]], additions: object, key: str) -> None:
     if not isinstance(additions, list):
         raise PropertyRegistryClosureError(f"fragment {key} additions must be a list")
     keyed = {record.get(key): record for record in target}
     if None in keyed or len(keyed) != len(target):
-        raise PropertyRegistryClosureError(f"base records have invalid or duplicate {key}")
+        raise PropertyRegistryClosureError(
+            f"base records have invalid or duplicate {key}"
+        )
     for addition in additions:
         if not isinstance(addition, dict) or addition.get(key) is None:
             raise PropertyRegistryClosureError(f"fragment record has no {key}")

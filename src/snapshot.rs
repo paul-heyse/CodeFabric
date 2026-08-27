@@ -1,5 +1,6 @@
 //! Immutable serving-snapshot manifest identities from the AC-G-19 CBEF contract.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
@@ -111,6 +112,9 @@ pub struct SnapshotBundles {
     pub query_language_bundle_id: String,
     pub model_pack_bundle_id: String,
     pub toolchain_bundle_id: String,
+    /// Provider ID to exact generated containment profile digest.
+    #[serde(default)]
+    pub sandbox_profile_digests: BTreeMap<String, String>,
 }
 
 /// Immutable AC-G-19 manifest body; mutable activation observations are absent.
@@ -301,6 +305,34 @@ fn decode_digest(value: &str, field: &'static str) -> Result<[u8; 32], SnapshotM
 
 fn digest(value: &str, field: &'static str) -> Result<CbefValue, SnapshotManifestError> {
     Ok(CbefValue::Digest(decode_digest(value, field)?))
+}
+
+fn sandbox_profile_digests(
+    values: &BTreeMap<String, String>,
+) -> Result<CbefValue, SnapshotManifestError> {
+    values
+        .iter()
+        .map(|(provider_id, value)| {
+            let payload = value
+                .strip_prefix("sha256:")
+                .or_else(|| value.strip_prefix("b3:"))
+                .ok_or(SnapshotManifestError::InvalidField(
+                    "bundles.sandbox_profile_digests",
+                ))?;
+            if provider_id.is_empty()
+                || payload.len() != 64
+                || !payload
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+            {
+                return Err(SnapshotManifestError::InvalidField(
+                    "bundles.sandbox_profile_digests",
+                ));
+            }
+            Ok((text(provider_id), text(value)))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(CbefValue::Map)
 }
 
 fn public_id(
@@ -670,6 +702,10 @@ impl ServingSnapshotManifestBody {
                 "toolchain_bundle_id",
                 text(&self.bundles.toolchain_bundle_id),
             ),
+            (
+                "sandbox_profile_digests",
+                sandbox_profile_digests(&self.bundles.sandbox_profile_digests)?,
+            ),
         ]);
         Ok(encode_record(&CbefRecord {
             domain: IdentityDomain::ServingSnapshot,
@@ -869,6 +905,7 @@ mod tests {
                 query_language_bundle_id: "query:1.0".to_owned(),
                 model_pack_bundle_id: "model-pack:1.0".to_owned(),
                 toolchain_bundle_id: "toolchain:1.0".to_owned(),
+                sandbox_profile_digests: BTreeMap::new(),
             },
             limits_profile_digest: digest_value(16),
             source_blob_digests: vec![digest_value(17)],
@@ -885,6 +922,36 @@ mod tests {
         let changed = changed.derive().unwrap();
         assert_ne!(first.manifest_digest, changed.manifest_digest);
         assert_ne!(first.snapshot_id, changed.snapshot_id);
+    }
+
+    #[test]
+    fn sandbox_profile_digest_is_snapshot_identity_material() {
+        let mut first_body = body();
+        first_body.bundles.sandbox_profile_digests.insert(
+            "pyrefly-python".into(),
+            format!("sha256:{}", "11".repeat(32)),
+        );
+        let first = first_body.derive().unwrap();
+
+        let mut changed_body = body();
+        changed_body.bundles.sandbox_profile_digests.insert(
+            "pyrefly-python".into(),
+            format!("sha256:{}", "22".repeat(32)),
+        );
+        let changed = changed_body.clone().derive().unwrap();
+        assert_ne!(first.snapshot_id, changed.snapshot_id);
+        assert_ne!(first.manifest_digest, changed.manifest_digest);
+
+        changed_body
+            .bundles
+            .sandbox_profile_digests
+            .insert("rustc-mir".into(), format!("sha256:{}", "AA".repeat(32)));
+        assert!(matches!(
+            changed_body.derive(),
+            Err(SnapshotManifestError::InvalidField(
+                "bundles.sandbox_profile_digests"
+            ))
+        ));
     }
 
     #[test]

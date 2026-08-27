@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:63bd5ccd9580028acac3cf4269ca72efa927e59db44be762b05c5b4e1d449069; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:a55071ea3d46f6ea603db2eec379a7fec6f400c28fdcaecbb9042a20af87e53e; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
@@ -4704,7 +4704,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "provider_run",
-        sqlite_ddl: "CREATE TABLE provider_run (\n  provider_run_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  analysis_context_id BLOB NOT NULL,\n  wave_id BLOB NOT NULL,\n  provider_code INTEGER NOT NULL,\n  owner_id BLOB,\n  build_unit_id BLOB,\n  source_generation INTEGER NOT NULL,\n  input_fingerprint BLOB NOT NULL,\n  output_fingerprint BLOB,\n  state_code INTEGER NOT NULL,\n  accepted_at TEXT NOT NULL,\n  terminal_at TEXT,\n  diagnostic_id BLOB,\n  PRIMARY KEY (provider_run_id)\n) STRICT;\n",
+        sqlite_ddl: "CREATE TABLE provider_run (\n  provider_run_id BLOB NOT NULL,\n  workspace_id BLOB NOT NULL,\n  analysis_context_id BLOB NOT NULL,\n  wave_id BLOB NOT NULL,\n  provider_code INTEGER NOT NULL,\n  owner_id BLOB,\n  build_unit_id BLOB,\n  source_generation INTEGER NOT NULL,\n  input_fingerprint BLOB NOT NULL,\n  output_fingerprint BLOB,\n  sandbox_profile_digest TEXT,\n  state_code INTEGER NOT NULL,\n  accepted_at TEXT NOT NULL,\n  terminal_at TEXT,\n  diagnostic_id BLOB,\n  PRIMARY KEY (provider_run_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "provider_run_id",
@@ -4754,6 +4754,11 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
             GeneratedOperationalColumn {
                 name: "output_fingerprint",
                 sqlite_type: OperationalSqliteType::Blob,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "sandbox_profile_digest",
+                sqlite_type: OperationalSqliteType::Text,
                 nullable: true,
             },
             GeneratedOperationalColumn {

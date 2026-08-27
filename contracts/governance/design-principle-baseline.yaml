@@ -566,3 +566,123 @@ records:
     disposition: plan_owned
     owner: repository-infrastructure-owner
     current_packet: WP01
+  - path: Cargo.lock
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: Cargo.toml
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.py
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/provider_control_pb2.pyi
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: contracts/faults/fault-point-registry.yaml
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP36
+  - path: contracts/observability/semantic-provider-telemetry-contract.yaml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP36
+  - path: contracts/rpc/provider_control.proto
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP36
+  - path: scripts/model_family_check.sh
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: src/continuous.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP36
+  - path: src/contracts/registry_models.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP36
+  - path: src/daemon.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP36
+  - path: src/gate_b_candidate/vertical.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP36
+  - path: src/generated/codefabric.provider.v1.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: src/provider_runtime.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP36
+  - path: src/provider_runtime/fixture.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP36
+  - path: src/provider_sandbox.rs
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP36
+  - path: src/snapshot.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP36
+  - path: src/snapshot_runtime.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP36
+  - path: src/source_image.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP36
+  - path: tooling/benchmarks/semantic-profile-baseline-v1.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: tooling/benchmarks/semantic_profile_bench.py
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: tooling/ci/semantic_provider_contracts.py
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: tooling/proto/descriptor-census.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36
+  - path: tooling/proto/production-descriptor.pb
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP36

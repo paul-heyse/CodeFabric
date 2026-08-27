@@ -46,13 +46,13 @@
     },
     {
       "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
-      "canonical_digest": "b3:f018389180a58510b09d99c6a71844d5a01d269cdd0960bb4ddd852ffc08bf97",
+      "canonical_digest": "b3:792452c08085468156a555fcbde831b66a39d5a30b81ac8d5f48611eb5b9d5e3",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:ab0d0c955ce7d09aecb2589651c413b8a6f33b0099e58ef56bbbd4fa52c53da5",
+  "bundle_digest": "b3:a16d66d211da40741a3031f1e0b29f42ad586ad5aa1a257bb98f21939682f792",
   "bundle_kind": "query-language",
   "bundle_major": 1,
   "bundle_version": "1.0",

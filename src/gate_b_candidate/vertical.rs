@@ -32,7 +32,7 @@ use crate::fabric::{
     SnapshotOverlayProviderFactory as _, bootstrap_workspace,
 };
 use crate::lifecycle::CanonicalState;
-use crate::provider_runtime::fixture::{ProviderSourceBlob, run_pyrefly, run_rustc};
+use crate::provider_runtime::fixture::{CompatibilityProviderRuntimeDispatch, ProviderSourceBlob};
 use crate::query_service::WorkspaceQueryBackend;
 use crate::registries::{
     Completeness, CpgdFeatureMask, Language, OwnerCapabilityState, SnapshotLeaseKind,
@@ -460,6 +460,10 @@ fn snapshot_body(
             query_language_bundle_id: "query:1.3".to_owned(),
             model_pack_bundle_id: "model-pack:1.3".to_owned(),
             toolchain_bundle_id: "toolchain:1.3".to_owned(),
+            sandbox_profile_digests: BTreeMap::from([
+                ("pyrefly-python".into(), digest(b"gate-b-pyrefly-sandbox")),
+                ("rustc-mir".into(), digest(b"gate-b-rustc-sandbox")),
+            ]),
         },
         limits_profile_digest: digest(b"gate-b-limits"),
         source_blob_digests: Vec::new(),
@@ -1310,28 +1314,22 @@ fn execute_with_hot_edit(
         ) {
             python_blob.content_digest = format!("b3:{}", "0".repeat(64));
         }
-        let mut pyrefly = run_pyrefly(
+        let provider_dispatch = CompatibilityProviderRuntimeDispatch::new(
             repository_root,
             &vertical_root,
             clean_record.workspace_id,
             SOURCE_CONTEXT_ID,
             source_generation,
+        );
+        let mut pyrefly = provider_dispatch
+            .pyrefly(
             &python_blob,
             &ffi_blob,
             &invalid_python_blob,
         )
         .await
         .map_err(invariant)?;
-        let rustc = run_rustc(
-            repository_root,
-            &vertical_root,
-            &rust_blob,
-            clean_record.workspace_id,
-            SOURCE_CONTEXT_ID,
-            source_generation,
-        )
-        .await
-        .map_err(invariant)?;
+        let rustc = provider_dispatch.rustc(&rust_blob).await.map_err(invariant)?;
         let core = CoreFactEngine::default();
         if intervention_is(
             intervention,

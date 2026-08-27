@@ -2135,6 +2135,7 @@ mod tests {
                 query_language_bundle_id: "query:1.0".into(),
                 model_pack_bundle_id: "model:1.0".into(),
                 toolchain_bundle_id: "toolchain:1.0".into(),
+                sandbox_profile_digests: BTreeMap::new(),
             },
             limits_profile_digest: digest(8),
             source_blob_digests: Vec::new(),
@@ -2859,28 +2860,19 @@ mod tests {
         let malformed = capture("malformed/broken.py", SourceLanguage::Python, 0x52);
         let rust = capture("rust/src/lib.rs", SourceLanguage::Rust, 0x53);
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let pyrefly = crate::provider_runtime::fixture::run_pyrefly(
-            repository_root,
-            state_root,
-            workspace_id,
-            analysis_context_id,
-            source_generation,
-            &python,
-            &ffi,
-            &malformed,
-        )
-        .await
-        .unwrap();
-        let rustc = crate::provider_runtime::fixture::run_rustc(
-            repository_root,
-            state_root,
-            &rust,
-            workspace_id,
-            analysis_context_id,
-            source_generation,
-        )
-        .await
-        .unwrap();
+        let provider_dispatch =
+            crate::provider_runtime::fixture::CompatibilityProviderRuntimeDispatch::new(
+                repository_root,
+                state_root,
+                workspace_id,
+                analysis_context_id,
+                source_generation,
+            );
+        let pyrefly = provider_dispatch
+            .pyrefly(&python, &ffi, &malformed)
+            .await
+            .unwrap();
+        let rustc = provider_dispatch.rustc(&rust).await.unwrap();
         let engine = CoreFactEngine::default();
         let mut outputs = engine.reconcile_pyrefly_run(&pyrefly).unwrap();
         outputs.extend(engine.reconcile_rustc_compilation(&rustc).unwrap());

@@ -1339,6 +1339,11 @@
           "sqlite_type": "BLOB"
         },
         {
+          "name": "sandbox_profile_digest",
+          "nullable": true,
+          "sqlite_type": "TEXT"
+        },
+        {
           "name": "state_code",
           "nullable": false,
           "sqlite_type": "INTEGER"
@@ -2336,7 +2341,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:63bd5ccd9580028acac3cf4269ca72efa927e59db44be762b05c5b4e1d449069"
+    "source_digest": "b3:a55071ea3d46f6ea603db2eec379a7fec6f400c28fdcaecbb9042a20af87e53e"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [

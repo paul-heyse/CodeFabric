@@ -612,6 +612,21 @@ property-registry-closure-check:
 semantic-provider-legacy-zero-state-check scope="all":
     ./scripts/semantic_provider_legacy_zero_state.sh "{{scope}}"
 
+[doc("Validate the closed semantic-provider fault seam census")]
+[group('gate')]
+semantic-fault-point-check:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/ci/semantic_provider_contracts.py faults
+
+[doc("Validate bounded semantic-provider telemetry, containment, and shared dispatch")]
+[group('gate')]
+semantic-observability-contract-check:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/ci/semantic_provider_contracts.py observability
+
+[doc("Run reproducible non-normative semantic substrate warm/cold workloads")]
+[group('perf')]
+semantic-profile-bench:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/benchmarks/semantic_profile_bench.py
+
 [doc("Execute all current design-principle detectors, or one DP-NNN detector")]
 [group('gate')]
 alignment-detector-check detector_id="":

@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir semantic=b3:10d3179c077d33341f6ad42d23442b6336d62452069551ae17c4af54bda9e214 source=b3:63bd5ccd9580028acac3cf4269ca72efa927e59db44be762b05c5b4e1d449069; schema-contract-driver-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir semantic=b3:d0cba53f4ae8f8aabfde07a4ed08f38852ad217a6744374971709763f2094e57 source=b3:a55071ea3d46f6ea603db2eec379a7fec6f400c28fdcaecbb9042a20af87e53e; schema-contract-driver-v1; do not edit.
 -- Cross-store Arrow/Delta foreign keys are generated as application contracts, not SQLite reference clauses.
 
 CREATE TABLE workspace_registration (
@@ -244,6 +244,7 @@ CREATE TABLE provider_run (
   source_generation INTEGER NOT NULL,
   input_fingerprint BLOB NOT NULL,
   output_fingerprint BLOB,
+  sandbox_profile_digest TEXT,
   state_code INTEGER NOT NULL,
   accepted_at TEXT NOT NULL,
   terminal_at TEXT,

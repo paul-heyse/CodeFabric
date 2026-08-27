@@ -21,10 +21,13 @@ use crate::model_generated::semantic_lane_fragments::{
 };
 use crate::snapshot::ServingSnapshotManifest;
 
-const SCHEMA_VERSION: u32 = 10;
+const SCHEMA_VERSION: u32 = 11;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str =
     include_str!("../contracts/generated/model/schema/operational-store.sql");
+const SCHEMA_IR_BYTES: &[u8] = include_bytes!("../contracts/schema/schema-contract-ir.json");
+const SCHEMA_VALIDATION_BYTES: &[u8] =
+    include_bytes!("../contracts/generated/model/schema/schema-validation.json");
 const SCHEMA_IR_ARTIFACT_ID: &str = "codefabric.schema.contract-ir";
 static OPEN_WRITERS: OnceLock<Mutex<BTreeSet<PathBuf>>> = OnceLock::new();
 type GeneratedColumnShapes = BTreeMap<String, Vec<(String, String, bool)>>;
@@ -78,6 +81,7 @@ pub struct ProviderRunRecord {
     pub source_generation: i64,
     pub input_fingerprint: Vec<u8>,
     pub output_fingerprint: Option<Vec<u8>>,
+    pub sandbox_profile_digest: Option<String>,
     pub state_code: i64,
     pub accepted_at: String,
     pub terminal_at: Option<String>,
@@ -477,15 +481,24 @@ impl OperationalStore {
                 )));
             }
         }
+        if record
+            .sandbox_profile_digest
+            .as_deref()
+            .is_some_and(|value| !valid_sandbox_profile_digest(value))
+        {
+            return Err(OperationalStoreError::ProviderRunRecord(
+                "sandbox_profile_digest must be a canonical sha256: or b3: digest".into(),
+            ));
+        }
         self.write_transaction(|transaction| {
             let changed = transaction.execute(
                 "INSERT INTO provider_run (
                    provider_run_id, workspace_id, analysis_context_id, wave_id,
                    provider_code, owner_id, build_unit_id, source_generation,
-                   input_fingerprint, output_fingerprint, state_code, accepted_at,
-                   terminal_at, diagnostic_id
+                   input_fingerprint, output_fingerprint, sandbox_profile_digest, state_code,
+                   accepted_at, terminal_at, diagnostic_id
                  ) VALUES (
-                   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+                   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
                  )
                  ON CONFLICT(provider_run_id) DO UPDATE SET
                    output_fingerprint = excluded.output_fingerprint,
@@ -498,6 +511,7 @@ impl OperationalStore {
                    AND provider_run.provider_code = excluded.provider_code
                    AND provider_run.source_generation = excluded.source_generation
                    AND provider_run.input_fingerprint = excluded.input_fingerprint
+                   AND provider_run.sandbox_profile_digest IS excluded.sandbox_profile_digest
                    AND provider_run.accepted_at = excluded.accepted_at",
                 rusqlite::params![
                     record.provider_run_id,
@@ -510,6 +524,7 @@ impl OperationalStore {
                     record.source_generation,
                     record.input_fingerprint,
                     record.output_fingerprint,
+                    record.sandbox_profile_digest,
                     record.state_code,
                     record.accepted_at,
                     record.terminal_at,
@@ -522,6 +537,47 @@ impl OperationalStore {
                 ));
             }
             Ok(())
+        })
+    }
+
+    /// Close provider runs left non-terminal by a prior daemon process.
+    ///
+    /// Queued work never received a permit and is recovered as cancelled; running work lost its
+    /// process and is recovered as crashed. This method is invoked once during daemon recovery,
+    /// before new runtimes admit work.
+    ///
+    /// # Errors
+    ///
+    /// Returns a transaction failure or an invalid empty recovery timestamp.
+    pub fn recover_incomplete_provider_runs(
+        &mut self,
+        recovered_at: &str,
+    ) -> Result<usize, OperationalStoreError> {
+        if recovered_at.is_empty() {
+            return Err(OperationalStoreError::ProviderRunRecord(
+                "provider recovery timestamp is empty".into(),
+            ));
+        }
+        self.write_transaction(|transaction| {
+            transaction
+                .execute(
+                    "UPDATE provider_run
+                     SET state_code=CASE
+                         WHEN state_code=?1 THEN ?2
+                         WHEN state_code=?3 THEN ?4
+                         ELSE state_code
+                       END,
+                       terminal_at=?5
+                     WHERE terminal_at IS NULL AND state_code IN (?1,?3)",
+                    rusqlite::params![
+                        i64::from(crate::registries::ProviderRunState::Queued as u16),
+                        i64::from(crate::registries::ProviderRunState::Cancelled as u16),
+                        i64::from(crate::registries::ProviderRunState::Running as u16),
+                        i64::from(crate::registries::ProviderRunState::Crashed as u16),
+                        recovered_at,
+                    ],
+                )
+                .map_err(OperationalStoreError::from)
         })
     }
 
@@ -736,6 +792,7 @@ impl OperationalStore {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
             2 => {
                 migrate_v2_to_v3(&transaction)?;
@@ -746,6 +803,7 @@ impl OperationalStore {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
             3 => {
                 migrate_v3_to_v4(&transaction)?;
@@ -755,6 +813,7 @@ impl OperationalStore {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
             4 => {
                 migrate_v4_to_v5(&transaction)?;
@@ -763,6 +822,7 @@ impl OperationalStore {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
             5 => {
                 migrate_v5_to_v6(&transaction)?;
@@ -770,23 +830,31 @@ impl OperationalStore {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
             6 => {
                 migrate_v6_to_v7(&transaction)?;
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
             7 => {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
             8 => {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
             }
-            9 => migrate_v9_to_v10(&transaction)?,
+            9 => {
+                migrate_v9_to_v10(&transaction)?;
+                migrate_v10_to_v11(&transaction)?;
+            }
+            10 => migrate_v10_to_v11(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -1201,6 +1269,27 @@ fn migrate_v9_to_v10(transaction: &Transaction<'_>) -> Result<(), OperationalSto
     Ok(())
 }
 
+fn migrate_v10_to_v11(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    if !table_has_column(transaction, "provider_run", "sandbox_profile_digest")? {
+        transaction.execute_batch("ALTER TABLE provider_run RENAME TO provider_run_v10;")?;
+        transaction.execute_batch(&generated_table_ddl("provider_run")?)?;
+        transaction.execute_batch(
+            "INSERT INTO provider_run(
+               provider_run_id, workspace_id, analysis_context_id, wave_id,
+               provider_code, owner_id, build_unit_id, source_generation,
+               input_fingerprint, output_fingerprint, sandbox_profile_digest,
+               state_code, accepted_at, terminal_at, diagnostic_id)
+             SELECT provider_run_id, workspace_id, analysis_context_id, wave_id,
+               provider_code, owner_id, build_unit_id, source_generation,
+               input_fingerprint, output_fingerprint, NULL,
+               state_code, accepted_at, terminal_at, diagnostic_id
+             FROM provider_run_v10;
+             DROP TABLE provider_run_v10;",
+        )?;
+    }
+    Ok(())
+}
+
 fn table_has_column(
     transaction: &Transaction<'_>,
     table: &str,
@@ -1269,17 +1358,30 @@ fn verify_ddl_lineage() -> Result<(), OperationalStoreError> {
     let index = model_artifact_index().map_err(|error| {
         OperationalStoreError::DdlLineage(format!("artifact index unavailable: {error}"))
     })?;
-    let expected = index
+    let schema_ir = index
         .artifacts
         .iter()
         .find(|artifact| artifact.artifact_id == SCHEMA_IR_ARTIFACT_ID)
-        .ok_or_else(|| OperationalStoreError::DdlLineage("schema IR is absent".into()))?
-        .canonical_digest
-        .as_str();
-    let first_line = OPERATIONAL_DDL.lines().next().unwrap_or_default();
-    if !first_line.contains(expected) || !first_line.contains("@generated") {
+        .ok_or_else(|| OperationalStoreError::DdlLineage("schema IR is absent".into()))?;
+    if crate::integrity::framed_digest(SCHEMA_IR_BYTES) != schema_ir.source_digest {
         return Err(OperationalStoreError::DdlLineage(
-            "DDL header does not bind the packaged schema-IR identity".into(),
+            "packaged schema-IR bytes differ from the artifact index".into(),
+        ));
+    }
+    let validation: serde_json::Value = serde_json::from_slice(SCHEMA_VALIDATION_BYTES)
+        .map_err(|error| OperationalStoreError::DdlLineage(error.to_string()))?;
+    let expected_source = validation
+        .get("source_digest")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            OperationalStoreError::DdlLineage(
+                "generated schema validation source digest is absent".into(),
+            )
+        })?;
+    let first_line = OPERATIONAL_DDL.lines().next().unwrap_or_default();
+    if !first_line.contains(expected_source) || !first_line.contains("@generated") {
+        return Err(OperationalStoreError::DdlLineage(
+            "DDL header does not bind the generated schema source identity".into(),
         ));
     }
     Ok(())
@@ -1412,6 +1514,18 @@ fn pragma_state(connection: &Connection) -> rusqlite::Result<PragmaState> {
 
 fn user_version(connection: &Connection) -> rusqlite::Result<u32> {
     connection.query_row("PRAGMA user_version", [], |row| row.get(0))
+}
+
+fn valid_sandbox_profile_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .or_else(|| value.strip_prefix("b3:"))
+        .is_some_and(|payload| {
+            payload.len() == 64
+                && payload
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        })
 }
 
 fn generated_table_names() -> BTreeSet<String> {
@@ -1653,6 +1767,7 @@ mod tests {
                 source_generation: 7,
                 input_fingerprint: vec![0x67; 32],
                 output_fingerprint: Some(vec![0x68; 32]),
+                sandbox_profile_digest: Some(format!("b3:{}", "55".repeat(32))),
                 state_code: 70,
                 accepted_at: "2026-08-25T00:00:00Z".into(),
                 terminal_at: Some("2026-08-25T00:00:01Z".into()),
@@ -1689,6 +1804,7 @@ mod tests {
             source_generation: 7,
             input_fingerprint: vec![0; 32],
             output_fingerprint: None,
+            sandbox_profile_digest: None,
             state_code: 10,
             accepted_at: "2026-08-25T00:00:02Z".into(),
             terminal_at: None,
@@ -1949,5 +2065,33 @@ mod tests {
             )
             .unwrap();
         assert_eq!(legacy_unique_indexes, 0);
+    }
+
+    #[test]
+    fn provider_run_sandbox_profile_digest_migrates_from_v10() {
+        let (_directory, path) = database();
+        let store = OperationalStore::open(&path).unwrap();
+        drop(store);
+
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "ALTER TABLE provider_run DROP COLUMN sandbox_profile_digest;
+                 PRAGMA user_version=10;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let migrated = OperationalStore::open(&path).unwrap();
+        assert_eq!(user_version(&migrated.connection).unwrap(), SCHEMA_VERSION);
+        let present = migrated
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('provider_run') WHERE name='sandbox_profile_digest')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        assert!(present);
     }
 }

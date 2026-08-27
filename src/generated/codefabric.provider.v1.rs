@@ -76,6 +76,8 @@ pub struct ProviderJobSpec {
     pub idempotency_key: ::prost::alloc::string::String,
     #[prost(string, tag = "15")]
     pub resource_profile_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "16")]
+    pub sandbox_profile_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AcceptedProviderJob {

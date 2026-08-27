@@ -1219,6 +1219,7 @@ dependencies = [
  "serde_json",
  "serde_json_canonicalizer",
  "serde_yaml_ng",
+ "sha2",
  "tempfile",
  "thiserror",
  "tokio",

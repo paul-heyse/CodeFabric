@@ -2363,6 +2363,7 @@ mod tests {
                 .into_iter()
                 .map(crate::query_service::QueryArtifactFaultPoint::code),
         );
+        executable.extend(crate::provider_runtime::SEMANTIC_PROVIDER_FAULT_POINT_CODES);
         assert_eq!(released, executable);
     }
 }

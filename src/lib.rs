@@ -81,6 +81,8 @@ pub mod operational_store;
 pub mod provider_raw_kinds;
 #[cfg(feature = "daemon")]
 pub mod provider_runtime;
+#[cfg(feature = "daemon")]
+pub mod provider_sandbox;
 #[cfg(feature = "fact-generation")]
 pub mod provider_types;
 #[cfg(feature = "daemon")]

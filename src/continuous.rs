@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::cancellation::Cancellation;
 use crate::fabric::ConsolidatedOverlay;
+use crate::fabric::OverlayMutation;
 use crate::git_state::{
     GitCandidatePlan, GitCandidatePlanner, GitCandidatePlanningRequest, GitStateAdapter,
     GitStateError, GitStateObservations, GitStateVector, RegisteredGitIdentity,
@@ -62,6 +63,59 @@ fn semantic_lane_required<'a>(
         })
 }
 
+/// Detached immutable source identity supplied to semantic scheduling.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticLaneSource {
+    pub file_id: [u8; 16],
+    pub raw_relative_path_bytes: Vec<u8>,
+    pub language: crate::source_image::SourceLanguage,
+    pub content_digest: [u8; 32],
+}
+
+/// One generation-fenced semantic scheduling transaction.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticLaneRequest {
+    pub wave_id: [u8; 16],
+    pub workspace_id: [u8; 16],
+    pub analysis_context_id: [u8; 16],
+    pub source_generation: u64,
+    pub provider_ids: BTreeSet<&'static str>,
+    pub sources: Vec<SemanticLaneSource>,
+}
+
+/// Terminal receipt consumed by the continuous actor; provider-library output never crosses it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticLaneTerminal {
+    pub provider_id: &'static str,
+    pub provider_run_id: [u8; 16],
+    pub source_generation: u64,
+    pub state: crate::registries::ProviderRunState,
+    pub output_fingerprint: Option<[u8; 32]>,
+}
+
+/// Closed scheduler result. Stale work is counted but cannot be staged or published.
+#[derive(Clone, Debug, Default)]
+pub struct SemanticLaneReport {
+    pub terminals: Vec<SemanticLaneTerminal>,
+    pub discarded_stale_runs: u64,
+    pub semantic_mutations: Vec<OverlayMutation>,
+}
+
+/// Application port that owns ProviderRuntime submission and terminal-event collection.
+pub trait SemanticLaneScheduler: Send + Sync {
+    /// Schedule every required semantic provider and return only generation-current terminals.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable detail when admission, journaling, containment, or terminal verification
+    /// fails. The continuous actor retains the non-current wave state for recovery.
+    fn schedule(
+        &self,
+        store: &mut OperationalStore,
+        request: &SemanticLaneRequest,
+    ) -> Result<SemanticLaneReport, String>;
+}
+
 /// One successfully published source wave.
 pub struct ContinuousWaveResult {
     pub wave: AcceptedUpdateWave,
@@ -80,6 +134,7 @@ pub struct ContinuousWorkspaceEngine<A> {
     fast_syntax: FastSyntaxReconciler,
     overlays: ContinuousOverlayState,
     config: ContinuousWorkspaceConfig,
+    semantic_scheduler: Option<Arc<dyn SemanticLaneScheduler>>,
 }
 
 impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
@@ -97,6 +152,7 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
             fast_syntax: FastSyntaxReconciler::default(),
             overlays: ContinuousOverlayState::default(),
             config,
+            semantic_scheduler: None,
         }
     }
 
@@ -178,6 +234,11 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
     /// or a required provider becomes unavailable.
     pub const fn set_semantic_capabilities_required(&mut self, required: bool) {
         self.config.semantic_capabilities_required = required;
+    }
+
+    /// Install the sole semantic lane scheduler used for subsequent source generations.
+    pub fn install_semantic_scheduler(&mut self, scheduler: Arc<dyn SemanticLaneScheduler>) {
+        self.semantic_scheduler = Some(scheduler);
     }
 
     /// Process one normalized final-state batch through candidate selection, authoritative byte
@@ -376,7 +437,7 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
             wave.source_generation,
             &removed_owners,
         )?);
-        let staged = self.overlays.stage(
+        let mut staged = self.overlays.stage(
             wave.workspace_id,
             self.config.analysis_context_id,
             &mutations,
@@ -401,14 +462,86 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
                 "semantic-work-required",
                 "semantic-capabilities-applicable",
             )?;
-            return Ok(None);
+            let scheduler = self
+                .semantic_scheduler
+                .as_ref()
+                .ok_or(ContinuousError::SemanticLaneUnavailable)?;
+            let mut provider_ids = BTreeSet::new();
+            let sources = wave
+                .items
+                .iter()
+                .filter_map(|item| item.captured.as_deref())
+                .filter_map(|source| {
+                    let provider_id = match source.language {
+                        crate::source_image::SourceLanguage::Python => "pyrefly-python",
+                        crate::source_image::SourceLanguage::Rust => "rustc-mir",
+                        crate::source_image::SourceLanguage::Other => return None,
+                    };
+                    provider_ids.insert(provider_id);
+                    Some(SemanticLaneSource {
+                        file_id: source.file_id,
+                        raw_relative_path_bytes: source.path.raw_relative_path_bytes.clone(),
+                        language: source.language.clone(),
+                        content_digest: source.digest,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let request = SemanticLaneRequest {
+                wave_id: wave.wave_id,
+                workspace_id: wave.workspace_id,
+                analysis_context_id: self.config.analysis_context_id,
+                source_generation: wave.source_generation,
+                provider_ids: provider_ids.clone(),
+                sources,
+            };
+            let report = scheduler
+                .schedule(store, &request)
+                .map_err(ContinuousError::SemanticLane)?;
+            let terminal_ids = report
+                .terminals
+                .iter()
+                .map(|terminal| terminal.provider_id)
+                .collect::<BTreeSet<_>>();
+            if terminal_ids != provider_ids
+                || report.terminals.len() != provider_ids.len()
+                || report.terminals.iter().any(|terminal| {
+                    terminal.source_generation != wave.source_generation
+                        || !matches!(
+                            terminal.state,
+                            crate::registries::ProviderRunState::Succeeded
+                                | crate::registries::ProviderRunState::Partial
+                        )
+                })
+            {
+                return Err(ContinuousError::SemanticGenerationFence);
+            }
+            mutations.extend(report.semantic_mutations);
+            staged = self.overlays.stage(
+                wave.workspace_id,
+                self.config.analysis_context_id,
+                &mutations,
+                self.config.overlay_memory_limit_bytes,
+            )?;
+            self.scheduler.transition(
+                store,
+                &mut wave,
+                "semantic-outputs-staged",
+                "semantic-providers-terminal",
+            )?;
+            self.scheduler.transition(
+                store,
+                &mut wave,
+                "derivations-staged",
+                "derivations-terminal",
+            )?;
+        } else {
+            self.scheduler.transition(
+                store,
+                &mut wave,
+                "semantic-work-not-applicable",
+                "semantic-capabilities-terminal",
+            )?;
         }
-        self.scheduler.transition(
-            store,
-            &mut wave,
-            "semantic-work-not-applicable",
-            "semantic-capabilities-terminal",
-        )?;
         self.scheduler.transition(
             store,
             &mut wave,
@@ -565,6 +698,12 @@ pub enum ContinuousError {
     GenerationOverflow,
     #[error("CONTINUOUS_CORRUPT_OWNER_IDENTITY")]
     CorruptOwnerIdentity,
+    #[error("SEMANTIC_LANE_UNAVAILABLE")]
+    SemanticLaneUnavailable,
+    #[error("SEMANTIC_LANE_FAILED: {0}")]
+    SemanticLane(String),
+    #[error("SEMANTIC_GENERATION_FENCE")]
+    SemanticGenerationFence,
 }
 
 #[cfg(test)]
@@ -576,6 +715,67 @@ mod tests {
     };
     use crate::source_image::SourceCapturePolicy;
     use crate::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
+
+    struct RecordingSemanticScheduler;
+
+    impl SemanticLaneScheduler for RecordingSemanticScheduler {
+        fn schedule(
+            &self,
+            store: &mut OperationalStore,
+            request: &SemanticLaneRequest,
+        ) -> Result<SemanticLaneReport, String> {
+            let mut terminals = Vec::new();
+            for provider_id in &request.provider_ids {
+                let provider = crate::registries::PROVIDER_ENTRIES
+                    .iter()
+                    .find(|entry| entry.provider_id == *provider_id)
+                    .ok_or_else(|| "provider registry entry absent".to_owned())?;
+                let code = u8::try_from(provider.provider_code).unwrap_or_default();
+                let run_id = [code; 16];
+                let mut record = crate::operational_store::ProviderRunRecord {
+                    provider_run_id: run_id.to_vec(),
+                    workspace_id: request.workspace_id.to_vec(),
+                    analysis_context_id: request.analysis_context_id.to_vec(),
+                    wave_id: request.wave_id.to_vec(),
+                    provider_code: i64::from(provider.provider_code),
+                    owner_id: None,
+                    build_unit_id: None,
+                    source_generation: i64::try_from(request.source_generation)
+                        .map_err(|_| "generation overflow".to_owned())?,
+                    input_fingerprint: vec![code; 32],
+                    output_fingerprint: None,
+                    sandbox_profile_digest: Some(format!("b3:{}", "33".repeat(32))),
+                    state_code: i64::from(crate::registries::ProviderRunState::Queued as u16),
+                    accepted_at: "1".into(),
+                    terminal_at: None,
+                    diagnostic_id: None,
+                };
+                store
+                    .record_provider_run(&record)
+                    .map_err(|error| error.to_string())?;
+                let output = [code; 32];
+                record.output_fingerprint = Some(output.to_vec());
+                record.state_code =
+                    i64::from(crate::registries::ProviderRunState::Succeeded as u16);
+                record.terminal_at = Some("2".into());
+                store
+                    .record_provider_run(&record)
+                    .map_err(|error| error.to_string())?;
+                terminals.push(SemanticLaneTerminal {
+                    provider_id,
+                    provider_run_id: run_id,
+                    source_generation: request.source_generation,
+                    state: crate::registries::ProviderRunState::Succeeded,
+                    output_fingerprint: Some(output),
+                });
+            }
+            Ok(SemanticLaneReport {
+                terminals,
+                discarded_stale_runs: 1,
+                semantic_mutations: Vec::new(),
+            })
+        }
+    }
 
     fn lifecycle_config() -> LifecycleConfig {
         LifecycleConfig {
@@ -639,20 +839,21 @@ mod tests {
                 semantic_capabilities_required: true,
             },
         );
-        let published = engine
-            .process_batch(
-                &mut store,
-                WatchHintBatch {
-                    hints: vec![WatchHint {
-                        path_bytes: b"lib.rs".to_vec(),
-                        kind: WatchHintKind::CreateOrModify,
-                    }],
-                    rescan_required: false,
-                },
-                &BTreeMap::new(),
-            )
-            .expect("guard evaluation");
-        assert!(published.is_none());
+        let error = match engine.process_batch(
+            &mut store,
+            WatchHintBatch {
+                hints: vec![WatchHint {
+                    path_bytes: b"lib.rs".to_vec(),
+                    kind: WatchHintKind::CreateOrModify,
+                }],
+                rescan_required: false,
+            },
+            &BTreeMap::new(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("semantic lane without a scheduler must fail closed"),
+        };
+        assert!(matches!(error, ContinuousError::SemanticLaneUnavailable));
         let (state_code, terminal_at): (i64, Option<String>) = store
             .reader_factory()
             .open()
@@ -673,6 +874,151 @@ mod tests {
         assert_eq!(
             engine.scheduler().freshness().state(),
             FreshnessState::PotentiallyStale
+        );
+    }
+
+    #[test]
+    fn semantic_lane_scheduling_conformance() {
+        let directory = tempfile::tempdir().expect("semantic scheduling fixture");
+        let root = directory.path().join("workspace");
+        std::fs::create_dir(&root).expect("workspace root");
+        std::fs::write(root.join("lib.rs"), b"pub fn answer() -> u32 { 42 }\n")
+            .expect("Rust source");
+        let mut store = OperationalStore::open(&directory.path().join("operational.sqlite"))
+            .expect("operational store");
+        let workspace_id = WorkspaceRegistry::new(&mut store)
+            .add(&root, WorkspaceSourceRegistration::Directory)
+            .expect("workspace registration")
+            .workspace_id;
+        let lifecycle = lifecycle_config();
+        let scheduler = UpdateWaveScheduler::new(workspace_id, &root, 0, 0, 0, lifecycle).unwrap();
+        let source_images = SourceImageStore::open(
+            &directory.path().join("source-blobs"),
+            SourceCapturePolicy {
+                maximum_bytes: lifecycle.maximum_capture_bytes,
+                stable_read_retries: lifecycle.stable_read_retry_count,
+                lease_ttl: lifecycle.source_blob_lease_ttl,
+            },
+        )
+        .unwrap();
+        let mut engine = ContinuousWorkspaceEngine::new(
+            scheduler,
+            source_images,
+            GitCandidatePlanner::without_cache(GixGitStateAdapter),
+            ContinuousWorkspaceConfig {
+                analysis_context_id: crate::identity::SOURCE_CONTEXT_ID,
+                registered_git_identity: None,
+                git_observations: GitStateObservations {
+                    inclusion_policy_fingerprint: [0x51; 32],
+                    attributes_fingerprint: [0x52; 32],
+                    worktree_inventory_digest: [0; 32],
+                },
+                prior_git_vector: None,
+                overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: true,
+            },
+        );
+        engine.install_semantic_scheduler(Arc::new(RecordingSemanticScheduler));
+        let published = engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: vec![WatchHint {
+                        path_bytes: b"lib.rs".to_vec(),
+                        kind: WatchHintKind::CreateOrModify,
+                    }],
+                    rescan_required: false,
+                },
+                &BTreeMap::new(),
+            )
+            .expect("semantic wave succeeds")
+            .expect("semantic wave publishes");
+        assert_eq!(
+            published.wave.state,
+            crate::registries::UpdateWaveState::HotPublished
+        );
+        assert_eq!(
+            engine.scheduler().freshness().state(),
+            FreshnessState::Current
+        );
+        let (state_code, terminal_at): (i64, Option<String>) = store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT state_code,terminal_at FROM provider_run WHERE workspace_id=?1",
+                    [workspace_id.as_slice()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            state_code,
+            i64::from(crate::registries::ProviderRunState::Succeeded as u16)
+        );
+        assert!(terminal_at.is_some());
+    }
+
+    #[test]
+    fn semantic_lane_operational_journal_gate() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("provider-recovery.sqlite");
+        let mut store = OperationalStore::open(&path).unwrap();
+        for (byte, state) in [
+            (0x71, crate::registries::ProviderRunState::Queued),
+            (0x72, crate::registries::ProviderRunState::Running),
+        ] {
+            store
+                .record_provider_run(&crate::operational_store::ProviderRunRecord {
+                    provider_run_id: vec![byte; 16],
+                    workspace_id: vec![0x73; 16],
+                    analysis_context_id: vec![0x74; 16],
+                    wave_id: vec![0x75; 16],
+                    provider_code: 40,
+                    owner_id: None,
+                    build_unit_id: None,
+                    source_generation: 3,
+                    input_fingerprint: vec![byte; 32],
+                    output_fingerprint: None,
+                    sandbox_profile_digest: Some(format!("b3:{}", "44".repeat(32))),
+                    state_code: i64::from(state as u16),
+                    accepted_at: "1".into(),
+                    terminal_at: None,
+                    diagnostic_id: None,
+                })
+                .unwrap();
+        }
+        drop(store);
+        let mut recovered = OperationalStore::open(&path).unwrap();
+        assert_eq!(recovered.recover_incomplete_provider_runs("2").unwrap(), 2);
+        let rows = recovered
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT state_code,terminal_at FROM provider_run ORDER BY provider_run_id",
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    i64::from(crate::registries::ProviderRunState::Cancelled as u16),
+                    Some("2".into())
+                ),
+                (
+                    i64::from(crate::registries::ProviderRunState::Crashed as u16),
+                    Some("2".into())
+                ),
+            ]
         );
     }
 

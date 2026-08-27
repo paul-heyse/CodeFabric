@@ -505,6 +505,20 @@ fn now_millis() -> Result<u128, DaemonError> {
         .map_err(|error| DaemonError::Admin(format!("system clock before Unix epoch: {error}")))
 }
 
+fn open_operational_store_with_provider_recovery(
+    path: &Path,
+) -> Result<OperationalStore, DaemonError> {
+    let mut store = OperationalStore::open(path)?;
+    let recovered_at = now_millis()?.to_string();
+    let recovered_provider_runs = store.recover_incomplete_provider_runs(&recovered_at)?;
+    tracing::info!(
+        recovered_provider_runs,
+        lifecycle = "provider-recovery",
+        "reconciled non-terminal provider runs before admission"
+    );
+    Ok(store)
+}
+
 fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
     let startup_time_unix_ms = now_millis()?;
     let pid = std::process::id();
@@ -917,7 +931,9 @@ pub(crate) async fn serve_with_query_backend(
         .static_config
         .state_root
         .join(&config.static_config.operational_database);
-    let operational_store = Arc::new(Mutex::new(OperationalStore::open(&operational_database)?));
+    let operational_store = Arc::new(Mutex::new(open_operational_store_with_provider_recovery(
+        &operational_database,
+    )?));
     let mut coordinators = WorkspaceCoordinatorManager::new(
         Arc::clone(&operational_store),
         config.static_config.state_root.clone(),
@@ -1237,6 +1253,53 @@ mod tests {
                 && detail == "injected flush failure"
         ));
         assert_eq!(completed, ["stop-admission", "drain-queries"]);
+    }
+
+    #[test]
+    fn provider_run_daemon_startup_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("operational.sqlite");
+        let mut store = OperationalStore::open(&path).unwrap();
+        for (byte, state) in [
+            (0x31, crate::registries::ProviderRunState::Queued),
+            (0x32, crate::registries::ProviderRunState::Running),
+        ] {
+            store
+                .record_provider_run(&crate::operational_store::ProviderRunRecord {
+                    provider_run_id: vec![byte; 16],
+                    workspace_id: vec![0x33; 16],
+                    analysis_context_id: vec![0x34; 16],
+                    wave_id: vec![0x35; 16],
+                    provider_code: 40,
+                    owner_id: None,
+                    build_unit_id: None,
+                    source_generation: 1,
+                    input_fingerprint: vec![byte; 32],
+                    output_fingerprint: None,
+                    sandbox_profile_digest: Some(format!("b3:{}", "36".repeat(32))),
+                    state_code: i64::from(state as u16),
+                    accepted_at: "1".into(),
+                    terminal_at: None,
+                    diagnostic_id: None,
+                })
+                .unwrap();
+        }
+        drop(store);
+
+        let recovered = open_operational_store_with_provider_recovery(&path).unwrap();
+        let non_terminal = recovered
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM provider_run WHERE terminal_at IS NULL",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(non_terminal, 0);
     }
 
     fn config(root: &Path) -> DaemonConfig {

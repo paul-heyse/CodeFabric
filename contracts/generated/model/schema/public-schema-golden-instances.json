@@ -27,6 +27,7 @@
           "ontology_bundle_id": "fixture-v1",
           "provider_bundle_id": "fixture-v1",
           "query_language_bundle_id": "fixture-v1",
+          "sandbox_profile_digests": {},
           "schema_bundle_id": "fixture-v1",
           "toolchain_bundle_id": "fixture-v1"
         },

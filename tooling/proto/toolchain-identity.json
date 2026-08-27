@@ -1,6 +1,6 @@
 {
   "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
-  "descriptor_sha256": "d9919fc17f1aaae8d16c10ce434a42b74e645531c8b28c344c008eb142bf0880",
+  "descriptor_sha256": "be46a9f5f85cd79f2f202c1d2f2b0452f90d0b6c9d33cd1bae9244b2b0bf7b18",
   "python": {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -13,10 +13,10 @@
     "script_digest": "b3:7304585e5f9a044259627968bb2b42e1f1c4342596fb128c41a430e28ff1bfea"
   },
   "rust": {
-    "action_key": "b3:d39a9a548e9df546ec7f64a05344edbad8cc5e487f18c3828912a7e4018bd94d",
+    "action_key": "b3:d7ef60cb276163292729954c7e07220921f19dada41cdf4eb807fbc116b9529f",
     "binary_digest": "b3:b6751909f69fc42af4cbd95f37a032a986f235593b3b87ddf61c48e2b8423528",
-    "cargo_lock_digest": "b3:7fcf9f576d33a8a6e0a29b7ab68929dcbf24edffcae90907e361f3b8b63e83bc",
-    "cargo_manifest_digest": "b3:b1be2aa6830d9ba759cb8bc2ae32c9ae476197bb79565198bcb9e79f31205500",
+    "cargo_lock_digest": "b3:227b1b9f7aa6107766b666df069627985a671dc90834c74abd9d40263f02d783",
+    "cargo_manifest_digest": "b3:a3742d976b0b8ba2fdb92be9853b24145b290bb16300bee41accb165faa99d1f",
     "descriptor_api": "tonic_prost_build::Builder::compile_fds",
     "features": [
       "proto-tooling"
@@ -28,7 +28,7 @@
   "schema": 4,
   "sources": {
     "contracts/rpc/cpg_query_service.proto": "b3:f87f09b6d8a39927fee8a4693c7b0b274807ebc6f06ef3a231b91b1acf74f510",
-    "contracts/rpc/provider_control.proto": "b3:88e322e42cc6475bfa810a4a3b4479a1620bef22e3156b3b82469abc4fd36e38",
+    "contracts/rpc/provider_control.proto": "b3:a8aa0d10cddb81ff8c1eb5a9b1de9068a79b2719437949c04aa24baeddebad33",
     "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
     "contracts/rpc/rustc_extractor.proto": "b3:3fb3384fa6dfd521b4ed4690102d5e00e8c7fda7f4a95c5c2543d81bd156fac6"
   }
