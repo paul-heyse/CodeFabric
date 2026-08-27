@@ -1,0 +1,10 @@
+id: semantic-provider-legacy-opaque-semantic-json-ingest
+language: Rust
+severity: warning
+message: reviewed transitional opaque JSON decoder remains in semantic ingest
+files:
+  - src/core_facts.rs
+rule:
+  all:
+    - kind: call_expression
+    - regex: 'serde_json::from_(slice|str)\s*\('

@@ -16,9 +16,17 @@ use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::thread_pool::ThreadCount;
 use serde::Serialize;
 
-pub(crate) const OBSERVATION_FAMILY_CODE: u32 = 110;
-pub(crate) const SCHEMA_DESCRIPTOR: &str =
-    include_str!("../../contracts/schema/provider-observations/pyrefly-module-v1.json");
+#[allow(dead_code)]
+mod generated_observation_schema {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../src/generated/model_schema_tables.rs"
+    ));
+}
+
+use generated_observation_schema::{
+    PROVIDER_OBSERVATION_SCHEMAS, ProviderObservationLogicalType, ProviderObservationSchema,
+};
 
 #[derive(Serialize)]
 struct LocatedCallee {
@@ -140,23 +148,47 @@ fn normalize_source_locator_text(
     }
 }
 
+fn observation_contract() -> &'static ProviderObservationSchema {
+    PROVIDER_OBSERVATION_SCHEMAS
+        .iter()
+        .find(|schema| schema.provider_id == "pyrefly-python")
+        .expect("the model compiler requires the Pyrefly observation schema")
+}
+
+pub(crate) fn observation_family_code() -> u32 {
+    u32::from(observation_contract().observation_family_code)
+}
+
 fn observation_schema() -> Arc<Schema> {
+    let contract = observation_contract();
     Arc::new(Schema::new_with_metadata(
-        vec![
-            Field::new("module_id", DataType::Utf8, false),
-            Field::new("module_name", DataType::Utf8, false),
-            Field::new("type_table_json", DataType::Binary, false),
-            Field::new("callees_json", DataType::Binary, false),
-            Field::new("diagnostics_json", DataType::Binary, false),
-        ],
-        [("codefabric.schema".to_owned(), SCHEMA_DESCRIPTOR.to_owned())]
-            .into_iter()
-            .collect(),
+        contract
+            .fields
+            .iter()
+            .map(|field| {
+                let data_type = match field.logical_type {
+                    ProviderObservationLogicalType::Utf8 => DataType::Utf8,
+                    ProviderObservationLogicalType::Binary => DataType::Binary,
+                    ProviderObservationLogicalType::Boolean => DataType::Boolean,
+                    ProviderObservationLogicalType::UInt64 => DataType::UInt64,
+                    ProviderObservationLogicalType::Utf8List => {
+                        DataType::List(Arc::new(Field::new_list_field(DataType::Utf8, false)))
+                    }
+                };
+                Field::new(field.name, data_type, field.nullable)
+            })
+            .collect::<Vec<_>>(),
+        [(
+            "codefabric.schema".to_owned(),
+            contract.canonical_descriptor.to_owned(),
+        )]
+        .into_iter()
+        .collect(),
     ))
 }
 
 pub(crate) fn schema_digest() -> String {
-    b3(SCHEMA_DESCRIPTOR.as_bytes())
+    observation_contract().schema_digest.to_owned()
 }
 
 pub(crate) fn query_surface_smoke() -> usize {

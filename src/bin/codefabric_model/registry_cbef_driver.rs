@@ -25,7 +25,6 @@ use super::repository_model::read_stable;
 
 const CBEF_PATH: &str = "contracts/identity/cbef-v1.yaml";
 const FINGERPRINT_DOMAINS_PATH: &str = "contracts/identity/fingerprint-domain-registry.yaml";
-const ENUM_PATH: &str = "contracts/registry/enum-registry.yaml";
 const FLAG_PATH: &str = "contracts/registry/flag-registry.yaml";
 const RUST_RECIPES_PATH: &str = "src/generated/model_identity_recipes.rs";
 const RUST_RUNTIME_REGISTRIES_PATH: &str = "src/generated/registries.rs";
@@ -34,6 +33,8 @@ const PYTHON_REGISTRIES_PATH: &str =
 const RUST_DIGEST_FRAMES_PATH: &str = "src/generated/digest_frames.rs";
 const EXTRACTOR_DIGEST_FRAMES_PATH: &str = "rustc-extractor/src/generated/digest_frames.rs";
 const PROJECTION_PATH: &str = "contracts/generated/model/registry-cbef.json";
+const TRANSFORMATION_TRACEABILITY_PATH: &str =
+    "contracts/generated/model/governance/transformation-pass-traceability.json";
 const PROVIDER_TOOL_PATH: &str = "tooling/model/provider_inventory.rs";
 const CARGO_MANIFEST_PATH: &str = "Cargo.toml";
 const CARGO_LOCK_PATH: &str = "Cargo.lock";
@@ -62,6 +63,62 @@ struct DesignPrincipleGovernanceRegistry {
     coverage_defaults: Option<Value>,
     records: Vec<Value>,
     owner_acceptance: OwnerAcceptance,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TransformationPassRegistry {
+    artifact_id: String,
+    artifact_kind: String,
+    version: String,
+    compatible_suite_major: u64,
+    status: String,
+    canonical_digest: String,
+    schema_version: u64,
+    authority: String,
+    accepted_at: String,
+    records: Vec<TransformationPassRecord>,
+    owner_acceptance: OwnerAcceptance,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TransformationPassRecord {
+    pass_id: String,
+    owner_packet: String,
+    principles: Vec<String>,
+    inputs: Vec<TransformationInput>,
+    outputs: Vec<TransformationOutput>,
+    entry_invariants: Vec<String>,
+    exit_invariants: Vec<String>,
+    preserved_identities: Vec<String>,
+    generated_identities: Vec<String>,
+    invalidation_closure: Vec<String>,
+    diagnostics_failure_taxonomy: Vec<String>,
+    determinism_fingerprint_inputs: Vec<String>,
+    resource_telemetry_contract: Vec<String>,
+    behavioral_fixtures: Vec<String>,
+    negative_fixtures: Vec<String>,
+    incremental_fixtures: Vec<String>,
+    oracles: Vec<String>,
+    implementation_paths: Vec<String>,
+    contract_digest: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TransformationInput {
+    artifact: String,
+    schema: String,
+    preconditions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TransformationOutput {
+    artifact: String,
+    schema: String,
+    postconditions: Vec<String>,
 }
 
 /// Compile one governed registry through the same closed family-native records used by runtime
@@ -161,14 +218,93 @@ pub fn detached_registry_identity(
                 DesignPrincipleGovernanceRegistry,
             >(bytes)?)?)
         }
+        "codefabric.governance.transformation-pass-registry" => {
+            let document = decode_yaml::<TransformationPassRegistry>(bytes)?;
+            validate_transformation_passes(&document.records)?;
+            Some(detached_typed_digest(&document)?)
+        }
         "codefabric.identity.fingerprint-domain-registry" => {
             Some(detached_typed_digest(&decode_yaml::<
                 FingerprintDomainRegistry,
             >(bytes)?)?)
         }
+        "codefabric.identity.type-algebra-v1" => Some(detached_typed_digest(&decode_yaml::<
+            codefabric::contracts::models::TypeAlgebraContract,
+        >(bytes)?)?),
         _ => None,
     };
     Ok(digest)
+}
+
+fn validate_transformation_passes(
+    records: &[TransformationPassRecord],
+) -> Result<(), RegistryCbefError> {
+    let mut ids = BTreeSet::new();
+    for record in records {
+        let packet_number = record.owner_packet.strip_prefix("WP");
+        let lists_nonempty = [
+            &record.principles,
+            &record.entry_invariants,
+            &record.exit_invariants,
+            &record.preserved_identities,
+            &record.generated_identities,
+            &record.invalidation_closure,
+            &record.diagnostics_failure_taxonomy,
+            &record.determinism_fingerprint_inputs,
+            &record.resource_telemetry_contract,
+            &record.behavioral_fixtures,
+            &record.negative_fixtures,
+            &record.incremental_fixtures,
+            &record.oracles,
+            &record.implementation_paths,
+        ]
+        .into_iter()
+        .all(|values| !values.is_empty() && values.iter().all(|value| !value.trim().is_empty()));
+        if !ids.insert(record.pass_id.as_str())
+            || !record.pass_id.starts_with("PASS_")
+            || packet_number.is_none_or(|number| {
+                number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            || record.principles != ["H-P14", "H-P16"]
+            || record.inputs.is_empty()
+            || record.outputs.is_empty()
+            || record.inputs.iter().any(|input| {
+                input.artifact.is_empty()
+                    || input.schema.is_empty()
+                    || input.preconditions.is_empty()
+            })
+            || record.outputs.iter().any(|output| {
+                output.artifact.is_empty()
+                    || output.schema.is_empty()
+                    || output.postconditions.is_empty()
+            })
+            || !lists_nonempty
+        {
+            return Err(RegistryCbefError::RegistryModel(format!(
+                "invalid transformation pass contract {}",
+                record.pass_id
+            )));
+        }
+        let mut value = serde_json::to_value(record)?;
+        value
+            .as_object_mut()
+            .expect("transformation record serializes as an object")
+            .remove("contract_digest");
+        let canonical = codefabric::contracts::jcs::canonicalize_value(&value)?;
+        let expected = codefabric::integrity::framed_digest(&canonical);
+        if record.contract_digest != expected {
+            return Err(RegistryCbefError::RegistryModel(format!(
+                "stale transformation pass digest {}",
+                record.pass_id
+            )));
+        }
+    }
+    if records.is_empty() {
+        return Err(RegistryCbefError::RegistryModel(
+            "transformation pass registry is empty".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn decode_yaml<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RegistryCbefError> {
@@ -575,6 +711,11 @@ impl RegistryCbefDriver {
             CARGO_LOCK_PATH.to_owned(),
             PROVIDER_TOOL_PATH.to_owned(),
         ];
+        paths.extend(
+            super::semantic_fragment_driver::FRAGMENT_PATHS
+                .iter()
+                .map(|path| (*path).to_owned()),
+        );
         for entry in fs::read_dir(&registry_root).map_err(|source| DriverProtocolError::Io {
             path: registry_root.clone(),
             source,
@@ -778,6 +919,11 @@ impl ModelDriver for RegistryCbefDriver {
                     DriverOutputRole::CanonicalProjection,
                 )?,
                 Self::output(
+                    "output:model-transformation-pass-traceability",
+                    TRANSFORMATION_TRACEABILITY_PATH,
+                    DriverOutputRole::CanonicalProjection,
+                )?,
+                Self::output(
                     "output:model-provider-raw-rust",
                     PROVIDER_RUST_PATH,
                     DriverOutputRole::RustBinding,
@@ -814,10 +960,7 @@ impl ModelDriver for RegistryCbefDriver {
         let cbef = parse_yaml::<CbefAuthority>(repository_root, CBEF_PATH)?;
         let fingerprint_domains =
             parse_yaml::<FingerprintDomainRegistry>(repository_root, FINGERPRINT_DOMAINS_PATH)?;
-        let enums = parse_yaml::<EnumRegistry>(repository_root, ENUM_PATH)?;
         let flags = parse_yaml::<FlagRegistry>(repository_root, FLAG_PATH)?;
-        validate_authorities(&cbef, &enums, &flags)
-            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         validate_fingerprint_domains(&fingerprint_domains)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         let mut registry_values = BTreeMap::new();
@@ -861,6 +1004,36 @@ impl ModelDriver for RegistryCbefDriver {
                 )));
             }
         }
+        let semantic_fragments =
+            super::semantic_fragment_driver::SemanticFragmentSet::load(repository_root)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let mut enum_value = registry_values
+            .remove("codefabric.registry.enum-registry")
+            .ok_or_else(|| {
+                DriverProtocolError::InvalidAuthority(
+                    "enum registry is absent from registry/CBEF inputs".to_owned(),
+                )
+            })?;
+        let property_value = registry_values
+            .get_mut("codefabric.registry.ontology-property-registry")
+            .ok_or_else(|| {
+                DriverProtocolError::InvalidAuthority(
+                    "ontology property registry is absent from registry/CBEF inputs".to_owned(),
+                )
+            })?;
+        semantic_fragments
+            .compose_registries(property_value, &mut enum_value)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let effective_properties: governed::AcceptedRegistry<governed::PropertyKind> =
+            serde_json::from_value(property_value.clone())
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        governed::validate_property_records(&effective_properties.records)
+            .map_err(DriverProtocolError::InvalidAuthority)?;
+        let enums = serde_json::from_value(enum_value.clone())
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        registry_values.insert("codefabric.registry.enum-registry".to_owned(), enum_value);
+        validate_authorities(&cbef, &enums, &flags)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         let (provider_probe, provider_tool_identity) = run_provider_probe(repository_root)
             .map_err(|error| DriverProtocolError::ExternalTool {
                 tool: "codefabric-provider-inventory",
@@ -923,6 +1096,11 @@ impl ModelDriver for RegistryCbefDriver {
             (
                 PROJECTION_PATH.to_owned(),
                 render_projection(plan).map_err(|_| DriverProtocolError::InvalidDescriptor)?,
+            ),
+            (
+                TRANSFORMATION_TRACEABILITY_PATH.to_owned(),
+                render_transformation_traceability(plan)
+                    .map_err(|_| DriverProtocolError::InvalidDescriptor)?,
             ),
             (
                 PROVIDER_RUST_PATH.to_owned(),
@@ -2214,6 +2392,47 @@ fn render_projection(plan: &RegistryCbefPlan) -> Result<Vec<u8>, RegistryCbefErr
         flag_domains: plan.flags.records.clone(),
     };
     let value = serde_json::to_value(projection).map_err(RegistryCbefError::Json)?;
+    let mut bytes = codefabric::contracts::jcs::canonicalize_value(&value)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn render_transformation_traceability(
+    plan: &RegistryCbefPlan,
+) -> Result<Vec<u8>, RegistryCbefError> {
+    let source = plan
+        .registry_values
+        .get("codefabric.governance.transformation-pass-registry")
+        .ok_or_else(|| {
+            RegistryCbefError::RegistryModel(
+                "transformation pass registry is absent from the model".to_owned(),
+            )
+        })?;
+    let document: TransformationPassRegistry = serde_json::from_value(source.clone())?;
+    validate_transformation_passes(&document.records)?;
+    let records = document
+        .records
+        .iter()
+        .map(|record| {
+            json!({
+                "pass_id": record.pass_id,
+                "owner_packet": record.owner_packet,
+                "principles": record.principles,
+                "oracles": record.oracles,
+                "implementation_paths": record.implementation_paths,
+                "contract_digest": record.contract_digest,
+            })
+        })
+        .collect::<Vec<_>>();
+    let value = json!({
+        "artifact_id": "codefabric.generated.transformation-pass-traceability",
+        "artifact_kind": "generated-traceability",
+        "version": "1.0",
+        "schema_version": 1,
+        "source_artifact_id": document.artifact_id,
+        "source_canonical_digest": document.canonical_digest,
+        "records": records,
+    });
     let mut bytes = codefabric::contracts::jcs::canonicalize_value(&value)?;
     bytes.push(b'\n');
     Ok(bytes)

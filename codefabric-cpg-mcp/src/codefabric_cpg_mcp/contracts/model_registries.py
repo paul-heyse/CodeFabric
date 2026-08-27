@@ -73,33 +73,18 @@ class TypeCode(IntEnum):
     TAGGED_UNION = 12
 
 
-class EvidenceCertainty(IntEnum):
-    SOURCE_EXACT = 10
-    COMPILER_EXACT = 20
-    STATIC_SEMANTIC = 30
-    SOUND_MAY = 40
-    MODELLED = 50
-    HEURISTIC = 60
-    UNRESOLVED = 70
+class AnalysisContextKind(IntEnum):
+    SOURCE = 10
+    PYTHON = 20
+    RUST = 30
 
 
-class ResolutionClass(IntEnum):
-    EXACT = 10
-    STATICALLY_RESOLVED = 20
-    SOUND_POSSIBLE = 30
-    POSSIBLE = 40
-    MODELLED = 50
-    HEURISTIC = 60
-    UNRESOLVED = 70
-    UNAVAILABLE = 80
-    NOT_APPLICABLE = 90
-
-
-class Directness(IntEnum):
-    DIRECT = 10
-    TRANSITIVE = 20
-    SUMMARY = 30
-    NOT_APPLICABLE = 40
+class AnnotationKind(IntEnum):
+    COMMENT = 10
+    DOCUMENTATION = 20
+    PRAGMA_OR_DIRECTIVE = 30
+    PARSE_ERROR = 40
+    MISSING_SYNTAX = 50
 
 
 class Completeness(IntEnum):
@@ -110,64 +95,6 @@ class Completeness(IntEnum):
     NOT_APPLICABLE = 50
 
 
-class OwnerCapabilityState(IntEnum):
-    CURRENT = 10
-    PENDING = 20
-    INVALIDATED = 30
-    PARTIAL = 40
-    UNAVAILABLE_PARSE = 50
-    UNAVAILABLE_COMPILE = 60
-    UNAVAILABLE_PROVIDER = 70
-    UNAVAILABLE_DERIVATION = 80
-    EXCLUDED = 90
-    UNSUPPORTED = 100
-    REMOVED = 110
-    NOT_APPLICABLE = 120
-
-
-class ProviderRunState(IntEnum):
-    QUEUED = 10
-    RUNNING = 20
-    SUCCEEDED = 30
-    PARTIAL = 40
-    FAILED = 50
-    TIMED_OUT = 60
-    CANCELLED = 70
-    SUPERSEDED = 80
-    CRASHED = 90
-    PROTOCOL_ERROR = 100
-    STALE_RESULT = 110
-    STALE_GIT_BASELINE = 120
-
-
-class QueryExecutionState(IntEnum):
-    ACCEPTED = 10
-    RUNNING = 20
-    COMPLETE = 30
-    FAILED = 40
-    CANCELLED = 50
-    DEADLINE_EXCEEDED = 60
-    NOT_EXECUTED_DEPENDENCY = 70
-
-
-class QueryForm(IntEnum):
-    FIND_ENTITIES = 10
-    RETRIEVE_FACTS = 20
-    FOLLOW_RELATIONSHIPS = 30
-    FIND_PATHS = 40
-    MATCH_PATTERN = 50
-    COMBINE_RESULTS = 60
-    SUMMARIZE_FACTS = 70
-    RETRIEVE_SOURCE_CONTEXT = 80
-
-
-class QueryAvailabilityState(IntEnum):
-    AVAILABLE = 10
-    PARTIAL = 20
-    UNAVAILABLE = 30
-    NOT_APPLICABLE = 40
-
-
 class CompletenessState(IntEnum):
     COMPLETE = 10
     PARTIAL = 20
@@ -176,22 +103,17 @@ class CompletenessState(IntEnum):
     NOT_APPLICABLE = 50
 
 
-class FreshnessState(IntEnum):
-    CURRENT = 10
-    POTENTIALLY_STALE = 20
-    UNAVAILABLE = 30
-
-
-class LimitState(IntEnum):
-    NOT_APPLIED = 10
-    EXPLICIT_LIMIT_REACHED = 20
-    HARD_LIMIT_REJECTED = 30
-
-
 class DependencyState(IntEnum):
     READY = 10
     FAILED_DEPENDENCY = 20
     NOT_APPLICABLE = 30
+
+
+class Directness(IntEnum):
+    DIRECT = 10
+    TRANSITIVE = 20
+    SUMMARY = 30
+    NOT_APPLICABLE = 40
 
 
 class DurablePublicationState(IntEnum):
@@ -202,56 +124,6 @@ class DurablePublicationState(IntEnum):
     COMPLETE = 50
     FAILED = 60
     ABANDONED = 70
-
-
-class ServingActivationState(IntEnum):
-    BUILDING = 10
-    VALIDATING = 20
-    READY = 30
-    ACTIVE = 40
-    RETIRED = 50
-    FAILED = 60
-
-
-class SnapshotLeaseKind(IntEnum):
-    QUERY = 10
-    RESULT_ARTIFACT = 20
-    RESOURCE_READ = 30
-    MAINTENANCE = 40
-
-
-class SnapshotLeaseState(IntEnum):
-    ACTIVE = 10
-    RELEASING = 20
-    RELEASED = 30
-    EXPIRED = 40
-    ORPHANED = 50
-
-
-class SourceTrustState(IntEnum):
-    UNVERIFIED = 10
-    VERIFYING = 20
-    CURRENT = 30
-    POTENTIALLY_STALE = 40
-    UNAVAILABLE = 50
-
-
-class EventStreamHealth(IntEnum):
-    HEALTHY = 10
-    RESCAN_REQUIRED = 20
-    DEGRADED = 30
-    UNAVAILABLE = 40
-
-
-class GitAccelerationStatus(IntEnum):
-    NOT_A_GIT_WORKTREE = 10
-    GIT_UNAVAILABLE = 20
-    GIT_READY = 30
-    GIT_METADATA_DIRTY = 40
-    GIT_SCANNING = 50
-    GIT_OPERATION_IN_PROGRESS = 60
-    GIT_BULK_RECONCILING = 70
-    GIT_DEGRADED = 80
 
 
 class EffectKind(IntEnum):
@@ -294,6 +166,280 @@ class EffectKind(IntEnum):
     UNKNOWN_EXTERNAL_EFFECT = 370
 
 
+class EventStreamHealth(IntEnum):
+    HEALTHY = 10
+    RESCAN_REQUIRED = 20
+    DEGRADED = 30
+    UNAVAILABLE = 40
+
+
+class EvidenceCertainty(IntEnum):
+    SOURCE_EXACT = 10
+    COMPILER_EXACT = 20
+    STATIC_SEMANTIC = 30
+    SOUND_MAY = 40
+    MODELLED = 50
+    HEURISTIC = 60
+    UNRESOLVED = 70
+
+
+class FreshnessState(IntEnum):
+    CURRENT = 10
+    POTENTIALLY_STALE = 20
+    UNAVAILABLE = 30
+
+
+class GitAccelerationStatus(IntEnum):
+    NOT_A_GIT_WORKTREE = 10
+    GIT_UNAVAILABLE = 20
+    GIT_READY = 30
+    GIT_METADATA_DIRTY = 40
+    GIT_SCANNING = 50
+    GIT_OPERATION_IN_PROGRESS = 60
+    GIT_BULK_RECONCILING = 70
+    GIT_DEGRADED = 80
+
+
+class GitCandidateMode(IntEnum):
+    STATUS = 10
+    HEAD_TREE = 20
+
+
+class GitCandidateOrigin(IntEnum):
+    INDEX_WORKTREE = 10
+    HEAD_INDEX = 20
+    HEAD_TREE = 30
+
+
+class GitHashAlgorithm(IntEnum):
+    SHA1 = 10
+    SHA256 = 20
+
+
+class GitHeadKind(IntEnum):
+    SYMBOLIC = 10
+    DETACHED = 20
+    UNBORN = 30
+
+
+class GitInventoryClassification(IntEnum):
+    TRACKED = 10
+    UNTRACKED_NOT_IGNORED = 20
+    UNTRACKED_IGNORED = 30
+    TRACKED_BUT_IGNORED_PATTERN_MATCHES = 40
+    EXCLUDED_BY_CODE_FABRIC_POLICY = 50
+    SUBMODULE_GITLINK = 60
+    NESTED_REPOSITORY = 70
+    SPECIAL_FILE = 80
+
+
+class GitOperationState(IntEnum):
+    CLEAN = 10
+    MERGE = 20
+    REBASE = 30
+    CHERRY_PICK = 40
+    REVERT = 50
+    BISECT = 60
+    APPLY = 70
+    OTHER_OPERATION = 80
+    UNKNOWN = 90
+
+
+class GitRepositoryKind(IntEnum):
+    COMMON = 10
+    LINKED_WORKTREE = 20
+    SUBMODULE = 30
+
+
+class InventoryFileKind(IntEnum):
+    REGULAR = 10
+    SYMLINK = 20
+    SPECIAL = 30
+
+
+class InventoryInclusionState(IntEnum):
+    INCLUDED = 10
+    EXCLUDED_POLICY = 20
+    EXCLUDED_SPECIAL_FILE = 30
+    EXCLUDED_SIZE_LIMIT = 40
+
+
+class Language(IntEnum):
+    COMMON = 10
+    PYTHON = 20
+    RUST = 30
+    UNKNOWN = 40
+
+
+class LimitState(IntEnum):
+    NOT_APPLIED = 10
+    EXPLICIT_LIMIT_REACHED = 20
+    HARD_LIMIT_REJECTED = 30
+
+
+class NewlineKind(IntEnum):
+    NONE = 10
+    LF = 20
+    CRLF = 30
+    CR = 40
+    MIXED = 50
+
+
+class NullableSemantics(IntEnum):
+    NON_NULL = 10
+    NULLABLE = 20
+    UNKNOWN = 30
+    NOT_APPLICABLE = 40
+
+
+class OccurrenceFamily(IntEnum):
+    TOKEN = 10
+    ANNOTATION = 20
+    SYNTAX = 30
+
+
+class OperationalDependencyEdgeKind(IntEnum):
+    SYNTAX = 10
+    SEMANTIC = 20
+    DERIVATION = 30
+    PUBLICATION = 40
+
+
+class OverlayTombstoneReason(IntEnum):
+    OWNER_REPLACED_EMPTY = 10
+    SOURCE_REMOVED = 20
+    SUPERSEDED_GENERATION = 30
+
+
+class OwnerCapabilityState(IntEnum):
+    CURRENT = 10
+    PENDING = 20
+    INVALIDATED = 30
+    PARTIAL = 40
+    UNAVAILABLE_PARSE = 50
+    UNAVAILABLE_COMPILE = 60
+    UNAVAILABLE_PROVIDER = 70
+    UNAVAILABLE_DERIVATION = 80
+    EXCLUDED = 90
+    UNSUPPORTED = 100
+    REMOVED = 110
+    NOT_APPLICABLE = 120
+
+
+class OwnerKind(IntEnum):
+    SOURCE_FILE = 10
+    MODULE = 20
+    SCOPE = 30
+    CALLABLE = 40
+    CLASS_OR_TYPE = 50
+    MIR_BODY = 60
+    CRATE_OR_BUILD_UNIT = 70
+    WORKSPACE_GLOBAL_DERIVATION = 80
+
+
+class PathEncoding(IntEnum):
+    UNIX_BYTES = 10
+    MACOS_BYTES = 20
+    WINDOWS_WTF8 = 30
+
+
+class Phase(IntEnum):
+    INPUT_VALIDATION = 10
+    SCHEMA_BINDING = 20
+    LOGICAL_PLANNING = 30
+    POLICY_VALIDATION = 40
+    PHYSICAL_PLANNING = 50
+    EXECUTION = 60
+    WRITE_VALIDATION = 70
+    COMMIT = 80
+    SNAPSHOT_CONSTRUCTION = 90
+    SNAPSHOT_ACTIVATION = 100
+    SHUTDOWN = 110
+
+
+class ProviderCode(IntEnum):
+    TREE_SITTER = 10
+    RUFF_PYTHON = 20
+    PYREFLY_PYTHON = 30
+    RUSTC_MIR = 40
+    CODEFABRIC_DERIVATION = 50
+    SOURCE_SUBSTRATE = 60
+
+
+class ProviderObservationFamily(IntEnum):
+    PYREFLY_MODULE = 110
+    RUST_MIR_OWNER = 120
+
+
+class ProviderRunState(IntEnum):
+    QUEUED = 10
+    RUNNING = 20
+    SUCCEEDED = 30
+    PARTIAL = 40
+    FAILED = 50
+    TIMED_OUT = 60
+    CANCELLED = 70
+    SUPERSEDED = 80
+    CRASHED = 90
+    PROTOCOL_ERROR = 100
+    STALE_RESULT = 110
+    STALE_GIT_BASELINE = 120
+
+
+class QueryAvailabilityState(IntEnum):
+    AVAILABLE = 10
+    PARTIAL = 20
+    UNAVAILABLE = 30
+    NOT_APPLICABLE = 40
+
+
+class QueryExecutionState(IntEnum):
+    ACCEPTED = 10
+    RUNNING = 20
+    COMPLETE = 30
+    FAILED = 40
+    CANCELLED = 50
+    DEADLINE_EXCEEDED = 60
+    NOT_EXECUTED_DEPENDENCY = 70
+
+
+class QueryForm(IntEnum):
+    FIND_ENTITIES = 10
+    RETRIEVE_FACTS = 20
+    FOLLOW_RELATIONSHIPS = 30
+    FIND_PATHS = 40
+    MATCH_PATTERN = 50
+    COMBINE_RESULTS = 60
+    SUMMARIZE_FACTS = 70
+    RETRIEVE_SOURCE_CONTEXT = 80
+
+
+class RangeReconciliationStep(IntEnum):
+    EXACT_RANGE_AND_KIND = 10
+    EXACT_DECLARATION_NAME = 20
+    SMALLEST_ENCLOSING_COMPATIBLE = 30
+    SAME_START_COMPATIBLE = 40
+    PROVIDER_ONLY_SYNTHETIC = 50
+
+
+class RawKindDisposition(IntEnum):
+    NORMALIZE = 10
+    IGNORE = 20
+    UNSUPPORTED = 30
+
+
+class ResolutionClass(IntEnum):
+    EXACT = 10
+    STATICALLY_RESOLVED = 20
+    SOUND_POSSIBLE = 30
+    POSSIBLE = 40
+    MODELLED = 50
+    HEURISTIC = 60
+    UNRESOLVED = 70
+    UNAVAILABLE = 80
+    NOT_APPLICABLE = 90
+
+
 class ResourceKind(IntEnum):
     FILE_HANDLE = 10
     SOCKET_OR_CONNECTION = 20
@@ -307,32 +453,63 @@ class ResourceKind(IntEnum):
     UNKNOWN_RESOURCE = 100
 
 
-class ProviderCode(IntEnum):
-    TREE_SITTER = 10
-    RUFF_PYTHON = 20
-    PYREFLY_PYTHON = 30
-    RUSTC_MIR = 40
-    CODEFABRIC_DERIVATION = 50
-    SOURCE_SUBSTRATE = 60
+class ServingActivationState(IntEnum):
+    BUILDING = 10
+    VALIDATING = 20
+    READY = 30
+    ACTIVE = 40
+    RETIRED = 50
+    FAILED = 60
 
 
-class TokenKind(IntEnum):
-    IDENTIFIER = 10
-    KEYWORD = 20
-    OPERATOR = 30
-    PUNCTUATION = 40
-    LITERAL = 50
-    STRING = 60
-    NUMBER = 70
-    UNKNOWN = 80
+class Severity(IntEnum):
+    INFO = 10
+    WARNING = 20
+    ERROR = 30
+    FATAL = 40
 
 
-class AnnotationKind(IntEnum):
-    COMMENT = 10
-    DOCUMENTATION = 20
-    PRAGMA_OR_DIRECTIVE = 30
-    PARSE_ERROR = 40
-    MISSING_SYNTAX = 50
+class SnapshotLeaseKind(IntEnum):
+    QUERY = 10
+    RESULT_ARTIFACT = 20
+    RESOURCE_READ = 30
+    MAINTENANCE = 40
+
+
+class SnapshotLeaseState(IntEnum):
+    ACTIVE = 10
+    RELEASING = 20
+    RELEASED = 30
+    EXPIRED = 40
+    ORPHANED = 50
+
+
+class SourceTrustState(IntEnum):
+    UNVERIFIED = 10
+    VERIFYING = 20
+    CURRENT = 30
+    POTENTIALLY_STALE = 40
+    UNAVAILABLE = 50
+
+
+class SyntaxFieldRole(IntEnum):
+    NAME = 10
+    PARAMETERS = 20
+    DECORATOR = 30
+    RETURNS = 40
+    BODY = 50
+    CONDITION = 60
+    TARGET = 70
+    VALUE = 80
+    RECEIVER = 90
+    CALLEE = 100
+    ARGUMENT = 110
+    KEYWORD_ARGUMENT = 120
+    ITERABLE = 130
+    GUARD = 140
+    PATTERN = 150
+    HANDLER = 160
+    FINALLY_BODY = 170
 
 
 class SyntaxKind(IntEnum):
@@ -362,48 +539,35 @@ class SyntaxKind(IntEnum):
     IMPORT_OR_USE_SYNTAX = 240
 
 
-class SyntaxFieldRole(IntEnum):
-    NAME = 10
-    PARAMETERS = 20
-    DECORATOR = 30
-    RETURNS = 40
-    BODY = 50
-    CONDITION = 60
-    TARGET = 70
-    VALUE = 80
-    RECEIVER = 90
-    CALLEE = 100
-    ARGUMENT = 110
-    KEYWORD_ARGUMENT = 120
-    ITERABLE = 130
-    GUARD = 140
-    PATTERN = 150
-    HANDLER = 160
-    FINALLY_BODY = 170
+class TokenKind(IntEnum):
+    IDENTIFIER = 10
+    KEYWORD = 20
+    OPERATOR = 30
+    PUNCTUATION = 40
+    LITERAL = 50
+    STRING = 60
+    NUMBER = 70
+    UNKNOWN = 80
 
 
-class OwnerKind(IntEnum):
-    SOURCE_FILE = 10
-    MODULE = 20
-    SCOPE = 30
-    CALLABLE = 40
-    CLASS_OR_TYPE = 50
-    MIR_BODY = 60
-    CRATE_OR_BUILD_UNIT = 70
-    WORKSPACE_GLOBAL_DERIVATION = 80
+class TypeOrigin(IntEnum):
+    EXPLICIT_ANNOTATION = 10
+    PROVIDER_COMPUTED = 20
+    CONTEXTUAL_EXPECTATION = 30
+    NARROWING = 40
+    COMPILER_LOWERED = 50
+    STATIC_SEMANTIC_DERIVATION = 60
 
 
-class Language(IntEnum):
-    COMMON = 10
-    PYTHON = 20
-    RUST = 30
-    UNKNOWN = 40
-
-
-class PathEncoding(IntEnum):
-    UNIX_BYTES = 10
-    MACOS_BYTES = 20
-    WINDOWS_WTF8 = 30
+class TypeRole(IntEnum):
+    DECLARED_TYPE = 10
+    INFERRED_TYPE = 20
+    COMPUTED_TYPE = 30
+    EXPECTED_TYPE = 40
+    TYPE_OF = 50
+    PARAMETER_TYPE = 60
+    RETURN_TYPE = 70
+    FIELD_TYPE = 80
 
 
 class UpdateCandidateStrategy(IntEnum):
@@ -421,126 +585,6 @@ class UpdateWaveItemState(IntEnum):
     FAILED = 50
 
 
-class OperationalDependencyEdgeKind(IntEnum):
-    SYNTAX = 10
-    SEMANTIC = 20
-    DERIVATION = 30
-    PUBLICATION = 40
-
-
-class GitHashAlgorithm(IntEnum):
-    SHA1 = 10
-    SHA256 = 20
-
-
-class GitRepositoryKind(IntEnum):
-    COMMON = 10
-    LINKED_WORKTREE = 20
-    SUBMODULE = 30
-
-
-class GitHeadKind(IntEnum):
-    SYMBOLIC = 10
-    DETACHED = 20
-    UNBORN = 30
-
-
-class GitOperationState(IntEnum):
-    CLEAN = 10
-    MERGE = 20
-    REBASE = 30
-    CHERRY_PICK = 40
-    REVERT = 50
-    BISECT = 60
-    APPLY = 70
-    OTHER_OPERATION = 80
-    UNKNOWN = 90
-
-
-class GitInventoryClassification(IntEnum):
-    TRACKED = 10
-    UNTRACKED_NOT_IGNORED = 20
-    UNTRACKED_IGNORED = 30
-    TRACKED_BUT_IGNORED_PATTERN_MATCHES = 40
-    EXCLUDED_BY_CODE_FABRIC_POLICY = 50
-    SUBMODULE_GITLINK = 60
-    NESTED_REPOSITORY = 70
-    SPECIAL_FILE = 80
-
-
-class InventoryInclusionState(IntEnum):
-    INCLUDED = 10
-    EXCLUDED_POLICY = 20
-    EXCLUDED_SPECIAL_FILE = 30
-    EXCLUDED_SIZE_LIMIT = 40
-
-
-class InventoryFileKind(IntEnum):
-    REGULAR = 10
-    SYMLINK = 20
-    SPECIAL = 30
-
-
-class GitCandidateOrigin(IntEnum):
-    INDEX_WORKTREE = 10
-    HEAD_INDEX = 20
-    HEAD_TREE = 30
-
-
-class GitCandidateMode(IntEnum):
-    STATUS = 10
-    HEAD_TREE = 20
-
-
-class OverlayTombstoneReason(IntEnum):
-    OWNER_REPLACED_EMPTY = 10
-    SOURCE_REMOVED = 20
-    SUPERSEDED_GENERATION = 30
-
-
-class NewlineKind(IntEnum):
-    NONE = 10
-    LF = 20
-    CRLF = 30
-    CR = 40
-    MIXED = 50
-
-
-class OccurrenceFamily(IntEnum):
-    TOKEN = 10
-    ANNOTATION = 20
-    SYNTAX = 30
-
-
-class ProviderObservationFamily(IntEnum):
-    RUST_MIR_OWNER = 120
-
-
-class RangeReconciliationStep(IntEnum):
-    EXACT_RANGE_AND_KIND = 10
-    EXACT_DECLARATION_NAME = 20
-    SMALLEST_ENCLOSING_COMPATIBLE = 30
-    SAME_START_COMPATIBLE = 40
-    PROVIDER_ONLY_SYNTHETIC = 50
-
-
-class RawKindDisposition(IntEnum):
-    NORMALIZE = 10
-    IGNORE = 20
-    UNSUPPORTED = 30
-
-
-class WorkspaceKind(IntEnum):
-    NON_GIT_ROOT = 10
-    GIT_WORKTREE = 20
-
-
-class AnalysisContextKind(IntEnum):
-    SOURCE = 10
-    PYTHON = 20
-    RUST = 30
-
-
 class ValueKind(IntEnum):
     ENTITY = 10
     BOOLEAN = 20
@@ -551,25 +595,9 @@ class ValueKind(IntEnum):
     TYPE = 70
 
 
-class Severity(IntEnum):
-    INFO = 10
-    WARNING = 20
-    ERROR = 30
-    FATAL = 40
-
-
-class Phase(IntEnum):
-    INPUT_VALIDATION = 10
-    SCHEMA_BINDING = 20
-    LOGICAL_PLANNING = 30
-    POLICY_VALIDATION = 40
-    PHYSICAL_PLANNING = 50
-    EXECUTION = 60
-    WRITE_VALIDATION = 70
-    COMMIT = 80
-    SNAPSHOT_CONSTRUCTION = 90
-    SNAPSHOT_ACTIVATION = 100
-    SHUTDOWN = 110
+class WorkspaceKind(IntEnum):
+    NON_GIT_ROOT = 10
+    GIT_WORKTREE = 20
 
 
 class WorkspaceLifecycle(IntEnum):
@@ -641,31 +669,17 @@ class ProviderNodeFlags(IntFlag):
 
 # fmt: off
 ENUM_TRIPLES = MappingProxyType({
-    "EVIDENCE_CERTAINTY": (
-        (10, "SOURCE_EXACT", "source-exact"),
-        (20, "COMPILER_EXACT", "compiler-exact"),
-        (30, "STATIC_SEMANTIC", "static-semantic"),
-        (40, "SOUND_MAY", "sound-may"),
-        (50, "MODELLED", "modelled"),
-        (60, "HEURISTIC", "heuristic"),
-        (70, "UNRESOLVED", "unresolved"),
+    "ANALYSIS_CONTEXT_KIND": (
+        (10, "SOURCE", "source"),
+        (20, "PYTHON", "python"),
+        (30, "RUST", "rust"),
     ),
-    "RESOLUTION_CLASS": (
-        (10, "EXACT", "exact"),
-        (20, "STATICALLY_RESOLVED", "statically-resolved"),
-        (30, "SOUND_POSSIBLE", "sound-possible"),
-        (40, "POSSIBLE", "possible"),
-        (50, "MODELLED", "modelled"),
-        (60, "HEURISTIC", "heuristic"),
-        (70, "UNRESOLVED", "unresolved"),
-        (80, "UNAVAILABLE", "unavailable"),
-        (90, "NOT_APPLICABLE", "not-applicable"),
-    ),
-    "DIRECTNESS": (
-        (10, "DIRECT", "direct"),
-        (20, "TRANSITIVE", "transitive"),
-        (30, "SUMMARY", "summary"),
-        (40, "NOT_APPLICABLE", "not-applicable"),
+    "ANNOTATION_KIND": (
+        (10, "COMMENT", "comment"),
+        (20, "DOCUMENTATION", "documentation"),
+        (30, "PRAGMA_OR_DIRECTIVE", "pragma-or-directive"),
+        (40, "PARSE_ERROR", "parse-error"),
+        (50, "MISSING_SYNTAX", "missing-syntax"),
     ),
     "COMPLETENESS": (
         (10, "COMPLETE", "complete"),
@@ -674,59 +688,6 @@ ENUM_TRIPLES = MappingProxyType({
         (40, "UNAVAILABLE", "unavailable"),
         (50, "NOT_APPLICABLE", "not-applicable"),
     ),
-    "OWNER_CAPABILITY_STATE": (
-        (10, "CURRENT", "current"),
-        (20, "PENDING", "pending"),
-        (30, "INVALIDATED", "invalidated"),
-        (40, "PARTIAL", "partial"),
-        (50, "UNAVAILABLE_PARSE", "unavailable-parse"),
-        (60, "UNAVAILABLE_COMPILE", "unavailable-compile"),
-        (70, "UNAVAILABLE_PROVIDER", "unavailable-provider"),
-        (80, "UNAVAILABLE_DERIVATION", "unavailable-derivation"),
-        (90, "EXCLUDED", "excluded"),
-        (100, "UNSUPPORTED", "unsupported"),
-        (110, "REMOVED", "removed"),
-        (120, "NOT_APPLICABLE", "not-applicable"),
-    ),
-    "PROVIDER_RUN_STATE": (
-        (10, "QUEUED", "queued"),
-        (20, "RUNNING", "running"),
-        (30, "SUCCEEDED", "succeeded"),
-        (40, "PARTIAL", "partial"),
-        (50, "FAILED", "failed"),
-        (60, "TIMED_OUT", "timed-out"),
-        (70, "CANCELLED", "cancelled"),
-        (80, "SUPERSEDED", "superseded"),
-        (90, "CRASHED", "crashed"),
-        (100, "PROTOCOL_ERROR", "protocol-error"),
-        (110, "STALE_RESULT", "stale-result"),
-        (120, "STALE_GIT_BASELINE", "stale-git-baseline"),
-    ),
-    "QUERY_EXECUTION_STATE": (
-        (10, "ACCEPTED", "accepted"),
-        (20, "RUNNING", "running"),
-        (30, "COMPLETE", "complete"),
-        (40, "FAILED", "failed"),
-        (50, "CANCELLED", "cancelled"),
-        (60, "DEADLINE_EXCEEDED", "deadline-exceeded"),
-        (70, "NOT_EXECUTED_DEPENDENCY", "not-executed-dependency"),
-    ),
-    "QUERY_FORM": (
-        (10, "FIND_ENTITIES", "find code entities"),
-        (20, "RETRIEVE_FACTS", "retrieve facts about code"),
-        (30, "FOLLOW_RELATIONSHIPS", "follow code relationships"),
-        (40, "FIND_PATHS", "find connecting fact paths"),
-        (50, "MATCH_PATTERN", "match a code fact pattern"),
-        (60, "COMBINE_RESULTS", "combine result sets"),
-        (70, "SUMMARIZE_FACTS", "summarize objective facts"),
-        (80, "RETRIEVE_SOURCE_CONTEXT", "retrieve source and syntax context"),
-    ),
-    "QUERY_AVAILABILITY_STATE": (
-        (10, "AVAILABLE", "available"),
-        (20, "PARTIAL", "partial"),
-        (30, "UNAVAILABLE", "unavailable"),
-        (40, "NOT_APPLICABLE", "not-applicable"),
-    ),
     "COMPLETENESS_STATE": (
         (10, "COMPLETE", "complete"),
         (20, "PARTIAL", "partial"),
@@ -734,20 +695,16 @@ ENUM_TRIPLES = MappingProxyType({
         (40, "UNAVAILABLE", "unavailable"),
         (50, "NOT_APPLICABLE", "not-applicable"),
     ),
-    "FRESHNESS_STATE": (
-        (10, "CURRENT", "current"),
-        (20, "POTENTIALLY_STALE", "potentially-stale"),
-        (30, "UNAVAILABLE", "unavailable"),
-    ),
-    "LIMIT_STATE": (
-        (10, "NOT_APPLIED", "not-applied"),
-        (20, "EXPLICIT_LIMIT_REACHED", "explicit-limit-reached"),
-        (30, "HARD_LIMIT_REJECTED", "hard-limit-rejected"),
-    ),
     "DEPENDENCY_STATE": (
         (10, "READY", "ready"),
         (20, "FAILED_DEPENDENCY", "failed-dependency"),
         (30, "NOT_APPLICABLE", "not-applicable"),
+    ),
+    "DIRECTNESS": (
+        (10, "DIRECT", "direct"),
+        (20, "TRANSITIVE", "transitive"),
+        (30, "SUMMARY", "summary"),
+        (40, "NOT_APPLICABLE", "not-applicable"),
     ),
     "DURABLE_PUBLICATION_STATE": (
         (10, "STAGING", "staging"),
@@ -757,50 +714,6 @@ ENUM_TRIPLES = MappingProxyType({
         (50, "COMPLETE", "complete"),
         (60, "FAILED", "failed"),
         (70, "ABANDONED", "abandoned"),
-    ),
-    "SERVING_ACTIVATION_STATE": (
-        (10, "BUILDING", "building"),
-        (20, "VALIDATING", "validating"),
-        (30, "READY", "ready"),
-        (40, "ACTIVE", "active"),
-        (50, "RETIRED", "retired"),
-        (60, "FAILED", "failed"),
-    ),
-    "SNAPSHOT_LEASE_KIND": (
-        (10, "QUERY", "query"),
-        (20, "RESULT_ARTIFACT", "result-artifact"),
-        (30, "RESOURCE_READ", "resource-read"),
-        (40, "MAINTENANCE", "maintenance"),
-    ),
-    "SNAPSHOT_LEASE_STATE": (
-        (10, "ACTIVE", "active"),
-        (20, "RELEASING", "releasing"),
-        (30, "RELEASED", "released"),
-        (40, "EXPIRED", "expired"),
-        (50, "ORPHANED", "orphaned"),
-    ),
-    "SOURCE_TRUST_STATE": (
-        (10, "UNVERIFIED", "unverified"),
-        (20, "VERIFYING", "verifying"),
-        (30, "CURRENT", "current"),
-        (40, "POTENTIALLY_STALE", "potentially-stale"),
-        (50, "UNAVAILABLE", "unavailable"),
-    ),
-    "EVENT_STREAM_HEALTH": (
-        (10, "HEALTHY", "healthy"),
-        (20, "RESCAN_REQUIRED", "rescan-required"),
-        (30, "DEGRADED", "degraded"),
-        (40, "UNAVAILABLE", "unavailable"),
-    ),
-    "GIT_ACCELERATION_STATUS": (
-        (10, "NOT_A_GIT_WORKTREE", "not-a-git-worktree"),
-        (20, "GIT_UNAVAILABLE", "git-unavailable"),
-        (30, "GIT_READY", "git-ready"),
-        (40, "GIT_METADATA_DIRTY", "git-metadata-dirty"),
-        (50, "GIT_SCANNING", "git-scanning"),
-        (60, "GIT_OPERATION_IN_PROGRESS", "git-operation-in-progress"),
-        (70, "GIT_BULK_RECONCILING", "git-bulk-reconciling"),
-        (80, "GIT_DEGRADED", "git-degraded"),
     ),
     "EFFECT_KIND": (
         (10, "READ_MEMORY", "read-memory"),
@@ -841,6 +754,247 @@ ENUM_TRIPLES = MappingProxyType({
         (360, "DYNAMIC_CODE_EXECUTION", "dynamic-code-execution"),
         (370, "UNKNOWN_EXTERNAL_EFFECT", "unknown-external-effect"),
     ),
+    "EVENT_STREAM_HEALTH": (
+        (10, "HEALTHY", "healthy"),
+        (20, "RESCAN_REQUIRED", "rescan-required"),
+        (30, "DEGRADED", "degraded"),
+        (40, "UNAVAILABLE", "unavailable"),
+    ),
+    "EVIDENCE_CERTAINTY": (
+        (10, "SOURCE_EXACT", "source-exact"),
+        (20, "COMPILER_EXACT", "compiler-exact"),
+        (30, "STATIC_SEMANTIC", "static-semantic"),
+        (40, "SOUND_MAY", "sound-may"),
+        (50, "MODELLED", "modelled"),
+        (60, "HEURISTIC", "heuristic"),
+        (70, "UNRESOLVED", "unresolved"),
+    ),
+    "FRESHNESS_STATE": (
+        (10, "CURRENT", "current"),
+        (20, "POTENTIALLY_STALE", "potentially-stale"),
+        (30, "UNAVAILABLE", "unavailable"),
+    ),
+    "GIT_ACCELERATION_STATUS": (
+        (10, "NOT_A_GIT_WORKTREE", "not-a-git-worktree"),
+        (20, "GIT_UNAVAILABLE", "git-unavailable"),
+        (30, "GIT_READY", "git-ready"),
+        (40, "GIT_METADATA_DIRTY", "git-metadata-dirty"),
+        (50, "GIT_SCANNING", "git-scanning"),
+        (60, "GIT_OPERATION_IN_PROGRESS", "git-operation-in-progress"),
+        (70, "GIT_BULK_RECONCILING", "git-bulk-reconciling"),
+        (80, "GIT_DEGRADED", "git-degraded"),
+    ),
+    "GIT_CANDIDATE_MODE": (
+        (10, "STATUS", "status"),
+        (20, "HEAD_TREE", "head-tree"),
+    ),
+    "GIT_CANDIDATE_ORIGIN": (
+        (10, "INDEX_WORKTREE", "index-worktree"),
+        (20, "HEAD_INDEX", "head-index"),
+        (30, "HEAD_TREE", "head-tree"),
+    ),
+    "GIT_HASH_ALGORITHM": (
+        (10, "SHA1", "sha1"),
+        (20, "SHA256", "sha256"),
+    ),
+    "GIT_HEAD_KIND": (
+        (10, "SYMBOLIC", "symbolic"),
+        (20, "DETACHED", "detached"),
+        (30, "UNBORN", "unborn"),
+    ),
+    "GIT_INVENTORY_CLASSIFICATION": (
+        (10, "TRACKED", "tracked"),
+        (20, "UNTRACKED_NOT_IGNORED", "untracked-not-ignored"),
+        (30, "UNTRACKED_IGNORED", "untracked-ignored"),
+        (40, "TRACKED_BUT_IGNORED_PATTERN_MATCHES", "tracked-but-ignored-pattern-matches"),
+        (50, "EXCLUDED_BY_CODE_FABRIC_POLICY", "excluded-by-code-fabric-policy"),
+        (60, "SUBMODULE_GITLINK", "submodule-gitlink"),
+        (70, "NESTED_REPOSITORY", "nested-repository"),
+        (80, "SPECIAL_FILE", "special-file"),
+    ),
+    "GIT_OPERATION_STATE": (
+        (10, "CLEAN", "clean"),
+        (20, "MERGE", "merge"),
+        (30, "REBASE", "rebase"),
+        (40, "CHERRY_PICK", "cherry-pick"),
+        (50, "REVERT", "revert"),
+        (60, "BISECT", "bisect"),
+        (70, "APPLY", "apply"),
+        (80, "OTHER_OPERATION", "other-operation"),
+        (90, "UNKNOWN", "unknown"),
+    ),
+    "GIT_REPOSITORY_KIND": (
+        (10, "COMMON", "common"),
+        (20, "LINKED_WORKTREE", "linked-worktree"),
+        (30, "SUBMODULE", "submodule"),
+    ),
+    "INVENTORY_FILE_KIND": (
+        (10, "REGULAR", "regular"),
+        (20, "SYMLINK", "symlink"),
+        (30, "SPECIAL", "special"),
+    ),
+    "INVENTORY_INCLUSION_STATE": (
+        (10, "INCLUDED", "included"),
+        (20, "EXCLUDED_POLICY", "excluded-policy"),
+        (30, "EXCLUDED_SPECIAL_FILE", "excluded-special-file"),
+        (40, "EXCLUDED_SIZE_LIMIT", "excluded-size-limit"),
+    ),
+    "LANGUAGE": (
+        (10, "COMMON", "common"),
+        (20, "PYTHON", "python"),
+        (30, "RUST", "rust"),
+        (40, "UNKNOWN", "unknown"),
+    ),
+    "LIMIT_STATE": (
+        (10, "NOT_APPLIED", "not-applied"),
+        (20, "EXPLICIT_LIMIT_REACHED", "explicit-limit-reached"),
+        (30, "HARD_LIMIT_REJECTED", "hard-limit-rejected"),
+    ),
+    "NEWLINE_KIND": (
+        (10, "NONE", "none"),
+        (20, "LF", "lf"),
+        (30, "CRLF", "crlf"),
+        (40, "CR", "cr"),
+        (50, "MIXED", "mixed"),
+    ),
+    "NULLABLE_SEMANTICS": (
+        (10, "NON_NULL", "non-null"),
+        (20, "NULLABLE", "nullable"),
+        (30, "UNKNOWN", "unknown"),
+        (40, "NOT_APPLICABLE", "not-applicable"),
+    ),
+    "OCCURRENCE_FAMILY": (
+        (10, "TOKEN", "token"),
+        (20, "ANNOTATION", "annotation"),
+        (30, "SYNTAX", "syntax"),
+    ),
+    "OPERATIONAL_DEPENDENCY_EDGE_KIND": (
+        (10, "SYNTAX", "syntax"),
+        (20, "SEMANTIC", "semantic"),
+        (30, "DERIVATION", "derivation"),
+        (40, "PUBLICATION", "publication"),
+    ),
+    "OVERLAY_TOMBSTONE_REASON": (
+        (10, "OWNER_REPLACED_EMPTY", "owner-replaced-empty"),
+        (20, "SOURCE_REMOVED", "source-removed"),
+        (30, "SUPERSEDED_GENERATION", "superseded-generation"),
+    ),
+    "OWNER_CAPABILITY_STATE": (
+        (10, "CURRENT", "current"),
+        (20, "PENDING", "pending"),
+        (30, "INVALIDATED", "invalidated"),
+        (40, "PARTIAL", "partial"),
+        (50, "UNAVAILABLE_PARSE", "unavailable-parse"),
+        (60, "UNAVAILABLE_COMPILE", "unavailable-compile"),
+        (70, "UNAVAILABLE_PROVIDER", "unavailable-provider"),
+        (80, "UNAVAILABLE_DERIVATION", "unavailable-derivation"),
+        (90, "EXCLUDED", "excluded"),
+        (100, "UNSUPPORTED", "unsupported"),
+        (110, "REMOVED", "removed"),
+        (120, "NOT_APPLICABLE", "not-applicable"),
+    ),
+    "OWNER_KIND": (
+        (10, "SOURCE_FILE", "source-file"),
+        (20, "MODULE", "module"),
+        (30, "SCOPE", "scope"),
+        (40, "CALLABLE", "callable"),
+        (50, "CLASS_OR_TYPE", "class-or-type"),
+        (60, "MIR_BODY", "mir-body"),
+        (70, "CRATE_OR_BUILD_UNIT", "crate-or-build-unit"),
+        (80, "WORKSPACE_GLOBAL_DERIVATION", "workspace-global-derivation"),
+    ),
+    "PATH_ENCODING": (
+        (10, "UNIX_BYTES", "unix-bytes"),
+        (20, "MACOS_BYTES", "macos-bytes"),
+        (30, "WINDOWS_WTF8", "windows-wtf8"),
+    ),
+    "PHASE": (
+        (10, "INPUT_VALIDATION", "input-validation"),
+        (20, "SCHEMA_BINDING", "schema-binding"),
+        (30, "LOGICAL_PLANNING", "logical-planning"),
+        (40, "POLICY_VALIDATION", "policy-validation"),
+        (50, "PHYSICAL_PLANNING", "physical-planning"),
+        (60, "EXECUTION", "execution"),
+        (70, "WRITE_VALIDATION", "write-validation"),
+        (80, "COMMIT", "commit"),
+        (90, "SNAPSHOT_CONSTRUCTION", "snapshot-construction"),
+        (100, "SNAPSHOT_ACTIVATION", "snapshot-activation"),
+        (110, "SHUTDOWN", "shutdown"),
+    ),
+    "PROVIDER_CODE": (
+        (10, "TREE_SITTER", "tree-sitter"),
+        (20, "RUFF_PYTHON", "ruff-python"),
+        (30, "PYREFLY_PYTHON", "pyrefly-python"),
+        (40, "RUSTC_MIR", "rustc-mir"),
+        (50, "CODEFABRIC_DERIVATION", "codefabric-derivation"),
+        (60, "SOURCE_SUBSTRATE", "source-substrate"),
+    ),
+    "PROVIDER_OBSERVATION_FAMILY": (
+        (110, "PYREFLY_MODULE", "pyrefly-module"),
+        (120, "RUST_MIR_OWNER", "rust-mir-owner"),
+    ),
+    "PROVIDER_RUN_STATE": (
+        (10, "QUEUED", "queued"),
+        (20, "RUNNING", "running"),
+        (30, "SUCCEEDED", "succeeded"),
+        (40, "PARTIAL", "partial"),
+        (50, "FAILED", "failed"),
+        (60, "TIMED_OUT", "timed-out"),
+        (70, "CANCELLED", "cancelled"),
+        (80, "SUPERSEDED", "superseded"),
+        (90, "CRASHED", "crashed"),
+        (100, "PROTOCOL_ERROR", "protocol-error"),
+        (110, "STALE_RESULT", "stale-result"),
+        (120, "STALE_GIT_BASELINE", "stale-git-baseline"),
+    ),
+    "QUERY_AVAILABILITY_STATE": (
+        (10, "AVAILABLE", "available"),
+        (20, "PARTIAL", "partial"),
+        (30, "UNAVAILABLE", "unavailable"),
+        (40, "NOT_APPLICABLE", "not-applicable"),
+    ),
+    "QUERY_EXECUTION_STATE": (
+        (10, "ACCEPTED", "accepted"),
+        (20, "RUNNING", "running"),
+        (30, "COMPLETE", "complete"),
+        (40, "FAILED", "failed"),
+        (50, "CANCELLED", "cancelled"),
+        (60, "DEADLINE_EXCEEDED", "deadline-exceeded"),
+        (70, "NOT_EXECUTED_DEPENDENCY", "not-executed-dependency"),
+    ),
+    "QUERY_FORM": (
+        (10, "FIND_ENTITIES", "find code entities"),
+        (20, "RETRIEVE_FACTS", "retrieve facts about code"),
+        (30, "FOLLOW_RELATIONSHIPS", "follow code relationships"),
+        (40, "FIND_PATHS", "find connecting fact paths"),
+        (50, "MATCH_PATTERN", "match a code fact pattern"),
+        (60, "COMBINE_RESULTS", "combine result sets"),
+        (70, "SUMMARIZE_FACTS", "summarize objective facts"),
+        (80, "RETRIEVE_SOURCE_CONTEXT", "retrieve source and syntax context"),
+    ),
+    "RANGE_RECONCILIATION_STEP": (
+        (10, "EXACT_RANGE_AND_KIND", "exact-range-and-kind"),
+        (20, "EXACT_DECLARATION_NAME", "exact-declaration-name"),
+        (30, "SMALLEST_ENCLOSING_COMPATIBLE", "smallest-enclosing-compatible"),
+        (40, "SAME_START_COMPATIBLE", "same-start-compatible"),
+        (50, "PROVIDER_ONLY_SYNTHETIC", "provider-only-synthetic"),
+    ),
+    "RAW_KIND_DISPOSITION": (
+        (10, "NORMALIZE", "normalize"),
+        (20, "IGNORE", "ignore"),
+        (30, "UNSUPPORTED", "unsupported"),
+    ),
+    "RESOLUTION_CLASS": (
+        (10, "EXACT", "exact"),
+        (20, "STATICALLY_RESOLVED", "statically-resolved"),
+        (30, "SOUND_POSSIBLE", "sound-possible"),
+        (40, "POSSIBLE", "possible"),
+        (50, "MODELLED", "modelled"),
+        (60, "HEURISTIC", "heuristic"),
+        (70, "UNRESOLVED", "unresolved"),
+        (80, "UNAVAILABLE", "unavailable"),
+        (90, "NOT_APPLICABLE", "not-applicable"),
+    ),
     "RESOURCE_KIND": (
         (10, "FILE_HANDLE", "file-handle"),
         (20, "SOCKET_OR_CONNECTION", "socket-or-connection"),
@@ -853,30 +1007,58 @@ ENUM_TRIPLES = MappingProxyType({
         (90, "USER_DEFINED_MODELLED_RESOURCE", "user-defined-modelled-resource"),
         (100, "UNKNOWN_RESOURCE", "unknown-resource"),
     ),
-    "PROVIDER_CODE": (
-        (10, "TREE_SITTER", "tree-sitter"),
-        (20, "RUFF_PYTHON", "ruff-python"),
-        (30, "PYREFLY_PYTHON", "pyrefly-python"),
-        (40, "RUSTC_MIR", "rustc-mir"),
-        (50, "CODEFABRIC_DERIVATION", "codefabric-derivation"),
-        (60, "SOURCE_SUBSTRATE", "source-substrate"),
+    "SERVING_ACTIVATION_STATE": (
+        (10, "BUILDING", "building"),
+        (20, "VALIDATING", "validating"),
+        (30, "READY", "ready"),
+        (40, "ACTIVE", "active"),
+        (50, "RETIRED", "retired"),
+        (60, "FAILED", "failed"),
     ),
-    "TOKEN_KIND": (
-        (10, "IDENTIFIER", "identifier"),
-        (20, "KEYWORD", "keyword"),
-        (30, "OPERATOR", "operator"),
-        (40, "PUNCTUATION", "punctuation"),
-        (50, "LITERAL", "literal"),
-        (60, "STRING", "string"),
-        (70, "NUMBER", "number"),
-        (80, "UNKNOWN", "unknown"),
+    "SEVERITY": (
+        (10, "INFO", "info"),
+        (20, "WARNING", "warning"),
+        (30, "ERROR", "error"),
+        (40, "FATAL", "fatal"),
     ),
-    "ANNOTATION_KIND": (
-        (10, "COMMENT", "comment"),
-        (20, "DOCUMENTATION", "documentation"),
-        (30, "PRAGMA_OR_DIRECTIVE", "pragma-or-directive"),
-        (40, "PARSE_ERROR", "parse-error"),
-        (50, "MISSING_SYNTAX", "missing-syntax"),
+    "SNAPSHOT_LEASE_KIND": (
+        (10, "QUERY", "query"),
+        (20, "RESULT_ARTIFACT", "result-artifact"),
+        (30, "RESOURCE_READ", "resource-read"),
+        (40, "MAINTENANCE", "maintenance"),
+    ),
+    "SNAPSHOT_LEASE_STATE": (
+        (10, "ACTIVE", "active"),
+        (20, "RELEASING", "releasing"),
+        (30, "RELEASED", "released"),
+        (40, "EXPIRED", "expired"),
+        (50, "ORPHANED", "orphaned"),
+    ),
+    "SOURCE_TRUST_STATE": (
+        (10, "UNVERIFIED", "unverified"),
+        (20, "VERIFYING", "verifying"),
+        (30, "CURRENT", "current"),
+        (40, "POTENTIALLY_STALE", "potentially-stale"),
+        (50, "UNAVAILABLE", "unavailable"),
+    ),
+    "SYNTAX_FIELD_ROLE": (
+        (10, "NAME", "name"),
+        (20, "PARAMETERS", "parameters"),
+        (30, "DECORATOR", "decorator"),
+        (40, "RETURNS", "returns"),
+        (50, "BODY", "body"),
+        (60, "CONDITION", "condition"),
+        (70, "TARGET", "target"),
+        (80, "VALUE", "value"),
+        (90, "RECEIVER", "receiver"),
+        (100, "CALLEE", "callee"),
+        (110, "ARGUMENT", "argument"),
+        (120, "KEYWORD_ARGUMENT", "keyword-argument"),
+        (130, "ITERABLE", "iterable"),
+        (140, "GUARD", "guard"),
+        (150, "PATTERN", "pattern"),
+        (160, "HANDLER", "handler"),
+        (170, "FINALLY_BODY", "finally-body"),
     ),
     "SYNTAX_KIND": (
         (10, "SYNTAX_NODE", "syntax-node"),
@@ -904,45 +1086,33 @@ ENUM_TRIPLES = MappingProxyType({
         (230, "RAISE_OR_PANIC_SYNTAX", "raise-or-panic-syntax"),
         (240, "IMPORT_OR_USE_SYNTAX", "import-or-use-syntax"),
     ),
-    "SYNTAX_FIELD_ROLE": (
-        (10, "NAME", "name"),
-        (20, "PARAMETERS", "parameters"),
-        (30, "DECORATOR", "decorator"),
-        (40, "RETURNS", "returns"),
-        (50, "BODY", "body"),
-        (60, "CONDITION", "condition"),
-        (70, "TARGET", "target"),
-        (80, "VALUE", "value"),
-        (90, "RECEIVER", "receiver"),
-        (100, "CALLEE", "callee"),
-        (110, "ARGUMENT", "argument"),
-        (120, "KEYWORD_ARGUMENT", "keyword-argument"),
-        (130, "ITERABLE", "iterable"),
-        (140, "GUARD", "guard"),
-        (150, "PATTERN", "pattern"),
-        (160, "HANDLER", "handler"),
-        (170, "FINALLY_BODY", "finally-body"),
+    "TOKEN_KIND": (
+        (10, "IDENTIFIER", "identifier"),
+        (20, "KEYWORD", "keyword"),
+        (30, "OPERATOR", "operator"),
+        (40, "PUNCTUATION", "punctuation"),
+        (50, "LITERAL", "literal"),
+        (60, "STRING", "string"),
+        (70, "NUMBER", "number"),
+        (80, "UNKNOWN", "unknown"),
     ),
-    "OWNER_KIND": (
-        (10, "SOURCE_FILE", "source-file"),
-        (20, "MODULE", "module"),
-        (30, "SCOPE", "scope"),
-        (40, "CALLABLE", "callable"),
-        (50, "CLASS_OR_TYPE", "class-or-type"),
-        (60, "MIR_BODY", "mir-body"),
-        (70, "CRATE_OR_BUILD_UNIT", "crate-or-build-unit"),
-        (80, "WORKSPACE_GLOBAL_DERIVATION", "workspace-global-derivation"),
+    "TYPE_ORIGIN": (
+        (10, "EXPLICIT_ANNOTATION", "explicit-annotation"),
+        (20, "PROVIDER_COMPUTED", "provider-computed"),
+        (30, "CONTEXTUAL_EXPECTATION", "contextual-expectation"),
+        (40, "NARROWING", "narrowing"),
+        (50, "COMPILER_LOWERED", "compiler-lowered"),
+        (60, "STATIC_SEMANTIC_DERIVATION", "static-semantic-derivation"),
     ),
-    "LANGUAGE": (
-        (10, "COMMON", "common"),
-        (20, "PYTHON", "python"),
-        (30, "RUST", "rust"),
-        (40, "UNKNOWN", "unknown"),
-    ),
-    "PATH_ENCODING": (
-        (10, "UNIX_BYTES", "unix-bytes"),
-        (20, "MACOS_BYTES", "macos-bytes"),
-        (30, "WINDOWS_WTF8", "windows-wtf8"),
+    "TYPE_ROLE": (
+        (10, "DECLARED_TYPE", "declared-type"),
+        (20, "INFERRED_TYPE", "inferred-type"),
+        (30, "COMPUTED_TYPE", "computed-type"),
+        (40, "EXPECTED_TYPE", "expected-type"),
+        (50, "TYPE_OF", "type-of"),
+        (60, "PARAMETER_TYPE", "parameter-type"),
+        (70, "RETURN_TYPE", "return-type"),
+        (80, "FIELD_TYPE", "field-type"),
     ),
     "UPDATE_CANDIDATE_STRATEGY": (
         (10, "ISOLATED_PATHS", "isolated-paths"),
@@ -957,108 +1127,6 @@ ENUM_TRIPLES = MappingProxyType({
         (40, "DEFERRED_SOURCE_DRIFT", "deferred-source-drift"),
         (50, "FAILED", "failed"),
     ),
-    "OPERATIONAL_DEPENDENCY_EDGE_KIND": (
-        (10, "SYNTAX", "syntax"),
-        (20, "SEMANTIC", "semantic"),
-        (30, "DERIVATION", "derivation"),
-        (40, "PUBLICATION", "publication"),
-    ),
-    "GIT_HASH_ALGORITHM": (
-        (10, "SHA1", "sha1"),
-        (20, "SHA256", "sha256"),
-    ),
-    "GIT_REPOSITORY_KIND": (
-        (10, "COMMON", "common"),
-        (20, "LINKED_WORKTREE", "linked-worktree"),
-        (30, "SUBMODULE", "submodule"),
-    ),
-    "GIT_HEAD_KIND": (
-        (10, "SYMBOLIC", "symbolic"),
-        (20, "DETACHED", "detached"),
-        (30, "UNBORN", "unborn"),
-    ),
-    "GIT_OPERATION_STATE": (
-        (10, "CLEAN", "clean"),
-        (20, "MERGE", "merge"),
-        (30, "REBASE", "rebase"),
-        (40, "CHERRY_PICK", "cherry-pick"),
-        (50, "REVERT", "revert"),
-        (60, "BISECT", "bisect"),
-        (70, "APPLY", "apply"),
-        (80, "OTHER_OPERATION", "other-operation"),
-        (90, "UNKNOWN", "unknown"),
-    ),
-    "GIT_INVENTORY_CLASSIFICATION": (
-        (10, "TRACKED", "tracked"),
-        (20, "UNTRACKED_NOT_IGNORED", "untracked-not-ignored"),
-        (30, "UNTRACKED_IGNORED", "untracked-ignored"),
-        (40, "TRACKED_BUT_IGNORED_PATTERN_MATCHES", "tracked-but-ignored-pattern-matches"),
-        (50, "EXCLUDED_BY_CODE_FABRIC_POLICY", "excluded-by-code-fabric-policy"),
-        (60, "SUBMODULE_GITLINK", "submodule-gitlink"),
-        (70, "NESTED_REPOSITORY", "nested-repository"),
-        (80, "SPECIAL_FILE", "special-file"),
-    ),
-    "INVENTORY_INCLUSION_STATE": (
-        (10, "INCLUDED", "included"),
-        (20, "EXCLUDED_POLICY", "excluded-policy"),
-        (30, "EXCLUDED_SPECIAL_FILE", "excluded-special-file"),
-        (40, "EXCLUDED_SIZE_LIMIT", "excluded-size-limit"),
-    ),
-    "INVENTORY_FILE_KIND": (
-        (10, "REGULAR", "regular"),
-        (20, "SYMLINK", "symlink"),
-        (30, "SPECIAL", "special"),
-    ),
-    "GIT_CANDIDATE_ORIGIN": (
-        (10, "INDEX_WORKTREE", "index-worktree"),
-        (20, "HEAD_INDEX", "head-index"),
-        (30, "HEAD_TREE", "head-tree"),
-    ),
-    "GIT_CANDIDATE_MODE": (
-        (10, "STATUS", "status"),
-        (20, "HEAD_TREE", "head-tree"),
-    ),
-    "OVERLAY_TOMBSTONE_REASON": (
-        (10, "OWNER_REPLACED_EMPTY", "owner-replaced-empty"),
-        (20, "SOURCE_REMOVED", "source-removed"),
-        (30, "SUPERSEDED_GENERATION", "superseded-generation"),
-    ),
-    "NEWLINE_KIND": (
-        (10, "NONE", "none"),
-        (20, "LF", "lf"),
-        (30, "CRLF", "crlf"),
-        (40, "CR", "cr"),
-        (50, "MIXED", "mixed"),
-    ),
-    "OCCURRENCE_FAMILY": (
-        (10, "TOKEN", "token"),
-        (20, "ANNOTATION", "annotation"),
-        (30, "SYNTAX", "syntax"),
-    ),
-    "PROVIDER_OBSERVATION_FAMILY": (
-        (120, "RUST_MIR_OWNER", "rust-mir-owner"),
-    ),
-    "RANGE_RECONCILIATION_STEP": (
-        (10, "EXACT_RANGE_AND_KIND", "exact-range-and-kind"),
-        (20, "EXACT_DECLARATION_NAME", "exact-declaration-name"),
-        (30, "SMALLEST_ENCLOSING_COMPATIBLE", "smallest-enclosing-compatible"),
-        (40, "SAME_START_COMPATIBLE", "same-start-compatible"),
-        (50, "PROVIDER_ONLY_SYNTHETIC", "provider-only-synthetic"),
-    ),
-    "RAW_KIND_DISPOSITION": (
-        (10, "NORMALIZE", "normalize"),
-        (20, "IGNORE", "ignore"),
-        (30, "UNSUPPORTED", "unsupported"),
-    ),
-    "WORKSPACE_KIND": (
-        (10, "NON_GIT_ROOT", "non-git-root"),
-        (20, "GIT_WORKTREE", "git-worktree"),
-    ),
-    "ANALYSIS_CONTEXT_KIND": (
-        (10, "SOURCE", "source"),
-        (20, "PYTHON", "python"),
-        (30, "RUST", "rust"),
-    ),
     "VALUE_KIND": (
         (10, "ENTITY", "entity"),
         (20, "BOOLEAN", "boolean"),
@@ -1068,24 +1136,9 @@ ENUM_TRIPLES = MappingProxyType({
         (60, "BYTES", "bytes"),
         (70, "TYPE", "type"),
     ),
-    "SEVERITY": (
-        (10, "INFO", "info"),
-        (20, "WARNING", "warning"),
-        (30, "ERROR", "error"),
-        (40, "FATAL", "fatal"),
-    ),
-    "PHASE": (
-        (10, "INPUT_VALIDATION", "input-validation"),
-        (20, "SCHEMA_BINDING", "schema-binding"),
-        (30, "LOGICAL_PLANNING", "logical-planning"),
-        (40, "POLICY_VALIDATION", "policy-validation"),
-        (50, "PHYSICAL_PLANNING", "physical-planning"),
-        (60, "EXECUTION", "execution"),
-        (70, "WRITE_VALIDATION", "write-validation"),
-        (80, "COMMIT", "commit"),
-        (90, "SNAPSHOT_CONSTRUCTION", "snapshot-construction"),
-        (100, "SNAPSHOT_ACTIVATION", "snapshot-activation"),
-        (110, "SHUTDOWN", "shutdown"),
+    "WORKSPACE_KIND": (
+        (10, "NON_GIT_ROOT", "non-git-root"),
+        (20, "GIT_WORKTREE", "git-worktree"),
     ),
     "WORKSPACE_LIFECYCLE": (
         (10, "BOOTSTRAPPING", "bootstrapping"),
@@ -1279,6 +1332,13 @@ REGISTRY_IDS = MappingProxyType({
         "VISIBILITY",
         "LANGUAGE",
         "CATEGORICAL_KIND",
+        "TYPE_KIND",
+        "CANONICAL_TYPE_KEY",
+        "PRIMITIVE_KIND",
+        "NOMINAL_DECLARATION_REF",
+        "CALLABLE_SIGNATURE_REF",
+        "RAW_TYPE_SHAPE_HASH",
+        "NULLABLE_SEMANTICS",
     ),
     "fact_kinds": (
         "ENTITY_EXISTENCE",

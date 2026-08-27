@@ -1,0 +1,8 @@
+id: semantic-provider-legacy-observation-schema-include-bypass
+language: Rust
+severity: error
+message: hand-authored provider-observation schema include bypasses Contract IR
+rule:
+  all:
+    - kind: macro_invocation
+    - regex: 'include_str!\s*\([^)]*provider-observations'

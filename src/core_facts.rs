@@ -33,6 +33,7 @@ use crate::identity::{
 use crate::model_generated::schema_tables::{
     PROVIDER_OBSERVATION_SCHEMAS, ProviderObservationLogicalType, ProviderObservationSchema,
 };
+use crate::model_generated::semantic_lane_fragments::{SEMANTIC_INGEST_CONTRACTS, SemanticLane};
 use crate::provider_raw_kinds::{
     PROVIDER_GRAMMAR_INVENTORIES, ProviderRawKindDisposition, RUFF_PYTHON_FRONTEND,
 };
@@ -1168,6 +1169,7 @@ impl CoreFactEngine {
         let precedence = BTreeMap::from([(provider_code, 0)]);
         let mut outputs = Vec::with_capacity(run.modules.len());
         for module in &run.modules {
+            validate_semantic_ingest_contract("codefabric.pyrefly.module.v1", &module.batch)?;
             let observed_id = module
                 .batch
                 .column_by_name("module_id")
@@ -1884,6 +1886,7 @@ fn decode_rustc_owner(owner: &AcceptedRustcOwner) -> Result<RustcMirObservation,
     )?;
     let mut rows = Vec::new();
     for batch in batches {
+        validate_semantic_ingest_contract("codefabric.rustc.owned-mir.v1", &batch)?;
         let names = batch
             .column(0)
             .as_any()
@@ -1942,6 +1945,61 @@ fn rustc_mir_observation_contract() -> Result<&'static ProviderObservationSchema
         .ok_or_else(|| FactIngestError::Protocol("rustc MIR observation schema is absent".into()))
 }
 
+fn validate_semantic_ingest_contract(
+    observation_schema_id: &str,
+    batch: &arrow_array::RecordBatch,
+) -> Result<(), FactIngestError> {
+    let mut shared = false;
+    let mut lane_specific = false;
+    for contract in SEMANTIC_INGEST_CONTRACTS.iter().filter(|contract| {
+        contract
+            .observation_schema_ids
+            .contains(&observation_schema_id)
+    }) {
+        for table_code in contract.output_table_codes {
+            if table_spec(*table_code).is_none() {
+                return Err(FactIngestError::Protocol(format!(
+                    "semantic ingest contract {} targets absent table {table_code}",
+                    contract.contract_id
+                )));
+            }
+        }
+        match contract.lane {
+            SemanticLane::Shared => {
+                shared = true;
+                for field in contract.required_fields {
+                    if !contract.output_table_codes.iter().any(|table_code| {
+                        table_spec(*table_code)
+                            .is_some_and(|table| table.arrow_schema.field_with_name(field).is_ok())
+                    }) {
+                        return Err(FactIngestError::Protocol(format!(
+                            "semantic ingest contract {} requires absent output field {field}",
+                            contract.contract_id
+                        )));
+                    }
+                }
+            }
+            SemanticLane::Python | SemanticLane::Rust => {
+                lane_specific = true;
+                for field in contract.required_fields {
+                    if batch.schema().field_with_name(field).is_err() {
+                        return Err(FactIngestError::Protocol(format!(
+                            "semantic ingest contract {} requires absent observation field {field}",
+                            contract.contract_id
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    if !shared || !lane_specific {
+        return Err(FactIngestError::Protocol(format!(
+            "observation schema {observation_schema_id} lacks shared or lane-specific semantic ingest authority"
+        )));
+    }
+    Ok(())
+}
+
 fn provider_observation_arrow_schema(contract: &ProviderObservationSchema) -> Schema {
     Schema::new(
         contract
@@ -1950,6 +2008,7 @@ fn provider_observation_arrow_schema(contract: &ProviderObservationSchema) -> Sc
             .map(|field| {
                 let data_type = match field.logical_type {
                     ProviderObservationLogicalType::Utf8 => DataType::Utf8,
+                    ProviderObservationLogicalType::Binary => DataType::Binary,
                     ProviderObservationLogicalType::Boolean => DataType::Boolean,
                     ProviderObservationLogicalType::UInt64 => DataType::UInt64,
                     ProviderObservationLogicalType::Utf8List => {
@@ -2124,6 +2183,7 @@ mod tests {
     };
     use crate::operational_store::OperationalStore;
     use crate::provider_types::ProviderText;
+    use crate::pyrefly_service::AcceptedPyreflyModule;
     use crate::registries::{ProviderRunState, WorkspaceRegistryLifecycle};
     use crate::rpc::generated::codefabric::rustc::v1::{
         CompilationBegin, CompilationEnd, CompilerOwnerKey, DiagnosticSummary, OwnerBegin,
@@ -2399,6 +2459,53 @@ mod tests {
         }
     }
 
+    fn accepted_pyrefly_run() -> AcceptedPyreflyRun {
+        let contract = PROVIDER_OBSERVATION_SCHEMAS
+            .iter()
+            .find(|contract| contract.schema_id == "codefabric.pyrefly.module.v1")
+            .unwrap();
+        let schema = Arc::new(provider_observation_arrow_schema(contract));
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(StringArray::from(vec!["module:fixture"])) as ArrayRef,
+                Arc::new(StringArray::from(vec!["fixture.module"])) as ArrayRef,
+                Arc::new(BinaryArray::from(vec![Some(b"{}".as_slice())])) as ArrayRef,
+                Arc::new(BinaryArray::from(vec![Some(b"[]".as_slice())])) as ArrayRef,
+                Arc::new(BinaryArray::from(vec![Some(b"[]".as_slice())])) as ArrayRef,
+            ],
+        )
+        .unwrap();
+        let mut arrow_ipc = Vec::new();
+        {
+            let mut writer = StreamWriter::try_new(&mut arrow_ipc, &schema).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+        }
+        let chunk_digest = crate::integrity::framed_digest(&arrow_ipc);
+        AcceptedPyreflyRun {
+            provider_run_id: "run:pyrefly-wp01".to_owned(),
+            workspace_id: "workspace:wp01".to_owned(),
+            analysis_context_id: "context:wp01".to_owned(),
+            canonical_workspace_id: [0x21; 16],
+            canonical_analysis_context_id: [0x22; 16],
+            source_generation: 7,
+            modules: vec![AcceptedPyreflyModule {
+                module_id: "module:fixture".to_owned(),
+                module_name: "fixture.module".to_owned(),
+                canonical_file_id: [0x23; 16],
+                source_bytes: b"def answer():\n    return 42\n".to_vec(),
+                arrow_ipc,
+                batch,
+                schema_digest: contract.schema_digest.to_owned(),
+                chunk_digest,
+                module_digest: framed(0x24),
+            }],
+            capability_codes: Vec::new(),
+            overall_digest: framed(0x25),
+        }
+    }
+
     fn snapshot_body() -> ServingSnapshotManifestBody {
         let contexts = vec![SOURCE_CONTEXT_ID];
         ServingSnapshotManifestBody {
@@ -2501,6 +2608,35 @@ mod tests {
                 .map(|(code, batch)| (*code, batch_checksum(batch.batch()).unwrap()))
                 .collect()
         );
+    }
+
+    #[test]
+    fn observation_schema_generation_conformance() {
+        let schemas = PROVIDER_OBSERVATION_SCHEMAS
+            .iter()
+            .map(|schema| (schema.schema_id, schema.observation_family_code))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            schemas,
+            BTreeSet::from([
+                ("codefabric.pyrefly.module.v1", 110),
+                ("codefabric.rustc.owned-mir.v1", 120),
+            ])
+        );
+
+        let engine = CoreFactEngine::default();
+        let rust = engine
+            .reconcile_rustc_compilation(&accepted_rustc_compilation("fixture::answer"))
+            .unwrap();
+        let python = engine
+            .reconcile_pyrefly_run(&accepted_pyrefly_run())
+            .unwrap();
+        assert_eq!(rust.len(), 1);
+        assert_eq!(python.len(), 1);
+        for outputs in [&rust, &python] {
+            assert!(outputs[0].batches.iter().any(|(code, _)| *code == 100));
+            assert!(outputs[0].batches.iter().any(|(code, _)| *code == 130));
+        }
     }
 
     #[test]
@@ -2719,6 +2855,30 @@ mod tests {
             .await
             .unwrap();
         assert!(entity_rows > 0);
+    }
+
+    #[test]
+    fn semantic_ingest_requires_generated_shared_and_lane_contracts() {
+        for schema_id in [
+            "codefabric.pyrefly.module.v1",
+            "codefabric.rustc.owned-mir.v1",
+        ] {
+            let contract = PROVIDER_OBSERVATION_SCHEMAS
+                .iter()
+                .find(|contract| contract.schema_id == schema_id)
+                .unwrap();
+            let batch = arrow_array::RecordBatch::new_empty(Arc::new(
+                provider_observation_arrow_schema(contract),
+            ));
+            validate_semantic_ingest_contract(schema_id, &batch).unwrap();
+        }
+
+        let empty = arrow_array::RecordBatch::new_empty(Arc::new(Schema::empty()));
+        let error =
+            validate_semantic_ingest_contract("codefabric.pyrefly.module.v1", &empty).unwrap_err();
+        assert!(error.to_string().contains("absent observation field"));
+        let error = validate_semantic_ingest_contract("codefabric.unknown.v1", &empty).unwrap_err();
+        assert!(error.to_string().contains("lacks shared or lane-specific"));
     }
 
     #[test]

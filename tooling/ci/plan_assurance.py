@@ -568,8 +568,18 @@ def validate_oracle_substance(root: Path = ROOT) -> tuple[int, int]:
 
 
 def _rust_selector_command(domain: str, oracles: Sequence[str]) -> list[str]:
-    command = ["cargo", "nextest", "run", "--locked"]
-    if domain != "root":
+    command = ["cargo", "nextest", "run", "--locked", "--no-fail-fast"]
+    if domain == "root-model-compiler":
+        command.extend(
+            (
+                "--no-default-features",
+                "--features",
+                "model-compiler",
+                "--bin",
+                "codefabric-model",
+            )
+        )
+    elif domain != "root":
         command.extend(("--manifest-path", domain))
     expression = "test(/(" + "|".join(sorted(map(re.escape, oracles))) + ")/)"
     command.extend(("-E", expression, "--no-tests=fail"))
@@ -620,7 +630,9 @@ def run_packet_oracles(packet: str, root: Path = ROOT) -> None:
         roots: dict[str, list[str]] = defaultdict(list)
         for definition in rust_definitions:
             domain = "root"
-            if definition.path.startswith("rustc-extractor/"):
+            if definition.path.startswith("src/bin/codefabric_model/"):
+                domain = "root-model-compiler"
+            elif definition.path.startswith("rustc-extractor/"):
                 domain = "rustc-extractor/Cargo.toml"
             elif definition.path.startswith("pyrefly-sidecar/"):
                 domain = "pyrefly-sidecar/Cargo.toml"

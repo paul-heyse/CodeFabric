@@ -1,0 +1,205 @@
+artifact_id: codefabric.governance.transformation-pass-registry
+artifact_kind: registry
+version: "1.0"
+compatible_suite_major: 1
+status: accepted
+canonical_digest: "b3:aad4324b3f28e6d87242db15e445c41ce718d020a3822caa47c867fb24103454"
+schema_version: 1
+authority: AC-G-05
+accepted_at: "2026-08-27"
+records:
+  - pass_id: PASS_CANONICAL_TYPE_INTERNING_V1
+    owner_packet: WP01
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: provider-normalized-type-observation, schema: application-owned-TypeTerm-adapter, preconditions: [workspace-and-analysis-context-pinned, provider-internal-identities-removed]}]
+    outputs: [{artifact: canonical-semantic-type, schema: type_detail-v1, postconditions: [CBEF-type-term-canonical, context-scoped-type-id]}]
+    entry_invariants: [immutable-provider-observation, governed-type-constructor]
+    exit_invariants: [idempotent-interning, canonical-key-reversible]
+    preserved_identities: [workspace_id, analysis_context_id]
+    generated_identities: [type_id]
+    invalidation_closure: [analysis-context-change, normalized-type-shape-change]
+    diagnostics_failure_taxonomy: [adapter-rejection, canonical-encoding-failure, ID_COLLISION]
+    determinism_fingerprint_inputs: [type-algebra-digest, workspace_id, analysis_context_id, normalized-type-term]
+    resource_telemetry_contract: [interned-type-count, collision-count]
+    behavioral_fixtures: [language_type_adapters_consume_one_canonical_type_authority]
+    negative_fixtures: [semantic_context_discovery_rejects_source_and_duplicate_candidates]
+    incremental_fixtures: [common_semantic_type_rows_encode_against_generated_tables]
+    oracles: [observation_schema_generation_conformance, provider_observation_schema_projection_parity, handwritten_observation_schema_falsification, successor_intake_operational_gate]
+    implementation_paths: [src/identity.rs, src/fact_ingest.rs]
+    contract_digest: "b3:04f97fbc1a3caab2fc95f401722d376505ea233c901ab6c2a1ef0a906bb534bb"
+  - pass_id: PASS_RUFF_SEMANTIC_TRAVERSAL_V1
+    owner_packet: WP03
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: ruff-semantic-model, schema: ruff-adapter-snapshot-v1, preconditions: [source-digest-pinned, python-context-pinned]}]
+    outputs: [{artifact: python-scope-binding-facts, schema: canonical-fact-stream-v1, postconditions: [unresolved-references-explicit, owner-scope-complete]}]
+    entry_invariants: [provider-isolated, source-range-byte-based]
+    exit_invariants: [syntax-and-semantic-entities-distinct, raw-evidence-retained]
+    preserved_identities: [workspace_id, analysis_context_id, source_file_id]
+    generated_identities: [scope_entity_id, binding_entity_id, reference_entity_id]
+    invalidation_closure: [source-file-owner, python-analysis-context]
+    diagnostics_failure_taxonomy: [ruff-model-unavailable, unresolved-reference, range-reconciliation-failure]
+    determinism_fingerprint_inputs: [source_digest, python-context-fingerprint, ruff-version, adapter-digest]
+    resource_telemetry_contract: [visited-node-count, scope-count, unresolved-reference-count]
+    behavioral_fixtures: [py_scope_binding_fixture_conformance]
+    negative_fixtures: [py_unresolved_reference_unknown_falsification]
+    incremental_fixtures: [py_scope_binding_owner_replacement_gate]
+    oracles: [py_scope_binding_fixture_conformance, ruff_semantic_isolation_parity, py_unresolved_reference_unknown_falsification, py_scope_binding_owner_replacement_gate]
+    implementation_paths: [src/ruff_adapter.rs, src/python_semantic.rs]
+    contract_digest: "b3:44d8a1ec44400e988fccf88a93852f931637a20da9d52c292551206a050bbb2f"
+  - pass_id: PASS_PYTHON_CFG_V1
+    owner_packet: WP06
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: python-semantic-callable, schema: canonical-python-semantic-facts-v1, preconditions: [callable-owner-closed, source-ranges-reconciled]}]
+    outputs: [{artifact: python-control-flow-graph, schema: CFG_FULL_V1, postconditions: [entry-and-exit-present, exceptional-edges-distinct]}]
+    entry_invariants: [immutable-callable-input, typed-statement-kinds]
+    exit_invariants: [wellformed-cfg, unreachable-regions-retained]
+    preserved_identities: [workspace_id, analysis_context_id, callable_entity_id]
+    generated_identities: [basic_block_id, control_flow_relation_id]
+    invalidation_closure: [callable-owner, python-context]
+    diagnostics_failure_taxonomy: [cfg-construction-failure, unsupported-control-form]
+    determinism_fingerprint_inputs: [callable-fact-digest, cfg-algorithm-version]
+    resource_telemetry_contract: [basic-block-count, control-flow-edge-count]
+    behavioral_fixtures: [py_cfg_fixture_conformance]
+    negative_fixtures: [py_cfg_exceptional_edge_falsification]
+    incremental_fixtures: [py_cfg_owner_invalidation_gate]
+    oracles: [py_cfg_fixture_conformance, py_cfg_wellformedness_parity, py_cfg_exceptional_edge_falsification, py_cfg_owner_invalidation_gate]
+    implementation_paths: [src/python_cfg.rs]
+    contract_digest: "b3:70f915119ab4353a1d93d5a810eed6f90c634737a8974d6b212cd7f780dd6f03"
+  - pass_id: PASS_PYTHON_DATAFLOW_V1
+    owner_packet: WP07
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: python-cfg-and-bindings, schema: CFG_FULL_V1-plus-binding-facts, preconditions: [cfg-wellformed, bindings-owner-closed]}]
+    outputs: [{artifact: python-def-use-facts, schema: DATAFLOW_V1, postconditions: [unknown-remainder-explicit, definitions-and-uses-distinct]}]
+    entry_invariants: [immutable-cfg, semantic-context-pinned]
+    exit_invariants: [fixed-point-converged, capability-completeness-derived]
+    preserved_identities: [workspace_id, analysis_context_id, callable_entity_id]
+    generated_identities: [definition_entity_id, use_entity_id, def_use_relation_id]
+    invalidation_closure: [callable-owner, dependent-summary-owner]
+    diagnostics_failure_taxonomy: [dataflow-nonconvergence, unsupported-expression, parse-capability-gap]
+    determinism_fingerprint_inputs: [cfg-digest, binding-fact-digest, dataflow-algorithm-version]
+    resource_telemetry_contract: [iteration-count, definition-count, use-count]
+    behavioral_fixtures: [py_defuse_fixture_conformance]
+    negative_fixtures: [py_parse_error_capability_gap_falsification]
+    incremental_fixtures: [wave8_integration_operational_gate]
+    oracles: [py_defuse_fixture_conformance, py_semantic_profile_partial_parity, py_parse_error_capability_gap_falsification, wave8_integration_operational_gate]
+    implementation_paths: [src/python_dataflow.rs]
+    contract_digest: "b3:1cd7bb681d533edbd39f4f8806ca81c047e14a832d2a457097c1a65a61610692"
+  - pass_id: PASS_GLEAN_REPORT_DECODING_V1
+    owner_packet: WP09
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: pyrefly-glean-report, schema: pinned-pyrefly-glean-wire-v1, preconditions: [source-snapshot-digest-matched, pyrefly-version-exact]}]
+    outputs: [{artifact: application-owned-pyrefly-dtos, schema: pyrefly-semantic-dto-v1, postconditions: [provider-indices-response-local, byte-ranges-source-bound]}]
+    entry_invariants: [bounded-report-bytes, provider-process-isolated]
+    exit_invariants: [no-pyrefly-types-cross-boundary, schema-version-validated]
+    preserved_identities: [workspace_id, analysis_context_id, source_file_id]
+    generated_identities: [observation_id]
+    invalidation_closure: [pyrefly-module-owner, python-context]
+    diagnostics_failure_taxonomy: [glean-decode-failure, snapshot-mismatch, unsupported-report-version]
+    determinism_fingerprint_inputs: [report-bytes-digest, pyrefly-source-identity, decoder-digest]
+    resource_telemetry_contract: [report-byte-count, decoded-record-count, rejected-record-count]
+    behavioral_fixtures: [pyrefly_glean_surface_compile_conformance]
+    negative_fixtures: [pyrefly_glean_snapshot_mismatch_falsification]
+    incremental_fixtures: [pyrefly_module_xref_surface_operational_gate]
+    oracles: [pyrefly_glean_surface_compile_conformance, pyrefly_glean_dto_isolation_parity, pyrefly_glean_snapshot_mismatch_falsification, pyrefly_module_xref_surface_operational_gate]
+    implementation_paths: [pyrefly-sidecar/src/pyrefly_link.rs, src/pyrefly_service.rs]
+    contract_digest: "b3:1746c01e50c5328cde192f0fa1bd1f7f31c63b5c658b21b3fd7eb316f4a3ad6a"
+  - pass_id: PASS_RUST_CFG_V1
+    owner_packet: WP21
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: accepted-rust-mir-owner, schema: rustc-owned-mir-v1, preconditions: [compiler-context-pinned, owner-manifest-accepted]}]
+    outputs: [{artifact: rust-control-flow-and-call-facts, schema: CFG_FULL_V1, postconditions: [unwind-and-normal-edges-distinct, indirect-calls-not-promoted-to-exact]}]
+    entry_invariants: [mir-indices-response-local, source-correspondence-retained]
+    exit_invariants: [cfg-wellformed, unknown-call-remainders-explicit]
+    preserved_identities: [workspace_id, analysis_context_id, callable_entity_id]
+    generated_identities: [mir_block_entity_id, cfg_relation_id, call_site_entity_id]
+    invalidation_closure: [mir-body-owner, rust-build-context]
+    diagnostics_failure_taxonomy: [malformed-mir-cfg, unresolved-indirect-call, unwind-metadata-unavailable]
+    determinism_fingerprint_inputs: [mir-owner-digest, rust-toolchain-digest, cfg-adapter-digest]
+    resource_telemetry_contract: [mir-block-count, cfg-edge-count, indirect-call-count]
+    behavioral_fixtures: [rust_cfg_call_fixture_conformance]
+    negative_fixtures: [rust_fn_pointer_unknown_falsification]
+    incremental_fixtures: [rust_call_ingest_operational_gate]
+    oracles: [rust_cfg_call_fixture_conformance, rust_unwind_edge_distinction_parity, rust_fn_pointer_unknown_falsification, rust_call_ingest_operational_gate]
+    implementation_paths: [rustc-extractor/src/wrapper.rs, src/rust_semantic.rs]
+    contract_digest: "b3:98728b9a227b642d8e2041151382685df14aa5f9554588d42956e5c9ad6e54fd"
+  - pass_id: PASS_RUST_DATAFLOW_V1
+    owner_packet: WP22
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: accepted-rust-mir-body, schema: rustc-owned-mir-v1, preconditions: [place-projections-structured, mir-owner-closed]}]
+    outputs: [{artifact: rust-place-access-facts, schema: DATAFLOW_V1, postconditions: [move-and-copy-distinct, place-keys-structured]}]
+    entry_invariants: [compiler-context-pinned, mir-locals-not-canonical]
+    exit_invariants: [access-events-program-point-bound, unsupported-projections-explicit]
+    preserved_identities: [workspace_id, analysis_context_id, mir_body_entity_id]
+    generated_identities: [place_entity_id, access_event_entity_id, dataflow_relation_id]
+    invalidation_closure: [mir-body-owner, dependent-ownership-summary]
+    diagnostics_failure_taxonomy: [place-normalization-failure, unsupported-projection, access-kind-unavailable]
+    determinism_fingerprint_inputs: [mir-body-digest, type-algebra-digest, place-normalizer-digest]
+    resource_telemetry_contract: [place-count, projection-count, access-event-count]
+    behavioral_fixtures: [rust_access_event_fixture_conformance]
+    negative_fixtures: [rust_move_copy_collapse_falsification]
+    incremental_fixtures: [rust_access_event_ingest_gate]
+    oracles: [rust_access_event_fixture_conformance, rust_place_key_structure_parity, rust_move_copy_collapse_falsification, rust_access_event_ingest_gate]
+    implementation_paths: [src/rust_dataflow.rs]
+    contract_digest: "b3:26c01c377d67fd8ec3c5f3ca827b1b1dcb3d2376c89d9d464dea427b1dd879a2"
+  - pass_id: PASS_PROVIDER_NORMALIZATION_V1
+    owner_packet: WP29
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: provider-observation-streams, schema: generated-provider-observation-schemas, preconditions: [provider-run-accepted, source-generation-current]}]
+    outputs: [{artifact: normalized-provider-facts, schema: canonical-fact-stream-v1, postconditions: [raw-and-normalized-coexist, every-raw-kind-dispositioned]}]
+    entry_invariants: [schema-digest-matched, provider-authority-retained]
+    exit_invariants: [normalization-registry-complete, unknowns-materialized]
+    preserved_identities: [provider_run_id, observation_id, source_file_id]
+    generated_identities: [normalized_fact_candidate_id]
+    invalidation_closure: [provider-owner, normalization-registry-version]
+    diagnostics_failure_taxonomy: [unknown-raw-kind, normalization-conflict, observation-schema-mismatch]
+    determinism_fingerprint_inputs: [observation-digest, provider-normalization-registry-digest, adapter-digest]
+    resource_telemetry_contract: [observation-count, normalized-count, ignored-count, unsupported-count]
+    behavioral_fixtures: [canonical_reconciliation_pipeline_conformance]
+    negative_fixtures: [conflicting_exact_evidence_falsification]
+    incremental_fixtures: [reconciliation_plan_family_operational_gate]
+    oracles: [canonical_reconciliation_pipeline_conformance, reconciliation_single_authority_parity, conflicting_exact_evidence_falsification, reconciliation_plan_family_operational_gate]
+    implementation_paths: [src/core_facts.rs, src/provider_runtime.rs]
+    contract_digest: "b3:d6e56348f31e92e41d6bcf0106b66244b354e5b050cd744ea5d9ea5e9ec388ae"
+  - pass_id: PASS_CANONICAL_RECONCILIATION_V1
+    owner_packet: WP29
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: normalized-provider-facts, schema: canonical-fact-candidates-v1, preconditions: [authority-table-loaded, owner-scope-closed]}]
+    outputs: [{artifact: canonical-fact-batches, schema: generated-canonical-tables, postconditions: [one-authority-selected, conflicting-evidence-retained]}]
+    entry_invariants: [all-inputs-same-snapshot, capability-gaps-explicit]
+    exit_invariants: [schema-validated, owner-replacement-complete, provenance-closed]
+    preserved_identities: [workspace_id, analysis_context_id, owner_id, observation_id]
+    generated_identities: [entity_id, relation_id, property_fact_id, evidence_id]
+    invalidation_closure: [owner-replacement, dependent-derivation-owners]
+    diagnostics_failure_taxonomy: [authority-conflict, ID_COLLISION, schema-validation-failure, incomplete-owner-stream]
+    determinism_fingerprint_inputs: [ordered-input-digests, authority-registry-digest, reconciliation-version]
+    resource_telemetry_contract: [candidate-count, selected-count, conflict-count, evidence-count]
+    behavioral_fixtures: [canonical_reconciliation_pipeline_conformance]
+    negative_fixtures: [conflicting_exact_evidence_falsification]
+    incremental_fixtures: [reconciliation_plan_family_operational_gate]
+    oracles: [canonical_reconciliation_pipeline_conformance, reconciliation_single_authority_parity, conflicting_exact_evidence_falsification, reconciliation_plan_family_operational_gate]
+    implementation_paths: [src/fact_ingest.rs, src/core_facts.rs]
+    contract_digest: "b3:79ad64a9f0b84c1c1b16b3472107861e0927e1052b5ac847484c6f871077c836"
+  - pass_id: PASS_SYNTAX_TREE_DERIVATION_V1
+    owner_packet: WP29
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: canonical-syntax-facts, schema: syntax_detail-plus-AST_CHILD, preconditions: [source-file-owner-closed, source-generation-current]}]
+    outputs: [{artifact: syntax-tree-projection, schema: SYNTAX_TREE_V1, postconditions: [projection-owner-replaced, ordinals-preserved]}]
+    entry_invariants: [syntax-identities-canonical, AST_CHILD-edges-direct]
+    exit_invariants: [projection-reproducible, no-provider-node-identity-exposed]
+    preserved_identities: [workspace_id, source_file_id, syntax_entity_id]
+    generated_identities: [syntax_projection_identity]
+    invalidation_closure: [source-file-owner]
+    diagnostics_failure_taxonomy: [syntax-cycle, missing-parent, ordinal-conflict]
+    determinism_fingerprint_inputs: [syntax-fact-digest, derivation-registry-digest, algorithm-version]
+    resource_telemetry_contract: [syntax-node-count, AST_CHILD-edge-count]
+    behavioral_fixtures: [canonical_reconciliation_pipeline_conformance]
+    negative_fixtures: [conflicting_exact_evidence_falsification]
+    incremental_fixtures: [reconciliation_plan_family_operational_gate]
+    oracles: [canonical_reconciliation_pipeline_conformance, reconciliation_single_authority_parity, conflicting_exact_evidence_falsification, reconciliation_plan_family_operational_gate]
+    implementation_paths: [src/derivation.rs]
+    contract_digest: "b3:772cfa1f4e7ff0f12bff37275277c272e0e0d4694050710a6d7f831161220899"
+owner_acceptance:
+  approver: suite-governance-owner
+  accepted_at: "2026-08-27"
+  construction_rule: WP01 namespaced transformation contracts for the semantic-profile execution graph
+  source_digest: "b3:0d4dcf0d1a57ad2449ee9c3fc5b22ddb783930e709d73795ce62efc16e43d8b2"

@@ -2042,8 +2042,14 @@
     {
       "artifact_id": "codefabric.registry.enum-registry",
       "authority": "ENUM_REGISTRY",
-      "canonical_digest": "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+      "canonical_digest": "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
       "path": "contracts/registry/enum-registry.yaml"
+    },
+    {
+      "artifact_id": "codefabric.identity.type-algebra-v1",
+      "authority": "TYPE_ALGEBRA",
+      "canonical_digest": "b3:73da9c1c7479b44bed00612631e7ff8fa648ccaea31bd715597233b7accdc22d",
+      "path": "contracts/identity/type-algebra-v1.yaml"
     },
     {
       "artifact_id": "codefabric.registry.ontology-entity-registry",
@@ -2060,7 +2066,7 @@
     {
       "artifact_id": "codefabric.registry.ontology-property-registry",
       "authority": "ONTOLOGY_PROPERTY_REGISTRY",
-      "canonical_digest": "b3:05b14e4de007611d241113f336378fd5040defe3e2c0d7d056fbfce1466a79c7",
+      "canonical_digest": "b3:e044aa20af89ed43f153969e39c1a9bf974a9569dc8c3798eea53ac9d7945eb2",
       "path": "contracts/registry/ontology-property-registry.yaml"
     },
     {
@@ -2081,16 +2087,6 @@
       "authority": "INTRINSIC",
       "domain": null,
       "semantic_type": "byte_offset"
-    },
-    {
-      "authority": "INTRINSIC",
-      "domain": null,
-      "semantic_type": "hash32"
-    },
-    {
-      "authority": "INTRINSIC",
-      "domain": null,
-      "semantic_type": "id16"
     },
     {
       "authority": "ENUM_REGISTRY",
@@ -2136,6 +2132,11 @@
       "authority": "ENUM_REGISTRY",
       "domain": "NEWLINE_KIND",
       "semantic_type": "enum:newline_kind"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "NULLABLE_SEMANTICS",
+      "semantic_type": "enum:nullable_semantics"
     },
     {
       "authority": "ENUM_REGISTRY",
@@ -2199,6 +2200,16 @@
     },
     {
       "authority": "ENUM_REGISTRY",
+      "domain": "TYPE_ORIGIN",
+      "semantic_type": "enum:type_origin"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
+      "domain": "TYPE_ROLE",
+      "semantic_type": "enum:type_role"
+    },
+    {
+      "authority": "ENUM_REGISTRY",
       "domain": "VALUE_KIND",
       "semantic_type": "enum:value_kind"
     },
@@ -2206,6 +2217,21 @@
       "authority": "ENUM_REGISTRY",
       "domain": "WORKSPACE_KIND",
       "semantic_type": "enum:workspace_kind"
+    },
+    {
+      "authority": "INTRINSIC",
+      "domain": null,
+      "semantic_type": "hash32"
+    },
+    {
+      "authority": "INTRINSIC",
+      "domain": null,
+      "semantic_type": "id16"
+    },
+    {
+      "authority": "TYPE_ALGEBRA",
+      "domain": "TYPE_CONSTRUCTOR",
+      "semantic_type": "identity:type-constructor"
     },
     {
       "authority": "ONTOLOGY_ENTITY_REGISTRY",
@@ -2310,7 +2336,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:73c8bb48ccd414224e25b4079ec0f6d64f778e01dfa863c049519edd2232cb47"
+    "source_digest": "b3:63bd5ccd9580028acac3cf4269ca72efa927e59db44be762b05c5b4e1d449069"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [
@@ -2448,6 +2474,22 @@
       "owner_column": "owner_id",
       "source_generation_column": "source_generation",
       "table_code": 170,
+      "workspace_column": "workspace_id"
+    },
+    {
+      "analysis_context_column": "analysis_context_id",
+      "analysis_context_set_column": null,
+      "owner_column": "owner_id",
+      "source_generation_column": "source_generation",
+      "table_code": 180,
+      "workspace_column": "workspace_id"
+    },
+    {
+      "analysis_context_column": "analysis_context_id",
+      "analysis_context_set_column": null,
+      "owner_column": "owner_id",
+      "source_generation_column": "source_generation",
+      "table_code": 190,
       "workspace_column": "workspace_id"
     },
     {
@@ -7167,6 +7209,491 @@
         "analysis_context_id",
         "parent_syntax_id",
         "ordinal"
+      ]
+    },
+    {
+      "columns": [
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_detail.workspace_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "primary",
+          "logical_type": "id16",
+          "name": "workspace_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_detail.analysis_context_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "primary",
+          "logical_type": "id16",
+          "name": "analysis_context_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "type_detail.source_generation",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "source_generation",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_detail.type_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "primary",
+          "logical_type": "id16",
+          "name": "type_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_detail.owner_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "owner_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "type_detail.owner_bucket",
+          "foreign_key": null,
+          "hidden_operational": true,
+          "key_role": "none",
+          "logical_type": "bucket16",
+          "name": "owner_bucket",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int32"
+          },
+          "field_id": "type_detail.type_kind_code",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "code32",
+          "name": "type_kind_code",
+          "nullable": false,
+          "semantic_type": "identity:type-constructor"
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "type_detail.canonical_key",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "canonical_key",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "type_detail.display_name",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "display_name",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "type_detail.primitive_code",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "code16",
+          "name": "primitive_code",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_detail.nominal_entity_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "nominal_entity_id",
+          "nullable": true,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_detail.callable_entity_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "callable_entity_id",
+          "nullable": true,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 32,
+            "name": "binary"
+          },
+          "field_id": "type_detail.raw_shape_hash",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "hash32",
+          "name": "raw_shape_hash",
+          "nullable": true,
+          "semantic_type": "hash32"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "type_detail.nullable_semantics_code",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "code16",
+          "name": "nullable_semantics_code",
+          "nullable": true,
+          "semantic_type": "enum:nullable_semantics"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "type_detail.flags",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "flags",
+          "nullable": false,
+          "semantic_type": null
+        }
+      ],
+      "dependencies": [
+        8,
+        100
+      ],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "family": "semantic-type",
+      "grain": "one canonical semantic type entity",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "name": "type_detail",
+      "overlay_mutation": "OWNER_REPLACE",
+      "partition_columns": [
+        "type_kind_code",
+        "owner_bucket"
+      ],
+      "primary_key": [
+        "workspace_id",
+        "analysis_context_id",
+        "type_id"
+      ],
+      "publication_pin_role": "PINNED_DATA",
+      "required_for_publication": true,
+      "row_encoder": "type_details",
+      "schema_version": "1.0",
+      "table_code": 180,
+      "table_id": "table:type_detail",
+      "zorder_columns": [
+        "workspace_id",
+        "analysis_context_id",
+        "type_id"
+      ]
+    },
+    {
+      "columns": [
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_fact_detail.workspace_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "workspace_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_fact_detail.analysis_context_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "analysis_context_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "type_fact_detail.source_generation",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "source_generation",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_fact_detail.relation_id",
+          "foreign_key": "relation.fact_id",
+          "hidden_operational": false,
+          "key_role": "primary",
+          "logical_type": "id16",
+          "name": "relation_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_fact_detail.owner_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "owner_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "type_fact_detail.owner_bucket",
+          "foreign_key": null,
+          "hidden_operational": true,
+          "key_role": "none",
+          "logical_type": "bucket16",
+          "name": "owner_bucket",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_fact_detail.subject_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "subject_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_fact_detail.type_id",
+          "foreign_key": "type_detail.type_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "type_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "type_fact_detail.type_role_code",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "code16",
+          "name": "type_role_code",
+          "nullable": false,
+          "semantic_type": "enum:type_role"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "type_fact_detail.program_point_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "program_point_id",
+          "nullable": true,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "type_fact_detail.origin_code",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "code16",
+          "name": "origin_code",
+          "nullable": false,
+          "semantic_type": "enum:type_origin"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "type_fact_detail.certainty_code",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "code16",
+          "name": "certainty_code",
+          "nullable": false,
+          "semantic_type": "enum:evidence_certainty"
+        }
+      ],
+      "dependencies": [
+        8,
+        100,
+        110,
+        180
+      ],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "family": "semantic-type",
+      "grain": "one subject and type attribution relation extension",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "name": "type_fact_detail",
+      "overlay_mutation": "OWNER_REPLACE",
+      "partition_columns": [
+        "owner_bucket"
+      ],
+      "primary_key": [
+        "relation_id"
+      ],
+      "publication_pin_role": "PINNED_DATA",
+      "required_for_publication": true,
+      "row_encoder": "type_fact_details",
+      "schema_version": "1.0",
+      "table_code": 190,
+      "table_id": "table:type_fact_detail",
+      "zorder_columns": [
+        "workspace_id",
+        "analysis_context_id",
+        "subject_id",
+        "type_role_code"
       ]
     },
     {

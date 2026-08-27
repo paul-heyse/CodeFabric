@@ -1,0 +1,75 @@
+{
+  "artifact_id": "codefabric.semantic-fragment.python",
+  "artifact_kind": "semantic-lane-fragment",
+  "version": "1.0",
+  "compatible_suite_major": 1,
+  "status": "accepted",
+  "canonical_digest": "b3:cb602875d81d1b6cb851d666b5c243640805ea963c24c847a614754ce5886b07",
+  "fragment_id": "SEMANTIC_PYTHON_V1",
+  "lane": "python",
+  "owner_packet": "WP01",
+  "model": {
+    "owned_table_codes": [],
+    "owned_observation_schema_ids": ["codefabric.pyrefly.module.v1"],
+    "table_additions": [],
+    "table_scope_additions": [],
+    "semantic_type_binding_additions": [],
+    "provider_observation_schema_additions": [
+      {
+        "schema_id": "codefabric.pyrefly.module.v1",
+        "provider_id": "pyrefly-python",
+        "observation_family_code": 110,
+        "fields": [
+          {"name": "module_id", "logical_type": "utf8", "nullable": false},
+          {"name": "module_name", "logical_type": "utf8", "nullable": false},
+          {"name": "type_table_json", "logical_type": "binary", "nullable": false},
+          {"name": "callees_json", "logical_type": "binary", "nullable": false},
+          {"name": "diagnostics_json", "logical_type": "binary", "nullable": false}
+        ]
+      }
+    ]
+  },
+  "registry": {
+    "property_codes": [],
+    "enum_values": [{"domain": "PROVIDER_OBSERVATION_FAMILY", "codes": [110]}],
+    "property_record_additions": [],
+    "enum_domain_additions": [
+      {
+        "domain": "PROVIDER_OBSERVATION_FAMILY",
+        "width_bits": 16,
+        "values": [
+          {
+            "code": 110,
+            "name": "PYREFLY_MODULE",
+            "slug": "pyrefly-module",
+            "meaning": "One Pyrefly module semantic observation row"
+          }
+        ]
+      }
+    ]
+  },
+  "ingest": [
+    {
+      "contract_id": "INGEST_PYREFLY_MODULE_V1",
+      "observation_schema_ids": ["codefabric.pyrefly.module.v1"],
+      "output_table_codes": [180, 190],
+      "required_fields": ["module_id", "module_name", "type_table_json", "callees_json", "diagnostics_json"]
+    }
+  ],
+  "contexts": [
+    {
+      "contract_id": "CONTEXT_PYTHON_MANIFEST_V1",
+      "context_kinds": ["python"],
+      "discovery_port": "crate::analysis_context::AnalysisContextDiscoveryPort",
+      "partition_keys": ["workspace_id", "analysis_context_id", "source_generation"]
+    }
+  ],
+  "invalidations": [
+    {
+      "contract_id": "INVALIDATE_PYTHON_MODULE_V1",
+      "trigger_kinds": ["python-source-change", "python-manifest-change"],
+      "invalidated_table_codes": [180, 190],
+      "scope": "module-owner-and-analysis-context"
+    }
+  ]
+}

@@ -24,6 +24,7 @@ pub(crate) mod registry_models;
 pub mod release_census;
 pub mod repository_model;
 pub mod schema_driver;
+pub mod semantic_fragment_driver;
 pub mod transaction;
 
 fn main() -> ExitCode {

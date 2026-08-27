@@ -322,7 +322,7 @@ impl PyreflySidecar for Service {
                         event: Some(Event::ObservationBatchChunk(ObservationBatchChunk {
                             header: Some(header(&start, &source_manifest, sequence)),
                             module_id: module.module_id.clone(),
-                            observation_family_code: crate::pyrefly_link::OBSERVATION_FAMILY_CODE,
+                            observation_family_code: crate::pyrefly_link::observation_family_code(),
                             arrow_ipc: analysis.arrow_ipc,
                             payload_reference: None,
                             schema_digest: analysis.schema_digest,
@@ -342,7 +342,7 @@ impl PyreflySidecar for Service {
                         event: Some(Event::ModuleEnd(ModuleEnd {
                             header: Some(header(&start, &source_manifest, sequence)),
                             module_id: module.module_id.clone(),
-                            family_counts: [(crate::pyrefly_link::OBSERVATION_FAMILY_CODE, 1)]
+                            family_counts: [(crate::pyrefly_link::observation_family_code(), 1)]
                                 .into_iter()
                                 .collect(),
                             module_digest: analysis.module_digest,

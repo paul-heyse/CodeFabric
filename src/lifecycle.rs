@@ -35,6 +35,7 @@ use crate::fabric::{
 use crate::fact_ingest::{CanonicalIngestOutput, FactScope};
 use crate::git_state::{GitCandidatePlan, GitStateVector};
 use crate::identity::PlatformCode;
+use crate::model_generated::semantic_lane_fragments::SEMANTIC_INVALIDATION_CONTRACTS;
 use crate::operational_store::{OperationalReader, OperationalStore, OperationalStoreError};
 use crate::provider_types::ProviderText;
 pub use crate::registries::FreshnessState;
@@ -1142,6 +1143,7 @@ pub struct InvalidationPlan {
     pub affected_owners: BTreeSet<[u8; 16]>,
     pub unknown_changed_owners: BTreeSet<[u8; 16]>,
     pub traversed_edges: Vec<DependencyEdge>,
+    pub invalidated_table_codes: BTreeSet<i16>,
     pub full_rebuild_required: bool,
 }
 
@@ -1296,6 +1298,14 @@ impl OperationalDependencyGraph {
             affected_owners: affected,
             unknown_changed_owners: unknown_changed_owners.clone(),
             traversed_edges,
+            invalidated_table_codes: (!changed.is_empty())
+                .then(|| {
+                    SEMANTIC_INVALIDATION_CONTRACTS
+                        .iter()
+                        .flat_map(|contract| contract.invalidated_table_codes.iter().copied())
+                        .collect()
+                })
+                .unwrap_or_default(),
             full_rebuild_required: !unknown_changed_owners.is_empty(),
         }
     }
@@ -2911,6 +2921,7 @@ mod tests {
             BTreeSet::from([[1; 16], [2; 16], [3; 16], [9; 16]])
         );
         assert_eq!(widened.traversed_edges.len(), 2);
+        assert_eq!(widened.invalidated_table_codes, BTreeSet::from([180, 190]));
     }
 
     #[test]
@@ -2952,6 +2963,7 @@ mod tests {
         let plan = graph.plan_invalidation(&BTreeSet::from([[1; 16]]));
         assert_eq!(plan.affected_owners, BTreeSet::from([[1; 16], [2; 16]]));
         assert!(!plan.full_rebuild_required);
+        assert_eq!(plan.invalidated_table_codes, BTreeSet::from([180, 190]));
     }
 
     #[test]

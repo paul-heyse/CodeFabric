@@ -132,6 +132,7 @@ pub struct MetadataAnnotationSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SemanticAuthority {
     EnumRegistry,
+    TypeAlgebra,
     OntologyEntityRegistry,
     OntologyRelationRegistry,
     OntologyPropertyRegistry,

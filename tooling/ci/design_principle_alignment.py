@@ -19,10 +19,17 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from codefabric_cpg_mcp.contracts.json import canonicalize_value, checksum
 
 ROOT = Path(__file__).resolve().parents[2]
 PRINCIPLE_REGISTRY = Path("contracts/registry/design-principle-registry.yaml")
 DETECTOR_REGISTRY = Path("contracts/registry/design-principle-detector-registry.yaml")
+TRANSFORMATION_PASS_REGISTRY = Path(
+    "contracts/registry/transformation-pass-registry.yaml"
+)
+TRANSFORMATION_PASS_TRACEABILITY = Path(
+    "contracts/generated/model/governance/transformation-pass-traceability.json"
+)
 BASELINE_REGISTRY = Path("contracts/governance/design-principle-baseline.yaml")
 ACTIVE_PLAN_POINTER = Path("docs/plans/active-plan.json")
 PRINCIPLE_IDS = {f"P{number}" for number in range(1, 26)}
@@ -36,6 +43,18 @@ DIRTY_DISPOSITIONS = {
     "planned_integration_preserve",
 }
 REVIEW_EXCLUSIONS = ("docs/reviews/**", "docs/library_ref/**", ".git/**", "target/**")
+REQUIRED_TRANSFORMATION_PASSES = {
+    "PASS_CANONICAL_TYPE_INTERNING_V1",
+    "PASS_RUFF_SEMANTIC_TRAVERSAL_V1",
+    "PASS_PYTHON_CFG_V1",
+    "PASS_PYTHON_DATAFLOW_V1",
+    "PASS_GLEAN_REPORT_DECODING_V1",
+    "PASS_RUST_CFG_V1",
+    "PASS_RUST_DATAFLOW_V1",
+    "PASS_PROVIDER_NORMALIZATION_V1",
+    "PASS_CANONICAL_RECONCILIATION_V1",
+    "PASS_SYNTAX_TREE_DERIVATION_V1",
+}
 
 
 class AlignmentContractError(ValueError):
@@ -96,6 +115,18 @@ def _active_plan(root: Path) -> tuple[Path, str]:
         raise AlignmentContractError(f"cannot resolve active plan: {error}") from error
 
 
+def _implementation_plan_corpus(root: Path) -> str:
+    plans = sorted((root / "docs/plans").glob("*implementation_plan*.md"))
+    if not plans:
+        raise AlignmentContractError("implementation plan corpus is empty")
+    try:
+        return "\n".join(plan.read_text(encoding="utf-8") for plan in plans)
+    except OSError as error:
+        raise AlignmentContractError(
+            f"cannot read implementation plan corpus: {error}"
+        ) from error
+
+
 def _just_recipes(root: Path) -> set[str]:
     completed = subprocess.run(
         ("just", "--dump", "--dump-format", "json"),
@@ -117,6 +148,8 @@ def validate_traceability(root: Path = ROOT) -> tuple[int, int]:
     _exact_ids(detector_records, "detector_id", DETECTOR_IDS)
     recipes = _just_recipes(root)
     plan_path, plan_text = _active_plan(root)
+    plan_corpus = _implementation_plan_corpus(root)
+    validate_transformation_passes(root, plan_path, plan_text)
 
     finding_owners: dict[str, set[str]] = {}
     for principle in principle_records:
@@ -197,9 +230,11 @@ def validate_traceability(root: Path = ROOT) -> tuple[int, int]:
                 raise AlignmentContractError(
                     f"{detector_id} has invalid packet {packet!r}"
                 )
-            if not re.search(rf"^### {re.escape(packet)}\s+—", plan_text, re.MULTILINE):
+            if not re.search(
+                rf"^### {re.escape(packet)}\s+—", plan_corpus, re.MULTILINE
+            ):
                 raise AlignmentContractError(
-                    f"{detector_id} packet {packet} is absent from active plan {plan_path}"
+                    f"{detector_id} packet {packet} is absent from the implementation plan corpus"
                 )
         expected_command = f"just alignment-detector-check {detector_id}"
         if command != expected_command:
@@ -215,6 +250,152 @@ def validate_traceability(root: Path = ROOT) -> tuple[int, int]:
             )
         _validate_probe(detector_id, detector.get("probe"))
     return len(principle_records), len(detector_records)
+
+
+def _detached_digest(value: Mapping[str, Any], field: str) -> str:
+    detached = dict(value)
+    detached.pop(field, None)
+    detached.pop("source_digest", None)
+    return checksum(canonicalize_value(detached))
+
+
+def _nonempty_string_list(
+    record: Mapping[str, Any], key: str, pass_id: str
+) -> list[str]:
+    value = record.get(key)
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise AlignmentContractError(f"{pass_id} {key} must be a nonempty string list")
+    return list(value)
+
+
+def validate_transformation_passes(
+    root: Path = ROOT,
+    plan_path: Path | None = None,
+    plan_text: str | None = None,
+) -> int:
+    """Validate namespaced pass contracts and their generated oracle traceability."""
+    document = _load_yaml(TRANSFORMATION_PASS_REGISTRY, root)
+    records = _records(document, TRANSFORMATION_PASS_REGISTRY)
+    pass_ids = [record.get("pass_id") for record in records]
+    if set(pass_ids) != REQUIRED_TRANSFORMATION_PASSES or len(pass_ids) != len(
+        set(pass_ids)
+    ):
+        raise AlignmentContractError(
+            "transformation pass census differs from the required semantic-profile substrate"
+        )
+    if document.get("canonical_digest") != _detached_digest(
+        document, "canonical_digest"
+    ):
+        raise AlignmentContractError("transformation pass registry digest is stale")
+    if plan_path is None or plan_text is None:
+        plan_path, plan_text = _active_plan(root)
+    projection_records: list[dict[str, Any]] = []
+    for record in records:
+        pass_id = str(record["pass_id"])
+        packet = record.get("owner_packet")
+        if not isinstance(packet, str) or not re.fullmatch(r"WP\d+", packet):
+            raise AlignmentContractError(f"{pass_id} has an invalid owner packet")
+        if not re.search(rf"^### {re.escape(packet)}\s+—", plan_text, re.MULTILINE):
+            raise AlignmentContractError(
+                f"{pass_id} packet {packet} is absent from active plan {plan_path}"
+            )
+        principles = _nonempty_string_list(record, "principles", pass_id)
+        if principles != ["H-P14", "H-P16"] or any(
+            re.fullmatch(r"P\d+", principle) for principle in principles
+        ):
+            raise AlignmentContractError(
+                f"{pass_id} principles must be namespaced H-P14/H-P16"
+            )
+        for key in (
+            "entry_invariants",
+            "exit_invariants",
+            "preserved_identities",
+            "generated_identities",
+            "invalidation_closure",
+            "diagnostics_failure_taxonomy",
+            "determinism_fingerprint_inputs",
+            "resource_telemetry_contract",
+            "behavioral_fixtures",
+            "negative_fixtures",
+            "incremental_fixtures",
+            "implementation_paths",
+        ):
+            _nonempty_string_list(record, key, pass_id)
+        for key, condition_key in (
+            ("inputs", "preconditions"),
+            ("outputs", "postconditions"),
+        ):
+            values = record.get(key)
+            if not isinstance(values, list) or not values:
+                raise AlignmentContractError(f"{pass_id} has no {key}")
+            for value in values:
+                if (
+                    not isinstance(value, Mapping)
+                    or not isinstance(value.get("artifact"), str)
+                    or not isinstance(value.get("schema"), str)
+                    or not isinstance(value.get(condition_key), list)
+                    or not value[condition_key]
+                ):
+                    raise AlignmentContractError(
+                        f"{pass_id} has an invalid {key} contract"
+                    )
+        oracles = _nonempty_string_list(record, "oracles", pass_id)
+        for oracle in oracles:
+            if f"Executable oracle: `{oracle}`" not in plan_text:
+                raise AlignmentContractError(
+                    f"{pass_id} oracle {oracle} is absent from active plan {plan_path}"
+                )
+        if record.get("contract_digest") != _detached_digest(record, "contract_digest"):
+            raise AlignmentContractError(f"{pass_id} contract digest is stale")
+        projection_records.append(
+            {
+                "pass_id": pass_id,
+                "owner_packet": packet,
+                "principles": principles,
+                "oracles": oracles,
+                "implementation_paths": record["implementation_paths"],
+                "contract_digest": record["contract_digest"],
+            }
+        )
+
+    derivations = _records(
+        _load_yaml(Path("contracts/registry/derivation-registry.yaml"), root),
+        Path("contracts/registry/derivation-registry.yaml"),
+    )
+    for derivation in derivations:
+        derivation_id = str(derivation.get("derivation_id"))
+        expected_pass = f"PASS_{derivation_id.removesuffix('_V1')}_DERIVATION_V1"
+        if expected_pass not in REQUIRED_TRANSFORMATION_PASSES:
+            raise AlignmentContractError(
+                f"materialized derivation {derivation_id} has no pass contract"
+            )
+
+    expected_projection = {
+        "artifact_id": "codefabric.generated.transformation-pass-traceability",
+        "artifact_kind": "generated-traceability",
+        "version": "1.0",
+        "schema_version": 1,
+        "source_artifact_id": document["artifact_id"],
+        "source_canonical_digest": document["canonical_digest"],
+        "records": projection_records,
+    }
+    try:
+        actual_projection = json.loads(
+            (root / TRANSFORMATION_PASS_TRACEABILITY).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as error:
+        raise AlignmentContractError(
+            f"cannot load generated transformation traceability: {error}"
+        ) from error
+    if actual_projection != expected_projection:
+        raise AlignmentContractError(
+            "generated transformation pass traceability is stale"
+        )
+    return len(records)
 
 
 def _validate_probe(detector_id: str, value: Any) -> None:

@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:73c8bb48ccd414224e25b4079ec0f6d64f778e01dfa863c049519edd2232cb47; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:63bd5ccd9580028acac3cf4269ca72efa927e59db44be762b05c5b4e1d449069; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -354,6 +354,63 @@ pub fn encode_syntax_details(rows: &[SyntaxDetailRow]) -> Result<RecordBatch, Fa
             bools(rows, |row| Some(row.missing)),
             bools(rows, |row| Some(row.explicitly_parenthesized)),
             i64s(rows, |row| Some(row.provider_node_flags)),
+        ],
+    )
+}
+
+/// Encode `type_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_type_details(rows: &[TypeDetailRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        180,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.type_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            i32s(rows, |row| Some(row.type_kind_code)),
+            utf8(rows, |row| Some(row.canonical_key.as_str())),
+            utf8(rows, |row| row.display_name.as_deref()),
+            i16s(rows, |row| row.primitive_code),
+            id16s(rows, |row| row.nominal_entity_id.as_ref()),
+            id16s(rows, |row| row.callable_entity_id.as_ref()),
+            binary(rows, |row| {
+                row.raw_shape_hash.as_ref().map(<[u8; 32]>::as_slice)
+            }),
+            i16s(rows, |row| row.nullable_semantics_code),
+            i64s(rows, |row| Some(row.flags)),
+        ],
+    )
+}
+
+/// Encode `type_fact_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_type_fact_details(
+    rows: &[TypeFactDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        190,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.relation_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.subject_id)),
+            id16s(rows, |row| Some(&row.type_id)),
+            i16s(rows, |row| Some(row.type_role_code)),
+            id16s(rows, |row| row.program_point_id.as_ref()),
+            i16s(rows, |row| Some(row.origin_code)),
+            i16s(rows, |row| Some(row.certainty_code)),
         ],
     )
 }

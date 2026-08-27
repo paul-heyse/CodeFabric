@@ -14,6 +14,9 @@ use tokio::net::UnixStream;
 use tonic::transport::Endpoint;
 use tower::service_fn;
 
+use crate::model_generated::schema_tables::{
+    PROVIDER_OBSERVATION_SCHEMAS, ProviderObservationLogicalType, ProviderObservationSchema,
+};
 use crate::rpc::generated::codefabric::provider::v1::{
     BlobReference, ProviderRunState, SourceSnapshotLease,
 };
@@ -25,9 +28,6 @@ use crate::rpc::generated::codefabric::pyrefly::v1::{
     OpenContextRequest,
 };
 
-const OBSERVATION_FAMILY_CODE: u32 = 110;
-const SCHEMA_DESCRIPTOR: &str =
-    include_str!("../contracts/schema/provider-observations/pyrefly-module-v1.json");
 const PYREFLY_SOURCE_DIGEST: &str =
     "b3:1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e";
 const SANDBOX_PROFILE_DIGEST: &str =
@@ -117,29 +117,52 @@ fn valid_digest(value: &str) -> bool {
         && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn schema_digest() -> String {
-    b3(SCHEMA_DESCRIPTOR.as_bytes())
+fn pyrefly_observation_contract() -> Result<&'static ProviderObservationSchema, PyreflyServiceError>
+{
+    PROVIDER_OBSERVATION_SCHEMAS
+        .iter()
+        .find(|schema| schema.provider_id == "pyrefly-python")
+        .ok_or_else(|| {
+            PyreflyServiceError::Protocol(
+                "generated Pyrefly observation schema is absent".to_owned(),
+            )
+        })
 }
 
-fn expected_schema() -> Schema {
+fn expected_schema(contract: &ProviderObservationSchema) -> Schema {
     Schema::new_with_metadata(
-        vec![
-            Field::new("module_id", DataType::Utf8, false),
-            Field::new("module_name", DataType::Utf8, false),
-            Field::new("type_table_json", DataType::Binary, false),
-            Field::new("callees_json", DataType::Binary, false),
-            Field::new("diagnostics_json", DataType::Binary, false),
-        ],
-        [("codefabric.schema".to_owned(), SCHEMA_DESCRIPTOR.to_owned())]
-            .into_iter()
-            .collect(),
+        contract
+            .fields
+            .iter()
+            .map(|field| {
+                let data_type = match field.logical_type {
+                    ProviderObservationLogicalType::Utf8 => DataType::Utf8,
+                    ProviderObservationLogicalType::Binary => DataType::Binary,
+                    ProviderObservationLogicalType::Boolean => DataType::Boolean,
+                    ProviderObservationLogicalType::UInt64 => DataType::UInt64,
+                    ProviderObservationLogicalType::Utf8List => DataType::List(
+                        std::sync::Arc::new(Field::new_list_field(DataType::Utf8, false)),
+                    ),
+                };
+                Field::new(field.name, data_type, field.nullable)
+            })
+            .collect::<Vec<_>>(),
+        [(
+            "codefabric.schema".to_owned(),
+            contract.canonical_descriptor.to_owned(),
+        )]
+        .into_iter()
+        .collect(),
     )
 }
 
-fn decode_batch(bytes: &[u8]) -> Result<RecordBatch, PyreflyServiceError> {
+fn decode_batch(
+    bytes: &[u8],
+    contract: &ProviderObservationSchema,
+) -> Result<RecordBatch, PyreflyServiceError> {
     let mut reader = FileReader::try_new(Cursor::new(bytes), None)
         .map_err(|error| PyreflyServiceError::Arrow(error.to_string()))?;
-    if reader.schema().as_ref() != &expected_schema() {
+    if reader.schema().as_ref() != &expected_schema(contract) {
         return Err(PyreflyServiceError::Arrow(
             "schema differs from the application-owned contract".to_owned(),
         ));
@@ -223,6 +246,9 @@ pub async fn analyze_pyrefly_uds(
             "run identity, modules, or digests are incomplete".to_owned(),
         ));
     }
+    let observation_contract = pyrefly_observation_contract()?;
+    let observation_family_code = u32::from(observation_contract.observation_family_code);
+    let observation_schema_digest = observation_contract.schema_digest.to_owned();
     let blobs = request
         .modules
         .iter()
@@ -256,7 +282,7 @@ pub async fn analyze_pyrefly_uds(
             optional_feature_bits: 0,
             daemon_build: "codefabricd 0.1.0".to_owned(),
             supported_python_versions: vec!["3.14".to_owned()],
-            observation_schema_digests: vec![schema_digest()],
+            observation_schema_digests: vec![observation_schema_digest.clone()],
             maximum_frame_bytes: 4 * 1024 * 1024,
             maximum_arrow_chunk_bytes: 64 * 1024 * 1024,
             sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
@@ -267,7 +293,7 @@ pub async fn analyze_pyrefly_uds(
     if acknowledgement.protocol_major != 1
         || acknowledgement.protocol_minor != 0
         || acknowledgement.pyrefly_source_digest != PYREFLY_SOURCE_DIGEST
-        || acknowledgement.observation_schema_digests != [schema_digest()]
+        || acknowledgement.observation_schema_digests != [observation_schema_digest.clone()]
         || acknowledgement.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
     {
         return Err(PyreflyServiceError::Protocol(
@@ -370,8 +396,8 @@ pub async fn analyze_pyrefly_uds(
                 if open_module.as_deref() != Some(event.module_id.as_str())
                     || pending.is_some()
                     || !header_matches(&header, request, sequence)
-                    || event.observation_family_code != OBSERVATION_FAMILY_CODE
-                    || event.schema_digest != schema_digest()
+                    || event.observation_family_code != observation_family_code
+                    || event.schema_digest != observation_schema_digest
                     || event.chunk_digest != b3(&event.arrow_ipc)
                     || event.row_count != 1
                 {
@@ -379,7 +405,7 @@ pub async fn analyze_pyrefly_uds(
                         "chunk identity, digest, schema, or count differs".to_owned(),
                     ));
                 }
-                let batch = decode_batch(&event.arrow_ipc)?;
+                let batch = decode_batch(&event.arrow_ipc, observation_contract)?;
                 let module_name = batch
                     .column_by_name("module_name")
                     .and_then(|array| array.as_any().downcast_ref::<StringArray>())
@@ -440,7 +466,7 @@ pub async fn analyze_pyrefly_uds(
                 })?;
                 if open_module.take().as_deref() != Some(event.module_id.as_str())
                     || module.module_id != event.module_id
-                    || event.family_counts.get(&OBSERVATION_FAMILY_CODE) != Some(&1)
+                    || event.family_counts.get(&observation_family_code) != Some(&1)
                     || !header_matches(&header, request, sequence)
                     || !valid_digest(&event.module_digest)
                 {

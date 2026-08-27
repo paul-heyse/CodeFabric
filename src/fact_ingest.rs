@@ -319,6 +319,35 @@ pub struct SyntaxDetailRow {
     pub provider_node_flags: i64,
 }
 
+/// One canonical semantic type entity derived from the application-owned type algebra.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypeDetailRow {
+    pub scope: FactScope,
+    pub type_id: [u8; 16],
+    pub type_kind_code: i32,
+    pub canonical_key: String,
+    pub display_name: Option<String>,
+    pub primitive_code: Option<i16>,
+    pub nominal_entity_id: Option<[u8; 16]>,
+    pub callable_entity_id: Option<[u8; 16]>,
+    pub raw_shape_hash: Option<[u8; 32]>,
+    pub nullable_semantics_code: Option<i16>,
+    pub flags: i64,
+}
+
+/// One canonical relation extension retaining the precise role and origin of a type fact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypeFactDetailRow {
+    pub scope: FactScope,
+    pub relation_id: [u8; 16],
+    pub subject_id: [u8; 16],
+    pub type_id: [u8; 16],
+    pub type_role_code: i16,
+    pub program_point_id: Option<[u8; 16]>,
+    pub origin_code: i16,
+    pub certainty_code: i16,
+}
+
 fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]>) -> ArrayRef {
     let mut builder = BinaryBuilder::with_capacity(rows.len(), rows.len().saturating_mul(16));
     for row in rows {
@@ -636,6 +665,9 @@ fn semantic_code_registered(
                 .and_then(enum_domain)
                 .is_some_and(|values| values.iter().any(|entry| entry.code == code))
         }),
+        SemanticAuthority::TypeAlgebra => {
+            binding.domain == Some("TYPE_CONSTRUCTOR") && (1..=35).contains(&code)
+        }
         SemanticAuthority::OntologyEntityRegistry => match binding.domain {
             Some("ENTITY_KIND") => i32::try_from(code).is_ok_and(|code| {
                 crate::registries::ENTITY_KIND_CODES
@@ -2412,6 +2444,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn common_semantic_type_rows_encode_against_generated_tables() {
+        let type_row = TypeDetailRow {
+            scope: scope(),
+            type_id: [0x41; 16],
+            type_kind_code: crate::identity::TypeConstructor::Primitive.code(),
+            canonical_key: "cbef-type-v1:fixture".to_owned(),
+            display_name: Some("int".to_owned()),
+            primitive_code: Some(10),
+            nominal_entity_id: None,
+            callable_entity_id: None,
+            raw_shape_hash: Some([0x42; 32]),
+            nullable_semantics_code: Some(10),
+            flags: 0,
+        };
+        let type_batch = encode_type_details(&[type_row]).expect("type detail encodes");
+        validate_fact_batch(&type_batch, 180, scope()).expect("type detail validates");
+
+        let fact_row = TypeFactDetailRow {
+            scope: scope(),
+            relation_id: [0x43; 16],
+            subject_id: [0x44; 16],
+            type_id: [0x41; 16],
+            type_role_code: 10,
+            program_point_id: Some([0x45; 16]),
+            origin_code: 10,
+            certainty_code: 30,
+        };
+        let fact_batch = encode_type_fact_details(&[fact_row]).expect("type fact detail encodes");
+        validate_fact_batch(&fact_batch, 190, scope()).expect("type fact detail validates");
+
+        assert_eq!(type_batch.schema().field(6).name(), "type_kind_code");
+        assert_eq!(fact_batch.schema().field(8).name(), "type_role_code");
     }
 
     #[tokio::test]

@@ -7,6 +7,9 @@ use crate::identity::{
     CbefField, CbefRecord, CbefValue, IdentityDomain, IdentityError, SOURCE_CONTEXT_ID,
     StringNormalization, decode_public_id, derive_identity, encode_public_id,
 };
+use crate::model_generated::semantic_lane_fragments::{
+    SEMANTIC_CONTEXT_CONTRACTS, SemanticContextContract, SemanticLane,
+};
 
 /// Closed analysis context kinds accepted by the public contract.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -41,6 +44,40 @@ pub struct AnalysisContext {
     pub active: bool,
 }
 
+/// Lane-neutral input supplied to a language-specific context-discovery adapter.
+///
+/// Source paths remain raw bytes. Discovery adapters may inspect only this immutable,
+/// generation-pinned inventory and must return application-owned candidates.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnalysisContextDiscoveryRequest {
+    pub workspace_id: String,
+    pub source_generation: u64,
+    pub source_paths: Vec<Vec<u8>>,
+}
+
+/// Application-owned candidate emitted by a language-specific discovery adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnalysisContextCandidate {
+    pub context_kind: AnalysisContextKind,
+    pub provider_bundle_version: String,
+    pub compiler_or_language_version: String,
+    pub configuration_manifest_uri: Option<String>,
+    pub active: bool,
+}
+
+/// Shared discovery port implemented independently by the Python and Rust lanes.
+///
+/// Provider-library values cannot cross this boundary: implementations return the closed
+/// [`AnalysisContextCandidate`] DTO and the application derives every canonical identity.
+pub trait AnalysisContextDiscoveryPort {
+    type Error;
+
+    fn discover(
+        &self,
+        request: &AnalysisContextDiscoveryRequest,
+    ) -> Result<Vec<AnalysisContextCandidate>, Self::Error>;
+}
+
 /// Analysis-context validation and identity failures.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum AnalysisContextError {
@@ -54,6 +91,76 @@ pub enum AnalysisContextError {
     IdentityMismatch,
     #[error("context:source is reserved for the source context")]
     SourceContextMismatch,
+    #[error("semantic context discovery cannot emit the reserved source context")]
+    DiscoveredSourceContext,
+    #[error("semantic context discovery emitted a duplicate canonical context")]
+    DuplicateDiscoveredContext,
+    #[error("semantic context kind {0} has no shared and lane-specific generated contract")]
+    UnregisteredSemanticContextKind(String),
+}
+
+/// Materialize and deterministically order application-owned discovery candidates.
+///
+/// # Errors
+///
+/// Rejects source-context candidates, invalid candidate fields, or duplicate canonical
+/// contexts. Language adapters therefore cannot choose or bypass canonical context identity.
+pub fn materialize_discovered_contexts(
+    request: &AnalysisContextDiscoveryRequest,
+    candidates: Vec<AnalysisContextCandidate>,
+) -> Result<Vec<AnalysisContext>, AnalysisContextError> {
+    let mut contexts = candidates
+        .into_iter()
+        .map(|candidate| {
+            if candidate.context_kind == AnalysisContextKind::Source {
+                return Err(AnalysisContextError::DiscoveredSourceContext);
+            }
+            validate_semantic_context_contracts(
+                SEMANTIC_CONTEXT_CONTRACTS,
+                candidate.context_kind,
+            )?;
+            AnalysisContext::new(
+                &request.workspace_id,
+                candidate.context_kind,
+                candidate.provider_bundle_version,
+                candidate.compiler_or_language_version,
+                candidate.configuration_manifest_uri,
+                candidate.active,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    contexts.sort_by(|left, right| left.analysis_context_id.cmp(&right.analysis_context_id));
+    if contexts
+        .windows(2)
+        .any(|pair| pair[0].analysis_context_id == pair[1].analysis_context_id)
+    {
+        return Err(AnalysisContextError::DuplicateDiscoveredContext);
+    }
+    Ok(contexts)
+}
+
+fn validate_semantic_context_contracts(
+    contracts: &[SemanticContextContract],
+    context_kind: AnalysisContextKind,
+) -> Result<(), AnalysisContextError> {
+    let name = context_kind.canonical_name();
+    let shared = contracts.iter().any(|contract| {
+        contract.lane == SemanticLane::Shared && contract.context_kinds.contains(&name)
+    });
+    let lane = contracts.iter().any(|contract| {
+        matches!(
+            (context_kind, contract.lane),
+            (AnalysisContextKind::Python, SemanticLane::Python)
+                | (AnalysisContextKind::Rust, SemanticLane::Rust)
+        ) && contract.context_kinds.contains(&name)
+    });
+    if shared && lane {
+        Ok(())
+    } else {
+        Err(AnalysisContextError::UnregisteredSemanticContextKind(
+            name.to_owned(),
+        ))
+    }
 }
 
 impl AnalysisContext {
@@ -342,5 +449,101 @@ mod tests {
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(schema_fields, model_fields);
+    }
+
+    #[test]
+    fn lane_neutral_discovery_materializes_only_application_owned_contexts() {
+        struct FixtureDiscovery;
+
+        impl AnalysisContextDiscoveryPort for FixtureDiscovery {
+            type Error = std::convert::Infallible;
+
+            fn discover(
+                &self,
+                _request: &AnalysisContextDiscoveryRequest,
+            ) -> Result<Vec<AnalysisContextCandidate>, Self::Error> {
+                Ok(vec![
+                    AnalysisContextCandidate {
+                        context_kind: AnalysisContextKind::Rust,
+                        provider_bundle_version: "rustc-provider-1".to_owned(),
+                        compiler_or_language_version: "1.95.0".to_owned(),
+                        configuration_manifest_uri: Some("contexts/rust.json".to_owned()),
+                        active: true,
+                    },
+                    AnalysisContextCandidate {
+                        context_kind: AnalysisContextKind::Python,
+                        provider_bundle_version: "pyrefly-provider-1".to_owned(),
+                        compiler_or_language_version: "3.14.7".to_owned(),
+                        configuration_manifest_uri: Some("contexts/python.json".to_owned()),
+                        active: true,
+                    },
+                ])
+            }
+        }
+
+        let request = AnalysisContextDiscoveryRequest {
+            workspace_id: workspace_id(),
+            source_generation: 7,
+            source_paths: vec![b"src/lib.rs".to_vec(), b"src/app.py".to_vec()],
+        };
+        let candidates = FixtureDiscovery.discover(&request).unwrap();
+        let first = materialize_discovered_contexts(&request, candidates.clone()).unwrap();
+        let second = materialize_discovered_contexts(&request, candidates).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 2);
+        assert!(first.iter().all(|context| context.validate().is_ok()));
+        assert!(first.windows(2).all(|pair| {
+            pair[0].analysis_context_id.as_bytes() < pair[1].analysis_context_id.as_bytes()
+        }));
+    }
+
+    #[test]
+    fn semantic_context_materialization_requires_generated_lane_authority() {
+        assert_eq!(
+            validate_semantic_context_contracts(&[], AnalysisContextKind::Python),
+            Err(AnalysisContextError::UnregisteredSemanticContextKind(
+                "python".to_owned()
+            ))
+        );
+        validate_semantic_context_contracts(
+            SEMANTIC_CONTEXT_CONTRACTS,
+            AnalysisContextKind::Python,
+        )
+        .unwrap();
+        validate_semantic_context_contracts(SEMANTIC_CONTEXT_CONTRACTS, AnalysisContextKind::Rust)
+            .unwrap();
+    }
+
+    #[test]
+    fn semantic_context_discovery_rejects_source_and_duplicate_candidates() {
+        let request = AnalysisContextDiscoveryRequest {
+            workspace_id: workspace_id(),
+            source_generation: 1,
+            source_paths: Vec::new(),
+        };
+        let semantic = AnalysisContextCandidate {
+            context_kind: AnalysisContextKind::Python,
+            provider_bundle_version: "providers-1".to_owned(),
+            compiler_or_language_version: "3.14.7".to_owned(),
+            configuration_manifest_uri: None,
+            active: true,
+        };
+        assert_eq!(
+            materialize_discovered_contexts(&request, vec![semantic.clone(), semantic]),
+            Err(AnalysisContextError::DuplicateDiscoveredContext)
+        );
+        assert_eq!(
+            materialize_discovered_contexts(
+                &request,
+                vec![AnalysisContextCandidate {
+                    context_kind: AnalysisContextKind::Source,
+                    provider_bundle_version: "source".to_owned(),
+                    compiler_or_language_version: "source".to_owned(),
+                    configuration_manifest_uri: None,
+                    active: true,
+                }]
+            ),
+            Err(AnalysisContextError::DiscoveredSourceContext)
+        );
     }
 }

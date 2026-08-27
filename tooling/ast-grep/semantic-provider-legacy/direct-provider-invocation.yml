@@ -1,0 +1,8 @@
+id: semantic-provider-legacy-direct-provider-invocation
+language: Rust
+severity: warning
+message: reviewed transitional provider invocation outside the ProviderRuntime authority
+rule:
+  all:
+    - kind: call_expression
+    - regex: '\b(run_pyrefly|run_rustc)\s*\('

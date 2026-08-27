@@ -7,3 +7,5 @@ pub(crate) mod identity_recipes;
 pub(crate) mod query_forms;
 #[path = "model_schema_tables.rs"]
 pub(crate) mod schema_tables;
+#[path = "model_semantic_lane_fragments.rs"]
+pub(crate) mod semantic_lane_fragments;

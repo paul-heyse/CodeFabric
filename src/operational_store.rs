@@ -16,6 +16,9 @@ use thiserror::Error;
 
 use crate::contracts::index::model_artifact_index;
 use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
+use crate::model_generated::semantic_lane_fragments::{
+    SEMANTIC_INGEST_CONTRACTS, SEMANTIC_INVALIDATION_CONTRACTS,
+};
 use crate::snapshot::ServingSnapshotManifest;
 
 const SCHEMA_VERSION: u32 = 10;
@@ -1262,6 +1265,7 @@ pub fn operational_ddl_digest() -> String {
 }
 
 fn verify_ddl_lineage() -> Result<(), OperationalStoreError> {
+    verify_semantic_fragment_table_contracts()?;
     let index = model_artifact_index().map_err(|error| {
         OperationalStoreError::DdlLineage(format!("artifact index unavailable: {error}"))
     })?;
@@ -1277,6 +1281,38 @@ fn verify_ddl_lineage() -> Result<(), OperationalStoreError> {
         return Err(OperationalStoreError::DdlLineage(
             "DDL header does not bind the packaged schema-IR identity".into(),
         ));
+    }
+    Ok(())
+}
+
+fn verify_semantic_fragment_table_contracts() -> Result<(), OperationalStoreError> {
+    validate_semantic_table_codes(
+        SEMANTIC_INGEST_CONTRACTS
+            .iter()
+            .flat_map(|contract| contract.output_table_codes.iter().copied())
+            .chain(
+                SEMANTIC_INVALIDATION_CONTRACTS
+                    .iter()
+                    .flat_map(|contract| contract.invalidated_table_codes.iter().copied()),
+            ),
+    )
+}
+
+fn validate_semantic_table_codes(
+    table_codes: impl IntoIterator<Item = i16>,
+) -> Result<(), OperationalStoreError> {
+    for table_code in table_codes {
+        let Some(table) = crate::schema_registry::table_spec(table_code) else {
+            return Err(OperationalStoreError::DdlLineage(format!(
+                "semantic fragment targets absent table {table_code}"
+            )));
+        };
+        if crate::schema_registry::table_scope_spec(table_code).is_none() {
+            return Err(OperationalStoreError::DdlLineage(format!(
+                "semantic fragment table {} ({table_code}) has no generated owner scope",
+                table.name
+            )));
+        }
     }
     Ok(())
 }
@@ -1459,6 +1495,13 @@ mod tests {
             assert!(spec.sqlite_ddl.ends_with(") STRICT;\n"));
             assert_eq!(shapes[spec.name].len(), spec.arrow_schema.fields().len());
         }
+    }
+
+    #[test]
+    fn semantic_fragment_tables_are_schema_registered_and_scoped() {
+        verify_semantic_fragment_table_contracts().unwrap();
+        let error = validate_semantic_table_codes([i16::MAX]).unwrap_err();
+        assert!(error.to_string().contains("targets absent table"));
     }
 
     #[test]

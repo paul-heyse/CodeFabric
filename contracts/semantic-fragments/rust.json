@@ -1,0 +1,49 @@
+{
+  "artifact_id": "codefabric.semantic-fragment.rust",
+  "artifact_kind": "semantic-lane-fragment",
+  "version": "1.0",
+  "compatible_suite_major": 1,
+  "status": "accepted",
+  "canonical_digest": "b3:22056b1ab97fa275036659a4fbf2251adec0d4d372660ea88d596938e8248ba3",
+  "fragment_id": "SEMANTIC_RUST_V1",
+  "lane": "rust",
+  "owner_packet": "WP01",
+  "model": {
+    "owned_table_codes": [],
+    "owned_observation_schema_ids": ["codefabric.rustc.owned-mir.v1"],
+    "table_additions": [],
+    "table_scope_additions": [],
+    "semantic_type_binding_additions": [],
+    "provider_observation_schema_additions": []
+  },
+  "registry": {
+    "property_codes": [],
+    "enum_values": [{"domain": "PROVIDER_OBSERVATION_FAMILY", "codes": [120]}],
+    "property_record_additions": [],
+    "enum_domain_additions": []
+  },
+  "ingest": [
+    {
+      "contract_id": "INGEST_RUSTC_MIR_OWNER_V1",
+      "observation_schema_ids": ["codefabric.rustc.owned-mir.v1"],
+      "output_table_codes": [180, 190],
+      "required_fields": ["name", "item_kind", "statement_kinds", "terminator_kinds"]
+    }
+  ],
+  "contexts": [
+    {
+      "contract_id": "CONTEXT_RUST_BUILD_UNIT_V1",
+      "context_kinds": ["rust"],
+      "discovery_port": "crate::analysis_context::AnalysisContextDiscoveryPort",
+      "partition_keys": ["workspace_id", "analysis_context_id", "source_generation"]
+    }
+  ],
+  "invalidations": [
+    {
+      "contract_id": "INVALIDATE_RUST_CRATE_V1",
+      "trigger_kinds": ["rust-source-change", "rust-build-manifest-change"],
+      "invalidated_table_codes": [180, 190],
+      "scope": "crate-owner-and-analysis-context"
+    }
+  ]
+}

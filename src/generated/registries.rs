@@ -160,195 +160,93 @@ impl RustcFeatureMask {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum EvidenceCertainty {
-    SourceExact = 10,
-    CompilerExact = 20,
-    StaticSemantic = 30,
-    SoundMay = 40,
-    Modelled = 50,
-    Heuristic = 60,
-    Unresolved = 70,
+pub enum AnalysisContextKind {
+    Source = 10,
+    Python = 20,
+    Rust = 30,
 }
-impl TryFrom<u16> for EvidenceCertainty {
+impl TryFrom<u16> for AnalysisContextKind {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
-            10 => Ok(Self::SourceExact),
-            20 => Ok(Self::CompilerExact),
-            30 => Ok(Self::StaticSemantic),
-            40 => Ok(Self::SoundMay),
-            50 => Ok(Self::Modelled),
-            60 => Ok(Self::Heuristic),
-            70 => Ok(Self::Unresolved),
+            10 => Ok(Self::Source),
+            20 => Ok(Self::Python),
+            30 => Ok(Self::Rust),
             _ => Err(UnknownRegistryCode {
-                domain: "EVIDENCE_CERTAINTY",
+                domain: "ANALYSIS_CONTEXT_KIND",
                 code,
             }),
         }
     }
 }
-pub const EVIDENCE_CERTAINTY_VALUES: &[RegistryEntry] = &[
+pub const ANALYSIS_CONTEXT_KIND_VALUES: &[RegistryEntry] = &[
     RegistryEntry {
         code: 10,
-        name: "SOURCE_EXACT",
-        slug: "source-exact",
+        name: "SOURCE",
+        slug: "source",
     },
     RegistryEntry {
         code: 20,
-        name: "COMPILER_EXACT",
-        slug: "compiler-exact",
+        name: "PYTHON",
+        slug: "python",
     },
     RegistryEntry {
         code: 30,
-        name: "STATIC_SEMANTIC",
-        slug: "static-semantic",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "SOUND_MAY",
-        slug: "sound-may",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "MODELLED",
-        slug: "modelled",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "HEURISTIC",
-        slug: "heuristic",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "UNRESOLVED",
-        slug: "unresolved",
+        name: "RUST",
+        slug: "rust",
     },
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum ResolutionClass {
-    Exact = 10,
-    StaticallyResolved = 20,
-    SoundPossible = 30,
-    Possible = 40,
-    Modelled = 50,
-    Heuristic = 60,
-    Unresolved = 70,
-    Unavailable = 80,
-    NotApplicable = 90,
+pub enum AnnotationKind {
+    Comment = 10,
+    Documentation = 20,
+    PragmaOrDirective = 30,
+    ParseError = 40,
+    MissingSyntax = 50,
 }
-impl TryFrom<u16> for ResolutionClass {
+impl TryFrom<u16> for AnnotationKind {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
-            10 => Ok(Self::Exact),
-            20 => Ok(Self::StaticallyResolved),
-            30 => Ok(Self::SoundPossible),
-            40 => Ok(Self::Possible),
-            50 => Ok(Self::Modelled),
-            60 => Ok(Self::Heuristic),
-            70 => Ok(Self::Unresolved),
-            80 => Ok(Self::Unavailable),
-            90 => Ok(Self::NotApplicable),
+            10 => Ok(Self::Comment),
+            20 => Ok(Self::Documentation),
+            30 => Ok(Self::PragmaOrDirective),
+            40 => Ok(Self::ParseError),
+            50 => Ok(Self::MissingSyntax),
             _ => Err(UnknownRegistryCode {
-                domain: "RESOLUTION_CLASS",
+                domain: "ANNOTATION_KIND",
                 code,
             }),
         }
     }
 }
-pub const RESOLUTION_CLASS_VALUES: &[RegistryEntry] = &[
+pub const ANNOTATION_KIND_VALUES: &[RegistryEntry] = &[
     RegistryEntry {
         code: 10,
-        name: "EXACT",
-        slug: "exact",
+        name: "COMMENT",
+        slug: "comment",
     },
     RegistryEntry {
         code: 20,
-        name: "STATICALLY_RESOLVED",
-        slug: "statically-resolved",
+        name: "DOCUMENTATION",
+        slug: "documentation",
     },
     RegistryEntry {
         code: 30,
-        name: "SOUND_POSSIBLE",
-        slug: "sound-possible",
+        name: "PRAGMA_OR_DIRECTIVE",
+        slug: "pragma-or-directive",
     },
     RegistryEntry {
         code: 40,
-        name: "POSSIBLE",
-        slug: "possible",
+        name: "PARSE_ERROR",
+        slug: "parse-error",
     },
     RegistryEntry {
         code: 50,
-        name: "MODELLED",
-        slug: "modelled",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "HEURISTIC",
-        slug: "heuristic",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "UNRESOLVED",
-        slug: "unresolved",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "UNAVAILABLE",
-        slug: "unavailable",
-    },
-    RegistryEntry {
-        code: 90,
-        name: "NOT_APPLICABLE",
-        slug: "not-applicable",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum Directness {
-    Direct = 10,
-    Transitive = 20,
-    Summary = 30,
-    NotApplicable = 40,
-}
-impl TryFrom<u16> for Directness {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Direct),
-            20 => Ok(Self::Transitive),
-            30 => Ok(Self::Summary),
-            40 => Ok(Self::NotApplicable),
-            _ => Err(UnknownRegistryCode {
-                domain: "DIRECTNESS",
-                code,
-            }),
-        }
-    }
-}
-pub const DIRECTNESS_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "DIRECT",
-        slug: "direct",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "TRANSITIVE",
-        slug: "transitive",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SUMMARY",
-        slug: "summary",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "NOT_APPLICABLE",
-        slug: "not-applicable",
+        name: "MISSING_SYNTAX",
+        slug: "missing-syntax",
     },
 ];
 
@@ -400,397 +298,6 @@ pub const COMPLETENESS_VALUES: &[RegistryEntry] = &[
     },
     RegistryEntry {
         code: 50,
-        name: "NOT_APPLICABLE",
-        slug: "not-applicable",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum OwnerCapabilityState {
-    Current = 10,
-    Pending = 20,
-    Invalidated = 30,
-    Partial = 40,
-    UnavailableParse = 50,
-    UnavailableCompile = 60,
-    UnavailableProvider = 70,
-    UnavailableDerivation = 80,
-    Excluded = 90,
-    Unsupported = 100,
-    Removed = 110,
-    NotApplicable = 120,
-}
-impl TryFrom<u16> for OwnerCapabilityState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Current),
-            20 => Ok(Self::Pending),
-            30 => Ok(Self::Invalidated),
-            40 => Ok(Self::Partial),
-            50 => Ok(Self::UnavailableParse),
-            60 => Ok(Self::UnavailableCompile),
-            70 => Ok(Self::UnavailableProvider),
-            80 => Ok(Self::UnavailableDerivation),
-            90 => Ok(Self::Excluded),
-            100 => Ok(Self::Unsupported),
-            110 => Ok(Self::Removed),
-            120 => Ok(Self::NotApplicable),
-            _ => Err(UnknownRegistryCode {
-                domain: "OWNER_CAPABILITY_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const OWNER_CAPABILITY_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "CURRENT",
-        slug: "current",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "PENDING",
-        slug: "pending",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "INVALIDATED",
-        slug: "invalidated",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "PARTIAL",
-        slug: "partial",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "UNAVAILABLE_PARSE",
-        slug: "unavailable-parse",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "UNAVAILABLE_COMPILE",
-        slug: "unavailable-compile",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "UNAVAILABLE_PROVIDER",
-        slug: "unavailable-provider",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "UNAVAILABLE_DERIVATION",
-        slug: "unavailable-derivation",
-    },
-    RegistryEntry {
-        code: 90,
-        name: "EXCLUDED",
-        slug: "excluded",
-    },
-    RegistryEntry {
-        code: 100,
-        name: "UNSUPPORTED",
-        slug: "unsupported",
-    },
-    RegistryEntry {
-        code: 110,
-        name: "REMOVED",
-        slug: "removed",
-    },
-    RegistryEntry {
-        code: 120,
-        name: "NOT_APPLICABLE",
-        slug: "not-applicable",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum ProviderRunState {
-    Queued = 10,
-    Running = 20,
-    Succeeded = 30,
-    Partial = 40,
-    Failed = 50,
-    TimedOut = 60,
-    Cancelled = 70,
-    Superseded = 80,
-    Crashed = 90,
-    ProtocolError = 100,
-    StaleResult = 110,
-    StaleGitBaseline = 120,
-}
-impl TryFrom<u16> for ProviderRunState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Queued),
-            20 => Ok(Self::Running),
-            30 => Ok(Self::Succeeded),
-            40 => Ok(Self::Partial),
-            50 => Ok(Self::Failed),
-            60 => Ok(Self::TimedOut),
-            70 => Ok(Self::Cancelled),
-            80 => Ok(Self::Superseded),
-            90 => Ok(Self::Crashed),
-            100 => Ok(Self::ProtocolError),
-            110 => Ok(Self::StaleResult),
-            120 => Ok(Self::StaleGitBaseline),
-            _ => Err(UnknownRegistryCode {
-                domain: "PROVIDER_RUN_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const PROVIDER_RUN_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "QUEUED",
-        slug: "queued",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "RUNNING",
-        slug: "running",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SUCCEEDED",
-        slug: "succeeded",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "PARTIAL",
-        slug: "partial",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "FAILED",
-        slug: "failed",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "TIMED_OUT",
-        slug: "timed-out",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "CANCELLED",
-        slug: "cancelled",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "SUPERSEDED",
-        slug: "superseded",
-    },
-    RegistryEntry {
-        code: 90,
-        name: "CRASHED",
-        slug: "crashed",
-    },
-    RegistryEntry {
-        code: 100,
-        name: "PROTOCOL_ERROR",
-        slug: "protocol-error",
-    },
-    RegistryEntry {
-        code: 110,
-        name: "STALE_RESULT",
-        slug: "stale-result",
-    },
-    RegistryEntry {
-        code: 120,
-        name: "STALE_GIT_BASELINE",
-        slug: "stale-git-baseline",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum QueryExecutionState {
-    Accepted = 10,
-    Running = 20,
-    Complete = 30,
-    Failed = 40,
-    Cancelled = 50,
-    DeadlineExceeded = 60,
-    NotExecutedDependency = 70,
-}
-impl TryFrom<u16> for QueryExecutionState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Accepted),
-            20 => Ok(Self::Running),
-            30 => Ok(Self::Complete),
-            40 => Ok(Self::Failed),
-            50 => Ok(Self::Cancelled),
-            60 => Ok(Self::DeadlineExceeded),
-            70 => Ok(Self::NotExecutedDependency),
-            _ => Err(UnknownRegistryCode {
-                domain: "QUERY_EXECUTION_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const QUERY_EXECUTION_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "ACCEPTED",
-        slug: "accepted",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "RUNNING",
-        slug: "running",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "COMPLETE",
-        slug: "complete",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "FAILED",
-        slug: "failed",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "CANCELLED",
-        slug: "cancelled",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "DEADLINE_EXCEEDED",
-        slug: "deadline-exceeded",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "NOT_EXECUTED_DEPENDENCY",
-        slug: "not-executed-dependency",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum QueryForm {
-    FindEntities = 10,
-    RetrieveFacts = 20,
-    FollowRelationships = 30,
-    FindPaths = 40,
-    MatchPattern = 50,
-    CombineResults = 60,
-    SummarizeFacts = 70,
-    RetrieveSourceContext = 80,
-}
-impl TryFrom<u16> for QueryForm {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::FindEntities),
-            20 => Ok(Self::RetrieveFacts),
-            30 => Ok(Self::FollowRelationships),
-            40 => Ok(Self::FindPaths),
-            50 => Ok(Self::MatchPattern),
-            60 => Ok(Self::CombineResults),
-            70 => Ok(Self::SummarizeFacts),
-            80 => Ok(Self::RetrieveSourceContext),
-            _ => Err(UnknownRegistryCode {
-                domain: "QUERY_FORM",
-                code,
-            }),
-        }
-    }
-}
-pub const QUERY_FORM_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "FIND_ENTITIES",
-        slug: "find code entities",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "RETRIEVE_FACTS",
-        slug: "retrieve facts about code",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "FOLLOW_RELATIONSHIPS",
-        slug: "follow code relationships",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "FIND_PATHS",
-        slug: "find connecting fact paths",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "MATCH_PATTERN",
-        slug: "match a code fact pattern",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "COMBINE_RESULTS",
-        slug: "combine result sets",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "SUMMARIZE_FACTS",
-        slug: "summarize objective facts",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "RETRIEVE_SOURCE_CONTEXT",
-        slug: "retrieve source and syntax context",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum QueryAvailabilityState {
-    Available = 10,
-    Partial = 20,
-    Unavailable = 30,
-    NotApplicable = 40,
-}
-impl TryFrom<u16> for QueryAvailabilityState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Available),
-            20 => Ok(Self::Partial),
-            30 => Ok(Self::Unavailable),
-            40 => Ok(Self::NotApplicable),
-            _ => Err(UnknownRegistryCode {
-                domain: "QUERY_AVAILABILITY_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const QUERY_AVAILABILITY_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "AVAILABLE",
-        slug: "available",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "PARTIAL",
-        slug: "partial",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "UNAVAILABLE",
-        slug: "unavailable",
-    },
-    RegistryEntry {
-        code: 40,
         name: "NOT_APPLICABLE",
         slug: "not-applicable",
     },
@@ -851,84 +358,6 @@ pub const COMPLETENESS_STATE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum FreshnessState {
-    Current = 10,
-    PotentiallyStale = 20,
-    Unavailable = 30,
-}
-impl TryFrom<u16> for FreshnessState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Current),
-            20 => Ok(Self::PotentiallyStale),
-            30 => Ok(Self::Unavailable),
-            _ => Err(UnknownRegistryCode {
-                domain: "FRESHNESS_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const FRESHNESS_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "CURRENT",
-        slug: "current",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "POTENTIALLY_STALE",
-        slug: "potentially-stale",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "UNAVAILABLE",
-        slug: "unavailable",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum LimitState {
-    NotApplied = 10,
-    ExplicitLimitReached = 20,
-    HardLimitRejected = 30,
-}
-impl TryFrom<u16> for LimitState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::NotApplied),
-            20 => Ok(Self::ExplicitLimitReached),
-            30 => Ok(Self::HardLimitRejected),
-            _ => Err(UnknownRegistryCode {
-                domain: "LIMIT_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const LIMIT_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "NOT_APPLIED",
-        slug: "not-applied",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "EXPLICIT_LIMIT_REACHED",
-        slug: "explicit-limit-reached",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "HARD_LIMIT_REJECTED",
-        slug: "hard-limit-rejected",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
 pub enum DependencyState {
     Ready = 10,
     FailedDependency = 20,
@@ -961,6 +390,52 @@ pub const DEPENDENCY_STATE_VALUES: &[RegistryEntry] = &[
     },
     RegistryEntry {
         code: 30,
+        name: "NOT_APPLICABLE",
+        slug: "not-applicable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum Directness {
+    Direct = 10,
+    Transitive = 20,
+    Summary = 30,
+    NotApplicable = 40,
+}
+impl TryFrom<u16> for Directness {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Direct),
+            20 => Ok(Self::Transitive),
+            30 => Ok(Self::Summary),
+            40 => Ok(Self::NotApplicable),
+            _ => Err(UnknownRegistryCode {
+                domain: "DIRECTNESS",
+                code,
+            }),
+        }
+    }
+}
+pub const DIRECTNESS_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "DIRECT",
+        slug: "direct",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "TRANSITIVE",
+        slug: "transitive",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SUMMARY",
+        slug: "summary",
+    },
+    RegistryEntry {
+        code: 40,
         name: "NOT_APPLICABLE",
         slug: "not-applicable",
     },
@@ -1030,338 +505,6 @@ pub const DURABLE_PUBLICATION_STATE_VALUES: &[RegistryEntry] = &[
         code: 70,
         name: "ABANDONED",
         slug: "abandoned",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum ServingActivationState {
-    Building = 10,
-    Validating = 20,
-    Ready = 30,
-    Active = 40,
-    Retired = 50,
-    Failed = 60,
-}
-impl TryFrom<u16> for ServingActivationState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Building),
-            20 => Ok(Self::Validating),
-            30 => Ok(Self::Ready),
-            40 => Ok(Self::Active),
-            50 => Ok(Self::Retired),
-            60 => Ok(Self::Failed),
-            _ => Err(UnknownRegistryCode {
-                domain: "SERVING_ACTIVATION_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const SERVING_ACTIVATION_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "BUILDING",
-        slug: "building",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "VALIDATING",
-        slug: "validating",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "READY",
-        slug: "ready",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "ACTIVE",
-        slug: "active",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "RETIRED",
-        slug: "retired",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "FAILED",
-        slug: "failed",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum SnapshotLeaseKind {
-    Query = 10,
-    ResultArtifact = 20,
-    ResourceRead = 30,
-    Maintenance = 40,
-}
-impl TryFrom<u16> for SnapshotLeaseKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Query),
-            20 => Ok(Self::ResultArtifact),
-            30 => Ok(Self::ResourceRead),
-            40 => Ok(Self::Maintenance),
-            _ => Err(UnknownRegistryCode {
-                domain: "SNAPSHOT_LEASE_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const SNAPSHOT_LEASE_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "QUERY",
-        slug: "query",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "RESULT_ARTIFACT",
-        slug: "result-artifact",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "RESOURCE_READ",
-        slug: "resource-read",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "MAINTENANCE",
-        slug: "maintenance",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum SnapshotLeaseState {
-    Active = 10,
-    Releasing = 20,
-    Released = 30,
-    Expired = 40,
-    Orphaned = 50,
-}
-impl TryFrom<u16> for SnapshotLeaseState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Active),
-            20 => Ok(Self::Releasing),
-            30 => Ok(Self::Released),
-            40 => Ok(Self::Expired),
-            50 => Ok(Self::Orphaned),
-            _ => Err(UnknownRegistryCode {
-                domain: "SNAPSHOT_LEASE_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const SNAPSHOT_LEASE_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "ACTIVE",
-        slug: "active",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "RELEASING",
-        slug: "releasing",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "RELEASED",
-        slug: "released",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "EXPIRED",
-        slug: "expired",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "ORPHANED",
-        slug: "orphaned",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum SourceTrustState {
-    Unverified = 10,
-    Verifying = 20,
-    Current = 30,
-    PotentiallyStale = 40,
-    Unavailable = 50,
-}
-impl TryFrom<u16> for SourceTrustState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Unverified),
-            20 => Ok(Self::Verifying),
-            30 => Ok(Self::Current),
-            40 => Ok(Self::PotentiallyStale),
-            50 => Ok(Self::Unavailable),
-            _ => Err(UnknownRegistryCode {
-                domain: "SOURCE_TRUST_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const SOURCE_TRUST_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "UNVERIFIED",
-        slug: "unverified",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "VERIFYING",
-        slug: "verifying",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "CURRENT",
-        slug: "current",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "POTENTIALLY_STALE",
-        slug: "potentially-stale",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "UNAVAILABLE",
-        slug: "unavailable",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum EventStreamHealth {
-    Healthy = 10,
-    RescanRequired = 20,
-    Degraded = 30,
-    Unavailable = 40,
-}
-impl TryFrom<u16> for EventStreamHealth {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Healthy),
-            20 => Ok(Self::RescanRequired),
-            30 => Ok(Self::Degraded),
-            40 => Ok(Self::Unavailable),
-            _ => Err(UnknownRegistryCode {
-                domain: "EVENT_STREAM_HEALTH",
-                code,
-            }),
-        }
-    }
-}
-pub const EVENT_STREAM_HEALTH_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "HEALTHY",
-        slug: "healthy",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "RESCAN_REQUIRED",
-        slug: "rescan-required",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "DEGRADED",
-        slug: "degraded",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "UNAVAILABLE",
-        slug: "unavailable",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitAccelerationStatus {
-    NotAGitWorktree = 10,
-    GitUnavailable = 20,
-    GitReady = 30,
-    GitMetadataDirty = 40,
-    GitScanning = 50,
-    GitOperationInProgress = 60,
-    GitBulkReconciling = 70,
-    GitDegraded = 80,
-}
-impl TryFrom<u16> for GitAccelerationStatus {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::NotAGitWorktree),
-            20 => Ok(Self::GitUnavailable),
-            30 => Ok(Self::GitReady),
-            40 => Ok(Self::GitMetadataDirty),
-            50 => Ok(Self::GitScanning),
-            60 => Ok(Self::GitOperationInProgress),
-            70 => Ok(Self::GitBulkReconciling),
-            80 => Ok(Self::GitDegraded),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_ACCELERATION_STATUS",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_ACCELERATION_STATUS_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "NOT_A_GIT_WORKTREE",
-        slug: "not-a-git-worktree",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "GIT_UNAVAILABLE",
-        slug: "git-unavailable",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "GIT_READY",
-        slug: "git-ready",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "GIT_METADATA_DIRTY",
-        slug: "git-metadata-dirty",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "GIT_SCANNING",
-        slug: "git-scanning",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "GIT_OPERATION_IN_PROGRESS",
-        slug: "git-operation-in-progress",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "GIT_BULK_RECONCILING",
-        slug: "git-bulk-reconciling",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "GIT_DEGRADED",
-        slug: "git-degraded",
     },
 ];
 
@@ -1644,6 +787,1825 @@ pub const EFFECT_KIND_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
+pub enum EventStreamHealth {
+    Healthy = 10,
+    RescanRequired = 20,
+    Degraded = 30,
+    Unavailable = 40,
+}
+impl TryFrom<u16> for EventStreamHealth {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Healthy),
+            20 => Ok(Self::RescanRequired),
+            30 => Ok(Self::Degraded),
+            40 => Ok(Self::Unavailable),
+            _ => Err(UnknownRegistryCode {
+                domain: "EVENT_STREAM_HEALTH",
+                code,
+            }),
+        }
+    }
+}
+pub const EVENT_STREAM_HEALTH_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "HEALTHY",
+        slug: "healthy",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RESCAN_REQUIRED",
+        slug: "rescan-required",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "DEGRADED",
+        slug: "degraded",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "UNAVAILABLE",
+        slug: "unavailable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum EvidenceCertainty {
+    SourceExact = 10,
+    CompilerExact = 20,
+    StaticSemantic = 30,
+    SoundMay = 40,
+    Modelled = 50,
+    Heuristic = 60,
+    Unresolved = 70,
+}
+impl TryFrom<u16> for EvidenceCertainty {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::SourceExact),
+            20 => Ok(Self::CompilerExact),
+            30 => Ok(Self::StaticSemantic),
+            40 => Ok(Self::SoundMay),
+            50 => Ok(Self::Modelled),
+            60 => Ok(Self::Heuristic),
+            70 => Ok(Self::Unresolved),
+            _ => Err(UnknownRegistryCode {
+                domain: "EVIDENCE_CERTAINTY",
+                code,
+            }),
+        }
+    }
+}
+pub const EVIDENCE_CERTAINTY_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SOURCE_EXACT",
+        slug: "source-exact",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "COMPILER_EXACT",
+        slug: "compiler-exact",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "STATIC_SEMANTIC",
+        slug: "static-semantic",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "SOUND_MAY",
+        slug: "sound-may",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "MODELLED",
+        slug: "modelled",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "HEURISTIC",
+        slug: "heuristic",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "UNRESOLVED",
+        slug: "unresolved",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum FreshnessState {
+    Current = 10,
+    PotentiallyStale = 20,
+    Unavailable = 30,
+}
+impl TryFrom<u16> for FreshnessState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Current),
+            20 => Ok(Self::PotentiallyStale),
+            30 => Ok(Self::Unavailable),
+            _ => Err(UnknownRegistryCode {
+                domain: "FRESHNESS_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const FRESHNESS_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "CURRENT",
+        slug: "current",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "POTENTIALLY_STALE",
+        slug: "potentially-stale",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNAVAILABLE",
+        slug: "unavailable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitAccelerationStatus {
+    NotAGitWorktree = 10,
+    GitUnavailable = 20,
+    GitReady = 30,
+    GitMetadataDirty = 40,
+    GitScanning = 50,
+    GitOperationInProgress = 60,
+    GitBulkReconciling = 70,
+    GitDegraded = 80,
+}
+impl TryFrom<u16> for GitAccelerationStatus {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::NotAGitWorktree),
+            20 => Ok(Self::GitUnavailable),
+            30 => Ok(Self::GitReady),
+            40 => Ok(Self::GitMetadataDirty),
+            50 => Ok(Self::GitScanning),
+            60 => Ok(Self::GitOperationInProgress),
+            70 => Ok(Self::GitBulkReconciling),
+            80 => Ok(Self::GitDegraded),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_ACCELERATION_STATUS",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_ACCELERATION_STATUS_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "NOT_A_GIT_WORKTREE",
+        slug: "not-a-git-worktree",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "GIT_UNAVAILABLE",
+        slug: "git-unavailable",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "GIT_READY",
+        slug: "git-ready",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "GIT_METADATA_DIRTY",
+        slug: "git-metadata-dirty",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "GIT_SCANNING",
+        slug: "git-scanning",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "GIT_OPERATION_IN_PROGRESS",
+        slug: "git-operation-in-progress",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "GIT_BULK_RECONCILING",
+        slug: "git-bulk-reconciling",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "GIT_DEGRADED",
+        slug: "git-degraded",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitCandidateMode {
+    Status = 10,
+    HeadTree = 20,
+}
+impl TryFrom<u16> for GitCandidateMode {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Status),
+            20 => Ok(Self::HeadTree),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_CANDIDATE_MODE",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_CANDIDATE_MODE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "STATUS",
+        slug: "status",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "HEAD_TREE",
+        slug: "head-tree",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitCandidateOrigin {
+    IndexWorktree = 10,
+    HeadIndex = 20,
+    HeadTree = 30,
+}
+impl TryFrom<u16> for GitCandidateOrigin {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::IndexWorktree),
+            20 => Ok(Self::HeadIndex),
+            30 => Ok(Self::HeadTree),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_CANDIDATE_ORIGIN",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_CANDIDATE_ORIGIN_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "INDEX_WORKTREE",
+        slug: "index-worktree",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "HEAD_INDEX",
+        slug: "head-index",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "HEAD_TREE",
+        slug: "head-tree",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitHashAlgorithm {
+    Sha1 = 10,
+    Sha256 = 20,
+}
+impl TryFrom<u16> for GitHashAlgorithm {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Sha1),
+            20 => Ok(Self::Sha256),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_HASH_ALGORITHM",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_HASH_ALGORITHM_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SHA1",
+        slug: "sha1",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SHA256",
+        slug: "sha256",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitHeadKind {
+    Symbolic = 10,
+    Detached = 20,
+    Unborn = 30,
+}
+impl TryFrom<u16> for GitHeadKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Symbolic),
+            20 => Ok(Self::Detached),
+            30 => Ok(Self::Unborn),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_HEAD_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_HEAD_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SYMBOLIC",
+        slug: "symbolic",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "DETACHED",
+        slug: "detached",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNBORN",
+        slug: "unborn",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitInventoryClassification {
+    Tracked = 10,
+    UntrackedNotIgnored = 20,
+    UntrackedIgnored = 30,
+    TrackedButIgnoredPatternMatches = 40,
+    ExcludedByCodeFabricPolicy = 50,
+    SubmoduleGitlink = 60,
+    NestedRepository = 70,
+    SpecialFile = 80,
+}
+impl TryFrom<u16> for GitInventoryClassification {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Tracked),
+            20 => Ok(Self::UntrackedNotIgnored),
+            30 => Ok(Self::UntrackedIgnored),
+            40 => Ok(Self::TrackedButIgnoredPatternMatches),
+            50 => Ok(Self::ExcludedByCodeFabricPolicy),
+            60 => Ok(Self::SubmoduleGitlink),
+            70 => Ok(Self::NestedRepository),
+            80 => Ok(Self::SpecialFile),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_INVENTORY_CLASSIFICATION",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_INVENTORY_CLASSIFICATION_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "TRACKED",
+        slug: "tracked",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "UNTRACKED_NOT_IGNORED",
+        slug: "untracked-not-ignored",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNTRACKED_IGNORED",
+        slug: "untracked-ignored",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "TRACKED_BUT_IGNORED_PATTERN_MATCHES",
+        slug: "tracked-but-ignored-pattern-matches",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "EXCLUDED_BY_CODE_FABRIC_POLICY",
+        slug: "excluded-by-code-fabric-policy",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "SUBMODULE_GITLINK",
+        slug: "submodule-gitlink",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "NESTED_REPOSITORY",
+        slug: "nested-repository",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "SPECIAL_FILE",
+        slug: "special-file",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitOperationState {
+    Clean = 10,
+    Merge = 20,
+    Rebase = 30,
+    CherryPick = 40,
+    Revert = 50,
+    Bisect = 60,
+    Apply = 70,
+    OtherOperation = 80,
+    Unknown = 90,
+}
+impl TryFrom<u16> for GitOperationState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Clean),
+            20 => Ok(Self::Merge),
+            30 => Ok(Self::Rebase),
+            40 => Ok(Self::CherryPick),
+            50 => Ok(Self::Revert),
+            60 => Ok(Self::Bisect),
+            70 => Ok(Self::Apply),
+            80 => Ok(Self::OtherOperation),
+            90 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_OPERATION_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_OPERATION_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "CLEAN",
+        slug: "clean",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "MERGE",
+        slug: "merge",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "REBASE",
+        slug: "rebase",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "CHERRY_PICK",
+        slug: "cherry-pick",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "REVERT",
+        slug: "revert",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "BISECT",
+        slug: "bisect",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "APPLY",
+        slug: "apply",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "OTHER_OPERATION",
+        slug: "other-operation",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "UNKNOWN",
+        slug: "unknown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum GitRepositoryKind {
+    Common = 10,
+    LinkedWorktree = 20,
+    Submodule = 30,
+}
+impl TryFrom<u16> for GitRepositoryKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Common),
+            20 => Ok(Self::LinkedWorktree),
+            30 => Ok(Self::Submodule),
+            _ => Err(UnknownRegistryCode {
+                domain: "GIT_REPOSITORY_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const GIT_REPOSITORY_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "COMMON",
+        slug: "common",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "LINKED_WORKTREE",
+        slug: "linked-worktree",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SUBMODULE",
+        slug: "submodule",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum InventoryFileKind {
+    Regular = 10,
+    Symlink = 20,
+    Special = 30,
+}
+impl TryFrom<u16> for InventoryFileKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Regular),
+            20 => Ok(Self::Symlink),
+            30 => Ok(Self::Special),
+            _ => Err(UnknownRegistryCode {
+                domain: "INVENTORY_FILE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const INVENTORY_FILE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "REGULAR",
+        slug: "regular",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SYMLINK",
+        slug: "symlink",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SPECIAL",
+        slug: "special",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum InventoryInclusionState {
+    Included = 10,
+    ExcludedPolicy = 20,
+    ExcludedSpecialFile = 30,
+    ExcludedSizeLimit = 40,
+}
+impl TryFrom<u16> for InventoryInclusionState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Included),
+            20 => Ok(Self::ExcludedPolicy),
+            30 => Ok(Self::ExcludedSpecialFile),
+            40 => Ok(Self::ExcludedSizeLimit),
+            _ => Err(UnknownRegistryCode {
+                domain: "INVENTORY_INCLUSION_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const INVENTORY_INCLUSION_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "INCLUDED",
+        slug: "included",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "EXCLUDED_POLICY",
+        slug: "excluded-policy",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "EXCLUDED_SPECIAL_FILE",
+        slug: "excluded-special-file",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "EXCLUDED_SIZE_LIMIT",
+        slug: "excluded-size-limit",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum Language {
+    Common = 10,
+    Python = 20,
+    Rust = 30,
+    Unknown = 40,
+}
+impl TryFrom<u16> for Language {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Common),
+            20 => Ok(Self::Python),
+            30 => Ok(Self::Rust),
+            40 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode {
+                domain: "LANGUAGE",
+                code,
+            }),
+        }
+    }
+}
+pub const LANGUAGE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "COMMON",
+        slug: "common",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "PYTHON",
+        slug: "python",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "RUST",
+        slug: "rust",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "UNKNOWN",
+        slug: "unknown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum LimitState {
+    NotApplied = 10,
+    ExplicitLimitReached = 20,
+    HardLimitRejected = 30,
+}
+impl TryFrom<u16> for LimitState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::NotApplied),
+            20 => Ok(Self::ExplicitLimitReached),
+            30 => Ok(Self::HardLimitRejected),
+            _ => Err(UnknownRegistryCode {
+                domain: "LIMIT_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const LIMIT_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "NOT_APPLIED",
+        slug: "not-applied",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "EXPLICIT_LIMIT_REACHED",
+        slug: "explicit-limit-reached",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "HARD_LIMIT_REJECTED",
+        slug: "hard-limit-rejected",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum NewlineKind {
+    None = 10,
+    Lf = 20,
+    Crlf = 30,
+    Cr = 40,
+    Mixed = 50,
+}
+impl TryFrom<u16> for NewlineKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::None),
+            20 => Ok(Self::Lf),
+            30 => Ok(Self::Crlf),
+            40 => Ok(Self::Cr),
+            50 => Ok(Self::Mixed),
+            _ => Err(UnknownRegistryCode {
+                domain: "NEWLINE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const NEWLINE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "NONE",
+        slug: "none",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "LF",
+        slug: "lf",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "CRLF",
+        slug: "crlf",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "CR",
+        slug: "cr",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "MIXED",
+        slug: "mixed",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum NullableSemantics {
+    NonNull = 10,
+    Nullable = 20,
+    Unknown = 30,
+    NotApplicable = 40,
+}
+impl TryFrom<u16> for NullableSemantics {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::NonNull),
+            20 => Ok(Self::Nullable),
+            30 => Ok(Self::Unknown),
+            40 => Ok(Self::NotApplicable),
+            _ => Err(UnknownRegistryCode {
+                domain: "NULLABLE_SEMANTICS",
+                code,
+            }),
+        }
+    }
+}
+pub const NULLABLE_SEMANTICS_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "NON_NULL",
+        slug: "non-null",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "NULLABLE",
+        slug: "nullable",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNKNOWN",
+        slug: "unknown",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "NOT_APPLICABLE",
+        slug: "not-applicable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OccurrenceFamily {
+    Token = 10,
+    Annotation = 20,
+    Syntax = 30,
+}
+impl TryFrom<u16> for OccurrenceFamily {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Token),
+            20 => Ok(Self::Annotation),
+            30 => Ok(Self::Syntax),
+            _ => Err(UnknownRegistryCode {
+                domain: "OCCURRENCE_FAMILY",
+                code,
+            }),
+        }
+    }
+}
+pub const OCCURRENCE_FAMILY_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "TOKEN",
+        slug: "token",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "ANNOTATION",
+        slug: "annotation",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SYNTAX",
+        slug: "syntax",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OperationalDependencyEdgeKind {
+    Syntax = 10,
+    Semantic = 20,
+    Derivation = 30,
+    Publication = 40,
+}
+impl TryFrom<u16> for OperationalDependencyEdgeKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Syntax),
+            20 => Ok(Self::Semantic),
+            30 => Ok(Self::Derivation),
+            40 => Ok(Self::Publication),
+            _ => Err(UnknownRegistryCode {
+                domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SYNTAX",
+        slug: "syntax",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SEMANTIC",
+        slug: "semantic",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "DERIVATION",
+        slug: "derivation",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "PUBLICATION",
+        slug: "publication",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OverlayTombstoneReason {
+    OwnerReplacedEmpty = 10,
+    SourceRemoved = 20,
+    SupersededGeneration = 30,
+}
+impl TryFrom<u16> for OverlayTombstoneReason {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::OwnerReplacedEmpty),
+            20 => Ok(Self::SourceRemoved),
+            30 => Ok(Self::SupersededGeneration),
+            _ => Err(UnknownRegistryCode {
+                domain: "OVERLAY_TOMBSTONE_REASON",
+                code,
+            }),
+        }
+    }
+}
+pub const OVERLAY_TOMBSTONE_REASON_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "OWNER_REPLACED_EMPTY",
+        slug: "owner-replaced-empty",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SOURCE_REMOVED",
+        slug: "source-removed",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SUPERSEDED_GENERATION",
+        slug: "superseded-generation",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OwnerCapabilityState {
+    Current = 10,
+    Pending = 20,
+    Invalidated = 30,
+    Partial = 40,
+    UnavailableParse = 50,
+    UnavailableCompile = 60,
+    UnavailableProvider = 70,
+    UnavailableDerivation = 80,
+    Excluded = 90,
+    Unsupported = 100,
+    Removed = 110,
+    NotApplicable = 120,
+}
+impl TryFrom<u16> for OwnerCapabilityState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Current),
+            20 => Ok(Self::Pending),
+            30 => Ok(Self::Invalidated),
+            40 => Ok(Self::Partial),
+            50 => Ok(Self::UnavailableParse),
+            60 => Ok(Self::UnavailableCompile),
+            70 => Ok(Self::UnavailableProvider),
+            80 => Ok(Self::UnavailableDerivation),
+            90 => Ok(Self::Excluded),
+            100 => Ok(Self::Unsupported),
+            110 => Ok(Self::Removed),
+            120 => Ok(Self::NotApplicable),
+            _ => Err(UnknownRegistryCode {
+                domain: "OWNER_CAPABILITY_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const OWNER_CAPABILITY_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "CURRENT",
+        slug: "current",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "PENDING",
+        slug: "pending",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "INVALIDATED",
+        slug: "invalidated",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "PARTIAL",
+        slug: "partial",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "UNAVAILABLE_PARSE",
+        slug: "unavailable-parse",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "UNAVAILABLE_COMPILE",
+        slug: "unavailable-compile",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "UNAVAILABLE_PROVIDER",
+        slug: "unavailable-provider",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "UNAVAILABLE_DERIVATION",
+        slug: "unavailable-derivation",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "EXCLUDED",
+        slug: "excluded",
+    },
+    RegistryEntry {
+        code: 100,
+        name: "UNSUPPORTED",
+        slug: "unsupported",
+    },
+    RegistryEntry {
+        code: 110,
+        name: "REMOVED",
+        slug: "removed",
+    },
+    RegistryEntry {
+        code: 120,
+        name: "NOT_APPLICABLE",
+        slug: "not-applicable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum OwnerKind {
+    SourceFile = 10,
+    Module = 20,
+    Scope = 30,
+    Callable = 40,
+    ClassOrType = 50,
+    MirBody = 60,
+    CrateOrBuildUnit = 70,
+    WorkspaceGlobalDerivation = 80,
+}
+impl TryFrom<u16> for OwnerKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::SourceFile),
+            20 => Ok(Self::Module),
+            30 => Ok(Self::Scope),
+            40 => Ok(Self::Callable),
+            50 => Ok(Self::ClassOrType),
+            60 => Ok(Self::MirBody),
+            70 => Ok(Self::CrateOrBuildUnit),
+            80 => Ok(Self::WorkspaceGlobalDerivation),
+            _ => Err(UnknownRegistryCode {
+                domain: "OWNER_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const OWNER_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "SOURCE_FILE",
+        slug: "source-file",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "MODULE",
+        slug: "module",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SCOPE",
+        slug: "scope",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "CALLABLE",
+        slug: "callable",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "CLASS_OR_TYPE",
+        slug: "class-or-type",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "MIR_BODY",
+        slug: "mir-body",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "CRATE_OR_BUILD_UNIT",
+        slug: "crate-or-build-unit",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "WORKSPACE_GLOBAL_DERIVATION",
+        slug: "workspace-global-derivation",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum PathEncoding {
+    UnixBytes = 10,
+    MacosBytes = 20,
+    WindowsWtf8 = 30,
+}
+impl TryFrom<u16> for PathEncoding {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::UnixBytes),
+            20 => Ok(Self::MacosBytes),
+            30 => Ok(Self::WindowsWtf8),
+            _ => Err(UnknownRegistryCode {
+                domain: "PATH_ENCODING",
+                code,
+            }),
+        }
+    }
+}
+pub const PATH_ENCODING_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "UNIX_BYTES",
+        slug: "unix-bytes",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "MACOS_BYTES",
+        slug: "macos-bytes",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "WINDOWS_WTF8",
+        slug: "windows-wtf8",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum Phase {
+    InputValidation = 10,
+    SchemaBinding = 20,
+    LogicalPlanning = 30,
+    PolicyValidation = 40,
+    PhysicalPlanning = 50,
+    Execution = 60,
+    WriteValidation = 70,
+    Commit = 80,
+    SnapshotConstruction = 90,
+    SnapshotActivation = 100,
+    Shutdown = 110,
+}
+impl TryFrom<u16> for Phase {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::InputValidation),
+            20 => Ok(Self::SchemaBinding),
+            30 => Ok(Self::LogicalPlanning),
+            40 => Ok(Self::PolicyValidation),
+            50 => Ok(Self::PhysicalPlanning),
+            60 => Ok(Self::Execution),
+            70 => Ok(Self::WriteValidation),
+            80 => Ok(Self::Commit),
+            90 => Ok(Self::SnapshotConstruction),
+            100 => Ok(Self::SnapshotActivation),
+            110 => Ok(Self::Shutdown),
+            _ => Err(UnknownRegistryCode {
+                domain: "PHASE",
+                code,
+            }),
+        }
+    }
+}
+pub const PHASE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "INPUT_VALIDATION",
+        slug: "input-validation",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "SCHEMA_BINDING",
+        slug: "schema-binding",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "LOGICAL_PLANNING",
+        slug: "logical-planning",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "POLICY_VALIDATION",
+        slug: "policy-validation",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "PHYSICAL_PLANNING",
+        slug: "physical-planning",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "EXECUTION",
+        slug: "execution",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "WRITE_VALIDATION",
+        slug: "write-validation",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "COMMIT",
+        slug: "commit",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "SNAPSHOT_CONSTRUCTION",
+        slug: "snapshot-construction",
+    },
+    RegistryEntry {
+        code: 100,
+        name: "SNAPSHOT_ACTIVATION",
+        slug: "snapshot-activation",
+    },
+    RegistryEntry {
+        code: 110,
+        name: "SHUTDOWN",
+        slug: "shutdown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum ProviderCode {
+    TreeSitter = 10,
+    RuffPython = 20,
+    PyreflyPython = 30,
+    RustcMir = 40,
+    CodefabricDerivation = 50,
+    SourceSubstrate = 60,
+}
+impl TryFrom<u16> for ProviderCode {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::TreeSitter),
+            20 => Ok(Self::RuffPython),
+            30 => Ok(Self::PyreflyPython),
+            40 => Ok(Self::RustcMir),
+            50 => Ok(Self::CodefabricDerivation),
+            60 => Ok(Self::SourceSubstrate),
+            _ => Err(UnknownRegistryCode {
+                domain: "PROVIDER_CODE",
+                code,
+            }),
+        }
+    }
+}
+pub const PROVIDER_CODE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "TREE_SITTER",
+        slug: "tree-sitter",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RUFF_PYTHON",
+        slug: "ruff-python",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "PYREFLY_PYTHON",
+        slug: "pyrefly-python",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "RUSTC_MIR",
+        slug: "rustc-mir",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "CODEFABRIC_DERIVATION",
+        slug: "codefabric-derivation",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "SOURCE_SUBSTRATE",
+        slug: "source-substrate",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum ProviderObservationFamily {
+    PyreflyModule = 110,
+    RustMirOwner = 120,
+}
+impl TryFrom<u16> for ProviderObservationFamily {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            110 => Ok(Self::PyreflyModule),
+            120 => Ok(Self::RustMirOwner),
+            _ => Err(UnknownRegistryCode {
+                domain: "PROVIDER_OBSERVATION_FAMILY",
+                code,
+            }),
+        }
+    }
+}
+pub const PROVIDER_OBSERVATION_FAMILY_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 110,
+        name: "PYREFLY_MODULE",
+        slug: "pyrefly-module",
+    },
+    RegistryEntry {
+        code: 120,
+        name: "RUST_MIR_OWNER",
+        slug: "rust-mir-owner",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum ProviderRunState {
+    Queued = 10,
+    Running = 20,
+    Succeeded = 30,
+    Partial = 40,
+    Failed = 50,
+    TimedOut = 60,
+    Cancelled = 70,
+    Superseded = 80,
+    Crashed = 90,
+    ProtocolError = 100,
+    StaleResult = 110,
+    StaleGitBaseline = 120,
+}
+impl TryFrom<u16> for ProviderRunState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Queued),
+            20 => Ok(Self::Running),
+            30 => Ok(Self::Succeeded),
+            40 => Ok(Self::Partial),
+            50 => Ok(Self::Failed),
+            60 => Ok(Self::TimedOut),
+            70 => Ok(Self::Cancelled),
+            80 => Ok(Self::Superseded),
+            90 => Ok(Self::Crashed),
+            100 => Ok(Self::ProtocolError),
+            110 => Ok(Self::StaleResult),
+            120 => Ok(Self::StaleGitBaseline),
+            _ => Err(UnknownRegistryCode {
+                domain: "PROVIDER_RUN_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const PROVIDER_RUN_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "QUEUED",
+        slug: "queued",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RUNNING",
+        slug: "running",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SUCCEEDED",
+        slug: "succeeded",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "PARTIAL",
+        slug: "partial",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "FAILED",
+        slug: "failed",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "TIMED_OUT",
+        slug: "timed-out",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "CANCELLED",
+        slug: "cancelled",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "SUPERSEDED",
+        slug: "superseded",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "CRASHED",
+        slug: "crashed",
+    },
+    RegistryEntry {
+        code: 100,
+        name: "PROTOCOL_ERROR",
+        slug: "protocol-error",
+    },
+    RegistryEntry {
+        code: 110,
+        name: "STALE_RESULT",
+        slug: "stale-result",
+    },
+    RegistryEntry {
+        code: 120,
+        name: "STALE_GIT_BASELINE",
+        slug: "stale-git-baseline",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum QueryAvailabilityState {
+    Available = 10,
+    Partial = 20,
+    Unavailable = 30,
+    NotApplicable = 40,
+}
+impl TryFrom<u16> for QueryAvailabilityState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Available),
+            20 => Ok(Self::Partial),
+            30 => Ok(Self::Unavailable),
+            40 => Ok(Self::NotApplicable),
+            _ => Err(UnknownRegistryCode {
+                domain: "QUERY_AVAILABILITY_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const QUERY_AVAILABILITY_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "AVAILABLE",
+        slug: "available",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "PARTIAL",
+        slug: "partial",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNAVAILABLE",
+        slug: "unavailable",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "NOT_APPLICABLE",
+        slug: "not-applicable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum QueryExecutionState {
+    Accepted = 10,
+    Running = 20,
+    Complete = 30,
+    Failed = 40,
+    Cancelled = 50,
+    DeadlineExceeded = 60,
+    NotExecutedDependency = 70,
+}
+impl TryFrom<u16> for QueryExecutionState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Accepted),
+            20 => Ok(Self::Running),
+            30 => Ok(Self::Complete),
+            40 => Ok(Self::Failed),
+            50 => Ok(Self::Cancelled),
+            60 => Ok(Self::DeadlineExceeded),
+            70 => Ok(Self::NotExecutedDependency),
+            _ => Err(UnknownRegistryCode {
+                domain: "QUERY_EXECUTION_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const QUERY_EXECUTION_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "ACCEPTED",
+        slug: "accepted",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RUNNING",
+        slug: "running",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "COMPLETE",
+        slug: "complete",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "FAILED",
+        slug: "failed",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "CANCELLED",
+        slug: "cancelled",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "DEADLINE_EXCEEDED",
+        slug: "deadline-exceeded",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "NOT_EXECUTED_DEPENDENCY",
+        slug: "not-executed-dependency",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum QueryForm {
+    FindEntities = 10,
+    RetrieveFacts = 20,
+    FollowRelationships = 30,
+    FindPaths = 40,
+    MatchPattern = 50,
+    CombineResults = 60,
+    SummarizeFacts = 70,
+    RetrieveSourceContext = 80,
+}
+impl TryFrom<u16> for QueryForm {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::FindEntities),
+            20 => Ok(Self::RetrieveFacts),
+            30 => Ok(Self::FollowRelationships),
+            40 => Ok(Self::FindPaths),
+            50 => Ok(Self::MatchPattern),
+            60 => Ok(Self::CombineResults),
+            70 => Ok(Self::SummarizeFacts),
+            80 => Ok(Self::RetrieveSourceContext),
+            _ => Err(UnknownRegistryCode {
+                domain: "QUERY_FORM",
+                code,
+            }),
+        }
+    }
+}
+pub const QUERY_FORM_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "FIND_ENTITIES",
+        slug: "find code entities",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RETRIEVE_FACTS",
+        slug: "retrieve facts about code",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "FOLLOW_RELATIONSHIPS",
+        slug: "follow code relationships",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "FIND_PATHS",
+        slug: "find connecting fact paths",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "MATCH_PATTERN",
+        slug: "match a code fact pattern",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "COMBINE_RESULTS",
+        slug: "combine result sets",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "SUMMARIZE_FACTS",
+        slug: "summarize objective facts",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "RETRIEVE_SOURCE_CONTEXT",
+        slug: "retrieve source and syntax context",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum RangeReconciliationStep {
+    ExactRangeAndKind = 10,
+    ExactDeclarationName = 20,
+    SmallestEnclosingCompatible = 30,
+    SameStartCompatible = 40,
+    ProviderOnlySynthetic = 50,
+}
+impl TryFrom<u16> for RangeReconciliationStep {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::ExactRangeAndKind),
+            20 => Ok(Self::ExactDeclarationName),
+            30 => Ok(Self::SmallestEnclosingCompatible),
+            40 => Ok(Self::SameStartCompatible),
+            50 => Ok(Self::ProviderOnlySynthetic),
+            _ => Err(UnknownRegistryCode {
+                domain: "RANGE_RECONCILIATION_STEP",
+                code,
+            }),
+        }
+    }
+}
+pub const RANGE_RECONCILIATION_STEP_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "EXACT_RANGE_AND_KIND",
+        slug: "exact-range-and-kind",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "EXACT_DECLARATION_NAME",
+        slug: "exact-declaration-name",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SMALLEST_ENCLOSING_COMPATIBLE",
+        slug: "smallest-enclosing-compatible",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "SAME_START_COMPATIBLE",
+        slug: "same-start-compatible",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "PROVIDER_ONLY_SYNTHETIC",
+        slug: "provider-only-synthetic",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum RawKindDisposition {
+    Normalize = 10,
+    Ignore = 20,
+    Unsupported = 30,
+}
+impl TryFrom<u16> for RawKindDisposition {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Normalize),
+            20 => Ok(Self::Ignore),
+            30 => Ok(Self::Unsupported),
+            _ => Err(UnknownRegistryCode {
+                domain: "RAW_KIND_DISPOSITION",
+                code,
+            }),
+        }
+    }
+}
+pub const RAW_KIND_DISPOSITION_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "NORMALIZE",
+        slug: "normalize",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "IGNORE",
+        slug: "ignore",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "UNSUPPORTED",
+        slug: "unsupported",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum ResolutionClass {
+    Exact = 10,
+    StaticallyResolved = 20,
+    SoundPossible = 30,
+    Possible = 40,
+    Modelled = 50,
+    Heuristic = 60,
+    Unresolved = 70,
+    Unavailable = 80,
+    NotApplicable = 90,
+}
+impl TryFrom<u16> for ResolutionClass {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Exact),
+            20 => Ok(Self::StaticallyResolved),
+            30 => Ok(Self::SoundPossible),
+            40 => Ok(Self::Possible),
+            50 => Ok(Self::Modelled),
+            60 => Ok(Self::Heuristic),
+            70 => Ok(Self::Unresolved),
+            80 => Ok(Self::Unavailable),
+            90 => Ok(Self::NotApplicable),
+            _ => Err(UnknownRegistryCode {
+                domain: "RESOLUTION_CLASS",
+                code,
+            }),
+        }
+    }
+}
+pub const RESOLUTION_CLASS_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "EXACT",
+        slug: "exact",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "STATICALLY_RESOLVED",
+        slug: "statically-resolved",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "SOUND_POSSIBLE",
+        slug: "sound-possible",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "POSSIBLE",
+        slug: "possible",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "MODELLED",
+        slug: "modelled",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "HEURISTIC",
+        slug: "heuristic",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "UNRESOLVED",
+        slug: "unresolved",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "UNAVAILABLE",
+        slug: "unavailable",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "NOT_APPLICABLE",
+        slug: "not-applicable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
 pub enum ResourceKind {
     FileHandle = 10,
     SocketOrConnection = 20,
@@ -1732,188 +2694,396 @@ pub const RESOURCE_KIND_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum ProviderCode {
-    TreeSitter = 10,
-    RuffPython = 20,
-    PyreflyPython = 30,
-    RustcMir = 40,
-    CodefabricDerivation = 50,
-    SourceSubstrate = 60,
+pub enum ServingActivationState {
+    Building = 10,
+    Validating = 20,
+    Ready = 30,
+    Active = 40,
+    Retired = 50,
+    Failed = 60,
 }
-impl TryFrom<u16> for ProviderCode {
+impl TryFrom<u16> for ServingActivationState {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
-            10 => Ok(Self::TreeSitter),
-            20 => Ok(Self::RuffPython),
-            30 => Ok(Self::PyreflyPython),
-            40 => Ok(Self::RustcMir),
-            50 => Ok(Self::CodefabricDerivation),
-            60 => Ok(Self::SourceSubstrate),
+            10 => Ok(Self::Building),
+            20 => Ok(Self::Validating),
+            30 => Ok(Self::Ready),
+            40 => Ok(Self::Active),
+            50 => Ok(Self::Retired),
+            60 => Ok(Self::Failed),
             _ => Err(UnknownRegistryCode {
-                domain: "PROVIDER_CODE",
+                domain: "SERVING_ACTIVATION_STATE",
                 code,
             }),
         }
     }
 }
-pub const PROVIDER_CODE_VALUES: &[RegistryEntry] = &[
+pub const SERVING_ACTIVATION_STATE_VALUES: &[RegistryEntry] = &[
     RegistryEntry {
         code: 10,
-        name: "TREE_SITTER",
-        slug: "tree-sitter",
+        name: "BUILDING",
+        slug: "building",
     },
     RegistryEntry {
         code: 20,
-        name: "RUFF_PYTHON",
-        slug: "ruff-python",
+        name: "VALIDATING",
+        slug: "validating",
     },
     RegistryEntry {
         code: 30,
-        name: "PYREFLY_PYTHON",
-        slug: "pyrefly-python",
+        name: "READY",
+        slug: "ready",
     },
     RegistryEntry {
         code: 40,
-        name: "RUSTC_MIR",
-        slug: "rustc-mir",
+        name: "ACTIVE",
+        slug: "active",
     },
     RegistryEntry {
         code: 50,
-        name: "CODEFABRIC_DERIVATION",
-        slug: "codefabric-derivation",
+        name: "RETIRED",
+        slug: "retired",
     },
     RegistryEntry {
         code: 60,
-        name: "SOURCE_SUBSTRATE",
-        slug: "source-substrate",
+        name: "FAILED",
+        slug: "failed",
     },
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum TokenKind {
-    Identifier = 10,
-    Keyword = 20,
-    Operator = 30,
-    Punctuation = 40,
-    Literal = 50,
-    String = 60,
-    Number = 70,
-    Unknown = 80,
+pub enum Severity {
+    Info = 10,
+    Warning = 20,
+    Error = 30,
+    Fatal = 40,
 }
-impl TryFrom<u16> for TokenKind {
+impl TryFrom<u16> for Severity {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
-            10 => Ok(Self::Identifier),
-            20 => Ok(Self::Keyword),
-            30 => Ok(Self::Operator),
-            40 => Ok(Self::Punctuation),
-            50 => Ok(Self::Literal),
-            60 => Ok(Self::String),
-            70 => Ok(Self::Number),
-            80 => Ok(Self::Unknown),
+            10 => Ok(Self::Info),
+            20 => Ok(Self::Warning),
+            30 => Ok(Self::Error),
+            40 => Ok(Self::Fatal),
             _ => Err(UnknownRegistryCode {
-                domain: "TOKEN_KIND",
+                domain: "SEVERITY",
                 code,
             }),
         }
     }
 }
-pub const TOKEN_KIND_VALUES: &[RegistryEntry] = &[
+pub const SEVERITY_VALUES: &[RegistryEntry] = &[
     RegistryEntry {
         code: 10,
-        name: "IDENTIFIER",
-        slug: "identifier",
+        name: "INFO",
+        slug: "info",
     },
     RegistryEntry {
         code: 20,
-        name: "KEYWORD",
-        slug: "keyword",
+        name: "WARNING",
+        slug: "warning",
     },
     RegistryEntry {
         code: 30,
-        name: "OPERATOR",
-        slug: "operator",
+        name: "ERROR",
+        slug: "error",
     },
     RegistryEntry {
         code: 40,
-        name: "PUNCTUATION",
-        slug: "punctuation",
+        name: "FATAL",
+        slug: "fatal",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum SnapshotLeaseKind {
+    Query = 10,
+    ResultArtifact = 20,
+    ResourceRead = 30,
+    Maintenance = 40,
+}
+impl TryFrom<u16> for SnapshotLeaseKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Query),
+            20 => Ok(Self::ResultArtifact),
+            30 => Ok(Self::ResourceRead),
+            40 => Ok(Self::Maintenance),
+            _ => Err(UnknownRegistryCode {
+                domain: "SNAPSHOT_LEASE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const SNAPSHOT_LEASE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "QUERY",
+        slug: "query",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RESULT_ARTIFACT",
+        slug: "result-artifact",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "RESOURCE_READ",
+        slug: "resource-read",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "MAINTENANCE",
+        slug: "maintenance",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum SnapshotLeaseState {
+    Active = 10,
+    Releasing = 20,
+    Released = 30,
+    Expired = 40,
+    Orphaned = 50,
+}
+impl TryFrom<u16> for SnapshotLeaseState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Active),
+            20 => Ok(Self::Releasing),
+            30 => Ok(Self::Released),
+            40 => Ok(Self::Expired),
+            50 => Ok(Self::Orphaned),
+            _ => Err(UnknownRegistryCode {
+                domain: "SNAPSHOT_LEASE_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const SNAPSHOT_LEASE_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "ACTIVE",
+        slug: "active",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "RELEASING",
+        slug: "releasing",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "RELEASED",
+        slug: "released",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "EXPIRED",
+        slug: "expired",
     },
     RegistryEntry {
         code: 50,
-        name: "LITERAL",
-        slug: "literal",
+        name: "ORPHANED",
+        slug: "orphaned",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum SourceTrustState {
+    Unverified = 10,
+    Verifying = 20,
+    Current = 30,
+    PotentiallyStale = 40,
+    Unavailable = 50,
+}
+impl TryFrom<u16> for SourceTrustState {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Unverified),
+            20 => Ok(Self::Verifying),
+            30 => Ok(Self::Current),
+            40 => Ok(Self::PotentiallyStale),
+            50 => Ok(Self::Unavailable),
+            _ => Err(UnknownRegistryCode {
+                domain: "SOURCE_TRUST_STATE",
+                code,
+            }),
+        }
+    }
+}
+pub const SOURCE_TRUST_STATE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "UNVERIFIED",
+        slug: "unverified",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "VERIFYING",
+        slug: "verifying",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "CURRENT",
+        slug: "current",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "POTENTIALLY_STALE",
+        slug: "potentially-stale",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "UNAVAILABLE",
+        slug: "unavailable",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum SyntaxFieldRole {
+    Name = 10,
+    Parameters = 20,
+    Decorator = 30,
+    Returns = 40,
+    Body = 50,
+    Condition = 60,
+    Target = 70,
+    Value = 80,
+    Receiver = 90,
+    Callee = 100,
+    Argument = 110,
+    KeywordArgument = 120,
+    Iterable = 130,
+    Guard = 140,
+    Pattern = 150,
+    Handler = 160,
+    FinallyBody = 170,
+}
+impl TryFrom<u16> for SyntaxFieldRole {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Name),
+            20 => Ok(Self::Parameters),
+            30 => Ok(Self::Decorator),
+            40 => Ok(Self::Returns),
+            50 => Ok(Self::Body),
+            60 => Ok(Self::Condition),
+            70 => Ok(Self::Target),
+            80 => Ok(Self::Value),
+            90 => Ok(Self::Receiver),
+            100 => Ok(Self::Callee),
+            110 => Ok(Self::Argument),
+            120 => Ok(Self::KeywordArgument),
+            130 => Ok(Self::Iterable),
+            140 => Ok(Self::Guard),
+            150 => Ok(Self::Pattern),
+            160 => Ok(Self::Handler),
+            170 => Ok(Self::FinallyBody),
+            _ => Err(UnknownRegistryCode {
+                domain: "SYNTAX_FIELD_ROLE",
+                code,
+            }),
+        }
+    }
+}
+pub const SYNTAX_FIELD_ROLE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "NAME",
+        slug: "name",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "PARAMETERS",
+        slug: "parameters",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "DECORATOR",
+        slug: "decorator",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "RETURNS",
+        slug: "returns",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "BODY",
+        slug: "body",
     },
     RegistryEntry {
         code: 60,
-        name: "STRING",
-        slug: "string",
+        name: "CONDITION",
+        slug: "condition",
     },
     RegistryEntry {
         code: 70,
-        name: "NUMBER",
-        slug: "number",
+        name: "TARGET",
+        slug: "target",
     },
     RegistryEntry {
         code: 80,
-        name: "UNKNOWN",
-        slug: "unknown",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum AnnotationKind {
-    Comment = 10,
-    Documentation = 20,
-    PragmaOrDirective = 30,
-    ParseError = 40,
-    MissingSyntax = 50,
-}
-impl TryFrom<u16> for AnnotationKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Comment),
-            20 => Ok(Self::Documentation),
-            30 => Ok(Self::PragmaOrDirective),
-            40 => Ok(Self::ParseError),
-            50 => Ok(Self::MissingSyntax),
-            _ => Err(UnknownRegistryCode {
-                domain: "ANNOTATION_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const ANNOTATION_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "COMMENT",
-        slug: "comment",
+        name: "VALUE",
+        slug: "value",
     },
     RegistryEntry {
-        code: 20,
-        name: "DOCUMENTATION",
-        slug: "documentation",
+        code: 90,
+        name: "RECEIVER",
+        slug: "receiver",
     },
     RegistryEntry {
-        code: 30,
-        name: "PRAGMA_OR_DIRECTIVE",
-        slug: "pragma-or-directive",
+        code: 100,
+        name: "CALLEE",
+        slug: "callee",
     },
     RegistryEntry {
-        code: 40,
-        name: "PARSE_ERROR",
-        slug: "parse-error",
+        code: 110,
+        name: "ARGUMENT",
+        slug: "argument",
     },
     RegistryEntry {
-        code: 50,
-        name: "MISSING_SYNTAX",
-        slug: "missing-syntax",
+        code: 120,
+        name: "KEYWORD_ARGUMENT",
+        slug: "keyword-argument",
+    },
+    RegistryEntry {
+        code: 130,
+        name: "ITERABLE",
+        slug: "iterable",
+    },
+    RegistryEntry {
+        code: 140,
+        name: "GUARD",
+        slug: "guard",
+    },
+    RegistryEntry {
+        code: 150,
+        name: "PATTERN",
+        slug: "pattern",
+    },
+    RegistryEntry {
+        code: 160,
+        name: "HANDLER",
+        slug: "handler",
+    },
+    RegistryEntry {
+        code: 170,
+        name: "FINALLY_BODY",
+        slug: "finally-body",
     },
 ];
 
@@ -2105,256 +3275,73 @@ pub const SYNTAX_KIND_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum SyntaxFieldRole {
-    Name = 10,
-    Parameters = 20,
-    Decorator = 30,
-    Returns = 40,
-    Body = 50,
-    Condition = 60,
-    Target = 70,
-    Value = 80,
-    Receiver = 90,
-    Callee = 100,
-    Argument = 110,
-    KeywordArgument = 120,
-    Iterable = 130,
-    Guard = 140,
-    Pattern = 150,
-    Handler = 160,
-    FinallyBody = 170,
+pub enum TokenKind {
+    Identifier = 10,
+    Keyword = 20,
+    Operator = 30,
+    Punctuation = 40,
+    Literal = 50,
+    String = 60,
+    Number = 70,
+    Unknown = 80,
 }
-impl TryFrom<u16> for SyntaxFieldRole {
+impl TryFrom<u16> for TokenKind {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
-            10 => Ok(Self::Name),
-            20 => Ok(Self::Parameters),
-            30 => Ok(Self::Decorator),
-            40 => Ok(Self::Returns),
-            50 => Ok(Self::Body),
-            60 => Ok(Self::Condition),
-            70 => Ok(Self::Target),
-            80 => Ok(Self::Value),
-            90 => Ok(Self::Receiver),
-            100 => Ok(Self::Callee),
-            110 => Ok(Self::Argument),
-            120 => Ok(Self::KeywordArgument),
-            130 => Ok(Self::Iterable),
-            140 => Ok(Self::Guard),
-            150 => Ok(Self::Pattern),
-            160 => Ok(Self::Handler),
-            170 => Ok(Self::FinallyBody),
+            10 => Ok(Self::Identifier),
+            20 => Ok(Self::Keyword),
+            30 => Ok(Self::Operator),
+            40 => Ok(Self::Punctuation),
+            50 => Ok(Self::Literal),
+            60 => Ok(Self::String),
+            70 => Ok(Self::Number),
+            80 => Ok(Self::Unknown),
             _ => Err(UnknownRegistryCode {
-                domain: "SYNTAX_FIELD_ROLE",
+                domain: "TOKEN_KIND",
                 code,
             }),
         }
     }
 }
-pub const SYNTAX_FIELD_ROLE_VALUES: &[RegistryEntry] = &[
+pub const TOKEN_KIND_VALUES: &[RegistryEntry] = &[
     RegistryEntry {
         code: 10,
-        name: "NAME",
-        slug: "name",
+        name: "IDENTIFIER",
+        slug: "identifier",
     },
     RegistryEntry {
         code: 20,
-        name: "PARAMETERS",
-        slug: "parameters",
+        name: "KEYWORD",
+        slug: "keyword",
     },
     RegistryEntry {
         code: 30,
-        name: "DECORATOR",
-        slug: "decorator",
+        name: "OPERATOR",
+        slug: "operator",
     },
     RegistryEntry {
         code: 40,
-        name: "RETURNS",
-        slug: "returns",
+        name: "PUNCTUATION",
+        slug: "punctuation",
     },
     RegistryEntry {
         code: 50,
-        name: "BODY",
-        slug: "body",
+        name: "LITERAL",
+        slug: "literal",
     },
     RegistryEntry {
         code: 60,
-        name: "CONDITION",
-        slug: "condition",
+        name: "STRING",
+        slug: "string",
     },
     RegistryEntry {
         code: 70,
-        name: "TARGET",
-        slug: "target",
+        name: "NUMBER",
+        slug: "number",
     },
     RegistryEntry {
         code: 80,
-        name: "VALUE",
-        slug: "value",
-    },
-    RegistryEntry {
-        code: 90,
-        name: "RECEIVER",
-        slug: "receiver",
-    },
-    RegistryEntry {
-        code: 100,
-        name: "CALLEE",
-        slug: "callee",
-    },
-    RegistryEntry {
-        code: 110,
-        name: "ARGUMENT",
-        slug: "argument",
-    },
-    RegistryEntry {
-        code: 120,
-        name: "KEYWORD_ARGUMENT",
-        slug: "keyword-argument",
-    },
-    RegistryEntry {
-        code: 130,
-        name: "ITERABLE",
-        slug: "iterable",
-    },
-    RegistryEntry {
-        code: 140,
-        name: "GUARD",
-        slug: "guard",
-    },
-    RegistryEntry {
-        code: 150,
-        name: "PATTERN",
-        slug: "pattern",
-    },
-    RegistryEntry {
-        code: 160,
-        name: "HANDLER",
-        slug: "handler",
-    },
-    RegistryEntry {
-        code: 170,
-        name: "FINALLY_BODY",
-        slug: "finally-body",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum OwnerKind {
-    SourceFile = 10,
-    Module = 20,
-    Scope = 30,
-    Callable = 40,
-    ClassOrType = 50,
-    MirBody = 60,
-    CrateOrBuildUnit = 70,
-    WorkspaceGlobalDerivation = 80,
-}
-impl TryFrom<u16> for OwnerKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::SourceFile),
-            20 => Ok(Self::Module),
-            30 => Ok(Self::Scope),
-            40 => Ok(Self::Callable),
-            50 => Ok(Self::ClassOrType),
-            60 => Ok(Self::MirBody),
-            70 => Ok(Self::CrateOrBuildUnit),
-            80 => Ok(Self::WorkspaceGlobalDerivation),
-            _ => Err(UnknownRegistryCode {
-                domain: "OWNER_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const OWNER_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "SOURCE_FILE",
-        slug: "source-file",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "MODULE",
-        slug: "module",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SCOPE",
-        slug: "scope",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "CALLABLE",
-        slug: "callable",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "CLASS_OR_TYPE",
-        slug: "class-or-type",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "MIR_BODY",
-        slug: "mir-body",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "CRATE_OR_BUILD_UNIT",
-        slug: "crate-or-build-unit",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "WORKSPACE_GLOBAL_DERIVATION",
-        slug: "workspace-global-derivation",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum Language {
-    Common = 10,
-    Python = 20,
-    Rust = 30,
-    Unknown = 40,
-}
-impl TryFrom<u16> for Language {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Common),
-            20 => Ok(Self::Python),
-            30 => Ok(Self::Rust),
-            40 => Ok(Self::Unknown),
-            _ => Err(UnknownRegistryCode {
-                domain: "LANGUAGE",
-                code,
-            }),
-        }
-    }
-}
-pub const LANGUAGE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "COMMON",
-        slug: "common",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "PYTHON",
-        slug: "python",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "RUST",
-        slug: "rust",
-    },
-    RegistryEntry {
-        code: 40,
         name: "UNKNOWN",
         slug: "unknown",
     },
@@ -2362,40 +3349,135 @@ pub const LANGUAGE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum PathEncoding {
-    UnixBytes = 10,
-    MacosBytes = 20,
-    WindowsWtf8 = 30,
+pub enum TypeOrigin {
+    ExplicitAnnotation = 10,
+    ProviderComputed = 20,
+    ContextualExpectation = 30,
+    Narrowing = 40,
+    CompilerLowered = 50,
+    StaticSemanticDerivation = 60,
 }
-impl TryFrom<u16> for PathEncoding {
+impl TryFrom<u16> for TypeOrigin {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
-            10 => Ok(Self::UnixBytes),
-            20 => Ok(Self::MacosBytes),
-            30 => Ok(Self::WindowsWtf8),
+            10 => Ok(Self::ExplicitAnnotation),
+            20 => Ok(Self::ProviderComputed),
+            30 => Ok(Self::ContextualExpectation),
+            40 => Ok(Self::Narrowing),
+            50 => Ok(Self::CompilerLowered),
+            60 => Ok(Self::StaticSemanticDerivation),
             _ => Err(UnknownRegistryCode {
-                domain: "PATH_ENCODING",
+                domain: "TYPE_ORIGIN",
                 code,
             }),
         }
     }
 }
-pub const PATH_ENCODING_VALUES: &[RegistryEntry] = &[
+pub const TYPE_ORIGIN_VALUES: &[RegistryEntry] = &[
     RegistryEntry {
         code: 10,
-        name: "UNIX_BYTES",
-        slug: "unix-bytes",
+        name: "EXPLICIT_ANNOTATION",
+        slug: "explicit-annotation",
     },
     RegistryEntry {
         code: 20,
-        name: "MACOS_BYTES",
-        slug: "macos-bytes",
+        name: "PROVIDER_COMPUTED",
+        slug: "provider-computed",
     },
     RegistryEntry {
         code: 30,
-        name: "WINDOWS_WTF8",
-        slug: "windows-wtf8",
+        name: "CONTEXTUAL_EXPECTATION",
+        slug: "contextual-expectation",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "NARROWING",
+        slug: "narrowing",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "COMPILER_LOWERED",
+        slug: "compiler-lowered",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "STATIC_SEMANTIC_DERIVATION",
+        slug: "static-semantic-derivation",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum TypeRole {
+    DeclaredType = 10,
+    InferredType = 20,
+    ComputedType = 30,
+    ExpectedType = 40,
+    TypeOf = 50,
+    ParameterType = 60,
+    ReturnType = 70,
+    FieldType = 80,
+}
+impl TryFrom<u16> for TypeRole {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::DeclaredType),
+            20 => Ok(Self::InferredType),
+            30 => Ok(Self::ComputedType),
+            40 => Ok(Self::ExpectedType),
+            50 => Ok(Self::TypeOf),
+            60 => Ok(Self::ParameterType),
+            70 => Ok(Self::ReturnType),
+            80 => Ok(Self::FieldType),
+            _ => Err(UnknownRegistryCode {
+                domain: "TYPE_ROLE",
+                code,
+            }),
+        }
+    }
+}
+pub const TYPE_ROLE_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "DECLARED_TYPE",
+        slug: "declared-type",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "INFERRED_TYPE",
+        slug: "inferred-type",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "COMPUTED_TYPE",
+        slug: "computed-type",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "EXPECTED_TYPE",
+        slug: "expected-type",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "TYPE_OF",
+        slug: "type-of",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "PARAMETER_TYPE",
+        slug: "parameter-type",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "RETURN_TYPE",
+        slug: "return-type",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "FIELD_TYPE",
+        slug: "field-type",
     },
 ];
 
@@ -2500,790 +3582,6 @@ pub const UPDATE_WAVE_ITEM_STATE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum OperationalDependencyEdgeKind {
-    Syntax = 10,
-    Semantic = 20,
-    Derivation = 30,
-    Publication = 40,
-}
-impl TryFrom<u16> for OperationalDependencyEdgeKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Syntax),
-            20 => Ok(Self::Semantic),
-            30 => Ok(Self::Derivation),
-            40 => Ok(Self::Publication),
-            _ => Err(UnknownRegistryCode {
-                domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "SYNTAX",
-        slug: "syntax",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "SEMANTIC",
-        slug: "semantic",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "DERIVATION",
-        slug: "derivation",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "PUBLICATION",
-        slug: "publication",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitHashAlgorithm {
-    Sha1 = 10,
-    Sha256 = 20,
-}
-impl TryFrom<u16> for GitHashAlgorithm {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Sha1),
-            20 => Ok(Self::Sha256),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_HASH_ALGORITHM",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_HASH_ALGORITHM_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "SHA1",
-        slug: "sha1",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "SHA256",
-        slug: "sha256",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitRepositoryKind {
-    Common = 10,
-    LinkedWorktree = 20,
-    Submodule = 30,
-}
-impl TryFrom<u16> for GitRepositoryKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Common),
-            20 => Ok(Self::LinkedWorktree),
-            30 => Ok(Self::Submodule),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_REPOSITORY_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_REPOSITORY_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "COMMON",
-        slug: "common",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "LINKED_WORKTREE",
-        slug: "linked-worktree",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SUBMODULE",
-        slug: "submodule",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitHeadKind {
-    Symbolic = 10,
-    Detached = 20,
-    Unborn = 30,
-}
-impl TryFrom<u16> for GitHeadKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Symbolic),
-            20 => Ok(Self::Detached),
-            30 => Ok(Self::Unborn),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_HEAD_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_HEAD_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "SYMBOLIC",
-        slug: "symbolic",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "DETACHED",
-        slug: "detached",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "UNBORN",
-        slug: "unborn",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitOperationState {
-    Clean = 10,
-    Merge = 20,
-    Rebase = 30,
-    CherryPick = 40,
-    Revert = 50,
-    Bisect = 60,
-    Apply = 70,
-    OtherOperation = 80,
-    Unknown = 90,
-}
-impl TryFrom<u16> for GitOperationState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Clean),
-            20 => Ok(Self::Merge),
-            30 => Ok(Self::Rebase),
-            40 => Ok(Self::CherryPick),
-            50 => Ok(Self::Revert),
-            60 => Ok(Self::Bisect),
-            70 => Ok(Self::Apply),
-            80 => Ok(Self::OtherOperation),
-            90 => Ok(Self::Unknown),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_OPERATION_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_OPERATION_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "CLEAN",
-        slug: "clean",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "MERGE",
-        slug: "merge",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "REBASE",
-        slug: "rebase",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "CHERRY_PICK",
-        slug: "cherry-pick",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "REVERT",
-        slug: "revert",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "BISECT",
-        slug: "bisect",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "APPLY",
-        slug: "apply",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "OTHER_OPERATION",
-        slug: "other-operation",
-    },
-    RegistryEntry {
-        code: 90,
-        name: "UNKNOWN",
-        slug: "unknown",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitInventoryClassification {
-    Tracked = 10,
-    UntrackedNotIgnored = 20,
-    UntrackedIgnored = 30,
-    TrackedButIgnoredPatternMatches = 40,
-    ExcludedByCodeFabricPolicy = 50,
-    SubmoduleGitlink = 60,
-    NestedRepository = 70,
-    SpecialFile = 80,
-}
-impl TryFrom<u16> for GitInventoryClassification {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Tracked),
-            20 => Ok(Self::UntrackedNotIgnored),
-            30 => Ok(Self::UntrackedIgnored),
-            40 => Ok(Self::TrackedButIgnoredPatternMatches),
-            50 => Ok(Self::ExcludedByCodeFabricPolicy),
-            60 => Ok(Self::SubmoduleGitlink),
-            70 => Ok(Self::NestedRepository),
-            80 => Ok(Self::SpecialFile),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_INVENTORY_CLASSIFICATION",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_INVENTORY_CLASSIFICATION_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "TRACKED",
-        slug: "tracked",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "UNTRACKED_NOT_IGNORED",
-        slug: "untracked-not-ignored",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "UNTRACKED_IGNORED",
-        slug: "untracked-ignored",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "TRACKED_BUT_IGNORED_PATTERN_MATCHES",
-        slug: "tracked-but-ignored-pattern-matches",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "EXCLUDED_BY_CODE_FABRIC_POLICY",
-        slug: "excluded-by-code-fabric-policy",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "SUBMODULE_GITLINK",
-        slug: "submodule-gitlink",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "NESTED_REPOSITORY",
-        slug: "nested-repository",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "SPECIAL_FILE",
-        slug: "special-file",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum InventoryInclusionState {
-    Included = 10,
-    ExcludedPolicy = 20,
-    ExcludedSpecialFile = 30,
-    ExcludedSizeLimit = 40,
-}
-impl TryFrom<u16> for InventoryInclusionState {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Included),
-            20 => Ok(Self::ExcludedPolicy),
-            30 => Ok(Self::ExcludedSpecialFile),
-            40 => Ok(Self::ExcludedSizeLimit),
-            _ => Err(UnknownRegistryCode {
-                domain: "INVENTORY_INCLUSION_STATE",
-                code,
-            }),
-        }
-    }
-}
-pub const INVENTORY_INCLUSION_STATE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "INCLUDED",
-        slug: "included",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "EXCLUDED_POLICY",
-        slug: "excluded-policy",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "EXCLUDED_SPECIAL_FILE",
-        slug: "excluded-special-file",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "EXCLUDED_SIZE_LIMIT",
-        slug: "excluded-size-limit",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum InventoryFileKind {
-    Regular = 10,
-    Symlink = 20,
-    Special = 30,
-}
-impl TryFrom<u16> for InventoryFileKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Regular),
-            20 => Ok(Self::Symlink),
-            30 => Ok(Self::Special),
-            _ => Err(UnknownRegistryCode {
-                domain: "INVENTORY_FILE_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const INVENTORY_FILE_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "REGULAR",
-        slug: "regular",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "SYMLINK",
-        slug: "symlink",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SPECIAL",
-        slug: "special",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitCandidateOrigin {
-    IndexWorktree = 10,
-    HeadIndex = 20,
-    HeadTree = 30,
-}
-impl TryFrom<u16> for GitCandidateOrigin {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::IndexWorktree),
-            20 => Ok(Self::HeadIndex),
-            30 => Ok(Self::HeadTree),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_CANDIDATE_ORIGIN",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_CANDIDATE_ORIGIN_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "INDEX_WORKTREE",
-        slug: "index-worktree",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "HEAD_INDEX",
-        slug: "head-index",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "HEAD_TREE",
-        slug: "head-tree",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum GitCandidateMode {
-    Status = 10,
-    HeadTree = 20,
-}
-impl TryFrom<u16> for GitCandidateMode {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Status),
-            20 => Ok(Self::HeadTree),
-            _ => Err(UnknownRegistryCode {
-                domain: "GIT_CANDIDATE_MODE",
-                code,
-            }),
-        }
-    }
-}
-pub const GIT_CANDIDATE_MODE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "STATUS",
-        slug: "status",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "HEAD_TREE",
-        slug: "head-tree",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum OverlayTombstoneReason {
-    OwnerReplacedEmpty = 10,
-    SourceRemoved = 20,
-    SupersededGeneration = 30,
-}
-impl TryFrom<u16> for OverlayTombstoneReason {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::OwnerReplacedEmpty),
-            20 => Ok(Self::SourceRemoved),
-            30 => Ok(Self::SupersededGeneration),
-            _ => Err(UnknownRegistryCode {
-                domain: "OVERLAY_TOMBSTONE_REASON",
-                code,
-            }),
-        }
-    }
-}
-pub const OVERLAY_TOMBSTONE_REASON_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "OWNER_REPLACED_EMPTY",
-        slug: "owner-replaced-empty",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "SOURCE_REMOVED",
-        slug: "source-removed",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SUPERSEDED_GENERATION",
-        slug: "superseded-generation",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum NewlineKind {
-    None = 10,
-    Lf = 20,
-    Crlf = 30,
-    Cr = 40,
-    Mixed = 50,
-}
-impl TryFrom<u16> for NewlineKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::None),
-            20 => Ok(Self::Lf),
-            30 => Ok(Self::Crlf),
-            40 => Ok(Self::Cr),
-            50 => Ok(Self::Mixed),
-            _ => Err(UnknownRegistryCode {
-                domain: "NEWLINE_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const NEWLINE_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "NONE",
-        slug: "none",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "LF",
-        slug: "lf",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "CRLF",
-        slug: "crlf",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "CR",
-        slug: "cr",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "MIXED",
-        slug: "mixed",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum OccurrenceFamily {
-    Token = 10,
-    Annotation = 20,
-    Syntax = 30,
-}
-impl TryFrom<u16> for OccurrenceFamily {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Token),
-            20 => Ok(Self::Annotation),
-            30 => Ok(Self::Syntax),
-            _ => Err(UnknownRegistryCode {
-                domain: "OCCURRENCE_FAMILY",
-                code,
-            }),
-        }
-    }
-}
-pub const OCCURRENCE_FAMILY_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "TOKEN",
-        slug: "token",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "ANNOTATION",
-        slug: "annotation",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SYNTAX",
-        slug: "syntax",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum ProviderObservationFamily {
-    RustMirOwner = 120,
-}
-impl TryFrom<u16> for ProviderObservationFamily {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            120 => Ok(Self::RustMirOwner),
-            _ => Err(UnknownRegistryCode {
-                domain: "PROVIDER_OBSERVATION_FAMILY",
-                code,
-            }),
-        }
-    }
-}
-pub const PROVIDER_OBSERVATION_FAMILY_VALUES: &[RegistryEntry] = &[RegistryEntry {
-    code: 120,
-    name: "RUST_MIR_OWNER",
-    slug: "rust-mir-owner",
-}];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum RangeReconciliationStep {
-    ExactRangeAndKind = 10,
-    ExactDeclarationName = 20,
-    SmallestEnclosingCompatible = 30,
-    SameStartCompatible = 40,
-    ProviderOnlySynthetic = 50,
-}
-impl TryFrom<u16> for RangeReconciliationStep {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::ExactRangeAndKind),
-            20 => Ok(Self::ExactDeclarationName),
-            30 => Ok(Self::SmallestEnclosingCompatible),
-            40 => Ok(Self::SameStartCompatible),
-            50 => Ok(Self::ProviderOnlySynthetic),
-            _ => Err(UnknownRegistryCode {
-                domain: "RANGE_RECONCILIATION_STEP",
-                code,
-            }),
-        }
-    }
-}
-pub const RANGE_RECONCILIATION_STEP_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "EXACT_RANGE_AND_KIND",
-        slug: "exact-range-and-kind",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "EXACT_DECLARATION_NAME",
-        slug: "exact-declaration-name",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "SMALLEST_ENCLOSING_COMPATIBLE",
-        slug: "smallest-enclosing-compatible",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "SAME_START_COMPATIBLE",
-        slug: "same-start-compatible",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "PROVIDER_ONLY_SYNTHETIC",
-        slug: "provider-only-synthetic",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum RawKindDisposition {
-    Normalize = 10,
-    Ignore = 20,
-    Unsupported = 30,
-}
-impl TryFrom<u16> for RawKindDisposition {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Normalize),
-            20 => Ok(Self::Ignore),
-            30 => Ok(Self::Unsupported),
-            _ => Err(UnknownRegistryCode {
-                domain: "RAW_KIND_DISPOSITION",
-                code,
-            }),
-        }
-    }
-}
-pub const RAW_KIND_DISPOSITION_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "NORMALIZE",
-        slug: "normalize",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "IGNORE",
-        slug: "ignore",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "UNSUPPORTED",
-        slug: "unsupported",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum WorkspaceKind {
-    NonGitRoot = 10,
-    GitWorktree = 20,
-}
-impl TryFrom<u16> for WorkspaceKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::NonGitRoot),
-            20 => Ok(Self::GitWorktree),
-            _ => Err(UnknownRegistryCode {
-                domain: "WORKSPACE_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const WORKSPACE_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "NON_GIT_ROOT",
-        slug: "non-git-root",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "GIT_WORKTREE",
-        slug: "git-worktree",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum AnalysisContextKind {
-    Source = 10,
-    Python = 20,
-    Rust = 30,
-}
-impl TryFrom<u16> for AnalysisContextKind {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::Source),
-            20 => Ok(Self::Python),
-            30 => Ok(Self::Rust),
-            _ => Err(UnknownRegistryCode {
-                domain: "ANALYSIS_CONTEXT_KIND",
-                code,
-            }),
-        }
-    }
-}
-pub const ANALYSIS_CONTEXT_KIND_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "SOURCE",
-        slug: "source",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "PYTHON",
-        slug: "python",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "RUST",
-        slug: "rust",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
 pub enum ValueKind {
     Entity = 10,
     Boolean = 20,
@@ -3351,142 +3649,33 @@ pub const VALUE_KIND_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
-pub enum Severity {
-    Info = 10,
-    Warning = 20,
-    Error = 30,
-    Fatal = 40,
+pub enum WorkspaceKind {
+    NonGitRoot = 10,
+    GitWorktree = 20,
 }
-impl TryFrom<u16> for Severity {
+impl TryFrom<u16> for WorkspaceKind {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
-            10 => Ok(Self::Info),
-            20 => Ok(Self::Warning),
-            30 => Ok(Self::Error),
-            40 => Ok(Self::Fatal),
+            10 => Ok(Self::NonGitRoot),
+            20 => Ok(Self::GitWorktree),
             _ => Err(UnknownRegistryCode {
-                domain: "SEVERITY",
+                domain: "WORKSPACE_KIND",
                 code,
             }),
         }
     }
 }
-pub const SEVERITY_VALUES: &[RegistryEntry] = &[
+pub const WORKSPACE_KIND_VALUES: &[RegistryEntry] = &[
     RegistryEntry {
         code: 10,
-        name: "INFO",
-        slug: "info",
+        name: "NON_GIT_ROOT",
+        slug: "non-git-root",
     },
     RegistryEntry {
         code: 20,
-        name: "WARNING",
-        slug: "warning",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "ERROR",
-        slug: "error",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "FATAL",
-        slug: "fatal",
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u16)]
-pub enum Phase {
-    InputValidation = 10,
-    SchemaBinding = 20,
-    LogicalPlanning = 30,
-    PolicyValidation = 40,
-    PhysicalPlanning = 50,
-    Execution = 60,
-    WriteValidation = 70,
-    Commit = 80,
-    SnapshotConstruction = 90,
-    SnapshotActivation = 100,
-    Shutdown = 110,
-}
-impl TryFrom<u16> for Phase {
-    type Error = UnknownRegistryCode;
-    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
-        match code {
-            10 => Ok(Self::InputValidation),
-            20 => Ok(Self::SchemaBinding),
-            30 => Ok(Self::LogicalPlanning),
-            40 => Ok(Self::PolicyValidation),
-            50 => Ok(Self::PhysicalPlanning),
-            60 => Ok(Self::Execution),
-            70 => Ok(Self::WriteValidation),
-            80 => Ok(Self::Commit),
-            90 => Ok(Self::SnapshotConstruction),
-            100 => Ok(Self::SnapshotActivation),
-            110 => Ok(Self::Shutdown),
-            _ => Err(UnknownRegistryCode {
-                domain: "PHASE",
-                code,
-            }),
-        }
-    }
-}
-pub const PHASE_VALUES: &[RegistryEntry] = &[
-    RegistryEntry {
-        code: 10,
-        name: "INPUT_VALIDATION",
-        slug: "input-validation",
-    },
-    RegistryEntry {
-        code: 20,
-        name: "SCHEMA_BINDING",
-        slug: "schema-binding",
-    },
-    RegistryEntry {
-        code: 30,
-        name: "LOGICAL_PLANNING",
-        slug: "logical-planning",
-    },
-    RegistryEntry {
-        code: 40,
-        name: "POLICY_VALIDATION",
-        slug: "policy-validation",
-    },
-    RegistryEntry {
-        code: 50,
-        name: "PHYSICAL_PLANNING",
-        slug: "physical-planning",
-    },
-    RegistryEntry {
-        code: 60,
-        name: "EXECUTION",
-        slug: "execution",
-    },
-    RegistryEntry {
-        code: 70,
-        name: "WRITE_VALIDATION",
-        slug: "write-validation",
-    },
-    RegistryEntry {
-        code: 80,
-        name: "COMMIT",
-        slug: "commit",
-    },
-    RegistryEntry {
-        code: 90,
-        name: "SNAPSHOT_CONSTRUCTION",
-        slug: "snapshot-construction",
-    },
-    RegistryEntry {
-        code: 100,
-        name: "SNAPSHOT_ACTIVATION",
-        slug: "snapshot-activation",
-    },
-    RegistryEntry {
-        code: 110,
-        name: "SHUTDOWN",
-        slug: "shutdown",
+        name: "GIT_WORKTREE",
+        slug: "git-worktree",
     },
 ];
 
@@ -3852,322 +4041,340 @@ pub struct RegistryDomainEntry {
 
 pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
     RegistryDomainEntry {
-        domain: "EVIDENCE_CERTAINTY",
+        domain: "ANALYSIS_CONTEXT_KIND",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: EVIDENCE_CERTAINTY_VALUES,
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: ANALYSIS_CONTEXT_KIND_VALUES,
     },
     RegistryDomainEntry {
-        domain: "RESOLUTION_CLASS",
+        domain: "ANNOTATION_KIND",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: RESOLUTION_CLASS_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "DIRECTNESS",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: DIRECTNESS_VALUES,
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: ANNOTATION_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: COMPLETENESS_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "COMPLETENESS_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: COMPLETENESS_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "DEPENDENCY_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: DEPENDENCY_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "DIRECTNESS",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: DIRECTNESS_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "DURABLE_PUBLICATION_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: DURABLE_PUBLICATION_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "EFFECT_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: EFFECT_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "EVENT_STREAM_HEALTH",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: EVENT_STREAM_HEALTH_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "EVIDENCE_CERTAINTY",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: EVIDENCE_CERTAINTY_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "FRESHNESS_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: FRESHNESS_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_ACCELERATION_STATUS",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_ACCELERATION_STATUS_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_CANDIDATE_MODE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_CANDIDATE_MODE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_CANDIDATE_ORIGIN",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_CANDIDATE_ORIGIN_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_HASH_ALGORITHM",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_HASH_ALGORITHM_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_HEAD_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_HEAD_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_INVENTORY_CLASSIFICATION",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_INVENTORY_CLASSIFICATION_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_OPERATION_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_OPERATION_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "GIT_REPOSITORY_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: GIT_REPOSITORY_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "INVENTORY_FILE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: INVENTORY_FILE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "INVENTORY_INCLUSION_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: INVENTORY_INCLUSION_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "LANGUAGE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: LANGUAGE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "LIMIT_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: LIMIT_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "NEWLINE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: NEWLINE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "NULLABLE_SEMANTICS",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: NULLABLE_SEMANTICS_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "OCCURRENCE_FAMILY",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: OCCURRENCE_FAMILY_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "OVERLAY_TOMBSTONE_REASON",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: OVERLAY_TOMBSTONE_REASON_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_CAPABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: OWNER_CAPABILITY_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "OWNER_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: OWNER_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PATH_ENCODING",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: PATH_ENCODING_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PHASE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: PHASE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PROVIDER_CODE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: PROVIDER_CODE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PROVIDER_OBSERVATION_FAMILY",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: PROVIDER_OBSERVATION_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_RUN_STATE",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: PROVIDER_RUN_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "QUERY_AVAILABILITY_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: QUERY_AVAILABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_EXECUTION_STATE",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: QUERY_EXECUTION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_FORM",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: QUERY_FORM_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "QUERY_AVAILABILITY_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: QUERY_AVAILABILITY_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "COMPLETENESS_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: COMPLETENESS_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "FRESHNESS_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: FRESHNESS_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "LIMIT_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: LIMIT_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "DEPENDENCY_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: DEPENDENCY_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "DURABLE_PUBLICATION_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: DURABLE_PUBLICATION_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "SERVING_ACTIVATION_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: SERVING_ACTIVATION_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "SNAPSHOT_LEASE_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: SNAPSHOT_LEASE_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "SNAPSHOT_LEASE_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: SNAPSHOT_LEASE_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "SOURCE_TRUST_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: SOURCE_TRUST_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "EVENT_STREAM_HEALTH",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: EVENT_STREAM_HEALTH_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_ACCELERATION_STATUS",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_ACCELERATION_STATUS_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "EFFECT_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: EFFECT_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "RESOURCE_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: RESOURCE_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "PROVIDER_CODE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: PROVIDER_CODE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "TOKEN_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: TOKEN_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "ANNOTATION_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: ANNOTATION_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "SYNTAX_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: SYNTAX_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "SYNTAX_FIELD_ROLE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: SYNTAX_FIELD_ROLE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "OWNER_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: OWNER_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "LANGUAGE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: LANGUAGE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "PATH_ENCODING",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: PATH_ENCODING_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "UPDATE_CANDIDATE_STRATEGY",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: UPDATE_CANDIDATE_STRATEGY_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "UPDATE_WAVE_ITEM_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: UPDATE_WAVE_ITEM_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_HASH_ALGORITHM",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_HASH_ALGORITHM_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_REPOSITORY_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_REPOSITORY_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_HEAD_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_HEAD_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_OPERATION_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_OPERATION_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_INVENTORY_CLASSIFICATION",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_INVENTORY_CLASSIFICATION_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "INVENTORY_INCLUSION_STATE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: INVENTORY_INCLUSION_STATE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "INVENTORY_FILE_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: INVENTORY_FILE_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_CANDIDATE_ORIGIN",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_CANDIDATE_ORIGIN_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "GIT_CANDIDATE_MODE",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: GIT_CANDIDATE_MODE_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "OVERLAY_TOMBSTONE_REASON",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: OVERLAY_TOMBSTONE_REASON_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "NEWLINE_KIND",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: NEWLINE_KIND_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "OCCURRENCE_FAMILY",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: OCCURRENCE_FAMILY_VALUES,
-    },
-    RegistryDomainEntry {
-        domain: "PROVIDER_OBSERVATION_FAMILY",
-        version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: PROVIDER_OBSERVATION_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "RANGE_RECONCILIATION_STEP",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: RANGE_RECONCILIATION_STEP_VALUES,
     },
     RegistryDomainEntry {
         domain: "RAW_KIND_DISPOSITION",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: RAW_KIND_DISPOSITION_VALUES,
     },
     RegistryDomainEntry {
-        domain: "WORKSPACE_KIND",
+        domain: "RESOLUTION_CLASS",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: WORKSPACE_KIND_VALUES,
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: RESOLUTION_CLASS_VALUES,
     },
     RegistryDomainEntry {
-        domain: "ANALYSIS_CONTEXT_KIND",
+        domain: "RESOURCE_KIND",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: ANALYSIS_CONTEXT_KIND_VALUES,
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: RESOURCE_KIND_VALUES,
     },
     RegistryDomainEntry {
-        domain: "VALUE_KIND",
+        domain: "SERVING_ACTIVATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: VALUE_KIND_VALUES,
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: SERVING_ACTIVATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SEVERITY",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
         values: SEVERITY_VALUES,
     },
     RegistryDomainEntry {
-        domain: "PHASE",
+        domain: "SNAPSHOT_LEASE_KIND",
         version: "1.0",
-        canonical_digest: "b3:924b3ee2858cbd589adbd7cc95211cdcf2c69f8cc29ee6de2bc26ccc26763b73",
-        values: PHASE_VALUES,
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: SNAPSHOT_LEASE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "SNAPSHOT_LEASE_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: SNAPSHOT_LEASE_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "SOURCE_TRUST_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: SOURCE_TRUST_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "SYNTAX_FIELD_ROLE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: SYNTAX_FIELD_ROLE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "SYNTAX_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: SYNTAX_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "TOKEN_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: TOKEN_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "TYPE_ORIGIN",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: TYPE_ORIGIN_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "TYPE_ROLE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: TYPE_ROLE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "UPDATE_CANDIDATE_STRATEGY",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: UPDATE_CANDIDATE_STRATEGY_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "UPDATE_WAVE_ITEM_STATE",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: UPDATE_WAVE_ITEM_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "VALUE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: VALUE_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "WORKSPACE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        values: WORKSPACE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "WORKSPACE_LIFECYCLE",
@@ -6971,6 +7178,13 @@ pub const PROPERTY_KIND_IDS: &[&str] = &[
     "VISIBILITY",
     "LANGUAGE",
     "CATEGORICAL_KIND",
+    "TYPE_KIND",
+    "CANONICAL_TYPE_KEY",
+    "PRIMITIVE_KIND",
+    "NOMINAL_DECLARATION_REF",
+    "CALLABLE_SIGNATURE_REF",
+    "RAW_TYPE_SHAPE_HASH",
+    "NULLABLE_SEMANTICS",
 ];
 
 pub const FACT_KIND_IDS: &[&str] = &["ENTITY_EXISTENCE", "RELATION", "PROPERTY"];
@@ -8109,6 +8323,34 @@ pub const PROPERTY_KIND_CODES: &[OntologyCodeEntry] = &[
     },
     OntologyCodeEntry {
         code: 100,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 110,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 120,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 130,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 140,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 150,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 160,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 170,
         family_code: 0,
     },
 ];

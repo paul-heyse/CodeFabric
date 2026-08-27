@@ -306,3 +306,263 @@ records:
     disposition: plan_owned
     owner: semantic-query-owner
     current_packet: WP01
+  - path: codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/bundles/ontology-bundle.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/bundles/tool-contract-bundle.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/generated/model/governance/transformation-pass-traceability.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/generated/model/registry-cbef.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/generated/model/schema/operational-store.sql
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: contracts/generated/model/schema/schema-evolution-policy.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: contracts/generated/model/schema/schema-validation.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: contracts/generated/model/schema/table-specs.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: contracts/registry/enum-registry.yaml
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/registry/transformation-pass-registry.yaml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/schema/analysis-context.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: contracts/schema/cpg-semantic-query-response.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: semantic-query-owner
+    current_packet: WP01
+  - path: contracts/schema/provider-observations/pyrefly-module-v1.json
+    status_at_wp73: " D"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: contracts/schema/public-snapshot-metadata.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP01
+  - path: contracts/schema/public-status.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP01
+  - path: contracts/schema/schema-contract-ir.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: contracts/schema/serving-snapshot.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: contracts/schema/source-context.schema.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: pyrefly-sidecar/src/pyrefly_link.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: pyrefly-sidecar/src/server.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: rustc-extractor/src/wrapper.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: src/analysis_context.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: src/core_facts.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: src/fact_ingest.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: src/generated/fact_row_encoders.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: src/generated/model_schema_tables.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: src/generated/table_specs.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: src/identity.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: src/pyrefly_service.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: src/schema_registry.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: tooling/proto/toolchain-identity.json
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: contracts/generated/model/schema/semantic-lane-fragments.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/governance/semantic-provider-legacy-candidates.yaml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: contracts/registry/ontology-property-registry.yaml
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: ontology-owner
+    current_packet: WP01
+  - path: contracts/semantic-fragments/python.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: contracts/semantic-fragments/rust.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP01
+  - path: contracts/semantic-fragments/shared.json
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: scripts/semantic_provider_legacy_zero_state.sh
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: src/bin/codefabric_model/main.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: src/bin/codefabric_model/semantic_fragment_driver.rs
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: src/generated/model_semantic_lane_fragments.rs
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: suite-governance-owner
+    current_packet: WP01
+  - path: src/lifecycle.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: lifecycle-owner
+    current_packet: WP01
+  - path: src/operational_store.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: data-fabric-owner
+    current_packet: WP01
+  - path: tooling/ast-grep/semantic-provider-legacy/direct-provider-invocation.yml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: tooling/ast-grep/semantic-provider-legacy/observation-schema-include-bypass.yml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: tooling/ast-grep/semantic-provider-legacy/opaque-semantic-json-ingest.yml
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: tooling/ci/plan_assurance.py
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: tooling/ci/property_registry_closure.py
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: ontology-owner
+    current_packet: WP01
+  - path: tooling/ci/semantic_provider_legacy_zero_state.py
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01
+  - path: tooling/ci/test_property_registry_closure.py
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: ontology-owner
+    current_packet: WP01
+  - path: tooling/ci/test_semantic_provider_legacy_zero_state.py
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: repository-infrastructure-owner
+    current_packet: WP01

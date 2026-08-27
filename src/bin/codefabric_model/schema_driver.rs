@@ -38,6 +38,7 @@ const PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH: &str =
 const PUBLIC_SCHEMA_INSTANCES_PATH: &str =
     "contracts/generated/model/schema/public-schema-golden-instances.json";
 const ENUM_REGISTRY_PATH: &str = "contracts/registry/enum-registry.yaml";
+const TYPE_ALGEBRA_PATH: &str = "contracts/identity/type-algebra-v1.yaml";
 const ENTITY_REGISTRY_PATH: &str = "contracts/registry/ontology-entity-registry.yaml";
 const RELATION_REGISTRY_PATH: &str = "contracts/registry/ontology-relation-registry.yaml";
 const PROPERTY_REGISTRY_PATH: &str = "contracts/registry/ontology-property-registry.yaml";
@@ -267,6 +268,8 @@ enum RowEncoderKind {
     SourceTokens,
     SourceAnnotations,
     SyntaxDetails,
+    TypeDetails,
+    TypeFactDetails,
 }
 
 impl RowEncoderKind {
@@ -282,6 +285,8 @@ impl RowEncoderKind {
             Self::SourceTokens => "encode_source_tokens",
             Self::SourceAnnotations => "encode_source_annotations",
             Self::SyntaxDetails => "encode_syntax_details",
+            Self::TypeDetails => "encode_type_details",
+            Self::TypeFactDetails => "encode_type_fact_details",
         }
     }
 
@@ -297,6 +302,8 @@ impl RowEncoderKind {
             Self::SourceTokens => "SourceTokenRow",
             Self::SourceAnnotations => "SourceAnnotationRow",
             Self::SyntaxDetails => "SyntaxDetailRow",
+            Self::TypeDetails => "TypeDetailRow",
+            Self::TypeFactDetails => "TypeFactDetailRow",
         }
     }
 }
@@ -330,6 +337,7 @@ struct MetadataAnnotationContract {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 enum SemanticAuthority {
     EnumRegistry,
+    TypeAlgebra,
     OntologyEntityRegistry,
     OntologyRelationRegistry,
     OntologyPropertyRegistry,
@@ -550,6 +558,7 @@ struct PublicSchemaContract {
 #[serde(rename_all = "snake_case")]
 enum ProviderObservationLogicalType {
     Utf8,
+    Binary,
     Boolean,
     #[serde(rename = "uint64")]
     UInt64,
@@ -711,6 +720,7 @@ impl SchemaContractIr {
         }
         let expected_authorities = BTreeMap::from([
             (SemanticAuthority::EnumRegistry, ENUM_REGISTRY_PATH),
+            (SemanticAuthority::TypeAlgebra, TYPE_ALGEBRA_PATH),
             (
                 SemanticAuthority::OntologyEntityRegistry,
                 ENTITY_REGISTRY_PATH,
@@ -806,6 +816,8 @@ impl SchemaContractIr {
             (RowEncoderKind::SourceTokens, 150),
             (RowEncoderKind::SourceAnnotations, 160),
             (RowEncoderKind::SyntaxDetails, 170),
+            (RowEncoderKind::TypeDetails, 180),
+            (RowEncoderKind::TypeFactDetails, 190),
         ]);
         if encoders != expected_encoders {
             return invalid(
@@ -1162,6 +1174,13 @@ fn validate_semantic_authorities(
                     .flatten()
                     .filter_map(|record| record["domain"].as_str().map(str::to_owned)),
             );
+        } else if authority.authority == SemanticAuthority::TypeAlgebra {
+            if value["constructors"].as_array().is_none_or(Vec::is_empty) {
+                return invalid(
+                    "$.semantic_authorities",
+                    format!("semantic authority {} has no constructors", authority.path),
+                );
+            }
         } else if value["records"].as_array().is_none_or(Vec::is_empty) {
             return invalid(
                 "$.semantic_authorities",
@@ -1175,6 +1194,7 @@ fn validate_semantic_authorities(
                 .domain
                 .as_deref()
                 .is_some_and(|domain| enum_domains.contains(domain)),
+            SemanticAuthority::TypeAlgebra => binding.domain.as_deref() == Some("TYPE_CONSTRUCTOR"),
             SemanticAuthority::OntologyEntityRegistry => {
                 matches!(
                     binding.domain.as_deref(),
@@ -1216,6 +1236,7 @@ fn validate_semantic_authorities(
 pub struct SchemaPlan {
     descriptor: DriverDescriptor,
     ir: SchemaContractIr,
+    semantic_fragments: super::semantic_fragment_driver::SemanticFragmentSet,
     query_forms: QueryFormContract,
     query_form_bytes: Vec<u8>,
     public_schema_instances: Value,
@@ -1276,6 +1297,14 @@ impl SchemaDriver {
             (
                 safe(PYTHON_QUERY_FORM_CONTRACT_PATH)?,
                 plan.query_form_bytes.clone(),
+            ),
+            (
+                safe(super::semantic_fragment_driver::JSON_PROJECTION_PATH)?,
+                plan.semantic_fragments.render_json()?,
+            ),
+            (
+                safe(super::semantic_fragment_driver::RUST_PROJECTION_PATH)?,
+                rustfmt_source(plan.semantic_fragments.render_rust().as_bytes())?,
             ),
         ];
         for schema in &plan.ir.public_schemas {
@@ -1354,6 +1383,16 @@ impl ModelDriver for SchemaDriver {
                 PYTHON_QUERY_FORM_CONTRACT_PATH,
                 DriverOutputRole::CanonicalProjection,
             )?,
+            Self::output(
+                "output:model-semantic-lane-fragments-json",
+                super::semantic_fragment_driver::JSON_PROJECTION_PATH,
+                DriverOutputRole::CanonicalProjection,
+            )?,
+            Self::output(
+                "output:model-semantic-lane-fragments-rust",
+                super::semantic_fragment_driver::RUST_PROJECTION_PATH,
+                DriverOutputRole::RustBinding,
+            )?,
         ];
         let descriptor = DriverDescriptor {
             driver_id: StableId::parse("driver:schema-contract-v1".to_owned())
@@ -1371,6 +1410,9 @@ impl ModelDriver for SchemaDriver {
                 FACT_REGISTRY_PATH,
                 CAPABILITY_REGISTRY_PATH,
                 PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH,
+                super::semantic_fragment_driver::FRAGMENT_PATHS[0],
+                super::semantic_fragment_driver::FRAGMENT_PATHS[1],
+                super::semantic_fragment_driver::FRAGMENT_PATHS[2],
             ]
             .into_iter()
             .map(safe_protocol)
@@ -1383,7 +1425,7 @@ impl ModelDriver for SchemaDriver {
             resource_profile: DriverResourceProfile {
                 max_source_bytes: MAX_AUTHORITY_BYTES,
                 max_output_bytes: 8 * 1024 * 1024,
-                max_outputs: 20,
+                max_outputs: 24,
             },
         };
         descriptor.validate()?;
@@ -1394,7 +1436,15 @@ impl ModelDriver for SchemaDriver {
         let mut descriptor = self.describe()?;
         let source_fence = DriverSourceFence::capture(repository_root, &descriptor)?;
         let bytes = read_stable(&repository_root.join(SCHEMA_IR_PATH), MAX_AUTHORITY_BYTES)?;
-        let ir = decode_ir(&bytes)
+        let semantic_fragments =
+            super::semantic_fragment_driver::SemanticFragmentSet::load(repository_root)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let mut ir_value = codefabric::contracts::jcs::decode_strict(&bytes)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        semantic_fragments
+            .compose_schema(&mut ir_value)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let ir: SchemaContractIr = serde_json::from_value(ir_value)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         ir.validate()
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
@@ -1410,6 +1460,23 @@ impl ModelDriver for SchemaDriver {
             &repository_root.join(ENUM_REGISTRY_PATH),
             MAX_AUTHORITY_BYTES,
         )?;
+        let property_registry_bytes = read_stable(
+            &repository_root.join(PROPERTY_REGISTRY_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?;
+        let mut enum_registry_value = serde_json::to_value(
+            serde_yaml_ng::from_slice::<serde_yaml_ng::Value>(&enum_registry_bytes)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?,
+        )
+        .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let mut property_registry_value = serde_json::to_value(
+            serde_yaml_ng::from_slice::<serde_yaml_ng::Value>(&property_registry_bytes)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?,
+        )
+        .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        semantic_fragments
+            .compose_registries(&mut property_registry_value, &mut enum_registry_value)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         query_forms
             .validate(&query_form_bytes, &enum_registry_bytes)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
@@ -1436,16 +1503,24 @@ impl ModelDriver for SchemaDriver {
             descriptor.outputs.push(output);
         }
         descriptor.validate()?;
-        let semantic_digest = detached_schema_identity(&bytes)
+        let base_semantic_digest = detached_schema_identity(&bytes)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let base_source_digest = codefabric::integrity::framed_digest(&bytes);
+        let semantic_digest = semantic_fragments
+            .composed_source_digest(&base_semantic_digest)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let source_digest = semantic_fragments
+            .composed_source_digest(&base_source_digest)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         Ok(SchemaPlan {
             descriptor,
             ir,
+            semantic_fragments,
             query_forms,
             query_form_source_digest: codefabric::integrity::framed_digest(&query_form_bytes),
             query_form_bytes,
             public_schema_instances,
-            source_digest: codefabric::integrity::framed_digest(&bytes),
+            source_digest,
             semantic_digest,
             source_fence,
         })
@@ -2285,7 +2360,7 @@ fn render_rust(ir: &SchemaContractIr) -> Vec<u8> {
     output.push_str("];\n\n");
     output.push_str(
         "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
-         pub enum ProviderObservationLogicalType { Utf8, Boolean, UInt64, Utf8List }\n\
+         pub enum ProviderObservationLogicalType { Utf8, Binary, Boolean, UInt64, Utf8List }\n\
          #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct ProviderObservationField { pub name: &'static str, pub logical_type: ProviderObservationLogicalType, pub nullable: bool }\n\
          #[derive(Clone, Copy, Debug)]\n\
@@ -2327,6 +2402,7 @@ fn provider_observation_descriptor(schema: &ProviderObservationSchemaContract) -
         descriptor.push(':');
         descriptor.push_str(match field.logical_type {
             ProviderObservationLogicalType::Utf8 => "utf8",
+            ProviderObservationLogicalType::Binary => "binary",
             ProviderObservationLogicalType::Boolean => "boolean",
             ProviderObservationLogicalType::UInt64 => "uint64",
             ProviderObservationLogicalType::Utf8List => "list<utf8>",
@@ -2961,6 +3037,8 @@ pub enum SchemaDriverError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     CanonicalJson(#[from] codefabric::contracts::jcs::CanonicalJsonError),
+    #[error(transparent)]
+    SemanticFragment(#[from] super::semantic_fragment_driver::SemanticFragmentError),
     #[error("schema I/O failed at {path}: {source}")]
     Io {
         path: std::path::PathBuf,
@@ -2974,7 +3052,13 @@ mod tests {
     use super::*;
 
     fn authority() -> SchemaContractIr {
-        decode_ir(&read_stable(Path::new(SCHEMA_IR_PATH), MAX_AUTHORITY_BYTES).unwrap()).unwrap()
+        let bytes = read_stable(Path::new(SCHEMA_IR_PATH), MAX_AUTHORITY_BYTES).unwrap();
+        let mut value = codefabric::contracts::jcs::decode_strict(&bytes).unwrap();
+        super::super::semantic_fragment_driver::SemanticFragmentSet::load(Path::new("."))
+            .unwrap()
+            .compose_schema(&mut value)
+            .unwrap();
+        serde_json::from_value(value).unwrap()
     }
 
     #[test]
@@ -3010,7 +3094,7 @@ mod tests {
         let ir = authority();
         ir.validate().unwrap();
         assert_eq!(ir.public_schemas.len(), 8);
-        assert_eq!(ir.operational_tables.len(), 26);
+        assert_eq!(ir.operational_tables.len(), 27);
         for table in &ir.tables {
             let ids = table
                 .columns
@@ -3222,8 +3306,178 @@ mod tests {
             "encode_source_tokens",
             "encode_source_annotations",
             "encode_syntax_details",
+            "encode_type_details",
+            "encode_type_fact_details",
         ] {
             assert!(rendered.contains(function), "missing {function}");
         }
+    }
+
+    #[test]
+    fn observation_schema_contract_ir_composition() {
+        let ir = authority();
+        ir.validate().unwrap();
+        let schemas = ir
+            .provider_observation_schemas
+            .iter()
+            .map(|schema| {
+                (
+                    schema.provider_id.as_str(),
+                    schema.observation_family_code,
+                    schema.fields.len(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            schemas,
+            BTreeSet::from([("pyrefly-python", 110, 5), ("rustc-mir", 120, 9)])
+        );
+        let pyrefly = ir
+            .provider_observation_schemas
+            .iter()
+            .find(|schema| schema.provider_id == "pyrefly-python")
+            .unwrap();
+        assert!(pyrefly.fields.iter().any(|field| {
+            field.name == "type_table_json"
+                && field.logical_type == ProviderObservationLogicalType::Binary
+        }));
+    }
+
+    #[test]
+    fn common_semantic_type_tables_bind_canonical_type_authority() {
+        let ir = authority();
+        ir.validate().unwrap();
+        let type_detail = ir
+            .tables
+            .iter()
+            .find(|table| table.name == "type_detail")
+            .unwrap();
+        let type_fact_detail = ir
+            .tables
+            .iter()
+            .find(|table| table.name == "type_fact_detail")
+            .unwrap();
+        assert_eq!(type_detail.table_code, 180);
+        assert_eq!(type_fact_detail.table_code, 190);
+        assert_eq!(
+            type_detail.partition_columns,
+            ["type_kind_code", "owner_bucket"]
+        );
+        assert_eq!(type_fact_detail.partition_columns, ["owner_bucket"]);
+        assert_eq!(type_detail.row_encoder, Some(RowEncoderKind::TypeDetails));
+        assert_eq!(
+            type_fact_detail.row_encoder,
+            Some(RowEncoderKind::TypeFactDetails)
+        );
+        assert!(ir.semantic_type_bindings.iter().any(|binding| {
+            binding.semantic_type == "identity:type-constructor"
+                && binding.authority == SemanticAuthority::TypeAlgebra
+                && binding.domain.as_deref() == Some("TYPE_CONSTRUCTOR")
+        }));
+        assert!(ir.semantic_authorities.iter().any(|authority| {
+            authority.authority == SemanticAuthority::TypeAlgebra
+                && authority.artifact_id == "codefabric.identity.type-algebra-v1"
+        }));
+    }
+
+    #[test]
+    fn provider_observation_schema_projection_parity() {
+        let ir = authority();
+        let rendered = String::from_utf8(render_rust(&ir)).unwrap();
+        for schema in &ir.provider_observation_schemas {
+            let descriptor = provider_observation_descriptor(schema);
+            let digest = codefabric::integrity::framed_digest(descriptor.as_bytes());
+            assert!(rendered.contains(&descriptor), "{}", schema.schema_id);
+            assert!(rendered.contains(&digest), "{}", schema.schema_id);
+        }
+        let sidecar = fs::read_to_string("pyrefly-sidecar/src/pyrefly_link.rs").unwrap();
+        let extractor = fs::read_to_string("rustc-extractor/src/protocol.rs").unwrap();
+        let daemon = fs::read_to_string("src/pyrefly_service.rs").unwrap();
+        assert!(sidecar.contains("/../src/generated/model_schema_tables.rs"));
+        assert!(extractor.contains("/../src/generated/model_schema_tables.rs"));
+        assert!(daemon.contains("PROVIDER_OBSERVATION_SCHEMAS"));
+    }
+
+    #[test]
+    fn handwritten_observation_schema_falsification() {
+        assert!(
+            !Path::new("contracts/schema/provider-observations/pyrefly-module-v1.json").exists()
+        );
+        for path in [
+            "pyrefly-sidecar/src/pyrefly_link.rs",
+            "src/pyrefly_service.rs",
+        ] {
+            let source = fs::read_to_string(path).unwrap();
+            assert!(
+                !source.contains("contracts/schema/provider-observations"),
+                "{path}"
+            );
+        }
+        let ir = authority();
+        let baseline = render_rust(&ir);
+        let mut drifted = ir;
+        drifted.provider_observation_schemas[0].fields[0].name = "drifted_module_id".to_owned();
+        assert_ne!(baseline, render_rust(&drifted));
+    }
+
+    #[test]
+    fn successor_intake_operational_gate() {
+        let fragments =
+            super::super::semantic_fragment_driver::SemanticFragmentSet::load(Path::new("."))
+                .unwrap();
+        assert_eq!(
+            fs::read(super::super::semantic_fragment_driver::JSON_PROJECTION_PATH).unwrap(),
+            fragments.render_json().unwrap()
+        );
+        assert_eq!(
+            fs::read(super::super::semantic_fragment_driver::RUST_PROJECTION_PATH).unwrap(),
+            rustfmt_source(fragments.render_rust().as_bytes()).unwrap()
+        );
+
+        let descriptor = SchemaDriver.describe().unwrap();
+        let sources = descriptor
+            .sources
+            .iter()
+            .map(SafeOutputPath::display)
+            .collect::<BTreeSet<_>>();
+        for path in super::super::semantic_fragment_driver::FRAGMENT_PATHS {
+            assert!(sources.contains(path));
+        }
+        let justfile = fs::read_to_string("justfile").unwrap();
+        for recipe in [
+            "wave8-integration-check:",
+            "property-registry-closure-check:",
+            "semantic-provider-legacy-zero-state-check",
+        ] {
+            assert!(justfile.contains(recipe), "missing {recipe}");
+        }
+        for path in [
+            "src/core_facts.rs",
+            "src/analysis_context.rs",
+            "src/operational_store.rs",
+            "src/lifecycle.rs",
+        ] {
+            assert!(
+                fs::read_to_string(path)
+                    .unwrap()
+                    .contains("semantic_lane_fragments"),
+                "{path} does not consume the frozen fragment projection"
+            );
+        }
+        let state: Value = serde_json::from_slice(
+            &fs::read("docs/plans/state/codefabric-waves-8-12-semantic-profiles_v2_state.json")
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            state["baseline_failures"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        );
+        assert!(
+            state["discovered_obligations"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        );
     }
 }

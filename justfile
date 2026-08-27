@@ -343,6 +343,11 @@ wp72-acceptance-check:
 [group('test')]
 wave7-integration-check: git-parity-check rebuild-equivalence-check wp72-acceptance-check source-capture-race-check
 
+[doc("Run the Wave-8 Python-local semantic acceptance slice; WP02-WP07 populate the selector")]
+[group('test')]
+wave8-integration-check:
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/^__wave8_packet_oracle_scaffold__$/)' --no-tests=pass
+
 [doc("Run every released Wave-2 through Wave-7 integration gate")]
 [group('test')]
 wave-acceptance-check: wave2-integration-check wave3-integration-check wave4-integration-check wave5-integration-check wave6-integration-check wave7-integration-check
@@ -595,6 +600,17 @@ model-design-contract-check:
 design-principle-traceability-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_design_principle_alignment.py
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py traceability-check
+
+[doc("Reject unregistered semantic properties and stale storage mappings before publication")]
+[group('gate')]
+property-registry-closure-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_property_registry_closure.py
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/property_registry_closure.py
+
+[doc("Validate governed DB01-DB03 semantic-provider candidates and reviewed transition allows")]
+[group('gate')]
+semantic-provider-legacy-zero-state-check scope="all":
+    ./scripts/semantic_provider_legacy_zero_state.sh "{{scope}}"
 
 [doc("Execute all current design-principle detectors, or one DP-NNN detector")]
 [group('gate')]

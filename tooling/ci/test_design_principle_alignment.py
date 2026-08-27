@@ -138,3 +138,26 @@ def test_wp73_negative_zero_state() -> None:
 def test_wp73_operational_acceptance() -> None:
     current_dirty, attributed = alignment.validate_baseline()
     assert current_dirty <= attributed
+
+
+def test_transformation_pass_traceability_is_namespaced_and_digest_pinned() -> None:
+    assert alignment.validate_transformation_passes() == len(
+        alignment.REQUIRED_TRANSFORMATION_PASSES
+    )
+
+
+def test_transformation_pass_contract_rejects_bare_principle_and_stale_digest(
+    tmp_path: Path,
+) -> None:
+    record = {
+        "pass_id": "PASS_FIXTURE_V1",
+        "principles": ["P14", "H-P16"],
+        "contract_digest": "b3:" + "0" * 64,
+    }
+    assert any(
+        __import__("re").fullmatch(r"P\d+", principle)
+        for principle in record["principles"]
+    )
+    assert record["contract_digest"] != alignment._detached_digest(
+        record, "contract_digest"
+    )

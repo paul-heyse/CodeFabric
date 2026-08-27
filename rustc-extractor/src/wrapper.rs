@@ -287,6 +287,7 @@ fn mir_schema() -> Result<Arc<Schema>, String> {
         .map(|field| {
             let data_type = match field.logical_type {
                 ProviderObservationLogicalType::Utf8 => DataType::Utf8,
+                ProviderObservationLogicalType::Binary => DataType::Binary,
                 ProviderObservationLogicalType::Boolean => DataType::Boolean,
                 ProviderObservationLogicalType::UInt64 => DataType::UInt64,
                 ProviderObservationLogicalType::Utf8List => {

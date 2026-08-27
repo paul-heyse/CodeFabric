@@ -1583,11 +1583,34 @@ pub enum TypeConstructor {
     BoundVariable,
 }
 
+impl TypeConstructor {
+    /// Return the one-based constructor code owned by AC-G-15.
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        self as i32 + 1
+    }
+}
+
 /// Versioned canonical type term; field tags are constructor-schema owned.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypeTerm {
     pub constructor: TypeConstructor,
     pub fields: Vec<CbefField>,
+}
+
+/// Provider-independent type projection accepted from either language adapter.
+pub trait SemanticTypeAdapter<Observation> {
+    type Error;
+
+    fn normalize(&self, observation: &Observation) -> Result<TypeTerm, Self::Error>;
+}
+
+/// Canonical type identity and storage key derived solely from one normalized term.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InternedType {
+    pub type_id: [u8; 16],
+    pub type_kind_code: i32,
+    pub canonical_key: String,
 }
 
 impl TypeTerm {
@@ -1669,6 +1692,48 @@ impl TypeInterner {
         }
         Ok(identity.id)
     }
+
+    /// Normalize a provider observation through an application-owned adapter and intern it.
+    ///
+    /// The returned storage key is the reversible base64url encoding of the canonical AC-G-15
+    /// term bytes. Provider display/debug strings never participate in identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns the adapter failure separately from canonical identity failures.
+    pub fn intern_observation<Observation, Adapter>(
+        &mut self,
+        workspace_id: [u8; 16],
+        context_id: [u8; 16],
+        adapter: &Adapter,
+        observation: &Observation,
+    ) -> Result<InternedType, TypeAdapterError<Adapter::Error>>
+    where
+        Adapter: SemanticTypeAdapter<Observation>,
+    {
+        let term = adapter
+            .normalize(observation)
+            .map_err(TypeAdapterError::Adapter)?;
+        let canonical = term.canonical_bytes()?;
+        let type_id = self.intern(workspace_id, context_id, &term)?;
+        Ok(InternedType {
+            type_id,
+            type_kind_code: term.constructor.code(),
+            canonical_key: format!(
+                "cbef-type-v1:{}",
+                URL_SAFE_NO_PAD.encode(canonical.as_slice())
+            ),
+        })
+    }
+}
+
+/// Failure while adapting and interning a language-provider type observation.
+#[derive(Debug, Error)]
+pub enum TypeAdapterError<AdapterError> {
+    #[error("semantic type adapter rejected the provider observation: {0}")]
+    Adapter(AdapterError),
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
 }
 
 /// Reject comparison-key collisions while preserving deterministic ordering.
@@ -2153,6 +2218,45 @@ mod tests {
         let mut interner = TypeInterner::default();
         let first = interner.intern([3; 16], [4; 16], &term).unwrap();
         assert_eq!(first, interner.intern([3; 16], [4; 16], &term).unwrap());
+    }
+
+    #[test]
+    fn language_type_adapters_consume_one_canonical_type_authority() {
+        struct PrimitiveAdapter;
+
+        impl SemanticTypeAdapter<&str> for PrimitiveAdapter {
+            type Error = std::convert::Infallible;
+
+            fn normalize(&self, observation: &&str) -> Result<TypeTerm, Self::Error> {
+                Ok(TypeTerm {
+                    constructor: TypeConstructor::Primitive,
+                    fields: vec![CbefField {
+                        tag: 1,
+                        value: CbefValue::Utf8 {
+                            value: (*observation).to_owned(),
+                            normalization: StringNormalization::AsciiLower,
+                        },
+                    }],
+                })
+            }
+        }
+
+        let mut interner = TypeInterner::default();
+        let first = interner
+            .intern_observation([1; 16], [2; 16], &PrimitiveAdapter, &"INTEGER")
+            .unwrap();
+        let second = interner
+            .intern_observation([1; 16], [2; 16], &PrimitiveAdapter, &"integer")
+            .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.type_kind_code, TypeConstructor::Primitive.code());
+        assert!(first.canonical_key.starts_with("cbef-type-v1:"));
+
+        let different_context = interner
+            .intern_observation([1; 16], [3; 16], &PrimitiveAdapter, &"integer")
+            .unwrap();
+        assert_ne!(first.type_id, different_context.type_id);
+        assert_eq!(first.canonical_key, different_context.canonical_key);
     }
 
     #[test]
