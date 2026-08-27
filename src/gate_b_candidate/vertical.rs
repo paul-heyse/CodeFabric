@@ -62,6 +62,12 @@ pub(super) struct VerticalExecution {
     pub execution_digest: String,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ProviderSourceBlob {
+    pub path: PathBuf,
+    pub content_digest: String,
+}
+
 struct ChildGuard(Child);
 static SHORT_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -124,8 +130,8 @@ pub(crate) async fn run_pyrefly(
     workspace_id: [u8; 16],
     analysis_context_id: [u8; 16],
     source_generation: u64,
-    source_path: &Path,
-    invalid_source_path: &Path,
+    source: &ProviderSourceBlob,
+    invalid_source: &ProviderSourceBlob,
 ) -> Result<crate::pyrefly_service::AcceptedPyreflyRun, GateBCandidateError> {
     let binary = provider_binary(repository_root, "target/debug/codefabric-pyrefly-sidecar")?;
     let socket = state_root.join("pyrefly.sock");
@@ -147,17 +153,12 @@ pub(crate) async fn run_pyrefly(
         encode_public_id(IdentityDomain::AnalysisContext, None, analysis_context_id)
             .map_err(invariant)?;
     let context_manifest = b"{\"language\":\"python\",\"profile\":\"PYTHON_SEMANTIC_V1\"}".to_vec();
-    let valid_source = fs::read(source_path)?;
-    let invalid_source = fs::read(invalid_source_path)?;
     let source_manifest_digest = digest(
-        [
-            (valid_source.len() as u64).to_be_bytes().as_slice(),
-            valid_source.as_slice(),
-            (invalid_source.len() as u64).to_be_bytes().as_slice(),
-            invalid_source.as_slice(),
-        ]
-        .concat()
-        .as_slice(),
+        format!(
+            "{}:{}",
+            source.content_digest, invalid_source.content_digest
+        )
+        .as_bytes(),
     );
     let request = PyreflyRunRequest {
         provider_run_id: "run:gate-b-pyrefly".to_owned(),
@@ -174,13 +175,15 @@ pub(crate) async fn run_pyrefly(
                 module_id: "module:gate-b-python".to_owned(),
                 module_name: "golden_pkg.core".to_owned(),
                 file_id: "file:gate-b-python".to_owned(),
-                source_path: source_path.to_path_buf(),
+                source_blob_path: source.path.clone(),
+                content_digest: source.content_digest.clone(),
             },
             PyreflyModuleInput {
                 module_id: "module:gate-b-python-invalid".to_owned(),
                 module_name: "malformed.broken".to_owned(),
                 file_id: "file:gate-b-python-invalid".to_owned(),
-                source_path: invalid_source_path.to_path_buf(),
+                source_blob_path: invalid_source.path.clone(),
+                content_digest: invalid_source.content_digest.clone(),
             },
         ],
         requested_capability_codes: vec![90, 110],
@@ -229,7 +232,7 @@ fn extractor_environment(
 pub(crate) async fn run_rustc(
     repository_root: &Path,
     state_root: &Path,
-    workspace_root: &Path,
+    source: &ProviderSourceBlob,
     workspace_id: [u8; 16],
     analysis_context_id: [u8; 16],
     source_generation: u64,
@@ -238,7 +241,8 @@ pub(crate) async fn run_rustc(
         repository_root,
         "target/extractor/debug/codefabric-rustc-extractor",
     )?;
-    let identity_bytes = fs::read(repository_root.join("rustc-extractor/toolchain-identity.json"))?;
+    let identity_bytes =
+        read_candidate_input(&repository_root.join("rustc-extractor/toolchain-identity.json"))?;
     let identity: Value = serde_json::from_slice(&identity_bytes)?;
     let workspace_id_text =
         encode_public_id(IdentityDomain::Workspace, None, workspace_id).map_err(invariant)?;
@@ -293,17 +297,12 @@ pub(crate) async fn run_rustc(
     });
     wait_for_socket(&socket).await?;
     let wrapper = repository_root.join("scripts/run_rustc_extractor.sh");
-    let lowercase_source = workspace_root.join("rust/src/lib.rs");
-    let source = if lowercase_source.is_file() {
-        lowercase_source
-    } else {
-        workspace_root.join("rust/src/Lib.rs")
-    };
-    if !source.is_file() {
+    if !source.path.is_file() {
         return Err(invariant(
-            "Gate B rustc fixture has no current Rust library source",
+            "Gate B rustc fixture has no immutable source blob",
         ));
     }
+    let source = source.path.clone();
     let output_directory = state_root.join("rust-output");
     fs::create_dir(&output_directory)?;
     let status = tokio::task::spawn_blocking(move || {
@@ -1030,20 +1029,36 @@ pub(super) fn execute(
             .map_err(invariant)?
             .ok_or_else(|| invariant("Gate B current-byte rebuild did not publish"))?;
         let source_generation = rebuilt.wave.source_generation;
+        let captured_blob = |display_path: &str| -> Result<ProviderSourceBlob, GateBCandidateError> {
+            let image = rebuilt
+                .wave
+                .items
+                .iter()
+                .filter_map(|item| item.captured.as_deref())
+                .find(|image| image.path.display_string == display_path)
+                .ok_or_else(|| invariant(format!("captured source image is absent: {display_path}")))?;
+            Ok(ProviderSourceBlob {
+                path: clean_root.join("source-blobs").join(&image.blob.relative_name),
+                content_digest: format!("b3:{}", lower_hex(&image.digest)),
+            })
+        };
+        let python_blob = captured_blob("python/golden_pkg/core.py")?;
+        let invalid_python_blob = captured_blob("malformed/broken.py")?;
+        let rust_blob = captured_blob("rust/src/lib.rs")?;
         let pyrefly = run_pyrefly(
             repository_root,
             &vertical_root,
             clean_record.workspace_id,
             SOURCE_CONTEXT_ID,
             source_generation,
-            &workspace_root.join("python/golden_pkg/core.py"),
-            &workspace_root.join("malformed/broken.py"),
+            &python_blob,
+            &invalid_python_blob,
         )
         .await?;
         let rustc = run_rustc(
             repository_root,
             &vertical_root,
-            &workspace_root,
+            &rust_blob,
             clean_record.workspace_id,
             SOURCE_CONTEXT_ID,
             source_generation,

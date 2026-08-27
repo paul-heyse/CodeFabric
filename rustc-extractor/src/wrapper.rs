@@ -205,9 +205,10 @@ fn source_path(arguments: &[String]) -> Option<PathBuf> {
         .iter()
         .find(|argument| {
             !argument.starts_with('-')
-                && std::path::Path::new(argument)
+                && (std::path::Path::new(argument)
                     .extension()
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
+                    || std::path::Path::new(argument).is_file())
         })
         .map(PathBuf::from)
 }
@@ -215,6 +216,7 @@ fn source_path(arguments: &[String]) -> Option<PathBuf> {
 fn normalized_invocation_digest(
     real_rustc: &OsStr,
     arguments: &[OsString],
+    source: &Path,
     source_bytes: &[u8],
 ) -> String {
     let mut normalized = Vec::with_capacity(arguments.len() + 1);
@@ -239,10 +241,7 @@ fn normalized_invocation_digest(
         if bytes.starts_with(b"--out-dir=") {
             continue;
         }
-        if Path::new(argument)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
-        {
+        if Path::new(argument) == source {
             normalized.push(format!("source-content:{}", b3(source_bytes)).into_bytes());
             continue;
         }
@@ -455,7 +454,8 @@ fn run_protocol(
         .ok_or_else(|| "analysis invocation has no Rust source input".to_owned())?;
     let source_bytes = std::fs::read(&source)
         .map_err(|error| format!("failed to read compiler source input: {error}"))?;
-    let invocation_digest = normalized_invocation_digest(real_rustc, arguments, &source_bytes);
+    let invocation_digest =
+        normalized_invocation_digest(real_rustc, arguments, &source, &source_bytes);
     let rust_mir_capability_code = rust_mir_capability_code()?;
     let rust_mir_observation = rust_mir_observation_contract()?;
     let rust_mir_observation_family_code = u32::from(rust_mir_observation.observation_family_code);
@@ -756,9 +756,11 @@ pub(crate) fn run(
         return passthrough(real_rustc, arguments).map_err(WrapperError::from);
     };
     if !arguments.iter().any(|argument| {
-        Path::new(argument)
-            .extension()
-            .is_some_and(|extension| extension == "rs")
+        !argument.as_bytes().starts_with(b"-")
+            && (Path::new(argument)
+                .extension()
+                .is_some_and(|extension| extension == "rs")
+                || Path::new(argument).is_file())
     }) {
         return passthrough(real_rustc, arguments).map_err(WrapperError::from);
     }
@@ -805,8 +807,18 @@ mod tests {
             OsString::from("/tmp/second"),
         ];
         assert_eq!(
-            normalized_invocation_digest(OsStr::new("/first/toolchain/rustc"), &first, b"source"),
-            normalized_invocation_digest(OsStr::new("/second/toolchain/rustc"), &second, b"source")
+            normalized_invocation_digest(
+                OsStr::new("/first/toolchain/rustc"),
+                &first,
+                Path::new("source.rs"),
+                b"source",
+            ),
+            normalized_invocation_digest(
+                OsStr::new("/second/toolchain/rustc"),
+                &second,
+                Path::new("source.rs"),
+                b"source",
+            )
         );
     }
 

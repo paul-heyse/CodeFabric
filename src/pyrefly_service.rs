@@ -39,7 +39,8 @@ pub struct PyreflyModuleInput {
     pub module_id: String,
     pub module_name: String,
     pub file_id: String,
-    pub source_path: PathBuf,
+    pub source_blob_path: PathBuf,
+    pub content_digest: String,
 }
 
 /// Complete identity and capability selection for one sidecar run.
@@ -172,21 +173,27 @@ fn header_matches(header: &AnalyzeEventHeader, request: &PyreflyRunRequest, sequ
         && header.source_manifest_digest == request.source_manifest_digest
 }
 
-fn read_blob(input: &PyreflyModuleInput) -> Result<BlobReference, PyreflyServiceError> {
-    if !input.source_path.is_absolute() || !input.source_path.is_file() {
+fn read_immutable_blob(input: &PyreflyModuleInput) -> Result<BlobReference, PyreflyServiceError> {
+    if !input.source_blob_path.is_absolute() || !input.source_blob_path.is_file() {
         return Err(PyreflyServiceError::Invalid(
-            "module source path must be an existing absolute file".to_owned(),
+            "module source blob path must be an existing absolute file".to_owned(),
         ));
     }
-    let bytes = std::fs::read(&input.source_path).map_err(|source| PyreflyServiceError::Io {
-        path: input.source_path.clone(),
-        source,
-    })?;
+    let bytes =
+        std::fs::read(&input.source_blob_path).map_err(|source| PyreflyServiceError::Io {
+            path: input.source_blob_path.clone(),
+            source,
+        })?;
+    if b3(&bytes) != input.content_digest {
+        return Err(PyreflyServiceError::Invalid(
+            "immutable source blob digest differs".to_owned(),
+        ));
+    }
     Ok(BlobReference {
         blob_id: format!("blob:{}", &b3(&bytes)[3..35]),
         content_digest: b3(&bytes),
         byte_length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-        read_only_uri: format!("file://{}", input.source_path.display()),
+        read_only_uri: format!("file://{}", input.source_blob_path.display()),
     })
 }
 
@@ -217,7 +224,7 @@ pub async fn analyze_pyrefly_uds(
     let blobs = request
         .modules
         .iter()
-        .map(read_blob)
+        .map(read_immutable_blob)
         .collect::<Result<Vec<_>, _>>()?;
     let context_digest = b3(&request.context_manifest);
     let lease = SourceSnapshotLease {

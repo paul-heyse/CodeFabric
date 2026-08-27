@@ -1782,13 +1782,28 @@ mod tests {
 
     #[test]
     fn gate_b_candidate_independent_oracle_contract() {
-        let candidate_source = include_str!("gate_b_candidate.rs");
-        assert!(!candidate_source.contains(&["fn derive_", "expectations"].concat()));
-        assert!(!candidate_source.contains(&["fn candidate_", "contracts"].concat()));
-        assert!(!candidate_source.contains(&["expectations", ".clone()"].concat()));
-        assert!(candidate_source.contains("vertical::execute"));
-        assert!(candidate_source.contains("requirement_checks"));
-        assert!(candidate_source.contains("released_digest"));
+        let candidate_root = repository_root()
+            .join("tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1");
+        verify_candidate_bundle(&candidate_root).unwrap();
+        let payload: GateBCandidatePayload = serde_json::from_slice(
+            &read_candidate_artifact(&candidate_root.join(CANDIDATE_FILE)).unwrap(),
+        )
+        .unwrap();
+        let comparison: CandidateDiff = serde_json::from_slice(
+            &read_candidate_artifact(&candidate_root.join("expected-vs-candidate-diff.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(comparison.candidate_id, payload.candidate_id);
+        assert_eq!(comparison.groups.len(), REQUIRED_EXPECTED_GROUPS.len());
+        for group in REQUIRED_EXPECTED_GROUPS {
+            validate_current_comparison(
+                group,
+                payload.gate_b_items.get(group).unwrap(),
+                comparison.groups.get(group).unwrap(),
+            )
+            .unwrap();
+        }
     }
 
     #[test]

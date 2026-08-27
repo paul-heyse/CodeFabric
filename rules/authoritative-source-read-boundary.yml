@@ -35,6 +35,10 @@ rule:
             # A Gate B candidate reads governed contract inputs and review artifacts, never
             # workspace source; scenario workspace bytes still flow through secure_path.
             - pattern: 'fn read_candidate_input($PATH: &Path) -> Result<Vec<u8>, GateBCandidateError> { $$$BODY }'
+            # The functional golden is an authored contract authority, not a live workspace.
+            - pattern: 'fn read_functional_authority_input($PATH: &Path) -> Result<Vec<u8>, FunctionalGoldenError> { $$$BODY }'
+            # Provider launchers receive only securely captured, content-addressed source blobs.
+            - pattern: 'fn read_immutable_blob($INPUT: &PyreflyModuleInput) -> Result<BlobReference, PyreflyServiceError> { $$$BODY }'
             # ResultArtifactStore owns private daemon artifacts below its configured state root.
             - all:
                 - kind: impl_item

@@ -13,6 +13,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+mod evaluator;
+
+pub use evaluator::{
+    ClaimResult, ClaimStatus, ComparisonReport, FixtureClaimEvaluator, LogicalObservation,
+    PublicObservationDecoder, QueryEvaluation, ReferenceQueryEvaluator,
+    ScenarioTransitionEvaluator, TransitionReport,
+};
+
 /// Repository-relative root containing the authored functional authority.
 pub const FUNCTIONAL_AUTHORITY_ROOT: &str = "tests/golden/codefabric-golden-v4";
 /// Contract member below [`FUNCTIONAL_AUTHORITY_ROOT`].
@@ -68,7 +76,7 @@ fn invariant(message: impl std::fmt::Display) -> FunctionalGoldenError {
     FunctionalGoldenError::Invariant(message.to_string())
 }
 
-fn read(path: &Path) -> Result<Vec<u8>, FunctionalGoldenError> {
+fn read_functional_authority_input(path: &Path) -> Result<Vec<u8>, FunctionalGoldenError> {
     fs::read(path).map_err(|source| FunctionalGoldenError::Io {
         path: path.to_owned(),
         source,
@@ -396,7 +404,10 @@ pub fn load_contract(
 ) -> Result<FunctionalGoldenContract, FunctionalGoldenError> {
     let authority_root = repository_root.join(FUNCTIONAL_AUTHORITY_ROOT);
     let contract_path = authority_root.join(FUNCTIONAL_CONTRACT_FILE);
-    decode_contract(&read(&contract_path)?, &authority_root)
+    decode_contract(
+        &read_functional_authority_input(&contract_path)?,
+        &authority_root,
+    )
 }
 
 fn reject_captured_output(value: &Value, location: &str) -> Result<(), FunctionalGoldenError> {
@@ -485,13 +496,15 @@ fn validate_sources(
                 source.source_name
             )));
         }
-        let text =
-            String::from_utf8(read(&authority_root.join(&source.path))?).map_err(|error| {
-                invariant(format!(
-                    "source fixture {} is not UTF-8: {error}",
-                    source.path
-                ))
-            })?;
+        let text = String::from_utf8(read_functional_authority_input(
+            &authority_root.join(&source.path),
+        )?)
+        .map_err(|error| {
+            invariant(format!(
+                "source fixture {} is not UTF-8: {error}",
+                source.path
+            ))
+        })?;
         for (anchor, needle) in &source.anchors {
             if !anchors.insert((source.source_name.clone(), anchor.clone()))
                 || !exactly_one(&text, needle)
@@ -814,7 +827,9 @@ mod tests {
         let path = root()
             .join(FUNCTIONAL_AUTHORITY_ROOT)
             .join(FUNCTIONAL_CONTRACT_FILE);
-        let valid = String::from_utf8(read(&path).expect("contract input")).expect("UTF-8");
+        let valid =
+            String::from_utf8(read_functional_authority_input(&path).expect("contract input"))
+                .expect("UTF-8");
         let weakened = valid.replacen("\"closed\":true", "\"closed\":false", 1);
         let error = decode_contract(weakened.as_bytes(), path.parent().expect("parent"))
             .expect_err("a weakened universe must not prove absence");

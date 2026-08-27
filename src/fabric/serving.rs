@@ -1961,7 +1961,7 @@ mod tests {
     use crate::golden_corpus::{
         RELEASED_CORPUS_DIRECTORY, ScenarioDefinition, ScenarioTerminal, load_scenarios,
     };
-    use crate::identity::{IdentityDomain, encode_public_id};
+    use crate::identity::{IdentityDomain, PlatformCode, encode_public_id};
     use crate::lifecycle::{
         LifecycleConfig, OverlayFlushPolicy, UpdateWaveScheduler, WatchHintBatch,
         prove_serving_rebuild_equivalence,
@@ -1979,6 +1979,7 @@ mod tests {
         PayloadCompression, ReadResultRequest, StartQueryRequest, StatusRequest,
         StreamQueryRequest, VersionRange, WorkspaceClaim, WorkspaceReadiness,
     };
+    use crate::secure_path::PlatformPath;
     use crate::snapshot::{
         ServingSnapshotManifestBody, SnapshotBasePublication, SnapshotBundles,
         SnapshotContextRecord, SnapshotContexts, SnapshotIndexes, SnapshotOverlay, SnapshotSource,
@@ -1986,7 +1987,10 @@ mod tests {
     use crate::snapshot_runtime::{
         ServingSnapshotCandidate, ServingSnapshotRuntime, SnapshotLeaseManager,
     };
-    use crate::source_image::{SourceCapturePolicy, SourceImageStore};
+    use crate::source_image::{
+        CaptureOutcome, CaptureRequest, SourceBlobHolderKind, SourceCapturePolicy,
+        SourceImageStore, SourceLanguage, advance_source_generation,
+    };
     use crate::workspace_registry::{WorkspaceRecord, WorkspaceRegistry};
 
     const WORKSPACE: [u8; 16] = [0x11; 16];
@@ -2749,6 +2753,7 @@ mod tests {
             real_semantic_outputs(
                 root,
                 &incremental_publication.path().join("providers"),
+                workspace_nonce,
                 incremental.scheduler().workspace_id(),
                 analysis_context_id,
                 incremental.scheduler().current_source_generation(),
@@ -2761,6 +2766,7 @@ mod tests {
             real_semantic_outputs(
                 root,
                 &clean_publication.path().join("providers"),
+                workspace_nonce,
                 clean_workspace_id,
                 analysis_context_id,
                 rebuilt.wave.source_generation,
@@ -2803,11 +2809,53 @@ mod tests {
     async fn real_semantic_outputs(
         root: &Path,
         state_root: &Path,
+        workspace_nonce: [u8; 16],
         workspace_id: [u8; 16],
         analysis_context_id: [u8; 16],
         source_generation: u64,
     ) -> Vec<crate::fact_ingest::CanonicalIngestOutput> {
         fs::create_dir_all(state_root).unwrap();
+        let mut store = OperationalStore::open(&state_root.join("source-capture.sqlite")).unwrap();
+        let record = WorkspaceRegistry::new(&mut store)
+            .add_directory_fixture(root, workspace_nonce)
+            .unwrap();
+        assert_eq!(record.workspace_id, workspace_id);
+        for expected_generation in 0..source_generation {
+            advance_source_generation(&mut store, workspace_id, expected_generation).unwrap();
+        }
+        let platform = match record.platform_code {
+            1 => PlatformCode::Unix,
+            2 => PlatformCode::MacOs,
+            code => panic!("unsupported provider fixture platform code: {code}"),
+        };
+        let blob_root = state_root.join("source-blobs");
+        let mut images =
+            SourceImageStore::open(&blob_root, SourceCapturePolicy::default()).unwrap();
+        let mut capture = |relative: &str, language, holder: u8| {
+            let path =
+                PlatformPath::from_raw_relative_bytes(platform, relative.as_bytes().to_vec())
+                    .unwrap();
+            let request = CaptureRequest {
+                workspace_id,
+                source_generation,
+                change_token: 1,
+                path,
+                language,
+                holder_kind: SourceBlobHolderKind::ProviderRun,
+                holder_id: [holder; 16],
+            };
+            let CaptureOutcome::Published(image) = images.capture(&mut store, &request).unwrap()
+            else {
+                panic!("provider source fixture was not published: {relative}");
+            };
+            crate::gate_b_candidate::vertical::ProviderSourceBlob {
+                path: blob_root.join(&image.blob.relative_name),
+                content_digest: crate::integrity::frame_digest(image.digest),
+            }
+        };
+        let python = capture("python/golden_pkg/core.py", SourceLanguage::Python, 0x51);
+        let malformed = capture("malformed/broken.py", SourceLanguage::Python, 0x52);
+        let rust = capture("rust/src/lib.rs", SourceLanguage::Rust, 0x53);
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let pyrefly = crate::gate_b_candidate::vertical::run_pyrefly(
             repository_root,
@@ -2815,15 +2863,15 @@ mod tests {
             workspace_id,
             analysis_context_id,
             source_generation,
-            &root.join("python/golden_pkg/core.py"),
-            &root.join("malformed/broken.py"),
+            &python,
+            &malformed,
         )
         .await
         .unwrap();
         let rustc = crate::gate_b_candidate::vertical::run_rustc(
             repository_root,
             state_root,
-            root,
+            &rust,
             workspace_id,
             analysis_context_id,
             source_generation,

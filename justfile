@@ -250,6 +250,13 @@ gate-b-rejected-candidate-zero-state-check:
     cargo nextest run --locked --lib -E 'test(gate_b_rejected_candidate_zero_state)' --no-tests=fail
     @if rg -n 'codefabric-golden-v3\.0\.0-candidate\.1' tests/golden/corpus-index.json tests/golden/codefabric-golden-v2/owner-acceptance.json; then echo 'rejected Gate B candidate entered current or accepted release metadata' >&2; exit 1; fi
 
+[doc("Execute the independent logical evaluators and prove expectation/production isolation")]
+[group('test')]
+functional-golden-independence-check:
+    cargo nextest run --locked --lib -E 'test(/(reference_query_evaluator_laws|functional_golden_comparator_falsification|functional_golden_expectation_write_isolation|functional_golden_independence_operational_gate|reference_bag_multiplicity_law|reference_coverage_monotonicity_law)/)' --no-tests=fail
+    @if rg -n 'use crate::(semantic_query|reconciliation|gate_b_candidate|gate_b_release|lifecycle)|use (datafusion|petgraph)' src/functional_golden.rs src/functional_golden; then echo 'functional evaluator imports a production semantic engine' >&2; exit 1; fi
+    @if rg -n 'fs::(write|create_dir|remove|rename)|File::create|OpenOptions' src/functional_golden.rs src/functional_golden; then echo 'functional expectation closure contains a write path' >&2; exit 1; fi
+
 [doc("Compare continuous effective state with the clean-rebuild oracle")]
 [group('test')]
 rebuild-equivalence-check:
