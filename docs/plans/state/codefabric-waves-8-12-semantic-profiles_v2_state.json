@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP05",
+  "current_packet": "WP06",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -58,14 +58,19 @@
       "blockers": []
     },
     "WP05": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "285f5cd9e69af787a05a5b8ba92b6a34e1b0abeb",
+      "deviations": [
+        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP05 closed on root format/check, focused Clippy, exactly four packet oracles with --no-fail-fast, adjacent WP03/WP04 regressions, model reproducibility, and design-principle traceability. CALL_TARGETS and MEMBER_RESOLUTION capability completeness remains unclaimed because those are Pyrefly-owned later-wave enrichments."
+      ],
+      "failed_approaches": [
+        "The initial callable fixture exposed that the pre-existing Ruff binding pass did not create the definition-time annotation scopes that the reference pass entered. Both passes now traverse decorators, class bases, type parameters, parameter annotations/defaults, and return annotations symmetrically before function/class body traversal.",
+        "The first binder draft treated nested splats as statically expandable, emitted default/missing bindings after dynamic splats, and classified any function under a retained class context as a method. The final binder recursively proves static splat shape, retains dynamic UNKNOWN_ARGUMENT_SET remainder without false default/missing claims, respects positional-only capture by **kwargs, and uses class-entry callable depth to distinguish direct members from nested functions/classes."
+      ],
       "blockers": []
     },
     "WP06": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -413,6 +418,6 @@
       "summary": "The user/design owner's execution direction moved the previously inactive draft v2 artifact to approved before the atomic activation transaction."
     }
   ],
-  "next_action": "Implement WP05 Python callable contracts, first-class call sites, argument binding, and source-declared member candidates with focused callable/call-site checks.",
-  "updated_at": "2026-08-27T10:05:33Z"
+  "next_action": "Implement WP06 application-owned Python control-flow graphs with focused CFG construction, well-formedness, exceptional-flow, and owner-invalidation checks.",
+  "updated_at": "2026-08-27T10:55:33Z"
 }
