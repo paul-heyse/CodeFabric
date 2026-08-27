@@ -62,6 +62,8 @@ pub struct AnalysisContextCandidate {
     pub provider_bundle_version: String,
     pub compiler_or_language_version: String,
     pub configuration_manifest_uri: Option<String>,
+    /// Complete canonical-manifest fingerprint for lane implementations that have one.
+    pub manifest_fingerprint: Option<[u8; 32]>,
     pub active: bool,
 }
 
@@ -72,6 +74,11 @@ pub struct AnalysisContextCandidate {
 pub trait AnalysisContextDiscoveryPort {
     type Error;
 
+    /// Discover lane-owned candidates from one immutable source inventory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the lane implementation's bounded discovery failure.
     fn discover(
         &self,
         request: &AnalysisContextDiscoveryRequest,
@@ -119,14 +126,25 @@ pub fn materialize_discovered_contexts(
                 SEMANTIC_CONTEXT_CONTRACTS,
                 candidate.context_kind,
             )?;
-            AnalysisContext::new(
-                &request.workspace_id,
-                candidate.context_kind,
-                candidate.provider_bundle_version,
-                candidate.compiler_or_language_version,
-                candidate.configuration_manifest_uri,
-                candidate.active,
-            )
+            if let Some(fingerprint) = candidate.manifest_fingerprint {
+                AnalysisContext::new_from_manifest_fingerprint(
+                    &request.workspace_id,
+                    candidate.context_kind,
+                    candidate.provider_bundle_version,
+                    candidate.compiler_or_language_version,
+                    fingerprint,
+                    candidate.active,
+                )
+            } else {
+                AnalysisContext::new(
+                    &request.workspace_id,
+                    candidate.context_kind,
+                    candidate.provider_bundle_version,
+                    candidate.compiler_or_language_version,
+                    candidate.configuration_manifest_uri,
+                    candidate.active,
+                )
+            }
         })
         .collect::<Result<Vec<_>, _>>()?;
     contexts.sort_by(|left, right| left.analysis_context_id.cmp(&right.analysis_context_id));
@@ -214,12 +232,86 @@ impl AnalysisContext {
         })
     }
 
+    /// Build a semantic context whose identity commits to a complete canonical manifest.
+    ///
+    /// The caller owns the manifest schema and canonicalization. This shared boundary accepts
+    /// only the resulting 256-bit fingerprint so provider-library values never enter canonical
+    /// identity. The content-addressed manifest URI makes the identity recipe explicit on the
+    /// public document and allows [`Self::validate`] to distinguish it from the legacy summary
+    /// recipe used by source and pre-semantic contexts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a source context, malformed workspace ID, empty versions, or an
+    /// invalid manifest URI.
+    pub fn new_from_manifest_fingerprint(
+        workspace_id: &str,
+        context_kind: AnalysisContextKind,
+        provider_bundle_version: impl Into<String>,
+        compiler_or_language_version: impl Into<String>,
+        manifest_fingerprint: [u8; 32],
+        active: bool,
+    ) -> Result<Self, AnalysisContextError> {
+        if context_kind == AnalysisContextKind::Source {
+            return Err(AnalysisContextError::SourceContextMismatch);
+        }
+        let workspace_bytes = decode_public_id(IdentityDomain::Workspace, None, workspace_id)?;
+        let provider_bundle_version = provider_bundle_version.into();
+        let compiler_or_language_version = compiler_or_language_version.into();
+        let fingerprint = lower_hex(&manifest_fingerprint);
+        let configuration_manifest_uri = Some(format!("codefabric-context:b3:{fingerprint}"));
+        validate_fields(
+            &provider_bundle_version,
+            &compiler_or_language_version,
+            configuration_manifest_uri.as_deref(),
+        )?;
+        let identity = context_identity(workspace_bytes, context_kind, manifest_fingerprint)?;
+        Ok(Self {
+            workspace_id: workspace_id.to_owned(),
+            analysis_context_id: encode_public_id(
+                IdentityDomain::AnalysisContext,
+                None,
+                identity.id,
+            )?,
+            context_kind,
+            context_fingerprint: format!("b3:{fingerprint}"),
+            provider_bundle_version,
+            compiler_or_language_version,
+            configuration_manifest_uri,
+            active,
+        })
+    }
+
     /// Re-validate a deserialized document against the same identity recipe.
     ///
     /// # Errors
     ///
     /// Returns an error when any identity, fingerprint, or semantic field is inconsistent.
     pub fn validate(&self) -> Result<(), AnalysisContextError> {
+        if let Some(manifest_fingerprint) = self
+            .configuration_manifest_uri
+            .as_deref()
+            .and_then(|uri| uri.strip_prefix("codefabric-context:b3:"))
+        {
+            let fingerprint = self.fingerprint_bytes()?;
+            if manifest_fingerprint != lower_hex(&fingerprint) {
+                return Err(AnalysisContextError::IdentityMismatch);
+            }
+            validate_fields(
+                &self.provider_bundle_version,
+                &self.compiler_or_language_version,
+                self.configuration_manifest_uri.as_deref(),
+            )?;
+            let workspace = decode_public_id(IdentityDomain::Workspace, None, &self.workspace_id)?;
+            let identity = context_identity(workspace, self.context_kind, fingerprint)?;
+            let expected = encode_public_id(IdentityDomain::AnalysisContext, None, identity.id)?;
+            if self.context_kind == AnalysisContextKind::Source
+                || self.analysis_context_id != expected
+            {
+                return Err(AnalysisContextError::IdentityMismatch);
+            }
+            return Ok(());
+        }
         let rebuilt = Self::new(
             &self.workspace_id,
             self.context_kind,
@@ -468,6 +560,7 @@ mod tests {
                         provider_bundle_version: "rustc-provider-1".to_owned(),
                         compiler_or_language_version: "1.95.0".to_owned(),
                         configuration_manifest_uri: Some("contexts/rust.json".to_owned()),
+                        manifest_fingerprint: None,
                         active: true,
                     },
                     AnalysisContextCandidate {
@@ -475,6 +568,7 @@ mod tests {
                         provider_bundle_version: "pyrefly-provider-1".to_owned(),
                         compiler_or_language_version: "3.14.7".to_owned(),
                         configuration_manifest_uri: Some("contexts/python.json".to_owned()),
+                        manifest_fingerprint: None,
                         active: true,
                     },
                 ])
@@ -526,6 +620,7 @@ mod tests {
             provider_bundle_version: "providers-1".to_owned(),
             compiler_or_language_version: "3.14.7".to_owned(),
             configuration_manifest_uri: None,
+            manifest_fingerprint: None,
             active: true,
         };
         assert_eq!(
@@ -540,6 +635,7 @@ mod tests {
                     provider_bundle_version: "source".to_owned(),
                     compiler_or_language_version: "source".to_owned(),
                     configuration_manifest_uri: None,
+                    manifest_fingerprint: None,
                     active: true,
                 }]
             ),

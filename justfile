@@ -346,7 +346,7 @@ wave7-integration-check: git-parity-check rebuild-equivalence-check wp72-accepta
 [doc("Run the Wave-8 Python-local semantic acceptance slice; WP02-WP07 populate the selector")]
 [group('test')]
 wave8-integration-check:
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/^__wave8_packet_oracle_scaffold__$/)' --no-tests=pass
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/py_context_(discovery_conformance|manifest_identity_parity|guess_rejection_falsification|invalidation_operational_gate)$/)' --no-tests=fail
 
 [doc("Run every released Wave-2 through Wave-7 integration gate")]
 [group('test')]
