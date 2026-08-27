@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP04",
+  "current_packet": "WP05",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -47,14 +47,18 @@
       "blockers": []
     },
     "WP04": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "de2797d60b59bba0c0473abf985ec038793f3dec",
+      "deviations": [
+        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP04 closed on root format/check, focused Clippy, exactly four packet oracles with --no-fail-fast, adjacent WP03 regressions, model reproducibility, and design-principle traceability."
+      ],
+      "failed_approaches": [
+        "The initial import projector classified any statically spelled module target as statically resolved. Rechecking GEN section 19.2 exposed that overclaim: named imports now use Ruff Import, SubmoduleImport, and FromImport binding metadata plus SemanticModel qualified-name resolution, while star and dynamic imports remain explicit possible or unknown facts."
+      ],
       "blockers": []
     },
     "WP05": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -409,6 +413,6 @@
       "summary": "The user/design owner's execution direction moved the previously inactive draft v2 artifact to approved before the atomic activation transaction."
     }
   ],
-  "next_action": "Implement WP36 provider execution, workspace-view, sandbox, and lane-scheduling substrate with focused provider-runtime and lifecycle checks.",
-  "updated_at": "2026-08-27T14:30:00Z"
+  "next_action": "Implement WP05 Python callable contracts, first-class call sites, argument binding, and source-declared member candidates with focused callable/call-site checks.",
+  "updated_at": "2026-08-27T10:05:33Z"
 }
