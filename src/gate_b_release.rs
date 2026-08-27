@@ -31,6 +31,10 @@ pub const CANDIDATE_DIRECTORY: &str =
     "tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1";
 pub const ACCEPTANCE_ARTIFACT: &str = "tests/golden/codefabric-golden-v2/owner-acceptance.json";
 pub const AUTHORITY_REGISTRY: &str = "tests/golden/acceptance-authorities/gate-b-owner-v1.json";
+pub const REJECTED_CANDIDATE_DIRECTORY: &str =
+    "tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1";
+pub const REJECTION_DECISION_ARTIFACT: &str =
+    "tests/golden/review-decisions/codefabric-golden-v3.0.0-candidate.1-rejection.json";
 
 const CANDIDATE_FILE: &str = "candidate.json";
 const CANDIDATE_MANIFEST_FILE: &str = "candidate-manifest.json";
@@ -94,6 +98,19 @@ enum AcceptanceDecision {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 enum AcceptanceStatus {
     Accepted,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct GateBRejectionDecision {
+    schema_version: u16,
+    artifact_kind: String,
+    decision: AcceptanceDecision,
+    candidate_id: String,
+    candidate_digest: String,
+    owner_identity: String,
+    rejected_at_utc: String,
+    reason: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -503,6 +520,11 @@ pub fn accept_candidate(
     acceptance_relative: &Path,
     authorization: &AcceptanceAuthorization,
 ) -> Result<GateBOwnerAcceptance, GateBReleaseError> {
+    if candidate_relative == Path::new(REJECTED_CANDIDATE_DIRECTORY) {
+        return Err(invariant(
+            "the behavior-review-rejected Gate B candidate cannot enter an acceptance transaction",
+        ));
+    }
     if !safe_relative(candidate_relative)
         || !safe_relative(acceptance_relative)
         || acceptance_relative != Path::new(ACCEPTANCE_ARTIFACT)
@@ -546,6 +568,54 @@ pub fn accept_candidate(
     let acceptance = result?;
     verify_release_chain(repository_root)?;
     Ok(acceptance)
+}
+
+/// Verify that the behavior-review-rejected v3 candidate is immutable and outside every release
+/// or current-corpus route.
+///
+/// # Errors
+///
+/// Returns an error if the detached decision does not bind the exact verified candidate, if the
+/// decision is not an accountable rejection, or if any acceptance/current-index path references
+/// the rejected candidate.
+pub fn verify_rejected_candidate_zero_state(
+    repository_root: &Path,
+) -> Result<(), GateBReleaseError> {
+    let candidate_root = repository_root.join(REJECTED_CANDIDATE_DIRECTORY);
+    verify_candidate_bundle(&candidate_root)?;
+    let manifest: CandidateManifestView = decode(&candidate_root.join(CANDIDATE_MANIFEST_FILE))?;
+    let detached: CandidateDigestView = decode(&candidate_root.join(CANDIDATE_DIGEST_FILE))?;
+    let rejection_path = repository_root.join(REJECTION_DECISION_ARTIFACT);
+    let rejection_value =
+        crate::contracts::jcs::decode_strict(&read_candidate_artifact(&rejection_path)?)
+            .map_err(invariant)?;
+    let rejection: GateBRejectionDecision = serde_json::from_value(rejection_value)?;
+    let index: CorpusIndex = decode(&repository_root.join(CORPUS_INDEX_PATH))?;
+    if rejection.schema_version != 1
+        || rejection.artifact_kind != "gate-b-candidate-rejection"
+        || rejection.decision != AcceptanceDecision::Rejected
+        || rejection.candidate_id != manifest.candidate_id
+        || rejection.candidate_digest != detached.digest
+        || rejection.owner_identity != EXPECTED_OWNER_IDENTITY
+        || rejection.rejected_at_utc.is_empty()
+        || !rejection.rejected_at_utc.ends_with('Z')
+        || rejection.reason.trim().is_empty()
+        || manifest.candidate_id != "codefabric-golden-v3.0.0-candidate.1"
+        || manifest.candidate_status != "CANDIDATE"
+        || manifest.owner_acceptance.is_some()
+        || candidate_root.join(ACCEPTANCE_FILE).exists()
+        || index.current_corpus_id == manifest.candidate_id
+        || index.entries.iter().any(|entry| {
+            entry.corpus_id == manifest.candidate_id
+                || entry.path == REJECTED_CANDIDATE_DIRECTORY
+                || entry.acceptance_digest.as_deref() == Some(detached.digest.as_str())
+        })
+    {
+        return Err(invariant(
+            "rejected Gate B candidate is not immutably isolated from release routing",
+        ));
+    }
+    Ok(())
 }
 
 /// Verify the owner authority, acceptance, candidate, immutable corpus, and current index chain.
@@ -832,5 +902,22 @@ mod tests {
         verify_release_chain(temporary.path()).unwrap();
         assert!(temporary.path().join(RELEASED_CORPUS_DIRECTORY).is_dir());
         assert!(temporary.path().join(CORPUS_INDEX_PATH).is_file());
+    }
+
+    #[test]
+    fn gate_b_rejected_candidate_zero_state() {
+        verify_rejected_candidate_zero_state(&repository_root()).unwrap();
+        let error = accept_candidate(
+            &repository_root(),
+            Path::new(REJECTED_CANDIDATE_DIRECTORY),
+            Path::new(ACCEPTANCE_ARTIFACT),
+            &authorization(EXPECTED_OWNER_IDENTITY),
+        )
+        .expect_err("a rejected candidate must never enter the acceptance path");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot enter an acceptance transaction")
+        );
     }
 }

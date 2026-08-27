@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "gate-b-candidate-rejection",
+  "decision": "REJECTED",
+  "candidate_id": "codefabric-golden-v3.0.0-candidate.1",
+  "candidate_digest": "b3:1584bb589fc6686cccb254a17b454a05f4d5fbd1a8856bb179080309d7f9fd68",
+  "owner_identity": "codefabric-repository-owner",
+  "rejected_at_utc": "2026-08-26T00:00:00Z",
+  "reason": "The bundle authenticates a real execution but derives its expected comparison from production output, records unconditional matches, and therefore does not independently establish intended semantic behavior."
+}

@@ -635,6 +635,7 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("oracle-substance-check")
     subparsers.add_parser("dependency-check")
+    subparsers.add_parser("current-packet-oracle-check")
     packet = subparsers.add_parser("packet-oracle-check")
     packet.add_argument("packet")
     return parser
@@ -653,9 +654,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 f"plan dependency closure: {packets} packets, {overlaps} disjoint-phase overlaps"
             )
-        else:
+        elif args.command == "packet-oracle-check":
             run_packet_oracles(args.packet)
             print(f"packet oracle selector: {args.packet} passed exactly four oracles")
+        else:
+            current = _active()[2]["current_packet"]
+            if current is None:
+                print("packet oracle selector: active plan has no current packet")
+            else:
+                run_packet_oracles(current)
+                print(
+                    f"packet oracle selector: current packet {current} passed exactly four oracles"
+                )
     except (PlanAssuranceError, subprocess.CalledProcessError) as error:
         print(f"plan assurance failed: {error}", file=sys.stderr)
         return 1

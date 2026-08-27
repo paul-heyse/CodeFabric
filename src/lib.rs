@@ -37,6 +37,8 @@ pub mod derivation;
 ))]
 pub mod error;
 #[cfg(all(feature = "daemon", feature = "compatibility-probes"))]
+pub mod functional_golden;
+#[cfg(all(feature = "daemon", feature = "compatibility-probes"))]
 pub mod gate_b_candidate;
 #[cfg(all(feature = "daemon", feature = "compatibility-probes"))]
 pub mod gate_b_release;

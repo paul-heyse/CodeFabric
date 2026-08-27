@@ -159,7 +159,7 @@ def test_wp67_structural_acceptance_admin_protocol_schema_examples() -> None:
     assert all(not validator.is_valid(value) for value in examples["invalid"])
 
 
-def test_query_form_projection_parity() -> None:
+def test_query_form_python_projection_parity() -> None:
     contract = json.loads(
         (
             ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json"

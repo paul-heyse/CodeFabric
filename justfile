@@ -189,7 +189,7 @@ semantic-query-conformance-check:
 [group('test')]
 query-form-contract-check:
     cargo nextest run --locked --lib -E 'test(/(qry_v13_form_contract_conformance|query_form_projection_parity|qry_v13_connecting_path_schema_falsification|query_form_contract_operational_gate)/)' --no-tests=fail
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py -k query_form_projection_parity
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py -k query_form_python_projection_parity
     just model-repro-check
 
 [doc("Prove the five governed relational QRY forms compile and execute as native DataFusion plans")]
@@ -237,6 +237,18 @@ gate-b-candidate-check:
     @if rg -n 'fn derive_expectations|fn candidate_contracts|expectations\.clone\(\)' src/gate_b_candidate.rs; then echo 'descriptor/self-confirming Gate B proof remains on the current candidate path' >&2; exit 1; fi
     @if test -d tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; fi
     @just packet-oracle-check WP06
+
+[doc("Validate strict, human-authored Gate B semantic claims, anchors, scenarios, and proof universes")]
+[group('test')]
+functional-golden-contract-check:
+    cargo nextest run --locked --lib -E 'test(/(functional_golden_claim_schema_conformance|functional_golden_source_anchor_closure|functional_golden_negative_claim_requires_complete_universe|functional_golden_duplicate_key_rejected|functional_golden_contract_operational_gate)/)' --no-tests=fail
+    @if rg -n '"(expected_digest|candidate_digest|canonical_row_hex|governed_key_hex|response_bytes_hex|descriptor_identity|registry_count|runtime_id|matches|requirement_checks)"|"b3:' tests/golden/codefabric-golden-v4; then echo 'captured output or integrity material remains in the functional expectation authority' >&2; exit 1; fi
+
+[doc("Prove the rejected Gate B v3 candidate remains immutable and outside release routing")]
+[group('test')]
+gate-b-rejected-candidate-zero-state-check:
+    cargo nextest run --locked --lib -E 'test(gate_b_rejected_candidate_zero_state)' --no-tests=fail
+    @if rg -n 'codefabric-golden-v3\.0\.0-candidate\.1' tests/golden/corpus-index.json tests/golden/codefabric-golden-v2/owner-acceptance.json; then echo 'rejected Gate B candidate entered current or accepted release metadata' >&2; exit 1; fi
 
 [doc("Compare continuous effective state with the clean-rebuild oracle")]
 [group('test')]
@@ -535,15 +547,7 @@ audit-baseline-check:
 oracle-substance-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_plan_assurance.py
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py oracle-substance-check
-    @just packet-oracle-check WP73
-    @just packet-oracle-check WP54
-    @just packet-oracle-check WP55
-    @just packet-oracle-check WP56
-    @just packet-oracle-check WP67
-    @just packet-oracle-check WP68
-    @just packet-oracle-check WP69
-    @just packet-oracle-check WP70
-    @just packet-oracle-check WP72
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py current-packet-oracle-check
 
 [doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
 [group('gate')]

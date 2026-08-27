@@ -208,4 +208,4 @@ def test_wp54_operational_acceptance() -> None:
         for entry in state["packets"].values()
     )
     assert implemented == required_packets * 4
-    assert assurance.validate_dependencies()[0] == 23
+    assert assurance.validate_dependencies()[0] == len(state["packets"])
