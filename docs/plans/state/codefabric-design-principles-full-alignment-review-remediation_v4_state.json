@@ -73,18 +73,30 @@
       "blockers": []
     },
     "WP11": {
-      "status": "in_progress",
+      "status": "blocked",
       "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "deviations": [
+        "Real-provider process launch and admission moved from gate_b_candidate::vertical to the neutral provider_runtime::fixture support seam while preserving the packet's required public behavior."
+      ],
+      "failed_approaches": [
+        "Running seven real causal-intervention verticals serially exceeded nextest's 120-second slow-test timeout; bounded batches of three retained the real producing seams and passed in 76.880 seconds."
+      ],
+      "blockers": [
+        "The real provider/public vertical validates 11 of 17 authored claims. Rust call-target, derived-path, provenance-owner, provider-withdrawal, closed absence-proof, and ACL-redaction claims are not exposed end-to-end; WP11 explicitly classifies a missing normative public field as a replan trigger."
+      ]
     },
     "WP12": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "deviations": [
+        "Bounded mutant and dossier infrastructure was implemented before WP11 closure to make the semantic readiness gap observable; no successor candidate or corpus-index change was emitted."
+      ],
+      "failed_approaches": [
+        "The first review manifest allowed semantic_conformance=false while retaining candidate status. Review-bundle generation and candidate readiness are now separate; blocked reviews use BLOCKED_REVIEW and the candidate generator/verifier reject any nonzero limitation count."
+      ],
+      "blockers": [
+        "The decoded dossier discloses six unsupported end-to-end claims, so gate-b-functional-candidate-check correctly fails after its isolation oracle passes and no v4 successor candidate is committed."
+      ]
     },
     "WP07": {
       "status": "not_started",
@@ -135,7 +147,9 @@
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP11 and WP12 cannot complete until the six missing public semantic seams are assigned to and implemented by their owning semantic-profile packets."
+      ]
     }
   },
   "decommission_batches": {
@@ -168,19 +182,33 @@
       "blockers": []
     },
     "DB05": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Candidate-side retirement completed ahead of the final WP07 release-side prerequisite so rejected v3 remains verification-only while functional readiness is developed."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Final DB05 exit still depends on a semantically conformant WP12 successor and the explicit WP07 owner decision."
+      ]
     }
   },
   "baseline_failures": [],
   "discovered_obligations": [
     "Keep supplemental cross-language checks uniquely named so exact oracle-definition governance remains meaningful.",
-    "Provider validation must retain source-path semantics while consuming immutable content-addressed blobs; the rustc extractor now recognizes an existing source blob without relying on a .rs suffix."
+    "Provider validation must retain source-path semantics while consuming immutable content-addressed blobs; the rustc extractor now recognizes an existing source blob without relying on a .rs suffix.",
+    "Implement Rust call-target semantics through the typed MIR/call-fact owner from the Waves 8-12 design; do not add a temporary string-summary call_targets column.",
+    "Expose and validate derived path semantics through the public query surface with explicit completeness and negative-proof state.",
+    "Decode governed provenance owner/authority on the real canonical and public surfaces rather than inferring it from provider presence.",
+    "Exercise provider withdrawal through reconciliation, snapshot activation, and public capability status in a fresh real workspace.",
+    "Add a closed-universe absence scenario whose proof universe is complete; the current paths query is intentionally PARTIAL/INDETERMINATE and cannot prove absence.",
+    "Exercise ACL redaction through the production authorization/query boundary while preserving explicit redaction and completeness semantics."
   ],
-  "plan_deviations": [],
-  "next_action": "Execute WP11: run the authored scenarios through the real provider, publication, UDS, artifact, and FastMCP boundaries and validate semantic claims plus causal interventions.",
-  "updated_at": "2026-08-27T02:30:00Z"
+  "plan_deviations": [
+    "Rejected v3 regeneration and its hard-coded scenario edit dispatcher were retired; immutable v2/v3 digest-chain verification remains supported.",
+    "A blocked decoded review bundle may be generated for diagnosis, but a v4 candidate cannot be emitted, verified, or routed until semantic_conformance is true and limitation_count is zero.",
+    "Bounded WP11/WP12 infrastructure is recorded at implementation commit 0f502ea; it is not a packet proving commit because the explicit public-semantic replan trigger remains active."
+  ],
+  "next_action": "Adopt a successor plan/design extension that assigns the six missing public semantic seams to their owning semantic-profile packets, implement those seams, then resume WP11/WP12 and emit v4 only after gate-b-functional-candidate-check is green with zero limitations.",
+  "updated_at": "2026-08-27T04:36:30Z"
 }
