@@ -117,6 +117,28 @@ class CallDispatchKind(IntEnum):
     UNKNOWN = 30
 
 
+class CfgKind(IntEnum):
+    MODULE = 10
+    FUNCTION = 20
+    ASYNC_FUNCTION = 30
+    LAMBDA = 40
+
+
+class CfgNodeKind(IntEnum):
+    ENTRY = 10
+    EXIT = 20
+    BASIC_BLOCK = 30
+    EXPRESSION_OPERATION = 40
+    STATEMENT_OPERATION = 50
+    BRANCH = 60
+    SWITCH = 70
+    LOOP_HEADER = 80
+    RETURN_POINT = 90
+    EXCEPTIONAL_EXIT = 100
+    SUSPEND_POINT = 110
+    RESUME_POINT = 120
+
+
 class Completeness(IntEnum):
     COMPLETE = 10
     PARTIAL = 20
@@ -415,6 +437,7 @@ class ProviderObservationFamily(IntEnum):
     RUFF_SEMANTIC = 100
     PYREFLY_MODULE = 110
     RUST_MIR_OWNER = 120
+    RUFF_SEMANTIC_CFG = 130
 
 
 class ProviderRunState(IntEnum):
@@ -754,6 +777,26 @@ ENUM_TRIPLES = MappingProxyType({
         (20, "ATTRIBUTE", "attribute"),
         (30, "UNKNOWN", "unknown"),
     ),
+    "CFG_KIND": (
+        (10, "MODULE", "module"),
+        (20, "FUNCTION", "function"),
+        (30, "ASYNC_FUNCTION", "async-function"),
+        (40, "LAMBDA", "lambda"),
+    ),
+    "CFG_NODE_KIND": (
+        (10, "ENTRY", "entry"),
+        (20, "EXIT", "exit"),
+        (30, "BASIC_BLOCK", "basic-block"),
+        (40, "EXPRESSION_OPERATION", "expression-operation"),
+        (50, "STATEMENT_OPERATION", "statement-operation"),
+        (60, "BRANCH", "branch"),
+        (70, "SWITCH", "switch"),
+        (80, "LOOP_HEADER", "loop-header"),
+        (90, "RETURN_POINT", "return-point"),
+        (100, "EXCEPTIONAL_EXIT", "exceptional-exit"),
+        (110, "SUSPEND_POINT", "suspend-point"),
+        (120, "RESUME_POINT", "resume-point"),
+    ),
     "COMPLETENESS": (
         (10, "COMPLETE", "complete"),
         (20, "PARTIAL", "partial"),
@@ -1019,6 +1062,7 @@ ENUM_TRIPLES = MappingProxyType({
         (100, "RUFF_SEMANTIC", "ruff-semantic"),
         (110, "PYREFLY_MODULE", "pyrefly-module"),
         (120, "RUST_MIR_OWNER", "rust-mir-owner"),
+        (130, "RUFF_SEMANTIC_CFG", "ruff-semantic-cfg"),
     ),
     "PROVIDER_RUN_STATE": (
         (10, "QUEUED", "queued"),
@@ -1438,6 +1482,20 @@ REGISTRY_IDS = MappingProxyType({
         "ARGUMENT_BINDS_TO",
         "CONTAINS_CALL",
         "DECLARES_MEMBER",
+        "CFG_NEXT",
+        "CFG_TRUE",
+        "CFG_FALSE",
+        "CFG_CASE",
+        "CFG_LOOP_BACK",
+        "CFG_BREAK",
+        "CFG_CONTINUE",
+        "CFG_RETURN",
+        "CFG_EXCEPTION",
+        "CFG_UNWIND",
+        "CFG_CALL_RETURN",
+        "CFG_CLEANUP",
+        "CFG_SUSPEND",
+        "CFG_RESUME",
     ),
     "property_kinds": (
         "NAME",

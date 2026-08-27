@@ -29,6 +29,7 @@ use crate::registries::{PROVIDER_RESOURCE_PROFILES, ProviderResourceProfileEntry
 use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSnapshot};
 
 mod callables;
+mod cfg;
 mod imports;
 mod semantic;
 
@@ -37,6 +38,10 @@ pub use callables::{
     PythonCallDiagnosticFact, PythonCallSiteFact, PythonCallableFact, PythonCallableSyntaxFact,
     PythonCallableSyntaxRole, PythonDispatchKind, PythonMemberFact, PythonMemberKind,
     PythonParameterFact, PythonParameterKind, PythonUnknownArgumentSetFact,
+};
+pub use cfg::{
+    PythonCfgEdgeFact, PythonCfgEdgeKind, PythonCfgFact, PythonCfgKind, PythonCfgNodeFact,
+    PythonCfgNodeKind, PythonCfgValidationError, validate_python_cfg,
 };
 pub use semantic::{
     PythonBindingFact, PythonBindingKind, PythonExportFact, PythonExportStatus,

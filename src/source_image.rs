@@ -228,6 +228,7 @@ struct ProviderWorkspaceManifest<'a> {
 ///
 /// Rejects mixed workspace/generation input, digest drift, unsafe paths including `.git`,
 /// writable input modes, or any failed durability/verification step.
+#[allow(clippy::too_many_lines)] // Atomic publication and its rollback checks form one transaction.
 pub fn publish_provider_workspace_view(
     state_root: &Path,
     run_key: &str,

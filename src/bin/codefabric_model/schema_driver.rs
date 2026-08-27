@@ -278,6 +278,9 @@ enum RowEncoderKind {
     ParameterDetails,
     CallSiteDetails,
     CallArgumentDetails,
+    CfgGraphs,
+    CfgNodeDetails,
+    CfgEdgeDetails,
 }
 
 impl RowEncoderKind {
@@ -303,6 +306,9 @@ impl RowEncoderKind {
             Self::ParameterDetails => "encode_parameter_details",
             Self::CallSiteDetails => "encode_call_site_details",
             Self::CallArgumentDetails => "encode_call_argument_details",
+            Self::CfgGraphs => "encode_cfg_graphs",
+            Self::CfgNodeDetails => "encode_cfg_node_details",
+            Self::CfgEdgeDetails => "encode_cfg_edge_details",
         }
     }
 
@@ -328,6 +334,9 @@ impl RowEncoderKind {
             Self::ParameterDetails => "ParameterDetailRow",
             Self::CallSiteDetails => "CallSiteDetailRow",
             Self::CallArgumentDetails => "CallArgumentDetailRow",
+            Self::CfgGraphs => "CfgGraphRow",
+            Self::CfgNodeDetails => "CfgNodeDetailRow",
+            Self::CfgEdgeDetails => "CfgEdgeDetailRow",
         }
     }
 }
@@ -850,6 +859,9 @@ impl SchemaContractIr {
             (RowEncoderKind::ParameterDetails, 250),
             (RowEncoderKind::CallSiteDetails, 260),
             (RowEncoderKind::CallArgumentDetails, 270),
+            (RowEncoderKind::CfgGraphs, 280),
+            (RowEncoderKind::CfgNodeDetails, 290),
+            (RowEncoderKind::CfgEdgeDetails, 300),
         ]);
         if encoders != expected_encoders {
             return invalid(

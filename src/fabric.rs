@@ -263,7 +263,10 @@ impl WorkspaceNamespace {
     fn table_path(&self, spec: &TableSpec) -> Result<PathBuf, FabricError> {
         let parent = match spec.family {
             "control" | "bundle" => &self.control,
-            "universal-fact" | "source" | "lexical" | "syntax" => &self.facts,
+            "universal-fact" | "source" | "lexical" | "syntax" | "semantic-type"
+            | "semantic-binding" | "module-import" | "callable" | "call" | "control-flow" => {
+                &self.facts
+            }
             "overlay-control" => &self.derived,
             family => {
                 return Err(FabricError::TableInvariant {

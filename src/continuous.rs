@@ -839,7 +839,7 @@ mod tests {
                 semantic_capabilities_required: true,
             },
         );
-        let error = match engine.process_batch(
+        let Err(error) = engine.process_batch(
             &mut store,
             WatchHintBatch {
                 hints: vec![WatchHint {
@@ -849,9 +849,8 @@ mod tests {
                 rescan_required: false,
             },
             &BTreeMap::new(),
-        ) {
-            Err(error) => error,
-            Ok(_) => panic!("semantic lane without a scheduler must fail closed"),
+        ) else {
+            panic!("semantic lane without a scheduler must fail closed");
         };
         assert!(matches!(error, ContinuousError::SemanticLaneUnavailable));
         let (state_code, terminal_at): (i64, Option<String>) = store

@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:a8e85e9d413f3e3fbc2152d3e273e19bebd2c43d7cea5010986769496f80c356; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:e49fa7f461c63de2be2000577e9abd438bffb48fd2fad4a23ff23117016c3b53; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -633,6 +633,83 @@ pub fn encode_call_argument_details(
             id16s(rows, |row| row.parameter_id.as_ref()),
             i16s(rows, |row| Some(row.binding_status_code)),
             i16s(rows, |row| row.spread_kind_code),
+        ],
+    )
+}
+
+/// Encode `cfg_graph` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_cfg_graphs(rows: &[CfgGraphRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        280,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.cfg_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| row.callable_id.as_ref()),
+            i16s(rows, |row| Some(row.cfg_kind_code)),
+            id16s(rows, |row| Some(&row.entry_node_id)),
+            id16s(rows, |row| Some(&row.exit_node_id)),
+            id16s(rows, |row| row.exceptional_exit_node_id.as_ref()),
+            i32s(rows, |row| Some(row.node_count)),
+            i32s(rows, |row| Some(row.edge_count)),
+            i64s(rows, |row| Some(row.flags)),
+        ],
+    )
+}
+
+/// Encode `cfg_node_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_cfg_node_details(rows: &[CfgNodeDetailRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        290,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.cfg_node_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.cfg_id)),
+            i16s(rows, |row| Some(row.node_kind_code)),
+            id16s(rows, |row| row.syntax_id.as_ref()),
+            id16s(rows, |row| row.mir_statement_id.as_ref()),
+            i32s(rows, |row| row.ordinal),
+            i64s(rows, |row| Some(row.flags)),
+        ],
+    )
+}
+
+/// Encode `cfg_edge_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_cfg_edge_details(rows: &[CfgEdgeDetailRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        300,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.relation_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.cfg_id)),
+            id16s(rows, |row| row.condition_id.as_ref()),
+            utf8(rows, |row| row.case_value_text.as_deref()),
+            i64s(rows, |row| row.case_value_hash),
+            id16s(rows, |row| row.exception_type_id.as_ref()),
+            i64s(rows, |row| Some(row.edge_flags)),
         ],
     )
 }

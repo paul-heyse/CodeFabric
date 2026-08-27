@@ -1980,11 +1980,44 @@ mod tests {
         let request = request(&fabric, 78).await;
         let (records, batches) = manifest_records(&fabric, &request).await.unwrap();
         let candidate = candidate_effective_batches(&request, &records, &batches).unwrap();
+        let generated_contracts = foreign_key_contracts()
+            .iter()
+            .map(|contract| {
+                (
+                    contract.source_table_code,
+                    contract.source_column.to_owned(),
+                    contract.target_table_code,
+                    contract.target_column.to_owned(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        let annotated_contracts = table_specs()
+            .iter()
+            .flat_map(|source| {
+                source
+                    .arrow_schema
+                    .fields()
+                    .iter()
+                    .filter_map(move |field| {
+                        let target = field.metadata().get("com.codefabric.cpg.foreign_key")?;
+                        let (target_table, target_column) = target.split_once('.')?;
+                        let target = table_specs()
+                            .iter()
+                            .find(|candidate| candidate.name == target_table)?;
+                        Some((
+                            source.table_code,
+                            field.name().to_owned(),
+                            target.table_code,
+                            target_column.to_owned(),
+                        ))
+                    })
+            })
+            .collect::<BTreeSet<_>>();
         assert_eq!(
             validate_references(&request, &candidate).await.unwrap(),
             foreign_key_contracts().len()
         );
-        assert_eq!(foreign_key_contracts().len(), 14);
+        assert_eq!(generated_contracts, annotated_contracts);
         assert!(foreign_key_contracts().iter().all(|contract| {
             candidate.contains_key(&contract.source_table_code)
                 && candidate.contains_key(&contract.target_table_code)

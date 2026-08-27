@@ -418,6 +418,7 @@ impl ProviderSandboxLauncher {
     /// # Errors
     ///
     /// Fails closed when containment is unavailable, profile identity differs, or launch fails.
+    #[allow(clippy::too_many_lines)] // Keep the fail-closed launch sequence auditable as one transaction.
     pub fn launch(
         &self,
         request: &ProviderLaunchRequest,

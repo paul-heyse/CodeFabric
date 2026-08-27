@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: accepted
-canonical_digest: "b3:efe47f4acf0a94cd7c0092a9b367a595dec2cd562f792ca32c95be20141960b9"
+canonical_digest: "b3:c864181e2264f908c0da958ce38a3bb78653747d4c17da3b3ac8f6fad51bac7e"
 schema_version: 1
 authority: AC-G-05
 accepted_at: "2026-08-27"
@@ -92,17 +92,17 @@ records:
     entry_invariants: [immutable-callable-input, typed-statement-kinds]
     exit_invariants: [wellformed-cfg, unreachable-regions-retained]
     preserved_identities: [workspace_id, analysis_context_id, callable_entity_id]
-    generated_identities: [basic_block_id, control_flow_relation_id]
+    generated_identities: [cfg_id, cfg_node_id, control_flow_relation_id]
     invalidation_closure: [callable-owner, python-context]
     diagnostics_failure_taxonomy: [cfg-construction-failure, unsupported-control-form]
     determinism_fingerprint_inputs: [callable-fact-digest, cfg-algorithm-version]
-    resource_telemetry_contract: [basic-block-count, control-flow-edge-count]
+    resource_telemetry_contract: [cfg-count, cfg-node-count, control-flow-edge-count]
     behavioral_fixtures: [py_cfg_fixture_conformance]
     negative_fixtures: [py_cfg_exceptional_edge_falsification]
     incremental_fixtures: [py_cfg_owner_invalidation_gate]
     oracles: [py_cfg_fixture_conformance, py_cfg_wellformedness_parity, py_cfg_exceptional_edge_falsification, py_cfg_owner_invalidation_gate]
-    implementation_paths: [src/python_cfg.rs]
-    contract_digest: "b3:70f915119ab4353a1d93d5a810eed6f90c634737a8974d6b212cd7f780dd6f03"
+    implementation_paths: [src/ruff_adapter/cfg.rs, src/python_semantic.rs]
+    contract_digest: "b3:8c9d31f59b3c6b6f8331692b5ff44cccb481ea1c5d179380d1ddb6ce49402276"
   - pass_id: PASS_PYTHON_DATAFLOW_V1
     owner_packet: WP07
     principles: [H-P14, H-P16]

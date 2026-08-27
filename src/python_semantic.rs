@@ -5,7 +5,7 @@
 //! namespace, materializes explicit unknowns, and validates every generated batch
 //! before it can reach publication.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use arrow_array::{ArrayRef, BinaryArray, RecordBatch, StringArray};
@@ -16,14 +16,15 @@ use crate::core_facts::{
 };
 use crate::fact_ingest::{
     BindingDetailRow, CallArgumentDetailRow, CallSiteDetailRow, CallableDetailRow,
-    CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow, DiagnosticRow,
-    EntityRow, FactEvidenceRow, FactIngestError, FactScope, ModuleImportDetailRow, OwnerRow,
-    ParameterDetailRow, ProviderFactBatch, ProviderFactManifest, ProviderFactStream,
-    ReferenceDetailRow, RelationRow, ScopeDetailRow, StreamTerminal, ValidatedFactBatch,
-    encode_binding_details, encode_call_argument_details, encode_call_site_details,
-    encode_callable_details, encode_capability_statuses, encode_diagnostics, encode_entities,
-    encode_evidence, encode_module_import_details, encode_owners, encode_parameter_details,
-    encode_reference_details, encode_relations, encode_scope_details,
+    CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow, CfgEdgeDetailRow,
+    CfgGraphRow, CfgNodeDetailRow, DiagnosticRow, EntityRow, FactEvidenceRow, FactIngestError,
+    FactScope, ModuleImportDetailRow, OwnerRow, ParameterDetailRow, ProviderFactBatch,
+    ProviderFactManifest, ProviderFactStream, ReferenceDetailRow, RelationRow, ScopeDetailRow,
+    StreamTerminal, ValidatedFactBatch, encode_binding_details, encode_call_argument_details,
+    encode_call_site_details, encode_callable_details, encode_capability_statuses,
+    encode_cfg_edge_details, encode_cfg_graphs, encode_cfg_node_details, encode_diagnostics,
+    encode_entities, encode_evidence, encode_module_import_details, encode_owners,
+    encode_parameter_details, encode_reference_details, encode_relations, encode_scope_details,
 };
 use crate::registries::{
     ArgumentBindingStatus, ArgumentSpreadKind, CallDispatchKind, CompletenessState, Directness,
@@ -33,12 +34,13 @@ use crate::registries::{
 };
 use crate::ruff_adapter::{
     PythonArgumentBindingStatus, PythonArgumentSpreadKind, PythonBindingKind,
-    PythonCallableSyntaxRole, PythonDispatchKind, PythonExportStatus, PythonFrontendBatch,
-    PythonImportKind, PythonMemberKind, PythonParameterKind, PythonReferenceClass,
-    PythonResolution, PythonScopeKind, PythonSemanticEdgeKind, PythonTargetForm,
+    PythonCallableSyntaxRole, PythonCfgKind, PythonCfgNodeKind, PythonDispatchKind,
+    PythonExportStatus, PythonFrontendBatch, PythonImportKind, PythonMemberKind,
+    PythonParameterKind, PythonReferenceClass, PythonResolution, PythonScopeKind,
+    PythonSemanticEdgeKind, PythonTargetForm, validate_python_cfg,
 };
 
-const OBSERVATION_SCHEMA_ID: &str = "codefabric.ruff.semantic.v1";
+const OBSERVATION_SCHEMA_ID: &str = "codefabric.ruff.semantic.v2";
 const PROVIDER_VERSION: &str = "0.0.7";
 
 #[derive(Clone, Copy)]
@@ -89,6 +91,7 @@ pub fn project_ruff_semantic_batch(
     validate_reference_edges(batch)?;
     validate_import_export_facts(batch)?;
     validate_callable_facts(batch)?;
+    validate_cfg_facts(batch)?;
 
     let observation_payloads = observation_payloads(batch)?;
     let observation = observation_batch(batch, &observation_payloads)?;
@@ -197,6 +200,18 @@ pub fn project_ruff_semantic_batch(
                 .iter()
                 .map(|fact| (b"member".as_slice(), fact.member_id)),
         )
+        .chain(
+            batch
+                .cfgs
+                .iter()
+                .map(|fact| (b"cfg".as_slice(), fact.cfg_id)),
+        )
+        .chain(
+            batch
+                .cfg_nodes
+                .iter()
+                .map(|fact| (b"cfg-node".as_slice(), fact.cfg_node_id)),
+        )
     {
         canonical_ids
             .entry(semantic)
@@ -222,6 +237,8 @@ pub fn project_ruff_semantic_batch(
     let argument_syntax_kind = required_entity_kind("ARGUMENT_SYNTAX")?;
     let call_expression_kind = required_entity_kind("CALL_EXPRESSION")?;
     let declaration_syntax_kind = required_entity_kind("DECLARATION_SYNTAX")?;
+    let cfg_block_kind = required_entity_kind("CFG_BLOCK")?;
+    let semantic_type_kind = required_entity_kind("SEMANTIC_TYPE")?;
     let contains_kind = required_relation_kind("CONTAINS")?;
     let declares_kind = required_relation_kind("DECLARES")?;
     let refers_to_kind = required_relation_kind("REFERS_TO")?;
@@ -256,7 +273,14 @@ pub fn project_ruff_semantic_batch(
             + batch.call_sites.len()
             + batch.call_arguments.len()
             + batch.unknown_argument_sets.len()
-            + batch.members.len(),
+            + batch.members.len()
+            + batch.cfg_nodes.len()
+            + batch
+                .cfg_edges
+                .iter()
+                .filter_map(|edge| edge.exception_category)
+                .collect::<BTreeSet<_>>()
+                .len(),
     );
     let mut scope_details = Vec::with_capacity(batch.scopes.len());
     let mut binding_details = Vec::with_capacity(batch.bindings.len());
@@ -266,6 +290,9 @@ pub fn project_ruff_semantic_batch(
     let mut parameter_details = Vec::with_capacity(batch.parameters.len());
     let mut call_site_details = Vec::with_capacity(batch.call_sites.len());
     let mut call_argument_details = Vec::with_capacity(batch.call_arguments.len());
+    let mut cfg_graphs = Vec::with_capacity(batch.cfgs.len());
+    let mut cfg_node_details = Vec::with_capacity(batch.cfg_nodes.len());
+    let mut cfg_edge_details = Vec::with_capacity(batch.cfg_edges.len());
 
     let module_identity = canonical_identity(&canonical_ids, batch.module_id, "module")?;
     entities.push(EntityRow {
@@ -813,6 +840,95 @@ pub fn project_ruff_semantic_batch(
         });
     }
 
+    for fact in &batch.cfg_nodes {
+        let identity = canonical_identity(&canonical_ids, fact.cfg_node_id, "CFG node")?;
+        let callable = canonical_identity(&canonical_ids, fact.owner_id, "CFG node owner")?.id;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: cfg_block_kind.family_code,
+            entity_kind_code: cfg_block_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: fact.start_byte.map(coordinate).transpose()?,
+            end_byte: fact.end_byte.map(coordinate).transpose()?,
+            name: Some(fact.label.into()),
+            qualified_name: None,
+            parent_entity_id: Some(callable),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        cfg_node_details.push(CfgNodeDetailRow {
+            scope,
+            cfg_node_id: identity.id,
+            cfg_id: canonical_identity(&canonical_ids, fact.cfg_id, "CFG node graph")?.id,
+            node_kind_code: fact.kind.code(),
+            syntax_id: None,
+            mir_statement_id: None,
+            ordinal: Some(fact.ordinal),
+            flags: fact.flags,
+        });
+    }
+
+    for fact in &batch.cfgs {
+        cfg_graphs.push(CfgGraphRow {
+            scope,
+            cfg_id: canonical_identity(&canonical_ids, fact.cfg_id, "CFG")?.id,
+            callable_id: Some(
+                canonical_identity(&canonical_ids, fact.callable_id, "CFG callable")?.id,
+            ),
+            cfg_kind_code: fact.kind.code(),
+            entry_node_id: canonical_identity(&canonical_ids, fact.entry_node_id, "CFG entry")?.id,
+            exit_node_id: canonical_identity(&canonical_ids, fact.exit_node_id, "CFG exit")?.id,
+            exceptional_exit_node_id: Some(
+                canonical_identity(
+                    &canonical_ids,
+                    fact.exceptional_exit_node_id,
+                    "CFG exceptional exit",
+                )?
+                .id,
+            ),
+            node_count: fact.node_count,
+            edge_count: fact.edge_count,
+            flags: fact.flags,
+        });
+    }
+
+    let mut exception_categories = BTreeMap::new();
+    for category in batch
+        .cfg_edges
+        .iter()
+        .filter_map(|edge| edge.exception_category)
+    {
+        exception_categories.entry(category).or_insert_with(|| {
+            derived_identity(
+                b"python-cfg-exception-category",
+                &[&scope.owner_id, category.as_bytes()],
+            )
+        });
+    }
+    for (category, identity) in &exception_categories {
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: semantic_type_kind.family_code,
+            entity_kind_code: semantic_type_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: None,
+            end_byte: None,
+            name: Some(format!("EXCEPTION_CATEGORY:{category}")),
+            qualified_name: None,
+            parent_entity_id: None,
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+    }
+
     let mut relations = Vec::new();
     let module_scope = batch
         .scopes
@@ -1150,6 +1266,59 @@ pub fn project_ruff_semantic_batch(
             ResolutionClass::StaticallyResolved as i16,
         );
     }
+    let cfg_nodes_by_id = batch
+        .cfg_nodes
+        .iter()
+        .map(|node| (node.cfg_node_id, node))
+        .collect::<BTreeMap<_, _>>();
+    for fact in &batch.cfg_edges {
+        let relation_kind = required_relation_kind(fact.kind.registry_name())?;
+        let source = canonical_identity(&canonical_ids, fact.source_node_id, "CFG edge source")?.id;
+        let target = canonical_identity(&canonical_ids, fact.target_node_id, "CFG edge target")?.id;
+        let source_node = cfg_nodes_by_id.get(&fact.source_node_id).ok_or_else(|| {
+            FactIngestError::Protocol("CFG relation source detail is absent".into())
+        })?;
+        push_relation(
+            &mut relations,
+            scope,
+            file_id,
+            relation_kind,
+            source,
+            target,
+            source_node.start_byte.map(coordinate).transpose()?,
+            source_node.end_byte.map(coordinate).transpose()?,
+            EvidenceCertainty::StaticSemantic as i16,
+            ResolutionClass::NotApplicable as i16,
+        );
+        let relation = relations.last_mut().ok_or_else(|| {
+            FactIngestError::Protocol("CFG relation projection produced no row".into())
+        })?;
+        relation.flags = fact.flags;
+        let relation_id = relation.fact_id;
+        let payload_text = fact
+            .case_value_text
+            .clone()
+            .or_else(|| fact.exception_category.map(str::to_owned));
+        cfg_edge_details.push(CfgEdgeDetailRow {
+            scope,
+            relation_id,
+            cfg_id: canonical_identity(&canonical_ids, fact.cfg_id, "CFG edge graph")?.id,
+            condition_id: fact
+                .condition_node_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "CFG edge condition")
+                        .map(|identity| identity.id)
+                })
+                .transpose()?,
+            case_value_hash: payload_text.as_deref().map(stable_text_hash64),
+            case_value_text: payload_text,
+            exception_type_id: fact
+                .exception_category
+                .and_then(|category| exception_categories.get(category))
+                .map(|identity| identity.id),
+            edge_flags: fact.flags,
+        });
+    }
 
     entities.sort_by_key(|row| row.entity_id);
     entities.dedup_by_key(|row| row.entity_id);
@@ -1163,6 +1332,9 @@ pub fn project_ruff_semantic_batch(
     parameter_details.sort_by_key(|row| row.parameter_id);
     call_site_details.sort_by_key(|row| row.call_site_id);
     call_argument_details.sort_by_key(|row| row.argument_id);
+    cfg_graphs.sort_by_key(|row| row.cfg_id);
+    cfg_node_details.sort_by_key(|row| row.cfg_node_id);
+    cfg_edge_details.sort_by_key(|row| row.relation_id);
 
     let diagnostics = batch
         .call_diagnostics
@@ -1275,8 +1447,24 @@ pub fn project_ruff_semantic_batch(
         fallback_source_available: false,
         coverage_scope_fingerprint,
     };
+    let cfg_capability_code = capability_code("CFG")
+        .and_then(|code| i16::try_from(code).ok())
+        .ok_or_else(|| FactIngestError::Protocol("CFG capability is absent".into()))?;
+    let cfg_capability = CapabilityStatusRow {
+        scope,
+        snapshot_id: None,
+        capability_code: cfg_capability_code,
+        owner_capability_state_code: OwnerCapabilityState::Current as i16,
+        completeness_state_code: CompletenessState::Complete as i16,
+        provider_run_id: Some(provider_run.id),
+        producer_code: Some(ProviderCode::RuffPython as i16),
+        reason_code: None,
+        diagnostic_id: None,
+        fallback_source_available: false,
+        coverage_scope_fingerprint,
+    };
 
-    let capability_bits = capability_mask(&["SCOPES_BINDINGS", "IMPORT_RESOLUTION"])
+    let capability_bits = capability_mask(&["SCOPES_BINDINGS", "IMPORT_RESOLUTION", "CFG"])
         .and_then(|mask| i64::try_from(mask).ok())
         .ok_or_else(|| FactIngestError::Protocol("SCOPES_BINDINGS mask is absent".into()))?;
     let owner = OwnerRow {
@@ -1299,7 +1487,7 @@ pub fn project_ruff_semantic_batch(
         (8, encode_owners(&[owner])?),
         (
             9,
-            encode_capability_statuses(&[capability, import_capability])?,
+            encode_capability_statuses(&[capability, import_capability, cfg_capability])?,
         ),
         (10, encode_diagnostics(&diagnostics)?),
         (100, encode_entities(&entities)?),
@@ -1313,6 +1501,9 @@ pub fn project_ruff_semantic_batch(
         (250, encode_parameter_details(&parameter_details)?),
         (260, encode_call_site_details(&call_site_details)?),
         (270, encode_call_argument_details(&call_argument_details)?),
+        (280, encode_cfg_graphs(&cfg_graphs)?),
+        (290, encode_cfg_node_details(&cfg_node_details)?),
+        (300, encode_cfg_edge_details(&cfg_edge_details)?),
     ];
     let provider_batches = encoded
         .into_iter()
@@ -1699,9 +1890,62 @@ fn validate_callable_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngest
     Ok(())
 }
 
+fn validate_cfg_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngestError> {
+    if batch.cfgs.is_empty() && batch.cfg_nodes.is_empty() && batch.cfg_edges.is_empty() {
+        return Ok(());
+    }
+    let callable_ids = batch
+        .callables
+        .iter()
+        .map(|callable| callable.callable_id)
+        .collect::<BTreeSet<_>>();
+    let cfg_ids = batch
+        .cfgs
+        .iter()
+        .map(|cfg| cfg.cfg_id)
+        .collect::<BTreeSet<_>>();
+    if cfg_ids.len() != batch.cfgs.len() || batch.cfgs.len() != callable_ids.len() {
+        return Err(FactIngestError::Protocol(
+            "Ruff CFG projection must contain exactly one graph per callable".into(),
+        ));
+    }
+    for cfg in &batch.cfgs {
+        if !callable_ids.contains(&cfg.callable_id) || cfg.owner_id != cfg.callable_id {
+            return Err(FactIngestError::Protocol(
+                "Ruff CFG references an absent or inconsistent callable owner".into(),
+            ));
+        }
+        validate_python_cfg(cfg, &batch.cfg_nodes, &batch.cfg_edges).map_err(|error| {
+            FactIngestError::Protocol(format!("Ruff CFG validation failed: {}", error.message))
+        })?;
+    }
+    let node_ids = batch
+        .cfg_nodes
+        .iter()
+        .map(|node| node.cfg_node_id)
+        .collect::<BTreeSet<_>>();
+    if node_ids.len() != batch.cfg_nodes.len()
+        || batch
+            .cfg_nodes
+            .iter()
+            .any(|node| !cfg_ids.contains(&node.cfg_id) || !callable_ids.contains(&node.owner_id))
+        || batch.cfg_edges.iter().any(|edge| {
+            !cfg_ids.contains(&edge.cfg_id)
+                || !callable_ids.contains(&edge.owner_id)
+                || !node_ids.contains(&edge.source_node_id)
+                || !node_ids.contains(&edge.target_node_id)
+        })
+    {
+        return Err(FactIngestError::Protocol(
+            "Ruff CFG detail rows contain duplicate or dangling identities".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn observation_batch(
     batch: &PythonFrontendBatch,
-    payloads: &[Vec<u8>; 15],
+    payloads: &[Vec<u8>; 18],
 ) -> Result<RecordBatch, FactIngestError> {
     let schema = Arc::new(registered_provider_observation_arrow_schema(
         OBSERVATION_SCHEMA_ID,
@@ -1729,12 +1973,15 @@ fn observation_batch(
         Arc::new(BinaryArray::from(vec![Some(payloads[12].as_slice())])),
         Arc::new(BinaryArray::from(vec![Some(payloads[13].as_slice())])),
         Arc::new(BinaryArray::from(vec![Some(payloads[14].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[15].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[16].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[17].as_slice())])),
     ];
     RecordBatch::try_new(schema, columns).map_err(FactIngestError::from)
 }
 
 #[allow(clippy::too_many_lines)] // One ordered payload census keeps the registered observation schema auditable.
-fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 15], FactIngestError> {
+fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 18], FactIngestError> {
     let scopes = batch
         .scopes
         .iter()
@@ -1972,6 +2219,59 @@ fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 15], Fa
             })
         })
         .collect::<Vec<_>>();
+    let cfgs = batch
+        .cfgs
+        .iter()
+        .map(|fact| {
+            json!({
+                "cfg_id": hex_id(fact.cfg_id),
+                "owner_id": hex_id(fact.owner_id),
+                "callable_id": hex_id(fact.callable_id),
+                "kind": cfg_kind_name(fact.kind),
+                "entry_node_id": hex_id(fact.entry_node_id),
+                "exit_node_id": hex_id(fact.exit_node_id),
+                "exceptional_exit_node_id": hex_id(fact.exceptional_exit_node_id),
+                "node_count": fact.node_count,
+                "edge_count": fact.edge_count,
+                "flags": fact.flags,
+            })
+        })
+        .collect::<Vec<_>>();
+    let cfg_nodes = batch
+        .cfg_nodes
+        .iter()
+        .map(|fact| {
+            json!({
+                "cfg_node_id": hex_id(fact.cfg_node_id),
+                "cfg_id": hex_id(fact.cfg_id),
+                "owner_id": hex_id(fact.owner_id),
+                "kind": cfg_node_kind_name(fact.kind),
+                "ordinal": fact.ordinal,
+                "label": fact.label,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+                "flags": fact.flags,
+            })
+        })
+        .collect::<Vec<_>>();
+    let cfg_edges = batch
+        .cfg_edges
+        .iter()
+        .map(|fact| {
+            json!({
+                "relation_id": hex_id(fact.relation_id),
+                "cfg_id": hex_id(fact.cfg_id),
+                "owner_id": hex_id(fact.owner_id),
+                "source_node_id": hex_id(fact.source_node_id),
+                "target_node_id": hex_id(fact.target_node_id),
+                "kind": fact.kind.registry_name(),
+                "condition_node_id": fact.condition_node_id.map(hex_id),
+                "case_value_text": fact.case_value_text,
+                "exception_category": fact.exception_category,
+                "flags": fact.flags,
+            })
+        })
+        .collect::<Vec<_>>();
     Ok([
         json_bytes(&scopes)?,
         json_bytes(&bindings)?,
@@ -1988,6 +2288,9 @@ fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 15], Fa
         json_bytes(&unknown_argument_sets)?,
         json_bytes(&members)?,
         json_bytes(&call_diagnostics)?,
+        json_bytes(&cfgs)?,
+        json_bytes(&cfg_nodes)?,
+        json_bytes(&cfg_edges)?,
     ])
 }
 
@@ -2171,6 +2474,10 @@ fn digest_hash64(digest: [u8; 32]) -> i64 {
     i64::from_be_bytes(digest[..8].try_into().expect("eight digest bytes"))
 }
 
+fn stable_text_hash64(value: &str) -> i64 {
+    digest_hash64(*blake3::hash(value.as_bytes()).as_bytes())
+}
+
 fn coordinate(value: u64) -> Result<i64, FactIngestError> {
     i64::try_from(value)
         .map_err(|_| FactIngestError::Protocol("Ruff byte coordinate exceeds Int64".into()))
@@ -2209,6 +2516,32 @@ const fn parameter_kind_code(kind: PythonParameterKind) -> i16 {
         PythonParameterKind::VarPositional => ParameterKind::VarPositional as i16,
         PythonParameterKind::KeywordOnly => ParameterKind::KeywordOnly as i16,
         PythonParameterKind::VarKeyword => ParameterKind::VarKeyword as i16,
+    }
+}
+
+const fn cfg_kind_name(kind: PythonCfgKind) -> &'static str {
+    match kind {
+        PythonCfgKind::Module => "MODULE",
+        PythonCfgKind::Function => "FUNCTION",
+        PythonCfgKind::AsyncFunction => "ASYNC_FUNCTION",
+        PythonCfgKind::Lambda => "LAMBDA",
+    }
+}
+
+const fn cfg_node_kind_name(kind: PythonCfgNodeKind) -> &'static str {
+    match kind {
+        PythonCfgNodeKind::Entry => "ENTRY",
+        PythonCfgNodeKind::Exit => "EXIT",
+        PythonCfgNodeKind::BasicBlock => "BASIC_BLOCK",
+        PythonCfgNodeKind::ExpressionOperation => "EXPRESSION_OPERATION",
+        PythonCfgNodeKind::StatementOperation => "STATEMENT_OPERATION",
+        PythonCfgNodeKind::Branch => "BRANCH",
+        PythonCfgNodeKind::Switch => "SWITCH",
+        PythonCfgNodeKind::LoopHeader => "LOOP_HEADER",
+        PythonCfgNodeKind::ReturnPoint => "RETURN_POINT",
+        PythonCfgNodeKind::ExceptionalExit => "EXCEPTIONAL_EXIT",
+        PythonCfgNodeKind::SuspendPoint => "SUSPEND_POINT",
+        PythonCfgNodeKind::ResumePoint => "RESUME_POINT",
     }
 }
 
@@ -2543,6 +2876,9 @@ mod tests {
             unknown_argument_sets: Vec::new(),
             members: Vec::new(),
             call_diagnostics: Vec::new(),
+            cfgs: Vec::new(),
+            cfg_nodes: Vec::new(),
+            cfg_edges: Vec::new(),
             metrics: PythonSemanticMetrics {
                 binding_pass_duration: Duration::ZERO,
                 traversal_pass_duration: Duration::ZERO,
@@ -2560,6 +2896,9 @@ mod tests {
                 call_site_count: 0,
                 call_argument_count: 0,
                 member_count: 0,
+                cfg_count: 0,
+                cfg_node_count: 0,
+                cfg_edge_count: 0,
             },
             terminal: PythonSemanticTerminal {
                 pass_id: "PASS_RUFF_SCOPE_BINDING_V1",

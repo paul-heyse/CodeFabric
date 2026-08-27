@@ -25,6 +25,7 @@ use super::callables::{
     PythonCallArgumentFact, PythonCallDiagnosticFact, PythonCallSiteFact, PythonCallableFact,
     PythonCallableSyntaxFact, PythonMemberFact, PythonParameterFact, PythonUnknownArgumentSetFact,
 };
+use super::cfg::{PythonCfgEdgeFact, PythonCfgFact, PythonCfgNodeFact};
 
 /// Application-owned stable identifier for one semantic observation.
 pub type PythonSemanticId = [u8; 16];
@@ -247,6 +248,9 @@ pub struct PythonSemanticMetrics {
     pub call_site_count: u64,
     pub call_argument_count: u64,
     pub member_count: u64,
+    pub cfg_count: u64,
+    pub cfg_node_count: u64,
+    pub cfg_edge_count: u64,
 }
 
 /// Registered terminal observation for the Ruff traversal pass.
@@ -280,6 +284,9 @@ pub struct PythonFrontendBatch {
     pub unknown_argument_sets: Vec<PythonUnknownArgumentSetFact>,
     pub members: Vec<PythonMemberFact>,
     pub call_diagnostics: Vec<PythonCallDiagnosticFact>,
+    pub cfgs: Vec<PythonCfgFact>,
+    pub cfg_nodes: Vec<PythonCfgNodeFact>,
+    pub cfg_edges: Vec<PythonCfgEdgeFact>,
     pub metrics: PythonSemanticMetrics,
     pub terminal: PythonSemanticTerminal,
 }
@@ -1638,6 +1645,12 @@ pub(super) fn project_python_semantics<'a>(
         &pass.bindings,
         &all_references,
     );
+    let cfg_projection = super::cfg::project_python_cfgs(
+        suite,
+        module_name,
+        provider_image_fingerprint,
+        &callable_projection.callables,
+    )?;
     let metrics = PythonSemanticMetrics {
         binding_pass_duration,
         traversal_pass_duration,
@@ -1662,6 +1675,9 @@ pub(super) fn project_python_semantics<'a>(
         call_site_count: u64::try_from(callable_projection.call_sites.len()).unwrap_or(u64::MAX),
         call_argument_count: u64::try_from(callable_projection.arguments.len()).unwrap_or(u64::MAX),
         member_count: u64::try_from(callable_projection.members.len()).unwrap_or(u64::MAX),
+        cfg_count: u64::try_from(cfg_projection.cfgs.len()).unwrap_or(u64::MAX),
+        cfg_node_count: u64::try_from(cfg_projection.nodes.len()).unwrap_or(u64::MAX),
+        cfg_edge_count: u64::try_from(cfg_projection.edges.len()).unwrap_or(u64::MAX),
     };
     Ok(PythonFrontendBatch {
         module_id: import_projection.module_id,
@@ -1683,6 +1699,9 @@ pub(super) fn project_python_semantics<'a>(
         unknown_argument_sets: callable_projection.unknown_argument_sets,
         members: callable_projection.members,
         call_diagnostics: callable_projection.diagnostics,
+        cfgs: cfg_projection.cfgs,
+        cfg_nodes: cfg_projection.nodes,
+        cfg_edges: cfg_projection.edges,
         metrics,
         terminal: PythonSemanticTerminal {
             pass_id: "PASS_RUFF_SEMANTIC_TRAVERSAL_V1",
@@ -1760,6 +1779,8 @@ pub(super) fn semantic_id(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use ruff_python_parser::{ParseOptions, parse_unchecked};
 
     use super::super::callables::{
@@ -1902,6 +1923,13 @@ def outer():
                     + first.call_arguments.len()
                     + first.unknown_argument_sets.len()
                     + first.members.len()
+                    + first.cfg_nodes.len()
+                    + first
+                        .cfg_edges
+                        .iter()
+                        .filter_map(|edge| edge.exception_category)
+                        .collect::<BTreeSet<_>>()
+                        .len()
             );
         }
     }
@@ -2039,7 +2067,8 @@ __all__ = ["alias"] + ("osp",)
                 projection.batch(230).unwrap().num_rows(),
                 batch.imports.len()
             );
-            assert_eq!(projection.batch(9).unwrap().num_rows(), 2);
+            assert_eq!(projection.batch(9).unwrap().num_rows(), 3);
+            assert_eq!(projection.batch(280).unwrap().num_rows(), batch.cfgs.len());
         }
     }
 
@@ -2203,6 +2232,7 @@ __all__ = ["alias"] + ("osp",)
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // The fixture proves the complete callable/call-site contract.
     fn py_callable_call_site_fixture_conformance() {
         use super::super::callables::{CALLABLE_FLAG_ASYNC, CALLABLE_FLAG_GENERATOR};
 

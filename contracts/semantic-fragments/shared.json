@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "accepted",
-  "canonical_digest": "b3:41a0baa88632e8a64f85d246908093c6f3aefa13e544bc6e48bbbd668ce81ecc",
+  "canonical_digest": "b3:4748f7476aabb98f127590889bc589dfdd99c07e9d36317e349ccaf8c23080b7",
   "fragment_id": "SEMANTIC_SHARED_V1",
   "lane": "shared",
   "owner_packet": "WP01",
@@ -30,6 +30,12 @@
     {
       "contract_id": "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V1",
       "observation_schema_ids": ["codefabric.ruff.semantic.v1"],
+      "output_table_codes": [100, 110, 130],
+      "required_fields": ["entity_id", "fact_id", "evidence_id"]
+    },
+    {
+      "contract_id": "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V2",
+      "observation_schema_ids": ["codefabric.ruff.semantic.v2"],
       "output_table_codes": [100, 110, 130],
       "required_fields": ["entity_id", "fact_id", "evidence_id"]
     },

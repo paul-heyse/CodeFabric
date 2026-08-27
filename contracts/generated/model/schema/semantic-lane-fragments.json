@@ -6,7 +6,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.shared",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:41a0baa88632e8a64f85d246908093c6f3aefa13e544bc6e48bbbd668ce81ecc",
+      "canonical_digest": "b3:4748f7476aabb98f127590889bc589dfdd99c07e9d36317e349ccaf8c23080b7",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -29,6 +29,22 @@
           "contract_id": "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V1",
           "observation_schema_ids": [
             "codefabric.ruff.semantic.v1"
+          ],
+          "output_table_codes": [
+            100,
+            110,
+            130
+          ],
+          "required_fields": [
+            "entity_id",
+            "fact_id",
+            "evidence_id"
+          ]
+        },
+        {
+          "contract_id": "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V2",
+          "observation_schema_ids": [
+            "codefabric.ruff.semantic.v2"
           ],
           "output_table_codes": [
             100,
@@ -143,7 +159,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.python",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:3d474367d9277abd36267d8713f1a9c06ed11560192bee77464786b7dcce6d81",
+      "canonical_digest": "b3:15ffc125b42e072ee2377ea1b25691b4016b3bb03e37e09a219f5ac4954e8c05",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -202,6 +218,52 @@
           ]
         },
         {
+          "contract_id": "INGEST_RUFF_SEMANTIC_CFG_V2",
+          "observation_schema_ids": [
+            "codefabric.ruff.semantic.v2"
+          ],
+          "output_table_codes": [
+            10,
+            100,
+            110,
+            130,
+            200,
+            210,
+            220,
+            230,
+            240,
+            250,
+            260,
+            270,
+            280,
+            290,
+            300
+          ],
+          "required_fields": [
+            "module_name",
+            "provider_image_fingerprint",
+            "scopes_json",
+            "bindings_json",
+            "references_json",
+            "unknown_symbols_json",
+            "edges_json",
+            "imports_json",
+            "exports_json",
+            "export_status",
+            "callables_json",
+            "parameters_json",
+            "callable_syntax_json",
+            "call_sites_json",
+            "call_arguments_json",
+            "unknown_argument_sets_json",
+            "members_json",
+            "call_diagnostics_json",
+            "cfgs_json",
+            "cfg_nodes_json",
+            "cfg_edges_json"
+          ]
+        },
+        {
           "contract_id": "INGEST_PYREFLY_MODULE_V1",
           "observation_schema_ids": [
             "codefabric.pyrefly.module.v1"
@@ -243,7 +305,10 @@
             240,
             250,
             260,
-            270
+            270,
+            280,
+            290,
+            300
           ],
           "scope": "module-owner-and-analysis-context",
           "trigger_kinds": [
@@ -256,6 +321,7 @@
       "model": {
         "owned_observation_schema_ids": [
           "codefabric.ruff.semantic.v1",
+          "codefabric.ruff.semantic.v2",
           "codefabric.pyrefly.module.v1"
         ],
         "owned_table_codes": [
@@ -266,7 +332,10 @@
           240,
           250,
           260,
-          270
+          270,
+          280,
+          290,
+          300
         ],
         "provider_observation_schema_additions": [
           {
@@ -370,6 +439,118 @@
             "fields": [
               {
                 "logical_type": "utf8",
+                "name": "module_name",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "provider_image_fingerprint",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "scopes_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "bindings_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "references_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "unknown_symbols_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "edges_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "imports_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "exports_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "export_status",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "callables_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "parameters_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "callable_syntax_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_sites_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_arguments_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "unknown_argument_sets_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "members_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_diagnostics_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "cfgs_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "cfg_nodes_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "cfg_edges_json",
+                "nullable": false
+              }
+            ],
+            "observation_family_code": 130,
+            "provider_id": "ruff-python",
+            "schema_id": "codefabric.ruff.semantic.v2"
+          },
+          {
+            "fields": [
+              {
+                "logical_type": "utf8",
                 "name": "module_id",
                 "nullable": false
               },
@@ -424,6 +605,16 @@
             "authority": "ENUM_REGISTRY",
             "domain": "ARGUMENT_SPREAD_KIND",
             "semantic_type": "enum:argument_spread_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "CFG_KIND",
+            "semantic_type": "enum:cfg_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "CFG_NODE_KIND",
+            "semantic_type": "enum:cfg_node_kind"
           }
         ],
         "table_additions": [
@@ -1015,6 +1206,331 @@
               "call_site_id",
               "ordinal"
             ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "logical_type": "id16",
+                "name": "cfg_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "callable_detail.callable_id",
+                "logical_type": "id16",
+                "name": "callable_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "code16",
+                "name": "cfg_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:cfg_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "entry_node_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "exit_node_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "exceptional_exit_node_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int32",
+                "name": "node_count",
+                "nullable": false
+              },
+              {
+                "logical_type": "int32",
+                "name": "edge_count",
+                "nullable": false
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              240
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "control-flow",
+            "grain": "one validated owner-local control-flow graph",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "cfg_graph",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "cfg_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "cfg_graphs",
+            "schema_version": "1.0",
+            "table_code": 280,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "callable_id",
+              "cfg_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "cfg_node_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "cfg_graph.cfg_id",
+                "logical_type": "id16",
+                "name": "cfg_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "code16",
+                "name": "node_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:cfg_node_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "mir_statement_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int32",
+                "name": "ordinal",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              280
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "control-flow",
+            "grain": "one application-owned control-flow node entity extension",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "cfg_node_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "cfg_node_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "cfg_node_details",
+            "schema_version": "1.0",
+            "table_code": 290,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "cfg_id",
+              "ordinal"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "relation.fact_id",
+                "logical_type": "id16",
+                "name": "relation_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "cfg_graph.cfg_id",
+                "logical_type": "id16",
+                "name": "cfg_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "condition_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "utf8",
+                "name": "case_value_text",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "case_value_hash",
+                "nullable": true
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "exception_type_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "edge_flags",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              110,
+              280
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "control-flow",
+            "grain": "one control-flow relation extension",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "cfg_edge_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "relation_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "cfg_edge_details",
+            "schema_version": "1.0",
+            "table_code": 300,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "cfg_id",
+              "relation_id"
+            ]
           }
         ],
         "table_scope_additions": [
@@ -1052,6 +1568,27 @@
             "source_generation_column": "source_generation",
             "table_code": 270,
             "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 280,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 290,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 300,
+            "workspace_column": "workspace_id"
           }
         ]
       },
@@ -1072,6 +1609,12 @@
                 "meaning": "One Pyrefly module semantic observation row",
                 "name": "PYREFLY_MODULE",
                 "slug": "pyrefly-module"
+              },
+              {
+                "code": 130,
+                "meaning": "One Ruff application-owned scope binding call and validated CFG observation",
+                "name": "RUFF_SEMANTIC_CFG",
+                "slug": "ruff-semantic-cfg"
               }
             ],
             "width_bits": 16
@@ -1285,13 +1828,122 @@
               }
             ],
             "width_bits": 16
+          },
+          {
+            "domain": "CFG_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Module-body control-flow graph",
+                "name": "MODULE",
+                "slug": "module"
+              },
+              {
+                "code": 20,
+                "meaning": "Synchronous function control-flow graph",
+                "name": "FUNCTION",
+                "slug": "function"
+              },
+              {
+                "code": 30,
+                "meaning": "Asynchronous function control-flow graph",
+                "name": "ASYNC_FUNCTION",
+                "slug": "async-function"
+              },
+              {
+                "code": 40,
+                "meaning": "Lambda body control-flow graph",
+                "name": "LAMBDA",
+                "slug": "lambda"
+              }
+            ],
+            "width_bits": 16
+          },
+          {
+            "domain": "CFG_NODE_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Unique synthetic graph entry",
+                "name": "ENTRY",
+                "slug": "entry"
+              },
+              {
+                "code": 20,
+                "meaning": "Unique synthetic normal exit",
+                "name": "EXIT",
+                "slug": "exit"
+              },
+              {
+                "code": 30,
+                "meaning": "Basic control-flow block",
+                "name": "BASIC_BLOCK",
+                "slug": "basic-block"
+              },
+              {
+                "code": 40,
+                "meaning": "Expression evaluation operation",
+                "name": "EXPRESSION_OPERATION",
+                "slug": "expression-operation"
+              },
+              {
+                "code": 50,
+                "meaning": "Statement execution operation",
+                "name": "STATEMENT_OPERATION",
+                "slug": "statement-operation"
+              },
+              {
+                "code": 60,
+                "meaning": "Boolean branch point",
+                "name": "BRANCH",
+                "slug": "branch"
+              },
+              {
+                "code": 70,
+                "meaning": "Multi-way branch point",
+                "name": "SWITCH",
+                "slug": "switch"
+              },
+              {
+                "code": 80,
+                "meaning": "Loop iteration header",
+                "name": "LOOP_HEADER",
+                "slug": "loop-header"
+              },
+              {
+                "code": 90,
+                "meaning": "Non-fallthrough return point",
+                "name": "RETURN_POINT",
+                "slug": "return-point"
+              },
+              {
+                "code": 100,
+                "meaning": "Unique explicit exceptional exit",
+                "name": "EXCEPTIONAL_EXIT",
+                "slug": "exceptional-exit"
+              },
+              {
+                "code": 110,
+                "meaning": "Yield or await suspension point",
+                "name": "SUSPEND_POINT",
+                "slug": "suspend-point"
+              },
+              {
+                "code": 120,
+                "meaning": "Yield or await resumption point",
+                "name": "RESUME_POINT",
+                "slug": "resume-point"
+              }
+            ],
+            "width_bits": 16
           }
         ],
         "enum_values": [
           {
             "codes": [
               100,
-              110
+              110,
+              130
             ],
             "domain": "PROVIDER_OBSERVATION_FAMILY"
           },
@@ -1349,6 +2001,32 @@
               80
             ],
             "domain": "ARGUMENT_SPREAD_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40
+            ],
+            "domain": "CFG_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50,
+              60,
+              70,
+              80,
+              90,
+              100,
+              110,
+              120
+            ],
+            "domain": "CFG_NODE_KIND"
           }
         ],
         "property_codes": [],
@@ -1439,9 +2117,9 @@
     }
   ],
   "source_digests": {
-    "contracts/semantic-fragments/python.json": "b3:3d474367d9277abd36267d8713f1a9c06ed11560192bee77464786b7dcce6d81",
+    "contracts/semantic-fragments/python.json": "b3:15ffc125b42e072ee2377ea1b25691b4016b3bb03e37e09a219f5ac4954e8c05",
     "contracts/semantic-fragments/rust.json": "b3:22056b1ab97fa275036659a4fbf2251adec0d4d372660ea88d596938e8248ba3",
-    "contracts/semantic-fragments/shared.json": "b3:41a0baa88632e8a64f85d246908093c6f3aefa13e544bc6e48bbbd668ce81ecc"
+    "contracts/semantic-fragments/shared.json": "b3:4748f7476aabb98f127590889bc589dfdd99c07e9d36317e349ccaf8c23080b7"
   },
   "status": "draft",
   "version": "1.0"

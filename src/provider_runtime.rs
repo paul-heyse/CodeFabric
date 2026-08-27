@@ -2942,6 +2942,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One parity matrix covers both registered provider adapters.
     async fn provider_adapter_registration_parity() {
         let registry = SemanticProviderAdapterRegistry::new(
             Arc::new(FakeSemanticDriver),

@@ -2921,7 +2921,12 @@ mod tests {
             BTreeSet::from([[1; 16], [2; 16], [3; 16], [9; 16]])
         );
         assert_eq!(widened.traversed_edges.len(), 2);
-        assert_eq!(widened.invalidated_table_codes, BTreeSet::from([180, 190]));
+        assert_eq!(
+            widened.invalidated_table_codes,
+            BTreeSet::from([
+                10, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300,
+            ])
+        );
     }
 
     #[test]
@@ -2963,7 +2968,12 @@ mod tests {
         let plan = graph.plan_invalidation(&BTreeSet::from([[1; 16]]));
         assert_eq!(plan.affected_owners, BTreeSet::from([[1; 16], [2; 16]]));
         assert!(!plan.full_rebuild_required);
-        assert_eq!(plan.invalidated_table_codes, BTreeSet::from([180, 190]));
+        assert_eq!(
+            plan.invalidated_table_codes,
+            BTreeSet::from([
+                10, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300,
+            ])
+        );
     }
 
     #[test]

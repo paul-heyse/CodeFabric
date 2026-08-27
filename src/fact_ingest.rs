@@ -466,6 +466,47 @@ pub struct CallArgumentDetailRow {
     pub spread_kind_code: Option<i16>,
 }
 
+/// One control-flow graph header owned by a module or callable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CfgGraphRow {
+    pub scope: FactScope,
+    pub cfg_id: [u8; 16],
+    pub callable_id: Option<[u8; 16]>,
+    pub cfg_kind_code: i16,
+    pub entry_node_id: [u8; 16],
+    pub exit_node_id: [u8; 16],
+    pub exceptional_exit_node_id: Option<[u8; 16]>,
+    pub node_count: i32,
+    pub edge_count: i32,
+    pub flags: i64,
+}
+
+/// One control-flow node entity extension.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CfgNodeDetailRow {
+    pub scope: FactScope,
+    pub cfg_node_id: [u8; 16],
+    pub cfg_id: [u8; 16],
+    pub node_kind_code: i16,
+    pub syntax_id: Option<[u8; 16]>,
+    pub mir_statement_id: Option<[u8; 16]>,
+    pub ordinal: Option<i32>,
+    pub flags: i64,
+}
+
+/// One control-flow relation extension with columnar branch/exception payloads.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CfgEdgeDetailRow {
+    pub scope: FactScope,
+    pub relation_id: [u8; 16],
+    pub cfg_id: [u8; 16],
+    pub condition_id: Option<[u8; 16]>,
+    pub case_value_text: Option<String>,
+    pub case_value_hash: Option<i64>,
+    pub exception_type_id: Option<[u8; 16]>,
+    pub edge_flags: i64,
+}
+
 fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]>) -> ArrayRef {
     let mut builder = BinaryBuilder::with_capacity(rows.len(), rows.len().saturating_mul(16));
     for row in rows {
@@ -2759,7 +2800,10 @@ mod tests {
         let codes = generated_ingest_table_codes();
         assert_eq!(
             codes,
-            [8, 9, 10, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190]
+            [
+                8, 9, 10, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230,
+                240, 250, 260, 270, 280, 290, 300,
+            ]
         );
         for table_code in codes {
             let spec = table_spec(table_code).expect("generated ingest table");

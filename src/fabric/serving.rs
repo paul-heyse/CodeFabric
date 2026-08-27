@@ -3168,21 +3168,25 @@ mod tests {
             let terminal = if definition.edits.is_empty() {
                 Some(initial)
             } else {
-                engine
-                    .process_batch(
-                        &mut store,
-                        WatchHintBatch {
-                            hints: Vec::new(),
-                            rescan_required: true,
-                        },
-                        &BTreeMap::new(),
-                    )
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "scenario {} terminal wave failed: {error}",
-                            definition.scenario_id
-                        )
-                    })
+                match engine.process_batch(
+                    &mut store,
+                    WatchHintBatch {
+                        hints: Vec::new(),
+                        rescan_required: true,
+                    },
+                    &BTreeMap::new(),
+                ) {
+                    Ok(terminal) => terminal,
+                    Err(crate::continuous::ContinuousError::SemanticLaneUnavailable)
+                        if withdrawal =>
+                    {
+                        None
+                    }
+                    Err(error) => panic!(
+                        "scenario {} terminal wave failed: {error}",
+                        definition.scenario_id
+                    ),
+                }
             };
             if withdrawal {
                 assert!(terminal.is_none());
@@ -3201,7 +3205,10 @@ mod tests {
                     lifecycle,
                 );
                 assert_eq!(workspace_id, clean_workspace_id);
-                assert!(clean.rebuild_from_zero(&mut clean_store).unwrap().is_none());
+                assert!(matches!(
+                    clean.rebuild_from_zero(&mut clean_store),
+                    Err(crate::continuous::ContinuousError::SemanticLaneUnavailable)
+                ));
                 assert_eq!(
                     clean.scheduler().freshness().state(),
                     crate::lifecycle::FreshnessState::PotentiallyStale
@@ -4151,7 +4158,7 @@ mod tests {
             same_query_bound.plan_template_id
         );
         assert_eq!(first_bound.bound_query_id, same_query_bound.bound_query_id);
-        assert_eq!(
+        assert_ne!(
             first_bound.plan_template_id,
             changed_parameter_bound.plan_template_id
         );
