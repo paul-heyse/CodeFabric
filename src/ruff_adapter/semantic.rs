@@ -21,6 +21,11 @@ use ruff_python_semantic::{
 use ruff_text_size::{Ranged, TextRange};
 use thiserror::Error;
 
+use super::callables::{
+    PythonCallArgumentFact, PythonCallDiagnosticFact, PythonCallSiteFact, PythonCallableFact,
+    PythonCallableSyntaxFact, PythonMemberFact, PythonParameterFact, PythonUnknownArgumentSetFact,
+};
+
 /// Application-owned stable identifier for one semantic observation.
 pub type PythonSemanticId = [u8; 16];
 
@@ -237,6 +242,11 @@ pub struct PythonSemanticMetrics {
     pub import_count: u64,
     pub export_count: u64,
     pub unresolved_module_count: u64,
+    pub callable_count: u64,
+    pub parameter_count: u64,
+    pub call_site_count: u64,
+    pub call_argument_count: u64,
+    pub member_count: u64,
 }
 
 /// Registered terminal observation for the Ruff traversal pass.
@@ -262,6 +272,14 @@ pub struct PythonFrontendBatch {
     pub imports: Vec<PythonImportFact>,
     pub exports: Vec<PythonExportFact>,
     pub export_status: PythonExportStatus,
+    pub callables: Vec<PythonCallableFact>,
+    pub parameters: Vec<PythonParameterFact>,
+    pub callable_syntax: Vec<PythonCallableSyntaxFact>,
+    pub call_sites: Vec<PythonCallSiteFact>,
+    pub call_arguments: Vec<PythonCallArgumentFact>,
+    pub unknown_argument_sets: Vec<PythonUnknownArgumentSetFact>,
+    pub members: Vec<PythonMemberFact>,
+    pub call_diagnostics: Vec<PythonCallDiagnosticFact>,
     pub metrics: PythonSemanticMetrics,
     pub terminal: PythonSemanticTerminal,
 }
@@ -607,8 +625,22 @@ impl<'a> Visitor<'a> for BindingPass<'a> {
         self.visited_nodes = self.visited_nodes.saturating_add(1);
         match stmt {
             Stmt::FunctionDef(node) => {
+                for decorator in &node.decorator_list {
+                    self.visit_expr(&decorator.expression);
+                }
                 if let Some(params) = &node.type_params {
                     self.collect_type_param_scope(params);
+                }
+                for parameter in &node.parameters {
+                    if let Some(annotation) = parameter.annotation() {
+                        self.visit_annotation(annotation);
+                    }
+                    if let Some(default) = parameter.default() {
+                        self.visit_expr(default);
+                    }
+                }
+                if let Some(returns) = &node.returns {
+                    self.visit_annotation(returns);
                 }
                 let child = self.create_scope(
                     node.range,
@@ -636,6 +668,12 @@ impl<'a> Visitor<'a> for BindingPass<'a> {
                 self.leave_scope();
             }
             Stmt::ClassDef(node) => {
+                for decorator in &node.decorator_list {
+                    self.visit_expr(&decorator.expression);
+                }
+                if let Some(arguments) = &node.arguments {
+                    self.visit_arguments(arguments);
+                }
                 if let Some(params) = &node.type_params {
                     self.collect_type_param_scope(params);
                 }
@@ -1321,6 +1359,19 @@ impl<'a> Visitor<'a> for ReferencePass<'a, '_> {
                 for decorator in &node.decorator_list {
                     self.visit_expr(&decorator.expression);
                 }
+                if let Some(params) = &node.type_params {
+                    self.enter(params.range, PythonScopeKind::TypeParameter);
+                    visitor::walk_type_params(self, params);
+                    self.leave();
+                }
+                for parameter in &node.parameters {
+                    if let Some(annotation) = parameter.annotation() {
+                        self.visit_annotation(annotation);
+                    }
+                    if let Some(default) = parameter.default() {
+                        self.visit_expr(default);
+                    }
+                }
                 if let Some(returns) = &node.returns {
                     self.visit_annotation(returns);
                 }
@@ -1334,6 +1385,11 @@ impl<'a> Visitor<'a> for ReferencePass<'a, '_> {
                 }
                 if let Some(arguments) = &node.arguments {
                     self.visit_arguments(arguments);
+                }
+                if let Some(params) = &node.type_params {
+                    self.enter(params.range, PythonScopeKind::TypeParameter);
+                    visitor::walk_type_params(self, params);
+                    self.leave();
                 }
                 self.enter(node.range, PythonScopeKind::Class);
                 visitor::walk_body(self, &node.body);
@@ -1453,7 +1509,7 @@ impl<'a> ReferencePass<'a, '_> {
 
 #[allow(clippy::too_many_lines)] // The binding/traversal/cleanup transaction remains auditable in one function.
 pub(super) fn project_python_semantics<'a>(
-    _source: &'a str,
+    source: &'a str,
     suite: &'a [Stmt],
     module_name: &'a str,
     module_path: &'a Path,
@@ -1572,6 +1628,16 @@ pub(super) fn project_python_semantics<'a>(
         &pass.bindings,
         &ruff_qualified_names,
     );
+    let callable_projection = super::callables::project_python_callables(
+        source,
+        suite,
+        module_name,
+        provider_image_fingerprint,
+        import_projection.module_id,
+        &scopes,
+        &pass.bindings,
+        &all_references,
+    );
     let metrics = PythonSemanticMetrics {
         binding_pass_duration,
         traversal_pass_duration,
@@ -1591,6 +1657,11 @@ pub(super) fn project_python_semantics<'a>(
                 .count(),
         )
         .unwrap_or(u64::MAX),
+        callable_count: u64::try_from(callable_projection.callables.len()).unwrap_or(u64::MAX),
+        parameter_count: u64::try_from(callable_projection.parameters.len()).unwrap_or(u64::MAX),
+        call_site_count: u64::try_from(callable_projection.call_sites.len()).unwrap_or(u64::MAX),
+        call_argument_count: u64::try_from(callable_projection.arguments.len()).unwrap_or(u64::MAX),
+        member_count: u64::try_from(callable_projection.members.len()).unwrap_or(u64::MAX),
     };
     Ok(PythonFrontendBatch {
         module_id: import_projection.module_id,
@@ -1604,6 +1675,14 @@ pub(super) fn project_python_semantics<'a>(
         imports: import_projection.imports,
         exports: import_projection.exports,
         export_status: import_projection.export_status,
+        callables: callable_projection.callables,
+        parameters: callable_projection.parameters,
+        callable_syntax: callable_projection.syntax,
+        call_sites: callable_projection.call_sites,
+        call_arguments: callable_projection.arguments,
+        unknown_argument_sets: callable_projection.unknown_argument_sets,
+        members: callable_projection.members,
+        call_diagnostics: callable_projection.diagnostics,
         metrics,
         terminal: PythonSemanticTerminal {
             pass_id: "PASS_RUFF_SEMANTIC_TRAVERSAL_V1",
@@ -1683,6 +1762,10 @@ pub(super) fn semantic_id(
 mod tests {
     use ruff_python_parser::{ParseOptions, parse_unchecked};
 
+    use super::super::callables::{
+        PythonArgumentBindingStatus, PythonArgumentSpreadKind, PythonCallableSyntaxRole,
+        PythonMemberKind, PythonParameterKind,
+    };
     use super::*;
 
     fn analyze(
@@ -1812,6 +1895,13 @@ def outer():
                     + first.unknown_symbols.len()
                     + 1
                     + first.exports.len()
+                    + first.callables.len()
+                    + first.parameters.len()
+                    + first.callable_syntax.len()
+                    + first.call_sites.len()
+                    + first.call_arguments.len()
+                    + first.unknown_argument_sets.len()
+                    + first.members.len()
             );
         }
     }
@@ -2109,6 +2199,345 @@ __all__ = ["alias"] + ("osp",)
                 .downcast_ref::<Int32Array>()
                 .unwrap();
             assert!(relation_kinds.iter().flatten().any(|code| code == 250));
+        }
+    }
+
+    #[test]
+    fn py_callable_call_site_fixture_conformance() {
+        use super::super::callables::{CALLABLE_FLAG_ASYNC, CALLABLE_FLAG_GENERATOR};
+
+        let batch = analyze(
+            r#"
+def deco(fn):
+    return fn
+
+@deco
+async def target(a, /, b: int = 2, *args, c, d=4, **kwargs) -> int:
+    yield a
+
+class C:
+    field = 1
+    @property
+    def prop(self):
+        return self._value
+    class Nested:
+        pass
+    def set(self, value):
+        self.item = value
+        def inner():
+            return value
+        return inner
+
+result = target(1, 3, *[4, *[5]], c=6, **{"extra": 0, "extra": 7})
+"#,
+            false,
+        )
+        .unwrap();
+
+        let target = batch
+            .callables
+            .iter()
+            .find(|fact| fact.name == "target")
+            .unwrap();
+        assert_ne!(target.flags & CALLABLE_FLAG_ASYNC, 0);
+        assert_ne!(target.flags & CALLABLE_FLAG_GENERATOR, 0);
+        let parameters = batch
+            .parameters
+            .iter()
+            .filter(|fact| fact.callable_id == target.callable_id)
+            .collect::<Vec<_>>();
+        assert_eq!(parameters.len(), 6);
+        assert_eq!(
+            parameters.iter().map(|fact| fact.kind).collect::<Vec<_>>(),
+            vec![
+                PythonParameterKind::PositionalOnly,
+                PythonParameterKind::PositionalOrKeyword,
+                PythonParameterKind::VarPositional,
+                PythonParameterKind::KeywordOnly,
+                PythonParameterKind::KeywordOnly,
+                PythonParameterKind::VarKeyword,
+            ]
+        );
+        assert!(parameters[1].annotation_syntax_id.is_some());
+        assert!(parameters[1].default_syntax_id.is_some());
+        assert!(batch.callable_syntax.iter().any(|fact| {
+            fact.owner_id == target.callable_id
+                && fact.role == PythonCallableSyntaxRole::Decorator
+                && fact.text == "deco"
+        }));
+        assert!(batch.callable_syntax.iter().any(|fact| {
+            fact.owner_id == target.callable_id
+                && fact.role == PythonCallableSyntaxRole::ReturnAnnotation
+                && fact.text == "int"
+        }));
+
+        let call = batch
+            .call_sites
+            .iter()
+            .find(|fact| fact.declared_target_id == Some(target.callable_id))
+            .unwrap();
+        assert_eq!(call.resolved_target_count, 0);
+        let arguments = batch
+            .call_arguments
+            .iter()
+            .filter(|fact| fact.call_site_id == call.call_site_id)
+            .collect::<Vec<_>>();
+        assert_eq!(arguments.len(), 7);
+        assert_eq!(
+            arguments
+                .iter()
+                .filter(|fact| fact.binding_status == PythonArgumentBindingStatus::Bound)
+                .count(),
+            6
+        );
+        assert!(arguments.iter().any(|fact| {
+            fact.binding_status == PythonArgumentBindingStatus::Defaulted
+                && fact.parameter_id == Some(parameters[4].parameter_id)
+        }));
+        assert_eq!(
+            arguments
+                .iter()
+                .filter(|fact| fact.spread_kind == PythonArgumentSpreadKind::PositionalStatic)
+                .count(),
+            2
+        );
+        assert!(arguments.iter().any(|fact| {
+            fact.spread_kind == PythonArgumentSpreadKind::KeywordStatic
+                && fact.keyword_name.as_deref() == Some("extra")
+        }));
+
+        let member_kinds = batch
+            .members
+            .iter()
+            .map(|fact| fact.kind)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            member_kinds,
+            std::collections::BTreeSet::from([
+                PythonMemberKind::Method,
+                PythonMemberKind::ClassVariable,
+                PythonMemberKind::PropertyCandidate,
+                PythonMemberKind::NestedType,
+                PythonMemberKind::InstanceVariable,
+            ])
+        );
+        assert!(!batch.members.iter().any(|fact| fact.name == "inner"));
+    }
+
+    #[test]
+    fn py_call_site_first_class_parity() {
+        let batch = analyze(
+            "def f(x):\n    return x\ndef g():\n    return f(f(1))\ng()\n",
+            false,
+        )
+        .unwrap();
+        let call_syntax_count = batch
+            .callable_syntax
+            .iter()
+            .filter(|fact| fact.role == PythonCallableSyntaxRole::CallExpression)
+            .count();
+        assert_eq!(call_syntax_count, 3);
+        assert_eq!(batch.call_sites.len(), call_syntax_count);
+        assert!(batch.call_sites.iter().all(|call| {
+            batch
+                .callables
+                .iter()
+                .any(|caller| caller.callable_id == call.caller_id)
+                && batch.callable_syntax.iter().any(|syntax| {
+                    syntax.syntax_id == call.syntax_id
+                        && syntax.owner_id == call.call_site_id
+                        && syntax.role == PythonCallableSyntaxRole::CallExpression
+                })
+        }));
+
+        #[cfg(feature = "daemon")]
+        {
+            use arrow_array::Int32Array;
+
+            use crate::fact_ingest::FactScope;
+            use crate::python_semantic::project_ruff_semantic_batch;
+
+            let projection = project_ruff_semantic_batch(
+                FactScope {
+                    workspace_id: [61; 16],
+                    analysis_context_id: [62; 16],
+                    source_generation: 63,
+                    owner_id: [64; 16],
+                },
+                [65; 16],
+                &batch,
+            )
+            .unwrap();
+            assert_eq!(projection.batch(260).unwrap().num_rows(), 3);
+            assert_eq!(
+                projection.batch(270).unwrap().num_rows(),
+                batch.call_arguments.len()
+            );
+            let relations = projection.batch(110).unwrap().batch();
+            let kinds = relations
+                .column_by_name("relation_kind_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap();
+            let kinds = kinds.iter().flatten().collect::<Vec<_>>();
+            assert_eq!(kinds.iter().filter(|code| **code == 360).count(), 3);
+            assert_eq!(kinds.iter().filter(|code| **code == 320).count(), 3);
+            assert!(!kinds.contains(&50), "WP05 must not invent CALLS edges");
+        }
+    }
+
+    #[test]
+    fn py_dynamic_splat_unknown_argument_falsification() {
+        let batch = analyze(
+            "def target(a, /, b):\n    return a\ndef poskw(a, /, **kwargs):\n    return kwargs\ntarget(1, *values, **mapping)\ntarget(1, 2, b=3)\nposkw(a=1)\n",
+            false,
+        )
+        .unwrap();
+        assert_eq!(batch.call_sites.len(), 3);
+        assert_eq!(batch.unknown_argument_sets.len(), 2);
+        let unknown_ids = batch
+            .unknown_argument_sets
+            .iter()
+            .map(|fact| fact.unknown_argument_set_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let dynamic = batch
+            .call_arguments
+            .iter()
+            .filter(|fact| {
+                matches!(
+                    fact.spread_kind,
+                    PythonArgumentSpreadKind::PositionalDynamic
+                        | PythonArgumentSpreadKind::KeywordDynamic
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(dynamic.len(), 2);
+        assert!(dynamic.iter().all(|fact| {
+            fact.binding_status == PythonArgumentBindingStatus::UnknownArgumentSet
+                && fact
+                    .parameter_id
+                    .is_some_and(|id| unknown_ids.contains(&id))
+        }));
+        assert!(batch.call_diagnostics.iter().any(|fact| {
+            fact.code == "DUPLICATE_ARGUMENT"
+                && batch
+                    .call_arguments
+                    .iter()
+                    .any(|argument| argument.argument_id == fact.argument_id)
+        }));
+        let poskw = batch
+            .callables
+            .iter()
+            .find(|fact| fact.name == "poskw")
+            .unwrap();
+        let poskw_call = batch
+            .call_sites
+            .iter()
+            .find(|fact| fact.declared_target_id == Some(poskw.callable_id))
+            .unwrap();
+        let poskw_parameters = batch
+            .parameters
+            .iter()
+            .filter(|fact| fact.callable_id == poskw.callable_id)
+            .collect::<Vec<_>>();
+        let poskw_arguments = batch
+            .call_arguments
+            .iter()
+            .filter(|fact| fact.call_site_id == poskw_call.call_site_id)
+            .collect::<Vec<_>>();
+        assert!(poskw_arguments.iter().any(|argument| {
+            argument.keyword_name.as_deref() == Some("a")
+                && argument.parameter_id == Some(poskw_parameters[1].parameter_id)
+                && argument.binding_status == PythonArgumentBindingStatus::Bound
+        }));
+        assert!(poskw_arguments.iter().any(|argument| {
+            argument.parameter_id == Some(poskw_parameters[0].parameter_id)
+                && argument.binding_status == PythonArgumentBindingStatus::MissingRequired
+        }));
+        assert!(!batch.call_diagnostics.iter().any(|fact| {
+            fact.call_site_id == poskw_call.call_site_id && fact.code == "POSITIONAL_ONLY_KEYWORD"
+        }));
+        let dynamic_call = batch
+            .call_sites
+            .iter()
+            .find(|fact| {
+                batch
+                    .call_arguments
+                    .iter()
+                    .filter(|argument| argument.call_site_id == fact.call_site_id)
+                    .any(|argument| {
+                        argument.binding_status == PythonArgumentBindingStatus::UnknownArgumentSet
+                    })
+            })
+            .unwrap();
+        assert!(!batch.call_arguments.iter().any(|argument| {
+            argument.call_site_id == dynamic_call.call_site_id
+                && matches!(
+                    argument.binding_status,
+                    PythonArgumentBindingStatus::Defaulted
+                        | PythonArgumentBindingStatus::MissingRequired
+                )
+        }));
+    }
+
+    #[test]
+    fn py_callable_contract_replacement_gate() {
+        #[cfg(feature = "daemon")]
+        {
+            use crate::fabric::batch_checksum;
+            use crate::fact_ingest::FactScope;
+            use crate::python_semantic::project_ruff_semantic_batch;
+
+            let owner = FactScope {
+                workspace_id: [71; 16],
+                analysis_context_id: [72; 16],
+                source_generation: 73,
+                owner_id: [74; 16],
+            };
+            let before = project_ruff_semantic_batch(
+                owner,
+                [75; 16],
+                &analyze("def target(a, b):\n    return a\ntarget(1)\n", false).unwrap(),
+            )
+            .unwrap();
+            let after = project_ruff_semantic_batch(
+                owner,
+                [75; 16],
+                &analyze("def target(a, c):\n    return a\ntarget(1)\n", false).unwrap(),
+            )
+            .unwrap();
+            let stable_scope = FactScope {
+                owner_id: [76; 16],
+                ..owner
+            };
+            let stable_before = project_ruff_semantic_batch(
+                stable_scope,
+                [77; 16],
+                &analyze("def stable(a):\n    return a\nstable(1)\n", false).unwrap(),
+            )
+            .unwrap();
+            let stable_after = project_ruff_semantic_batch(
+                stable_scope,
+                [77; 16],
+                &analyze("def stable(a):\n    return a\nstable(1)\n", false).unwrap(),
+            )
+            .unwrap();
+            assert_ne!(
+                batch_checksum(before.batch(250).unwrap().batch()).unwrap(),
+                batch_checksum(after.batch(250).unwrap().batch()).unwrap()
+            );
+            assert_ne!(
+                batch_checksum(before.batch(270).unwrap().batch()).unwrap(),
+                batch_checksum(after.batch(270).unwrap().batch()).unwrap()
+            );
+            for table_code in [240, 250, 260, 270] {
+                assert_eq!(
+                    batch_checksum(stable_before.batch(table_code).unwrap().batch()).unwrap(),
+                    batch_checksum(stable_after.batch(table_code).unwrap().batch()).unwrap(),
+                    "unchanged owner table {table_code}"
+                );
+            }
         }
     }
 

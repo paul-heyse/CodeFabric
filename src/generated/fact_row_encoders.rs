@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:c27c1412769559c94e809d3ea1b519a5cacf6d6e933e9da9cf20eb166b40bbdc; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:a8e85e9d413f3e3fbc2152d3e273e19bebd2c43d7cea5010986769496f80c356; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -520,6 +520,119 @@ pub fn encode_module_import_details(
             utf8(rows, |row| row.alias_name.as_deref()),
             bools(rows, |row| Some(row.star_import)),
             i16s(rows, |row| row.unknown_reason_code),
+        ],
+    )
+}
+
+/// Encode `callable_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_callable_details(rows: &[CallableDetailRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        240,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.callable_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| row.signature_id.as_ref()),
+            id16s(rows, |row| row.return_type_id.as_ref()),
+            i32s(rows, |row| Some(row.parameter_count)),
+            i32s(rows, |row| Some(row.generic_parameter_count)),
+            i16s(rows, |row| row.calling_convention_code),
+            utf8(rows, |row| row.abi_name.as_deref()),
+            i64s(rows, |row| Some(row.callable_flags)),
+        ],
+    )
+}
+
+/// Encode `parameter_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_parameter_details(
+    rows: &[ParameterDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        250,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.parameter_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.callable_id)),
+            i32s(rows, |row| Some(row.ordinal)),
+            utf8(rows, |row| row.name.as_deref()),
+            i16s(rows, |row| Some(row.parameter_kind_code)),
+            id16s(rows, |row| row.type_id.as_ref()),
+            id16s(rows, |row| row.default_syntax_id.as_ref()),
+            i64s(rows, |row| Some(row.flags)),
+        ],
+    )
+}
+
+/// Encode `call_site_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_call_site_details(
+    rows: &[CallSiteDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        260,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.call_site_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.caller_id)),
+            id16s(rows, |row| row.syntax_id.as_ref()),
+            id16s(rows, |row| row.callee_syntax_id.as_ref()),
+            id16s(rows, |row| row.receiver_value_id.as_ref()),
+            id16s(rows, |row| row.result_value_id.as_ref()),
+            i16s(rows, |row| Some(row.dispatch_kind_code)),
+            id16s(rows, |row| row.declared_target_id.as_ref()),
+            i32s(rows, |row| Some(row.resolved_target_count)),
+            i64s(rows, |row| Some(row.call_flags)),
+        ],
+    )
+}
+
+/// Encode `call_argument_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_call_argument_details(
+    rows: &[CallArgumentDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        270,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.argument_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.call_site_id)),
+            i32s(rows, |row| Some(row.ordinal)),
+            utf8(rows, |row| row.keyword_name.as_deref()),
+            id16s(rows, |row| row.argument_syntax_id.as_ref()),
+            id16s(rows, |row| row.argument_value_id.as_ref()),
+            id16s(rows, |row| row.parameter_id.as_ref()),
+            i16s(rows, |row| Some(row.binding_status_code)),
+            i16s(rows, |row| row.spread_kind_code),
         ],
     )
 }

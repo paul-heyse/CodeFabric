@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: accepted
-canonical_digest: "b3:215d86e1db377f55af6955531b75074ee7f59f65c89df8f902be89668ed85147"
+canonical_digest: "b3:efe47f4acf0a94cd7c0092a9b367a595dec2cd562f792ca32c95be20141960b9"
 schema_version: 1
 authority: AC-G-05
 accepted_at: "2026-08-27"
@@ -65,6 +65,25 @@ records:
     oracles: [py_import_export_fixture_conformance, py_import_syntax_semantic_distinction_parity, py_dynamic_export_unknown_falsification, py_module_fact_replacement_gate]
     implementation_paths: [src/ruff_adapter/imports.rs, src/python_semantic.rs]
     contract_digest: "b3:6e75d875014e10b4ddbc1a7f4d3ce03e6e9b9150575db1ffe28a8dc3a5c013a2"
+  - pass_id: PASS_PYTHON_CALLABLE_CALL_SITE_V1
+    owner_packet: WP05
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: ruff-python-module-ast, schema: ruff-adapter-snapshot-v1, preconditions: [source-digest-pinned, python-module-context-pinned, scope-binding-facts-current]}]
+    outputs: [{artifact: python-callable-call-site-facts, schema: canonical-python-semantic-facts-v1, postconditions: [every-call-first-class, argument-bindings-owner-closed, dynamic-splats-explicitly-unknown]}]
+    entry_invariants: [provider-isolated, source-range-byte-based, syntax-and-semantic-entities-distinct]
+    exit_invariants: [call-site-parity-complete, no-unanchored-call-edge, argument-order-contiguous, unresolved-target-placeholder-retained]
+    preserved_identities: [workspace_id, analysis_context_id, source_file_id, module_owner_id]
+    generated_identities: [callable_entity_id, parameter_entity_id, call_site_entity_id, argument_entity_id, unknown_argument_set_id, member_candidate_id]
+    invalidation_closure: [source-module-owner, callable-owner, dependent-argument-bindings, python-analysis-context]
+    diagnostics_failure_taxonomy: [duplicate-argument, positional-only-keyword, too-many-positional, unmatched-keyword, dynamic-argument-shape]
+    determinism_fingerprint_inputs: [source_digest, python-context-fingerprint, ruff-version, callable-projector-version]
+    resource_telemetry_contract: [callable-count, parameter-count, call-site-count, call-argument-count, member-count]
+    behavioral_fixtures: [py_callable_call_site_fixture_conformance]
+    negative_fixtures: [py_dynamic_splat_unknown_argument_falsification]
+    incremental_fixtures: [py_callable_contract_replacement_gate]
+    oracles: [py_callable_call_site_fixture_conformance, py_call_site_first_class_parity, py_dynamic_splat_unknown_argument_falsification, py_callable_contract_replacement_gate]
+    implementation_paths: [src/ruff_adapter/callables.rs, src/ruff_adapter/semantic.rs, src/python_semantic.rs]
+    contract_digest: "b3:3530ebd0a0713702ed062b2ce46a3a4077c92dcb415514f0e611044766e81621"
   - pass_id: PASS_PYTHON_CFG_V1
     owner_packet: WP06
     principles: [H-P14, H-P16]

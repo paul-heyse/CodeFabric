@@ -4,12 +4,12 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "accepted",
-  "canonical_digest": "b3:bac4328893942e14d73ab71214b5abcc44332b9dd241fb70053110237a94259a",
+  "canonical_digest": "b3:3d474367d9277abd36267d8713f1a9c06ed11560192bee77464786b7dcce6d81",
   "fragment_id": "SEMANTIC_PYTHON_V1",
   "lane": "python",
   "owner_packet": "WP01",
   "model": {
-    "owned_table_codes": [200, 210, 220, 230],
+    "owned_table_codes": [200, 210, 220, 230, 240, 250, 260, 270],
     "owned_observation_schema_ids": ["codefabric.ruff.semantic.v1", "codefabric.pyrefly.module.v1"],
     "table_additions": [
       {
@@ -46,13 +46,152 @@
         "materialization_role": "DURABLE_EFFECTIVE",
         "dependencies": [8, 100, 110, 210],
         "required_for_publication": true
+      },
+      {
+        "table_code": 240,
+        "name": "callable_detail",
+        "publication_pin_role": "PINNED_DATA",
+        "family": "callable",
+        "grain": "one callable semantic entity extension",
+        "schema_version": "1.0",
+        "row_encoder": "callable_details",
+        "columns": [
+          {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "source_generation", "logical_type": "int64", "nullable": false},
+          {"name": "callable_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+          {"name": "signature_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "return_type_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "parameter_count", "logical_type": "int32", "nullable": false},
+          {"name": "generic_parameter_count", "logical_type": "int32", "nullable": false},
+          {"name": "calling_convention_code", "logical_type": "code16", "nullable": true},
+          {"name": "abi_name", "logical_type": "utf8", "nullable": true},
+          {"name": "callable_flags", "logical_type": "int64", "nullable": false}
+        ],
+        "primary_key": ["callable_id"],
+        "partition_columns": ["owner_bucket"],
+        "zorder_columns": ["workspace_id", "analysis_context_id", "callable_id"],
+        "durable_mutation": "OWNER_REPLACED_FACT",
+        "overlay_mutation": "OWNER_REPLACE",
+        "materialization_role": "DURABLE_EFFECTIVE",
+        "dependencies": [8, 100],
+        "required_for_publication": true
+      },
+      {
+        "table_code": 250,
+        "name": "parameter_detail",
+        "publication_pin_role": "PINNED_DATA",
+        "family": "callable",
+        "grain": "one callable parameter",
+        "schema_version": "1.0",
+        "row_encoder": "parameter_details",
+        "columns": [
+          {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "source_generation", "logical_type": "int64", "nullable": false},
+          {"name": "parameter_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+          {"name": "callable_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "callable_detail.callable_id"},
+          {"name": "ordinal", "logical_type": "int32", "nullable": false},
+          {"name": "name", "logical_type": "utf8", "nullable": true},
+          {"name": "parameter_kind_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:parameter_kind"},
+          {"name": "type_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "default_syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "flags", "logical_type": "int64", "nullable": false}
+        ],
+        "primary_key": ["parameter_id"],
+        "partition_columns": ["owner_bucket"],
+        "zorder_columns": ["workspace_id", "analysis_context_id", "callable_id", "ordinal"],
+        "durable_mutation": "OWNER_REPLACED_FACT",
+        "overlay_mutation": "OWNER_REPLACE",
+        "materialization_role": "DURABLE_EFFECTIVE",
+        "dependencies": [8, 100, 240],
+        "required_for_publication": true
+      },
+      {
+        "table_code": 260,
+        "name": "call_site_detail",
+        "publication_pin_role": "PINNED_DATA",
+        "family": "call",
+        "grain": "one first-class call-site entity extension",
+        "schema_version": "1.0",
+        "row_encoder": "call_site_details",
+        "columns": [
+          {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "source_generation", "logical_type": "int64", "nullable": false},
+          {"name": "call_site_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+          {"name": "caller_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "callable_detail.callable_id"},
+          {"name": "syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "callee_syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "receiver_value_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "result_value_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "dispatch_kind_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:call_dispatch_kind"},
+          {"name": "declared_target_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "callable_detail.callable_id"},
+          {"name": "resolved_target_count", "logical_type": "int32", "nullable": false},
+          {"name": "call_flags", "logical_type": "int64", "nullable": false}
+        ],
+        "primary_key": ["call_site_id"],
+        "partition_columns": ["owner_bucket"],
+        "zorder_columns": ["workspace_id", "analysis_context_id", "caller_id", "call_site_id"],
+        "durable_mutation": "OWNER_REPLACED_FACT",
+        "overlay_mutation": "OWNER_REPLACE",
+        "materialization_role": "DURABLE_EFFECTIVE",
+        "dependencies": [8, 100, 240],
+        "required_for_publication": true
+      },
+      {
+        "table_code": 270,
+        "name": "call_argument_detail",
+        "publication_pin_role": "PINNED_DATA",
+        "family": "call",
+        "grain": "one argument occurrence at one call site",
+        "schema_version": "1.0",
+        "row_encoder": "call_argument_details",
+        "columns": [
+          {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "source_generation", "logical_type": "int64", "nullable": false},
+          {"name": "argument_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+          {"name": "call_site_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "call_site_detail.call_site_id"},
+          {"name": "ordinal", "logical_type": "int32", "nullable": false},
+          {"name": "keyword_name", "logical_type": "utf8", "nullable": true},
+          {"name": "argument_syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "argument_value_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "parameter_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "binding_status_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:argument_binding_status"},
+          {"name": "spread_kind_code", "logical_type": "code16", "nullable": true, "semantic_type": "enum:argument_spread_kind"}
+        ],
+        "primary_key": ["argument_id"],
+        "partition_columns": ["owner_bucket"],
+        "zorder_columns": ["workspace_id", "analysis_context_id", "call_site_id", "ordinal"],
+        "durable_mutation": "OWNER_REPLACED_FACT",
+        "overlay_mutation": "OWNER_REPLACE",
+        "materialization_role": "DURABLE_EFFECTIVE",
+        "dependencies": [8, 100, 240, 250, 260],
+        "required_for_publication": true
       }
     ],
     "table_scope_additions": [
-      {"table_code": 230, "workspace_column": "workspace_id", "analysis_context_column": "analysis_context_id", "source_generation_column": "source_generation", "owner_column": "owner_id"}
+      {"table_code": 230, "workspace_column": "workspace_id", "analysis_context_column": "analysis_context_id", "source_generation_column": "source_generation", "owner_column": "owner_id"},
+      {"table_code": 240, "workspace_column": "workspace_id", "analysis_context_column": "analysis_context_id", "source_generation_column": "source_generation", "owner_column": "owner_id"},
+      {"table_code": 250, "workspace_column": "workspace_id", "analysis_context_column": "analysis_context_id", "source_generation_column": "source_generation", "owner_column": "owner_id"},
+      {"table_code": 260, "workspace_column": "workspace_id", "analysis_context_column": "analysis_context_id", "source_generation_column": "source_generation", "owner_column": "owner_id"},
+      {"table_code": 270, "workspace_column": "workspace_id", "analysis_context_column": "analysis_context_id", "source_generation_column": "source_generation", "owner_column": "owner_id"}
     ],
     "semantic_type_binding_additions": [
-      {"semantic_type": "enum:import_kind", "authority": "ENUM_REGISTRY", "domain": "IMPORT_KIND"}
+      {"semantic_type": "enum:import_kind", "authority": "ENUM_REGISTRY", "domain": "IMPORT_KIND"},
+      {"semantic_type": "enum:parameter_kind", "authority": "ENUM_REGISTRY", "domain": "PARAMETER_KIND"},
+      {"semantic_type": "enum:call_dispatch_kind", "authority": "ENUM_REGISTRY", "domain": "CALL_DISPATCH_KIND"},
+      {"semantic_type": "enum:argument_binding_status", "authority": "ENUM_REGISTRY", "domain": "ARGUMENT_BINDING_STATUS"},
+      {"semantic_type": "enum:argument_spread_kind", "authority": "ENUM_REGISTRY", "domain": "ARGUMENT_SPREAD_KIND"}
     ],
     "provider_observation_schema_additions": [
       {
@@ -69,7 +208,15 @@
           {"name": "edges_json", "logical_type": "binary", "nullable": false},
           {"name": "imports_json", "logical_type": "binary", "nullable": false},
           {"name": "exports_json", "logical_type": "binary", "nullable": false},
-          {"name": "export_status", "logical_type": "utf8", "nullable": false}
+          {"name": "export_status", "logical_type": "utf8", "nullable": false},
+          {"name": "callables_json", "logical_type": "binary", "nullable": false},
+          {"name": "parameters_json", "logical_type": "binary", "nullable": false},
+          {"name": "callable_syntax_json", "logical_type": "binary", "nullable": false},
+          {"name": "call_sites_json", "logical_type": "binary", "nullable": false},
+          {"name": "call_arguments_json", "logical_type": "binary", "nullable": false},
+          {"name": "unknown_argument_sets_json", "logical_type": "binary", "nullable": false},
+          {"name": "members_json", "logical_type": "binary", "nullable": false},
+          {"name": "call_diagnostics_json", "logical_type": "binary", "nullable": false}
         ]
       },
       {
@@ -88,7 +235,7 @@
   },
   "registry": {
     "property_codes": [],
-    "enum_values": [{"domain": "PROVIDER_OBSERVATION_FAMILY", "codes": [100, 110]}, {"domain": "IMPORT_KIND", "codes": [10, 20, 30, 40]}],
+    "enum_values": [{"domain": "PROVIDER_OBSERVATION_FAMILY", "codes": [100, 110]}, {"domain": "IMPORT_KIND", "codes": [10, 20, 30, 40]}, {"domain": "PARAMETER_KIND", "codes": [10, 20, 30, 40, 50]}, {"domain": "CALL_DISPATCH_KIND", "codes": [10, 20, 30]}, {"domain": "ARGUMENT_BINDING_STATUS", "codes": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]}, {"domain": "ARGUMENT_SPREAD_KIND", "codes": [10, 20, 30, 40, 50, 60, 70, 80]}],
     "property_record_additions": [],
     "enum_domain_additions": [
       {
@@ -119,6 +266,56 @@
           {"code": 30, "name": "STAR", "slug": "star", "meaning": "Star import with statically unknown exported names"},
           {"code": 40, "name": "DYNAMIC", "slug": "dynamic", "meaning": "Dynamic import call observed without runtime execution"}
         ]
+      },
+      {
+        "domain": "PARAMETER_KIND",
+        "width_bits": 16,
+        "values": [
+          {"code": 10, "name": "POSITIONAL_ONLY", "slug": "positional-only", "meaning": "Positional-only formal parameter"},
+          {"code": 20, "name": "POSITIONAL_OR_KEYWORD", "slug": "positional-or-keyword", "meaning": "Positional or keyword formal parameter"},
+          {"code": 30, "name": "VAR_POSITIONAL", "slug": "var-positional", "meaning": "Variadic positional formal parameter"},
+          {"code": 40, "name": "KEYWORD_ONLY", "slug": "keyword-only", "meaning": "Keyword-only formal parameter"},
+          {"code": 50, "name": "VAR_KEYWORD", "slug": "var-keyword", "meaning": "Variadic keyword formal parameter"}
+        ]
+      },
+      {
+        "domain": "CALL_DISPATCH_KIND",
+        "width_bits": 16,
+        "values": [
+          {"code": 10, "name": "DIRECT_NAME", "slug": "direct-name", "meaning": "Name-form call syntax"},
+          {"code": 20, "name": "ATTRIBUTE", "slug": "attribute", "meaning": "Attribute-form call syntax"},
+          {"code": 30, "name": "UNKNOWN", "slug": "unknown", "meaning": "Other call syntax with unresolved dispatch"}
+        ]
+      },
+      {
+        "domain": "ARGUMENT_BINDING_STATUS",
+        "width_bits": 16,
+        "values": [
+          {"code": 10, "name": "BOUND", "slug": "bound", "meaning": "Actual argument bound to one formal parameter"},
+          {"code": 20, "name": "BOUND_RECEIVER", "slug": "bound-receiver", "meaning": "Implicit receiver bound to the first formal parameter"},
+          {"code": 30, "name": "DEFAULTED", "slug": "defaulted", "meaning": "Formal parameter supplied by its declared default"},
+          {"code": 40, "name": "MISSING_REQUIRED", "slug": "missing-required", "meaning": "Required formal parameter has no actual argument"},
+          {"code": 50, "name": "DUPLICATE_ARGUMENT", "slug": "duplicate-argument", "meaning": "Actual duplicates an already bound formal parameter"},
+          {"code": 60, "name": "POSITIONAL_ONLY_KEYWORD", "slug": "positional-only-keyword", "meaning": "Keyword attempted to bind a positional-only formal"},
+          {"code": 70, "name": "TOO_MANY_POSITIONAL", "slug": "too-many-positional", "meaning": "No positional or variadic formal remains"},
+          {"code": 80, "name": "UNMATCHED_KEYWORD", "slug": "unmatched-keyword", "meaning": "No named or variadic keyword formal accepts the actual"},
+          {"code": 90, "name": "UNRESOLVED_TARGET", "slug": "unresolved-target", "meaning": "No local callable contract is authoritative"},
+          {"code": 100, "name": "UNKNOWN_ARGUMENT_SET", "slug": "unknown-argument-set", "meaning": "Dynamic splat binds to an explicit unknown argument set"}
+        ]
+      },
+      {
+        "domain": "ARGUMENT_SPREAD_KIND",
+        "width_bits": 16,
+        "values": [
+          {"code": 10, "name": "NONE", "slug": "none", "meaning": "Explicit non-spread argument"},
+          {"code": 20, "name": "POSITIONAL_STATIC", "slug": "positional-static", "meaning": "Element expanded from a statically known positional splat"},
+          {"code": 30, "name": "KEYWORD_STATIC", "slug": "keyword-static", "meaning": "Entry expanded from a statically known keyword splat"},
+          {"code": 40, "name": "POSITIONAL_DYNAMIC", "slug": "positional-dynamic", "meaning": "Unexpanded dynamic positional splat"},
+          {"code": 50, "name": "KEYWORD_DYNAMIC", "slug": "keyword-dynamic", "meaning": "Unexpanded dynamic keyword splat"},
+          {"code": 60, "name": "BOUND_RECEIVER", "slug": "bound-receiver", "meaning": "Implicit bound receiver"},
+          {"code": 70, "name": "DEFAULT", "slug": "default", "meaning": "Declared default selected by the binder"},
+          {"code": 80, "name": "MISSING", "slug": "missing", "meaning": "Missing required formal represented explicitly"}
+        ]
       }
     ]
   },
@@ -126,8 +323,8 @@
     {
       "contract_id": "INGEST_RUFF_SEMANTIC_V1",
       "observation_schema_ids": ["codefabric.ruff.semantic.v1"],
-      "output_table_codes": [100, 110, 130, 200, 210, 220, 230],
-      "required_fields": ["module_name", "provider_image_fingerprint", "scopes_json", "bindings_json", "references_json", "unknown_symbols_json", "edges_json", "imports_json", "exports_json", "export_status"]
+      "output_table_codes": [10, 100, 110, 130, 200, 210, 220, 230, 240, 250, 260, 270],
+      "required_fields": ["module_name", "provider_image_fingerprint", "scopes_json", "bindings_json", "references_json", "unknown_symbols_json", "edges_json", "imports_json", "exports_json", "export_status", "callables_json", "parameters_json", "callable_syntax_json", "call_sites_json", "call_arguments_json", "unknown_argument_sets_json", "members_json", "call_diagnostics_json"]
     },
     {
       "contract_id": "INGEST_PYREFLY_MODULE_V1",
@@ -154,7 +351,7 @@
     {
       "contract_id": "INVALIDATE_PYTHON_SCOPE_BINDING_V1",
       "trigger_kinds": ["python-source-change", "python-manifest-change"],
-      "invalidated_table_codes": [200, 210, 220, 230],
+      "invalidated_table_codes": [10, 200, 210, 220, 230, 240, 250, 260, 270],
       "scope": "module-owner-and-analysis-context"
     }
   ]

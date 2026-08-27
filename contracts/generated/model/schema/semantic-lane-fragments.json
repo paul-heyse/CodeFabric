@@ -143,7 +143,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.python",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:bac4328893942e14d73ab71214b5abcc44332b9dd241fb70053110237a94259a",
+      "canonical_digest": "b3:3d474367d9277abd36267d8713f1a9c06ed11560192bee77464786b7dcce6d81",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -167,13 +167,18 @@
             "codefabric.ruff.semantic.v1"
           ],
           "output_table_codes": [
+            10,
             100,
             110,
             130,
             200,
             210,
             220,
-            230
+            230,
+            240,
+            250,
+            260,
+            270
           ],
           "required_fields": [
             "module_name",
@@ -185,7 +190,15 @@
             "edges_json",
             "imports_json",
             "exports_json",
-            "export_status"
+            "export_status",
+            "callables_json",
+            "parameters_json",
+            "callable_syntax_json",
+            "call_sites_json",
+            "call_arguments_json",
+            "unknown_argument_sets_json",
+            "members_json",
+            "call_diagnostics_json"
           ]
         },
         {
@@ -222,10 +235,15 @@
         {
           "contract_id": "INVALIDATE_PYTHON_SCOPE_BINDING_V1",
           "invalidated_table_codes": [
+            10,
             200,
             210,
             220,
-            230
+            230,
+            240,
+            250,
+            260,
+            270
           ],
           "scope": "module-owner-and-analysis-context",
           "trigger_kinds": [
@@ -244,7 +262,11 @@
           200,
           210,
           220,
-          230
+          230,
+          240,
+          250,
+          260,
+          270
         ],
         "provider_observation_schema_additions": [
           {
@@ -298,6 +320,46 @@
                 "logical_type": "utf8",
                 "name": "export_status",
                 "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "callables_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "parameters_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "callable_syntax_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_sites_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_arguments_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "unknown_argument_sets_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "members_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_diagnostics_json",
+                "nullable": false
               }
             ],
             "observation_family_code": 100,
@@ -342,6 +404,26 @@
             "authority": "ENUM_REGISTRY",
             "domain": "IMPORT_KIND",
             "semantic_type": "enum:import_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "PARAMETER_KIND",
+            "semantic_type": "enum:parameter_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "CALL_DISPATCH_KIND",
+            "semantic_type": "enum:call_dispatch_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "ARGUMENT_BINDING_STATUS",
+            "semantic_type": "enum:argument_binding_status"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "ARGUMENT_SPREAD_KIND",
+            "semantic_type": "enum:argument_spread_kind"
           }
         ],
         "table_additions": [
@@ -472,6 +554,467 @@
               "source_module_id",
               "source_name"
             ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "callable_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "signature_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "return_type_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int32",
+                "name": "parameter_count",
+                "nullable": false
+              },
+              {
+                "logical_type": "int32",
+                "name": "generic_parameter_count",
+                "nullable": false
+              },
+              {
+                "logical_type": "code16",
+                "name": "calling_convention_code",
+                "nullable": true
+              },
+              {
+                "logical_type": "utf8",
+                "name": "abi_name",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "callable_flags",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "callable",
+            "grain": "one callable semantic entity extension",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "callable_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "callable_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "callable_details",
+            "schema_version": "1.0",
+            "table_code": 240,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "callable_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "parameter_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "callable_detail.callable_id",
+                "logical_type": "id16",
+                "name": "callable_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int32",
+                "name": "ordinal",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "name",
+                "nullable": true
+              },
+              {
+                "logical_type": "code16",
+                "name": "parameter_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:parameter_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "type_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "default_syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              240
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "callable",
+            "grain": "one callable parameter",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "parameter_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "parameter_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "parameter_details",
+            "schema_version": "1.0",
+            "table_code": 250,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "callable_id",
+              "ordinal"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "call_site_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "callable_detail.callable_id",
+                "logical_type": "id16",
+                "name": "caller_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "callee_syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "receiver_value_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "result_value_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "code16",
+                "name": "dispatch_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:call_dispatch_kind"
+              },
+              {
+                "foreign_key": "callable_detail.callable_id",
+                "logical_type": "id16",
+                "name": "declared_target_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int32",
+                "name": "resolved_target_count",
+                "nullable": false
+              },
+              {
+                "logical_type": "int64",
+                "name": "call_flags",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              240
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "call",
+            "grain": "one first-class call-site entity extension",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "call_site_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "call_site_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "call_site_details",
+            "schema_version": "1.0",
+            "table_code": 260,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "caller_id",
+              "call_site_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "argument_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "call_site_detail.call_site_id",
+                "logical_type": "id16",
+                "name": "call_site_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int32",
+                "name": "ordinal",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "keyword_name",
+                "nullable": true
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "argument_syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "argument_value_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "parameter_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "code16",
+                "name": "binding_status_code",
+                "nullable": false,
+                "semantic_type": "enum:argument_binding_status"
+              },
+              {
+                "logical_type": "code16",
+                "name": "spread_kind_code",
+                "nullable": true,
+                "semantic_type": "enum:argument_spread_kind"
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              240,
+              250,
+              260
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "call",
+            "grain": "one argument occurrence at one call site",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "call_argument_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "argument_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "call_argument_details",
+            "schema_version": "1.0",
+            "table_code": 270,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "call_site_id",
+              "ordinal"
+            ]
           }
         ],
         "table_scope_additions": [
@@ -480,6 +1023,34 @@
             "owner_column": "owner_id",
             "source_generation_column": "source_generation",
             "table_code": 230,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 240,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 250,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 260,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 270,
             "workspace_column": "workspace_id"
           }
         ]
@@ -534,6 +1105,186 @@
               }
             ],
             "width_bits": 16
+          },
+          {
+            "domain": "PARAMETER_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Positional-only formal parameter",
+                "name": "POSITIONAL_ONLY",
+                "slug": "positional-only"
+              },
+              {
+                "code": 20,
+                "meaning": "Positional or keyword formal parameter",
+                "name": "POSITIONAL_OR_KEYWORD",
+                "slug": "positional-or-keyword"
+              },
+              {
+                "code": 30,
+                "meaning": "Variadic positional formal parameter",
+                "name": "VAR_POSITIONAL",
+                "slug": "var-positional"
+              },
+              {
+                "code": 40,
+                "meaning": "Keyword-only formal parameter",
+                "name": "KEYWORD_ONLY",
+                "slug": "keyword-only"
+              },
+              {
+                "code": 50,
+                "meaning": "Variadic keyword formal parameter",
+                "name": "VAR_KEYWORD",
+                "slug": "var-keyword"
+              }
+            ],
+            "width_bits": 16
+          },
+          {
+            "domain": "CALL_DISPATCH_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Name-form call syntax",
+                "name": "DIRECT_NAME",
+                "slug": "direct-name"
+              },
+              {
+                "code": 20,
+                "meaning": "Attribute-form call syntax",
+                "name": "ATTRIBUTE",
+                "slug": "attribute"
+              },
+              {
+                "code": 30,
+                "meaning": "Other call syntax with unresolved dispatch",
+                "name": "UNKNOWN",
+                "slug": "unknown"
+              }
+            ],
+            "width_bits": 16
+          },
+          {
+            "domain": "ARGUMENT_BINDING_STATUS",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Actual argument bound to one formal parameter",
+                "name": "BOUND",
+                "slug": "bound"
+              },
+              {
+                "code": 20,
+                "meaning": "Implicit receiver bound to the first formal parameter",
+                "name": "BOUND_RECEIVER",
+                "slug": "bound-receiver"
+              },
+              {
+                "code": 30,
+                "meaning": "Formal parameter supplied by its declared default",
+                "name": "DEFAULTED",
+                "slug": "defaulted"
+              },
+              {
+                "code": 40,
+                "meaning": "Required formal parameter has no actual argument",
+                "name": "MISSING_REQUIRED",
+                "slug": "missing-required"
+              },
+              {
+                "code": 50,
+                "meaning": "Actual duplicates an already bound formal parameter",
+                "name": "DUPLICATE_ARGUMENT",
+                "slug": "duplicate-argument"
+              },
+              {
+                "code": 60,
+                "meaning": "Keyword attempted to bind a positional-only formal",
+                "name": "POSITIONAL_ONLY_KEYWORD",
+                "slug": "positional-only-keyword"
+              },
+              {
+                "code": 70,
+                "meaning": "No positional or variadic formal remains",
+                "name": "TOO_MANY_POSITIONAL",
+                "slug": "too-many-positional"
+              },
+              {
+                "code": 80,
+                "meaning": "No named or variadic keyword formal accepts the actual",
+                "name": "UNMATCHED_KEYWORD",
+                "slug": "unmatched-keyword"
+              },
+              {
+                "code": 90,
+                "meaning": "No local callable contract is authoritative",
+                "name": "UNRESOLVED_TARGET",
+                "slug": "unresolved-target"
+              },
+              {
+                "code": 100,
+                "meaning": "Dynamic splat binds to an explicit unknown argument set",
+                "name": "UNKNOWN_ARGUMENT_SET",
+                "slug": "unknown-argument-set"
+              }
+            ],
+            "width_bits": 16
+          },
+          {
+            "domain": "ARGUMENT_SPREAD_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Explicit non-spread argument",
+                "name": "NONE",
+                "slug": "none"
+              },
+              {
+                "code": 20,
+                "meaning": "Element expanded from a statically known positional splat",
+                "name": "POSITIONAL_STATIC",
+                "slug": "positional-static"
+              },
+              {
+                "code": 30,
+                "meaning": "Entry expanded from a statically known keyword splat",
+                "name": "KEYWORD_STATIC",
+                "slug": "keyword-static"
+              },
+              {
+                "code": 40,
+                "meaning": "Unexpanded dynamic positional splat",
+                "name": "POSITIONAL_DYNAMIC",
+                "slug": "positional-dynamic"
+              },
+              {
+                "code": 50,
+                "meaning": "Unexpanded dynamic keyword splat",
+                "name": "KEYWORD_DYNAMIC",
+                "slug": "keyword-dynamic"
+              },
+              {
+                "code": 60,
+                "meaning": "Implicit bound receiver",
+                "name": "BOUND_RECEIVER",
+                "slug": "bound-receiver"
+              },
+              {
+                "code": 70,
+                "meaning": "Declared default selected by the binder",
+                "name": "DEFAULT",
+                "slug": "default"
+              },
+              {
+                "code": 80,
+                "meaning": "Missing required formal represented explicitly",
+                "name": "MISSING",
+                "slug": "missing"
+              }
+            ],
+            "width_bits": 16
           }
         ],
         "enum_values": [
@@ -552,6 +1303,52 @@
               40
             ],
             "domain": "IMPORT_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50
+            ],
+            "domain": "PARAMETER_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30
+            ],
+            "domain": "CALL_DISPATCH_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50,
+              60,
+              70,
+              80,
+              90,
+              100
+            ],
+            "domain": "ARGUMENT_BINDING_STATUS"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50,
+              60,
+              70,
+              80
+            ],
+            "domain": "ARGUMENT_SPREAD_KIND"
           }
         ],
         "property_codes": [],
@@ -642,7 +1439,7 @@
     }
   ],
   "source_digests": {
-    "contracts/semantic-fragments/python.json": "b3:bac4328893942e14d73ab71214b5abcc44332b9dd241fb70053110237a94259a",
+    "contracts/semantic-fragments/python.json": "b3:3d474367d9277abd36267d8713f1a9c06ed11560192bee77464786b7dcce6d81",
     "contracts/semantic-fragments/rust.json": "b3:22056b1ab97fa275036659a4fbf2251adec0d4d372660ea88d596938e8248ba3",
     "contracts/semantic-fragments/shared.json": "b3:41a0baa88632e8a64f85d246908093c6f3aefa13e544bc6e48bbbd668ce81ecc"
   },

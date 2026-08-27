@@ -87,6 +87,36 @@ class AnnotationKind(IntEnum):
     MISSING_SYNTAX = 50
 
 
+class ArgumentBindingStatus(IntEnum):
+    BOUND = 10
+    BOUND_RECEIVER = 20
+    DEFAULTED = 30
+    MISSING_REQUIRED = 40
+    DUPLICATE_ARGUMENT = 50
+    POSITIONAL_ONLY_KEYWORD = 60
+    TOO_MANY_POSITIONAL = 70
+    UNMATCHED_KEYWORD = 80
+    UNRESOLVED_TARGET = 90
+    UNKNOWN_ARGUMENT_SET = 100
+
+
+class ArgumentSpreadKind(IntEnum):
+    NONE = 10
+    POSITIONAL_STATIC = 20
+    KEYWORD_STATIC = 30
+    POSITIONAL_DYNAMIC = 40
+    KEYWORD_DYNAMIC = 50
+    BOUND_RECEIVER = 60
+    DEFAULT = 70
+    MISSING = 80
+
+
+class CallDispatchKind(IntEnum):
+    DIRECT_NAME = 10
+    ATTRIBUTE = 20
+    UNKNOWN = 30
+
+
 class Completeness(IntEnum):
     COMPLETE = 10
     PARTIAL = 20
@@ -342,6 +372,14 @@ class OwnerKind(IntEnum):
     MIR_BODY = 60
     CRATE_OR_BUILD_UNIT = 70
     WORKSPACE_GLOBAL_DERIVATION = 80
+
+
+class ParameterKind(IntEnum):
+    POSITIONAL_ONLY = 10
+    POSITIONAL_OR_KEYWORD = 20
+    VAR_POSITIONAL = 30
+    KEYWORD_ONLY = 40
+    VAR_KEYWORD = 50
 
 
 class PathEncoding(IntEnum):
@@ -689,6 +727,33 @@ ENUM_TRIPLES = MappingProxyType({
         (40, "PARSE_ERROR", "parse-error"),
         (50, "MISSING_SYNTAX", "missing-syntax"),
     ),
+    "ARGUMENT_BINDING_STATUS": (
+        (10, "BOUND", "bound"),
+        (20, "BOUND_RECEIVER", "bound-receiver"),
+        (30, "DEFAULTED", "defaulted"),
+        (40, "MISSING_REQUIRED", "missing-required"),
+        (50, "DUPLICATE_ARGUMENT", "duplicate-argument"),
+        (60, "POSITIONAL_ONLY_KEYWORD", "positional-only-keyword"),
+        (70, "TOO_MANY_POSITIONAL", "too-many-positional"),
+        (80, "UNMATCHED_KEYWORD", "unmatched-keyword"),
+        (90, "UNRESOLVED_TARGET", "unresolved-target"),
+        (100, "UNKNOWN_ARGUMENT_SET", "unknown-argument-set"),
+    ),
+    "ARGUMENT_SPREAD_KIND": (
+        (10, "NONE", "none"),
+        (20, "POSITIONAL_STATIC", "positional-static"),
+        (30, "KEYWORD_STATIC", "keyword-static"),
+        (40, "POSITIONAL_DYNAMIC", "positional-dynamic"),
+        (50, "KEYWORD_DYNAMIC", "keyword-dynamic"),
+        (60, "BOUND_RECEIVER", "bound-receiver"),
+        (70, "DEFAULT", "default"),
+        (80, "MISSING", "missing"),
+    ),
+    "CALL_DISPATCH_KIND": (
+        (10, "DIRECT_NAME", "direct-name"),
+        (20, "ATTRIBUTE", "attribute"),
+        (30, "UNKNOWN", "unknown"),
+    ),
     "COMPLETENESS": (
         (10, "COMPLETE", "complete"),
         (20, "PARTIAL", "partial"),
@@ -916,6 +981,13 @@ ENUM_TRIPLES = MappingProxyType({
         (60, "MIR_BODY", "mir-body"),
         (70, "CRATE_OR_BUILD_UNIT", "crate-or-build-unit"),
         (80, "WORKSPACE_GLOBAL_DERIVATION", "workspace-global-derivation"),
+    ),
+    "PARAMETER_KIND": (
+        (10, "POSITIONAL_ONLY", "positional-only"),
+        (20, "POSITIONAL_OR_KEYWORD", "positional-or-keyword"),
+        (30, "VAR_POSITIONAL", "var-positional"),
+        (40, "KEYWORD_ONLY", "keyword-only"),
+        (50, "VAR_KEYWORD", "var-keyword"),
     ),
     "PATH_ENCODING": (
         (10, "UNIX_BYTES", "unix-bytes"),
@@ -1319,6 +1391,14 @@ REGISTRY_IDS = MappingProxyType({
         "IMPORT_BINDING",
         "EXPORT",
         "REEXPORT",
+        "PARAMETER",
+        "ARGUMENT",
+        "UNKNOWN_ARGUMENT_SET",
+        "METHOD",
+        "CLASS_VARIABLE",
+        "PROPERTY_CANDIDATE",
+        "NESTED_TYPE",
+        "INSTANCE_VARIABLE",
     ),
     "relation_kinds": (
         "CONTAINS",
@@ -1346,6 +1426,18 @@ REGISTRY_IDS = MappingProxyType({
         "ALIASES",
         "DEFINED_IN_MODULE",
         "DEPENDS_ON_MODULE",
+        "HAS_PARAMETER",
+        "HAS_TYPE_PARAMETER",
+        "HAS_DECORATOR",
+        "HAS_RETURN_ANNOTATION",
+        "HAS_ANNOTATION",
+        "HAS_DEFAULT",
+        "HAS_CALLEE_EXPRESSION",
+        "HAS_RECEIVER",
+        "HAS_ARGUMENT",
+        "ARGUMENT_BINDS_TO",
+        "CONTAINS_CALL",
+        "DECLARES_MEMBER",
     ),
     "property_kinds": (
         "NAME",

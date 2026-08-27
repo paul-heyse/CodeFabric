@@ -526,6 +526,11 @@ records:
     disposition: plan_owned
     owner: fact-generation-owner
     current_packet: WP04
+  - path: src/ruff_adapter/callables.rs
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP05
   - path: src/ruff_adapter/imports.rs
     status_at_wp73: "??"
     disposition: plan_owned

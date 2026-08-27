@@ -407,6 +407,65 @@ pub struct ModuleImportDetailRow {
     pub unknown_reason_code: Option<i16>,
 }
 
+/// One canonical callable semantic extension.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallableDetailRow {
+    pub scope: FactScope,
+    pub callable_id: [u8; 16],
+    pub signature_id: Option<[u8; 16]>,
+    pub return_type_id: Option<[u8; 16]>,
+    pub parameter_count: i32,
+    pub generic_parameter_count: i32,
+    pub calling_convention_code: Option<i16>,
+    pub abi_name: Option<String>,
+    pub callable_flags: i64,
+}
+
+/// One canonical callable parameter extension.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParameterDetailRow {
+    pub scope: FactScope,
+    pub parameter_id: [u8; 16],
+    pub callable_id: [u8; 16],
+    pub ordinal: i32,
+    pub name: Option<String>,
+    pub parameter_kind_code: i16,
+    pub type_id: Option<[u8; 16]>,
+    pub default_syntax_id: Option<[u8; 16]>,
+    pub flags: i64,
+}
+
+/// One canonical first-class call-site extension.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallSiteDetailRow {
+    pub scope: FactScope,
+    pub call_site_id: [u8; 16],
+    pub caller_id: [u8; 16],
+    pub syntax_id: Option<[u8; 16]>,
+    pub callee_syntax_id: Option<[u8; 16]>,
+    pub receiver_value_id: Option<[u8; 16]>,
+    pub result_value_id: Option<[u8; 16]>,
+    pub dispatch_kind_code: i16,
+    pub declared_target_id: Option<[u8; 16]>,
+    pub resolved_target_count: i32,
+    pub call_flags: i64,
+}
+
+/// One explicit or binder-synthesized call argument extension.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallArgumentDetailRow {
+    pub scope: FactScope,
+    pub argument_id: [u8; 16],
+    pub call_site_id: [u8; 16],
+    pub ordinal: i32,
+    pub keyword_name: Option<String>,
+    pub argument_syntax_id: Option<[u8; 16]>,
+    pub argument_value_id: Option<[u8; 16]>,
+    pub parameter_id: Option<[u8; 16]>,
+    pub binding_status_code: i16,
+    pub spread_kind_code: Option<i16>,
+}
+
 fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]>) -> ArrayRef {
     let mut builder = BinaryBuilder::with_capacity(rows.len(), rows.len().saturating_mul(16));
     for row in rows {

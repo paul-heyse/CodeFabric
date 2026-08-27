@@ -15,22 +15,27 @@ use crate::core_facts::{
     registered_provider_observation_arrow_schema, validate_provider_semantic_observation,
 };
 use crate::fact_ingest::{
-    BindingDetailRow, CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow,
+    BindingDetailRow, CallArgumentDetailRow, CallSiteDetailRow, CallableDetailRow,
+    CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow, DiagnosticRow,
     EntityRow, FactEvidenceRow, FactIngestError, FactScope, ModuleImportDetailRow, OwnerRow,
-    ProviderFactBatch, ProviderFactManifest, ProviderFactStream, ReferenceDetailRow, RelationRow,
-    ScopeDetailRow, StreamTerminal, ValidatedFactBatch, encode_binding_details,
-    encode_capability_statuses, encode_entities, encode_evidence, encode_module_import_details,
-    encode_owners, encode_reference_details, encode_relations, encode_scope_details,
+    ParameterDetailRow, ProviderFactBatch, ProviderFactManifest, ProviderFactStream,
+    ReferenceDetailRow, RelationRow, ScopeDetailRow, StreamTerminal, ValidatedFactBatch,
+    encode_binding_details, encode_call_argument_details, encode_call_site_details,
+    encode_callable_details, encode_capability_statuses, encode_diagnostics, encode_entities,
+    encode_evidence, encode_module_import_details, encode_owners, encode_parameter_details,
+    encode_reference_details, encode_relations, encode_scope_details,
 };
 use crate::registries::{
-    CompletenessState, Directness, EvidenceCertainty, Language, OwnerCapabilityState, OwnerKind,
-    ProviderCode, ResolutionClass, capability_code, capability_mask, entity_kind, fact_kind_code,
+    ArgumentBindingStatus, ArgumentSpreadKind, CallDispatchKind, CompletenessState, Directness,
+    EvidenceCertainty, Language, OwnerCapabilityState, OwnerKind, ParameterKind, ProviderCode,
+    ResolutionClass, Severity, capability_code, capability_mask, entity_kind, fact_kind_code,
     relation_kind,
 };
 use crate::ruff_adapter::{
-    PythonBindingKind, PythonExportStatus, PythonFrontendBatch, PythonImportKind,
-    PythonReferenceClass, PythonResolution, PythonScopeKind, PythonSemanticEdgeKind,
-    PythonTargetForm,
+    PythonArgumentBindingStatus, PythonArgumentSpreadKind, PythonBindingKind,
+    PythonCallableSyntaxRole, PythonDispatchKind, PythonExportStatus, PythonFrontendBatch,
+    PythonImportKind, PythonMemberKind, PythonParameterKind, PythonReferenceClass,
+    PythonResolution, PythonScopeKind, PythonSemanticEdgeKind, PythonTargetForm,
 };
 
 const OBSERVATION_SCHEMA_ID: &str = "codefabric.ruff.semantic.v1";
@@ -83,6 +88,7 @@ pub fn project_ruff_semantic_batch(
     }
     validate_reference_edges(batch)?;
     validate_import_export_facts(batch)?;
+    validate_callable_facts(batch)?;
 
     let observation_payloads = observation_payloads(batch)?;
     let observation = observation_batch(batch, &observation_payloads)?;
@@ -149,6 +155,48 @@ pub fn project_ruff_semantic_batch(
                 .iter()
                 .map(|fact| (b"export".as_slice(), fact.export_id)),
         )
+        .chain(
+            batch
+                .callables
+                .iter()
+                .map(|fact| (b"callable".as_slice(), fact.callable_id)),
+        )
+        .chain(
+            batch
+                .parameters
+                .iter()
+                .map(|fact| (b"parameter".as_slice(), fact.parameter_id)),
+        )
+        .chain(
+            batch
+                .callable_syntax
+                .iter()
+                .map(|fact| (b"callable-syntax".as_slice(), fact.syntax_id)),
+        )
+        .chain(
+            batch
+                .call_sites
+                .iter()
+                .map(|fact| (b"call-site".as_slice(), fact.call_site_id)),
+        )
+        .chain(
+            batch
+                .call_arguments
+                .iter()
+                .map(|fact| (b"call-argument".as_slice(), fact.argument_id)),
+        )
+        .chain(batch.unknown_argument_sets.iter().map(|fact| {
+            (
+                b"unknown-argument-set".as_slice(),
+                fact.unknown_argument_set_id,
+            )
+        }))
+        .chain(
+            batch
+                .members
+                .iter()
+                .map(|fact| (b"member".as_slice(), fact.member_id)),
+        )
     {
         canonical_ids
             .entry(semantic)
@@ -165,6 +213,15 @@ pub fn project_ruff_semantic_batch(
     let symbol_kind = required_entity_kind("SYMBOL")?;
     let reference_kind = required_entity_kind("REFERENCE")?;
     let unknown_kind = required_entity_kind("UNKNOWN")?;
+    let callable_kind = required_entity_kind("CALLABLE")?;
+    let parameter_kind = required_entity_kind("PARAMETER")?;
+    let call_site_kind = required_entity_kind("CALL_SITE")?;
+    let argument_kind = required_entity_kind("ARGUMENT")?;
+    let unknown_argument_set_kind = required_entity_kind("UNKNOWN_ARGUMENT_SET")?;
+    let expression_kind = required_entity_kind("EXPRESSION")?;
+    let argument_syntax_kind = required_entity_kind("ARGUMENT_SYNTAX")?;
+    let call_expression_kind = required_entity_kind("CALL_EXPRESSION")?;
+    let declaration_syntax_kind = required_entity_kind("DECLARATION_SYNTAX")?;
     let contains_kind = required_relation_kind("CONTAINS")?;
     let declares_kind = required_relation_kind("DECLARES")?;
     let refers_to_kind = required_relation_kind("REFERS_TO")?;
@@ -175,17 +232,40 @@ pub fn project_ruff_semantic_batch(
     let aliases_kind = required_relation_kind("ALIASES")?;
     let defined_in_module_kind = required_relation_kind("DEFINED_IN_MODULE")?;
     let depends_on_module_kind = required_relation_kind("DEPENDS_ON_MODULE")?;
+    let has_parameter_kind = required_relation_kind("HAS_PARAMETER")?;
+    let has_type_parameter_kind = required_relation_kind("HAS_TYPE_PARAMETER")?;
+    let has_decorator_kind = required_relation_kind("HAS_DECORATOR")?;
+    let has_return_annotation_kind = required_relation_kind("HAS_RETURN_ANNOTATION")?;
+    let has_annotation_kind = required_relation_kind("HAS_ANNOTATION")?;
+    let has_default_kind = required_relation_kind("HAS_DEFAULT")?;
+    let has_callee_expression_kind = required_relation_kind("HAS_CALLEE_EXPRESSION")?;
+    let has_receiver_kind = required_relation_kind("HAS_RECEIVER")?;
+    let has_argument_kind = required_relation_kind("HAS_ARGUMENT")?;
+    let argument_binds_to_kind = required_relation_kind("ARGUMENT_BINDS_TO")?;
+    let contains_call_kind = required_relation_kind("CONTAINS_CALL")?;
+    let declares_member_kind = required_relation_kind("DECLARES_MEMBER")?;
 
     let mut entities = Vec::with_capacity(
         batch.scopes.len()
             + batch.bindings.len()
             + batch.references.len()
-            + batch.unknown_symbols.len(),
+            + batch.unknown_symbols.len()
+            + batch.callables.len()
+            + batch.parameters.len()
+            + batch.callable_syntax.len()
+            + batch.call_sites.len()
+            + batch.call_arguments.len()
+            + batch.unknown_argument_sets.len()
+            + batch.members.len(),
     );
     let mut scope_details = Vec::with_capacity(batch.scopes.len());
     let mut binding_details = Vec::with_capacity(batch.bindings.len());
     let mut reference_details = Vec::with_capacity(batch.references.len());
     let mut module_import_details = Vec::with_capacity(batch.imports.len());
+    let mut callable_details = Vec::with_capacity(batch.callables.len());
+    let mut parameter_details = Vec::with_capacity(batch.parameters.len());
+    let mut call_site_details = Vec::with_capacity(batch.call_sites.len());
+    let mut call_argument_details = Vec::with_capacity(batch.call_arguments.len());
 
     let module_identity = canonical_identity(&canonical_ids, batch.module_id, "module")?;
     entities.push(EntityRow {
@@ -476,6 +556,263 @@ pub fn project_ruff_semantic_batch(
         });
     }
 
+    for fact in &batch.callables {
+        let identity = canonical_identity(&canonical_ids, fact.callable_id, "callable")?;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: callable_kind.family_code,
+            entity_kind_code: callable_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: Some(fact.name.clone()),
+            qualified_name: Some(fact.qualified_name.clone()),
+            parent_entity_id: Some(
+                canonical_identity(&canonical_ids, fact.owner_scope_id, "callable owner scope")?.id,
+            ),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        callable_details.push(CallableDetailRow {
+            scope,
+            callable_id: identity.id,
+            signature_id: None,
+            return_type_id: None,
+            parameter_count: fact.parameter_count,
+            generic_parameter_count: fact.generic_parameter_count,
+            calling_convention_code: None,
+            abi_name: None,
+            callable_flags: fact.flags,
+        });
+    }
+
+    for fact in &batch.parameters {
+        let identity = canonical_identity(&canonical_ids, fact.parameter_id, "parameter")?;
+        let callable =
+            canonical_identity(&canonical_ids, fact.callable_id, "parameter callable")?.id;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: parameter_kind.family_code,
+            entity_kind_code: parameter_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: Some(fact.name.clone()),
+            qualified_name: None,
+            parent_entity_id: Some(callable),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        parameter_details.push(ParameterDetailRow {
+            scope,
+            parameter_id: identity.id,
+            callable_id: callable,
+            ordinal: fact.ordinal,
+            name: Some(fact.name.clone()),
+            parameter_kind_code: parameter_kind_code(fact.kind),
+            type_id: None,
+            default_syntax_id: fact
+                .default_syntax_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "default syntax").map(|item| item.id)
+                })
+                .transpose()?,
+            flags: fact.flags,
+        });
+    }
+
+    for fact in &batch.callable_syntax {
+        let identity = canonical_identity(&canonical_ids, fact.syntax_id, "callable syntax")?;
+        let kind = match fact.role {
+            PythonCallableSyntaxRole::CallExpression => call_expression_kind,
+            PythonCallableSyntaxRole::Argument => argument_syntax_kind,
+            PythonCallableSyntaxRole::TypeParameter => declaration_syntax_kind,
+            PythonCallableSyntaxRole::CalleeExpression
+            | PythonCallableSyntaxRole::Receiver
+            | PythonCallableSyntaxRole::Decorator
+            | PythonCallableSyntaxRole::ReturnAnnotation
+            | PythonCallableSyntaxRole::ParameterAnnotation
+            | PythonCallableSyntaxRole::ParameterDefault => expression_kind,
+        };
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: kind.family_code,
+            entity_kind_code: kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: (!fact.text.is_empty()).then(|| fact.text.clone()),
+            qualified_name: None,
+            parent_entity_id: Some(
+                canonical_identity(&canonical_ids, fact.owner_id, "callable syntax owner")?.id,
+            ),
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+    }
+
+    for fact in &batch.call_sites {
+        let identity = canonical_identity(&canonical_ids, fact.call_site_id, "call site")?;
+        let caller = canonical_identity(&canonical_ids, fact.caller_id, "call-site caller")?.id;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: call_site_kind.family_code,
+            entity_kind_code: call_site_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: None,
+            qualified_name: None,
+            parent_entity_id: Some(caller),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        call_site_details.push(CallSiteDetailRow {
+            scope,
+            call_site_id: identity.id,
+            caller_id: caller,
+            syntax_id: Some(canonical_identity(&canonical_ids, fact.syntax_id, "call syntax")?.id),
+            callee_syntax_id: Some(
+                canonical_identity(&canonical_ids, fact.callee_syntax_id, "callee syntax")?.id,
+            ),
+            receiver_value_id: fact
+                .receiver_syntax_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "receiver syntax").map(|item| item.id)
+                })
+                .transpose()?,
+            result_value_id: None,
+            dispatch_kind_code: dispatch_kind_code(fact.dispatch_kind),
+            declared_target_id: fact
+                .declared_target_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "declared call target")
+                        .map(|item| item.id)
+                })
+                .transpose()?,
+            resolved_target_count: fact.resolved_target_count,
+            call_flags: fact.flags,
+        });
+    }
+
+    for fact in &batch.call_arguments {
+        let identity = canonical_identity(&canonical_ids, fact.argument_id, "call argument")?;
+        let call_site =
+            canonical_identity(&canonical_ids, fact.call_site_id, "argument call site")?.id;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: argument_kind.family_code,
+            entity_kind_code: argument_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: fact.start_byte.map(coordinate).transpose()?,
+            end_byte: fact.end_byte.map(coordinate).transpose()?,
+            name: fact.keyword_name.clone(),
+            qualified_name: None,
+            parent_entity_id: Some(call_site),
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        call_argument_details.push(CallArgumentDetailRow {
+            scope,
+            argument_id: identity.id,
+            call_site_id: call_site,
+            ordinal: fact.ordinal,
+            keyword_name: fact.keyword_name.clone(),
+            argument_syntax_id: fact
+                .argument_syntax_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "argument syntax").map(|item| item.id)
+                })
+                .transpose()?,
+            argument_value_id: None,
+            parameter_id: fact
+                .parameter_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "argument binding target")
+                        .map(|item| item.id)
+                })
+                .transpose()?,
+            binding_status_code: argument_binding_status_code(fact.binding_status),
+            spread_kind_code: Some(argument_spread_kind_code(fact.spread_kind)),
+        });
+    }
+
+    for fact in &batch.unknown_argument_sets {
+        let identity = canonical_identity(
+            &canonical_ids,
+            fact.unknown_argument_set_id,
+            "unknown argument set",
+        )?;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: unknown_argument_set_kind.family_code,
+            entity_kind_code: unknown_argument_set_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: None,
+            end_byte: None,
+            name: Some("UNKNOWN_ARGUMENT_SET".into()),
+            qualified_name: None,
+            parent_entity_id: Some(
+                canonical_identity(
+                    &canonical_ids,
+                    fact.call_site_id,
+                    "unknown argument call site",
+                )?
+                .id,
+            ),
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+    }
+
+    for fact in &batch.members {
+        let identity = canonical_identity(&canonical_ids, fact.member_id, "member candidate")?;
+        let kind = required_entity_kind(member_kind_name(fact.kind))?;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: kind.family_code,
+            entity_kind_code: kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: Some(fact.name.clone()),
+            qualified_name: None,
+            parent_entity_id: Some(
+                canonical_identity(&canonical_ids, fact.class_id, "member class")?.id,
+            ),
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+    }
+
     let mut relations = Vec::new();
     let module_scope = batch
         .scopes
@@ -650,6 +987,170 @@ pub fn project_ruff_semantic_batch(
         );
     }
 
+    for fact in &batch.callables {
+        push_relation(
+            &mut relations,
+            scope,
+            file_id,
+            declares_kind,
+            canonical_identity(&canonical_ids, fact.owner_scope_id, "callable scope")?.id,
+            canonical_identity(&canonical_ids, fact.callable_id, "callable")?.id,
+            Some(coordinate(fact.start_byte)?),
+            Some(coordinate(fact.end_byte)?),
+            EvidenceCertainty::StaticSemantic as i16,
+            ResolutionClass::StaticallyResolved as i16,
+        );
+    }
+    for fact in &batch.parameters {
+        push_ordered_relation(
+            &mut relations,
+            scope,
+            file_id,
+            has_parameter_kind,
+            canonical_identity(&canonical_ids, fact.callable_id, "parameter callable")?.id,
+            canonical_identity(&canonical_ids, fact.parameter_id, "parameter")?.id,
+            fact.ordinal,
+            Some(coordinate(fact.start_byte)?),
+            Some(coordinate(fact.end_byte)?),
+            EvidenceCertainty::StaticSemantic as i16,
+            ResolutionClass::NotApplicable as i16,
+        );
+    }
+    for fact in &batch.callable_syntax {
+        let relation = match fact.role {
+            PythonCallableSyntaxRole::Decorator => Some(has_decorator_kind),
+            PythonCallableSyntaxRole::ReturnAnnotation => Some(has_return_annotation_kind),
+            PythonCallableSyntaxRole::ParameterAnnotation => Some(has_annotation_kind),
+            PythonCallableSyntaxRole::ParameterDefault => Some(has_default_kind),
+            PythonCallableSyntaxRole::TypeParameter => Some(has_type_parameter_kind),
+            PythonCallableSyntaxRole::CallExpression
+            | PythonCallableSyntaxRole::CalleeExpression
+            | PythonCallableSyntaxRole::Receiver
+            | PythonCallableSyntaxRole::Argument => None,
+        };
+        if let Some(relation) = relation {
+            push_ordered_relation(
+                &mut relations,
+                scope,
+                file_id,
+                relation,
+                canonical_identity(&canonical_ids, fact.owner_id, "callable syntax owner")?.id,
+                canonical_identity(&canonical_ids, fact.syntax_id, "callable syntax")?.id,
+                fact.ordinal.unwrap_or(0),
+                Some(coordinate(fact.start_byte)?),
+                Some(coordinate(fact.end_byte)?),
+                EvidenceCertainty::SourceExact as i16,
+                ResolutionClass::NotApplicable as i16,
+            );
+        }
+    }
+    for fact in &batch.call_sites {
+        let call_site = canonical_identity(&canonical_ids, fact.call_site_id, "call site")?.id;
+        push_relation(
+            &mut relations,
+            scope,
+            file_id,
+            contains_call_kind,
+            canonical_identity(&canonical_ids, fact.caller_id, "caller")?.id,
+            call_site,
+            Some(coordinate(fact.start_byte)?),
+            Some(coordinate(fact.end_byte)?),
+            EvidenceCertainty::SourceExact as i16,
+            ResolutionClass::NotApplicable as i16,
+        );
+        push_relation(
+            &mut relations,
+            scope,
+            file_id,
+            has_callee_expression_kind,
+            call_site,
+            canonical_identity(&canonical_ids, fact.callee_syntax_id, "callee syntax")?.id,
+            Some(coordinate(fact.start_byte)?),
+            Some(coordinate(fact.end_byte)?),
+            EvidenceCertainty::SourceExact as i16,
+            ResolutionClass::NotApplicable as i16,
+        );
+        if let Some(receiver) = fact.receiver_syntax_id {
+            push_relation(
+                &mut relations,
+                scope,
+                file_id,
+                has_receiver_kind,
+                call_site,
+                canonical_identity(&canonical_ids, receiver, "receiver syntax")?.id,
+                Some(coordinate(fact.start_byte)?),
+                Some(coordinate(fact.end_byte)?),
+                EvidenceCertainty::SourceExact as i16,
+                ResolutionClass::NotApplicable as i16,
+            );
+        }
+    }
+    for fact in &batch.call_arguments {
+        let argument = canonical_identity(&canonical_ids, fact.argument_id, "call argument")?.id;
+        push_ordered_relation(
+            &mut relations,
+            scope,
+            file_id,
+            has_argument_kind,
+            canonical_identity(&canonical_ids, fact.call_site_id, "argument call site")?.id,
+            argument,
+            fact.ordinal,
+            fact.start_byte.map(coordinate).transpose()?,
+            fact.end_byte.map(coordinate).transpose()?,
+            EvidenceCertainty::SourceExact as i16,
+            ResolutionClass::NotApplicable as i16,
+        );
+        if let Some(parameter) = fact.parameter_id {
+            let (certainty, resolution) = match fact.binding_status {
+                PythonArgumentBindingStatus::UnknownArgumentSet => (
+                    EvidenceCertainty::Unresolved as i16,
+                    ResolutionClass::Unresolved as i16,
+                ),
+                PythonArgumentBindingStatus::Duplicate
+                | PythonArgumentBindingStatus::PositionalOnlyKeyword
+                | PythonArgumentBindingStatus::TooManyPositional
+                | PythonArgumentBindingStatus::UnmatchedKeyword => (
+                    EvidenceCertainty::SoundMay as i16,
+                    ResolutionClass::SoundPossible as i16,
+                ),
+                PythonArgumentBindingStatus::Bound
+                | PythonArgumentBindingStatus::BoundReceiver
+                | PythonArgumentBindingStatus::Defaulted
+                | PythonArgumentBindingStatus::MissingRequired
+                | PythonArgumentBindingStatus::UnresolvedTarget => (
+                    EvidenceCertainty::StaticSemantic as i16,
+                    ResolutionClass::StaticallyResolved as i16,
+                ),
+            };
+            push_relation(
+                &mut relations,
+                scope,
+                file_id,
+                argument_binds_to_kind,
+                argument,
+                canonical_identity(&canonical_ids, parameter, "argument binding target")?.id,
+                fact.start_byte.map(coordinate).transpose()?,
+                fact.end_byte.map(coordinate).transpose()?,
+                certainty,
+                resolution,
+            );
+        }
+    }
+    for fact in &batch.members {
+        push_relation(
+            &mut relations,
+            scope,
+            file_id,
+            declares_member_kind,
+            canonical_identity(&canonical_ids, fact.class_id, "member class")?.id,
+            canonical_identity(&canonical_ids, fact.member_id, "member candidate")?.id,
+            Some(coordinate(fact.start_byte)?),
+            Some(coordinate(fact.end_byte)?),
+            EvidenceCertainty::SourceExact as i16,
+            ResolutionClass::StaticallyResolved as i16,
+        );
+    }
+
     entities.sort_by_key(|row| row.entity_id);
     entities.dedup_by_key(|row| row.entity_id);
     relations.sort_by_key(|row| row.fact_id);
@@ -658,12 +1159,38 @@ pub fn project_ruff_semantic_batch(
     binding_details.sort_by_key(|row| row.binding_id);
     reference_details.sort_by_key(|row| row.reference_id);
     module_import_details.sort_by_key(|row| row.import_id);
+    callable_details.sort_by_key(|row| row.callable_id);
+    parameter_details.sort_by_key(|row| row.parameter_id);
+    call_site_details.sort_by_key(|row| row.call_site_id);
+    call_argument_details.sort_by_key(|row| row.argument_id);
+
+    let diagnostics = batch
+        .call_diagnostics
+        .iter()
+        .map(|fact| DiagnosticRow {
+            diagnostic_id: derived_identity(
+                b"python-call-diagnostic",
+                &[&scope.owner_id, &fact.diagnostic_id],
+            )
+            .id,
+            workspace_id: scope.workspace_id,
+            analysis_context_id: Some(scope.analysis_context_id),
+            source_generation: scope.source_generation,
+            owner_id: Some(scope.owner_id),
+            diagnostic_code: call_diagnostic_code(fact.code),
+            severity_code: Severity::Error as i16,
+            message: fact.message.clone(),
+            cold_payload: None,
+            created_at_micros: 0,
+        })
+        .collect::<Vec<_>>();
 
     let entity_form = required_fact_form("ENTITY_EXISTENCE")?;
     let relation_form = required_fact_form("RELATION")?;
     let mut evidence = Vec::with_capacity(entities.len() + relations.len());
     for entity in &entities {
-        let unresolved = entity.entity_kind_code == unknown_kind.code;
+        let unresolved = entity.entity_kind_code == unknown_kind.code
+            || entity.entity_kind_code == unknown_argument_set_kind.code;
         evidence.push(evidence_row(
             scope,
             provider_run.id,
@@ -774,6 +1301,7 @@ pub fn project_ruff_semantic_batch(
             9,
             encode_capability_statuses(&[capability, import_capability])?,
         ),
+        (10, encode_diagnostics(&diagnostics)?),
         (100, encode_entities(&entities)?),
         (110, encode_relations(&relations)?),
         (130, encode_evidence(&evidence)?),
@@ -781,6 +1309,10 @@ pub fn project_ruff_semantic_batch(
         (210, encode_binding_details(&binding_details)?),
         (220, encode_reference_details(&reference_details)?),
         (230, encode_module_import_details(&module_import_details)?),
+        (240, encode_callable_details(&callable_details)?),
+        (250, encode_parameter_details(&parameter_details)?),
+        (260, encode_call_site_details(&call_site_details)?),
+        (270, encode_call_argument_details(&call_argument_details)?),
     ];
     let provider_batches = encoded
         .into_iter()
@@ -939,9 +1471,237 @@ fn validate_import_export_facts(batch: &PythonFrontendBatch) -> Result<(), FactI
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // One closed census makes cross-family referential checks reviewable.
+fn validate_callable_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngestError> {
+    if batch.callables.is_empty()
+        && batch.parameters.is_empty()
+        && batch.callable_syntax.is_empty()
+        && batch.call_sites.is_empty()
+        && batch.call_arguments.is_empty()
+        && batch.unknown_argument_sets.is_empty()
+        && batch.members.is_empty()
+        && batch.call_diagnostics.is_empty()
+    {
+        // Older hand-built fixtures exercise only the WP03/WP04 boundary. Real Ruff
+        // projections always contain the synthetic module-body callable.
+        return Ok(());
+    }
+
+    let scope_ids = batch
+        .scopes
+        .iter()
+        .map(|fact| fact.scope_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    let callable_ids = batch
+        .callables
+        .iter()
+        .map(|fact| fact.callable_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    if callable_ids.len() != batch.callables.len() {
+        return Err(FactIngestError::Protocol(
+            "Ruff callable projection contains duplicate callable IDs".into(),
+        ));
+    }
+    for callable in &batch.callables {
+        if !scope_ids.contains(&callable.owner_scope_id) {
+            return Err(FactIngestError::Protocol(format!(
+                "Ruff callable {} references an absent owner scope",
+                callable.qualified_name
+            )));
+        }
+    }
+
+    let parameter_ids = batch
+        .parameters
+        .iter()
+        .map(|fact| fact.parameter_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    if parameter_ids.len() != batch.parameters.len() {
+        return Err(FactIngestError::Protocol(
+            "Ruff callable projection contains duplicate parameter IDs".into(),
+        ));
+    }
+    for callable in &batch.callables {
+        let mut ordinals = batch
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.callable_id == callable.callable_id)
+            .map(|parameter| parameter.ordinal)
+            .collect::<Vec<_>>();
+        ordinals.sort_unstable();
+        let expected_count = i32::try_from(ordinals.len()).unwrap_or(i32::MAX);
+        let expected = (0..expected_count).collect::<Vec<_>>();
+        if ordinals != expected || callable.parameter_count != expected_count {
+            return Err(FactIngestError::Protocol(format!(
+                "Ruff callable {} has a non-contiguous or inconsistent parameter contract",
+                callable.qualified_name
+            )));
+        }
+    }
+    if batch
+        .parameters
+        .iter()
+        .any(|parameter| !callable_ids.contains(&parameter.callable_id))
+    {
+        return Err(FactIngestError::Protocol(
+            "Ruff parameter references an absent callable".into(),
+        ));
+    }
+
+    let syntax_by_id = batch
+        .callable_syntax
+        .iter()
+        .map(|fact| (fact.syntax_id, fact))
+        .collect::<BTreeMap<_, _>>();
+    if syntax_by_id.len() != batch.callable_syntax.len() {
+        return Err(FactIngestError::Protocol(
+            "Ruff callable projection contains duplicate syntax IDs".into(),
+        ));
+    }
+    let call_site_ids = batch
+        .call_sites
+        .iter()
+        .map(|fact| fact.call_site_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    if call_site_ids.len() != batch.call_sites.len() {
+        return Err(FactIngestError::Protocol(
+            "Ruff callable projection contains duplicate call-site IDs".into(),
+        ));
+    }
+    for call_site in &batch.call_sites {
+        let call_syntax = syntax_by_id.get(&call_site.syntax_id);
+        let callee_syntax = syntax_by_id.get(&call_site.callee_syntax_id);
+        if !callable_ids.contains(&call_site.caller_id)
+            || call_site.resolved_target_count != 0
+            || !matches!(
+                call_syntax.map(|fact| (fact.owner_id, fact.role)),
+                Some((owner, PythonCallableSyntaxRole::CallExpression)) if owner == call_site.call_site_id
+            )
+            || !matches!(
+                callee_syntax.map(|fact| (fact.owner_id, fact.role)),
+                Some((owner, PythonCallableSyntaxRole::CalleeExpression)) if owner == call_site.call_site_id
+            )
+        {
+            return Err(FactIngestError::Protocol(
+                "Ruff call site lacks its caller, first-class call syntax, callee syntax, or unresolved WP13 placeholder".into(),
+            ));
+        }
+        if call_site.receiver_syntax_id.is_some_and(|syntax_id| {
+            !matches!(
+                syntax_by_id.get(&syntax_id).map(|fact| (fact.owner_id, fact.role)),
+                Some((owner, PythonCallableSyntaxRole::Receiver)) if owner == call_site.call_site_id
+            )
+        }) {
+            return Err(FactIngestError::Protocol(
+                "Ruff call-site receiver does not reference receiver syntax".into(),
+            ));
+        }
+    }
+    let syntactic_call_count = batch
+        .callable_syntax
+        .iter()
+        .filter(|fact| fact.role == PythonCallableSyntaxRole::CallExpression)
+        .count();
+    if syntactic_call_count != batch.call_sites.len() {
+        return Err(FactIngestError::Protocol(format!(
+            "Ruff call-site parity failed: {syntactic_call_count} call syntax rows but {} call-site facts",
+            batch.call_sites.len()
+        )));
+    }
+
+    let argument_ids = batch
+        .call_arguments
+        .iter()
+        .map(|fact| fact.argument_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    if argument_ids.len() != batch.call_arguments.len() {
+        return Err(FactIngestError::Protocol(
+            "Ruff callable projection contains duplicate argument IDs".into(),
+        ));
+    }
+    for call_site_id in &call_site_ids {
+        let mut ordinals = batch
+            .call_arguments
+            .iter()
+            .filter(|argument| argument.call_site_id == *call_site_id)
+            .map(|argument| argument.ordinal)
+            .collect::<Vec<_>>();
+        ordinals.sort_unstable();
+        let expected = (0..i32::try_from(ordinals.len()).unwrap_or(i32::MAX)).collect::<Vec<_>>();
+        if ordinals != expected {
+            return Err(FactIngestError::Protocol(
+                "Ruff call arguments are not contiguous in source/binder order".into(),
+            ));
+        }
+    }
+    let unknown_ids = batch
+        .unknown_argument_sets
+        .iter()
+        .map(|fact| fact.unknown_argument_set_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    for argument in &batch.call_arguments {
+        if !call_site_ids.contains(&argument.call_site_id) {
+            return Err(FactIngestError::Protocol(
+                "Ruff argument references an absent call site".into(),
+            ));
+        }
+        if argument.argument_syntax_id.is_some_and(|syntax_id| {
+            !matches!(
+                syntax_by_id.get(&syntax_id).map(|fact| (fact.owner_id, fact.role)),
+                Some((owner, PythonCallableSyntaxRole::Argument)) if owner == argument.argument_id
+            )
+        }) {
+            return Err(FactIngestError::Protocol(
+                "Ruff explicit argument does not reference argument syntax".into(),
+            ));
+        }
+        let dynamic = matches!(
+            argument.spread_kind,
+            PythonArgumentSpreadKind::PositionalDynamic | PythonArgumentSpreadKind::KeywordDynamic
+        );
+        if dynamic
+            && (argument.binding_status != PythonArgumentBindingStatus::UnknownArgumentSet
+                || !argument
+                    .parameter_id
+                    .is_some_and(|target| unknown_ids.contains(&target)))
+        {
+            return Err(FactIngestError::Protocol(
+                "Ruff dynamic splat lacks an explicit UNKNOWN_ARGUMENT_SET binding".into(),
+            ));
+        }
+        if argument.parameter_id.is_some_and(|target| {
+            !parameter_ids.contains(&target) && !unknown_ids.contains(&target)
+        }) {
+            return Err(FactIngestError::Protocol(
+                "Ruff argument binding references an absent parameter/unknown set".into(),
+            ));
+        }
+    }
+    if batch.unknown_argument_sets.iter().any(|fact| {
+        !call_site_ids.contains(&fact.call_site_id)
+            || !matches!(
+                fact.spread_kind,
+                PythonArgumentSpreadKind::PositionalDynamic
+                    | PythonArgumentSpreadKind::KeywordDynamic
+            )
+    }) {
+        return Err(FactIngestError::Protocol(
+            "Ruff unknown argument set is not owned by a dynamic call-site splat".into(),
+        ));
+    }
+    if batch.call_diagnostics.iter().any(|fact| {
+        !call_site_ids.contains(&fact.call_site_id) || !argument_ids.contains(&fact.argument_id)
+    }) {
+        return Err(FactIngestError::Protocol(
+            "Ruff call diagnostic references an absent call site or argument".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn observation_batch(
     batch: &PythonFrontendBatch,
-    payloads: &[Vec<u8>; 7],
+    payloads: &[Vec<u8>; 15],
 ) -> Result<RecordBatch, FactIngestError> {
     let schema = Arc::new(registered_provider_observation_arrow_schema(
         OBSERVATION_SCHEMA_ID,
@@ -961,12 +1721,20 @@ fn observation_batch(
         Arc::new(StringArray::from(vec![Some(export_status_name(
             batch.export_status,
         ))])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[7].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[8].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[9].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[10].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[11].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[12].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[13].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[14].as_slice())])),
     ];
     RecordBatch::try_new(schema, columns).map_err(FactIngestError::from)
 }
 
 #[allow(clippy::too_many_lines)] // One ordered payload census keeps the registered observation schema auditable.
-fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 7], FactIngestError> {
+fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 15], FactIngestError> {
     let scopes = batch
         .scopes
         .iter()
@@ -1075,6 +1843,135 @@ fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 7], Fac
             })
         })
         .collect::<Vec<_>>();
+    let callables = batch
+        .callables
+        .iter()
+        .map(|fact| {
+            json!({
+                "callable_id": hex_id(fact.callable_id),
+                "owner_scope_id": hex_id(fact.owner_scope_id),
+                "declared_binding_id": fact.declared_binding_id.map(hex_id),
+                "class_id": fact.class_id.map(hex_id),
+                "name": fact.name,
+                "qualified_name": fact.qualified_name,
+                "parameter_count": fact.parameter_count,
+                "generic_parameter_count": fact.generic_parameter_count,
+                "flags": fact.flags,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
+    let parameters = batch
+        .parameters
+        .iter()
+        .map(|fact| {
+            json!({
+                "parameter_id": hex_id(fact.parameter_id),
+                "callable_id": hex_id(fact.callable_id),
+                "ordinal": fact.ordinal,
+                "name": fact.name,
+                "kind": parameter_kind_name(fact.kind),
+                "annotation_syntax_id": fact.annotation_syntax_id.map(hex_id),
+                "default_syntax_id": fact.default_syntax_id.map(hex_id),
+                "flags": fact.flags,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
+    let callable_syntax = batch
+        .callable_syntax
+        .iter()
+        .map(|fact| {
+            json!({
+                "syntax_id": hex_id(fact.syntax_id),
+                "owner_id": hex_id(fact.owner_id),
+                "role": callable_syntax_role_name(fact.role),
+                "ordinal": fact.ordinal,
+                "text": fact.text,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
+    let call_sites = batch
+        .call_sites
+        .iter()
+        .map(|fact| {
+            json!({
+                "call_site_id": hex_id(fact.call_site_id),
+                "caller_id": hex_id(fact.caller_id),
+                "syntax_id": hex_id(fact.syntax_id),
+                "callee_syntax_id": hex_id(fact.callee_syntax_id),
+                "receiver_syntax_id": fact.receiver_syntax_id.map(hex_id),
+                "declared_target_id": fact.declared_target_id.map(hex_id),
+                "dispatch_kind": dispatch_kind_name(fact.dispatch_kind),
+                "resolved_target_count": fact.resolved_target_count,
+                "resolution_status": "UNRESOLVED_WP13_PLACEHOLDER",
+                "flags": fact.flags,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
+    let call_arguments = batch
+        .call_arguments
+        .iter()
+        .map(|fact| {
+            json!({
+                "argument_id": hex_id(fact.argument_id),
+                "call_site_id": hex_id(fact.call_site_id),
+                "ordinal": fact.ordinal,
+                "keyword_name": fact.keyword_name,
+                "argument_syntax_id": fact.argument_syntax_id.map(hex_id),
+                "parameter_id": fact.parameter_id.map(hex_id),
+                "binding_status": argument_binding_status_name(fact.binding_status),
+                "spread_kind": argument_spread_kind_name(fact.spread_kind),
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
+    let unknown_argument_sets = batch
+        .unknown_argument_sets
+        .iter()
+        .map(|fact| {
+            json!({
+                "unknown_argument_set_id": hex_id(fact.unknown_argument_set_id),
+                "call_site_id": hex_id(fact.call_site_id),
+                "spread_kind": argument_spread_kind_name(fact.spread_kind),
+            })
+        })
+        .collect::<Vec<_>>();
+    let members = batch
+        .members
+        .iter()
+        .map(|fact| {
+            json!({
+                "member_id": hex_id(fact.member_id),
+                "class_id": hex_id(fact.class_id),
+                "declared_entity_id": fact.declared_entity_id.map(hex_id),
+                "name": fact.name,
+                "kind": member_kind_name(fact.kind),
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
+    let call_diagnostics = batch
+        .call_diagnostics
+        .iter()
+        .map(|fact| {
+            json!({
+                "diagnostic_id": hex_id(fact.diagnostic_id),
+                "call_site_id": hex_id(fact.call_site_id),
+                "argument_id": hex_id(fact.argument_id),
+                "code": fact.code,
+                "message": fact.message,
+            })
+        })
+        .collect::<Vec<_>>();
     Ok([
         json_bytes(&scopes)?,
         json_bytes(&bindings)?,
@@ -1083,6 +1980,14 @@ fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 7], Fac
         json_bytes(&edges)?,
         json_bytes(&imports)?,
         json_bytes(&exports)?,
+        json_bytes(&callables)?,
+        json_bytes(&parameters)?,
+        json_bytes(&callable_syntax)?,
+        json_bytes(&call_sites)?,
+        json_bytes(&call_arguments)?,
+        json_bytes(&unknown_argument_sets)?,
+        json_bytes(&members)?,
+        json_bytes(&call_diagnostics)?,
     ])
 }
 
@@ -1152,6 +2057,54 @@ fn push_relation(
         source_id,
         target_id,
         ordinal: None,
+        role_code: None,
+        distance: None,
+        directness_code: Directness::Direct as i16,
+        file_id: Some(file_id),
+        start_byte,
+        end_byte,
+        certainty_code,
+        resolution_code,
+        producer_code: ProviderCode::RuffPython as i16,
+        derivation_code: None,
+        flags: 0,
+        fact_hash64: digest_hash64(identity.digest),
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_ordered_relation(
+    output: &mut Vec<RelationRow>,
+    scope: FactScope,
+    file_id: [u8; 16],
+    kind: crate::registries::OntologyCodeEntry,
+    source_id: [u8; 16],
+    target_id: [u8; 16],
+    ordinal: i32,
+    start_byte: Option<i64>,
+    end_byte: Option<i64>,
+    certainty_code: i16,
+    resolution_code: i16,
+) {
+    let identity = derived_identity(
+        b"ordered-relation",
+        &[
+            &scope.owner_id,
+            &kind.code.to_be_bytes(),
+            &source_id,
+            &target_id,
+            &ordinal.to_be_bytes(),
+        ],
+    );
+    output.push(RelationRow {
+        scope,
+        fact_id: identity.id,
+        language: Language::Python as i16,
+        relation_family_code: kind.family_code,
+        relation_kind_code: kind.code,
+        source_id,
+        target_id,
+        ordinal: Some(ordinal),
         role_code: None,
         distance: None,
         directness_code: Directness::Direct as i16,
@@ -1247,6 +2200,144 @@ fn hex_id(id: [u8; 16]) -> String {
         write!(output, "{byte:02x}").expect("writing to String cannot fail");
     }
     output
+}
+
+const fn parameter_kind_code(kind: PythonParameterKind) -> i16 {
+    match kind {
+        PythonParameterKind::PositionalOnly => ParameterKind::PositionalOnly as i16,
+        PythonParameterKind::PositionalOrKeyword => ParameterKind::PositionalOrKeyword as i16,
+        PythonParameterKind::VarPositional => ParameterKind::VarPositional as i16,
+        PythonParameterKind::KeywordOnly => ParameterKind::KeywordOnly as i16,
+        PythonParameterKind::VarKeyword => ParameterKind::VarKeyword as i16,
+    }
+}
+
+const fn parameter_kind_name(kind: PythonParameterKind) -> &'static str {
+    match kind {
+        PythonParameterKind::PositionalOnly => "POSITIONAL_ONLY",
+        PythonParameterKind::PositionalOrKeyword => "POSITIONAL_OR_KEYWORD",
+        PythonParameterKind::VarPositional => "VAR_POSITIONAL",
+        PythonParameterKind::KeywordOnly => "KEYWORD_ONLY",
+        PythonParameterKind::VarKeyword => "VAR_KEYWORD",
+    }
+}
+
+const fn dispatch_kind_code(kind: PythonDispatchKind) -> i16 {
+    match kind {
+        PythonDispatchKind::DirectName => CallDispatchKind::DirectName as i16,
+        PythonDispatchKind::Attribute => CallDispatchKind::Attribute as i16,
+        PythonDispatchKind::Unknown => CallDispatchKind::Unknown as i16,
+    }
+}
+
+const fn dispatch_kind_name(kind: PythonDispatchKind) -> &'static str {
+    match kind {
+        PythonDispatchKind::DirectName => "DIRECT_NAME",
+        PythonDispatchKind::Attribute => "ATTRIBUTE",
+        PythonDispatchKind::Unknown => "UNKNOWN",
+    }
+}
+
+const fn argument_binding_status_code(status: PythonArgumentBindingStatus) -> i16 {
+    match status {
+        PythonArgumentBindingStatus::Bound => ArgumentBindingStatus::Bound as i16,
+        PythonArgumentBindingStatus::BoundReceiver => ArgumentBindingStatus::BoundReceiver as i16,
+        PythonArgumentBindingStatus::Defaulted => ArgumentBindingStatus::Defaulted as i16,
+        PythonArgumentBindingStatus::MissingRequired => {
+            ArgumentBindingStatus::MissingRequired as i16
+        }
+        PythonArgumentBindingStatus::Duplicate => ArgumentBindingStatus::DuplicateArgument as i16,
+        PythonArgumentBindingStatus::PositionalOnlyKeyword => {
+            ArgumentBindingStatus::PositionalOnlyKeyword as i16
+        }
+        PythonArgumentBindingStatus::TooManyPositional => {
+            ArgumentBindingStatus::TooManyPositional as i16
+        }
+        PythonArgumentBindingStatus::UnmatchedKeyword => {
+            ArgumentBindingStatus::UnmatchedKeyword as i16
+        }
+        PythonArgumentBindingStatus::UnresolvedTarget => {
+            ArgumentBindingStatus::UnresolvedTarget as i16
+        }
+        PythonArgumentBindingStatus::UnknownArgumentSet => {
+            ArgumentBindingStatus::UnknownArgumentSet as i16
+        }
+    }
+}
+
+const fn argument_binding_status_name(status: PythonArgumentBindingStatus) -> &'static str {
+    match status {
+        PythonArgumentBindingStatus::Bound => "BOUND",
+        PythonArgumentBindingStatus::BoundReceiver => "BOUND_RECEIVER",
+        PythonArgumentBindingStatus::Defaulted => "DEFAULTED",
+        PythonArgumentBindingStatus::MissingRequired => "MISSING_REQUIRED",
+        PythonArgumentBindingStatus::Duplicate => "DUPLICATE_ARGUMENT",
+        PythonArgumentBindingStatus::PositionalOnlyKeyword => "POSITIONAL_ONLY_KEYWORD",
+        PythonArgumentBindingStatus::TooManyPositional => "TOO_MANY_POSITIONAL",
+        PythonArgumentBindingStatus::UnmatchedKeyword => "UNMATCHED_KEYWORD",
+        PythonArgumentBindingStatus::UnresolvedTarget => "UNRESOLVED_TARGET",
+        PythonArgumentBindingStatus::UnknownArgumentSet => "UNKNOWN_ARGUMENT_SET",
+    }
+}
+
+const fn argument_spread_kind_code(kind: PythonArgumentSpreadKind) -> i16 {
+    match kind {
+        PythonArgumentSpreadKind::None => ArgumentSpreadKind::None as i16,
+        PythonArgumentSpreadKind::PositionalStatic => ArgumentSpreadKind::PositionalStatic as i16,
+        PythonArgumentSpreadKind::KeywordStatic => ArgumentSpreadKind::KeywordStatic as i16,
+        PythonArgumentSpreadKind::PositionalDynamic => ArgumentSpreadKind::PositionalDynamic as i16,
+        PythonArgumentSpreadKind::KeywordDynamic => ArgumentSpreadKind::KeywordDynamic as i16,
+        PythonArgumentSpreadKind::BoundReceiver => ArgumentSpreadKind::BoundReceiver as i16,
+        PythonArgumentSpreadKind::Default => ArgumentSpreadKind::Default as i16,
+        PythonArgumentSpreadKind::Missing => ArgumentSpreadKind::Missing as i16,
+    }
+}
+
+const fn argument_spread_kind_name(kind: PythonArgumentSpreadKind) -> &'static str {
+    match kind {
+        PythonArgumentSpreadKind::None => "NONE",
+        PythonArgumentSpreadKind::PositionalStatic => "POSITIONAL_STATIC",
+        PythonArgumentSpreadKind::KeywordStatic => "KEYWORD_STATIC",
+        PythonArgumentSpreadKind::PositionalDynamic => "POSITIONAL_DYNAMIC",
+        PythonArgumentSpreadKind::KeywordDynamic => "KEYWORD_DYNAMIC",
+        PythonArgumentSpreadKind::BoundReceiver => "BOUND_RECEIVER",
+        PythonArgumentSpreadKind::Default => "DEFAULT",
+        PythonArgumentSpreadKind::Missing => "MISSING",
+    }
+}
+
+const fn callable_syntax_role_name(role: PythonCallableSyntaxRole) -> &'static str {
+    match role {
+        PythonCallableSyntaxRole::CallExpression => "CALL_EXPRESSION",
+        PythonCallableSyntaxRole::CalleeExpression => "CALLEE_EXPRESSION",
+        PythonCallableSyntaxRole::Receiver => "RECEIVER",
+        PythonCallableSyntaxRole::Argument => "ARGUMENT",
+        PythonCallableSyntaxRole::Decorator => "DECORATOR",
+        PythonCallableSyntaxRole::ReturnAnnotation => "RETURN_ANNOTATION",
+        PythonCallableSyntaxRole::ParameterAnnotation => "PARAMETER_ANNOTATION",
+        PythonCallableSyntaxRole::ParameterDefault => "PARAMETER_DEFAULT",
+        PythonCallableSyntaxRole::TypeParameter => "TYPE_PARAMETER",
+    }
+}
+
+const fn member_kind_name(kind: PythonMemberKind) -> &'static str {
+    match kind {
+        PythonMemberKind::Method => "METHOD",
+        PythonMemberKind::ClassVariable => "CLASS_VARIABLE",
+        PythonMemberKind::PropertyCandidate => "PROPERTY_CANDIDATE",
+        PythonMemberKind::NestedType => "NESTED_TYPE",
+        PythonMemberKind::InstanceVariable => "INSTANCE_VARIABLE",
+    }
+}
+
+fn call_diagnostic_code(code: &str) -> i32 {
+    match code {
+        "DUPLICATE_ARGUMENT" => ArgumentBindingStatus::DuplicateArgument as i32,
+        "POSITIONAL_ONLY_KEYWORD" => ArgumentBindingStatus::PositionalOnlyKeyword as i32,
+        "TOO_MANY_POSITIONAL" => ArgumentBindingStatus::TooManyPositional as i32,
+        "UNMATCHED_KEYWORD" => ArgumentBindingStatus::UnmatchedKeyword as i32,
+        _ => 0,
+    }
 }
 
 const fn import_kind_code(kind: PythonImportKind) -> i16 {
@@ -1444,6 +2535,14 @@ mod tests {
             imports: Vec::new(),
             exports: Vec::new(),
             export_status: PythonExportStatus::Complete,
+            callables: Vec::new(),
+            parameters: Vec::new(),
+            callable_syntax: Vec::new(),
+            call_sites: Vec::new(),
+            call_arguments: Vec::new(),
+            unknown_argument_sets: Vec::new(),
+            members: Vec::new(),
+            call_diagnostics: Vec::new(),
             metrics: PythonSemanticMetrics {
                 binding_pass_duration: Duration::ZERO,
                 traversal_pass_duration: Duration::ZERO,
@@ -1456,6 +2555,11 @@ mod tests {
                 import_count: 0,
                 export_count: 0,
                 unresolved_module_count: 0,
+                callable_count: 0,
+                parameter_count: 0,
+                call_site_count: 0,
+                call_argument_count: 0,
+                member_count: 0,
             },
             terminal: PythonSemanticTerminal {
                 pass_id: "PASS_RUFF_SCOPE_BINDING_V1",

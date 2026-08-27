@@ -274,6 +274,10 @@ enum RowEncoderKind {
     BindingDetails,
     ReferenceDetails,
     ModuleImportDetails,
+    CallableDetails,
+    ParameterDetails,
+    CallSiteDetails,
+    CallArgumentDetails,
 }
 
 impl RowEncoderKind {
@@ -295,6 +299,10 @@ impl RowEncoderKind {
             Self::BindingDetails => "encode_binding_details",
             Self::ReferenceDetails => "encode_reference_details",
             Self::ModuleImportDetails => "encode_module_import_details",
+            Self::CallableDetails => "encode_callable_details",
+            Self::ParameterDetails => "encode_parameter_details",
+            Self::CallSiteDetails => "encode_call_site_details",
+            Self::CallArgumentDetails => "encode_call_argument_details",
         }
     }
 
@@ -316,6 +324,10 @@ impl RowEncoderKind {
             Self::BindingDetails => "BindingDetailRow",
             Self::ReferenceDetails => "ReferenceDetailRow",
             Self::ModuleImportDetails => "ModuleImportDetailRow",
+            Self::CallableDetails => "CallableDetailRow",
+            Self::ParameterDetails => "ParameterDetailRow",
+            Self::CallSiteDetails => "CallSiteDetailRow",
+            Self::CallArgumentDetails => "CallArgumentDetailRow",
         }
     }
 }
@@ -834,6 +846,10 @@ impl SchemaContractIr {
             (RowEncoderKind::BindingDetails, 210),
             (RowEncoderKind::ReferenceDetails, 220),
             (RowEncoderKind::ModuleImportDetails, 230),
+            (RowEncoderKind::CallableDetails, 240),
+            (RowEncoderKind::ParameterDetails, 250),
+            (RowEncoderKind::CallSiteDetails, 260),
+            (RowEncoderKind::CallArgumentDetails, 270),
         ]);
         if encoders != expected_encoders {
             return invalid(

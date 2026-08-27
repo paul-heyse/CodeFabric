@@ -158,7 +158,7 @@
       "authority": "ENUM_REGISTRY",
       "artifact_id": "codefabric.registry.enum-registry",
       "path": "contracts/registry/enum-registry.yaml",
-      "canonical_digest": "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28"
+      "canonical_digest": "b3:f7eaf87af0e4ac1d2a3ed20d22c599d183391883d90ee2b1851d67daf4527c89"
     },
     {
       "authority": "TYPE_ALGEBRA",
@@ -170,13 +170,13 @@
       "authority": "ONTOLOGY_ENTITY_REGISTRY",
       "artifact_id": "codefabric.registry.ontology-entity-registry",
       "path": "contracts/registry/ontology-entity-registry.yaml",
-      "canonical_digest": "b3:90c621c9a7ace113e3d4bf89a2ac766810d08b8ced48b7bc48da7492166864f3"
+      "canonical_digest": "b3:681380fe39e0d0d4f53346d465955333390c864f1d6968411b131b9e4d261a31"
     },
     {
       "authority": "ONTOLOGY_RELATION_REGISTRY",
       "artifact_id": "codefabric.registry.ontology-relation-registry",
       "path": "contracts/registry/ontology-relation-registry.yaml",
-      "canonical_digest": "b3:58081efc5a9667f8274246847564c3778b901f833c3c26ffa06036d49199fdc9"
+      "canonical_digest": "b3:0a8ef2a10a8add1c1a35ca3a5c35c62b5142d371bafb5d946601faafacdc3973"
     },
     {
       "authority": "ONTOLOGY_PROPERTY_REGISTRY",
@@ -214,6 +214,26 @@
       "semantic_type": "enum:import_kind",
       "authority": "ENUM_REGISTRY",
       "domain": "IMPORT_KIND"
+    },
+    {
+      "semantic_type": "enum:parameter_kind",
+      "authority": "ENUM_REGISTRY",
+      "domain": "PARAMETER_KIND"
+    },
+    {
+      "semantic_type": "enum:call_dispatch_kind",
+      "authority": "ENUM_REGISTRY",
+      "domain": "CALL_DISPATCH_KIND"
+    },
+    {
+      "semantic_type": "enum:argument_binding_status",
+      "authority": "ENUM_REGISTRY",
+      "domain": "ARGUMENT_BINDING_STATUS"
+    },
+    {
+      "semantic_type": "enum:argument_spread_kind",
+      "authority": "ENUM_REGISTRY",
+      "domain": "ARGUMENT_SPREAD_KIND"
     },
     {
       "semantic_type": "enum:analysis_context_kind",
@@ -2923,6 +2943,137 @@
       "required_for_publication": true
     },
     {
+      "table_code": 240,
+      "name": "callable_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "callable",
+      "grain": "one callable semantic entity extension",
+      "schema_version": "1.0",
+      "row_encoder": "callable_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "callable_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "signature_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "return_type_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "parameter_count", "logical_type": "int32", "nullable": false},
+        {"name": "generic_parameter_count", "logical_type": "int32", "nullable": false},
+        {"name": "calling_convention_code", "logical_type": "code16", "nullable": true},
+        {"name": "abi_name", "logical_type": "utf8", "nullable": true},
+        {"name": "callable_flags", "logical_type": "int64", "nullable": false}
+      ],
+      "primary_key": ["callable_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "callable_id"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100],
+      "required_for_publication": true
+    },
+    {
+      "table_code": 250,
+      "name": "parameter_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "callable",
+      "grain": "one callable parameter",
+      "schema_version": "1.0",
+      "row_encoder": "parameter_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "parameter_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "callable_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "callable_detail.callable_id"},
+        {"name": "ordinal", "logical_type": "int32", "nullable": false},
+        {"name": "name", "logical_type": "utf8", "nullable": true},
+        {"name": "parameter_kind_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:parameter_kind"},
+        {"name": "type_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "default_syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "flags", "logical_type": "int64", "nullable": false}
+      ],
+      "primary_key": ["parameter_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "callable_id", "ordinal"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100, 240],
+      "required_for_publication": true
+    },
+    {
+      "table_code": 260,
+      "name": "call_site_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "call",
+      "grain": "one first-class call-site entity extension",
+      "schema_version": "1.0",
+      "row_encoder": "call_site_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "call_site_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "caller_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "callable_detail.callable_id"},
+        {"name": "syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "callee_syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "receiver_value_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "result_value_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "dispatch_kind_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:call_dispatch_kind"},
+        {"name": "declared_target_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "callable_detail.callable_id"},
+        {"name": "resolved_target_count", "logical_type": "int32", "nullable": false},
+        {"name": "call_flags", "logical_type": "int64", "nullable": false}
+      ],
+      "primary_key": ["call_site_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "caller_id", "call_site_id"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100, 240],
+      "required_for_publication": true
+    },
+    {
+      "table_code": 270,
+      "name": "call_argument_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "call",
+      "grain": "one argument occurrence at one call site",
+      "schema_version": "1.0",
+      "row_encoder": "call_argument_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "argument_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "call_site_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "call_site_detail.call_site_id"},
+        {"name": "ordinal", "logical_type": "int32", "nullable": false},
+        {"name": "keyword_name", "logical_type": "utf8", "nullable": true},
+        {"name": "argument_syntax_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "argument_value_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "parameter_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "binding_status_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:argument_binding_status"},
+        {"name": "spread_kind_code", "logical_type": "code16", "nullable": true, "semantic_type": "enum:argument_spread_kind"}
+      ],
+      "primary_key": ["argument_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "call_site_id", "ordinal"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100, 240, 250, 260],
+      "required_for_publication": true
+    },
+    {
       "table_code": 900,
       "name": "owner_tombstone",
       "publication_pin_role": "NOT_PUBLISHED",
@@ -3221,6 +3372,34 @@
     },
     {
       "table_code": 230,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 240,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 250,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 260,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 270,
       "workspace_column": "workspace_id",
       "analysis_context_column": "analysis_context_id",
       "source_generation_column": "source_generation",
@@ -5082,7 +5261,15 @@
         {"name": "edges_json", "logical_type": "binary", "nullable": false},
         {"name": "imports_json", "logical_type": "binary", "nullable": false},
         {"name": "exports_json", "logical_type": "binary", "nullable": false},
-        {"name": "export_status", "logical_type": "utf8", "nullable": false}
+        {"name": "export_status", "logical_type": "utf8", "nullable": false},
+        {"name": "callables_json", "logical_type": "binary", "nullable": false},
+        {"name": "parameters_json", "logical_type": "binary", "nullable": false},
+        {"name": "callable_syntax_json", "logical_type": "binary", "nullable": false},
+        {"name": "call_sites_json", "logical_type": "binary", "nullable": false},
+        {"name": "call_arguments_json", "logical_type": "binary", "nullable": false},
+        {"name": "unknown_argument_sets_json", "logical_type": "binary", "nullable": false},
+        {"name": "members_json", "logical_type": "binary", "nullable": false},
+        {"name": "call_diagnostics_json", "logical_type": "binary", "nullable": false}
       ]
     },
     {
