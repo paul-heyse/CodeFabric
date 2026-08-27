@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP06",
+  "current_packet": "WP07",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -70,14 +70,22 @@
       "blockers": []
     },
     "WP06": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "4671b7e",
+      "deviations": [
+        "Per user direction, the composite root-ci-fast and remaining repository-wide Wave 8 gates are deferred to the M01 conclusion after WP07. The user separately requested one full cargo-nextest discovery run with --no-fail-fast during WP06: its initial 48-failure cascade was reduced through shared root-cause fixes, and the second complete run reached 410/412 before the two remaining failures were repaired and proven with focused selectors. A third full rerun was intentionally omitted under the user's targeted-change guidance.",
+        "The packet uses a separate codefabric.ruff.semantic.v2 observation family so the accepted v1 contracts remain immutable while CFG tables and relation kinds are added. Normal CFG continuation uses the explicit CFG_CALL_RETURN relation kind; the generic CFG_NORMAL placeholder is neither emitted nor persisted."
+      ],
+      "failed_approaches": [
+        "The first v2 Python fragment registered only its language-specific CFG ingest contract; model validation exposed that the v2 observation also needed an explicit shared-substrate ingest authority before generated outputs could be accepted.",
+        "The first finally validator accepted any resume edge after a finalizer. The exceptional-edge falsification oracle exposed that this could relabel or swallow return, unwind, break, and continue continuations, so validation now requires the route-specific resume kind and falsifies exact call exceptions plus every unwind continuation.",
+        "The first repository-wide run exposed generated-table growth assumptions outside the packet: semantic table families were not routed into the fact namespace, several adjacent censuses were frozen, the Pyrefly sidecar executable was stale, and one query-template assertion conflated a semantic projection change with request-only rebinding. These were fixed at their shared authorities and focused regressions passed.",
+        "The remaining publication test used a frozen foreign-key count and the withdrawal rebuild harness panicked on its expected fail-closed semantic-lane boundary. The structural proof now compares generated contracts to Arrow foreign-key annotations, and both incremental and clean withdrawal paths explicitly prove SemanticLaneUnavailable before comparing independently materialized capability gaps."
+      ],
       "blockers": []
     },
     "WP07": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
