@@ -3,7 +3,7 @@ artifact: implementation-plan
 plan_id: codefabric-waves-8-12-semantic-profiles
 version: v2
 date: 2026-08-26
-status: draft
+status: approved
 design_path: docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md
 design_version: v1.0
 baseline_commit: ea13ca41617dce93ea76349f34bfbd5739f7a5a2
@@ -27,8 +27,12 @@ milestone, and no later wave certifies an incomplete predecessor gate.
 
 Integrated-plan authorization: user/design owner Paul Heyse, 2026-08-26, by the
 request to create this v2 integrated plan from the independent v1 plan audit. This
-records the accountable authorization required by `RM §28`; it does not approve or
-activate the draft plan.
+records the accountable authorization required by `RM §28`. Execution approval:
+user/design owner Paul Heyse, 2026-08-27, by the explicit direction to implement
+this v2 plan even though the predecessor's final gate is not fully closed. That
+approval authorizes activation and sequencing only; it does not mark the
+predecessor gate complete or convert its unresolved semantic obligations into
+accepted evidence.
 
 ## 1. Outcome and non-goals
 
@@ -122,12 +126,13 @@ human acceptance checkpoint). Waves 0–7 are complete
 `complete` with trusted proving commits).
 
 Per `RM §0`, exactly one plan and one schema-current execution state may be mutable
-at a time. This plan is therefore `draft` and **inactive**: `activation_requires`
-names the remediation plan's M05 (accountable release and independent
-certification). Activation is the normal sealed handoff — `just plan-activate`
-creates the schema-2 state file and swaps the active pointer only after the
-predecessor freezes. WP01 of this plan revalidates the inherited surface before any
-product work, because the remediation plan's WP05/WP06/WP08 land on exactly the
+at a time. The original `activation_requires` names the remediation plan's M05
+(accountable release and independent certification). The 2026-08-27 execution
+approval authorizes a controlled sequencing exception: `just plan-activate`
+creates the schema-2 state file and atomically swaps the active pointer while the
+predecessor's unresolved Gate B obligations remain recorded and inherited. WP01
+of this plan revalidates that surface before any product work, because the
+remediation plan's WP05/WP06/WP08 land on exactly the
 files this plan extends (`src/pyrefly_service.rs`, `src/gate_b_candidate/vertical.rs`,
 `pyrefly-sidecar/src/server.rs`, `rustc-extractor/src/wrapper.rs`,
 `contracts/schema/provider-observations/`, `src/fabric/serving.rs`,
@@ -4599,8 +4604,10 @@ WP29→…→WP35 already serialize every known within-lane shared seam named by
 Execution state lives at
 `docs/plans/state/codefabric-waves-8-12-semantic-profiles_v2_state.json`
 (schema version 2, judgment fields only), created exclusively by
-`just plan-activate` after this plan reaches `approved` and the predecessor
-freezes. Proving commits are mandatory for `complete`; check outcomes are
+`just plan-activate` after this plan reaches `approved`. The normal predecessor
+freeze condition is superseded only by the explicit 2026-08-27 sequencing
+approval recorded above; the predecessor's unresolved obligations remain open.
+Proving commits are mandatory for `complete`; check outcomes are
 never stored — they re-derive via the named oracles and
 `just packet-oracle-check`. Deviations, failed approaches, discovered
 obligations, and blockers are recorded per packet as they occur.
