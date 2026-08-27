@@ -1,0 +1,402 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_waves_8-12_semantic_profiles_implementation_plan_v2_2026-08-26.md",
+  "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+  "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
+  "status": "executing",
+  "current_packet": "WP01",
+  "packets": {
+    "WP01": {
+      "status": "in_progress",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP36": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP06": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP07": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP08": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP09": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP38": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP10": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP11": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP12": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP13": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP14": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP15": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP16": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP17": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP18": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP19": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP20": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP21": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP22": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP23": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP24": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP25": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP26": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP27": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP28": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP29": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP30": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP31": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP32": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP33": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP34": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP37": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP35": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [
+    {
+      "command": "just model-handoff-check",
+      "fingerprint": "The historical Waves 4-7 handoff oracle rejected later design-input evolution and a fully completed successor because it still required the original incomplete-WP32 transition state.",
+      "disposition": "Resolved before activation by making the oracle validate both the original handoff boundary and the sealed historical successor state."
+    },
+    {
+      "command": "just artifacts-check && just plan-status",
+      "fingerprint": "The predecessor state used string-form top-level deviations and later Gate B work had removed WP06's four stable oracle entry points, leaving WP06 untrusted.",
+      "disposition": "Resolved before activation by structuring the judgments and restoring executable WP06 integrity oracles without treating them as semantic authority."
+    }
+  ],
+  "discovered_obligations": [
+    {
+      "kind": "inherited_gate_b_semantic_seam",
+      "source_plan": "codefabric-design-principles-full-alignment-review-remediation",
+      "owner_packet": "WP20",
+      "summary": "Expose and validate Rust typed-MIR call-target semantics through the canonical and public surfaces."
+    },
+    {
+      "kind": "inherited_gate_b_semantic_seam",
+      "source_plan": "codefabric-design-principles-full-alignment-review-remediation",
+      "owner_packet": "WP35",
+      "summary": "Expose functionally meaningful derived-path semantics with explicit completeness and negative-proof state."
+    },
+    {
+      "kind": "inherited_gate_b_semantic_seam",
+      "source_plan": "codefabric-design-principles-full-alignment-review-remediation",
+      "owner_packet": "WP29",
+      "summary": "Decode governed provenance owner and authority on canonical and public surfaces rather than inferring it from provider presence."
+    },
+    {
+      "kind": "inherited_gate_b_semantic_seam",
+      "source_plan": "codefabric-design-principles-full-alignment-review-remediation",
+      "owner_packet": "WP31",
+      "summary": "Exercise provider withdrawal through reconciliation, activation, and public capability aggregation."
+    },
+    {
+      "kind": "inherited_gate_b_semantic_seam",
+      "source_plan": "codefabric-design-principles-full-alignment-review-remediation",
+      "owner_packet": "WP33",
+      "summary": "Implement a closed-universe absence scenario whose completeness algebra can legitimately yield PROVEN_EMPTY."
+    },
+    {
+      "kind": "inherited_gate_b_semantic_seam",
+      "source_plan": "codefabric-design-principles-full-alignment-review-remediation",
+      "owner_packet": "WP33",
+      "summary": "Exercise production authorization redaction while preserving explicit authorization-excluded and completeness semantics."
+    }
+  ],
+  "plan_deviations": [
+    {
+      "kind": "explicit_sequencing_approval",
+      "summary": "The user/design owner explicitly authorized activating this successor on 2026-08-27 before predecessor M05 closure; the predecessor's six unsupported public semantic seams remain inherited obligations and are not accepted evidence."
+    },
+    {
+      "kind": "user_directed_validation_cadence",
+      "summary": "Each implementation item uses focused feature-specific validation. Repository-wide and wave integration gates run only at the conclusion of the owning wave."
+    },
+    {
+      "kind": "pre_activation_approval_transition",
+      "summary": "The user/design owner's execution direction moved the previously inactive draft v2 artifact to approved before the atomic activation transaction."
+    }
+  ],
+  "next_action": "Execute WP01 preflight against the current tree, then implement observation-schema regularization and the lane-neutral semantic contract substrate with focused WP01 checks.",
+  "updated_at": "2026-08-27T04:53:13Z"
+}
