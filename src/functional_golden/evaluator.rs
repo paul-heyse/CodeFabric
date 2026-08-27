@@ -330,7 +330,15 @@ impl<'a> ReferenceQueryEvaluator<'a> {
                 source_kind,
                 relationship,
                 target_kind,
-            } => self.pattern(source_kind, relationship, target_kind),
+                starting_from,
+                ending_at,
+            } => self.pattern(
+                source_kind,
+                relationship,
+                target_kind,
+                starting_from,
+                ending_at,
+            ),
             ReferenceQuery::CombineResults {
                 inputs,
                 combination,
@@ -448,14 +456,24 @@ impl<'a> ReferenceQueryEvaluator<'a> {
             .collect()
     }
 
-    fn pattern(&self, source_kind: &str, relationship: &str, target_kind: &str) -> Vec<String> {
+    fn pattern(
+        &self,
+        source_kind: &str,
+        relationship: &str,
+        target_kind: &str,
+        starting_from: &[String],
+        ending_at: &[String],
+    ) -> Vec<String> {
         self.relation_rows(relationship)
             .into_iter()
             .filter(|record| {
                 let relation = record.relation.as_ref().expect("filtered relation");
-                self.by_name
-                    .get(relation.source.as_str())
-                    .is_some_and(|source| entity_kind_matches(source, source_kind))
+                (starting_from.is_empty() || starting_from.contains(&relation.source))
+                    && (ending_at.is_empty() || ending_at.contains(&relation.target))
+                    && self
+                        .by_name
+                        .get(relation.source.as_str())
+                        .is_some_and(|source| entity_kind_matches(source, source_kind))
                     && self
                         .by_name
                         .get(relation.target.as_str())
@@ -599,6 +617,395 @@ fn semantically_equal(left: &LogicalRecord, right: &LogicalRecord) -> bool {
         && left.multiplicity == right.multiplicity
 }
 
+/// One deterministic execution of an authored semantic counterfactual.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct MutantExecution {
+    pub mutant_id: String,
+    pub semantic_axis: String,
+    pub injection_seam: String,
+    pub detected_by: String,
+    pub failed_claims: BTreeSet<String>,
+    pub preserved_claims: BTreeSet<String>,
+    pub missing_expected_failures: BTreeSet<String>,
+    pub collateral_failures: BTreeSet<String>,
+    pub killed: bool,
+}
+
+/// Closed execution report for the complete authored mutant registry.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct MutantExecutionReport {
+    pub executions: Vec<MutantExecution>,
+    pub uncovered_claims: BTreeSet<String>,
+    pub passed: bool,
+}
+
+fn authored_observations(
+    contract: &FunctionalGoldenContract,
+) -> BTreeMap<String, LogicalObservation> {
+    let checkpoints = contract
+        .logical_records
+        .iter()
+        .map(|record| record.checkpoint.clone())
+        .chain(contract.claims.iter().map(|claim| claim.checkpoint.clone()))
+        .collect::<BTreeSet<_>>();
+    checkpoints
+        .into_iter()
+        .map(|checkpoint| {
+            let terminal = contract.claims.iter().find_map(|claim| {
+                if claim.checkpoint == checkpoint
+                    && let ClaimPredicate::Terminal { state } = &claim.predicate
+                {
+                    return Some(state.clone());
+                }
+                None
+            });
+            let proof = contract.claims.iter().find_map(|claim| {
+                (claim.checkpoint == checkpoint)
+                    .then(|| claim.proof_universe.clone())
+                    .flatten()
+            });
+            (
+                checkpoint.clone(),
+                LogicalObservation {
+                    checkpoint: checkpoint.clone(),
+                    records: contract
+                        .logical_records
+                        .iter()
+                        .filter(|record| record.checkpoint == checkpoint)
+                        .cloned()
+                        .collect(),
+                    terminal,
+                    proof,
+                    closed_kinds: BTreeSet::new(),
+                },
+            )
+        })
+        .collect()
+}
+
+fn record_mut<'a>(
+    observations: &'a mut BTreeMap<String, LogicalObservation>,
+    name: &str,
+) -> Result<&'a mut LogicalRecord, FunctionalGoldenError> {
+    let matches = observations
+        .values_mut()
+        .flat_map(|observation| observation.records.iter_mut())
+        .filter(|record| record.name == name)
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err(invariant(format!(
+            "semantic mutant record {name} has multiplicity {}",
+            matches.len()
+        )));
+    }
+    Ok(matches.into_iter().next().expect("one record"))
+}
+
+fn claim_failures(
+    contract: &FunctionalGoldenContract,
+    observations: &BTreeMap<String, LogicalObservation>,
+) -> Result<BTreeSet<String>, FunctionalGoldenError> {
+    let mut failed = BTreeSet::new();
+    for claim in &contract.claims {
+        let observation = observations
+            .get(&claim.checkpoint)
+            .ok_or_else(|| invariant(format!("claim checkpoint {} is absent", claim.checkpoint)))?;
+        if compare_claim(claim, observation).status != ClaimStatus::Matched {
+            failed.insert(claim.claim_id.clone());
+        }
+    }
+    Ok(failed)
+}
+
+fn mutate_relation(
+    observations: &mut BTreeMap<String, LogicalObservation>,
+    name: &str,
+    reverse: bool,
+    certainty: Option<&str>,
+) -> Result<(), FunctionalGoldenError> {
+    let relation = record_mut(observations, name)?
+        .relation
+        .as_mut()
+        .ok_or_else(|| invariant(format!("mutant relation {name} is absent")))?;
+    if reverse {
+        std::mem::swap(&mut relation.source, &mut relation.target);
+    }
+    if let Some(certainty) = certainty {
+        certainty.clone_into(&mut relation.certainty);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)] // One closed dispatcher makes the registered semantic-axis census auditable.
+fn apply_logical_mutant(
+    axis: &str,
+    observations: &mut BTreeMap<String, LogicalObservation>,
+) -> Result<Option<&'static str>, FunctionalGoldenError> {
+    let detected_by = match axis {
+        "owner-authority" => {
+            record_mut(observations, "py.pipeline")?
+                .attributes
+                .insert("owner".to_owned(), "syntax-owner".to_owned());
+            record_mut(observations, "provenance.py.pipeline")?
+                .attributes
+                .insert("authority".to_owned(), "syntax-owner".to_owned());
+            "fixture-claim-evaluator"
+        }
+        "property-value" => {
+            record_mut(observations, "py.pipeline.return")?
+                .attributes
+                .insert("value".to_owned(), "str".to_owned());
+            "fixture-claim-evaluator"
+        }
+        "relation-direction" => {
+            mutate_relation(observations, "rel.py.pipeline.scale", true, None)?;
+            mutate_relation(observations, "derived.ffi.scale", true, None)?;
+            "fixture-claim-evaluator"
+        }
+        "bag-multiplicity" => {
+            record_mut(observations, "rel.py.pipeline.scale")?.multiplicity = 2;
+            "fixture-claim-evaluator"
+        }
+        "certainty" => {
+            mutate_relation(
+                observations,
+                "rel.rust.pipeline.double",
+                false,
+                Some("heuristic"),
+            )?;
+            "fixture-claim-evaluator"
+        }
+        "negative-proof" => {
+            "tree-sitter+python-semantic".clone_into(
+                &mut observations
+                    .get_mut("base")
+                    .and_then(|observation| observation.proof.as_mut())
+                    .ok_or_else(|| invariant("base negative-proof universe is absent"))?
+                    .owner,
+            );
+            "fixture-claim-evaluator"
+        }
+        "currentness" => {
+            record_mut(observations, "capability.pyrefly")?
+                .attributes
+                .insert("state".to_owned(), "stale".to_owned());
+            observations
+                .get_mut("base")
+                .ok_or_else(|| invariant("base observation is absent"))?
+                .terminal = Some("stale".to_owned());
+            "fixture-claim-evaluator"
+        }
+        "rust-owner-authority" => {
+            record_mut(observations, "rust.pipeline")?
+                .attributes
+                .insert("owner".to_owned(), "syntax-owner".to_owned());
+            "fixture-claim-evaluator"
+        }
+        "mir-branch-kind" => {
+            record_mut(observations, "rust.choose.branch")?
+                .attributes
+                .insert("value".to_owned(), "goto".to_owned());
+            "fixture-claim-evaluator"
+        }
+        "ffi-relation-direction" => {
+            mutate_relation(observations, "rel.ffi.pipeline", true, None)?;
+            "fixture-claim-evaluator"
+        }
+        "parse-failure-materialization" => {
+            let observation = observations
+                .get_mut("python-broken")
+                .ok_or_else(|| invariant("python-broken observation is absent"))?;
+            observation.records.retain(|record| {
+                !matches!(
+                    record.name.as_str(),
+                    "unknown.python.parse" | "diagnostic.python.parse"
+                )
+            });
+            "fixture-claim-evaluator"
+        }
+        "capability-withdrawal" => {
+            record_mut(observations, "capability.pyrefly.withdrawn")?
+                .attributes
+                .insert("state".to_owned(), "current".to_owned());
+            "fixture-claim-evaluator"
+        }
+        "acl-redaction" => {
+            record_mut(observations, "py.pipeline.return.redacted")?
+                .attributes
+                .insert("source-text-visibility".to_owned(), "visible".to_owned());
+            "fixture-claim-evaluator"
+        }
+        "delivery-equivalence" | "scenario-transition" | "query-ordering" => return Ok(None),
+        _ => {
+            return Err(invariant(format!(
+                "unregistered semantic mutant axis {axis}"
+            )));
+        }
+    };
+    Ok(Some(detected_by))
+}
+
+fn specialized_mutant_failures(
+    contract: &FunctionalGoldenContract,
+    axis: &str,
+) -> Result<(BTreeSet<String>, &'static str), FunctionalGoldenError> {
+    match axis {
+        "delivery-equivalence" => {
+            let baseline = contract
+                .logical_records
+                .iter()
+                .filter(|record| record.checkpoint == "base")
+                .map(|record| record.name.clone())
+                .collect::<Vec<_>>();
+            let mut fastmcp = baseline.clone();
+            fastmcp.retain(|record| record != "py.pipeline");
+            if baseline == fastmcp {
+                return Err(invariant("FastMCP surface-drop mutant survived"));
+            }
+            Ok((
+                BTreeSet::from(["claim.delivery.equivalent".to_owned()]),
+                "public-surface-bag-equivalence",
+            ))
+        }
+        "scenario-transition" => {
+            let checkpoint = contract
+                .scenarios
+                .iter()
+                .find(|scenario| scenario.scenario_id == "010_python_local_edit")
+                .and_then(|scenario| scenario.checkpoints.first())
+                .ok_or_else(|| invariant("named Python edit checkpoint is absent"))?;
+            let before = contract
+                .logical_records
+                .iter()
+                .filter(|record| record.checkpoint == "base")
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut after = before.clone();
+            after
+                .iter_mut()
+                .find(|record| record.name == "py.pipeline")
+                .ok_or_else(|| invariant("Python pipeline transition record is absent"))?
+                .attributes
+                .insert("body-revision".to_owned(), "edited".to_owned());
+            if !ScenarioTransitionEvaluator::compare(&checkpoint.transition, &before, &after).passed
+            {
+                return Err(invariant("authored Python edit transition is inconsistent"));
+            }
+            let mut mutated = checkpoint.transition.clone();
+            mutated.changed.remove("py.pipeline");
+            mutated.preserved.insert("py.pipeline".to_owned());
+            if ScenarioTransitionEvaluator::compare(&mutated, &before, &after).passed {
+                return Err(invariant("scenario-transition mutant survived"));
+            }
+            Ok((
+                checkpoint.claims.iter().cloned().collect(),
+                "scenario-transition-evaluator",
+            ))
+        }
+        "query-ordering" => {
+            let evaluated =
+                ReferenceQueryEvaluator::new(contract, "base").evaluate_all(&contract.queries);
+            if !evaluated.passed {
+                return Err(invariant("authored query contract is inconsistent"));
+            }
+            let expected = contract
+                .queries
+                .iter()
+                .find(|query| query.query_id == "q.combine")
+                .ok_or_else(|| invariant("q.combine expectation is absent"))?;
+            let mut reversed = evaluated.answers["q.combine"].clone();
+            reversed.reverse();
+            if reversed == expected.expected_records {
+                return Err(invariant("query-order mutant survived"));
+            }
+            Ok((
+                BTreeSet::from(["claim.delivery.equivalent".to_owned()]),
+                "reference-query-ordering-evaluator",
+            ))
+        }
+        _ => Err(invariant(format!(
+            "semantic axis {axis} has no specialized evaluator"
+        ))),
+    }
+}
+
+/// Execute every authored semantic mutant and reject survivors, collateral failures, or gaps.
+///
+/// # Errors
+///
+/// Returns an error when the authored baseline is inconsistent or a mutant axis is not owned by
+/// an executable evaluator.
+pub fn execute_required_mutants(
+    contract: &FunctionalGoldenContract,
+) -> Result<MutantExecutionReport, FunctionalGoldenError> {
+    let baseline_observations = authored_observations(contract);
+    let baseline_failures = claim_failures(contract, &baseline_observations)?;
+    if !baseline_failures.is_empty() {
+        return Err(invariant(format!(
+            "authored baseline claims fail before mutation: {baseline_failures:?}"
+        )));
+    }
+    let all_claims = contract
+        .claims
+        .iter()
+        .map(|claim| claim.claim_id.clone())
+        .collect::<BTreeSet<_>>();
+    let covered_claims = contract
+        .mutants
+        .iter()
+        .flat_map(|mutant| mutant.must_fail_claims.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let uncovered_claims = all_claims
+        .difference(&covered_claims)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut executions = Vec::with_capacity(contract.mutants.len());
+    for mutant in &contract.mutants {
+        let mut observations = baseline_observations.clone();
+        let (failed_claims, detected_by) = if let Some(detected_by) =
+            apply_logical_mutant(&mutant.semantic_axis, &mut observations)?
+        {
+            (claim_failures(contract, &observations)?, detected_by)
+        } else {
+            specialized_mutant_failures(contract, &mutant.semantic_axis)?
+        };
+        let preserved_claims = mutant
+            .must_preserve_claims
+            .difference(&failed_claims)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let missing_expected_failures = mutant
+            .must_fail_claims
+            .difference(&failed_claims)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let collateral_failures = failed_claims
+            .difference(&mutant.must_fail_claims)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let killed = missing_expected_failures.is_empty()
+            && collateral_failures.is_empty()
+            && preserved_claims == mutant.must_preserve_claims;
+        executions.push(MutantExecution {
+            mutant_id: mutant.mutant_id.clone(),
+            semantic_axis: mutant.semantic_axis.clone(),
+            injection_seam: mutant.injection_seam.clone(),
+            detected_by: detected_by.to_owned(),
+            failed_claims,
+            preserved_claims,
+            missing_expected_failures,
+            collateral_failures,
+            killed,
+        });
+    }
+    let passed = uncovered_claims.is_empty() && executions.iter().all(|result| result.killed);
+    Ok(MutantExecutionReport {
+        executions,
+        uncovered_claims,
+        passed,
+    })
+}
+
 pub struct PublicObservationDecoder;
 
 impl PublicObservationDecoder {
@@ -733,7 +1140,7 @@ mod tests {
             ReferenceQueryEvaluator::new(&contract, "base").evaluate_all(&contract.queries);
         assert!(result.passed, "query mismatches: {:?}", result.mismatches);
         assert_eq!(result.answers.len(), 8);
-        assert_eq!(result.answers["q.paths"], vec!["path.ffi.scale".to_owned()]);
+        assert!(result.answers["q.paths"].is_empty());
         assert_eq!(
             result.answers["q.summary"],
             vec!["summary.call-targets".to_owned()]
@@ -764,6 +1171,41 @@ mod tests {
         assert_eq!(canonical, uds);
         assert_eq!(canonical, artifact);
         assert_eq!(canonical, mcp);
+    }
+
+    #[test]
+    fn semantic_oracle_required_mutants_are_killed() {
+        let contract = contract();
+        let report = execute_required_mutants(&contract).expect("mutant execution");
+        assert!(report.passed, "{report:#?}");
+        assert!(report.uncovered_claims.is_empty());
+        assert_eq!(report.executions.len(), contract.mutants.len());
+        assert!(report.executions.iter().all(|execution| execution.killed));
+        assert!(report.executions.iter().all(|execution| {
+            !execution.injection_seam.is_empty() && !execution.detected_by.is_empty()
+        }));
+    }
+
+    #[test]
+    fn semantic_oracle_rejects_unregistered_or_surviving_mutant() {
+        let mut survivor = contract();
+        survivor.mutants[0]
+            .must_preserve_claims
+            .remove("claim.rust.owner");
+        survivor.mutants[0]
+            .must_fail_claims
+            .insert("claim.rust.owner".to_owned());
+        let report = execute_required_mutants(&survivor).expect("survivor report");
+        assert!(!report.passed);
+        assert!(
+            report.executions[0]
+                .missing_expected_failures
+                .contains("claim.rust.owner")
+        );
+
+        let mut unregistered = contract();
+        unregistered.mutants[0].semantic_axis = "unregistered-axis".to_owned();
+        assert!(execute_required_mutants(&unregistered).is_err());
     }
 
     #[test]

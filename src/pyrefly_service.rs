@@ -66,6 +66,8 @@ pub struct PyreflyRunRequest {
 pub struct AcceptedPyreflyModule {
     pub module_id: String,
     pub module_name: String,
+    pub canonical_file_id: [u8; 16],
+    pub source_bytes: Vec<u8>,
     pub arrow_ipc: Vec<u8>,
     pub batch: RecordBatch,
     pub schema_digest: String,
@@ -385,9 +387,42 @@ pub async fn analyze_pyrefly_uds(
                     .ok_or_else(|| {
                         PyreflyServiceError::Arrow("module_name is not UTF-8".to_owned())
                     })?;
+                let requested_module = request
+                    .modules
+                    .iter()
+                    .find(|module| module.module_id == event.module_id)
+                    .ok_or_else(|| {
+                        PyreflyServiceError::Protocol(
+                            "provider returned an unrequested module".to_owned(),
+                        )
+                    })?;
+                let canonical_file_id = crate::identity::decode_public_id(
+                    crate::identity::IdentityDomain::SourceFile,
+                    None,
+                    &requested_module.file_id,
+                )
+                .map_err(|_| {
+                    PyreflyServiceError::Invalid(
+                        "module file_id is not a canonical file identity".to_owned(),
+                    )
+                })?;
+                let source_bytes =
+                    std::fs::read(&requested_module.source_blob_path).map_err(|source| {
+                        PyreflyServiceError::Io {
+                            path: requested_module.source_blob_path.clone(),
+                            source,
+                        }
+                    })?;
+                if b3(&source_bytes) != requested_module.content_digest {
+                    return Err(PyreflyServiceError::Invalid(
+                        "module source changed after lease admission".to_owned(),
+                    ));
+                }
                 pending = Some(AcceptedPyreflyModule {
                     module_id: event.module_id,
                     module_name,
+                    canonical_file_id,
+                    source_bytes,
                     arrow_ipc: event.arrow_ipc,
                     batch,
                     schema_digest: event.schema_digest,

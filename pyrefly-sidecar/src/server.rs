@@ -252,9 +252,48 @@ impl PyreflySidecar for Service {
                     })),
                 }))
                 .await;
+            let inputs = start
+                .modules
+                .iter()
+                .map(|module| {
+                    validate_source(module, &context.lease).map(|source_path| {
+                        crate::pyrefly_link::ModuleInput {
+                            module_id: module.module_id.clone(),
+                            module_name: module.module_name.clone(),
+                            source_path,
+                        }
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>();
+            let inputs = match inputs {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    let _ = sender.send(Err(error)).await;
+                    return;
+                }
+            };
+            let analyses = match tokio::task::spawn_blocking(move || {
+                crate::pyrefly_link::analyze_modules(&inputs)
+            })
+            .await
+            {
+                Ok(Ok(analyses)) => analyses,
+                Ok(Err(error)) => {
+                    let _ = sender.send(Err(Status::internal(error))).await;
+                    return;
+                }
+                Err(error) => {
+                    let _ = sender
+                        .send(Err(Status::internal(format!(
+                            "Pyrefly analysis task failed: {error}"
+                        ))))
+                        .await;
+                    return;
+                }
+            };
             let mut sequence = 0_u64;
             let mut module_digests = Vec::new();
-            for module in &start.modules {
+            for (module, analysis) in start.modules.iter().zip(analyses) {
                 sequence += 1;
                 if sender
                     .send(Ok(AnalyzeEvent {
@@ -268,34 +307,14 @@ impl PyreflySidecar for Service {
                 {
                     return;
                 }
-                let path = match validate_source(module, &context.lease) {
-                    Ok(path) => path,
-                    Err(error) => {
-                        let _ = sender.send(Err(error)).await;
-                        return;
-                    }
-                };
-                let module_id = module.module_id.clone();
-                let module_name = module.module_name.clone();
-                let analysis = match tokio::task::spawn_blocking(move || {
-                    crate::pyrefly_link::analyze_module(&module_id, &module_name, &path)
-                })
-                .await
-                {
-                    Ok(Ok(analysis)) => analysis,
-                    Ok(Err(error)) => {
-                        let _ = sender.send(Err(Status::internal(error))).await;
-                        return;
-                    }
-                    Err(error) => {
-                        let _ = sender
-                            .send(Err(Status::internal(format!(
-                                "Pyrefly analysis task failed: {error}"
-                            ))))
-                            .await;
-                        return;
-                    }
-                };
+                if analysis.module_id != module.module_id {
+                    let _ = sender
+                        .send(Err(Status::internal(
+                            "Pyrefly module result order differs from the admitted request",
+                        )))
+                        .await;
+                    return;
+                }
                 sequence += 1;
                 let chunk_digest = b3(&analysis.arrow_ipc);
                 if sender

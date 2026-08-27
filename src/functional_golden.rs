@@ -17,8 +17,9 @@ mod evaluator;
 
 pub use evaluator::{
     ClaimResult, ClaimStatus, ComparisonReport, FixtureClaimEvaluator, LogicalObservation,
-    PublicObservationDecoder, QueryEvaluation, ReferenceQueryEvaluator,
-    ScenarioTransitionEvaluator, TransitionReport,
+    MutantExecution, MutantExecutionReport, PublicObservationDecoder, QueryEvaluation,
+    ReferenceQueryEvaluator, ScenarioTransitionEvaluator, TransitionReport,
+    execute_required_mutants,
 };
 
 /// Repository-relative root containing the authored functional authority.
@@ -274,6 +275,10 @@ pub enum ReferenceQuery {
         source_kind: String,
         relationship: String,
         target_kind: String,
+        #[serde(default)]
+        starting_from: Vec<String>,
+        #[serde(default)]
+        ending_at: Vec<String>,
     },
     CombineResults {
         inputs: Vec<String>,
@@ -373,6 +378,7 @@ pub struct SemanticMutant {
     pub mutant_id: String,
     pub semantic_axis: String,
     pub intervention: String,
+    pub injection_seam: String,
     pub must_fail_claims: BTreeSet<String>,
     pub must_preserve_claims: BTreeSet<String>,
 }
@@ -700,9 +706,11 @@ fn validate_mutants(
 ) -> Result<(), FunctionalGoldenError> {
     let mut mutant_ids = BTreeSet::new();
     let mut axes = BTreeSet::new();
+    let mut covered_claims = BTreeSet::new();
     for mutant in mutants {
         if !mutant_ids.insert(mutant.mutant_id.as_str())
             || !axes.insert(mutant.semantic_axis.as_str())
+            || mutant.injection_seam.trim().is_empty()
             || mutant.must_fail_claims.is_empty()
             || mutant
                 .must_fail_claims
@@ -715,11 +723,19 @@ fn validate_mutants(
                 mutant.mutant_id
             )));
         }
+        covered_claims.extend(mutant.must_fail_claims.iter().cloned());
     }
     if axes.len() < 8 {
         return Err(invariant(
             "semantic mutant registry covers fewer than eight axes",
         ));
+    }
+    if &covered_claims != claim_ids {
+        return Err(invariant(format!(
+            "semantic mutant claim coverage differs: missing={:?}, unexpected={:?}",
+            claim_ids.difference(&covered_claims).collect::<Vec<_>>(),
+            covered_claims.difference(claim_ids).collect::<Vec<_>>()
+        )));
     }
     Ok(())
 }

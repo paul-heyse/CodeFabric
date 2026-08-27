@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use arrow_array::{Array as _, BinaryArray, BooleanArray, ListArray, StringArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
+use serde::Deserialize;
 use thiserror::Error;
 
 use crate::cancellation::Cancellation;
@@ -21,12 +22,13 @@ use crate::fabric::{
 use crate::fact_ingest::{
     CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow, EntityRow,
     FactEvidenceRow, FactIngestError, FactScope, OwnerRow, PropertyFactRow, PropertyValue,
-    ProviderFactBatch, ProviderFactManifest, ProviderFactStream, StreamTerminal,
+    ProviderFactBatch, ProviderFactManifest, ProviderFactStream, RelationRow, StreamTerminal,
     decode_validated_arrow_ipc_chunks, encode_capability_statuses, encode_entities,
     encode_evidence, encode_owners, encode_properties, encode_relations,
 };
 use crate::identity::{
-    semantic_entity_identity, semantic_owner_identity, text_property_fact_identity,
+    SourceRelationIdentityInput, semantic_entity_identity, semantic_owner_identity,
+    source_relation_identity, text_property_fact_identity,
 };
 use crate::model_generated::schema_tables::{
     PROVIDER_OBSERVATION_SCHEMAS, ProviderObservationLogicalType, ProviderObservationSchema,
@@ -38,7 +40,7 @@ use crate::pyrefly_service::AcceptedPyreflyRun;
 use crate::registries::{
     CAPABILITY_IDS, Completeness, Directness, EvidenceCertainty, Language, OwnerCapabilityState,
     OwnerKind, ProviderCode, ProviderObservationFamily, ResolutionClass, UNKNOWN_IDS,
-    capability_code, capability_mask, entity_kind, property_kind,
+    capability_code, capability_mask, entity_kind, property_kind, relation_kind,
 };
 use crate::ruff_adapter::RuffSnapshot;
 use crate::ruff_adapter::{RuffAdapter, RuffAdapterError};
@@ -564,6 +566,35 @@ impl ProviderDispositionCensus {
 #[derive(Clone, Debug, Default)]
 pub struct CoreFactEngine {
     reconciliation: CanonicalReconciliationEngine,
+}
+
+#[derive(Debug, Deserialize)]
+struct PyreflyLocation {
+    start_line: u64,
+    start_col: u64,
+    end_line: u64,
+    end_col: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PyreflyCallee {
+    kind: String,
+    target: String,
+    range: PyreflyLocation,
+}
+
+fn pyrefly_byte_offset(source: &[u8], line: u64, column: u64) -> Option<i64> {
+    let line_index = usize::try_from(line.checked_sub(1)?).ok()?;
+    let column = usize::try_from(column).ok()?;
+    let start = source
+        .split_inclusive(|byte| *byte == b'\n')
+        .take(line_index)
+        .map(<[u8]>::len)
+        .sum::<usize>();
+    let line_bytes = source.get(start..)?.split(|byte| *byte == b'\n').next()?;
+    (column <= line_bytes.len())
+        .then(|| i64::try_from(start.checked_add(column)?).ok())
+        .flatten()
 }
 
 /// Complete, application-owned result of the in-process Wave-4 source lane.
@@ -1115,12 +1146,25 @@ impl CoreFactEngine {
             .map_err(|_| FactIngestError::Protocol("NAME code is invalid".into()))?;
         let qualified_name_property_code = u16::try_from(qualified_name_property.code)
             .map_err(|_| FactIngestError::Protocol("QUALIFIED_NAME code is invalid".into()))?;
+        let callable_kind = entity_kind("CALLABLE")
+            .ok_or_else(|| FactIngestError::Protocol("CALLABLE allocation is absent".into()))?;
+        let call_site_kind = entity_kind("CALL_SITE")
+            .ok_or_else(|| FactIngestError::Protocol("CALL_SITE allocation is absent".into()))?;
+        let calls_kind = relation_kind("CALLS")
+            .ok_or_else(|| FactIngestError::Protocol("CALLS allocation is absent".into()))?;
+        let callable_code = u16::try_from(callable_kind.code)
+            .map_err(|_| FactIngestError::Protocol("CALLABLE code is invalid".into()))?;
+        let call_site_code = u16::try_from(call_site_kind.code)
+            .map_err(|_| FactIngestError::Protocol("CALL_SITE code is invalid".into()))?;
         let entity_form = crate::registries::fact_kind_code("ENTITY_EXISTENCE")
             .and_then(|code| i16::try_from(code).ok())
             .ok_or_else(|| FactIngestError::Protocol("entity fact form is absent".into()))?;
         let property_form = crate::registries::fact_kind_code("PROPERTY")
             .and_then(|code| i16::try_from(code).ok())
             .ok_or_else(|| FactIngestError::Protocol("property fact form is absent".into()))?;
+        let relation_form = crate::registries::fact_kind_code("RELATION")
+            .and_then(|code| i16::try_from(code).ok())
+            .ok_or_else(|| FactIngestError::Protocol("relation fact form is absent".into()))?;
         let precedence = BTreeMap::from([(provider_code, 0)]);
         let mut outputs = Vec::with_capacity(run.modules.len());
         for module in &run.modules {
@@ -1146,6 +1190,14 @@ impl CoreFactEngine {
                 .ok_or_else(|| {
                     FactIngestError::Protocol("Pyrefly diagnostics_json is absent".into())
                 })?;
+            let callees_bytes = module
+                .batch
+                .column_by_name("callees_json")
+                .and_then(|array| array.as_any().downcast_ref::<BinaryArray>())
+                .map(|array| array.value(0))
+                .ok_or_else(|| {
+                    FactIngestError::Protocol("Pyrefly callees_json is absent".into())
+                })?;
             if observed_id != module.module_id {
                 return Err(FactIngestError::Protocol(
                     "Pyrefly application DTO module identity differs".into(),
@@ -1155,6 +1207,12 @@ impl CoreFactEngine {
             let _: serde_json::Value = serde_json::from_slice(type_table_bytes).map_err(|_| {
                 FactIngestError::Protocol("Pyrefly type table is not valid JSON".into())
             })?;
+            let callees: Vec<PyreflyCallee> =
+                serde_json::from_slice(callees_bytes).map_err(|_| {
+                    FactIngestError::Protocol(
+                        "Pyrefly callees are not valid application DTOs".into(),
+                    )
+                })?;
             let diagnostics: serde_json::Value = serde_json::from_slice(diagnostics_bytes)
                 .map_err(|_| {
                     FactIngestError::Protocol("Pyrefly diagnostics are not valid JSON".into())
@@ -1206,14 +1264,14 @@ impl CoreFactEngine {
                 &module.module_name,
             )
             .map_err(FactIngestError::from)?;
-            let entity = EntityRow {
+            let mut entities = vec![EntityRow {
                 scope,
                 entity_id: entity_identity.id,
                 language: Language::Python as i16,
                 entity_family_code: module_kind.family_code,
                 entity_kind_code: module_kind.code,
                 raw_kind_code: None,
-                file_id: None,
+                file_id: Some(module.canonical_file_id),
                 start_byte: None,
                 end_byte: None,
                 name: Some(module.module_name.clone()),
@@ -1222,8 +1280,8 @@ impl CoreFactEngine {
                 type_id: None,
                 flags: 0,
                 fact_hash64: digest_hash64(entity_identity.full_digest),
-            };
-            let properties = vec![
+            }];
+            let mut properties = vec![
                 PropertyFactRow {
                     scope,
                     fact_id: name_identity.id,
@@ -1236,7 +1294,7 @@ impl CoreFactEngine {
                     resolution_code: ResolutionClass::Exact as i16,
                     producer_code: provider_code,
                     derivation_code: None,
-                    file_id: None,
+                    file_id: Some(module.canonical_file_id),
                     start_byte: None,
                     end_byte: None,
                     fact_hash64: digest_hash64(name_identity.full_digest),
@@ -1253,7 +1311,7 @@ impl CoreFactEngine {
                     resolution_code: ResolutionClass::StaticallyResolved as i16,
                     producer_code: provider_code,
                     derivation_code: None,
-                    file_id: None,
+                    file_id: Some(module.canonical_file_id),
                     start_byte: None,
                     end_byte: None,
                     fact_hash64: digest_hash64(qualified_name_identity.full_digest),
@@ -1281,7 +1339,7 @@ impl CoreFactEngine {
                 name_identity.id,
                 qualified_name_identity.id,
             ];
-            let evidence = observation_ids
+            let mut evidence = observation_ids
                 .into_iter()
                 .zip(fact_ids)
                 .enumerate()
@@ -1303,7 +1361,7 @@ impl CoreFactEngine {
                     provider_run_id,
                     observation_id,
                     raw_kind_code: None,
-                    file_id: None,
+                    file_id: Some(module.canonical_file_id),
                     start_byte: None,
                     end_byte: None,
                     certainty_code: EvidenceCertainty::StaticSemantic as i16,
@@ -1312,6 +1370,226 @@ impl CoreFactEngine {
                     cold_payload: (index == 0).then(|| module.arrow_ipc.clone()),
                 })
                 .collect::<Vec<_>>();
+            let mut relations = Vec::new();
+            let mut targets = BTreeMap::<String, [u8; 16]>::new();
+            if !has_diagnostics {
+                for (ordinal, callee) in callees.iter().enumerate() {
+                    if callee.kind != "function" || callee.target.trim().is_empty() {
+                        continue;
+                    }
+                    let target_identity = if let Some(identity) = targets.get(&callee.target) {
+                        *identity
+                    } else {
+                        let identity = semantic_entity_identity(
+                            scope.workspace_id,
+                            scope.analysis_context_id,
+                            callable_code,
+                            scope.owner_id,
+                            callee.target.as_bytes().to_vec(),
+                        )
+                        .map_err(FactIngestError::from)?;
+                        let short_name = callee
+                            .target
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or(callee.target.as_str())
+                            .to_owned();
+                        entities.push(EntityRow {
+                            scope,
+                            entity_id: identity.id,
+                            language: Language::Python as i16,
+                            entity_family_code: callable_kind.family_code,
+                            entity_kind_code: callable_kind.code,
+                            raw_kind_code: None,
+                            file_id: None,
+                            start_byte: None,
+                            end_byte: None,
+                            name: Some(short_name.clone()),
+                            qualified_name: Some(callee.target.clone()),
+                            parent_entity_id: None,
+                            type_id: None,
+                            flags: 0,
+                            fact_hash64: digest_hash64(identity.full_digest),
+                        });
+                        for (kind, code, value, suffix) in [
+                            (name_property, name_property_code, short_name, "name"),
+                            (
+                                qualified_name_property,
+                                qualified_name_property_code,
+                                callee.target.clone(),
+                                "qualified-name",
+                            ),
+                        ] {
+                            let property_identity = text_property_fact_identity(
+                                scope.workspace_id,
+                                scope.analysis_context_id,
+                                code,
+                                identity.id,
+                                &value,
+                            )
+                            .map_err(FactIngestError::from)?;
+                            properties.push(PropertyFactRow {
+                                scope,
+                                fact_id: property_identity.id,
+                                subject_entity_id: identity.id,
+                                property_kind_code: kind.code,
+                                program_point_entity_id: None,
+                                value: PropertyValue::Text(value),
+                                directness_code: Directness::Direct as i16,
+                                certainty_code: EvidenceCertainty::StaticSemantic as i16,
+                                resolution_code: ResolutionClass::StaticallyResolved as i16,
+                                producer_code: provider_code,
+                                derivation_code: None,
+                                file_id: None,
+                                start_byte: None,
+                                end_byte: None,
+                                fact_hash64: digest_hash64(property_identity.full_digest),
+                            });
+                            let observation_id = stable_id16(
+                                format!(
+                                    "{}\0target:{suffix}:{}",
+                                    module.chunk_digest, callee.target
+                                )
+                                .as_bytes(),
+                            );
+                            evidence.push(FactEvidenceRow {
+                                evidence_id: crate::identity::fact_evidence_id(
+                                    provider_run_id,
+                                    observation_id,
+                                    property_identity.id,
+                                ),
+                                scope,
+                                fact_id: property_identity.id,
+                                fact_form_code: property_form,
+                                provider_code,
+                                provider_version: provider_version.to_owned(),
+                                provider_run_id,
+                                observation_id,
+                                raw_kind_code: None,
+                                file_id: None,
+                                start_byte: None,
+                                end_byte: None,
+                                certainty_code: EvidenceCertainty::StaticSemantic as i16,
+                                resolution_code: ResolutionClass::StaticallyResolved as i16,
+                                conflict_disposition_code: 10,
+                                cold_payload: None,
+                            });
+                        }
+                        targets.insert(callee.target.clone(), identity.id);
+                        identity.id
+                    };
+                    let location = format!(
+                        "{}:{}:{}-{}:{}",
+                        module.module_name,
+                        callee.range.start_line,
+                        callee.range.start_col,
+                        callee.range.end_line,
+                        callee.range.end_col
+                    );
+                    let start_byte = pyrefly_byte_offset(
+                        &module.source_bytes,
+                        callee.range.start_line,
+                        callee.range.start_col,
+                    );
+                    let end_byte = pyrefly_byte_offset(
+                        &module.source_bytes,
+                        callee.range.end_line,
+                        callee.range.end_col,
+                    );
+                    if !matches!((start_byte, end_byte), (Some(start), Some(end)) if start <= end) {
+                        return Err(FactIngestError::Protocol(
+                            "Pyrefly callee range is outside immutable source bytes".into(),
+                        )
+                        .into());
+                    }
+                    let call_site_identity = semantic_entity_identity(
+                        scope.workspace_id,
+                        scope.analysis_context_id,
+                        call_site_code,
+                        scope.owner_id,
+                        location.as_bytes().to_vec(),
+                    )
+                    .map_err(FactIngestError::from)?;
+                    entities.push(EntityRow {
+                        scope,
+                        entity_id: call_site_identity.id,
+                        language: Language::Python as i16,
+                        entity_family_code: call_site_kind.family_code,
+                        entity_kind_code: call_site_kind.code,
+                        raw_kind_code: None,
+                        file_id: Some(module.canonical_file_id),
+                        start_byte,
+                        end_byte,
+                        name: Some(location),
+                        qualified_name: None,
+                        parent_entity_id: Some(entity_identity.id),
+                        type_id: None,
+                        flags: 0,
+                        fact_hash64: digest_hash64(call_site_identity.full_digest),
+                    });
+                    let ordinal = u32::try_from(ordinal).map_err(|_| {
+                        FactIngestError::Protocol("Pyrefly callee ordinal exceeds u32".into())
+                    })?;
+                    let relation_identity = source_relation_identity(SourceRelationIdentityInput {
+                        workspace_id: scope.workspace_id,
+                        owner_id: scope.owner_id,
+                        relation_kind_code: calls_kind.code,
+                        source_id: call_site_identity.id,
+                        target_id: target_identity,
+                        ordinal: Some(ordinal),
+                        role_code: None,
+                    })
+                    .map_err(FactIngestError::from)?;
+                    relations.push(RelationRow {
+                        scope,
+                        fact_id: relation_identity.id,
+                        language: Language::Python as i16,
+                        relation_family_code: calls_kind.family_code,
+                        relation_kind_code: calls_kind.code,
+                        source_id: call_site_identity.id,
+                        target_id: target_identity,
+                        ordinal: i32::try_from(ordinal).ok(),
+                        role_code: None,
+                        distance: Some(1),
+                        directness_code: Directness::Direct as i16,
+                        file_id: Some(module.canonical_file_id),
+                        start_byte,
+                        end_byte,
+                        certainty_code: EvidenceCertainty::StaticSemantic as i16,
+                        resolution_code: ResolutionClass::StaticallyResolved as i16,
+                        producer_code: provider_code,
+                        derivation_code: None,
+                        flags: 0,
+                        fact_hash64: digest_hash64(relation_identity.full_digest),
+                    });
+                    let observation_id = stable_id16(
+                        format!("{}\0call:{ordinal}:{}", module.chunk_digest, callee.target)
+                            .as_bytes(),
+                    );
+                    evidence.push(FactEvidenceRow {
+                        evidence_id: crate::identity::fact_evidence_id(
+                            provider_run_id,
+                            observation_id,
+                            relation_identity.id,
+                        ),
+                        scope,
+                        fact_id: relation_identity.id,
+                        fact_form_code: relation_form,
+                        provider_code,
+                        provider_version: provider_version.to_owned(),
+                        provider_run_id,
+                        observation_id,
+                        raw_kind_code: None,
+                        file_id: Some(module.canonical_file_id),
+                        start_byte,
+                        end_byte,
+                        certainty_code: EvidenceCertainty::StaticSemantic as i16,
+                        resolution_code: ResolutionClass::StaticallyResolved as i16,
+                        conflict_disposition_code: 10,
+                        cold_payload: None,
+                    });
+                }
+            }
             let capability_rows = run
                 .capability_codes
                 .iter()
@@ -1386,11 +1664,11 @@ impl CoreFactEngine {
                 },
                 ProviderFactBatch {
                     table_code: 100,
-                    batch: encode_entities(&[entity])?,
+                    batch: encode_entities(&entities)?,
                 },
                 ProviderFactBatch {
                     table_code: 110,
-                    batch: encode_relations(&[])?,
+                    batch: encode_relations(&relations)?,
                 },
                 ProviderFactBatch {
                     table_code: 120,

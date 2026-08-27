@@ -2,14 +2,18 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+use std::io::Cursor;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use arrow::array::{Array as _, Int16Array};
+use arrow::array::{
+    Array as _, BinaryArray, FixedSizeBinaryArray, Int16Array, Int32Array, ListArray, StringArray,
+};
+use arrow::ipc::reader::StreamReader;
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -28,9 +32,11 @@ use crate::fabric::{
     SnapshotOverlayProviderFactory as _, bootstrap_workspace,
 };
 use crate::lifecycle::CanonicalState;
-use crate::pyrefly_service::{PyreflyModuleInput, PyreflyRunRequest, analyze_pyrefly_uds};
+use crate::provider_runtime::fixture::{ProviderSourceBlob, run_pyrefly, run_rustc};
 use crate::query_service::WorkspaceQueryBackend;
-use crate::registries::{Completeness, CpgdFeatureMask, OwnerCapabilityState, SnapshotLeaseKind};
+use crate::registries::{
+    Completeness, CpgdFeatureMask, Language, OwnerCapabilityState, SnapshotLeaseKind,
+};
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_client::CpgQueryServiceClient;
 use crate::rpc::generated::codefabric::cpgd::v1::query_event::Event;
 use crate::rpc::generated::codefabric::cpgd::v1::{
@@ -38,10 +44,7 @@ use crate::rpc::generated::codefabric::cpgd::v1::{
     PayloadCompression, QueryEventHeader, ReadResultRequest, StartQueryRequest, StreamQueryRequest,
     VersionRange, WorkspaceClaim, WorkspaceReadiness,
 };
-use crate::rustc_service::{
-    AcceptedRustcCompilation, RustcObservationService, RustcProtocolPolicy, RustcRunAdmission,
-    serve_rustc_uds,
-};
+use crate::rustc_service::AcceptedRustcCompilation;
 use crate::snapshot::{
     ServingSnapshotManifestBody, SnapshotBasePublication, SnapshotBundles, SnapshotContextRecord,
     SnapshotContexts, SnapshotIndexes, SnapshotOverlay, SnapshotSource,
@@ -62,27 +65,58 @@ pub(super) struct VerticalExecution {
     pub execution_digest: String,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ProviderSourceBlob {
-    pub path: PathBuf,
-    pub content_digest: String,
+/// Named interventions applied at the input side of a producing or public seam.
+///
+/// These are deliberately part of the real Gate B vertical instead of mutations of the final
+/// evidence JSON. Each variant changes an input consumed by the named subsystem, so a killed
+/// intervention demonstrates causal sensitivity rather than comparator sensitivity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CausalIntervention {
+    PyreflySourceAdmission,
+    ReconciliationAuthority,
+    DeltaPublication,
+    SnapshotActivation,
+    ArtifactPersistence,
+    ArtifactReadback,
+    FastMcpAdaptation,
 }
 
-struct ChildGuard(Child);
+fn intervention_is(intervention: Option<CausalIntervention>, expected: CausalIntervention) -> bool {
+    intervention == Some(expected)
+}
+
 static SHORT_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct DirectoryGuard(PathBuf);
 
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
+struct DirectoryPermissionGuard {
+    path: PathBuf,
+    original: fs::Permissions,
 }
 
 impl Drop for DirectoryGuard {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+impl DirectoryPermissionGuard {
+    fn deny_writes(path: &Path) -> Result<Self, GateBCandidateError> {
+        let metadata = fs::metadata(path)?;
+        let original = metadata.permissions();
+        let mut denied = original.clone();
+        denied.set_mode(0o500);
+        fs::set_permissions(path, denied)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            original,
+        })
+    }
+}
+
+impl Drop for DirectoryPermissionGuard {
+    fn drop(&mut self) {
+        let _ = fs::set_permissions(&self.path, self.original.clone());
     }
 }
 
@@ -100,269 +134,264 @@ fn digest(bytes: &[u8]) -> String {
     crate::integrity::framed_digest(bytes)
 }
 
-async fn wait_for_socket(path: &Path) -> Result<(), GateBCandidateError> {
-    for _ in 0..500 {
-        if path.exists() {
-            return Ok(());
+fn normalize_review_numbers(value: &mut Value) {
+    const MAXIMUM_INTEROPERABLE_INTEGER: u64 = 9_007_199_254_740_991;
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                normalize_review_numbers(value);
+            }
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Value::Object(values) => {
+            for value in values.values_mut() {
+                normalize_review_numbers(value);
+            }
+        }
+        Value::Number(number)
+            if number
+                .as_u64()
+                .is_some_and(|value| value > MAXIMUM_INTEROPERABLE_INTEGER)
+                || number.as_i64().is_some_and(|value| {
+                    value < -i64::try_from(MAXIMUM_INTEROPERABLE_INTEGER).unwrap_or(i64::MAX)
+                }) =>
+        {
+            *value = Value::String(number.to_string());
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
-    Err(invariant(format!(
-        "provider socket did not appear at {}",
-        path.display()
-    )))
 }
 
-fn provider_binary(repository_root: &Path, relative: &str) -> Result<PathBuf, GateBCandidateError> {
-    let path = repository_root.join(relative);
-    if !path.is_file() {
-        return Err(invariant(format!(
-            "required Gate B provider binary is absent at {}; run the provider gate first",
-            path.display()
-        )));
-    }
-    Ok(path)
-}
-
-pub(crate) async fn run_pyrefly(
-    repository_root: &Path,
-    state_root: &Path,
-    workspace_id: [u8; 16],
-    analysis_context_id: [u8; 16],
-    source_generation: u64,
-    source: &ProviderSourceBlob,
-    invalid_source: &ProviderSourceBlob,
-) -> Result<crate::pyrefly_service::AcceptedPyreflyRun, GateBCandidateError> {
-    let binary = provider_binary(repository_root, "target/debug/codefabric-pyrefly-sidecar")?;
-    let socket = state_root.join("pyrefly.sock");
-    let child = Command::new(binary)
-        .arg("--serve")
-        .env(
-            "CODEFABRIC_PYREFLY_ENDPOINT",
-            format!("unix://{}", socket.display()),
-        )
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let _guard = ChildGuard(child);
-    wait_for_socket(&socket).await?;
-    let workspace_id_text =
-        encode_public_id(IdentityDomain::Workspace, None, workspace_id).map_err(invariant)?;
-    let context_id_text =
-        encode_public_id(IdentityDomain::AnalysisContext, None, analysis_context_id)
-            .map_err(invariant)?;
-    let context_manifest = b"{\"language\":\"python\",\"profile\":\"PYTHON_SEMANTIC_V1\"}".to_vec();
-    let source_manifest_digest = digest(
-        format!(
-            "{}:{}",
-            source.content_digest, invalid_source.content_digest
-        )
-        .as_bytes(),
-    );
-    let request = PyreflyRunRequest {
-        provider_run_id: "run:gate-b-pyrefly".to_owned(),
-        workspace_id: workspace_id_text,
-        analysis_context_id: context_id_text,
-        canonical_workspace_id: workspace_id,
-        canonical_analysis_context_id: analysis_context_id,
-        source_generation,
-        context_manifest,
-        source_snapshot_lease_id: "lease:gate-b-pyrefly".to_owned(),
-        source_manifest_digest,
-        modules: vec![
-            PyreflyModuleInput {
-                module_id: "module:gate-b-python".to_owned(),
-                module_name: "golden_pkg.core".to_owned(),
-                file_id: "file:gate-b-python".to_owned(),
-                source_blob_path: source.path.clone(),
-                content_digest: source.content_digest.clone(),
-            },
-            PyreflyModuleInput {
-                module_id: "module:gate-b-python-invalid".to_owned(),
-                module_name: "malformed.broken".to_owned(),
-                file_id: "file:gate-b-python-invalid".to_owned(),
-                source_blob_path: invalid_source.path.clone(),
-                content_digest: invalid_source.content_digest.clone(),
-            },
-        ],
-        requested_capability_codes: vec![90, 110],
-        deadline_unix_ms: now_millis() + 120_000,
-        output_schema_bundle_digest: digest(include_bytes!(
-            "../../contracts/schema/schema-contract-ir.json"
-        )),
-    };
-    analyze_pyrefly_uds(&socket, &request)
-        .await
-        .map_err(invariant)
-}
-
-fn extractor_environment(
-    command: &mut Command,
-    socket: &Path,
-    workspace_id: &str,
-    context_id: &str,
-    source_generation: u64,
-) {
-    let fixed_digest = digest(b"gate-b-rustc-fixture");
-    command
-        .env(
-            "CODEFABRIC_EXTRACTOR_ENDPOINT",
-            format!("unix://{}", socket.display()),
-        )
-        .env("CODEFABRIC_PROVIDER_RUN_ID", "run:gate-b-rustc")
-        .env("CODEFABRIC_WORKSPACE_ID", workspace_id)
-        .env("CODEFABRIC_ANALYSIS_CONTEXT_ID", context_id)
-        .env(
-            "CODEFABRIC_SOURCE_GENERATION",
-            source_generation.to_string(),
-        )
-        .env("CODEFABRIC_CONTEXT_MANIFEST_DIGEST", &fixed_digest)
-        .env(
-            "CODEFABRIC_PROVIDER_RESOURCE_PROFILE_ID",
-            "compiler-semantic-standard",
-        )
-        .env("CODEFABRIC_SOURCE_SNAPSHOT_MANIFEST_DIGEST", &fixed_digest)
-        .env("CODEFABRIC_CARGO_METADATA_DIGEST", &fixed_digest)
-        .env("CODEFABRIC_CARGO_LOCK_DIGEST", &fixed_digest)
-        .env("CODEFABRIC_CARGO_CONFIG_DIGEST", &fixed_digest);
-}
-
-#[allow(clippy::too_many_lines)] // One compiler transaction keeps invocation, stream, and terminal validation ordered.
-pub(crate) async fn run_rustc(
-    repository_root: &Path,
-    state_root: &Path,
-    source: &ProviderSourceBlob,
-    workspace_id: [u8; 16],
-    analysis_context_id: [u8; 16],
-    source_generation: u64,
-) -> Result<AcceptedRustcCompilation, GateBCandidateError> {
-    provider_binary(
-        repository_root,
-        "target/extractor/debug/codefabric-rustc-extractor",
-    )?;
-    let identity_bytes =
-        read_candidate_input(&repository_root.join("rustc-extractor/toolchain-identity.json"))?;
-    let identity: Value = serde_json::from_slice(&identity_bytes)?;
-    let workspace_id_text =
-        encode_public_id(IdentityDomain::Workspace, None, workspace_id).map_err(invariant)?;
-    let context_id_text =
-        encode_public_id(IdentityDomain::AnalysisContext, None, analysis_context_id)
-            .map_err(invariant)?;
-    let fixed_digest = digest(b"gate-b-rustc-fixture");
-    let policy = RustcProtocolPolicy {
-        daemon_build: "codefabricd-gate-b".to_owned(),
-        output_schema_bundle_digest: digest(include_bytes!(
-            "../../contracts/schema/schema-contract-ir.json"
-        )),
-        sandbox_profile_digest: fixed_digest.clone(),
-        extractor_build: identity["extractor"]
-            .as_str()
-            .ok_or_else(|| invariant("extractor identity is absent"))?
-            .to_owned(),
-        rustc_version: identity["rustc_release"]
-            .as_str()
-            .ok_or_else(|| invariant("rustc release is absent"))?
-            .to_owned(),
-        rustc_commit: identity["rustc_commit_hash"]
-            .as_str()
-            .ok_or_else(|| invariant("rustc commit is absent"))?
-            .to_owned(),
-        toolchain_identity_digest: digest(&identity_bytes),
-        supported_feature_bits: 0,
-        provider_deadline_unix_ms: now_millis() + 120_000,
-    };
-    let admission = RustcRunAdmission {
-        provider_run_id: "run:gate-b-rustc".to_owned(),
-        workspace_id: workspace_id_text.clone(),
-        analysis_context_id: context_id_text.clone(),
-        canonical_workspace_id: workspace_id,
-        canonical_analysis_context_id: analysis_context_id,
-        source_generation,
-        context_manifest_digest: fixed_digest.clone(),
-        source_snapshot_manifest_digest: fixed_digest,
-        resource_profile_id: "compiler-semantic-standard".to_owned(),
-    };
-    let (service, mut accepted) =
-        RustcObservationService::new(policy, admission).map_err(invariant)?;
-    let socket = state_root.join("rustc.sock");
-    let allowed_uid = fs::metadata(state_root)?.uid();
-    let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
-    let server_socket = socket.clone();
-    let server = tokio::spawn(async move {
-        serve_rustc_uds(&server_socket, allowed_uid, service, async {
-            let _ = shutdown_receiver.await;
+fn decoded_pyrefly_observations(
+    run: &crate::pyrefly_service::AcceptedPyreflyRun,
+) -> Result<Vec<Value>, GateBCandidateError> {
+    run.modules
+        .iter()
+        .map(|module| {
+            let decode = |column: &str| -> Result<Value, GateBCandidateError> {
+                let bytes = module
+                    .batch
+                    .column_by_name(column)
+                    .and_then(|array| array.as_any().downcast_ref::<BinaryArray>())
+                    .map(|array| array.value(0))
+                    .ok_or_else(|| invariant(format!("Pyrefly {column} is absent")))?;
+                let mut value: Value =
+                    serde_json::from_slice(bytes).map_err(GateBCandidateError::from)?;
+                normalize_review_numbers(&mut value);
+                Ok(value)
+            };
+            Ok(json!({
+                "module_name": module.module_name,
+                "type_table": decode("type_table_json")?,
+                "callees": decode("callees_json")?,
+                "diagnostics": decode("diagnostics_json")?,
+            }))
         })
-        .await
-    });
-    wait_for_socket(&socket).await?;
-    let wrapper = repository_root.join("scripts/run_rustc_extractor.sh");
-    if !source.path.is_file() {
-        return Err(invariant(
-            "Gate B rustc fixture has no immutable source blob",
-        ));
-    }
-    let source = source.path.clone();
-    let output_directory = state_root.join("rust-output");
-    fs::create_dir(&output_directory)?;
-    let status = tokio::task::spawn_blocking(move || {
-        let rustc = Command::new("rustup")
-            .args(["which", "--toolchain", "nightly-2026-08-18", "rustc"])
-            .output()?;
-        if !rustc.status.success() {
-            return Err(std::io::Error::other(format!(
-                "rustup could not resolve the pinned rustc: {}",
-                String::from_utf8_lossy(&rustc.stderr)
-            )));
+        .collect()
+}
+
+fn string_list(batch: &arrow::record_batch::RecordBatch, column: &str) -> Vec<String> {
+    batch
+        .column_by_name(column)
+        .and_then(|array| array.as_any().downcast_ref::<ListArray>())
+        .map(|array| array.value(0))
+        .and_then(|values| {
+            values
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .map(|strings| {
+                    strings
+                        .iter()
+                        .flatten()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn decoded_rustc_observations(
+    compilation: &AcceptedRustcCompilation,
+) -> Result<Vec<Value>, GateBCandidateError> {
+    let mut observations = Vec::new();
+    for owner in &compilation.owners {
+        for chunk in &owner.chunks {
+            let batches =
+                StreamReader::try_new(Cursor::new(&chunk.arrow_ipc), None).map_err(invariant)?;
+            for batch in batches {
+                let batch = batch.map_err(invariant)?;
+                let text = |column: &str| {
+                    batch
+                        .column_by_name(column)
+                        .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+                        .map(|array| array.value(0).to_owned())
+                };
+                observations.push(json!({
+                    "name": text("name"),
+                    "item_kind": text("item_kind"),
+                    "type_description": text("type_description"),
+                    "statement_kinds": string_list(&batch, "statement_kinds"),
+                    "terminator_kinds": string_list(&batch, "terminator_kinds"),
+                }));
+            }
         }
-        let rustc = PathBuf::from(String::from_utf8_lossy(&rustc.stdout).trim());
-        let sysroot_library = rustc
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| std::io::Error::other("pinned rustc has no sysroot parent"))?
-            .join("lib");
-        let mut command = Command::new(wrapper);
-        command
-            .arg(rustc)
-            .arg(source)
-            .args([
-                "--crate-name=codefabric_gate_b_rust",
-                "--crate-type=lib",
-                "--edition=2024",
-                "--emit=metadata",
-            ])
-            .arg(format!("--out-dir={}", output_directory.display()))
-            .env("DYLD_LIBRARY_PATH", &sysroot_library)
-            .env("LD_LIBRARY_PATH", &sysroot_library)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
-        extractor_environment(
-            &mut command,
-            &socket,
-            &workspace_id_text,
-            &context_id_text,
-            source_generation,
-        );
-        command.output()
-    })
-    .await
-    .map_err(invariant)??;
-    if !status.status.success() {
-        let _ = shutdown_sender.send(());
-        let _ = server.await;
-        return Err(invariant(format!(
-            "real rustc extractor compilation failed: {}",
-            String::from_utf8_lossy(&status.stderr)
-        )));
     }
-    let compilation = tokio::time::timeout(Duration::from_secs(30), accepted.recv())
-        .await
-        .map_err(|_| invariant("rustc accepted stream timed out"))?
-        .ok_or_else(|| invariant("rustc service closed without an accepted compilation"))?;
-    let _ = shutdown_sender.send(());
-    server.await.map_err(invariant)?.map_err(invariant)?;
-    Ok(compilation)
+    observations.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
+    Ok(observations)
+}
+
+#[allow(clippy::too_many_lines)] // A single decoded projection keeps entity joins visible to reviewers.
+fn decoded_canonical_semantics(
+    canonicals: &[crate::fact_ingest::CanonicalIngestOutput],
+) -> Result<Value, GateBCandidateError> {
+    let mut names = BTreeMap::<Vec<u8>, String>::new();
+    let mut entities = Vec::new();
+    for canonical in canonicals {
+        let Some(validated) = canonical.batches.get(&100) else {
+            continue;
+        };
+        let batch = validated.batch();
+        let ids = batch
+            .column_by_name("entity_id")
+            .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+            .ok_or_else(|| invariant("canonical entity_id is absent"))?;
+        let entity_names = batch
+            .column_by_name("name")
+            .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+            .ok_or_else(|| invariant("canonical entity name is absent"))?;
+        let qualified_names = batch
+            .column_by_name("qualified_name")
+            .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+            .ok_or_else(|| invariant("canonical entity qualified_name is absent"))?;
+        let kinds = batch
+            .column_by_name("entity_kind_code")
+            .and_then(|array| array.as_any().downcast_ref::<Int32Array>())
+            .ok_or_else(|| invariant("canonical entity kind is absent"))?;
+        let languages = batch
+            .column_by_name("language")
+            .and_then(|array| array.as_any().downcast_ref::<Int16Array>())
+            .ok_or_else(|| invariant("canonical entity language is absent"))?;
+        let file_ids = batch
+            .column_by_name("file_id")
+            .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+            .ok_or_else(|| invariant("canonical entity file_id is absent"))?;
+        for row in 0..batch.num_rows() {
+            let short_name =
+                (!entity_names.is_null(row)).then(|| entity_names.value(row).to_owned());
+            let qualified_name =
+                (!qualified_names.is_null(row)).then(|| qualified_names.value(row).to_owned());
+            let name = qualified_name.clone().or_else(|| short_name.clone());
+            if let Some(name) = &name {
+                names.insert(ids.value(row).to_vec(), name.clone());
+            }
+            entities.push(json!({
+                "entity_id": format!("entity:{}", lower_hex(ids.value(row))),
+                "name": name,
+                "short_name": short_name,
+                "qualified_name": qualified_name,
+                "file_id": (!file_ids.is_null(row))
+                    .then(|| format!("file:{}", lower_hex(file_ids.value(row)))),
+                "entity_kind_code": kinds.value(row),
+                "language_code": languages.value(row),
+            }));
+        }
+    }
+    entities.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
+
+    let mut relations = Vec::new();
+    let mut properties = Vec::new();
+    let mut capabilities = Vec::new();
+    for canonical in canonicals {
+        if let Some(validated) = canonical.batches.get(&110) {
+            let batch = validated.batch();
+            let sources = batch
+                .column_by_name("source_id")
+                .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or_else(|| invariant("canonical relation source is absent"))?;
+            let targets = batch
+                .column_by_name("target_id")
+                .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or_else(|| invariant("canonical relation target is absent"))?;
+            let kinds = batch
+                .column_by_name("relation_kind_code")
+                .and_then(|array| array.as_any().downcast_ref::<Int32Array>())
+                .ok_or_else(|| invariant("canonical relation kind is absent"))?;
+            let certainty = batch
+                .column_by_name("certainty_code")
+                .and_then(|array| array.as_any().downcast_ref::<Int16Array>())
+                .ok_or_else(|| invariant("canonical relation certainty is absent"))?;
+            let fact_ids = batch
+                .column_by_name("fact_id")
+                .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or_else(|| invariant("canonical relation fact_id is absent"))?;
+            for row in 0..batch.num_rows() {
+                relations.push(json!({
+                    "fact_id": format!("fact:relation:{}", lower_hex(fact_ids.value(row))),
+                    "source_id": format!("entity:{}", lower_hex(sources.value(row))),
+                    "target_id": format!("entity:{}", lower_hex(targets.value(row))),
+                    "source_name": names.get(sources.value(row)),
+                    "target_name": names.get(targets.value(row)),
+                    "relation_kind_code": kinds.value(row),
+                    "certainty_code": certainty.value(row),
+                }));
+            }
+        }
+        if let Some(validated) = canonical.batches.get(&120) {
+            let batch = validated.batch();
+            let subjects = batch
+                .column_by_name("subject_entity_id")
+                .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or_else(|| invariant("canonical property subject is absent"))?;
+            let kinds = batch
+                .column_by_name("property_kind_code")
+                .and_then(|array| array.as_any().downcast_ref::<Int32Array>())
+                .ok_or_else(|| invariant("canonical property kind is absent"))?;
+            let values = batch
+                .column_by_name("value_text")
+                .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+                .ok_or_else(|| invariant("canonical property text is absent"))?;
+            let fact_ids = batch
+                .column_by_name("fact_id")
+                .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or_else(|| invariant("canonical property fact_id is absent"))?;
+            for row in 0..batch.num_rows() {
+                properties.push(json!({
+                    "fact_id": format!("fact:property:{}", lower_hex(fact_ids.value(row))),
+                    "subject_id": format!("entity:{}", lower_hex(subjects.value(row))),
+                    "subject_name": names.get(subjects.value(row)),
+                    "property_kind_code": kinds.value(row),
+                    "value_text": (!values.is_null(row)).then(|| values.value(row)),
+                }));
+            }
+        }
+        if let Some(validated) = canonical.batches.get(&9) {
+            let batch = validated.batch();
+            let codes = batch
+                .column_by_name("capability_code")
+                .and_then(|array| array.as_any().downcast_ref::<Int16Array>())
+                .ok_or_else(|| invariant("canonical capability code is absent"))?;
+            let states = batch
+                .column_by_name("owner_capability_state_code")
+                .and_then(|array| array.as_any().downcast_ref::<Int16Array>())
+                .ok_or_else(|| invariant("canonical capability state is absent"))?;
+            let completeness = batch
+                .column_by_name("completeness_state_code")
+                .and_then(|array| array.as_any().downcast_ref::<Int16Array>())
+                .ok_or_else(|| invariant("canonical completeness is absent"))?;
+            for row in 0..batch.num_rows() {
+                capabilities.push(json!({
+                    "capability_code": codes.value(row),
+                    "state_code": states.value(row),
+                    "completeness_code": completeness.value(row),
+                }));
+            }
+        }
+    }
+    Ok(json!({
+        "entities": entities,
+        "relations": relations,
+        "properties": properties,
+        "capabilities": capabilities,
+    }))
 }
 
 fn snapshot_body(
@@ -438,7 +467,7 @@ fn snapshot_body(
 }
 
 fn plane_digest(value: &Value) -> Result<String, GateBCandidateError> {
-    Ok(digest(&canonical_value(value)?))
+    Ok(digest(&canonical_bytes(value)?))
 }
 
 fn actual_derived_digest(
@@ -480,11 +509,157 @@ fn actual_derived_digest(
     Ok((digest_bytes(&inputs), row_count))
 }
 
-fn eight_form_request(workspace_id: &str, request_id: &str) -> String {
-    format!(
-        r#"{{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"{request_id}","workspace_id":"{workspace_id}","freshness_policy":"best_available_snapshot","queries":[{{"query_id":"entities","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"properties","request":"retrieve facts about code","label":null,"about":[{{"results_of":"entities","select":"entities"}}],"facts":["callable contracts"],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"relations","request":"follow code relationships","label":null,"starting_from":[{{"results_of":"entities","select":"entities"}}],"relationship":"call targets","direction":"outgoing","distance":"transitive","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"paths","request":"find connecting fact paths","label":null,"starting_from":[{{"results_of":"entities","select":"entities"}}],"ending_at":["syntax nodes"],"through":["control flow"],"path_policy":"one shortest witness path","direction":"outgoing","maximum_length":4,"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"patterns","request":"match a code fact pattern","label":null,"bindings":[{{"name":"source","looking_for":"syntax nodes","within":{{"results_of":"entities","select":"entities"}}}}],"relationships":[],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"combined","request":"combine result sets","label":null,"inputs":[{{"results_of":"properties","select":"facts"}},{{"results_of":"relations","select":"facts"}}],"combination":"union by fact identity","identity":"fact identity","preserve_origin":"all origins","return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"summary","request":"summarize objective facts","label":null,"input":[{{"results_of":"combined","select":"groups"}}],"summaries":["graph metrics"],"return":{{"limit":{{"maximum_results":10}}}}}},{{"query_id":"context","request":"retrieve source and syntax context","label":null,"for":[{{"results_of":"paths","select":"paths"}}],"context":["source location","exact span"],"text_handling":"omit text","return":{{"limit":{{"maximum_results":10}}}}}}],"response_projection":{{"canonical_semantic_identity":true,"coverage":true}},"cost_budget":{{"maximum_rows":2048}}}}"#
-    )
-    .replace("\"maximum_results\":10", "\"maximum_results\":256")
+#[derive(Debug)]
+struct FunctionalQueryTargets {
+    rust_callables: Vec<String>,
+    ffi_call_site: String,
+    ffi_target: String,
+    context_source_file: String,
+}
+
+fn functional_query_targets(
+    decoded: &Value,
+) -> Result<FunctionalQueryTargets, GateBCandidateError> {
+    let mut rust_callables = decoded["entities"]
+        .as_array()
+        .ok_or_else(|| invariant("decoded canonical entities are absent"))?
+        .iter()
+        .filter(|entity| entity["language_code"] == Language::Rust as i16)
+        .filter(|entity| {
+            entity["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("codefabric_gate_b_rust::"))
+        })
+        .filter_map(|entity| entity["entity_id"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    rust_callables.sort();
+    if rust_callables.len() != 3 {
+        return Err(invariant(format!(
+            "functional query expected three rustc callables, observed {}",
+            rust_callables.len()
+        )));
+    }
+    let relations = decoded["relations"]
+        .as_array()
+        .ok_or_else(|| invariant("decoded canonical relations are absent"))?;
+    let relation = relations
+        .iter()
+        .find(|relation| {
+            relation["source_name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("golden_pkg.core:"))
+                && relation["target_name"] == "golden_pkg.core.scale"
+        })
+        .ok_or_else(|| {
+            let named = relations
+                .iter()
+                .filter_map(|relation| {
+                    Some(format!(
+                        "{} -> {}",
+                        relation["source_name"].as_str()?,
+                        relation["target_name"].as_str()?
+                    ))
+                })
+                .collect::<Vec<_>>();
+            invariant(format!(
+                "functional Python call-target relation is absent; named relations: {named:?}"
+            ))
+        })?;
+    let call_site_id = relation["source_id"]
+        .as_str()
+        .ok_or_else(|| invariant("functional Python call-site identity is absent"))?;
+    let call_site_file = decoded["entities"]
+        .as_array()
+        .and_then(|entities| {
+            entities
+                .iter()
+                .find(|entity| entity["entity_id"] == call_site_id)
+        })
+        .and_then(|entity| entity["file_id"].as_str())
+        .ok_or_else(|| invariant("functional Python call-site file identity is absent"))?;
+    let source_file_kind = crate::registries::entity_kind("SOURCE_FILE")
+        .ok_or_else(|| invariant("SOURCE_FILE registry allocation is absent"))?
+        .code;
+    let context_source_file = decoded["entities"]
+        .as_array()
+        .and_then(|entities| {
+            entities.iter().find(|entity| {
+                entity["entity_kind_code"] == source_file_kind
+                    && entity["file_id"] == call_site_file
+            })
+        })
+        .and_then(|entity| entity["entity_id"].as_str())
+        .ok_or_else(|| invariant("functional source-file entity is absent"))?
+        .to_owned();
+    Ok(FunctionalQueryTargets {
+        rust_callables,
+        ffi_call_site: call_site_id.to_owned(),
+        ffi_target: relation["target_id"]
+            .as_str()
+            .ok_or_else(|| invariant("functional Python call-target identity is absent"))?
+            .to_owned(),
+        context_source_file,
+    })
+}
+
+fn eight_form_request(
+    workspace_id: &str,
+    request_id: &str,
+    targets: &FunctionalQueryTargets,
+) -> Result<String, GateBCandidateError> {
+    let limit = json!({"limit": {"maximum_results": 256}});
+    let rust_references = targets
+        .rust_callables
+        .iter()
+        .map(|entity_id| json!({"entity_id": entity_id}))
+        .collect::<Vec<_>>();
+    let request = json!({
+        "specification": "composable semantic CPG fact query",
+        "version": "1.3",
+        "semantic_request_id": request_id,
+        "workspace_id": workspace_id,
+        "freshness_policy": "best_available_snapshot",
+        "queries": [
+            {"query_id":"q.entities","request":"find code entities","label":null,
+             "looking_for":"source files","within":[{"entity_id":targets.context_source_file}],
+             "return":limit},
+            {"query_id":"q.facts","request":"retrieve facts about code","label":null,
+             "about":rust_references,
+             "facts":["callable contracts"],"return":limit},
+            {"query_id":"q.relationships","request":"follow code relationships","label":null,
+             "starting_from":[{"entity_id":targets.ffi_call_site}],"relationship":"call targets",
+             "direction":"outgoing","distance":"direct","return":limit},
+            {"query_id":"q.paths","request":"find connecting fact paths","label":null,
+             "starting_from":[{"entity_id":targets.ffi_call_site}],
+             "ending_at":[{"entity_id":targets.ffi_target}],"through":["control flow"],
+             "path_policy":"one shortest witness path","direction":"outgoing",
+             "maximum_length":1,"return":limit},
+            {"query_id":"q.pattern","request":"match a code fact pattern","label":null,
+             "bindings":[
+             {"name":"source","looking_for":"syntax nodes",
+             "within":{"entity_id":targets.ffi_call_site}},
+             {"name":"target","looking_for":"Python async generators",
+             "within":{"entity_id":targets.ffi_target}}],
+             "relationships":[{"from":"source","to":"target",
+             "relationship":"call targets","direction":"outgoing","distance":"direct"}],
+             "return":limit},
+            {"query_id":"q.combine","request":"combine result sets","label":null,
+             "inputs":[{"results_of":"q.facts","select":"facts"},
+             {"results_of":"q.relationships","select":"facts"}],
+             "combination":"union by fact identity","identity":"fact identity",
+             "preserve_origin":"all origins","return":limit},
+            {"query_id":"q.summary","request":"summarize objective facts","label":null,
+             "input":[{"results_of":"q.combine","select":"groups"}],
+             "summaries":["graph metrics"],"return":limit},
+            {"query_id":"q.context","request":"retrieve source and syntax context","label":null,
+             "for":[{"results_of":"q.entities","select":"entities"}],
+             "context":["source location","exact span"],"text_handling":"omit text",
+             "return":limit}
+        ],
+        "response_projection":{"canonical_semantic_identity":true,"coverage":true},
+        "cost_budget":{"maximum_rows":2048}
+    });
+    serde_json::to_string(&request).map_err(GateBCandidateError::from)
 }
 
 fn daemon_config(root: &Path, repository_root: &Path) -> Result<DaemonConfig, GateBCandidateError> {
@@ -616,7 +791,10 @@ async fn run_query_vertical(
     workspace_root: &Path,
     candidate: Arc<crate::snapshot_runtime::ServingSnapshotCandidate>,
     durable_pointer_generation: u64,
+    decoded_canonical: &Value,
+    intervention: Option<CausalIntervention>,
 ) -> Result<QueryPlanes, GateBCandidateError> {
+    let functional_targets = functional_query_targets(decoded_canonical)?;
     let query_state_root = vertical_root.join("query-state");
     fs::create_dir(&query_state_root)?;
     let mut store = OperationalStore::open(&query_state_root.join("operational.sqlite"))?;
@@ -710,6 +888,14 @@ async fn run_query_vertical(
         return Err(invariant(error));
     }
 
+    let result_root = daemon_root.join("state/query-results");
+    let _artifact_permission_fault =
+        if intervention_is(intervention, CausalIntervention::ArtifactPersistence) {
+            Some(DirectoryPermissionGuard::deny_writes(&result_root)?)
+        } else {
+            None
+        };
+
     let execution = async {
         let mut client = query_client(query_socket.clone()).await?;
         let mut host = HostCapabilityProfile {
@@ -755,7 +941,11 @@ async fn run_query_vertical(
         if handshake.authorized_workspaces.len() != 1 {
             return Err(invariant("Gate B daemon handshake did not authorize the workspace"));
         }
-        let request_text = eight_form_request(&workspace_id, "gate-b-rpc-eight-form");
+        let request_text = eight_form_request(
+            &workspace_id,
+            "gate-b-rpc-eight-form",
+            &functional_targets,
+        )?;
         let canonical_request = canonicalize_slice(request_text.as_bytes()).map_err(invariant)?;
         let started = client
             .start_query(StartQueryRequest {
@@ -853,16 +1043,32 @@ async fn run_query_vertical(
                 break;
             }
         }
+        if intervention_is(intervention, CausalIntervention::ArtifactReadback) {
+            let first = response_bytes
+                .first_mut()
+                .ok_or_else(|| invariant("Gate B artifact readback was empty"))?;
+            *first ^= 0xff;
+        }
         let response: Value = serde_json::from_slice(&response_bytes)?;
         if response["successful_query_count"] != 8 {
             return Err(invariant("Gate B daemon did not execute all eight query forms"));
         }
 
         let adapter_request = vertical_root.join("gate-b-mcp-request.json");
-        fs::write(
-            &adapter_request,
-            eight_form_request(&workspace_id, "gate-b-mcp-eight-form"),
-        )?;
+        let adapter_request_bytes = if intervention_is(
+            intervention,
+            CausalIntervention::FastMcpAdaptation,
+        ) {
+            b"{}".to_vec()
+        } else {
+            eight_form_request(
+                &workspace_id,
+                "gate-b-rpc-eight-form",
+                &functional_targets,
+            )?
+            .into_bytes()
+        };
+        fs::write(&adapter_request, adapter_request_bytes)?;
         let probe = repository_root.join("tooling/gate_b_adapter_probe.py");
         let python = repository_root.join("codefabric-cpg-mcp/.venv/bin/python");
         let command_root = repository_root.to_path_buf();
@@ -911,6 +1117,11 @@ async fn run_query_vertical(
         mcp.as_object_mut()
             .ok_or_else(|| invariant("locked FastMCP probe output is not an object"))?
             .insert("mcp_call_id_correlated".to_owned(), Value::Bool(true));
+        if mcp["structured_content"]["delivery"]["response"] != response {
+            return Err(invariant(
+                "FastMCP decoded response differs from UDS artifact readback",
+            ));
+        }
         let artifact_root = daemon_root.join("state/query-results");
         let plan_artifact_count = fs::read_dir(artifact_root.join("query-plan-artifacts"))?
             .filter_map(Result::ok)
@@ -925,6 +1136,7 @@ async fn run_query_vertical(
                 "successful_query_count": response["successful_query_count"],
                 "response_digest": digest(&response_bytes),
                 "response_bytes_hex": lower_hex(&response_bytes),
+                "decoded_response": response.clone(),
                 "snapshot_id": response["snapshot"]["snapshot_id"],
             }),
             rpc: json!({
@@ -952,11 +1164,51 @@ async fn run_query_vertical(
     execution
 }
 
-#[allow(clippy::too_many_lines)] // One Gate B execution keeps all eleven correlated planes in one auditable transaction.
-pub(super) fn execute(
+#[cfg(test)]
+pub(super) fn execute_authored_workspace(
     repository_root: &Path,
     corpus_root: &Path,
     scratch_root: &Path,
+) -> Result<VerticalExecution, GateBCandidateError> {
+    execute_with_hot_edit(repository_root, corpus_root, scratch_root, false, None)
+}
+
+pub(super) fn execute_functional_candidate(
+    repository_root: &Path,
+    corpus_root: &Path,
+    scratch_root: &Path,
+) -> Result<VerticalExecution, GateBCandidateError> {
+    execute_with_hot_edit(repository_root, corpus_root, scratch_root, false, None)
+}
+
+#[cfg(test)]
+pub(super) fn execute_with_intervention(
+    repository_root: &Path,
+    corpus_root: &Path,
+    scratch_root: &Path,
+    intervention: CausalIntervention,
+) -> Result<VerticalExecution, GateBCandidateError> {
+    execute_with_hot_edit(
+        repository_root,
+        corpus_root,
+        scratch_root,
+        false,
+        Some(intervention),
+    )
+    .map_err(|error| {
+        invariant(format!(
+            "causal intervention {intervention:?} was detected at its producing/public seam: {error}"
+        ))
+    })
+}
+
+#[allow(clippy::too_many_lines)] // One Gate B execution keeps all eleven correlated planes in one auditable transaction.
+fn execute_with_hot_edit(
+    repository_root: &Path,
+    corpus_root: &Path,
+    scratch_root: &Path,
+    apply_hot_edit: bool,
+    intervention: Option<CausalIntervention>,
 ) -> Result<VerticalExecution, GateBCandidateError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -983,29 +1235,34 @@ pub(super) fn execute(
             lifecycle,
             engine_config(),
         )?;
-        incremental
+        let initial = incremental
             .rebuild_from_zero(&mut incremental_store)
             .map_err(invariant)?
             .ok_or_else(|| invariant("Gate B initial rebuild did not publish"))?;
-        write_workspace(
-            &workspace_root,
-            "python/golden_pkg/core.py",
-            b"def normalized_total(values: list[int]) -> int:\n    return sum(values) + 7\n",
-        )?;
-        let hot = incremental
-            .process_batch(
-                &mut incremental_store,
-                batch(
-                    vec![hint(
-                        "python/golden_pkg/core.py",
-                        WatchHintKind::CreateOrModify,
-                    )],
-                    false,
-                ),
-                &BTreeMap::new(),
-            )
-            .map_err(invariant)?
-            .ok_or_else(|| invariant("Gate B hot edit did not publish"))?;
+        let hot = if apply_hot_edit {
+            let hot_edit: &[u8] = if corpus_root.join("functional-expectations.json").is_file() {
+                b"def scale(value: int) -> int:  # @anchor py.scale\n    return value * 2\n\n\ndef pipeline(value: int) -> int:  # @anchor py.pipeline\n    return scale(value) + 7  # @anchor py.call.scale\n\n\nclass Counter:  # @anchor py.counter\n    def increment(self, value: int) -> int:  # @anchor py.counter.increment\n        return value + 1\n"
+            } else {
+                b"def normalized_total(values: list[int]) -> int:\n    return sum(values) + 7\n"
+            };
+            write_workspace(&workspace_root, "python/golden_pkg/core.py", hot_edit)?;
+            incremental
+                .process_batch(
+                    &mut incremental_store,
+                    batch(
+                        vec![hint(
+                            "python/golden_pkg/core.py",
+                            WatchHintKind::CreateOrModify,
+                        )],
+                        false,
+                    ),
+                    &BTreeMap::new(),
+                )
+                .map_err(invariant)?
+                .ok_or_else(|| invariant("Gate B hot edit did not publish"))?
+        } else {
+            initial
+        };
 
         let clean_root = vertical_root.join("clean");
         fs::create_dir(&clean_root)?;
@@ -1040,21 +1297,31 @@ pub(super) fn execute(
             Ok(ProviderSourceBlob {
                 path: clean_root.join("source-blobs").join(&image.blob.relative_name),
                 content_digest: format!("b3:{}", lower_hex(&image.digest)),
+                file_id: image.file_id,
             })
         };
-        let python_blob = captured_blob("python/golden_pkg/core.py")?;
+        let mut python_blob = captured_blob("python/golden_pkg/core.py")?;
+        let ffi_blob = captured_blob("ffi/boundary.py")?;
         let invalid_python_blob = captured_blob("malformed/broken.py")?;
         let rust_blob = captured_blob("rust/src/lib.rs")?;
-        let pyrefly = run_pyrefly(
+        if intervention_is(
+            intervention,
+            CausalIntervention::PyreflySourceAdmission,
+        ) {
+            python_blob.content_digest = format!("b3:{}", "0".repeat(64));
+        }
+        let mut pyrefly = run_pyrefly(
             repository_root,
             &vertical_root,
             clean_record.workspace_id,
             SOURCE_CONTEXT_ID,
             source_generation,
             &python_blob,
+            &ffi_blob,
             &invalid_python_blob,
         )
-        .await?;
+        .await
+        .map_err(invariant)?;
         let rustc = run_rustc(
             repository_root,
             &vertical_root,
@@ -1063,8 +1330,17 @@ pub(super) fn execute(
             SOURCE_CONTEXT_ID,
             source_generation,
         )
-        .await?;
+        .await
+        .map_err(invariant)?;
         let core = CoreFactEngine::default();
+        if intervention_is(
+            intervention,
+            CausalIntervention::ReconciliationAuthority,
+        ) {
+            pyrefly
+                .modules
+                .retain(|module| module.module_name != "golden_pkg.core");
+        }
         let mut canonicals = rebuilt
             .fast_outputs
             .into_iter()
@@ -1072,6 +1348,7 @@ pub(super) fn execute(
             .collect::<Vec<_>>();
         canonicals.extend(core.reconcile_pyrefly_run(&pyrefly).map_err(invariant)?);
         canonicals.extend(core.reconcile_rustc_compilation(&rustc).map_err(invariant)?);
+        let decoded_canonical = decoded_canonical_semantics(&canonicals)?;
         let (derived_fact_digest, derived_row_count) = actual_derived_digest(&canonicals)?;
         let mut canonical_rows = BTreeMap::<i16, usize>::new();
         let mut explicit_unknown_rows = 0_usize;
@@ -1133,7 +1410,18 @@ pub(super) fn execute(
                 toolchain_bundle_version: "1.3".to_owned(),
             },
             expected_pointer: None,
-            expected_publication_table_version: fabric.table(5).unwrap().version(),
+            expected_publication_table_version: if intervention_is(
+                intervention,
+                CausalIntervention::DeltaPublication,
+            ) {
+                fabric
+                    .table(5)
+                    .unwrap()
+                    .version()
+                    .map(|version| version.saturating_add(1))
+            } else {
+                fabric.table(5).unwrap().version()
+            },
             expected_manifest_table_version: fabric.table(6).unwrap().version(),
             expected_pointer_table_version: fabric.table(7).unwrap().version(),
             started_at_micros: 1_000,
@@ -1143,14 +1431,18 @@ pub(super) fn execute(
             .publish_canonical_set(&mut fabric, &mut store, &request, canonicals)
             .await
             .map_err(invariant)?;
+        let mut candidate_body = snapshot_body(
+            clean_record.workspace_id,
+            source_generation,
+            clean.current_inventory_digest(),
+        )?;
+        if intervention_is(intervention, CausalIntervention::SnapshotActivation) {
+            "STALE".clone_into(&mut candidate_body.source.source_trust_state);
+        }
         let candidate = Arc::new(core
             .freeze_publication(
                 &publication,
-                snapshot_body(
-                    clean_record.workspace_id,
-                    source_generation,
-                    clean.current_inventory_digest(),
-                )?,
+                candidate_body,
                 &[],
             )
             .await
@@ -1169,6 +1461,8 @@ pub(super) fn execute(
                 })
             })
             .collect::<Vec<_>>();
+        let decoded_pyrefly = decoded_pyrefly_observations(&pyrefly)?;
+        let decoded_rustc = decoded_rustc_observations(&rustc)?;
         let provider_observations = json!({
             "tree_sitter_and_ruff_owner_count": canonical_rows.get(&8).copied().unwrap_or(0),
             "pyrefly": {
@@ -1177,11 +1471,13 @@ pub(super) fn execute(
                 "module_names": pyrefly.modules.iter().map(|module| &module.module_name).collect::<Vec<_>>(),
                 "module_count": pyrefly.modules.len(),
                 "terminal_digest_verified": true,
+                "decoded_semantics": decoded_pyrefly,
             },
             "rustc_mir": {
                 "provider_run_id": rustc.admission.provider_run_id,
                 "owner_count": rustc.owners.len(),
                 "terminal_digest_verified": true,
+                "decoded_semantics": decoded_rustc,
             },
         });
         let publication_plane = json!({
@@ -1222,6 +1518,8 @@ pub(super) fn execute(
             &workspace_root,
             Arc::clone(&candidate),
             u64::try_from(publication.pointer.pointer_generation).map_err(invariant)?,
+            &decoded_canonical,
+            intervention,
         )
         .await?;
         let canonical_tables = json!({
@@ -1236,6 +1534,7 @@ pub(super) fn execute(
             "explicit_unknown_row_count": explicit_unknown_rows,
             "derived_row_count": derived_row_count,
             "derived_fact_digest": digest(&derived_fact_digest),
+            "decoded_semantics": decoded_canonical,
         });
         let planes = BTreeMap::from([
             ("source_inventory".to_owned(), json!(source_inventory)),

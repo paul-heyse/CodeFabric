@@ -227,35 +227,92 @@ gate-b-owner-acceptance-check:
     cargo run --locked --bin codefabric-gate-b-candidate -- verify-release .
     @just packet-oracle-check WP76
 
-[doc("Execute the production Gate B vertical and verify the unreleased candidate contract")]
+[doc("Execute the production Gate B vertical and verify functional-candidate isolation")]
 [group('test')]
 gate-b-candidate-check:
     cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
     CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib -E 'test(/(gate_b_vertical_slice_produces_all_eleven_planes|gate_b_candidate_independent_oracle_contract|gate_b_vertical_slice_adversarial|gate_b_candidate_operational_gate)/)' --no-tests=fail
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_public_vertical_conformance|gate_b_delivery_surface_semantic_equivalence|gate_b_projection_registry_closure|gate_b_functional_candidate_is_expectation_independent)/)' --no-tests=fail
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest -q codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_adapter_contracts.py
-    @if rg -n 'fn derive_expectations|fn candidate_contracts|expectations\.clone\(\)' src/gate_b_candidate.rs; then echo 'descriptor/self-confirming Gate B proof remains on the current candidate path' >&2; exit 1; fi
+    @if rg -n 'fn run_scenario|async fn run_(pyrefly|rustc)|functional_candidate_projection|normalize_gate_b_planes' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local scenario, provider, or comparison authority remains' >&2; exit 1; fi
     @if test -d tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; fi
     @just packet-oracle-check WP06
 
 [doc("Validate strict, human-authored Gate B semantic claims, anchors, scenarios, and proof universes")]
 [group('test')]
 functional-golden-contract-check:
-    cargo nextest run --locked --lib -E 'test(/(functional_golden_claim_schema_conformance|functional_golden_source_anchor_closure|functional_golden_negative_claim_requires_complete_universe|functional_golden_duplicate_key_rejected|functional_golden_contract_operational_gate)/)' --no-tests=fail
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(functional_golden_claim_schema_conformance|functional_golden_source_anchor_closure|functional_golden_negative_claim_requires_complete_universe|functional_golden_duplicate_key_rejected|functional_golden_contract_operational_gate)/)' --no-tests=fail
     @if rg -n '"(expected_digest|candidate_digest|canonical_row_hex|governed_key_hex|response_bytes_hex|descriptor_identity|registry_count|runtime_id|matches|requirement_checks)"|"b3:' tests/golden/codefabric-golden-v4; then echo 'captured output or integrity material remains in the functional expectation authority' >&2; exit 1; fi
 
 [doc("Prove the rejected Gate B v3 candidate remains immutable and outside release routing")]
 [group('test')]
 gate-b-rejected-candidate-zero-state-check:
-    cargo nextest run --locked --lib -E 'test(gate_b_rejected_candidate_zero_state)' --no-tests=fail
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_rejected_candidate_zero_state)' --no-tests=fail
     @if rg -n 'codefabric-golden-v3\.0\.0-candidate\.1' tests/golden/corpus-index.json tests/golden/codefabric-golden-v2/owner-acceptance.json; then echo 'rejected Gate B candidate entered current or accepted release metadata' >&2; exit 1; fi
 
 [doc("Execute the independent logical evaluators and prove expectation/production isolation")]
 [group('test')]
 functional-golden-independence-check:
-    cargo nextest run --locked --lib -E 'test(/(reference_query_evaluator_laws|functional_golden_comparator_falsification|functional_golden_expectation_write_isolation|functional_golden_independence_operational_gate|reference_bag_multiplicity_law|reference_coverage_monotonicity_law)/)' --no-tests=fail
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(reference_query_evaluator_laws|functional_golden_comparator_falsification|functional_golden_expectation_write_isolation|functional_golden_independence_operational_gate|reference_bag_multiplicity_law|reference_coverage_monotonicity_law)/)' --no-tests=fail
     @if rg -n 'use crate::(semantic_query|reconciliation|gate_b_candidate|gate_b_release|lifecycle)|use (datafusion|petgraph)' src/functional_golden.rs src/functional_golden; then echo 'functional evaluator imports a production semantic engine' >&2; exit 1; fi
     @if rg -n 'fs::(write|create_dir|remove|rename)|File::create|OpenOptions' src/functional_golden.rs src/functional_golden; then echo 'functional expectation closure contains a write path' >&2; exit 1; fi
+
+[doc("Execute the first-principles Gate B provider, canonical, public-query, and scenario contract")]
+[group('test')]
+gate-b-public-vertical-check:
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_public_vertical_conformance|golden_scenario_semantic_transition_contracts|gate_b_public_vertical_operational_gate)/)' --no-tests=fail
+
+[doc("Prove named fixture edits and producing/public seam interventions affect their dependent Gate B claims")]
+[group('test')]
+gate-b-causal-check:
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_causal_intervention_matrix|gate_b_named_fixture_query_causality)/)' --no-tests=fail
+
+[doc("Prove UDS artifact readback and locked FastMCP STDIO preserve exact Gate B semantics")]
+[group('test')]
+gate-b-delivery-equivalence-check:
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_delivery_surface_semantic_equivalence)' --no-tests=fail
+
+[doc("Prove the governed comparison projection is the only Gate B semantic-ignore authority")]
+[group('static')]
+gate-b-projection-registry-check:
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_projection_registry_closure)' --no-tests=fail
+    @if rg -n 'semantic[^\n]*(ignore|normaliz)|ignore[^\n]*semantic' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local semantic comparison ignore or normalizer remains' >&2; exit 1; fi
+    @if rg -n 'fn run_scenario|async fn run_(pyrefly|rustc)|codefabric-pyrefly-sidecar|run_rustc_extractor\.sh' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local scenario edit dispatcher or provider ownership remains' >&2; exit 1; fi
+
+[doc("Execute every registered Gate B semantic mutant and reject survivors, collateral failures, or claim gaps")]
+[group('test')]
+semantic-oracle-mutants-check profile:
+    @if test "{{profile}}" != "gate-b"; then echo 'only the gate-b semantic mutant profile is registered' >&2; exit 1; fi
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(semantic_oracle_required_mutants_are_killed|semantic_oracle_rejects_unregistered_or_surviving_mutant)/)' --no-tests=fail
+
+[doc("Generate and validate the decoded claim-by-claim Gate B human review dossier")]
+[group('test')]
+gate-b-review-bundle-check:
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_human_review_bundle_contract)' --no-tests=fail
+
+[doc("Validate functional candidate isolation and any committed successor digest chain")]
+[group('test')]
+gate-b-functional-candidate-check:
+    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
+    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_functional_candidate_is_expectation_independent)' --no-tests=fail
+    @if test -d tests/golden/review-candidates/codefabric-golden-v4.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify-functional tests/golden/review-candidates/codefabric-golden-v4.0.0-candidate.1; else echo 'functional Gate B successor is not candidate-ready or committed' >&2; exit 1; fi
+    @if rg -n 'codefabric-golden-v4\.0\.0-candidate\.1' tests/golden/corpus-index.json; then echo 'unaccepted functional candidate advanced the corpus index' >&2; exit 1; fi
+
+[doc("Verify immutable v2 release, rejected v3 candidate, and functional successor remain distinctly routed")]
+[group('test')]
+gate-b-predecessor-check:
+    cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1
+    cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1
+    just gate-b-rejected-candidate-zero-state-check
 
 [doc("Compare continuous effective state with the clean-rebuild oracle")]
 [group('test')]
@@ -810,11 +867,11 @@ fixture-candidates output_dir="target/fixture-candidates":
 model-release-census-candidate:
     ./scripts/model_exec.sh release-census-candidate .
 
-[confirm("Generate the immutable unreleased Gate B review candidate for accountable-owner review. Continue?")]
-[doc("MUTATES: emit a new Gate B candidate bundle without accepting or releasing it")]
+[confirm("Generate the immutable functional Gate B successor for accountable-owner review. Continue?")]
+[doc("MUTATES: emit the decoded behavior-first Gate B candidate without accepting or releasing it")]
 [group('mutating')]
-gate-b-candidate-emit output_dir="tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1":
-    cargo run --locked --bin codefabric-gate-b-candidate -- emit . tests/golden/codefabric-golden-v2 target/gate-b-candidate-emit-scratch "{{output_dir}}"
+gate-b-functional-candidate-emit output_dir="tests/golden/review-candidates/codefabric-golden-v4.0.0-candidate.1":
+    cargo run --locked --bin codefabric-gate-b-candidate -- emit-functional . target/gate-b-functional-candidate-emit-scratch "{{output_dir}}"
 
 [confirm("Accept the exact reviewed Gate B candidate and publish immutable corpus v2. Continue?")]
 [doc("MUTATES: record accountable-owner acceptance and publish immutable Gate B corpus v2 exactly once")]

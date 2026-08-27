@@ -2848,27 +2848,30 @@ mod tests {
             else {
                 panic!("provider source fixture was not published: {relative}");
             };
-            crate::gate_b_candidate::vertical::ProviderSourceBlob {
+            crate::provider_runtime::fixture::ProviderSourceBlob {
                 path: blob_root.join(&image.blob.relative_name),
                 content_digest: crate::integrity::frame_digest(image.digest),
+                file_id: image.file_id,
             }
         };
         let python = capture("python/golden_pkg/core.py", SourceLanguage::Python, 0x51);
+        let ffi = capture("ffi/boundary.py", SourceLanguage::Python, 0x54);
         let malformed = capture("malformed/broken.py", SourceLanguage::Python, 0x52);
         let rust = capture("rust/src/lib.rs", SourceLanguage::Rust, 0x53);
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let pyrefly = crate::gate_b_candidate::vertical::run_pyrefly(
+        let pyrefly = crate::provider_runtime::fixture::run_pyrefly(
             repository_root,
             state_root,
             workspace_id,
             analysis_context_id,
             source_generation,
             &python,
+            &ffi,
             &malformed,
         )
         .await
         .unwrap();
-        let rustc = crate::gate_b_candidate::vertical::run_rustc(
+        let rustc = crate::provider_runtime::fixture::run_rustc(
             repository_root,
             state_root,
             &rust,

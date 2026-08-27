@@ -1,0 +1,7 @@
+[package]
+name = "codefabric-functional-golden-rust"
+version = "1.0.0"
+edition = "2024"
+
+[lib]
+path = "rust/src/lib.rs"

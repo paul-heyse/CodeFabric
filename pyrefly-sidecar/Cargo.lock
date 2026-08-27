@@ -568,6 +568,7 @@ dependencies = [
  "hyper-util",
  "prost",
  "pyrefly",
+ "pyrefly_config",
  "pyrefly_python",
  "pyrefly_util",
  "serde",

@@ -1166,7 +1166,44 @@ fn entity_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
                 names.insert("SOURCE_FILE");
             }
             "Q51_SYNTAX_NODES" => {
-                names.insert("SYNTAX_NODE");
+                names.extend([
+                    "SYNTAX_NODE",
+                    "CALL_SITE",
+                    "IDENTIFIER_TOKEN",
+                    "KEYWORD_TOKEN",
+                    "OPERATOR_TOKEN",
+                    "PUNCTUATION_TOKEN",
+                    "LITERAL_TOKEN",
+                    "STRING_TOKEN",
+                    "NUMBER_TOKEN",
+                    "COMMENT",
+                    "DOCUMENTATION",
+                    "PRAGMA_OR_DIRECTIVE",
+                    "MISSING_SYNTAX",
+                    "STATEMENT",
+                    "EXPRESSION",
+                    "PATTERN",
+                    "DECLARATION_SYNTAX",
+                    "TYPE_SYNTAX",
+                    "PARAMETER_SYNTAX",
+                    "ARGUMENT_SYNTAX",
+                    "BLOCK",
+                    "LITERAL",
+                    "OPERATION",
+                    "ATTRIBUTE_ACCESS",
+                    "MEMBER_ACCESS",
+                    "SUBSCRIPT_ACCESS",
+                    "INDEX_ACCESS",
+                    "CALL_EXPRESSION",
+                    "ASSIGNMENT",
+                    "BRANCH",
+                    "LOOP",
+                    "RETURN",
+                    "YIELD",
+                    "AWAIT",
+                    "RAISE_OR_PANIC_SYNTAX",
+                    "IMPORT_OR_USE_SYNTAX",
+                ]);
             }
             "Q52_SEMANTIC_SYMBOLS" | "Q71_PYTHON_BINDINGS" => {
                 names.insert("SYMBOL");

@@ -2,14 +2,17 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrow_array::{ArrayRef, BinaryArray, RecordBatch, StringArray};
 use arrow_ipc::writer::FileWriter;
 use arrow_schema::{DataType, Field, Schema};
-use pyrefly::library::library::library::library::default_config_finder;
 use pyrefly::query::Query;
+use pyrefly_config::config::{ConfigFile, ConfigSource};
+use pyrefly_config::finder::ConfigFinder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
+use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::thread_pool::ThreadCount;
 use serde::Serialize;
 
@@ -26,10 +29,78 @@ struct LocatedCallee {
 }
 
 pub(crate) struct ModuleAnalysis {
+    pub module_id: String,
     pub arrow_ipc: Vec<u8>,
     pub row_count: u64,
     pub schema_digest: String,
     pub module_digest: String,
+}
+
+pub(crate) struct ModuleInput {
+    pub module_id: String,
+    pub module_name: String,
+    pub source_path: PathBuf,
+}
+
+static PROVIDER_VIEW_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+struct ProviderView {
+    root: PathBuf,
+}
+
+impl Drop for ProviderView {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn provider_module_path(root: &Path, module_name: &str) -> Result<PathBuf, String> {
+    let components = module_name.split('.').collect::<Vec<_>>();
+    if components.is_empty()
+        || components.iter().any(|component| {
+            component.is_empty()
+                || !component
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        })
+    {
+        return Err(format!("invalid Pyrefly module name {module_name}"));
+    }
+    let mut path = root.to_owned();
+    for component in &components[..components.len() - 1] {
+        path.push(component);
+    }
+    path.push(components[components.len() - 1]);
+    path.set_extension("py");
+    Ok(path)
+}
+
+fn materialize_provider_view(
+    modules: &[ModuleInput],
+) -> Result<(ProviderView, Vec<PathBuf>), String> {
+    let root = std::env::temp_dir().join(format!(
+        "codefabric-pyrefly-{}-{}",
+        std::process::id(),
+        PROVIDER_VIEW_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&root).map_err(|error| format!("create Pyrefly provider view: {error}"))?;
+    let view = ProviderView { root };
+    let paths = modules
+        .iter()
+        .map(|module| {
+            let target = provider_module_path(&view.root, &module.module_name)?;
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| format!("create Pyrefly module directory: {error}"))?;
+            }
+            let bytes = std::fs::read(&module.source_path)
+                .map_err(|error| format!("read admitted Pyrefly source: {error}"))?;
+            std::fs::write(&target, bytes)
+                .map_err(|error| format!("materialize Pyrefly module: {error}"))?;
+            Ok(target)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok((view, paths))
 }
 
 fn b3(bytes: &[u8]) -> String {
@@ -89,22 +160,68 @@ pub(crate) fn schema_digest() -> String {
 }
 
 pub(crate) fn query_surface_smoke() -> usize {
-    let query = Query::new(default_config_finder(None), ThreadCount::Inline);
+    let mut config = ConfigFile::default();
+    config.python_environment.set_empty_to_default();
+    config.configure();
+    let query = Query::new(
+        ConfigFinder::new_constant(ArcId::new(config)),
+        ThreadCount::Inline,
+    );
     size_of_val(&query)
 }
 
-pub(crate) fn analyze_module(
-    module_id: &str,
-    module_name: &str,
-    source_path: &Path,
-) -> Result<ModuleAnalysis, String> {
-    if !source_path.is_absolute() || !source_path.is_file() {
-        return Err("Pyrefly source path must be an existing absolute file".to_owned());
+pub(crate) fn analyze_modules(modules: &[ModuleInput]) -> Result<Vec<ModuleAnalysis>, String> {
+    if modules.is_empty() {
+        return Err("Pyrefly analysis requires at least one module".to_owned());
     }
-    let name = ModuleName::from_str(module_name);
-    let path = ModulePath::filesystem(PathBuf::from(source_path));
-    let query = Query::new(default_config_finder(None), ThreadCount::Inline);
-    let diagnostics = query.add_files(vec![(name, path.clone())]);
+    if modules
+        .iter()
+        .any(|module| !module.source_path.is_absolute() || !module.source_path.is_file())
+    {
+        return Err("Pyrefly source paths must be existing absolute files".to_owned());
+    }
+    let (provider_view, provider_paths) = materialize_provider_view(modules)?;
+    let resolved = modules
+        .iter()
+        .zip(&provider_paths)
+        .map(|(module, provider_path)| {
+            (
+                ModuleName::from_str(&module.module_name),
+                ModulePath::filesystem(provider_path.clone()),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut config = ConfigFile {
+        source: ConfigSource::File(provider_view.root.join(ConfigFile::PYREFLY_FILE_NAME)),
+        enable_fallback_search_path: true,
+        ..ConfigFile::default()
+    };
+    config.python_environment.set_empty_to_default();
+    config.interpreters.skip_interpreter_query = true;
+    config.configure();
+    let query = Query::new(
+        ConfigFinder::new_constant(ArcId::new(config)),
+        ThreadCount::Inline,
+    );
+    let diagnostics = query.add_files(resolved.clone());
+    modules
+        .iter()
+        .zip(resolved)
+        .zip(provider_paths)
+        .map(|((module, (name, path)), provider_path)| {
+            analyze_loaded_module(&query, &diagnostics, module, &provider_path, name, path)
+        })
+        .collect()
+}
+
+fn analyze_loaded_module(
+    query: &Query,
+    diagnostics: &[String],
+    module: &ModuleInput,
+    provider_path: &Path,
+    name: ModuleName,
+    path: ModulePath,
+) -> Result<ModuleAnalysis, String> {
     let type_table = query
         .get_type_table_in_file(name, path.clone(), None)
         .ok_or_else(|| "Pyrefly did not return a type table".to_owned())?;
@@ -126,18 +243,24 @@ pub(crate) fn analyze_module(
         .map_err(|error| format!("project Pyrefly type table: {error}"))?;
     let mut callees = serde_json::to_value(&callees)
         .map_err(|error| format!("project Pyrefly callees: {error}"))?;
-    let mut diagnostics = serde_json::to_value(&diagnostics)
+    let source_path_text = provider_path.to_string_lossy();
+    let module_diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.contains(source_path_text.as_ref()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut diagnostics = serde_json::to_value(&module_diagnostics)
         .map_err(|error| format!("project Pyrefly diagnostics: {error}"))?;
-    normalize_source_locator(&mut type_table, source_path, module_id);
-    normalize_source_locator(&mut callees, source_path, module_id);
-    normalize_source_locator(&mut diagnostics, source_path, module_id);
+    normalize_source_locator(&mut type_table, provider_path, &module.module_id);
+    normalize_source_locator(&mut callees, provider_path, &module.module_id);
+    normalize_source_locator(&mut diagnostics, provider_path, &module.module_id);
     let type_table_json = canonical_json(&type_table)?;
     let callees_json = canonical_json(&callees)?;
     let diagnostics_json = canonical_json(&diagnostics)?;
     let schema = observation_schema();
     let columns: Vec<ArrayRef> = vec![
-        Arc::new(StringArray::from(vec![module_id])),
-        Arc::new(StringArray::from(vec![module_name])),
+        Arc::new(StringArray::from(vec![module.module_id.as_str()])),
+        Arc::new(StringArray::from(vec![module.module_name.as_str()])),
         Arc::new(BinaryArray::from(vec![type_table_json.as_slice()])),
         Arc::new(BinaryArray::from(vec![callees_json.as_slice()])),
         Arc::new(BinaryArray::from(vec![diagnostics_json.as_slice()])),
@@ -156,8 +279,8 @@ pub(crate) fn analyze_module(
             .map_err(|error| format!("finish Pyrefly Arrow IPC: {error}"))?;
     }
     let module_digest = b3([
-        module_id.as_bytes(),
-        module_name.as_bytes(),
+        module.module_id.as_bytes(),
+        module.module_name.as_bytes(),
         type_table_json.as_slice(),
         callees_json.as_slice(),
         diagnostics_json.as_slice(),
@@ -165,6 +288,7 @@ pub(crate) fn analyze_module(
     .concat()
     .as_slice());
     Ok(ModuleAnalysis {
+        module_id: module.module_id.clone(),
         arrow_ipc,
         row_count: 1,
         schema_digest: schema_digest(),

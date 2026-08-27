@@ -12,6 +12,7 @@ blake3 = "=1.8.2"
 hyper-util = { version = "=0.1.20", features = ["tokio"] }
 prost = "=0.14.4"
 pyrefly = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094", default-features = false }
+pyrefly_config = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094" }
 pyrefly_python = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094" }
 pyrefly_util = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094" }
 serde = { version = "=1.0.228", features = ["derive"] }

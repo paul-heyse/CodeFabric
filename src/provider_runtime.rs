@@ -1,5 +1,8 @@
 //! Bounded accepted-handle execution for all fact providers.
 
+#[cfg(any(test, feature = "compatibility-probes"))]
+pub(crate) mod fixture;
+
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
