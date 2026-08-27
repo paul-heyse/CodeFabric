@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:a55071ea3d46f6ea603db2eec379a7fec6f400c28fdcaecbb9042a20af87e53e; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:902aefa346fffb37456cc107916d45d96c97c4db444d14f6552e7cd007e89d22; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -411,6 +411,84 @@ pub fn encode_type_fact_details(
             id16s(rows, |row| row.program_point_id.as_ref()),
             i16s(rows, |row| Some(row.origin_code)),
             i16s(rows, |row| Some(row.certainty_code)),
+        ],
+    )
+}
+
+/// Encode `scope_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_scope_details(rows: &[ScopeDetailRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        200,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.scope_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| row.parent_scope_id.as_ref()),
+            utf8(rows, |row| Some(row.scope_kind.as_str())),
+            utf8(rows, |row| row.name.as_deref()),
+            i64s(rows, |row| Some(row.start_byte)),
+            i64s(rows, |row| Some(row.end_byte)),
+        ],
+    )
+}
+
+/// Encode `binding_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_binding_details(rows: &[BindingDetailRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        210,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.binding_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.scope_id)),
+            utf8(rows, |row| Some(row.name.as_str())),
+            utf8(rows, |row| Some(row.binding_kind.as_str())),
+            utf8(rows, |row| Some(row.target_form.as_str())),
+            i64s(rows, |row| Some(row.start_byte)),
+            i64s(rows, |row| Some(row.end_byte)),
+        ],
+    )
+}
+
+/// Encode `reference_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_reference_details(
+    rows: &[ReferenceDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        220,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.reference_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.scope_id)),
+            id16s(rows, |row| Some(&row.target_id)),
+            utf8(rows, |row| Some(row.name.as_str())),
+            utf8(rows, |row| Some(row.reference_class.as_str())),
+            utf8(rows, |row| Some(row.resolution.as_str())),
+            i64s(rows, |row| Some(row.start_byte)),
+            i64s(rows, |row| Some(row.end_byte)),
+            utf8(rows, |row| row.unknown_reason_code.as_deref()),
         ],
     )
 }

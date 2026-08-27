@@ -2341,7 +2341,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:a55071ea3d46f6ea603db2eec379a7fec6f400c28fdcaecbb9042a20af87e53e"
+    "source_digest": "b3:902aefa346fffb37456cc107916d45d96c97c4db444d14f6552e7cd007e89d22"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [
@@ -2495,6 +2495,30 @@
       "owner_column": "owner_id",
       "source_generation_column": "source_generation",
       "table_code": 190,
+      "workspace_column": "workspace_id"
+    },
+    {
+      "analysis_context_column": "analysis_context_id",
+      "analysis_context_set_column": null,
+      "owner_column": "owner_id",
+      "source_generation_column": "source_generation",
+      "table_code": 200,
+      "workspace_column": "workspace_id"
+    },
+    {
+      "analysis_context_column": "analysis_context_id",
+      "analysis_context_set_column": null,
+      "owner_column": "owner_id",
+      "source_generation_column": "source_generation",
+      "table_code": 210,
+      "workspace_column": "workspace_id"
+    },
+    {
+      "analysis_context_column": "analysis_context_id",
+      "analysis_context_set_column": null,
+      "owner_column": "owner_id",
+      "source_generation_column": "source_generation",
+      "table_code": 220,
       "workspace_column": "workspace_id"
     },
     {
@@ -7699,6 +7723,667 @@
         "analysis_context_id",
         "subject_id",
         "type_role_code"
+      ]
+    },
+    {
+      "columns": [
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "scope_detail.workspace_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "workspace_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "scope_detail.analysis_context_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "analysis_context_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "scope_detail.source_generation",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "source_generation",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "scope_detail.scope_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "primary",
+          "logical_type": "id16",
+          "name": "scope_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "scope_detail.owner_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "owner_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "scope_detail.owner_bucket",
+          "foreign_key": null,
+          "hidden_operational": true,
+          "key_role": "none",
+          "logical_type": "bucket16",
+          "name": "owner_bucket",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "scope_detail.parent_scope_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "parent_scope_id",
+          "nullable": true,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "scope_detail.scope_kind",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "scope_kind",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "scope_detail.name",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "name",
+          "nullable": true,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "scope_detail.start_byte",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "start_byte",
+          "nullable": false,
+          "semantic_type": "byte_offset"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "scope_detail.end_byte",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "end_byte",
+          "nullable": false,
+          "semantic_type": "byte_offset"
+        }
+      ],
+      "dependencies": [
+        8,
+        100
+      ],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "family": "semantic-binding",
+      "grain": "one Python lexical or annotation scope",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "name": "scope_detail",
+      "overlay_mutation": "OWNER_REPLACE",
+      "partition_columns": [
+        "owner_bucket"
+      ],
+      "primary_key": [
+        "scope_id"
+      ],
+      "publication_pin_role": "PINNED_DATA",
+      "required_for_publication": true,
+      "row_encoder": "scope_details",
+      "schema_version": "1.0",
+      "table_code": 200,
+      "table_id": "table:scope_detail",
+      "zorder_columns": [
+        "workspace_id",
+        "analysis_context_id",
+        "parent_scope_id",
+        "start_byte"
+      ]
+    },
+    {
+      "columns": [
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "binding_detail.workspace_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "workspace_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "binding_detail.analysis_context_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "analysis_context_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "binding_detail.source_generation",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "source_generation",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "binding_detail.binding_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "primary",
+          "logical_type": "id16",
+          "name": "binding_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "binding_detail.owner_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "owner_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "binding_detail.owner_bucket",
+          "foreign_key": null,
+          "hidden_operational": true,
+          "key_role": "none",
+          "logical_type": "bucket16",
+          "name": "owner_bucket",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "binding_detail.scope_id",
+          "foreign_key": "scope_detail.scope_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "scope_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "binding_detail.name",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "name",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "binding_detail.binding_kind",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "binding_kind",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "binding_detail.target_form",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "target_form",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "binding_detail.start_byte",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "start_byte",
+          "nullable": false,
+          "semantic_type": "byte_offset"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "binding_detail.end_byte",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "end_byte",
+          "nullable": false,
+          "semantic_type": "byte_offset"
+        }
+      ],
+      "dependencies": [
+        8,
+        100,
+        200
+      ],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "family": "semantic-binding",
+      "grain": "one Python name binding occurrence",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "name": "binding_detail",
+      "overlay_mutation": "OWNER_REPLACE",
+      "partition_columns": [
+        "owner_bucket"
+      ],
+      "primary_key": [
+        "binding_id"
+      ],
+      "publication_pin_role": "PINNED_DATA",
+      "required_for_publication": true,
+      "row_encoder": "binding_details",
+      "schema_version": "1.0",
+      "table_code": 210,
+      "table_id": "table:binding_detail",
+      "zorder_columns": [
+        "workspace_id",
+        "analysis_context_id",
+        "scope_id",
+        "name"
+      ]
+    },
+    {
+      "columns": [
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "reference_detail.workspace_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "workspace_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "reference_detail.analysis_context_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "analysis_context_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "reference_detail.source_generation",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "source_generation",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "reference_detail.reference_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "primary",
+          "logical_type": "id16",
+          "name": "reference_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "reference_detail.owner_id",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "owner_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "int16"
+          },
+          "field_id": "reference_detail.owner_bucket",
+          "foreign_key": null,
+          "hidden_operational": true,
+          "key_role": "none",
+          "logical_type": "bucket16",
+          "name": "owner_bucket",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "reference_detail.scope_id",
+          "foreign_key": "scope_detail.scope_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "scope_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "byte_width": 16,
+            "extension": {
+              "metadata": "version=1",
+              "name": "codefabric.id16"
+            },
+            "name": "fixed_size_binary"
+          },
+          "field_id": "reference_detail.target_id",
+          "foreign_key": "entity.entity_id",
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "id16",
+          "name": "target_id",
+          "nullable": false,
+          "semantic_type": "id16"
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "reference_detail.name",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "name",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "reference_detail.reference_class",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "reference_class",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "reference_detail.resolution",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "resolution",
+          "nullable": false,
+          "semantic_type": null
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "reference_detail.start_byte",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "start_byte",
+          "nullable": false,
+          "semantic_type": "byte_offset"
+        },
+        {
+          "arrow_type": {
+            "name": "int64"
+          },
+          "field_id": "reference_detail.end_byte",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "int64",
+          "name": "end_byte",
+          "nullable": false,
+          "semantic_type": "byte_offset"
+        },
+        {
+          "arrow_type": {
+            "name": "utf8"
+          },
+          "field_id": "reference_detail.unknown_reason_code",
+          "foreign_key": null,
+          "hidden_operational": false,
+          "key_role": "none",
+          "logical_type": "utf8",
+          "name": "unknown_reason_code",
+          "nullable": true,
+          "semantic_type": null
+        }
+      ],
+      "dependencies": [
+        8,
+        100,
+        110,
+        200,
+        210
+      ],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "family": "semantic-binding",
+      "grain": "one Python name reference occurrence",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "name": "reference_detail",
+      "overlay_mutation": "OWNER_REPLACE",
+      "partition_columns": [
+        "owner_bucket"
+      ],
+      "primary_key": [
+        "reference_id"
+      ],
+      "publication_pin_role": "PINNED_DATA",
+      "required_for_publication": true,
+      "row_encoder": "reference_details",
+      "schema_version": "1.0",
+      "table_code": 220,
+      "table_id": "table:reference_detail",
+      "zorder_columns": [
+        "workspace_id",
+        "analysis_context_id",
+        "scope_id",
+        "start_byte"
       ]
     },
     {

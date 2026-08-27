@@ -4,7 +4,7 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "released",
-  "canonical_digest": "b3:0f287a35353f352b6a3f4bdef569bb20a3c6e11bd2ce84aa1e9a82830c010460",
+  "canonical_digest": "b3:c664ea817108d76552c58a0df08d173dc25f6e13cfa82ab870cf00c255f2b60e",
   "generator_revision": "codefabric-schema-contracts-v1",
   "schema_version": 1,
   "ontology_version": "1.3",
@@ -2789,6 +2789,100 @@
       "required_for_publication": true
     },
     {
+      "table_code": 200,
+      "name": "scope_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "semantic-binding",
+      "grain": "one Python lexical or annotation scope",
+      "schema_version": "1.0",
+      "row_encoder": "scope_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "scope_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "parent_scope_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "scope_kind", "logical_type": "utf8", "nullable": false},
+        {"name": "name", "logical_type": "utf8", "nullable": true},
+        {"name": "start_byte", "logical_type": "int64", "nullable": false, "semantic_type": "byte_offset"},
+        {"name": "end_byte", "logical_type": "int64", "nullable": false, "semantic_type": "byte_offset"}
+      ],
+      "primary_key": ["scope_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "parent_scope_id", "start_byte"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100],
+      "required_for_publication": true
+    },
+    {
+      "table_code": 210,
+      "name": "binding_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "semantic-binding",
+      "grain": "one Python name binding occurrence",
+      "schema_version": "1.0",
+      "row_encoder": "binding_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "binding_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "scope_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "scope_detail.scope_id"},
+        {"name": "name", "logical_type": "utf8", "nullable": false},
+        {"name": "binding_kind", "logical_type": "utf8", "nullable": false},
+        {"name": "target_form", "logical_type": "utf8", "nullable": false},
+        {"name": "start_byte", "logical_type": "int64", "nullable": false, "semantic_type": "byte_offset"},
+        {"name": "end_byte", "logical_type": "int64", "nullable": false, "semantic_type": "byte_offset"}
+      ],
+      "primary_key": ["binding_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "scope_id", "name"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100, 200],
+      "required_for_publication": true
+    },
+    {
+      "table_code": 220,
+      "name": "reference_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "semantic-binding",
+      "grain": "one Python name reference occurrence",
+      "schema_version": "1.0",
+      "row_encoder": "reference_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "reference_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "scope_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "scope_detail.scope_id"},
+        {"name": "target_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "name", "logical_type": "utf8", "nullable": false},
+        {"name": "reference_class", "logical_type": "utf8", "nullable": false},
+        {"name": "resolution", "logical_type": "utf8", "nullable": false},
+        {"name": "start_byte", "logical_type": "int64", "nullable": false, "semantic_type": "byte_offset"},
+        {"name": "end_byte", "logical_type": "int64", "nullable": false, "semantic_type": "byte_offset"},
+        {"name": "unknown_reason_code", "logical_type": "utf8", "nullable": true}
+      ],
+      "primary_key": ["reference_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "scope_id", "start_byte"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100, 110, 200, 210],
+      "required_for_publication": true
+    },
+    {
       "table_code": 900,
       "name": "owner_tombstone",
       "publication_pin_role": "NOT_PUBLISHED",
@@ -3059,6 +3153,27 @@
     },
     {
       "table_code": 190,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 200,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 210,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 220,
       "workspace_column": "workspace_id",
       "analysis_context_column": "analysis_context_id",
       "source_generation_column": "source_generation",
@@ -4906,6 +5021,20 @@
     "max_snapshot_validation_batches": 4096
   },
   "provider_observation_schemas": [
+    {
+      "schema_id": "codefabric.ruff.semantic.v1",
+      "provider_id": "ruff-python",
+      "observation_family_code": 100,
+      "fields": [
+        {"name": "module_name", "logical_type": "utf8", "nullable": false},
+        {"name": "provider_image_fingerprint", "logical_type": "utf8", "nullable": false},
+        {"name": "scopes_json", "logical_type": "binary", "nullable": false},
+        {"name": "bindings_json", "logical_type": "binary", "nullable": false},
+        {"name": "references_json", "logical_type": "binary", "nullable": false},
+        {"name": "unknown_symbols_json", "logical_type": "binary", "nullable": false},
+        {"name": "edges_json", "logical_type": "binary", "nullable": false}
+      ]
+    },
     {
       "schema_id": "codefabric.rustc.owned-mir.v1",
       "provider_id": "rustc-mir",

@@ -270,6 +270,9 @@ enum RowEncoderKind {
     SyntaxDetails,
     TypeDetails,
     TypeFactDetails,
+    ScopeDetails,
+    BindingDetails,
+    ReferenceDetails,
 }
 
 impl RowEncoderKind {
@@ -287,6 +290,9 @@ impl RowEncoderKind {
             Self::SyntaxDetails => "encode_syntax_details",
             Self::TypeDetails => "encode_type_details",
             Self::TypeFactDetails => "encode_type_fact_details",
+            Self::ScopeDetails => "encode_scope_details",
+            Self::BindingDetails => "encode_binding_details",
+            Self::ReferenceDetails => "encode_reference_details",
         }
     }
 
@@ -304,6 +310,9 @@ impl RowEncoderKind {
             Self::SyntaxDetails => "SyntaxDetailRow",
             Self::TypeDetails => "TypeDetailRow",
             Self::TypeFactDetails => "TypeFactDetailRow",
+            Self::ScopeDetails => "ScopeDetailRow",
+            Self::BindingDetails => "BindingDetailRow",
+            Self::ReferenceDetails => "ReferenceDetailRow",
         }
     }
 }
@@ -818,6 +827,9 @@ impl SchemaContractIr {
             (RowEncoderKind::SyntaxDetails, 170),
             (RowEncoderKind::TypeDetails, 180),
             (RowEncoderKind::TypeFactDetails, 190),
+            (RowEncoderKind::ScopeDetails, 200),
+            (RowEncoderKind::BindingDetails, 210),
+            (RowEncoderKind::ReferenceDetails, 220),
         ]);
         if encoders != expected_encoders {
             return invalid(

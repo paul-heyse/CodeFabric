@@ -90,6 +90,8 @@ pub mod pyrefly_service;
 #[cfg(feature = "daemon")]
 pub mod python_context;
 #[cfg(feature = "daemon")]
+pub mod python_semantic;
+#[cfg(feature = "daemon")]
 pub mod query_service;
 /// Generated categorical and lifecycle registry types.
 #[cfg(any(

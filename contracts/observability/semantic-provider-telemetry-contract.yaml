@@ -6,9 +6,11 @@ status: released
 label_policy:
   bounded_labels: [provider_id, provider_phase, terminal_state, failure_code]
   forbidden_labels: [workspace_id, analysis_context_id, provider_run_id, source_path, diagnostic_text]
-  provider_ids: [pyrefly-python, rustc-mir]
+  provider_ids: [ruff-python, pyrefly-python, rustc-mir]
 phases:
   - admission
+  - binding-pass
+  - traversal-pass
   - child-launch
   - handshake
   - stage-creation
@@ -29,9 +31,15 @@ metrics:
   - {name: chunk_count, value_kind: counter, unit: chunks, lifecycle: provider-run, cardinality: per-provider}
   - {name: cache_hits, value_kind: counter, unit: entries, lifecycle: provider-run, cardinality: per-provider}
   - {name: cancellation_count, value_kind: counter, unit: requests, lifecycle: provider-run, cardinality: per-provider}
+  - {name: visited_node_count, value_kind: counter, unit: nodes, lifecycle: provider-run, cardinality: per-provider}
+  - {name: scope_count, value_kind: gauge, unit: scopes, lifecycle: provider-run, cardinality: per-provider}
+  - {name: binding_count, value_kind: gauge, unit: bindings, lifecycle: provider-run, cardinality: per-provider}
+  - {name: reference_count, value_kind: gauge, unit: references, lifecycle: provider-run, cardinality: per-provider}
+  - {name: unresolved_reference_count, value_kind: gauge, unit: references, lifecycle: provider-run, cardinality: per-provider}
   - {name: failure_count, value_kind: counter, unit: failures, lifecycle: provider-run, cardinality: bounded-failure-code}
   - {name: wall_time, value_kind: histogram, unit: microseconds, lifecycle: provider-run, cardinality: per-provider}
 resource_profiles:
+  ruff-python: in-process-syntax-standard
   pyrefly-python: sidecar-semantic-standard
   rustc-mir: compiler-semantic-standard
 owner_acceptance:

@@ -28,6 +28,15 @@ use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, Provider
 use crate::registries::{PROVIDER_RESOURCE_PROFILES, ProviderResourceProfileEntry};
 use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSnapshot};
 
+mod semantic;
+
+pub use semantic::{
+    PythonBindingFact, PythonBindingKind, PythonFrontendBatch, PythonReferenceClass,
+    PythonReferenceFact, PythonResolution, PythonScopeFact, PythonScopeKind, PythonSemanticEdge,
+    PythonSemanticEdgeKind, PythonSemanticError, PythonSemanticMetrics, PythonSemanticTerminal,
+    PythonTargetForm, PythonUnknownSymbolFact,
+};
+
 /// Stable occurrence identity within one Ruff parse result.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct RuffOccurrenceId(pub u64);
@@ -473,6 +482,36 @@ impl RuffAdapter {
             retained: None,
             metrics: RuffAdapterMetrics::default(),
         })
+    }
+
+    /// Project the retained Ruff AST through the pinned semantic model.
+    ///
+    /// Ruff arena identifiers and borrowed nodes remain inside this adapter
+    /// module. The returned batch is entirely application owned.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a missing/stale retained revision or an injected cleanup fault.
+    pub fn semantic_batch(
+        &self,
+        revision: u64,
+        module_name: &str,
+        module_path: &std::path::Path,
+        inject_cleanup_failure: bool,
+    ) -> Result<PythonFrontendBatch, PythonSemanticError> {
+        let retained = self
+            .retained
+            .as_ref()
+            .filter(|retained| retained.revision == revision)
+            .ok_or(PythonSemanticError::MissingRevision(revision))?;
+        semantic::project_python_semantics(
+            &retained.text.text,
+            retained.parsed.syntax().body.as_slice(),
+            module_name,
+            module_path,
+            &retained.snapshot.source.provider_image_fingerprint,
+            inject_cleanup_failure,
+        )
     }
 
     /// Parse a Python source image once, build all Ruff indexes once, then

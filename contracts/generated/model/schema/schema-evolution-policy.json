@@ -14,6 +14,6 @@
   ],
   "require_schema_digest_equality": true,
   "source_artifact_id": "codefabric.schema.contract-ir",
-  "source_digest": "b3:a55071ea3d46f6ea603db2eec379a7fec6f400c28fdcaecbb9042a20af87e53e",
+  "source_digest": "b3:902aefa346fffb37456cc107916d45d96c97c4db444d14f6552e7cd007e89d22",
   "version": "1.0"
 }

@@ -1945,6 +1945,34 @@ fn rustc_mir_observation_contract() -> Result<&'static ProviderObservationSchema
         .ok_or_else(|| FactIngestError::Protocol("rustc MIR observation schema is absent".into()))
 }
 
+/// Validate a provider observation against its generated schema and both shared and
+/// lane-specific semantic-ingest authorities.
+///
+/// # Errors
+///
+/// Returns a protocol error when the schema is unregistered, its Arrow shape differs, or its
+/// generated shared/lane-specific ingest authority is incomplete.
+pub fn validate_provider_semantic_observation(
+    observation_schema_id: &str,
+    batch: &arrow_array::RecordBatch,
+) -> Result<(), FactIngestError> {
+    let contract = PROVIDER_OBSERVATION_SCHEMAS
+        .iter()
+        .find(|schema| schema.schema_id == observation_schema_id)
+        .ok_or_else(|| {
+            FactIngestError::Protocol(format!(
+                "provider observation schema {observation_schema_id} is not registered"
+            ))
+        })?;
+    let expected = provider_observation_arrow_schema(contract);
+    if batch.schema().as_ref() != &expected {
+        return Err(FactIngestError::Protocol(format!(
+            "provider observation {observation_schema_id} does not match its registered Arrow schema"
+        )));
+    }
+    validate_semantic_ingest_contract(observation_schema_id, batch)
+}
+
 fn validate_semantic_ingest_contract(
     observation_schema_id: &str,
     batch: &arrow_array::RecordBatch,
@@ -1998,6 +2026,20 @@ fn validate_semantic_ingest_contract(
         )));
     }
     Ok(())
+}
+
+pub(crate) fn registered_provider_observation_arrow_schema(
+    observation_schema_id: &str,
+) -> Result<Schema, FactIngestError> {
+    PROVIDER_OBSERVATION_SCHEMAS
+        .iter()
+        .find(|schema| schema.schema_id == observation_schema_id)
+        .map(provider_observation_arrow_schema)
+        .ok_or_else(|| {
+            FactIngestError::Protocol(format!(
+                "provider observation schema {observation_schema_id} is not registered"
+            ))
+        })
 }
 
 fn provider_observation_arrow_schema(contract: &ProviderObservationSchema) -> Schema {
@@ -2620,6 +2662,7 @@ mod tests {
         assert_eq!(
             schemas,
             BTreeSet::from([
+                ("codefabric.ruff.semantic.v1", 100),
                 ("codefabric.pyrefly.module.v1", 110),
                 ("codefabric.rustc.owned-mir.v1", 120),
             ])

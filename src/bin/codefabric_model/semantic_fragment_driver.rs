@@ -126,7 +126,8 @@ impl SemanticFragmentSet {
             let digest = detached_digest(&document)?;
             if document.canonical_digest != digest {
                 return Err(SemanticFragmentError::Invalid(format!(
-                    "{path} canonical digest is stale"
+                    "{path} canonical digest is stale: declared {}, computed {digest}",
+                    document.canonical_digest
                 )));
             }
             source_digests.insert(path.to_owned(), digest);

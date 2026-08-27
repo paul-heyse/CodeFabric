@@ -348,6 +348,47 @@ pub struct TypeFactDetailRow {
     pub certainty_code: i16,
 }
 
+/// One canonical Python scope extension row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScopeDetailRow {
+    pub scope: FactScope,
+    pub scope_id: [u8; 16],
+    pub parent_scope_id: Option<[u8; 16]>,
+    pub scope_kind: String,
+    pub name: Option<String>,
+    pub start_byte: i64,
+    pub end_byte: i64,
+}
+
+/// One canonical Python binding extension row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BindingDetailRow {
+    pub scope: FactScope,
+    pub binding_id: [u8; 16],
+    pub scope_id: [u8; 16],
+    pub name: String,
+    pub binding_kind: String,
+    pub target_form: String,
+    pub start_byte: i64,
+    pub end_byte: i64,
+}
+
+/// One canonical Python reference extension row. Unknown resolution must carry
+/// a non-null reason code and a concrete `UNKNOWN_SYMBOL` target entity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceDetailRow {
+    pub scope: FactScope,
+    pub reference_id: [u8; 16],
+    pub scope_id: [u8; 16],
+    pub target_id: [u8; 16],
+    pub name: String,
+    pub reference_class: String,
+    pub resolution: String,
+    pub start_byte: i64,
+    pub end_byte: i64,
+    pub unknown_reason_code: Option<String>,
+}
+
 fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]>) -> ArrayRef {
     let mut builder = BinaryBuilder::with_capacity(rows.len(), rows.len().saturating_mul(16));
     for row in rows {

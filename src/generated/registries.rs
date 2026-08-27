@@ -2113,6 +2113,7 @@ pub const PROVIDER_CODE_VALUES: &[RegistryEntry] = &[
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
 pub enum ProviderObservationFamily {
+    RuffSemantic = 100,
     PyreflyModule = 110,
     RustMirOwner = 120,
 }
@@ -2120,6 +2121,7 @@ impl TryFrom<u16> for ProviderObservationFamily {
     type Error = UnknownRegistryCode;
     fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
         match code {
+            100 => Ok(Self::RuffSemantic),
             110 => Ok(Self::PyreflyModule),
             120 => Ok(Self::RustMirOwner),
             _ => Err(UnknownRegistryCode {
@@ -2130,6 +2132,11 @@ impl TryFrom<u16> for ProviderObservationFamily {
     }
 }
 pub const PROVIDER_OBSERVATION_FAMILY_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 100,
+        name: "RUFF_SEMANTIC",
+        slug: "ruff-semantic",
+    },
     RegistryEntry {
         code: 110,
         name: "PYREFLY_MODULE",

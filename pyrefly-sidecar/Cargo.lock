@@ -565,7 +565,6 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "blake3",
- "hyper-util",
  "prost",
  "pyrefly",
  "pyrefly_config",

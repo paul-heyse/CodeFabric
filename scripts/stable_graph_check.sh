@@ -57,7 +57,7 @@ for pin in \
   'tree-sitter 0.26.12' 'tree-sitter-python 0.25.0' \
   'tree-sitter-rust 0.24.2' 'ruff_python_ast 0.0.7' \
   'ruff_python_index 0.0.7' 'ruff_python_parser 0.0.7' \
-  'ruff_python_trivia 0.0.7' 'ruff_source_file 0.0.7' \
+  'ruff_python_semantic 0.0.7' 'ruff_python_trivia 0.0.7' 'ruff_source_file 0.0.7' \
   'ruff_text_size 0.0.7'; do
   require_one_version ${pin}
 done
@@ -97,7 +97,7 @@ printf '%s' "$root_shape" | jq -e '
   ] | sort)
   and (.features["fact-generation"] | sort) == ([
     "contract-models", "dep:blake3", "dep:rayon", "dep:ruff_python_ast",
-    "dep:ruff_python_index", "dep:ruff_python_parser", "dep:ruff_python_trivia",
+    "dep:ruff_python_index", "dep:ruff_python_parser", "dep:ruff_python_semantic", "dep:ruff_python_trivia",
     "dep:ruff_source_file", "dep:ruff_text_size", "dep:tree-sitter",
     "dep:tree-sitter-python", "dep:tree-sitter-rust", "dep:thiserror"
   ] | sort)
@@ -124,7 +124,7 @@ declared_features() {
 [ "$(declared_features petgraph)" = '["std"]' ] || fail 'petgraph direct features drifted'
 [ "$(declared_features rusqlite)" = '["backup","bundled"]' ] || \
   fail 'rusqlite direct features drifted'
-[ "$(declared_features rustix)" = '["fs"]' ] || fail 'rustix direct features drifted'
+[ "$(declared_features rustix)" = '["fs","process"]' ] || fail 'rustix direct features drifted'
 [ "$(declared_features serde_json)" = '["arbitrary_precision"]' ] || \
   fail 'serde_json arbitrary_precision is required before canonicalization'
 
@@ -185,7 +185,7 @@ forbid_in_tree() {
 }
 
 default_tree="$(cargo_tree)"
-for package in datafusion deltalake gix tonic rayon tree-sitter ruff_python_parser; do
+for package in datafusion deltalake gix tonic rayon tree-sitter ruff_python_parser ruff_python_semantic; do
   require_in_tree "$default_tree" "$package" 'default local-workstation graph'
 done
 forbid_in_tree "$default_tree" 'deltalake-aws|aws-config|aws-sdk-.*|pyo3' \

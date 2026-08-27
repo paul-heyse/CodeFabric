@@ -33,6 +33,13 @@ pub struct SemanticInvalidationContract {
 
 pub const SEMANTIC_INGEST_CONTRACTS: &[SemanticIngestContract] = &[
     SemanticIngestContract {
+        contract_id: "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V1",
+        lane: SemanticLane::Shared,
+        observation_schema_ids: &["codefabric.ruff.semantic.v1"],
+        output_table_codes: &[100, 110, 130],
+        required_fields: &["entity_id", "fact_id", "evidence_id"],
+    },
+    SemanticIngestContract {
         contract_id: "INGEST_SHARED_CANONICAL_TYPES_V1",
         lane: SemanticLane::Shared,
         observation_schema_ids: &[
@@ -46,6 +53,21 @@ pub const SEMANTIC_INGEST_CONTRACTS: &[SemanticIngestContract] = &[
             "type_role_code",
             "origin_code",
             "certainty_code",
+        ],
+    },
+    SemanticIngestContract {
+        contract_id: "INGEST_RUFF_SEMANTIC_V1",
+        lane: SemanticLane::Python,
+        observation_schema_ids: &["codefabric.ruff.semantic.v1"],
+        output_table_codes: &[100, 110, 130, 200, 210, 220],
+        required_fields: &[
+            "module_name",
+            "provider_image_fingerprint",
+            "scopes_json",
+            "bindings_json",
+            "references_json",
+            "unknown_symbols_json",
+            "edges_json",
         ],
     },
     SemanticIngestContract {
@@ -107,6 +129,13 @@ pub const SEMANTIC_INVALIDATION_CONTRACTS: &[SemanticInvalidationContract] = &[
         lane: SemanticLane::Python,
         trigger_kinds: &["python-source-change", "python-manifest-change"],
         invalidated_table_codes: &[180, 190],
+        scope: "module-owner-and-analysis-context",
+    },
+    SemanticInvalidationContract {
+        contract_id: "INVALIDATE_PYTHON_SCOPE_BINDING_V1",
+        lane: SemanticLane::Python,
+        trigger_kinds: &["python-source-change", "python-manifest-change"],
+        invalidated_table_codes: &[200, 210, 220],
         scope: "module-owner-and-analysis-context",
     },
     SemanticInvalidationContract {

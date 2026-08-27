@@ -6,7 +6,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.shared",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:13d681450d59acc2a9c6f5e83ebce6e0261ddf8e93b7825404bc7368b9a95ef9",
+      "canonical_digest": "b3:41a0baa88632e8a64f85d246908093c6f3aefa13e544bc6e48bbbd668ce81ecc",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -25,6 +25,22 @@
       ],
       "fragment_id": "SEMANTIC_SHARED_V1",
       "ingest": [
+        {
+          "contract_id": "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V1",
+          "observation_schema_ids": [
+            "codefabric.ruff.semantic.v1"
+          ],
+          "output_table_codes": [
+            100,
+            110,
+            130
+          ],
+          "required_fields": [
+            "entity_id",
+            "fact_id",
+            "evidence_id"
+          ]
+        },
         {
           "contract_id": "INGEST_SHARED_CANONICAL_TYPES_V1",
           "observation_schema_ids": [
@@ -127,7 +143,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.python",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:cb602875d81d1b6cb851d666b5c243640805ea963c24c847a614754ce5886b07",
+      "canonical_digest": "b3:2330980d501987ef69bb71c1dbc06580d36aef97207561f2569308d00fafb0c6",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -145,6 +161,29 @@
       ],
       "fragment_id": "SEMANTIC_PYTHON_V1",
       "ingest": [
+        {
+          "contract_id": "INGEST_RUFF_SEMANTIC_V1",
+          "observation_schema_ids": [
+            "codefabric.ruff.semantic.v1"
+          ],
+          "output_table_codes": [
+            100,
+            110,
+            130,
+            200,
+            210,
+            220
+          ],
+          "required_fields": [
+            "module_name",
+            "provider_image_fingerprint",
+            "scopes_json",
+            "bindings_json",
+            "references_json",
+            "unknown_symbols_json",
+            "edges_json"
+          ]
+        },
         {
           "contract_id": "INGEST_PYREFLY_MODULE_V1",
           "observation_schema_ids": [
@@ -175,15 +214,75 @@
             "python-source-change",
             "python-manifest-change"
           ]
+        },
+        {
+          "contract_id": "INVALIDATE_PYTHON_SCOPE_BINDING_V1",
+          "invalidated_table_codes": [
+            200,
+            210,
+            220
+          ],
+          "scope": "module-owner-and-analysis-context",
+          "trigger_kinds": [
+            "python-source-change",
+            "python-manifest-change"
+          ]
         }
       ],
       "lane": "python",
       "model": {
         "owned_observation_schema_ids": [
+          "codefabric.ruff.semantic.v1",
           "codefabric.pyrefly.module.v1"
         ],
-        "owned_table_codes": [],
+        "owned_table_codes": [
+          200,
+          210,
+          220
+        ],
         "provider_observation_schema_additions": [
+          {
+            "fields": [
+              {
+                "logical_type": "utf8",
+                "name": "module_name",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "provider_image_fingerprint",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "scopes_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "bindings_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "references_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "unknown_symbols_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "edges_json",
+                "nullable": false
+              }
+            ],
+            "observation_family_code": 100,
+            "provider_id": "ruff-python",
+            "schema_id": "codefabric.ruff.semantic.v1"
+          },
           {
             "fields": [
               {
@@ -228,6 +327,12 @@
             "domain": "PROVIDER_OBSERVATION_FAMILY",
             "values": [
               {
+                "code": 100,
+                "meaning": "One Ruff application-owned scope binding and reference observation",
+                "name": "RUFF_SEMANTIC",
+                "slug": "ruff-semantic"
+              },
+              {
                 "code": 110,
                 "meaning": "One Pyrefly module semantic observation row",
                 "name": "PYREFLY_MODULE",
@@ -240,6 +345,7 @@
         "enum_values": [
           {
             "codes": [
+              100,
               110
             ],
             "domain": "PROVIDER_OBSERVATION_FAMILY"
@@ -333,9 +439,9 @@
     }
   ],
   "source_digests": {
-    "contracts/semantic-fragments/python.json": "b3:cb602875d81d1b6cb851d666b5c243640805ea963c24c847a614754ce5886b07",
+    "contracts/semantic-fragments/python.json": "b3:2330980d501987ef69bb71c1dbc06580d36aef97207561f2569308d00fafb0c6",
     "contracts/semantic-fragments/rust.json": "b3:22056b1ab97fa275036659a4fbf2251adec0d4d372660ea88d596938e8248ba3",
-    "contracts/semantic-fragments/shared.json": "b3:13d681450d59acc2a9c6f5e83ebce6e0261ddf8e93b7825404bc7368b9a95ef9"
+    "contracts/semantic-fragments/shared.json": "b3:41a0baa88632e8a64f85d246908093c6f3aefa13e544bc6e48bbbd668ce81ecc"
   },
   "status": "draft",
   "version": "1.0"

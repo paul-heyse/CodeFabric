@@ -367,6 +367,7 @@ class ProviderCode(IntEnum):
 
 
 class ProviderObservationFamily(IntEnum):
+    RUFF_SEMANTIC = 100
     PYREFLY_MODULE = 110
     RUST_MIR_OWNER = 120
 
@@ -930,6 +931,7 @@ ENUM_TRIPLES = MappingProxyType({
         (60, "SOURCE_SUBSTRATE", "source-substrate"),
     ),
     "PROVIDER_OBSERVATION_FAMILY": (
+        (100, "RUFF_SEMANTIC", "ruff-semantic"),
         (110, "PYREFLY_MODULE", "pyrefly-module"),
         (120, "RUST_MIR_OWNER", "rust-mir-owner"),
     ),
