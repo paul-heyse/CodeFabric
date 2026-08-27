@@ -12,36 +12,43 @@ use arrow_array::{ArrayRef, BinaryArray, RecordBatch, StringArray};
 use serde_json::{Value, json};
 
 use crate::core_facts::{
-    registered_provider_observation_arrow_schema, validate_provider_semantic_observation,
+    CapabilityChild, aggregate_capability, registered_provider_observation_arrow_schema,
+    validate_provider_semantic_observation,
 };
 use crate::fact_ingest::{
-    BindingDetailRow, CallArgumentDetailRow, CallSiteDetailRow, CallableDetailRow,
-    CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow, CfgEdgeDetailRow,
-    CfgGraphRow, CfgNodeDetailRow, DiagnosticRow, EntityRow, FactEvidenceRow, FactIngestError,
-    FactScope, ModuleImportDetailRow, OwnerRow, ParameterDetailRow, ProviderFactBatch,
+    AccessPathComponentRow, BindingDetailRow, CallArgumentDetailRow, CallSiteDetailRow,
+    CallableDetailRow, CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow,
+    CfgEdgeDetailRow, CfgGraphRow, CfgNodeDetailRow, DataflowEventDetailRow, DiagnosticRow,
+    EntityRow, FactEvidenceRow, FactIngestError, FactScope, MemoryLocationDetailRow,
+    ModuleImportDetailRow, OperationDetailRow, OwnerRow, ParameterDetailRow, ProviderFactBatch,
     ProviderFactManifest, ProviderFactStream, ReferenceDetailRow, RelationRow, ScopeDetailRow,
-    StreamTerminal, ValidatedFactBatch, encode_binding_details, encode_call_argument_details,
-    encode_call_site_details, encode_callable_details, encode_capability_statuses,
-    encode_cfg_edge_details, encode_cfg_graphs, encode_cfg_node_details, encode_diagnostics,
-    encode_entities, encode_evidence, encode_module_import_details, encode_owners,
+    StreamTerminal, ValidatedFactBatch, ValueDetailRow, encode_access_path_components,
+    encode_binding_details, encode_call_argument_details, encode_call_site_details,
+    encode_callable_details, encode_capability_statuses, encode_cfg_edge_details,
+    encode_cfg_graphs, encode_cfg_node_details, encode_dataflow_event_details,
+    encode_diagnostics, encode_entities, encode_evidence, encode_memory_location_details,
+    encode_module_import_details, encode_operation_details, encode_owners,
     encode_parameter_details, encode_reference_details, encode_relations, encode_scope_details,
+    encode_value_details,
 };
 use crate::registries::{
-    ArgumentBindingStatus, ArgumentSpreadKind, CallDispatchKind, CompletenessState, Directness,
-    EvidenceCertainty, Language, OwnerCapabilityState, OwnerKind, ParameterKind, ProviderCode,
-    ResolutionClass, Severity, capability_code, capability_mask, entity_kind, fact_kind_code,
-    relation_kind,
+    ArgumentBindingStatus, ArgumentSpreadKind, CallDispatchKind, Completeness, CompletenessState,
+    Directness, EvidenceCertainty, Language, OwnerCapabilityState, OwnerKind, ParameterKind,
+    ProviderCode, ResolutionClass, Severity, capability_code, capability_mask, entity_kind,
+    fact_kind_code, relation_kind,
 };
 use crate::ruff_adapter::{
     PythonArgumentBindingStatus, PythonArgumentSpreadKind, PythonBindingKind,
-    PythonCallableSyntaxRole, PythonCfgKind, PythonCfgNodeKind, PythonDispatchKind,
-    PythonExportStatus, PythonFrontendBatch, PythonImportKind, PythonMemberKind,
-    PythonParameterKind, PythonReferenceClass, PythonResolution, PythonScopeKind,
-    PythonSemanticEdgeKind, PythonTargetForm, validate_python_cfg,
+    PythonCallableSyntaxRole, PythonCfgKind, PythonCfgNodeKind, PythonDataflowEventKind,
+    PythonDataflowRelationKind, PythonDispatchKind, PythonExportStatus, PythonFrontendBatch,
+    PythonImportKind, PythonMemberKind, PythonParameterKind, PythonReferenceClass,
+    PythonResolution, PythonScopeKind, PythonSemanticEdgeKind, PythonTargetForm,
+    validate_python_cfg,
 };
 
-const OBSERVATION_SCHEMA_ID: &str = "codefabric.ruff.semantic.v2";
+const OBSERVATION_SCHEMA_ID: &str = "codefabric.ruff.semantic.v3";
 const PROVIDER_VERSION: &str = "0.0.7";
+const PYTHON_DATAFLOW_DERIVATION_CODE: i16 = 20;
 
 #[derive(Clone, Copy)]
 struct DerivedIdentity {
@@ -55,6 +62,7 @@ pub struct PythonSemanticProjection {
     pub provider_run_id: [u8; 16],
     pub observation: RecordBatch,
     pub canonical: CanonicalIngestOutput,
+    pub profile_completeness: Completeness,
 }
 
 impl PythonSemanticProjection {
@@ -92,6 +100,7 @@ pub fn project_ruff_semantic_batch(
     validate_import_export_facts(batch)?;
     validate_callable_facts(batch)?;
     validate_cfg_facts(batch)?;
+    validate_dataflow_facts(batch)?;
 
     let observation_payloads = observation_payloads(batch)?;
     let observation = observation_batch(batch, &observation_payloads)?;
@@ -212,6 +221,35 @@ pub fn project_ruff_semantic_batch(
                 .iter()
                 .map(|fact| (b"cfg-node".as_slice(), fact.cfg_node_id)),
         )
+        .chain(
+            batch
+                .values
+                .iter()
+                .map(|fact| (b"dataflow-value".as_slice(), fact.value_id)),
+        )
+        .chain(
+            batch
+                .operations
+                .iter()
+                .map(|fact| (b"dataflow-operation".as_slice(), fact.operation_id)),
+        )
+        .chain(batch.dataflow_events.iter().map(|fact| {
+            let domain = if fact.kind == PythonDataflowEventKind::Definition {
+                b"definition-event".as_slice()
+            } else {
+                b"use-event".as_slice()
+            };
+            (domain, fact.event_id)
+        }))
+        .chain(
+            batch
+                .memory_locations
+                .iter()
+                .map(|fact| (b"memory-location".as_slice(), fact.location_id)),
+        )
+        .chain(batch.access_path_components.iter().map(|fact| {
+            (b"access-path-component".as_slice(), fact.component_id)
+        }))
     {
         canonical_ids
             .entry(semantic)
@@ -238,6 +276,11 @@ pub fn project_ruff_semantic_batch(
     let call_expression_kind = required_entity_kind("CALL_EXPRESSION")?;
     let declaration_syntax_kind = required_entity_kind("DECLARATION_SYNTAX")?;
     let cfg_block_kind = required_entity_kind("CFG_BLOCK")?;
+    let value_entity_kind = required_entity_kind("VALUE")?;
+    let operation_entity_kind = required_entity_kind("DATAFLOW_OPERATION")?;
+    let definition_event_kind = required_entity_kind("DEFINITION_EVENT")?;
+    let use_event_kind = required_entity_kind("USE_EVENT")?;
+    let memory_location_kind = required_entity_kind("MEMORY_LOCATION")?;
     let semantic_type_kind = required_entity_kind("SEMANTIC_TYPE")?;
     let contains_kind = required_relation_kind("CONTAINS")?;
     let declares_kind = required_relation_kind("DECLARES")?;
@@ -261,6 +304,12 @@ pub fn project_ruff_semantic_batch(
     let argument_binds_to_kind = required_relation_kind("ARGUMENT_BINDS_TO")?;
     let contains_call_kind = required_relation_kind("CONTAINS_CALL")?;
     let declares_member_kind = required_relation_kind("DECLARES_MEMBER")?;
+    let reaching_definition_kind = required_relation_kind("REACHING_DEFINITION")?;
+    let reaches_kind = required_relation_kind("REACHES")?;
+    let def_use_kind = required_relation_kind("DEF_USE")?;
+    let data_dep_kind = required_relation_kind("DATA_DEP")?;
+    let value_flows_to_kind = required_relation_kind("VALUE_FLOWS_TO")?;
+    let kills_definition_kind = required_relation_kind("KILLS_DEFINITION")?;
 
     let mut entities = Vec::with_capacity(
         batch.scopes.len()
@@ -275,6 +324,10 @@ pub fn project_ruff_semantic_batch(
             + batch.unknown_argument_sets.len()
             + batch.members.len()
             + batch.cfg_nodes.len()
+            + batch.values.len()
+            + batch.operations.len()
+            + batch.dataflow_events.len()
+            + batch.memory_locations.len()
             + batch
                 .cfg_edges
                 .iter()
@@ -293,6 +346,11 @@ pub fn project_ruff_semantic_batch(
     let mut cfg_graphs = Vec::with_capacity(batch.cfgs.len());
     let mut cfg_node_details = Vec::with_capacity(batch.cfg_nodes.len());
     let mut cfg_edge_details = Vec::with_capacity(batch.cfg_edges.len());
+    let mut value_details = Vec::with_capacity(batch.values.len());
+    let mut operation_details = Vec::with_capacity(batch.operations.len());
+    let mut dataflow_event_details = Vec::with_capacity(batch.dataflow_events.len());
+    let mut memory_location_details = Vec::with_capacity(batch.memory_locations.len());
+    let mut access_path_components = Vec::with_capacity(batch.access_path_components.len());
 
     let module_identity = canonical_identity(&canonical_ids, batch.module_id, "module")?;
     entities.push(EntityRow {
@@ -896,6 +954,240 @@ pub fn project_ruff_semantic_batch(
         });
     }
 
+    for fact in &batch.values {
+        let identity = canonical_identity(&canonical_ids, fact.value_id, "dataflow value")?;
+        let owner = canonical_identity(&canonical_ids, fact.owner_id, "dataflow value owner")?.id;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: value_entity_kind.family_code,
+            entity_kind_code: value_entity_kind.code,
+            raw_kind_code: None,
+            file_id: fact.start_byte.map(|_| file_id),
+            start_byte: fact.start_byte.map(coordinate).transpose()?,
+            end_byte: fact.end_byte.map(coordinate).transpose()?,
+            name: None,
+            qualified_name: None,
+            parent_entity_id: Some(owner),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        value_details.push(ValueDetailRow {
+            scope,
+            value_id: identity.id,
+            value_kind_code: fact.kind.code(),
+            type_id: None,
+            producer_operation_id: fact
+                .producer_operation_id
+                .map(|id| canonical_identity(&canonical_ids, id, "value producer operation"))
+                .transpose()?
+                .map(|identity| identity.id),
+            constant_value_id: None,
+            syntax_id: fact
+                .syntax_id
+                .map(|id| canonical_identity(&canonical_ids, id, "value syntax"))
+                .transpose()?
+                .map(|identity| identity.id),
+            flags: fact.flags,
+            precision_profile_id: fact.precision_profile_id.into(),
+            derivation_bundle_id: fact.derivation_bundle_id.into(),
+        });
+    }
+    for fact in &batch.operations {
+        let identity =
+            canonical_identity(&canonical_ids, fact.operation_id, "dataflow operation")?;
+        let owner =
+            canonical_identity(&canonical_ids, fact.owner_id, "dataflow operation owner")?.id;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: operation_entity_kind.family_code,
+            entity_kind_code: operation_entity_kind.code,
+            raw_kind_code: None,
+            file_id: None,
+            start_byte: None,
+            end_byte: None,
+            name: None,
+            qualified_name: None,
+            parent_entity_id: Some(owner),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        operation_details.push(OperationDetailRow {
+            scope,
+            operation_id: identity.id,
+            cfg_node_id: fact
+                .cfg_node_id
+                .map(|id| canonical_identity(&canonical_ids, id, "operation CFG node"))
+                .transpose()?
+                .map(|identity| identity.id),
+            operation_kind_code: fact.kind.code(),
+            result_value_id: fact
+                .result_value_id
+                .map(|id| canonical_identity(&canonical_ids, id, "operation result value"))
+                .transpose()?
+                .map(|identity| identity.id),
+            type_id: None,
+            syntax_id: fact
+                .syntax_id
+                .map(|id| canonical_identity(&canonical_ids, id, "operation syntax"))
+                .transpose()?
+                .map(|identity| identity.id),
+            raw_kind_code: None,
+            flags: fact.flags,
+            precision_profile_id: fact.precision_profile_id.into(),
+            derivation_bundle_id: fact.derivation_bundle_id.into(),
+        });
+    }
+    for fact in &batch.dataflow_events {
+        let identity = canonical_identity(&canonical_ids, fact.event_id, "dataflow event")?;
+        let owner = canonical_identity(&canonical_ids, fact.owner_id, "dataflow event owner")?.id;
+        let kind = if fact.kind == PythonDataflowEventKind::Definition {
+            definition_event_kind
+        } else {
+            use_event_kind
+        };
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: kind.family_code,
+            entity_kind_code: kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: None,
+            qualified_name: None,
+            parent_entity_id: Some(owner),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        dataflow_event_details.push(DataflowEventDetailRow {
+            scope,
+            event_id: identity.id,
+            cfg_node_id: fact
+                .cfg_node_id
+                .map(|id| canonical_identity(&canonical_ids, id, "event CFG node"))
+                .transpose()?
+                .map(|identity| identity.id),
+            event_kind_code: fact.kind.code(),
+            binding_id: fact
+                .binding_id
+                .map(|id| canonical_identity(&canonical_ids, id, "event binding"))
+                .transpose()?
+                .map(|identity| identity.id),
+            value_id: fact
+                .value_id
+                .map(|id| canonical_identity(&canonical_ids, id, "event value"))
+                .transpose()?
+                .map(|identity| identity.id),
+            location_id: fact
+                .location_id
+                .map(|id| canonical_identity(&canonical_ids, id, "event memory location"))
+                .transpose()?
+                .map(|identity| identity.id),
+            syntax_id: fact
+                .syntax_id
+                .map(|id| canonical_identity(&canonical_ids, id, "event syntax"))
+                .transpose()?
+                .map(|identity| identity.id),
+            ordinal: fact.ordinal,
+            flags: fact.flags,
+            precision_profile_id: fact.precision_profile_id.into(),
+            derivation_bundle_id: fact.derivation_bundle_id.into(),
+        });
+    }
+    for fact in &batch.memory_locations {
+        let identity = canonical_identity(&canonical_ids, fact.location_id, "memory location")?;
+        let owner = canonical_identity(&canonical_ids, fact.owner_id, "memory location owner")?.id;
+        entities.push(EntityRow {
+            scope,
+            entity_id: identity.id,
+            language: Language::Python as i16,
+            entity_family_code: memory_location_kind.family_code,
+            entity_kind_code: memory_location_kind.code,
+            raw_kind_code: None,
+            file_id: None,
+            start_byte: None,
+            end_byte: None,
+            name: fact.display_path.clone(),
+            qualified_name: None,
+            parent_entity_id: Some(owner),
+            type_id: None,
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+        memory_location_details.push(MemoryLocationDetailRow {
+            scope,
+            location_id: identity.id,
+            location_kind_code: fact.kind.code(),
+            base_entity_id: fact
+                .base_entity_id
+                .map(|id| canonical_identity(&canonical_ids, id, "location base entity"))
+                .transpose()?
+                .map(|identity| identity.id),
+            base_local_id: fact
+                .base_local_id
+                .map(|id| canonical_identity(&canonical_ids, id, "location base local"))
+                .transpose()?
+                .map(|identity| identity.id),
+            type_id: None,
+            parent_location_id: fact
+                .parent_location_id
+                .map(|id| canonical_identity(&canonical_ids, id, "parent memory location"))
+                .transpose()?
+                .map(|identity| identity.id),
+            projection_depth: fact.projection_depth,
+            canonical_path_hash: fact.canonical_path_hash,
+            display_path: fact.display_path.clone(),
+            flags: fact.flags,
+            precision_profile_id: fact.precision_profile_id.into(),
+            derivation_bundle_id: fact.derivation_bundle_id.into(),
+        });
+    }
+    for fact in &batch.access_path_components {
+        access_path_components.push(AccessPathComponentRow {
+            scope,
+            component_id: canonical_identity(
+                &canonical_ids,
+                fact.component_id,
+                "access-path component",
+            )?
+            .id,
+            location_id: canonical_identity(
+                &canonical_ids,
+                fact.location_id,
+                "component memory location",
+            )?
+            .id,
+            ordinal: fact.ordinal,
+            projection_kind_code: fact.kind.code(),
+            field_entity_id: fact
+                .field_entity_id
+                .map(|id| canonical_identity(&canonical_ids, id, "component field"))
+                .transpose()?
+                .map(|identity| identity.id),
+            index_value_id: fact
+                .index_value_id
+                .map(|id| canonical_identity(&canonical_ids, id, "component index value"))
+                .transpose()?
+                .map(|identity| identity.id),
+            variant_entity_id: None,
+            constant_index: fact.constant_index,
+            subslice_from: None,
+            subslice_to: None,
+            flags: fact.flags,
+            precision_profile_id: fact.precision_profile_id.into(),
+            derivation_bundle_id: fact.derivation_bundle_id.into(),
+        });
+    }
+
     let mut exception_categories = BTreeMap::new();
     for category in batch
         .cfg_edges
@@ -1319,6 +1611,59 @@ pub fn project_ruff_semantic_batch(
             edge_flags: fact.flags,
         });
     }
+    for fact in &batch.dataflow_relations {
+        if fact.precision_profile_id != crate::ruff_adapter::PYTHON_DATAFLOW_PRECISION_PROFILE
+            || fact.derivation_bundle_id != crate::ruff_adapter::PYTHON_DATAFLOW_BUNDLE_ID
+        {
+            return Err(FactIngestError::Protocol(
+                "Python dataflow relation lacks the selected derivation stamps".into(),
+            ));
+        }
+        let kind = match fact.kind {
+            PythonDataflowRelationKind::ReachingDefinition => reaching_definition_kind,
+            PythonDataflowRelationKind::Reaches => reaches_kind,
+            PythonDataflowRelationKind::DefUse => def_use_kind,
+            PythonDataflowRelationKind::DataDep => data_dep_kind,
+            PythonDataflowRelationKind::ValueFlowsTo => value_flows_to_kind,
+            PythonDataflowRelationKind::KillsDefinition => kills_definition_kind,
+        };
+        let identity = derived_identity(
+            b"python-dataflow-relation",
+            &[&scope.owner_id, &fact.relation_id],
+        );
+        relations.push(RelationRow {
+            scope,
+            fact_id: identity.id,
+            language: Language::Python as i16,
+            relation_family_code: kind.family_code,
+            relation_kind_code: kind.code,
+            source_id: canonical_identity(
+                &canonical_ids,
+                fact.source_id,
+                "dataflow relation source",
+            )?
+            .id,
+            target_id: canonical_identity(
+                &canonical_ids,
+                fact.target_id,
+                "dataflow relation target",
+            )?
+            .id,
+            ordinal: None,
+            role_code: None,
+            distance: None,
+            directness_code: Directness::Direct as i16,
+            file_id: None,
+            start_byte: None,
+            end_byte: None,
+            certainty_code: EvidenceCertainty::StaticSemantic as i16,
+            resolution_code: ResolutionClass::Exact as i16,
+            producer_code: ProviderCode::CodefabricDerivation as i16,
+            derivation_code: Some(PYTHON_DATAFLOW_DERIVATION_CODE),
+            flags: fact.flags,
+            fact_hash64: digest_hash64(identity.digest),
+        });
+    }
 
     entities.sort_by_key(|row| row.entity_id);
     entities.dedup_by_key(|row| row.entity_id);
@@ -1335,6 +1680,11 @@ pub fn project_ruff_semantic_batch(
     cfg_graphs.sort_by_key(|row| row.cfg_id);
     cfg_node_details.sort_by_key(|row| row.cfg_node_id);
     cfg_edge_details.sort_by_key(|row| row.relation_id);
+    value_details.sort_by_key(|row| row.value_id);
+    operation_details.sort_by_key(|row| row.operation_id);
+    dataflow_event_details.sort_by_key(|row| row.event_id);
+    memory_location_details.sort_by_key(|row| row.location_id);
+    access_path_components.sort_by_key(|row| row.component_id);
 
     let diagnostics = batch
         .call_diagnostics
@@ -1463,8 +1813,128 @@ pub fn project_ruff_semantic_batch(
         fallback_source_available: false,
         coverage_scope_fingerprint,
     };
+    let def_use_code = capability_code("DEF_USE")
+        .and_then(|code| i16::try_from(code).ok())
+        .ok_or_else(|| FactIngestError::Protocol("DEF_USE capability is absent".into()))?;
+    let dataflow_incomplete = batch
+        .values
+        .iter()
+        .any(|fact| fact.kind == crate::ruff_adapter::PythonValueKind::Unknown)
+        || batch
+            .dataflow_events
+            .iter()
+            .any(|fact| fact.kind == PythonDataflowEventKind::DynamicUnknown)
+        || batch
+            .memory_locations
+            .iter()
+            .any(|fact| fact.kind == crate::ruff_adapter::PythonLocationKind::Unknown);
+    let def_use_capability = CapabilityStatusRow {
+        scope,
+        snapshot_id: None,
+        capability_code: def_use_code,
+        owner_capability_state_code: if dataflow_incomplete {
+            OwnerCapabilityState::Partial as i16
+        } else {
+            OwnerCapabilityState::Current as i16
+        },
+        completeness_state_code: if dataflow_incomplete {
+            CompletenessState::Partial as i16
+        } else {
+            CompletenessState::Complete as i16
+        },
+        provider_run_id: Some(provider_run.id),
+        producer_code: Some(ProviderCode::CodefabricDerivation as i16),
+        reason_code: dataflow_incomplete.then_some(10),
+        diagnostic_id: None,
+        fallback_source_available: false,
+        coverage_scope_fingerprint,
+    };
+    let unavailable_provider_capability = |name: &str| -> Result<CapabilityStatusRow, FactIngestError> {
+        let code = capability_code(name)
+            .and_then(|code| i16::try_from(code).ok())
+            .ok_or_else(|| FactIngestError::Protocol(format!("{name} capability is absent")))?;
+        Ok(CapabilityStatusRow {
+            scope,
+            snapshot_id: None,
+            capability_code: code,
+            owner_capability_state_code: OwnerCapabilityState::UnavailableProvider as i16,
+            completeness_state_code: CompletenessState::Unavailable as i16,
+            provider_run_id: None,
+            producer_code: None,
+            reason_code: Some(30),
+            diagnostic_id: None,
+            fallback_source_available: false,
+            coverage_scope_fingerprint,
+        })
+    };
+    let computed_types_capability = unavailable_provider_capability("COMPUTED_TYPES")?;
+    let member_resolution_capability = unavailable_provider_capability("MEMBER_RESOLUTION")?;
+    let call_targets_capability = unavailable_provider_capability("CALL_TARGETS")?;
+    let profile_completeness = aggregate_capability(&[
+        CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Complete,
+            has_facts: !batch.scopes.is_empty(),
+            missing_remainder_characterized: true,
+            required_context_covered: true,
+            external_policy_allows_closure: true,
+        },
+        CapabilityChild {
+            applicable: true,
+            completeness: if import_incomplete {
+                Completeness::Partial
+            } else {
+                Completeness::Complete
+            },
+            has_facts: true,
+            missing_remainder_characterized: true,
+            required_context_covered: true,
+            external_policy_allows_closure: true,
+        },
+        CapabilityChild {
+            applicable: true,
+            completeness: if dataflow_incomplete {
+                Completeness::Partial
+            } else {
+                Completeness::Complete
+            },
+            has_facts: !batch.dataflow_events.is_empty(),
+            missing_remainder_characterized: true,
+            required_context_covered: true,
+            external_policy_allows_closure: true,
+        },
+        CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Unavailable,
+            has_facts: false,
+            missing_remainder_characterized: true,
+            required_context_covered: false,
+            external_policy_allows_closure: true,
+        },
+        CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Unavailable,
+            has_facts: false,
+            missing_remainder_characterized: true,
+            required_context_covered: false,
+            external_policy_allows_closure: true,
+        },
+        CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Unavailable,
+            has_facts: false,
+            missing_remainder_characterized: true,
+            required_context_covered: false,
+            external_policy_allows_closure: true,
+        },
+    ]);
 
-    let capability_bits = capability_mask(&["SCOPES_BINDINGS", "IMPORT_RESOLUTION", "CFG"])
+    let capability_bits = capability_mask(&[
+        "SCOPES_BINDINGS",
+        "IMPORT_RESOLUTION",
+        "CFG",
+        "DEF_USE",
+    ])
         .and_then(|mask| i64::try_from(mask).ok())
         .ok_or_else(|| FactIngestError::Protocol("SCOPES_BINDINGS mask is absent".into()))?;
     let owner = OwnerRow {
@@ -1487,7 +1957,15 @@ pub fn project_ruff_semantic_batch(
         (8, encode_owners(&[owner])?),
         (
             9,
-            encode_capability_statuses(&[capability, import_capability, cfg_capability])?,
+            encode_capability_statuses(&[
+                capability,
+                import_capability,
+                cfg_capability,
+                def_use_capability,
+                computed_types_capability,
+                member_resolution_capability,
+                call_targets_capability,
+            ])?,
         ),
         (10, encode_diagnostics(&diagnostics)?),
         (100, encode_entities(&entities)?),
@@ -1504,6 +1982,11 @@ pub fn project_ruff_semantic_batch(
         (280, encode_cfg_graphs(&cfg_graphs)?),
         (290, encode_cfg_node_details(&cfg_node_details)?),
         (300, encode_cfg_edge_details(&cfg_edge_details)?),
+        (310, encode_value_details(&value_details)?),
+        (320, encode_operation_details(&operation_details)?),
+        (330, encode_dataflow_event_details(&dataflow_event_details)?),
+        (340, encode_memory_location_details(&memory_location_details)?),
+        (350, encode_access_path_components(&access_path_components)?),
     ];
     let provider_batches = encoded
         .into_iter()
@@ -1552,6 +2035,7 @@ pub fn project_ruff_semantic_batch(
         provider_run_id: provider_run.id,
         observation,
         canonical,
+        profile_completeness,
     })
 }
 
@@ -1943,9 +2427,144 @@ fn validate_cfg_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngestError
     Ok(())
 }
 
+fn validate_dataflow_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngestError> {
+    let callable_ids = batch
+        .callables
+        .iter()
+        .map(|fact| fact.callable_id)
+        .collect::<BTreeSet<_>>();
+    let cfg_node_ids = batch
+        .cfg_nodes
+        .iter()
+        .map(|fact| fact.cfg_node_id)
+        .collect::<BTreeSet<_>>();
+    let binding_ids = batch
+        .bindings
+        .iter()
+        .map(|fact| fact.binding_id)
+        .collect::<BTreeSet<_>>();
+    let syntax_ids = batch
+        .references
+        .iter()
+        .map(|fact| fact.reference_id)
+        .chain(batch.callable_syntax.iter().map(|fact| fact.syntax_id))
+        .collect::<BTreeSet<_>>();
+    let value_ids = batch
+        .values
+        .iter()
+        .map(|fact| fact.value_id)
+        .collect::<BTreeSet<_>>();
+    let operation_ids = batch
+        .operations
+        .iter()
+        .map(|fact| fact.operation_id)
+        .collect::<BTreeSet<_>>();
+    let event_ids = batch
+        .dataflow_events
+        .iter()
+        .map(|fact| fact.event_id)
+        .collect::<BTreeSet<_>>();
+    let location_ids = batch
+        .memory_locations
+        .iter()
+        .map(|fact| fact.location_id)
+        .collect::<BTreeSet<_>>();
+    let component_ids = batch
+        .access_path_components
+        .iter()
+        .map(|fact| fact.component_id)
+        .collect::<BTreeSet<_>>();
+    if value_ids.len() != batch.values.len()
+        || operation_ids.len() != batch.operations.len()
+        || event_ids.len() != batch.dataflow_events.len()
+        || location_ids.len() != batch.memory_locations.len()
+        || component_ids.len() != batch.access_path_components.len()
+    {
+        return Err(FactIngestError::Protocol(
+            "Python dataflow projection contains duplicate application-owned IDs".into(),
+        ));
+    }
+    let stamped = |precision: &str, bundle: &str| {
+        precision == crate::ruff_adapter::PYTHON_DATAFLOW_PRECISION_PROFILE
+            && bundle == crate::ruff_adapter::PYTHON_DATAFLOW_BUNDLE_ID
+    };
+    if batch.values.iter().any(|fact| {
+        !callable_ids.contains(&fact.owner_id)
+            || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
+            || fact
+                .producer_operation_id
+                .is_some_and(|id| !operation_ids.contains(&id))
+            || fact
+                .syntax_id
+                .is_some_and(|id| !syntax_ids.contains(&id))
+    }) || batch.operations.iter().any(|fact| {
+        !callable_ids.contains(&fact.owner_id)
+            || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
+            || fact
+                .cfg_node_id
+                .is_some_and(|id| !cfg_node_ids.contains(&id))
+            || fact
+                .result_value_id
+                .is_some_and(|id| !value_ids.contains(&id))
+            || fact
+                .syntax_id
+                .is_some_and(|id| !syntax_ids.contains(&id))
+    }) || batch.dataflow_events.iter().any(|fact| {
+        !callable_ids.contains(&fact.owner_id)
+            || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
+            || fact
+                .cfg_node_id
+                .is_some_and(|id| !cfg_node_ids.contains(&id))
+            || fact
+                .binding_id
+                .is_some_and(|id| !binding_ids.contains(&id))
+            || fact.value_id.is_some_and(|id| !value_ids.contains(&id))
+            || fact
+                .location_id
+                .is_some_and(|id| !location_ids.contains(&id))
+            || fact
+                .syntax_id
+                .is_some_and(|id| !syntax_ids.contains(&id))
+    }) || batch.memory_locations.iter().any(|fact| {
+        !callable_ids.contains(&fact.owner_id)
+            || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
+            || fact
+                .parent_location_id
+                .is_some_and(|id| !location_ids.contains(&id))
+    }) || batch.access_path_components.iter().any(|fact| {
+        !callable_ids.contains(&fact.owner_id)
+            || !location_ids.contains(&fact.location_id)
+            || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
+            || fact
+                .index_value_id
+                .is_some_and(|id| !value_ids.contains(&id))
+    }) {
+        return Err(FactIngestError::Protocol(
+            "Python dataflow projection contains dangling identities or missing derivation stamps"
+                .into(),
+        ));
+    }
+    let endpoints = value_ids
+        .union(&event_ids)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    if batch.dataflow_relations.iter().any(|fact| {
+        !callable_ids.contains(&fact.owner_id)
+            || !endpoints.contains(&fact.source_id)
+            || !endpoints.contains(&fact.target_id)
+            || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
+    }) {
+        return Err(FactIngestError::Protocol(
+            "Python dataflow relation contains a dangling endpoint or missing derivation stamp"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 fn observation_batch(
     batch: &PythonFrontendBatch,
-    payloads: &[Vec<u8>; 18],
+    payloads: &[Vec<u8>; 24],
 ) -> Result<RecordBatch, FactIngestError> {
     let schema = Arc::new(registered_provider_observation_arrow_schema(
         OBSERVATION_SCHEMA_ID,
@@ -1976,12 +2595,18 @@ fn observation_batch(
         Arc::new(BinaryArray::from(vec![Some(payloads[15].as_slice())])),
         Arc::new(BinaryArray::from(vec![Some(payloads[16].as_slice())])),
         Arc::new(BinaryArray::from(vec![Some(payloads[17].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[18].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[19].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[20].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[21].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[22].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[23].as_slice())])),
     ];
     RecordBatch::try_new(schema, columns).map_err(FactIngestError::from)
 }
 
 #[allow(clippy::too_many_lines)] // One ordered payload census keeps the registered observation schema auditable.
-fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 18], FactIngestError> {
+fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 24], FactIngestError> {
     let scopes = batch
         .scopes
         .iter()
@@ -2272,6 +2897,118 @@ fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 18], Fa
             })
         })
         .collect::<Vec<_>>();
+    let values = batch
+        .values
+        .iter()
+        .map(|fact| {
+            json!({
+                "value_id": hex_id(fact.value_id),
+                "owner_id": hex_id(fact.owner_id),
+                "value_kind_code": fact.kind.code(),
+                "producer_operation_id": fact.producer_operation_id.map(hex_id),
+                "syntax_id": fact.syntax_id.map(hex_id),
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+                "flags": fact.flags,
+                "precision_profile_id": fact.precision_profile_id,
+                "derivation_bundle_id": fact.derivation_bundle_id,
+            })
+        })
+        .collect::<Vec<_>>();
+    let operations = batch
+        .operations
+        .iter()
+        .map(|fact| {
+            json!({
+                "operation_id": hex_id(fact.operation_id),
+                "owner_id": hex_id(fact.owner_id),
+                "cfg_node_id": fact.cfg_node_id.map(hex_id),
+                "operation_kind_code": fact.kind.code(),
+                "result_value_id": fact.result_value_id.map(hex_id),
+                "syntax_id": fact.syntax_id.map(hex_id),
+                "flags": fact.flags,
+                "precision_profile_id": fact.precision_profile_id,
+                "derivation_bundle_id": fact.derivation_bundle_id,
+            })
+        })
+        .collect::<Vec<_>>();
+    let dataflow_events = batch
+        .dataflow_events
+        .iter()
+        .map(|fact| {
+            json!({
+                "event_id": hex_id(fact.event_id),
+                "owner_id": hex_id(fact.owner_id),
+                "cfg_node_id": fact.cfg_node_id.map(hex_id),
+                "event_kind_code": fact.kind.code(),
+                "binding_id": fact.binding_id.map(hex_id),
+                "value_id": fact.value_id.map(hex_id),
+                "location_id": fact.location_id.map(hex_id),
+                "syntax_id": fact.syntax_id.map(hex_id),
+                "ordinal": fact.ordinal,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+                "flags": fact.flags,
+                "precision_profile_id": fact.precision_profile_id,
+                "derivation_bundle_id": fact.derivation_bundle_id,
+            })
+        })
+        .collect::<Vec<_>>();
+    let memory_locations = batch
+        .memory_locations
+        .iter()
+        .map(|fact| {
+            json!({
+                "location_id": hex_id(fact.location_id),
+                "owner_id": hex_id(fact.owner_id),
+                "location_kind_code": fact.kind.code(),
+                "base_entity_id": fact.base_entity_id.map(hex_id),
+                "base_local_id": fact.base_local_id.map(hex_id),
+                "parent_location_id": fact.parent_location_id.map(hex_id),
+                "projection_depth": fact.projection_depth,
+                "canonical_path_hash": hex_hash(fact.canonical_path_hash),
+                "display_path": fact.display_path,
+                "flags": fact.flags,
+                "precision_profile_id": fact.precision_profile_id,
+                "derivation_bundle_id": fact.derivation_bundle_id,
+            })
+        })
+        .collect::<Vec<_>>();
+    let access_path_components = batch
+        .access_path_components
+        .iter()
+        .map(|fact| {
+            json!({
+                "component_id": hex_id(fact.component_id),
+                "owner_id": hex_id(fact.owner_id),
+                "location_id": hex_id(fact.location_id),
+                "ordinal": fact.ordinal,
+                "projection_kind_code": fact.kind.code(),
+                "field_entity_id": fact.field_entity_id.map(hex_id),
+                "index_value_id": fact.index_value_id.map(hex_id),
+                "constant_index": fact.constant_index,
+                "flags": fact.flags,
+                "precision_profile_id": fact.precision_profile_id,
+                "derivation_bundle_id": fact.derivation_bundle_id,
+            })
+        })
+        .collect::<Vec<_>>();
+    let dataflow_relations = batch
+        .dataflow_relations
+        .iter()
+        .map(|fact| {
+            json!({
+                "relation_id": hex_id(fact.relation_id),
+                "owner_id": hex_id(fact.owner_id),
+                "source_id": hex_id(fact.source_id),
+                "target_id": hex_id(fact.target_id),
+                "kind": fact.kind.canonical_name(),
+                "flags": fact.flags,
+                "precision_profile_id": fact.precision_profile_id,
+                "derivation_bundle_id": fact.derivation_bundle_id,
+            })
+        })
+        .collect::<Vec<_>>();
     Ok([
         json_bytes(&scopes)?,
         json_bytes(&bindings)?,
@@ -2291,6 +3028,12 @@ fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 18], Fa
         json_bytes(&cfgs)?,
         json_bytes(&cfg_nodes)?,
         json_bytes(&cfg_edges)?,
+        json_bytes(&values)?,
+        json_bytes(&operations)?,
+        json_bytes(&dataflow_events)?,
+        json_bytes(&memory_locations)?,
+        json_bytes(&access_path_components)?,
+        json_bytes(&dataflow_relations)?,
     ])
 }
 
@@ -2503,6 +3246,16 @@ fn canonical_resolution(resolution: PythonResolution) -> (i16, i16) {
 fn hex_id(id: [u8; 16]) -> String {
     let mut output = String::with_capacity(32);
     for byte in id {
+        use std::fmt::Write as _;
+        write!(output, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    output
+}
+
+fn hex_hash(hash: [u8; 32]) -> String {
+    let mut output = String::with_capacity(67);
+    output.push_str("b3:");
+    for byte in hash {
         use std::fmt::Write as _;
         write!(output, "{byte:02x}").expect("writing to String cannot fail");
     }
@@ -2879,6 +3632,12 @@ mod tests {
             cfgs: Vec::new(),
             cfg_nodes: Vec::new(),
             cfg_edges: Vec::new(),
+            values: Vec::new(),
+            operations: Vec::new(),
+            dataflow_events: Vec::new(),
+            memory_locations: Vec::new(),
+            access_path_components: Vec::new(),
+            dataflow_relations: Vec::new(),
             metrics: PythonSemanticMetrics {
                 binding_pass_duration: Duration::ZERO,
                 traversal_pass_duration: Duration::ZERO,
@@ -2899,6 +3658,13 @@ mod tests {
                 cfg_count: 0,
                 cfg_node_count: 0,
                 cfg_edge_count: 0,
+                dataflow_value_count: 0,
+                dataflow_operation_count: 0,
+                dataflow_event_count: 0,
+                memory_location_count: 0,
+                access_path_component_count: 0,
+                dataflow_relation_count: 0,
+                dataflow_iteration_count: 0,
             },
             terminal: PythonSemanticTerminal {
                 pass_id: "PASS_RUFF_SCOPE_BINDING_V1",

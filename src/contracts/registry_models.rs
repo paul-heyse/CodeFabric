@@ -446,14 +446,32 @@ pub struct PublicError {
 #[serde(deny_unknown_fields)]
 pub struct DerivationDefinition {
     pub derivation_id: String,
+    #[serde(default)]
+    pub owner_packet: String,
     pub owner_kind: String,
     pub input_fact_families: Vec<String>,
     pub output_fact_families: Vec<String>,
     pub projection_id: String,
     pub precision_profile: String,
+    #[serde(default)]
+    pub algorithm_id: String,
     pub algorithm_version: String,
+    #[serde(default)]
+    pub derivation_bundle_id: String,
     pub replacement_scope: String,
     pub dependency_rule: String,
+    #[serde(default)]
+    pub context_fingerprint_inputs: Vec<String>,
+    #[serde(default)]
+    pub source_fingerprint_inputs: Vec<String>,
+    #[serde(default)]
+    pub invalidation_closure: Vec<String>,
+    #[serde(default)]
+    pub resource_profile_id: String,
+    #[serde(default)]
+    pub pass_contract_id: String,
+    #[serde(default)]
+    pub implementation_symbol: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

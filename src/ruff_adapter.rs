@@ -30,6 +30,7 @@ use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSn
 
 mod callables;
 mod cfg;
+mod dataflow;
 mod imports;
 mod semantic;
 
@@ -42,6 +43,14 @@ pub use callables::{
 pub use cfg::{
     PythonCfgEdgeFact, PythonCfgEdgeKind, PythonCfgFact, PythonCfgKind, PythonCfgNodeFact,
     PythonCfgNodeKind, PythonCfgValidationError, validate_python_cfg,
+};
+pub use dataflow::{
+    PYTHON_DATAFLOW_BUNDLE_ID, PYTHON_DATAFLOW_DERIVATION_ID,
+    PYTHON_DATAFLOW_PRECISION_PROFILE, PythonAccessPathComponentFact,
+    PythonAccessProjectionKind, PythonDataflowEventFact, PythonDataflowEventKind,
+    PythonDataflowRelationFact, PythonDataflowRelationKind, PythonLocationKind,
+    PythonMemoryLocationFact, PythonOperationFact, PythonOperationKind, PythonValueFact,
+    PythonValueKind,
 };
 pub use semantic::{
     PythonBindingFact, PythonBindingKind, PythonExportFact, PythonExportStatus,
@@ -518,6 +527,17 @@ impl RuffAdapter {
             .as_ref()
             .filter(|retained| retained.revision == revision)
             .ok_or(PythonSemanticError::MissingRevision(revision))?;
+        let parse_diagnostic_count = retained
+            .snapshot
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == RuffDiagnosticKind::Parse)
+            .count();
+        if parse_diagnostic_count > 0 {
+            return Err(PythonSemanticError::UnavailableParse(
+                parse_diagnostic_count,
+            ));
+        }
         semantic::project_python_semantics(
             &retained.text.text,
             retained.parsed.syntax().body.as_slice(),

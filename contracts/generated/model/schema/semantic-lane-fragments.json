@@ -6,7 +6,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.shared",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:4748f7476aabb98f127590889bc589dfdd99c07e9d36317e349ccaf8c23080b7",
+      "canonical_digest": "b3:5d17416334af0893e17599cdc20122360092ff508e9a2a90845040e63048671b",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -45,6 +45,22 @@
           "contract_id": "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V2",
           "observation_schema_ids": [
             "codefabric.ruff.semantic.v2"
+          ],
+          "output_table_codes": [
+            100,
+            110,
+            130
+          ],
+          "required_fields": [
+            "entity_id",
+            "fact_id",
+            "evidence_id"
+          ]
+        },
+        {
+          "contract_id": "INGEST_SHARED_FACT_SUBSTRATE_RUFF_V3",
+          "observation_schema_ids": [
+            "codefabric.ruff.semantic.v3"
           ],
           "output_table_codes": [
             100,
@@ -159,7 +175,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.python",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:15ffc125b42e072ee2377ea1b25691b4016b3bb03e37e09a219f5ac4954e8c05",
+      "canonical_digest": "b3:01ff2eeda90d0cf0ff753d38c338a839278d672a288498ffe90777d877485687",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -264,6 +280,63 @@
           ]
         },
         {
+          "contract_id": "INGEST_RUFF_SEMANTIC_DATAFLOW_V3",
+          "observation_schema_ids": [
+            "codefabric.ruff.semantic.v3"
+          ],
+          "output_table_codes": [
+            10,
+            100,
+            110,
+            130,
+            200,
+            210,
+            220,
+            230,
+            240,
+            250,
+            260,
+            270,
+            280,
+            290,
+            300,
+            310,
+            320,
+            330,
+            340,
+            350
+          ],
+          "required_fields": [
+            "module_name",
+            "provider_image_fingerprint",
+            "scopes_json",
+            "bindings_json",
+            "references_json",
+            "unknown_symbols_json",
+            "edges_json",
+            "imports_json",
+            "exports_json",
+            "export_status",
+            "callables_json",
+            "parameters_json",
+            "callable_syntax_json",
+            "call_sites_json",
+            "call_arguments_json",
+            "unknown_argument_sets_json",
+            "members_json",
+            "call_diagnostics_json",
+            "cfgs_json",
+            "cfg_nodes_json",
+            "cfg_edges_json",
+            "values_json",
+            "operations_json",
+            "dataflow_events_json",
+            "memory_locations_json",
+            "access_path_components_json",
+            "dataflow_relations_json"
+          ]
+        },
+        {
           "contract_id": "INGEST_PYREFLY_MODULE_V1",
           "observation_schema_ids": [
             "codefabric.pyrefly.module.v1"
@@ -308,7 +381,12 @@
             270,
             280,
             290,
-            300
+            300,
+            310,
+            320,
+            330,
+            340,
+            350
           ],
           "scope": "module-owner-and-analysis-context",
           "trigger_kinds": [
@@ -322,6 +400,7 @@
         "owned_observation_schema_ids": [
           "codefabric.ruff.semantic.v1",
           "codefabric.ruff.semantic.v2",
+          "codefabric.ruff.semantic.v3",
           "codefabric.pyrefly.module.v1"
         ],
         "owned_table_codes": [
@@ -335,7 +414,12 @@
           270,
           280,
           290,
-          300
+          300,
+          310,
+          320,
+          330,
+          340,
+          350
         ],
         "provider_observation_schema_additions": [
           {
@@ -551,6 +635,148 @@
             "fields": [
               {
                 "logical_type": "utf8",
+                "name": "module_name",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "provider_image_fingerprint",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "scopes_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "bindings_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "references_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "unknown_symbols_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "edges_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "imports_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "exports_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "export_status",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "callables_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "parameters_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "callable_syntax_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_sites_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_arguments_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "unknown_argument_sets_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "members_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "call_diagnostics_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "cfgs_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "cfg_nodes_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "cfg_edges_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "values_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "operations_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "dataflow_events_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "memory_locations_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "access_path_components_json",
+                "nullable": false
+              },
+              {
+                "logical_type": "binary",
+                "name": "dataflow_relations_json",
+                "nullable": false
+              }
+            ],
+            "observation_family_code": 140,
+            "provider_id": "ruff-python",
+            "schema_id": "codefabric.ruff.semantic.v3"
+          },
+          {
+            "fields": [
+              {
+                "logical_type": "utf8",
                 "name": "module_id",
                 "nullable": false
               },
@@ -615,6 +841,31 @@
             "authority": "ENUM_REGISTRY",
             "domain": "CFG_NODE_KIND",
             "semantic_type": "enum:cfg_node_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "DATAFLOW_VALUE_KIND",
+            "semantic_type": "enum:dataflow_value_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "PYTHON_OPERATION_KIND",
+            "semantic_type": "enum:python_operation_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "PYTHON_DATAFLOW_EVENT_KIND",
+            "semantic_type": "enum:python_dataflow_event_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "PYTHON_LOCATION_KIND",
+            "semantic_type": "enum:python_location_kind"
+          },
+          {
+            "authority": "ENUM_REGISTRY",
+            "domain": "PYTHON_ACCESS_PROJECTION_KIND",
+            "semantic_type": "enum:python_access_projection_kind"
           }
         ],
         "table_additions": [
@@ -1531,6 +1782,645 @@
               "cfg_id",
               "relation_id"
             ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "value_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "logical_type": "code16",
+                "name": "value_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:dataflow_value_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "type_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "producer_operation_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "constant_value_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "precision_profile_id",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "derivation_bundle_id",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "dataflow-value",
+            "grain": "one value entity extension",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "value_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "value_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "value_details",
+            "schema_version": "1.0",
+            "table_code": 310,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "owner_id",
+              "value_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "operation_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "cfg_node_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "code32",
+                "name": "operation_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:python_operation_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "result_value_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "type_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "code32",
+                "name": "raw_kind_code",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "precision_profile_id",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "derivation_bundle_id",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              290,
+              310
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "dataflow-operation",
+            "grain": "one normalized computation operation",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "operation_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "operation_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "operation_details",
+            "schema_version": "1.0",
+            "table_code": 320,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "owner_id",
+              "operation_id"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "event_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "cfg_node_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "code16",
+                "name": "event_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:python_dataflow_event_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "binding_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "value_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "location_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "syntax_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int32",
+                "name": "ordinal",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "precision_profile_id",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "derivation_bundle_id",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              210,
+              290,
+              310,
+              340
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "dataflow-event",
+            "grain": "one normalized definition or use event",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "dataflow_event_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "event_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "dataflow_event_details",
+            "schema_version": "1.0",
+            "table_code": 330,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "owner_id",
+              "cfg_node_id",
+              "ordinal"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "location_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "logical_type": "code16",
+                "name": "location_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:python_location_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "base_entity_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "base_local_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "type_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "parent_location_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int16",
+                "name": "projection_depth",
+                "nullable": false
+              },
+              {
+                "logical_type": "hash32",
+                "name": "canonical_path_hash",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "display_path",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "precision_profile_id",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "derivation_bundle_id",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "memory-location",
+            "grain": "one canonical abstract memory or access-path location",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "memory_location_detail",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "location_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "memory_location_details",
+            "schema_version": "1.0",
+            "table_code": 340,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "owner_id",
+              "canonical_path_hash"
+            ]
+          },
+          {
+            "columns": [
+              {
+                "logical_type": "id16",
+                "name": "workspace_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "analysis_context_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "source_generation",
+                "nullable": false
+              },
+              {
+                "logical_type": "id16",
+                "name": "component_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "id16",
+                "name": "owner_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "hidden_operational": true,
+                "logical_type": "bucket16",
+                "name": "owner_bucket",
+                "nullable": false
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "location_id",
+                "nullable": false,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int16",
+                "name": "ordinal",
+                "nullable": false
+              },
+              {
+                "logical_type": "code16",
+                "name": "projection_kind_code",
+                "nullable": false,
+                "semantic_type": "enum:python_access_projection_kind"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "field_entity_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "index_value_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "foreign_key": "entity.entity_id",
+                "logical_type": "id16",
+                "name": "variant_entity_id",
+                "nullable": true,
+                "semantic_type": "id16"
+              },
+              {
+                "logical_type": "int64",
+                "name": "constant_index",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "subslice_from",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "subslice_to",
+                "nullable": true
+              },
+              {
+                "logical_type": "int64",
+                "name": "flags",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "precision_profile_id",
+                "nullable": false
+              },
+              {
+                "logical_type": "utf8",
+                "name": "derivation_bundle_id",
+                "nullable": false
+              }
+            ],
+            "dependencies": [
+              8,
+              100,
+              310,
+              340
+            ],
+            "durable_mutation": "OWNER_REPLACED_FACT",
+            "family": "access-path",
+            "grain": "one ordered projection component of one memory location",
+            "materialization_role": "DURABLE_EFFECTIVE",
+            "name": "access_path_component",
+            "overlay_mutation": "OWNER_REPLACE",
+            "partition_columns": [
+              "owner_bucket"
+            ],
+            "primary_key": [
+              "component_id"
+            ],
+            "publication_pin_role": "PINNED_DATA",
+            "required_for_publication": true,
+            "row_encoder": "access_path_components",
+            "schema_version": "1.0",
+            "table_code": 350,
+            "zorder_columns": [
+              "workspace_id",
+              "analysis_context_id",
+              "owner_id",
+              "location_id",
+              "ordinal"
+            ]
           }
         ],
         "table_scope_additions": [
@@ -1589,6 +2479,41 @@
             "source_generation_column": "source_generation",
             "table_code": 300,
             "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 310,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 320,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 330,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 340,
+            "workspace_column": "workspace_id"
+          },
+          {
+            "analysis_context_column": "analysis_context_id",
+            "owner_column": "owner_id",
+            "source_generation_column": "source_generation",
+            "table_code": 350,
+            "workspace_column": "workspace_id"
           }
         ]
       },
@@ -1615,6 +2540,12 @@
                 "meaning": "One Ruff application-owned scope binding call and validated CFG observation",
                 "name": "RUFF_SEMANTIC_CFG",
                 "slug": "ruff-semantic-cfg"
+              },
+              {
+                "code": 140,
+                "meaning": "One Ruff application-owned scope binding call CFG value access and registered dataflow observation",
+                "name": "RUFF_SEMANTIC_DATAFLOW",
+                "slug": "ruff-semantic-dataflow"
               }
             ],
             "width_bits": 16
@@ -1936,6 +2867,276 @@
               }
             ],
             "width_bits": 16
+          },
+          {
+            "domain": "DATAFLOW_VALUE_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Literal value",
+                "name": "LITERAL",
+                "slug": "literal"
+              },
+              {
+                "code": 20,
+                "meaning": "Name-read value",
+                "name": "NAME_READ",
+                "slug": "name-read"
+              },
+              {
+                "code": 30,
+                "meaning": "Attribute-read value",
+                "name": "ATTRIBUTE_READ",
+                "slug": "attribute-read"
+              },
+              {
+                "code": 40,
+                "meaning": "Subscript-read value",
+                "name": "SUBSCRIPT_READ",
+                "slug": "subscript-read"
+              },
+              {
+                "code": 50,
+                "meaning": "Call-return value",
+                "name": "CALL_RETURN",
+                "slug": "call-return"
+              },
+              {
+                "code": 60,
+                "meaning": "Normalized operation result",
+                "name": "OPERATION_RESULT",
+                "slug": "operation-result"
+              },
+              {
+                "code": 70,
+                "meaning": "Container construction value",
+                "name": "CONTAINER",
+                "slug": "container"
+              },
+              {
+                "code": 80,
+                "meaning": "Function class or lambda object value",
+                "name": "CALLABLE_OBJECT",
+                "slug": "callable-object"
+              },
+              {
+                "code": 90,
+                "meaning": "Await or yield result",
+                "name": "AWAIT_OR_YIELD",
+                "slug": "await-or-yield"
+              },
+              {
+                "code": 100,
+                "meaning": "CFG-join value retaining multi-definition provenance",
+                "name": "MERGED",
+                "slug": "merged"
+              },
+              {
+                "code": 110,
+                "meaning": "Explicit unknown value remainder",
+                "name": "UNKNOWN",
+                "slug": "unknown"
+              }
+            ],
+            "width_bits": 16
+          },
+          {
+            "domain": "PYTHON_OPERATION_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Read operation",
+                "name": "READ",
+                "slug": "read"
+              },
+              {
+                "code": 20,
+                "meaning": "Write operation",
+                "name": "WRITE",
+                "slug": "write"
+              },
+              {
+                "code": 30,
+                "meaning": "Call operation",
+                "name": "CALL",
+                "slug": "call"
+              },
+              {
+                "code": 40,
+                "meaning": "Control-flow merge operation",
+                "name": "MERGE",
+                "slug": "merge"
+              },
+              {
+                "code": 50,
+                "meaning": "Dynamic semantic precision barrier",
+                "name": "DYNAMIC_BARRIER",
+                "slug": "dynamic-barrier"
+              }
+            ],
+            "width_bits": 32
+          },
+          {
+            "domain": "PYTHON_DATAFLOW_EVENT_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Definition event",
+                "name": "DEFINITION",
+                "slug": "definition"
+              },
+              {
+                "code": 20,
+                "meaning": "Ordinary read use",
+                "name": "READ",
+                "slug": "read"
+              },
+              {
+                "code": 30,
+                "meaning": "Receiver use",
+                "name": "RECEIVER",
+                "slug": "receiver"
+              },
+              {
+                "code": 40,
+                "meaning": "Callee use",
+                "name": "CALLEE",
+                "slug": "callee"
+              },
+              {
+                "code": 50,
+                "meaning": "Argument use",
+                "name": "ARGUMENT",
+                "slug": "argument"
+              },
+              {
+                "code": 60,
+                "meaning": "Condition use",
+                "name": "CONDITION",
+                "slug": "condition"
+              },
+              {
+                "code": 70,
+                "meaning": "Return or yield use",
+                "name": "RETURN_OR_YIELD",
+                "slug": "return-or-yield"
+              },
+              {
+                "code": 80,
+                "meaning": "Index or key use",
+                "name": "INDEX",
+                "slug": "index"
+              },
+              {
+                "code": 90,
+                "meaning": "Decorator use",
+                "name": "DECORATOR",
+                "slug": "decorator"
+              },
+              {
+                "code": 100,
+                "meaning": "Runtime-evaluated annotation use",
+                "name": "EVALUATED_ANNOTATION",
+                "slug": "evaluated-annotation"
+              },
+              {
+                "code": 110,
+                "meaning": "Explicit dynamic unknown remainder",
+                "name": "DYNAMIC_UNKNOWN",
+                "slug": "dynamic-unknown"
+              }
+            ],
+            "width_bits": 16
+          },
+          {
+            "domain": "PYTHON_LOCATION_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Local location",
+                "name": "LOCAL",
+                "slug": "local"
+              },
+              {
+                "code": 20,
+                "meaning": "Global location",
+                "name": "GLOBAL",
+                "slug": "global"
+              },
+              {
+                "code": 30,
+                "meaning": "Closure cell location",
+                "name": "CELL",
+                "slug": "cell"
+              },
+              {
+                "code": 40,
+                "meaning": "Field location",
+                "name": "FIELD",
+                "slug": "field"
+              },
+              {
+                "code": 50,
+                "meaning": "Instance member location",
+                "name": "INSTANCE_MEMBER",
+                "slug": "instance-member"
+              },
+              {
+                "code": 60,
+                "meaning": "Class member location",
+                "name": "CLASS_MEMBER",
+                "slug": "class-member"
+              },
+              {
+                "code": 70,
+                "meaning": "Indexed container location",
+                "name": "INDEXED",
+                "slug": "indexed"
+              },
+              {
+                "code": 80,
+                "meaning": "Module location",
+                "name": "MODULE",
+                "slug": "module"
+              },
+              {
+                "code": 90,
+                "meaning": "Explicit unknown location",
+                "name": "UNKNOWN",
+                "slug": "unknown"
+              }
+            ],
+            "width_bits": 16
+          },
+          {
+            "domain": "PYTHON_ACCESS_PROJECTION_KIND",
+            "values": [
+              {
+                "code": 10,
+                "meaning": "Base location component",
+                "name": "BASE",
+                "slug": "base"
+              },
+              {
+                "code": 20,
+                "meaning": "Field projection component",
+                "name": "FIELD",
+                "slug": "field"
+              },
+              {
+                "code": 30,
+                "meaning": "Index projection component",
+                "name": "INDEX",
+                "slug": "index"
+              },
+              {
+                "code": 40,
+                "meaning": "Unknown projection component",
+                "name": "UNKNOWN",
+                "slug": "unknown"
+              }
+            ],
+            "width_bits": 16
           }
         ],
         "enum_values": [
@@ -1943,7 +3144,8 @@
             "codes": [
               100,
               110,
-              130
+              130,
+              140
             ],
             "domain": "PROVIDER_OBSERVATION_FAMILY"
           },
@@ -2027,6 +3229,71 @@
               120
             ],
             "domain": "CFG_NODE_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50,
+              60,
+              70,
+              80,
+              90,
+              100,
+              110
+            ],
+            "domain": "DATAFLOW_VALUE_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50
+            ],
+            "domain": "PYTHON_OPERATION_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50,
+              60,
+              70,
+              80,
+              90,
+              100,
+              110
+            ],
+            "domain": "PYTHON_DATAFLOW_EVENT_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40,
+              50,
+              60,
+              70,
+              80,
+              90
+            ],
+            "domain": "PYTHON_LOCATION_KIND"
+          },
+          {
+            "codes": [
+              10,
+              20,
+              30,
+              40
+            ],
+            "domain": "PYTHON_ACCESS_PROJECTION_KIND"
           }
         ],
         "property_codes": [],
@@ -2117,9 +3384,9 @@
     }
   ],
   "source_digests": {
-    "contracts/semantic-fragments/python.json": "b3:15ffc125b42e072ee2377ea1b25691b4016b3bb03e37e09a219f5ac4954e8c05",
+    "contracts/semantic-fragments/python.json": "b3:01ff2eeda90d0cf0ff753d38c338a839278d672a288498ffe90777d877485687",
     "contracts/semantic-fragments/rust.json": "b3:22056b1ab97fa275036659a4fbf2251adec0d4d372660ea88d596938e8248ba3",
-    "contracts/semantic-fragments/shared.json": "b3:4748f7476aabb98f127590889bc589dfdd99c07e9d36317e349ccaf8c23080b7"
+    "contracts/semantic-fragments/shared.json": "b3:5d17416334af0893e17599cdc20122360092ff508e9a2a90845040e63048671b"
   },
   "status": "draft",
   "version": "1.0"

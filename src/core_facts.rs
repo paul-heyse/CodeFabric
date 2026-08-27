@@ -2664,6 +2664,7 @@ mod tests {
             BTreeSet::from([
                 ("codefabric.ruff.semantic.v1", 100),
                 ("codefabric.ruff.semantic.v2", 130),
+                ("codefabric.ruff.semantic.v3", 140),
                 ("codefabric.pyrefly.module.v1", 110),
                 ("codefabric.rustc.owned-mir.v1", 120),
             ])

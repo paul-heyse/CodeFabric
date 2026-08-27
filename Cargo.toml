@@ -82,6 +82,7 @@ data-fabric = [
 fact-generation = [
     "contract-models",
     "dep:blake3",
+    "dep:petgraph",
     "dep:rayon",
     "dep:ruff_python_ast",
     "dep:ruff_python_index",

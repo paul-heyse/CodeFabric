@@ -769,6 +769,11 @@ mod tests {
                 .render_rust()
                 .contains("INGEST_RUSTC_MIR_OWNER_V1")
         );
+        let mut schema = json_authority("contracts/schema/schema-contract-ir.json");
+        fragments.compose_schema(&mut schema).unwrap();
+        assert!(schema["tables"].as_array().unwrap().iter().any(|table| {
+            table["table_code"] == 350 && table["row_encoder"] == "access_path_components"
+        }));
     }
 
     #[test]

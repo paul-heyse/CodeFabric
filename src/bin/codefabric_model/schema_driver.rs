@@ -281,6 +281,11 @@ enum RowEncoderKind {
     CfgGraphs,
     CfgNodeDetails,
     CfgEdgeDetails,
+    ValueDetails,
+    OperationDetails,
+    DataflowEventDetails,
+    MemoryLocationDetails,
+    AccessPathComponents,
 }
 
 impl RowEncoderKind {
@@ -309,6 +314,11 @@ impl RowEncoderKind {
             Self::CfgGraphs => "encode_cfg_graphs",
             Self::CfgNodeDetails => "encode_cfg_node_details",
             Self::CfgEdgeDetails => "encode_cfg_edge_details",
+            Self::ValueDetails => "encode_value_details",
+            Self::OperationDetails => "encode_operation_details",
+            Self::DataflowEventDetails => "encode_dataflow_event_details",
+            Self::MemoryLocationDetails => "encode_memory_location_details",
+            Self::AccessPathComponents => "encode_access_path_components",
         }
     }
 
@@ -337,6 +347,11 @@ impl RowEncoderKind {
             Self::CfgGraphs => "CfgGraphRow",
             Self::CfgNodeDetails => "CfgNodeDetailRow",
             Self::CfgEdgeDetails => "CfgEdgeDetailRow",
+            Self::ValueDetails => "ValueDetailRow",
+            Self::OperationDetails => "OperationDetailRow",
+            Self::DataflowEventDetails => "DataflowEventDetailRow",
+            Self::MemoryLocationDetails => "MemoryLocationDetailRow",
+            Self::AccessPathComponents => "AccessPathComponentRow",
         }
     }
 }
@@ -862,11 +877,24 @@ impl SchemaContractIr {
             (RowEncoderKind::CfgGraphs, 280),
             (RowEncoderKind::CfgNodeDetails, 290),
             (RowEncoderKind::CfgEdgeDetails, 300),
+            (RowEncoderKind::ValueDetails, 310),
+            (RowEncoderKind::OperationDetails, 320),
+            (RowEncoderKind::DataflowEventDetails, 330),
+            (RowEncoderKind::MemoryLocationDetails, 340),
+            (RowEncoderKind::AccessPathComponents, 350),
         ]);
         if encoders != expected_encoders {
+            let tail = self
+                .tables
+                .iter()
+                .filter(|table| table.table_code >= 280)
+                .map(|table| (table.table_code, table.name.as_str(), table.row_encoder))
+                .collect::<Vec<_>>();
             return invalid(
                 "$.tables[*].row_encoder",
-                "generated fact-row encoder census differs",
+                format!(
+                    "generated fact-row encoder census differs: actual={encoders:?}, expected={expected_encoders:?}, tail={tail:?}"
+                ),
             );
         }
         let mut bindings = BTreeMap::new();
@@ -2724,7 +2752,9 @@ fn render_encoder_column(
         "owner_bucket" => "i16s(rows, |row| Some(i16::from(row.scope.owner_id[0])))".into(),
         "source_bucket" => "i16s(rows, |row| Some(i16::from(row.source_id[0])))".into(),
         "target_bucket" => "i16s(rows, |row| Some(i16::from(row.target_id[0])))".into(),
-        "value_kind_code" => "i16s(rows, |row| Some(row.value.code()))".into(),
+        "value_kind_code" if table_code == 120 => {
+            "i16s(rows, |row| Some(row.value.code()))".into()
+        }
         "value_entity_id" => "id16s(rows, |row| match &row.value { PropertyValue::Entity(value) => Some(value), _ => None })".into(),
         "value_bool" => "bools(rows, |row| match row.value { PropertyValue::Boolean(value) => Some(value), _ => None })".into(),
         "value_int64" => "i64s(rows, |row| match row.value { PropertyValue::Integer(value) => Some(value), _ => None })".into(),

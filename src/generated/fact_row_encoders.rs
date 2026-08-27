@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:e49fa7f461c63de2be2000577e9abd438bffb48fd2fad4a23ff23117016c3b53; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:64cc3e34a9a2c7d2b07b3551d626e401eac2b49ff661dee4443e166b5fe5a14b; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -710,6 +710,159 @@ pub fn encode_cfg_edge_details(rows: &[CfgEdgeDetailRow]) -> Result<RecordBatch,
             i64s(rows, |row| row.case_value_hash),
             id16s(rows, |row| row.exception_type_id.as_ref()),
             i64s(rows, |row| Some(row.edge_flags)),
+        ],
+    )
+}
+
+/// Encode `value_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_value_details(rows: &[ValueDetailRow]) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        310,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.value_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            i16s(rows, |row| Some(row.value_kind_code)),
+            id16s(rows, |row| row.type_id.as_ref()),
+            id16s(rows, |row| row.producer_operation_id.as_ref()),
+            id16s(rows, |row| row.constant_value_id.as_ref()),
+            id16s(rows, |row| row.syntax_id.as_ref()),
+            i64s(rows, |row| Some(row.flags)),
+            utf8(rows, |row| Some(row.precision_profile_id.as_str())),
+            utf8(rows, |row| Some(row.derivation_bundle_id.as_str())),
+        ],
+    )
+}
+
+/// Encode `operation_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_operation_details(
+    rows: &[OperationDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        320,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.operation_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| row.cfg_node_id.as_ref()),
+            i32s(rows, |row| Some(row.operation_kind_code)),
+            id16s(rows, |row| row.result_value_id.as_ref()),
+            id16s(rows, |row| row.type_id.as_ref()),
+            id16s(rows, |row| row.syntax_id.as_ref()),
+            i32s(rows, |row| row.raw_kind_code),
+            i64s(rows, |row| Some(row.flags)),
+            utf8(rows, |row| Some(row.precision_profile_id.as_str())),
+            utf8(rows, |row| Some(row.derivation_bundle_id.as_str())),
+        ],
+    )
+}
+
+/// Encode `dataflow_event_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_dataflow_event_details(
+    rows: &[DataflowEventDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        330,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.event_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| row.cfg_node_id.as_ref()),
+            i16s(rows, |row| Some(row.event_kind_code)),
+            id16s(rows, |row| row.binding_id.as_ref()),
+            id16s(rows, |row| row.value_id.as_ref()),
+            id16s(rows, |row| row.location_id.as_ref()),
+            id16s(rows, |row| row.syntax_id.as_ref()),
+            i32s(rows, |row| row.ordinal),
+            i64s(rows, |row| Some(row.flags)),
+            utf8(rows, |row| Some(row.precision_profile_id.as_str())),
+            utf8(rows, |row| Some(row.derivation_bundle_id.as_str())),
+        ],
+    )
+}
+
+/// Encode `memory_location_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_memory_location_details(
+    rows: &[MemoryLocationDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        340,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.location_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            i16s(rows, |row| Some(row.location_kind_code)),
+            id16s(rows, |row| row.base_entity_id.as_ref()),
+            id16s(rows, |row| row.base_local_id.as_ref()),
+            id16s(rows, |row| row.type_id.as_ref()),
+            id16s(rows, |row| row.parent_location_id.as_ref()),
+            i16s(rows, |row| Some(row.projection_depth)),
+            binary(rows, |row| Some(row.canonical_path_hash.as_slice())),
+            utf8(rows, |row| row.display_path.as_deref()),
+            i64s(rows, |row| Some(row.flags)),
+            utf8(rows, |row| Some(row.precision_profile_id.as_str())),
+            utf8(rows, |row| Some(row.derivation_bundle_id.as_str())),
+        ],
+    )
+}
+
+/// Encode `access_path_component` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_access_path_components(
+    rows: &[AccessPathComponentRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        350,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.component_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.location_id)),
+            i16s(rows, |row| Some(row.ordinal)),
+            i16s(rows, |row| Some(row.projection_kind_code)),
+            id16s(rows, |row| row.field_entity_id.as_ref()),
+            id16s(rows, |row| row.index_value_id.as_ref()),
+            id16s(rows, |row| row.variant_entity_id.as_ref()),
+            i64s(rows, |row| row.constant_index),
+            i64s(rows, |row| row.subslice_from),
+            i64s(rows, |row| row.subslice_to),
+            i64s(rows, |row| Some(row.flags)),
+            utf8(rows, |row| Some(row.precision_profile_id.as_str())),
+            utf8(rows, |row| Some(row.derivation_bundle_id.as_str())),
         ],
     )
 }

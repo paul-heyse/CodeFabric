@@ -707,6 +707,101 @@ pub const COMPLETENESS_STATE_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
+pub enum DataflowValueKind {
+    Literal = 10,
+    NameRead = 20,
+    AttributeRead = 30,
+    SubscriptRead = 40,
+    CallReturn = 50,
+    OperationResult = 60,
+    Container = 70,
+    CallableObject = 80,
+    AwaitOrYield = 90,
+    Merged = 100,
+    Unknown = 110,
+}
+impl TryFrom<u16> for DataflowValueKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Literal),
+            20 => Ok(Self::NameRead),
+            30 => Ok(Self::AttributeRead),
+            40 => Ok(Self::SubscriptRead),
+            50 => Ok(Self::CallReturn),
+            60 => Ok(Self::OperationResult),
+            70 => Ok(Self::Container),
+            80 => Ok(Self::CallableObject),
+            90 => Ok(Self::AwaitOrYield),
+            100 => Ok(Self::Merged),
+            110 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode {
+                domain: "DATAFLOW_VALUE_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const DATAFLOW_VALUE_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "LITERAL",
+        slug: "literal",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "NAME_READ",
+        slug: "name-read",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "ATTRIBUTE_READ",
+        slug: "attribute-read",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "SUBSCRIPT_READ",
+        slug: "subscript-read",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "CALL_RETURN",
+        slug: "call-return",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "OPERATION_RESULT",
+        slug: "operation-result",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "CONTAINER",
+        slug: "container",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "CALLABLE_OBJECT",
+        slug: "callable-object",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "AWAIT_OR_YIELD",
+        slug: "await-or-yield",
+    },
+    RegistryEntry {
+        code: 100,
+        name: "MERGED",
+        slug: "merged",
+    },
+    RegistryEntry {
+        code: 110,
+        name: "UNKNOWN",
+        slug: "unknown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
 pub enum DependencyState {
     Ready = 10,
     FailedDependency = 20,
@@ -2565,6 +2660,7 @@ pub enum ProviderObservationFamily {
     PyreflyModule = 110,
     RustMirOwner = 120,
     RuffSemanticCfg = 130,
+    RuffSemanticDataflow = 140,
 }
 impl TryFrom<u16> for ProviderObservationFamily {
     type Error = UnknownRegistryCode;
@@ -2574,6 +2670,7 @@ impl TryFrom<u16> for ProviderObservationFamily {
             110 => Ok(Self::PyreflyModule),
             120 => Ok(Self::RustMirOwner),
             130 => Ok(Self::RuffSemanticCfg),
+            140 => Ok(Self::RuffSemanticDataflow),
             _ => Err(UnknownRegistryCode {
                 domain: "PROVIDER_OBSERVATION_FAMILY",
                 code,
@@ -2601,6 +2698,11 @@ pub const PROVIDER_OBSERVATION_FAMILY_VALUES: &[RegistryEntry] = &[
         code: 130,
         name: "RUFF_SEMANTIC_CFG",
         slug: "ruff-semantic-cfg",
+    },
+    RegistryEntry {
+        code: 140,
+        name: "RUFF_SEMANTIC_DATAFLOW",
+        slug: "ruff-semantic-dataflow",
     },
 ];
 
@@ -2703,6 +2805,281 @@ pub const PROVIDER_RUN_STATE_VALUES: &[RegistryEntry] = &[
         code: 120,
         name: "STALE_GIT_BASELINE",
         slug: "stale-git-baseline",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum PythonAccessProjectionKind {
+    Base = 10,
+    Field = 20,
+    Index = 30,
+    Unknown = 40,
+}
+impl TryFrom<u16> for PythonAccessProjectionKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Base),
+            20 => Ok(Self::Field),
+            30 => Ok(Self::Index),
+            40 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode {
+                domain: "PYTHON_ACCESS_PROJECTION_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const PYTHON_ACCESS_PROJECTION_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "BASE",
+        slug: "base",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "FIELD",
+        slug: "field",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "INDEX",
+        slug: "index",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "UNKNOWN",
+        slug: "unknown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum PythonDataflowEventKind {
+    Definition = 10,
+    Read = 20,
+    Receiver = 30,
+    Callee = 40,
+    Argument = 50,
+    Condition = 60,
+    ReturnOrYield = 70,
+    Index = 80,
+    Decorator = 90,
+    EvaluatedAnnotation = 100,
+    DynamicUnknown = 110,
+}
+impl TryFrom<u16> for PythonDataflowEventKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Definition),
+            20 => Ok(Self::Read),
+            30 => Ok(Self::Receiver),
+            40 => Ok(Self::Callee),
+            50 => Ok(Self::Argument),
+            60 => Ok(Self::Condition),
+            70 => Ok(Self::ReturnOrYield),
+            80 => Ok(Self::Index),
+            90 => Ok(Self::Decorator),
+            100 => Ok(Self::EvaluatedAnnotation),
+            110 => Ok(Self::DynamicUnknown),
+            _ => Err(UnknownRegistryCode {
+                domain: "PYTHON_DATAFLOW_EVENT_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const PYTHON_DATAFLOW_EVENT_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "DEFINITION",
+        slug: "definition",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "READ",
+        slug: "read",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "RECEIVER",
+        slug: "receiver",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "CALLEE",
+        slug: "callee",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "ARGUMENT",
+        slug: "argument",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "CONDITION",
+        slug: "condition",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "RETURN_OR_YIELD",
+        slug: "return-or-yield",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "INDEX",
+        slug: "index",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "DECORATOR",
+        slug: "decorator",
+    },
+    RegistryEntry {
+        code: 100,
+        name: "EVALUATED_ANNOTATION",
+        slug: "evaluated-annotation",
+    },
+    RegistryEntry {
+        code: 110,
+        name: "DYNAMIC_UNKNOWN",
+        slug: "dynamic-unknown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum PythonLocationKind {
+    Local = 10,
+    Global = 20,
+    Cell = 30,
+    Field = 40,
+    InstanceMember = 50,
+    ClassMember = 60,
+    Indexed = 70,
+    Module = 80,
+    Unknown = 90,
+}
+impl TryFrom<u16> for PythonLocationKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Local),
+            20 => Ok(Self::Global),
+            30 => Ok(Self::Cell),
+            40 => Ok(Self::Field),
+            50 => Ok(Self::InstanceMember),
+            60 => Ok(Self::ClassMember),
+            70 => Ok(Self::Indexed),
+            80 => Ok(Self::Module),
+            90 => Ok(Self::Unknown),
+            _ => Err(UnknownRegistryCode {
+                domain: "PYTHON_LOCATION_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const PYTHON_LOCATION_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "LOCAL",
+        slug: "local",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "GLOBAL",
+        slug: "global",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "CELL",
+        slug: "cell",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "FIELD",
+        slug: "field",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "INSTANCE_MEMBER",
+        slug: "instance-member",
+    },
+    RegistryEntry {
+        code: 60,
+        name: "CLASS_MEMBER",
+        slug: "class-member",
+    },
+    RegistryEntry {
+        code: 70,
+        name: "INDEXED",
+        slug: "indexed",
+    },
+    RegistryEntry {
+        code: 80,
+        name: "MODULE",
+        slug: "module",
+    },
+    RegistryEntry {
+        code: 90,
+        name: "UNKNOWN",
+        slug: "unknown",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum PythonOperationKind {
+    Read = 10,
+    Write = 20,
+    Call = 30,
+    Merge = 40,
+    DynamicBarrier = 50,
+}
+impl TryFrom<u16> for PythonOperationKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Read),
+            20 => Ok(Self::Write),
+            30 => Ok(Self::Call),
+            40 => Ok(Self::Merge),
+            50 => Ok(Self::DynamicBarrier),
+            _ => Err(UnknownRegistryCode {
+                domain: "PYTHON_OPERATION_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const PYTHON_OPERATION_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "READ",
+        slug: "read",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "WRITE",
+        slug: "write",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "CALL",
+        slug: "call",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "MERGE",
+        slug: "merge",
+    },
+    RegistryEntry {
+        code: 50,
+        name: "DYNAMIC_BARRIER",
+        slug: "dynamic-barrier",
     },
 ];
 
@@ -4505,379 +4882,409 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
     RegistryDomainEntry {
         domain: "ANALYSIS_CONTEXT_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: ANALYSIS_CONTEXT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "ANNOTATION_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: ANNOTATION_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "ARGUMENT_BINDING_STATUS",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: ARGUMENT_BINDING_STATUS_VALUES,
     },
     RegistryDomainEntry {
         domain: "ARGUMENT_SPREAD_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: ARGUMENT_SPREAD_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "CALL_DISPATCH_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: CALL_DISPATCH_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "CFG_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: CFG_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "CFG_NODE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: CFG_NODE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: COMPLETENESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: COMPLETENESS_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "DATAFLOW_VALUE_KIND",
+        version: "1.0",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
+        values: DATAFLOW_VALUE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "DEPENDENCY_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: DEPENDENCY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "DIRECTNESS",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: DIRECTNESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "DURABLE_PUBLICATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: DURABLE_PUBLICATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "EFFECT_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: EFFECT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "EVENT_STREAM_HEALTH",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: EVENT_STREAM_HEALTH_VALUES,
     },
     RegistryDomainEntry {
         domain: "EVIDENCE_CERTAINTY",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: EVIDENCE_CERTAINTY_VALUES,
     },
     RegistryDomainEntry {
         domain: "FRESHNESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: FRESHNESS_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_ACCELERATION_STATUS",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_ACCELERATION_STATUS_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_MODE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_CANDIDATE_MODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_ORIGIN",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_CANDIDATE_ORIGIN_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HASH_ALGORITHM",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_HASH_ALGORITHM_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HEAD_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_HEAD_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_INVENTORY_CLASSIFICATION",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_INVENTORY_CLASSIFICATION_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_OPERATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_OPERATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_REPOSITORY_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: GIT_REPOSITORY_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "IMPORT_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: IMPORT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_FILE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: INVENTORY_FILE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_INCLUSION_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: INVENTORY_INCLUSION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "LANGUAGE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: LANGUAGE_VALUES,
     },
     RegistryDomainEntry {
         domain: "LIMIT_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: LIMIT_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "NEWLINE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: NEWLINE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "NULLABLE_SEMANTICS",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: NULLABLE_SEMANTICS_VALUES,
     },
     RegistryDomainEntry {
         domain: "OCCURRENCE_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: OCCURRENCE_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "OVERLAY_TOMBSTONE_REASON",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: OVERLAY_TOMBSTONE_REASON_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_CAPABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: OWNER_CAPABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: OWNER_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "PARAMETER_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: PARAMETER_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "PATH_ENCODING",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: PATH_ENCODING_VALUES,
     },
     RegistryDomainEntry {
         domain: "PHASE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: PHASE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_CODE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: PROVIDER_CODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_OBSERVATION_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: PROVIDER_OBSERVATION_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_RUN_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: PROVIDER_RUN_STATE_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PYTHON_ACCESS_PROJECTION_KIND",
+        version: "1.0",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
+        values: PYTHON_ACCESS_PROJECTION_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PYTHON_DATAFLOW_EVENT_KIND",
+        version: "1.0",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
+        values: PYTHON_DATAFLOW_EVENT_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PYTHON_LOCATION_KIND",
+        version: "1.0",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
+        values: PYTHON_LOCATION_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "PYTHON_OPERATION_KIND",
+        version: "1.0",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
+        values: PYTHON_OPERATION_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_AVAILABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: QUERY_AVAILABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_EXECUTION_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: QUERY_EXECUTION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_FORM",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: QUERY_FORM_VALUES,
     },
     RegistryDomainEntry {
         domain: "RANGE_RECONCILIATION_STEP",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: RANGE_RECONCILIATION_STEP_VALUES,
     },
     RegistryDomainEntry {
         domain: "RAW_KIND_DISPOSITION",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: RAW_KIND_DISPOSITION_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOLUTION_CLASS",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: RESOLUTION_CLASS_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOURCE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: RESOURCE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SERVING_ACTIVATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: SERVING_ACTIVATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SEVERITY",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: SEVERITY_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: SNAPSHOT_LEASE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: SNAPSHOT_LEASE_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SOURCE_TRUST_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: SOURCE_TRUST_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_FIELD_ROLE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: SYNTAX_FIELD_ROLE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: SYNTAX_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "TOKEN_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: TOKEN_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "TYPE_ORIGIN",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: TYPE_ORIGIN_VALUES,
     },
     RegistryDomainEntry {
         domain: "TYPE_ROLE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: TYPE_ROLE_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_CANDIDATE_STRATEGY",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: UPDATE_CANDIDATE_STRATEGY_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_WAVE_ITEM_STATE",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: UPDATE_WAVE_ITEM_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "VALUE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: VALUE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "WORKSPACE_KIND",
         version: "1.0",
-        canonical_digest: "b3:36a453c5842db75bbbe902626d5eb5682a4f04165256d739117e89905b8d168e",
+        canonical_digest: "b3:32ebaf576499c649ed9ccdcc6b393f5d5f5c8e1b0c9f58026a380fa3f0486ac2",
         values: WORKSPACE_KIND_VALUES,
     },
     RegistryDomainEntry {
@@ -4909,27 +5316,87 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DerivationEntry {
     pub derivation_id: &'static str,
+    pub owner_packet: &'static str,
     pub owner_kind: &'static str,
     pub input_fact_families: &'static [&'static str],
     pub output_fact_families: &'static [&'static str],
     pub projection_id: &'static str,
     pub precision_profile: &'static str,
+    pub algorithm_id: &'static str,
     pub algorithm_version: &'static str,
+    pub derivation_bundle_id: &'static str,
     pub replacement_scope: &'static str,
     pub dependency_rule: &'static str,
+    pub context_fingerprint_inputs: &'static [&'static str],
+    pub source_fingerprint_inputs: &'static [&'static str],
+    pub invalidation_closure: &'static [&'static str],
+    pub resource_profile_id: &'static str,
+    pub pass_contract_id: &'static str,
+    pub implementation_symbol: &'static str,
 }
 
-pub const DERIVATION_ENTRIES: &[DerivationEntry] = &[DerivationEntry {
-    derivation_id: "SYNTAX_TREE_V1",
-    owner_kind: "source-file",
-    input_fact_families: &["syntax-detail", "relation"],
-    output_fact_families: &["syntax-projection"],
-    projection_id: "SYNTAX_TREE_V1",
-    precision_profile: "CORE_SOURCE_V1",
-    algorithm_version: "1.0",
-    replacement_scope: "OWNER_REPLACE",
-    dependency_rule: "source-file->syntax-detail+AST_CHILD",
-}];
+pub const DERIVATION_ENTRIES: &[DerivationEntry] = &[
+    DerivationEntry {
+        derivation_id: "SYNTAX_TREE_V1",
+        owner_packet: "",
+        owner_kind: "source-file",
+        input_fact_families: &["syntax-detail", "relation"],
+        output_fact_families: &["syntax-projection"],
+        projection_id: "SYNTAX_TREE_V1",
+        precision_profile: "CORE_SOURCE_V1",
+        algorithm_id: "",
+        algorithm_version: "1.0",
+        derivation_bundle_id: "",
+        replacement_scope: "OWNER_REPLACE",
+        dependency_rule: "source-file->syntax-detail+AST_CHILD",
+        context_fingerprint_inputs: &[],
+        source_fingerprint_inputs: &[],
+        invalidation_closure: &[],
+        resource_profile_id: "",
+        pass_contract_id: "",
+        implementation_symbol: "",
+    },
+    DerivationEntry {
+        derivation_id: "PY_OWNER_REACHING_DEFS_V1",
+        owner_packet: "WP07",
+        owner_kind: "callable",
+        input_fact_families: &[
+            "scope-detail",
+            "binding-detail",
+            "reference-detail",
+            "cfg-graph",
+            "cfg-node-detail",
+            "cfg-edge-detail",
+            "value-input",
+            "access-path-input",
+        ],
+        output_fact_families: &[
+            "reaching-definition",
+            "reaches",
+            "def-use",
+            "data-dep",
+            "value-flows-to",
+            "kills-definition",
+        ],
+        projection_id: "DATAFLOW_V1",
+        precision_profile: "PYTHON_LOCAL_REACHING_DEFS_V1",
+        algorithm_id: "FORWARD_REACHING_DEFINITIONS",
+        algorithm_version: "1.0",
+        derivation_bundle_id: "codefabric.derivation-bundle.v1.3",
+        replacement_scope: "OWNER_REPLACE",
+        dependency_rule: "callable->bindings+references+CFG_FULL_V1",
+        context_fingerprint_inputs: &["workspace_id", "analysis_context_id", "precision_profile"],
+        source_fingerprint_inputs: &["source_generation", "binding-fact-digest", "cfg-digest"],
+        invalidation_closure: &[
+            "callable-owner",
+            "python-analysis-context",
+            "dependent-summary-owner",
+        ],
+        resource_profile_id: "derivation-standard",
+        pass_contract_id: "PASS_PYTHON_DATAFLOW_V1",
+        implementation_symbol: "crate::ruff_adapter::dataflow::project_python_dataflow",
+    },
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StateTransitionEntry {
@@ -7660,6 +8127,9 @@ pub const ENTITY_KIND_IDS: &[&str] = &[
     "PROPERTY_CANDIDATE",
     "NESTED_TYPE",
     "INSTANCE_VARIABLE",
+    "DATAFLOW_OPERATION",
+    "DEFINITION_EVENT",
+    "USE_EVENT",
 ];
 
 pub const RELATION_KIND_IDS: &[&str] = &[
@@ -7714,6 +8184,11 @@ pub const RELATION_KIND_IDS: &[&str] = &[
     "CFG_CLEANUP",
     "CFG_SUSPEND",
     "CFG_RESUME",
+    "REACHING_DEFINITION",
+    "REACHES",
+    "DATA_DEP",
+    "VALUE_FLOWS_TO",
+    "KILLS_DEFINITION",
 ];
 
 pub const PROPERTY_KIND_IDS: &[&str] = &[
@@ -7901,7 +8376,7 @@ pub const PUBLIC_ERROR_IDS: &[&str] = &[
     "INTERNAL",
 ];
 
-pub const DERIVATION_IDS: &[&str] = &["SYNTAX_TREE_V1"];
+pub const DERIVATION_IDS: &[&str] = &["SYNTAX_TREE_V1", "PY_OWNER_REACHING_DEFS_V1"];
 
 pub const PHRASE_IDS: &[&str] = &[
     "Q50_SOURCE_FILES",
@@ -8804,6 +9279,18 @@ pub const ENTITY_KIND_CODES: &[OntologyCodeEntry] = &[
         code: 700,
         family_code: 7,
     },
+    OntologyCodeEntry {
+        code: 710,
+        family_code: 9,
+    },
+    OntologyCodeEntry {
+        code: 720,
+        family_code: 9,
+    },
+    OntologyCodeEntry {
+        code: 730,
+        family_code: 9,
+    },
 ];
 
 pub const RELATION_KIND_CODES: &[OntologyCodeEntry] = &[
@@ -9010,6 +9497,26 @@ pub const RELATION_KIND_CODES: &[OntologyCodeEntry] = &[
     OntologyCodeEntry {
         code: 510,
         family_code: 8,
+    },
+    OntologyCodeEntry {
+        code: 520,
+        family_code: 9,
+    },
+    OntologyCodeEntry {
+        code: 530,
+        family_code: 9,
+    },
+    OntologyCodeEntry {
+        code: 540,
+        family_code: 9,
+    },
+    OntologyCodeEntry {
+        code: 550,
+        family_code: 9,
+    },
+    OntologyCodeEntry {
+        code: 560,
+        family_code: 9,
     },
 ];
 

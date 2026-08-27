@@ -2865,22 +2865,31 @@ fn render_rust_runtime_registries(
         registry_records(values, "codefabric.registry.derivation-registry")?;
     output.push_str(
         "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
-         pub struct DerivationEntry { pub derivation_id: &'static str, pub owner_kind: &'static str, pub input_fact_families: &'static [&'static str], pub output_fact_families: &'static [&'static str], pub projection_id: &'static str, pub precision_profile: &'static str, pub algorithm_version: &'static str, pub replacement_scope: &'static str, pub dependency_rule: &'static str }\n\n\
+         pub struct DerivationEntry { pub derivation_id: &'static str, pub owner_packet: &'static str, pub owner_kind: &'static str, pub input_fact_families: &'static [&'static str], pub output_fact_families: &'static [&'static str], pub projection_id: &'static str, pub precision_profile: &'static str, pub algorithm_id: &'static str, pub algorithm_version: &'static str, pub derivation_bundle_id: &'static str, pub replacement_scope: &'static str, pub dependency_rule: &'static str, pub context_fingerprint_inputs: &'static [&'static str], pub source_fingerprint_inputs: &'static [&'static str], pub invalidation_closure: &'static [&'static str], pub resource_profile_id: &'static str, pub pass_contract_id: &'static str, pub implementation_symbol: &'static str }\n\n\
          pub const DERIVATION_ENTRIES: &[DerivationEntry] = &[\n",
     );
     for derivation in &derivations {
         writeln!(
             output,
-            "    DerivationEntry {{ derivation_id: {:?}, owner_kind: {:?}, input_fact_families: &{:?}, output_fact_families: &{:?}, projection_id: {:?}, precision_profile: {:?}, algorithm_version: {:?}, replacement_scope: {:?}, dependency_rule: {:?} }},",
+            "    DerivationEntry {{ derivation_id: {:?}, owner_packet: {:?}, owner_kind: {:?}, input_fact_families: &{:?}, output_fact_families: &{:?}, projection_id: {:?}, precision_profile: {:?}, algorithm_id: {:?}, algorithm_version: {:?}, derivation_bundle_id: {:?}, replacement_scope: {:?}, dependency_rule: {:?}, context_fingerprint_inputs: &{:?}, source_fingerprint_inputs: &{:?}, invalidation_closure: &{:?}, resource_profile_id: {:?}, pass_contract_id: {:?}, implementation_symbol: {:?} }},",
             derivation.derivation_id,
+            derivation.owner_packet,
             derivation.owner_kind,
             derivation.input_fact_families,
             derivation.output_fact_families,
             derivation.projection_id,
             derivation.precision_profile,
+            derivation.algorithm_id,
             derivation.algorithm_version,
+            derivation.derivation_bundle_id,
             derivation.replacement_scope,
             derivation.dependency_rule,
+            derivation.context_fingerprint_inputs,
+            derivation.source_fingerprint_inputs,
+            derivation.invalidation_closure,
+            derivation.resource_profile_id,
+            derivation.pass_contract_id,
+            derivation.implementation_symbol,
         )
         .unwrap();
     }

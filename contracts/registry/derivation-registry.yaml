@@ -14,8 +14,26 @@ records:
     algorithm_version: "1.0"
     replacement_scope: OWNER_REPLACE
     dependency_rule: source-file->syntax-detail+AST_CHILD
+  - derivation_id: PY_OWNER_REACHING_DEFS_V1
+    owner_packet: WP07
+    owner_kind: callable
+    input_fact_families: [scope-detail, binding-detail, reference-detail, cfg-graph, cfg-node-detail, cfg-edge-detail, value-input, access-path-input]
+    output_fact_families: [reaching-definition, reaches, def-use, data-dep, value-flows-to, kills-definition]
+    projection_id: DATAFLOW_V1
+    precision_profile: PYTHON_LOCAL_REACHING_DEFS_V1
+    algorithm_id: FORWARD_REACHING_DEFINITIONS
+    algorithm_version: "1.0"
+    derivation_bundle_id: codefabric.derivation-bundle.v1.3
+    replacement_scope: OWNER_REPLACE
+    dependency_rule: callable->bindings+references+CFG_FULL_V1
+    context_fingerprint_inputs: [workspace_id, analysis_context_id, precision_profile]
+    source_fingerprint_inputs: [source_generation, binding-fact-digest, cfg-digest]
+    invalidation_closure: [callable-owner, python-analysis-context, dependent-summary-owner]
+    resource_profile_id: derivation-standard
+    pass_contract_id: PASS_PYTHON_DATAFLOW_V1
+    implementation_symbol: crate::ruff_adapter::dataflow::project_python_dataflow
 owner_acceptance:
   approver: data-fabric-owner
   accepted_at: "2026-08-21"
-  construction_rule: AC-G-79A registry with the Wave-5 SYNTAX_TREE_V1 owner-replace derivation
+  construction_rule: AC-G-79A registry with Wave-5 syntax-tree and Wave-8 Python owner-local reaching-definitions derivations
   source_digest: "b3:d55a5efa8ce523348ee671afecf561e6c188c5918fed488b48f4c977cbf40fa9"

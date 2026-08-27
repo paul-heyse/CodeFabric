@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP07",
+  "current_packet": "WP04",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -47,10 +47,11 @@
       "blockers": []
     },
     "WP04": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "de2797d60b59bba0c0473abf985ec038793f3dec",
       "deviations": [
-        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP04 closed on root format/check, focused Clippy, exactly four packet oracles with --no-fail-fast, adjacent WP03 regressions, model reproducibility, and design-principle traceability."
+        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP04 closed on root format/check, focused Clippy, exactly four packet oracles with --no-fail-fast, adjacent WP03 regressions, model reproducibility, and design-principle traceability.",
+        "The 2026-08-27 status reconciliation reopened WP04 because its required py_import_export_fixture_conformance oracle no longer passes after additive WP07 semantic-entity projection changed the shared fixture census. The import/export behavior remains otherwise focused-green, but complete status is untrusted until all four WP04 oracles pass at HEAD."
       ],
       "failed_approaches": [
         "The initial import projector classified any statically spelled module target as statically resolved. Rechecking GEN section 19.2 exposed that overclaim: named imports now use Ruff Import, SubmoduleImport, and FromImport binding metadata plus SemanticModel qualified-name resolution, while star and dynamic imports remain explicit possible or unknown facts."
@@ -58,10 +59,11 @@
       "blockers": []
     },
     "WP05": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "285f5cd9e69af787a05a5b8ba92b6a34e1b0abeb",
       "deviations": [
-        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP05 closed on root format/check, focused Clippy, exactly four packet oracles with --no-fail-fast, adjacent WP03/WP04 regressions, model reproducibility, and design-principle traceability. CALL_TARGETS and MEMBER_RESOLUTION capability completeness remains unclaimed because those are Pyrefly-owned later-wave enrichments."
+        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP05 closed on root format/check, focused Clippy, exactly four packet oracles with --no-fail-fast, adjacent WP03/WP04 regressions, model reproducibility, and design-principle traceability. CALL_TARGETS and MEMBER_RESOLUTION capability completeness remains unclaimed because those are Pyrefly-owned later-wave enrichments.",
+        "The 2026-08-27 status reconciliation marked WP05 stale by dependency trust because WP04 is stale. WP05's own four named oracles still pass at HEAD; revalidation is required after the WP04 proof defect is repaired."
       ],
       "failed_approaches": [
         "The initial callable fixture exposed that the pre-existing Ruff binding pass did not create the definition-time annotation scopes that the reference pass entered. Both passes now traverse decorators, class bases, type parameters, parameter annotations/defaults, and return annotations symmetrically before function/class body traversal.",
@@ -70,11 +72,12 @@
       "blockers": []
     },
     "WP06": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "4671b7e",
       "deviations": [
         "Per user direction, the composite root-ci-fast and remaining repository-wide Wave 8 gates are deferred to the M01 conclusion after WP07. The user separately requested one full cargo-nextest discovery run with --no-fail-fast during WP06: its initial 48-failure cascade was reduced through shared root-cause fixes, and the second complete run reached 410/412 before the two remaining failures were repaired and proven with focused selectors. A third full rerun was intentionally omitted under the user's targeted-change guidance.",
-        "The packet uses a separate codefabric.ruff.semantic.v2 observation family so the accepted v1 contracts remain immutable while CFG tables and relation kinds are added. Normal CFG continuation uses the explicit CFG_CALL_RETURN relation kind; the generic CFG_NORMAL placeholder is neither emitted nor persisted."
+        "The packet uses a separate codefabric.ruff.semantic.v2 observation family so the accepted v1 contracts remain immutable while CFG tables and relation kinds are added. Normal CFG continuation uses the explicit CFG_CALL_RETURN relation kind; the generic CFG_NORMAL placeholder is neither emitted nor persisted.",
+        "The 2026-08-27 status reconciliation marked WP06 stale by transitive dependency trust because WP04 is stale through WP05. WP06's own four named oracles still pass at HEAD; revalidation is required after the WP04 proof defect is repaired."
       ],
       "failed_approaches": [
         "The first v2 Python fragment registered only its language-specific CFG ingest contract; model validation exposed that the v2 observation also needed an explicit shared-substrate ingest authority before generated outputs could be accepted.",
@@ -348,9 +351,11 @@
       "blockers": []
     },
     "DB02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The 2026-08-27 status reconciliation found coherent WP01 cutover evidence for generated provider-observation schema authority, but DB02 remains unproved until its governed semantic-provider legacy zero-state gate runs at the Wave 8 milestone and a proving commit is recorded."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -426,6 +431,6 @@
       "summary": "The user/design owner's execution direction moved the previously inactive draft v2 artifact to approved before the atomic activation transaction."
     }
   ],
-  "next_action": "Implement WP06 application-owned Python control-flow graphs with focused CFG construction, well-formedness, exceptional-flow, and owner-invalidation checks.",
-  "updated_at": "2026-08-27T10:55:33Z"
+  "next_action": "Repair the WP04 py_import_export_fixture_conformance census so all four WP04 oracles pass at HEAD, then re-run the four-oracle selectors for WP04, WP05, and WP06 before resuming WP07's missing named acceptance oracles and Wave 8 closure.",
+  "updated_at": "2026-08-27T13:02:35Z"
 }

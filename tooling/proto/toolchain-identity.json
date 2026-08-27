@@ -13,10 +13,10 @@
     "script_digest": "b3:7304585e5f9a044259627968bb2b42e1f1c4342596fb128c41a430e28ff1bfea"
   },
   "rust": {
-    "action_key": "b3:ea752d0103e0fdefe84c908928106bb28907643aad521408a48ad417fc2e97e4",
+    "action_key": "b3:aa5cd8754775a1c42cea11e391a0dc99c3f34fd6d67485565b6b2de56cb3ace1",
     "binary_digest": "b3:d33cec558851f123c5c61f7c585c94768374a2befb7d1eee2507e0e0328653cd",
     "cargo_lock_digest": "b3:21b01693b4c54ae62fff218bc444ecf9c8e60573047295d44efaf8a1c0bbd5da",
-    "cargo_manifest_digest": "b3:de4dfef9e6aa82d0a246ecf830608343f5c86718c4850589d82ba021338485bf",
+    "cargo_manifest_digest": "b3:88fa35ed55f67137e686e95da2ddb645a31161fd75e97809d6ec3d6c9b180413",
     "descriptor_api": "tonic_prost_build::Builder::compile_fds",
     "features": [
       "proto-tooling"

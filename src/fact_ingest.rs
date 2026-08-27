@@ -507,6 +507,91 @@ pub struct CfgEdgeDetailRow {
     pub edge_flags: i64,
 }
 
+/// One application-owned value entity materialized by a registered derivation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValueDetailRow {
+    pub scope: FactScope,
+    pub value_id: [u8; 16],
+    pub value_kind_code: i16,
+    pub type_id: Option<[u8; 16]>,
+    pub producer_operation_id: Option<[u8; 16]>,
+    pub constant_value_id: Option<[u8; 16]>,
+    pub syntax_id: Option<[u8; 16]>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// One normalized operation and its optional produced value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationDetailRow {
+    pub scope: FactScope,
+    pub operation_id: [u8; 16],
+    pub cfg_node_id: Option<[u8; 16]>,
+    pub operation_kind_code: i32,
+    pub result_value_id: Option<[u8; 16]>,
+    pub type_id: Option<[u8; 16]>,
+    pub syntax_id: Option<[u8; 16]>,
+    pub raw_kind_code: Option<i32>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// One definition, use, argument, return, or dynamic-unknown dataflow event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DataflowEventDetailRow {
+    pub scope: FactScope,
+    pub event_id: [u8; 16],
+    pub cfg_node_id: Option<[u8; 16]>,
+    pub event_kind_code: i16,
+    pub binding_id: Option<[u8; 16]>,
+    pub value_id: Option<[u8; 16]>,
+    pub location_id: Option<[u8; 16]>,
+    pub syntax_id: Option<[u8; 16]>,
+    pub ordinal: Option<i32>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// One canonical abstract memory or access-path location.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryLocationDetailRow {
+    pub scope: FactScope,
+    pub location_id: [u8; 16],
+    pub location_kind_code: i16,
+    pub base_entity_id: Option<[u8; 16]>,
+    pub base_local_id: Option<[u8; 16]>,
+    pub type_id: Option<[u8; 16]>,
+    pub parent_location_id: Option<[u8; 16]>,
+    pub projection_depth: i16,
+    pub canonical_path_hash: [u8; 32],
+    pub display_path: Option<String>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// One ordered projection component of an abstract memory location.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessPathComponentRow {
+    pub scope: FactScope,
+    pub component_id: [u8; 16],
+    pub location_id: [u8; 16],
+    pub ordinal: i16,
+    pub projection_kind_code: i16,
+    pub field_entity_id: Option<[u8; 16]>,
+    pub index_value_id: Option<[u8; 16]>,
+    pub variant_entity_id: Option<[u8; 16]>,
+    pub constant_index: Option<i64>,
+    pub subslice_from: Option<i64>,
+    pub subslice_to: Option<i64>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
 fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]>) -> ArrayRef {
     let mut builder = BinaryBuilder::with_capacity(rows.len(), rows.len().saturating_mul(16));
     for row in rows {
@@ -2802,7 +2887,7 @@ mod tests {
             codes,
             [
                 8, 9, 10, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230,
-                240, 250, 260, 270, 280, 290, 300,
+                240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340, 350,
             ]
         );
         for table_code in codes {

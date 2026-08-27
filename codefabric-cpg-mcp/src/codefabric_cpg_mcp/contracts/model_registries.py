@@ -155,6 +155,20 @@ class CompletenessState(IntEnum):
     NOT_APPLICABLE = 50
 
 
+class DataflowValueKind(IntEnum):
+    LITERAL = 10
+    NAME_READ = 20
+    ATTRIBUTE_READ = 30
+    SUBSCRIPT_READ = 40
+    CALL_RETURN = 50
+    OPERATION_RESULT = 60
+    CONTAINER = 70
+    CALLABLE_OBJECT = 80
+    AWAIT_OR_YIELD = 90
+    MERGED = 100
+    UNKNOWN = 110
+
+
 class DependencyState(IntEnum):
     READY = 10
     FAILED_DEPENDENCY = 20
@@ -438,6 +452,7 @@ class ProviderObservationFamily(IntEnum):
     PYREFLY_MODULE = 110
     RUST_MIR_OWNER = 120
     RUFF_SEMANTIC_CFG = 130
+    RUFF_SEMANTIC_DATAFLOW = 140
 
 
 class ProviderRunState(IntEnum):
@@ -453,6 +468,47 @@ class ProviderRunState(IntEnum):
     PROTOCOL_ERROR = 100
     STALE_RESULT = 110
     STALE_GIT_BASELINE = 120
+
+
+class PythonAccessProjectionKind(IntEnum):
+    BASE = 10
+    FIELD = 20
+    INDEX = 30
+    UNKNOWN = 40
+
+
+class PythonDataflowEventKind(IntEnum):
+    DEFINITION = 10
+    READ = 20
+    RECEIVER = 30
+    CALLEE = 40
+    ARGUMENT = 50
+    CONDITION = 60
+    RETURN_OR_YIELD = 70
+    INDEX = 80
+    DECORATOR = 90
+    EVALUATED_ANNOTATION = 100
+    DYNAMIC_UNKNOWN = 110
+
+
+class PythonLocationKind(IntEnum):
+    LOCAL = 10
+    GLOBAL = 20
+    CELL = 30
+    FIELD = 40
+    INSTANCE_MEMBER = 50
+    CLASS_MEMBER = 60
+    INDEXED = 70
+    MODULE = 80
+    UNKNOWN = 90
+
+
+class PythonOperationKind(IntEnum):
+    READ = 10
+    WRITE = 20
+    CALL = 30
+    MERGE = 40
+    DYNAMIC_BARRIER = 50
 
 
 class QueryAvailabilityState(IntEnum):
@@ -811,6 +867,19 @@ ENUM_TRIPLES = MappingProxyType({
         (40, "UNAVAILABLE", "unavailable"),
         (50, "NOT_APPLICABLE", "not-applicable"),
     ),
+    "DATAFLOW_VALUE_KIND": (
+        (10, "LITERAL", "literal"),
+        (20, "NAME_READ", "name-read"),
+        (30, "ATTRIBUTE_READ", "attribute-read"),
+        (40, "SUBSCRIPT_READ", "subscript-read"),
+        (50, "CALL_RETURN", "call-return"),
+        (60, "OPERATION_RESULT", "operation-result"),
+        (70, "CONTAINER", "container"),
+        (80, "CALLABLE_OBJECT", "callable-object"),
+        (90, "AWAIT_OR_YIELD", "await-or-yield"),
+        (100, "MERGED", "merged"),
+        (110, "UNKNOWN", "unknown"),
+    ),
     "DEPENDENCY_STATE": (
         (10, "READY", "ready"),
         (20, "FAILED_DEPENDENCY", "failed-dependency"),
@@ -1063,6 +1132,7 @@ ENUM_TRIPLES = MappingProxyType({
         (110, "PYREFLY_MODULE", "pyrefly-module"),
         (120, "RUST_MIR_OWNER", "rust-mir-owner"),
         (130, "RUFF_SEMANTIC_CFG", "ruff-semantic-cfg"),
+        (140, "RUFF_SEMANTIC_DATAFLOW", "ruff-semantic-dataflow"),
     ),
     "PROVIDER_RUN_STATE": (
         (10, "QUEUED", "queued"),
@@ -1077,6 +1147,43 @@ ENUM_TRIPLES = MappingProxyType({
         (100, "PROTOCOL_ERROR", "protocol-error"),
         (110, "STALE_RESULT", "stale-result"),
         (120, "STALE_GIT_BASELINE", "stale-git-baseline"),
+    ),
+    "PYTHON_ACCESS_PROJECTION_KIND": (
+        (10, "BASE", "base"),
+        (20, "FIELD", "field"),
+        (30, "INDEX", "index"),
+        (40, "UNKNOWN", "unknown"),
+    ),
+    "PYTHON_DATAFLOW_EVENT_KIND": (
+        (10, "DEFINITION", "definition"),
+        (20, "READ", "read"),
+        (30, "RECEIVER", "receiver"),
+        (40, "CALLEE", "callee"),
+        (50, "ARGUMENT", "argument"),
+        (60, "CONDITION", "condition"),
+        (70, "RETURN_OR_YIELD", "return-or-yield"),
+        (80, "INDEX", "index"),
+        (90, "DECORATOR", "decorator"),
+        (100, "EVALUATED_ANNOTATION", "evaluated-annotation"),
+        (110, "DYNAMIC_UNKNOWN", "dynamic-unknown"),
+    ),
+    "PYTHON_LOCATION_KIND": (
+        (10, "LOCAL", "local"),
+        (20, "GLOBAL", "global"),
+        (30, "CELL", "cell"),
+        (40, "FIELD", "field"),
+        (50, "INSTANCE_MEMBER", "instance-member"),
+        (60, "CLASS_MEMBER", "class-member"),
+        (70, "INDEXED", "indexed"),
+        (80, "MODULE", "module"),
+        (90, "UNKNOWN", "unknown"),
+    ),
+    "PYTHON_OPERATION_KIND": (
+        (10, "READ", "read"),
+        (20, "WRITE", "write"),
+        (30, "CALL", "call"),
+        (40, "MERGE", "merge"),
+        (50, "DYNAMIC_BARRIER", "dynamic-barrier"),
     ),
     "QUERY_AVAILABILITY_STATE": (
         (10, "AVAILABLE", "available"),
@@ -1443,6 +1550,9 @@ REGISTRY_IDS = MappingProxyType({
         "PROPERTY_CANDIDATE",
         "NESTED_TYPE",
         "INSTANCE_VARIABLE",
+        "DATAFLOW_OPERATION",
+        "DEFINITION_EVENT",
+        "USE_EVENT",
     ),
     "relation_kinds": (
         "CONTAINS",
@@ -1496,6 +1606,11 @@ REGISTRY_IDS = MappingProxyType({
         "CFG_CLEANUP",
         "CFG_SUSPEND",
         "CFG_RESUME",
+        "REACHING_DEFINITION",
+        "REACHES",
+        "DATA_DEP",
+        "VALUE_FLOWS_TO",
+        "KILLS_DEFINITION",
     ),
     "property_kinds": (
         "NAME",
@@ -1675,6 +1790,7 @@ REGISTRY_IDS = MappingProxyType({
     ),
     "derivations": (
         "SYNTAX_TREE_V1",
+        "PY_OWNER_REACHING_DEFS_V1",
     ),
     "phrases": (
         "Q50_SOURCE_FILES",

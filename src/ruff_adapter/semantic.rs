@@ -26,6 +26,10 @@ use super::callables::{
     PythonCallableSyntaxFact, PythonMemberFact, PythonParameterFact, PythonUnknownArgumentSetFact,
 };
 use super::cfg::{PythonCfgEdgeFact, PythonCfgFact, PythonCfgNodeFact};
+use super::dataflow::{
+    PythonAccessPathComponentFact, PythonDataflowEventFact, PythonDataflowRelationFact,
+    PythonMemoryLocationFact, PythonOperationFact, PythonValueFact,
+};
 
 /// Application-owned stable identifier for one semantic observation.
 pub type PythonSemanticId = [u8; 16];
@@ -251,6 +255,13 @@ pub struct PythonSemanticMetrics {
     pub cfg_count: u64,
     pub cfg_node_count: u64,
     pub cfg_edge_count: u64,
+    pub dataflow_value_count: u64,
+    pub dataflow_operation_count: u64,
+    pub dataflow_event_count: u64,
+    pub memory_location_count: u64,
+    pub access_path_component_count: u64,
+    pub dataflow_relation_count: u64,
+    pub dataflow_iteration_count: u64,
 }
 
 /// Registered terminal observation for the Ruff traversal pass.
@@ -287,6 +298,12 @@ pub struct PythonFrontendBatch {
     pub cfgs: Vec<PythonCfgFact>,
     pub cfg_nodes: Vec<PythonCfgNodeFact>,
     pub cfg_edges: Vec<PythonCfgEdgeFact>,
+    pub values: Vec<PythonValueFact>,
+    pub operations: Vec<PythonOperationFact>,
+    pub dataflow_events: Vec<PythonDataflowEventFact>,
+    pub memory_locations: Vec<PythonMemoryLocationFact>,
+    pub access_path_components: Vec<PythonAccessPathComponentFact>,
+    pub dataflow_relations: Vec<PythonDataflowRelationFact>,
     pub metrics: PythonSemanticMetrics,
     pub terminal: PythonSemanticTerminal,
 }
@@ -296,6 +313,8 @@ pub struct PythonFrontendBatch {
 pub enum PythonSemanticError {
     #[error("Ruff semantic projection has no retained revision {0}")]
     MissingRevision(u64),
+    #[error("RUFF_SEMANTIC_UNAVAILABLE_PARSE: {0} source-invalid diagnostics")]
+    UnavailableParse(usize),
     #[error("RUFF_SEMANTIC_CLEANUP_FAILED: terminal_state=failed failure_code=cleanup-failure")]
     CleanupFailure,
     #[error("Ruff semantic projection invariant failed: {0}")]
@@ -1651,6 +1670,18 @@ pub(super) fn project_python_semantics<'a>(
         provider_image_fingerprint,
         &callable_projection.callables,
     )?;
+    let dataflow_projection = super::dataflow::project_python_dataflow(
+        provider_image_fingerprint,
+        &pass.bindings,
+        &all_references,
+        &callable_projection.callables,
+        &callable_projection.syntax,
+        &callable_projection.call_sites,
+        &callable_projection.arguments,
+        &cfg_projection.cfgs,
+        &cfg_projection.nodes,
+        &cfg_projection.edges,
+    )?;
     let metrics = PythonSemanticMetrics {
         binding_pass_duration,
         traversal_pass_duration,
@@ -1678,6 +1709,18 @@ pub(super) fn project_python_semantics<'a>(
         cfg_count: u64::try_from(cfg_projection.cfgs.len()).unwrap_or(u64::MAX),
         cfg_node_count: u64::try_from(cfg_projection.nodes.len()).unwrap_or(u64::MAX),
         cfg_edge_count: u64::try_from(cfg_projection.edges.len()).unwrap_or(u64::MAX),
+        dataflow_value_count: u64::try_from(dataflow_projection.values.len()).unwrap_or(u64::MAX),
+        dataflow_operation_count: u64::try_from(dataflow_projection.operations.len())
+            .unwrap_or(u64::MAX),
+        dataflow_event_count: u64::try_from(dataflow_projection.events.len())
+            .unwrap_or(u64::MAX),
+        memory_location_count: u64::try_from(dataflow_projection.locations.len())
+            .unwrap_or(u64::MAX),
+        access_path_component_count: u64::try_from(dataflow_projection.components.len())
+            .unwrap_or(u64::MAX),
+        dataflow_relation_count: u64::try_from(dataflow_projection.relations.len())
+            .unwrap_or(u64::MAX),
+        dataflow_iteration_count: dataflow_projection.iteration_count,
     };
     Ok(PythonFrontendBatch {
         module_id: import_projection.module_id,
@@ -1702,6 +1745,12 @@ pub(super) fn project_python_semantics<'a>(
         cfgs: cfg_projection.cfgs,
         cfg_nodes: cfg_projection.nodes,
         cfg_edges: cfg_projection.edges,
+        values: dataflow_projection.values,
+        operations: dataflow_projection.operations,
+        dataflow_events: dataflow_projection.events,
+        memory_locations: dataflow_projection.locations,
+        access_path_components: dataflow_projection.components,
+        dataflow_relations: dataflow_projection.relations,
         metrics,
         terminal: PythonSemanticTerminal {
             pass_id: "PASS_RUFF_SEMANTIC_TRAVERSAL_V1",
@@ -1924,6 +1973,10 @@ def outer():
                     + first.unknown_argument_sets.len()
                     + first.members.len()
                     + first.cfg_nodes.len()
+                    + first.values.len()
+                    + first.operations.len()
+                    + first.dataflow_events.len()
+                    + first.memory_locations.len()
                     + first
                         .cfg_edges
                         .iter()
