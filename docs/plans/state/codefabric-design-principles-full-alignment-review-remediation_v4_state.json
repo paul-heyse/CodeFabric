@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_behavioral_conformance_corpus_design_v1_2026-08-26.md",
   "baseline_commit": "a3efb30d699f84a0d6f190a5ff3c2574bfcf039e",
   "status": "executing",
-  "current_packet": "WP10",
+  "current_packet": "WP11",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -66,14 +66,14 @@
       "blockers": []
     },
     "WP10": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "aebd84a",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP11": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -177,9 +177,10 @@
   },
   "baseline_failures": [],
   "discovered_obligations": [
-    "Keep supplemental cross-language checks uniquely named so exact oracle-definition governance remains meaningful."
+    "Keep supplemental cross-language checks uniquely named so exact oracle-definition governance remains meaningful.",
+    "Provider validation must retain source-path semantics while consuming immutable content-addressed blobs; the rustc extractor now recognizes an existing source blob without relying on a .rs suffix."
   ],
   "plan_deviations": [],
-  "next_action": "Execute WP10: implement the production-independent reference evaluators, fail-closed claim comparator, observation decoder, and independence governance.",
-  "updated_at": "2026-08-27T01:25:00Z"
+  "next_action": "Execute WP11: run the authored scenarios through the real provider, publication, UDS, artifact, and FastMCP boundaries and validate semantic claims plus causal interventions.",
+  "updated_at": "2026-08-27T02:30:00Z"
 }
