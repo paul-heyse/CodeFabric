@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP03",
+  "current_packet": "WP04",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -34,14 +34,20 @@
       "blockers": []
     },
     "WP03": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "9b3586de0d82241201bcf2405edd253357d7c06d",
+      "deviations": [
+        "Per user direction, repository-wide root-ci-fast and governance-scan execution is deferred to the Wave 8 M01 conclusion; WP03 closed on focused daemon checks, exactly four packet oracles with --no-fail-fast, stable graph and dependency gates, model reproducibility, generated-schema validation, and focused Clippy.",
+        "The packet-local deps-fast gate exposed an unrelated Pyrefly-sidecar scanner mismatch. Generated-code uses of prost and tonic-prost are now declared to cargo-machete, while the genuinely unused direct hyper-util declaration was removed and the sidecar was compile-checked."
+      ],
+      "failed_approaches": [
+        "The first shared Ruff ingest contract named relation_id, but the canonical relation table is governed by fact_id; model validation rejected the absent field and the contract was corrected before regeneration.",
+        "The first canonical projection validated generated batches directly. Plan reconciliation showed that provider output must enter through CanonicalReconciliationEngine, so WP03 now emits a complete owner-scoped ProviderFactStream before validation/publication."
+      ],
       "blockers": []
     },
     "WP04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
