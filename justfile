@@ -232,7 +232,7 @@ gate-b-owner-acceptance-check:
 gate-b-candidate-check:
     cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
     CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_public_vertical_conformance|gate_b_delivery_surface_semantic_equivalence|gate_b_projection_registry_closure|gate_b_functional_candidate_is_expectation_independent)/)' --no-tests=fail
+    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_vertical_slice_produces_all_eleven_planes|gate_b_vertical_slice_adversarial|gate_b_candidate_independent_oracle_contract|gate_b_candidate_operational_gate)/)' --no-tests=fail
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest -q codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_adapter_contracts.py
     @if rg -n 'fn run_scenario|async fn run_(pyrefly|rustc)|functional_candidate_projection|normalize_gate_b_planes' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local scenario, provider, or comparison authority remains' >&2; exit 1; fi
     @if test -d tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; fi

@@ -21,45 +21,48 @@ from tooling.ci.model_handoff import (
 )
 
 
-def test_model_waves_successor_candidate_preserves_history_and_leaves_wp32_incomplete() -> (
-    None
-):
+def test_model_waves_successor_preserves_handoff_history_after_completion() -> None:
     report = validate_handoff()
     assert report["trusted_historical_packets"] == sorted(TRUSTED_PACKETS)
-    assert report["resume_packet"] == "WP32"
+    assert report["resume_packet"] is None
+    assert report["successor_complete"]
     state = load_state(
         ROOT / "docs/plans/state/codefabric-waves-4-7-core-facts_v5_state.json"
     )
-    assert state["packets"]["WP32"]["status"] == "in_progress"
-    assert state["packets"]["WP32"]["proving_commit"] is None
+    assert state["packets"]["WP32"]["status"] == "complete"
+    assert state["packets"]["WP32"]["proving_commit"] is not None
 
 
-def test_model_active_pointer_remains_on_remediation_through_release_certification() -> (
-    None
-):
+def test_model_active_pointer_can_advance_after_sealed_handoff() -> None:
     report = validate_handoff()
     if report["mode"] == "approved-inactive-candidate":
         assert active_plan_path(ROOT) == ROOT / REMEDIATION_PLAN
-    else:
+    elif report["mode"] in {"handoff-unsealed", "handoff-sealed"}:
         assert active_plan_path(ROOT) == ROOT / SUCCESSOR_PLAN
+    else:
+        assert report["mode"] == "historical-handoff-sealed"
+        assert active_plan_path(ROOT) not in {
+            ROOT / REMEDIATION_PLAN,
+            ROOT / SUCCESSOR_PLAN,
+        }
 
 
-def test_model_handoff_commit_activates_only_approved_successor_at_incomplete_wp32() -> (
-    None
-):
+def test_model_handoff_commit_records_zero_product_packets_at_h() -> None:
     report = validate_handoff()
     assert report["product_packets_released"] == 0
     assert report["mode"] in {
         "approved-inactive-candidate",
         "handoff-unsealed",
         "handoff-sealed",
+        "historical-handoff-sealed",
     }
 
 
-def test_model_handoff_at_h_is_the_complete_executable_outcome() -> None:
+def test_model_handoff_at_h_remains_auditable_after_successor_completion() -> None:
     report = validate_handoff()
     assert report["successor_plan"] == SUCCESSOR_PLAN.as_posix()
-    assert report["resume_packet"] == "WP32"
+    assert report["resume_packet"] is None
+    assert report["successor_complete"]
 
 
 def test_model_handoff_rejects_two_active_plans_unapproved_successor_and_early_wp33(
@@ -68,7 +71,9 @@ def test_model_handoff_rejects_two_active_plans_unapproved_successor_and_early_w
     remediation_plan = model_handoff.validate_plan(
         ROOT, ROOT / REMEDIATION_PLAN, verify_declared_inputs=False
     )
-    successor_plan = model_handoff.validate_plan(ROOT, ROOT / SUCCESSOR_PLAN)
+    successor_plan = model_handoff.validate_plan(
+        ROOT, ROOT / SUCCESSOR_PLAN, verify_declared_inputs=False
+    )
     remediation_state = load_state(ROOT / remediation_plan["state_path"])
     successor_state = load_state(ROOT / successor_plan["state_path"])
     frozen_state = load_state(ROOT / model_handoff.FROZEN_STATE)
@@ -111,6 +116,17 @@ def test_model_handoff_rejects_two_active_plans_unapproved_successor_and_early_w
     remediation_state["current_packet"] = "WP15"
     remediation_state["packets"]["WP15"]["status"] = "in_progress"
     successor_state["status"] = "executing"
+    successor_state["current_packet"] = "WP32"
+    successor_state["packets"]["WP32"]["status"] = "in_progress"
+    successor_state["packets"]["WP32"]["proving_commit"] = None
+    for number in range(33, 54):
+        packet = successor_state["packets"][f"WP{number}"]
+        packet["status"] = "not_started"
+        packet["proving_commit"] = None
+    for group in ("milestones", "decommission_batches"):
+        for entry in successor_state[group].values():
+            entry["status"] = "not_started"
+            entry["proving_commit"] = None
     monkeypatch.setattr(
         model_handoff, "active_plan_path", lambda _root: ROOT / REMEDIATION_PLAN
     )

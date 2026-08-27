@@ -78,7 +78,10 @@ def validate_handoff(root: Path = ROOT) -> dict[str, Any]:
     successor_path = root / SUCCESSOR_PLAN
 
     remediation = validate_plan(root, remediation_path, verify_declared_inputs=False)
-    successor = validate_plan(root, successor_path)
+    # This command proves a sealed historical transition. Current design evolution must not
+    # invalidate the immutable plan-time digest record after the successor itself completed;
+    # the frozen plan/state and trusted proving commits below remain the handoff authorities.
+    successor = validate_plan(root, successor_path, verify_declared_inputs=False)
     _require(
         successor["status"] == "approved", "Waves successor is not explicitly approved"
     )
@@ -122,26 +125,48 @@ def validate_handoff(root: Path = ROOT) -> dict[str, Any]:
             commit_trust(root, commit)["ancestor"], f"{packet} proof is not an ancestor"
         )
 
-    wp32 = successor_state["packets"]["WP32"]
-    _require(wp32["status"] == "in_progress", "successor WP32 must remain in progress")
-    _require(wp32["proving_commit"] is None, "successor WP32 must remain unproved")
-    for number in range(33, 54):
-        packet = f"WP{number}"
-        entry = successor_state["packets"][packet]
+    successor_complete = successor_state["status"] == "complete"
+    if successor_complete:
         _require(
-            entry["status"] == "not_started", f"{packet} progressed before handoff seal"
+            successor_state["current_packet"] is None,
+            "complete successor retains a current packet",
         )
+        for group in ("packets", "milestones", "decommission_batches"):
+            for identifier, entry in successor_state[group].items():
+                _require(
+                    entry["status"] == "complete",
+                    f"complete successor retains incomplete {identifier}",
+                )
+                _require(
+                    commit_trust(root, entry["proving_commit"])["ancestor"],
+                    f"complete successor {identifier} proof is not trusted",
+                )
+    else:
+        wp32 = successor_state["packets"]["WP32"]
         _require(
-            entry["proving_commit"] is None, f"{packet} has an early proving commit"
+            wp32["status"] == "in_progress", "successor WP32 must remain in progress"
         )
-    for group in ("milestones", "decommission_batches"):
-        for identifier, entry in successor_state[group].items():
+        _require(wp32["proving_commit"] is None, "successor WP32 must remain unproved")
+        for number in range(33, 54):
+            packet = f"WP{number}"
+            entry = successor_state["packets"][packet]
             _require(
-                entry["status"] == "not_started", f"{identifier} progressed before WP32"
+                entry["status"] == "not_started",
+                f"{packet} progressed before handoff seal",
             )
             _require(
-                entry["proving_commit"] is None, f"{identifier} has an early proof"
+                entry["proving_commit"] is None, f"{packet} has an early proving commit"
             )
+        for group in ("milestones", "decommission_batches"):
+            for identifier, entry in successor_state[group].items():
+                _require(
+                    entry["status"] == "not_started",
+                    f"{identifier} progressed before WP32",
+                )
+                _require(
+                    entry["proving_commit"] is None,
+                    f"{identifier} has an early proof",
+                )
 
     active = active_plan_path(root)
     remediation_relative = _relative(remediation_path, root)
@@ -201,6 +226,22 @@ def validate_handoff(root: Path = ROOT) -> dict[str, Any]:
                 == proof,
                 "terminal seal does not consistently record handoff commit H",
             )
+    elif successor_complete:
+        _require(
+            remediation_state["status"] == "complete"
+            and remediation_state["packets"]["WP15"]["status"] == "complete"
+            and remediation_state["milestones"]["M05"]["status"] == "complete"
+            and remediation_state["decommission_batches"]["DB06"]["status"]
+            == "complete",
+            "historical remediation handoff seal is incomplete",
+        )
+        active_plan = validate_plan(root, active, verify_declared_inputs=False)
+        active_state = _state_for(root, active_plan)
+        _require(
+            active_state["status"] in {"executing", "complete"},
+            "later active plan has no live execution state",
+        )
+        mode = "historical-handoff-sealed"
     else:
         raise ArtifactContractError(
             f"active plan is neither remediation nor successor: {_relative(active, root)}"
@@ -212,7 +253,8 @@ def validate_handoff(root: Path = ROOT) -> dict[str, Any]:
         "remediation_plan": remediation_relative,
         "successor_plan": successor_relative,
         "trusted_historical_packets": sorted(TRUSTED_PACKETS),
-        "resume_packet": "WP32",
+        "resume_packet": None if successor_complete else "WP32",
+        "successor_complete": successor_complete,
         "product_packets_released": 0,
     }
 

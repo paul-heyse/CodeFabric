@@ -1290,6 +1290,37 @@ mod tests {
         assert_eq!(execution.planes["diagnostics"]["artifact_persisted"], true);
     }
 
+    // These stable names are WP06's execution/integrity contract. Later functional
+    // remediation adds stronger semantic oracles under separate names; it must not silently
+    // remove the historical packet's live proof surface.
+    #[test]
+    fn gate_b_vertical_slice_produces_all_eleven_planes() {
+        let execution = functional_execution();
+        validate_vertical_execution(execution).unwrap();
+        assert_eq!(execution.planes.len(), REQUIRED_EXPECTED_GROUPS.len());
+    }
+
+    #[test]
+    fn gate_b_candidate_independent_oracle_contract() {
+        validate_vertical_execution(functional_execution()).unwrap();
+        gate_b_projection_registry_closure();
+    }
+
+    #[test]
+    fn gate_b_vertical_slice_adversarial() {
+        gate_b_causal_intervention_matrix();
+        assert_eq!(functional_execution().planes["queries"]["form_count"], 8);
+    }
+
+    #[test]
+    fn gate_b_candidate_operational_gate() {
+        gate_b_public_vertical_operational_gate();
+        assert_eq!(
+            functional_execution().planes["diagnostics"]["terminal_state"],
+            "SUCCEEDED"
+        );
+    }
+
     #[test]
     fn golden_scenario_semantic_transition_contracts() {
         let contract = functional_contract();

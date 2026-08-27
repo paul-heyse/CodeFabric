@@ -205,10 +205,19 @@
     "Exercise ACL redaction through the production authorization/query boundary while preserving explicit redaction and completeness semantics."
   ],
   "plan_deviations": [
-    "Rejected v3 regeneration and its hard-coded scenario edit dispatcher were retired; immutable v2/v3 digest-chain verification remains supported.",
-    "A blocked decoded review bundle may be generated for diagnosis, but a v4 candidate cannot be emitted, verified, or routed until semantic_conformance is true and limitation_count is zero.",
-    "Bounded WP11/WP12 infrastructure is recorded at implementation commit 0f502ea; it is not a packet proving commit because the explicit public-semantic replan trigger remains active."
+    {
+      "kind": "legacy_authority_retirement",
+      "summary": "Rejected v3 regeneration and its hard-coded scenario edit dispatcher were retired; immutable v2/v3 digest-chain verification remains supported."
+    },
+    {
+      "kind": "candidate_readiness_guard",
+      "summary": "A blocked decoded review bundle may be generated for diagnosis, but a v4 candidate cannot be emitted, verified, or routed until semantic_conformance is true and limitation_count is zero."
+    },
+    {
+      "kind": "blocked_packet_infrastructure",
+      "summary": "Bounded WP11/WP12 infrastructure is recorded at implementation commit 0f502ea; it is not a packet proving commit because the explicit public-semantic replan trigger remains active."
+    }
   ],
   "next_action": "Adopt a successor plan/design extension that assigns the six missing public semantic seams to their owning semantic-profile packets, implement those seams, then resume WP11/WP12 and emit v4 only after gate-b-functional-candidate-check is green with zero limitations.",
-  "updated_at": "2026-08-27T04:36:30Z"
+  "updated_at": "2026-08-27T04:52:07Z"
 }
