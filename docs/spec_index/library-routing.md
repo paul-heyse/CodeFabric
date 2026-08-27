@@ -25,9 +25,10 @@ See [`README.md §2`](./README.md#2-citation-convention) for spec tags.
 | `df-schema` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | S1–S15 | `datafusion-pyarrow-rust-ref` |
 | `df-calc` | `datafusion_rust_55_arrow59_comprehensive_advanced_reference_2026-08-23.md` | C1–C13 | `datafusion-pyarrow-rust-ref` |
 | `arrow` | `arrow_rust_59_datafusion55_advanced_reference_2026-08-23.md` | §0–§28 (its topic map lists §29–§30, but the body ends at §28) | `datafusion-pyarrow-rust-ref` |
-| `principles` | `full_data_fabric_design_principles.md` | Principles 1–25 + §27–§31 | `datafusion-pyarrow-rust-ref` |
+| `principles` | `full_data_fabric_design_principles.md` | Principles 1–25 + §27–§31 | `datafusion-pyarrow-rust-ref` and `deltalake-rust-ref` |
 | `align` | `datafusion55_arrow59_design_principle_alignment_manual_2026-08-24.md` | P1–P25 · pattern families MOD…TST · flows §4–§11 · App. A | `datafusion-pyarrow-rust-ref` |
 | `delta` | `deltalake_rust_1.0.0_43a0cf10_datafusion55_arrow59_advanced_reference_2026-08-23.md` | §0, §2–§13 (no §1) | `deltalake-rust-ref` |
+| `delta-align` | `deltalake_1.0.0_43a0cf10_design_principle_alignment_manual_2026-08-26.md` | P1–P25 · pattern families MOD…TST · flows §8–§20 · App. A–D | `deltalake-rust-ref` |
 | `gix` | `gix_rust_advanced_reference.md` | §0–§50 + §1A + App. A–F | `gix-notify-ref` |
 | `notify` | `notify_debouncer_full_rust_reference.md` | §0–§40 | `gix-notify-ref` |
 | `fastmcp` | `fastmcp_python_advanced_reference_3.4.7.md` | §0–§37 | `fastmcp-pydantic-ref` |
