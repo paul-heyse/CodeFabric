@@ -4,16 +4,56 @@
   "version": "1.0",
   "compatible_suite_major": 1,
   "status": "accepted",
-  "canonical_digest": "b3:2330980d501987ef69bb71c1dbc06580d36aef97207561f2569308d00fafb0c6",
+  "canonical_digest": "b3:bac4328893942e14d73ab71214b5abcc44332b9dd241fb70053110237a94259a",
   "fragment_id": "SEMANTIC_PYTHON_V1",
   "lane": "python",
   "owner_packet": "WP01",
   "model": {
-    "owned_table_codes": [200, 210, 220],
+    "owned_table_codes": [200, 210, 220, 230],
     "owned_observation_schema_ids": ["codefabric.ruff.semantic.v1", "codefabric.pyrefly.module.v1"],
-    "table_additions": [],
-    "table_scope_additions": [],
-    "semantic_type_binding_additions": [],
+    "table_additions": [
+      {
+        "table_code": 230,
+        "name": "module_import_detail",
+        "publication_pin_role": "PINNED_DATA",
+        "family": "module-import",
+        "grain": "one Python import occurrence",
+        "schema_version": "1.0",
+        "row_encoder": "module_import_details",
+        "columns": [
+          {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "source_generation", "logical_type": "int64", "nullable": false},
+          {"name": "import_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+          {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+          {"name": "source_module_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "target_module_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "imported_entity_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "local_binding_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+          {"name": "import_kind_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:import_kind"},
+          {"name": "relative_level", "logical_type": "int16", "nullable": true},
+          {"name": "source_name", "logical_type": "utf8", "nullable": false},
+          {"name": "alias_name", "logical_type": "utf8", "nullable": true},
+          {"name": "star_import", "logical_type": "boolean", "nullable": false},
+          {"name": "unknown_reason_code", "logical_type": "code16", "nullable": true}
+        ],
+        "primary_key": ["import_id"],
+        "partition_columns": ["owner_bucket"],
+        "zorder_columns": ["workspace_id", "analysis_context_id", "source_module_id", "source_name"],
+        "durable_mutation": "OWNER_REPLACED_FACT",
+        "overlay_mutation": "OWNER_REPLACE",
+        "materialization_role": "DURABLE_EFFECTIVE",
+        "dependencies": [8, 100, 110, 210],
+        "required_for_publication": true
+      }
+    ],
+    "table_scope_additions": [
+      {"table_code": 230, "workspace_column": "workspace_id", "analysis_context_column": "analysis_context_id", "source_generation_column": "source_generation", "owner_column": "owner_id"}
+    ],
+    "semantic_type_binding_additions": [
+      {"semantic_type": "enum:import_kind", "authority": "ENUM_REGISTRY", "domain": "IMPORT_KIND"}
+    ],
     "provider_observation_schema_additions": [
       {
         "schema_id": "codefabric.ruff.semantic.v1",
@@ -26,7 +66,10 @@
           {"name": "bindings_json", "logical_type": "binary", "nullable": false},
           {"name": "references_json", "logical_type": "binary", "nullable": false},
           {"name": "unknown_symbols_json", "logical_type": "binary", "nullable": false},
-          {"name": "edges_json", "logical_type": "binary", "nullable": false}
+          {"name": "edges_json", "logical_type": "binary", "nullable": false},
+          {"name": "imports_json", "logical_type": "binary", "nullable": false},
+          {"name": "exports_json", "logical_type": "binary", "nullable": false},
+          {"name": "export_status", "logical_type": "utf8", "nullable": false}
         ]
       },
       {
@@ -45,7 +88,7 @@
   },
   "registry": {
     "property_codes": [],
-    "enum_values": [{"domain": "PROVIDER_OBSERVATION_FAMILY", "codes": [100, 110]}],
+    "enum_values": [{"domain": "PROVIDER_OBSERVATION_FAMILY", "codes": [100, 110]}, {"domain": "IMPORT_KIND", "codes": [10, 20, 30, 40]}],
     "property_record_additions": [],
     "enum_domain_additions": [
       {
@@ -66,14 +109,25 @@
           }
         ]
       }
+      ,
+      {
+        "domain": "IMPORT_KIND",
+        "width_bits": 16,
+        "values": [
+          {"code": 10, "name": "MODULE", "slug": "module", "meaning": "Direct module import"},
+          {"code": 20, "name": "FROM_NAME", "slug": "from-name", "meaning": "Named import from a module"},
+          {"code": 30, "name": "STAR", "slug": "star", "meaning": "Star import with statically unknown exported names"},
+          {"code": 40, "name": "DYNAMIC", "slug": "dynamic", "meaning": "Dynamic import call observed without runtime execution"}
+        ]
+      }
     ]
   },
   "ingest": [
     {
       "contract_id": "INGEST_RUFF_SEMANTIC_V1",
       "observation_schema_ids": ["codefabric.ruff.semantic.v1"],
-      "output_table_codes": [100, 110, 130, 200, 210, 220],
-      "required_fields": ["module_name", "provider_image_fingerprint", "scopes_json", "bindings_json", "references_json", "unknown_symbols_json", "edges_json"]
+      "output_table_codes": [100, 110, 130, 200, 210, 220, 230],
+      "required_fields": ["module_name", "provider_image_fingerprint", "scopes_json", "bindings_json", "references_json", "unknown_symbols_json", "edges_json", "imports_json", "exports_json", "export_status"]
     },
     {
       "contract_id": "INGEST_PYREFLY_MODULE_V1",
@@ -100,7 +154,7 @@
     {
       "contract_id": "INVALIDATE_PYTHON_SCOPE_BINDING_V1",
       "trigger_kinds": ["python-source-change", "python-manifest-change"],
-      "invalidated_table_codes": [200, 210, 220],
+      "invalidated_table_codes": [200, 210, 220, 230],
       "scope": "module-owner-and-analysis-context"
     }
   ]

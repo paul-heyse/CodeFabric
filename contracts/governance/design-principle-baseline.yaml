@@ -481,6 +481,16 @@ records:
     disposition: plan_owned
     owner: ontology-owner
     current_packet: WP01
+  - path: contracts/registry/ontology-entity-registry.yaml
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: ontology-owner
+    current_packet: WP04
+  - path: contracts/registry/ontology-relation-registry.yaml
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: ontology-owner
+    current_packet: WP04
   - path: contracts/semantic-fragments/python.json
     status_at_wp73: "??"
     disposition: plan_owned
@@ -506,6 +516,26 @@ records:
     disposition: plan_owned
     owner: repository-infrastructure-owner
     current_packet: WP01
+  - path: src/python_semantic.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP04
+  - path: src/ruff_adapter.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP04
+  - path: src/ruff_adapter/imports.rs
+    status_at_wp73: "??"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP04
+  - path: src/ruff_adapter/semantic.rs
+    status_at_wp73: " M"
+    disposition: plan_owned
+    owner: fact-generation-owner
+    current_packet: WP04
   - path: src/bin/codefabric_model/semantic_fragment_driver.rs
     status_at_wp73: "??"
     disposition: plan_owned

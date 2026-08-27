@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:902aefa346fffb37456cc107916d45d96c97c4db444d14f6552e7cd007e89d22; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:c27c1412769559c94e809d3ea1b519a5cacf6d6e933e9da9cf20eb166b40bbdc; schema-contract-driver-v1; do not edit.
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -489,6 +489,37 @@ pub fn encode_reference_details(
             i64s(rows, |row| Some(row.start_byte)),
             i64s(rows, |row| Some(row.end_byte)),
             utf8(rows, |row| row.unknown_reason_code.as_deref()),
+        ],
+    )
+}
+
+/// Encode `module_import_detail` rows in the exact generated schema order.
+///
+/// # Errors
+///
+/// Returns an Arrow error if a typed accessor and its generated physical field diverge.
+pub fn encode_module_import_details(
+    rows: &[ModuleImportDetailRow],
+) -> Result<RecordBatch, FactIngestError> {
+    generated_fact_batch(
+        230,
+        vec![
+            id16s(rows, |row| Some(&row.scope.workspace_id)),
+            id16s(rows, |row| Some(&row.scope.analysis_context_id)),
+            i64s(rows, |row| Some(row.scope.source_generation)),
+            id16s(rows, |row| Some(&row.import_id)),
+            id16s(rows, |row| Some(&row.scope.owner_id)),
+            i16s(rows, |row| Some(i16::from(row.scope.owner_id[0]))),
+            id16s(rows, |row| Some(&row.source_module_id)),
+            id16s(rows, |row| row.target_module_id.as_ref()),
+            id16s(rows, |row| row.imported_entity_id.as_ref()),
+            id16s(rows, |row| row.local_binding_id.as_ref()),
+            i16s(rows, |row| Some(row.import_kind_code)),
+            i16s(rows, |row| row.relative_level),
+            utf8(rows, |row| Some(row.source_name.as_str())),
+            utf8(rows, |row| row.alias_name.as_deref()),
+            bools(rows, |row| Some(row.star_import)),
+            i16s(rows, |row| row.unknown_reason_code),
         ],
     )
 }

@@ -251,6 +251,13 @@ class GitRepositoryKind(IntEnum):
     SUBMODULE = 30
 
 
+class ImportKind(IntEnum):
+    MODULE = 10
+    FROM_NAME = 20
+    STAR = 30
+    DYNAMIC = 40
+
+
 class InventoryFileKind(IntEnum):
     REGULAR = 10
     SYMLINK = 20
@@ -829,6 +836,12 @@ ENUM_TRIPLES = MappingProxyType({
         (20, "LINKED_WORKTREE", "linked-worktree"),
         (30, "SUBMODULE", "submodule"),
     ),
+    "IMPORT_KIND": (
+        (10, "MODULE", "module"),
+        (20, "FROM_NAME", "from-name"),
+        (30, "STAR", "star"),
+        (40, "DYNAMIC", "dynamic"),
+    ),
     "INVENTORY_FILE_KIND": (
         (10, "REGULAR", "regular"),
         (20, "SYMLINK", "symlink"),
@@ -1302,6 +1315,10 @@ REGISTRY_IDS = MappingProxyType({
         "AWAIT",
         "RAISE_OR_PANIC_SYNTAX",
         "IMPORT_OR_USE_SYNTAX",
+        "IMPORT_DECLARATION",
+        "IMPORT_BINDING",
+        "EXPORT",
+        "REEXPORT",
     ),
     "relation_kinds": (
         "CONTAINS",
@@ -1322,6 +1339,13 @@ REGISTRY_IDS = MappingProxyType({
         "LEXICALLY_PRECEDES",
         "DOCUMENTS",
         "DIRECTIVE_APPLIES_TO",
+        "IMPORTS_MODULE",
+        "IMPORTS_SYMBOL",
+        "EXPORTS",
+        "REEXPORTS",
+        "ALIASES",
+        "DEFINED_IN_MODULE",
+        "DEPENDS_ON_MODULE",
     ),
     "property_kinds": (
         "NAME",

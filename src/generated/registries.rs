@@ -1349,6 +1349,52 @@ pub const GIT_REPOSITORY_KIND_VALUES: &[RegistryEntry] = &[
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u16)]
+pub enum ImportKind {
+    Module = 10,
+    FromName = 20,
+    Star = 30,
+    Dynamic = 40,
+}
+impl TryFrom<u16> for ImportKind {
+    type Error = UnknownRegistryCode;
+    fn try_from(code: u16) -> Result<Self, UnknownRegistryCode> {
+        match code {
+            10 => Ok(Self::Module),
+            20 => Ok(Self::FromName),
+            30 => Ok(Self::Star),
+            40 => Ok(Self::Dynamic),
+            _ => Err(UnknownRegistryCode {
+                domain: "IMPORT_KIND",
+                code,
+            }),
+        }
+    }
+}
+pub const IMPORT_KIND_VALUES: &[RegistryEntry] = &[
+    RegistryEntry {
+        code: 10,
+        name: "MODULE",
+        slug: "module",
+    },
+    RegistryEntry {
+        code: 20,
+        name: "FROM_NAME",
+        slug: "from-name",
+    },
+    RegistryEntry {
+        code: 30,
+        name: "STAR",
+        slug: "star",
+    },
+    RegistryEntry {
+        code: 40,
+        name: "DYNAMIC",
+        slug: "dynamic",
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
 pub enum InventoryFileKind {
     Regular = 10,
     Symlink = 20,
@@ -4050,337 +4096,343 @@ pub const REGISTRY_DOMAINS: &[RegistryDomainEntry] = &[
     RegistryDomainEntry {
         domain: "ANALYSIS_CONTEXT_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: ANALYSIS_CONTEXT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "ANNOTATION_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: ANNOTATION_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: COMPLETENESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "COMPLETENESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: COMPLETENESS_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "DEPENDENCY_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: DEPENDENCY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "DIRECTNESS",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: DIRECTNESS_VALUES,
     },
     RegistryDomainEntry {
         domain: "DURABLE_PUBLICATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: DURABLE_PUBLICATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "EFFECT_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: EFFECT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "EVENT_STREAM_HEALTH",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: EVENT_STREAM_HEALTH_VALUES,
     },
     RegistryDomainEntry {
         domain: "EVIDENCE_CERTAINTY",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: EVIDENCE_CERTAINTY_VALUES,
     },
     RegistryDomainEntry {
         domain: "FRESHNESS_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: FRESHNESS_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_ACCELERATION_STATUS",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_ACCELERATION_STATUS_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_MODE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_CANDIDATE_MODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_CANDIDATE_ORIGIN",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_CANDIDATE_ORIGIN_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HASH_ALGORITHM",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_HASH_ALGORITHM_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_HEAD_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_HEAD_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_INVENTORY_CLASSIFICATION",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_INVENTORY_CLASSIFICATION_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_OPERATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_OPERATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "GIT_REPOSITORY_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: GIT_REPOSITORY_KIND_VALUES,
+    },
+    RegistryDomainEntry {
+        domain: "IMPORT_KIND",
+        version: "1.0",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
+        values: IMPORT_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_FILE_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: INVENTORY_FILE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "INVENTORY_INCLUSION_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: INVENTORY_INCLUSION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "LANGUAGE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: LANGUAGE_VALUES,
     },
     RegistryDomainEntry {
         domain: "LIMIT_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: LIMIT_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "NEWLINE_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: NEWLINE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "NULLABLE_SEMANTICS",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: NULLABLE_SEMANTICS_VALUES,
     },
     RegistryDomainEntry {
         domain: "OCCURRENCE_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: OCCURRENCE_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "OPERATIONAL_DEPENDENCY_EDGE_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: OPERATIONAL_DEPENDENCY_EDGE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "OVERLAY_TOMBSTONE_REASON",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: OVERLAY_TOMBSTONE_REASON_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_CAPABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: OWNER_CAPABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "OWNER_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: OWNER_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "PATH_ENCODING",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: PATH_ENCODING_VALUES,
     },
     RegistryDomainEntry {
         domain: "PHASE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: PHASE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_CODE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: PROVIDER_CODE_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_OBSERVATION_FAMILY",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: PROVIDER_OBSERVATION_FAMILY_VALUES,
     },
     RegistryDomainEntry {
         domain: "PROVIDER_RUN_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: PROVIDER_RUN_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_AVAILABILITY_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: QUERY_AVAILABILITY_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_EXECUTION_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: QUERY_EXECUTION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "QUERY_FORM",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: QUERY_FORM_VALUES,
     },
     RegistryDomainEntry {
         domain: "RANGE_RECONCILIATION_STEP",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: RANGE_RECONCILIATION_STEP_VALUES,
     },
     RegistryDomainEntry {
         domain: "RAW_KIND_DISPOSITION",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: RAW_KIND_DISPOSITION_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOLUTION_CLASS",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: RESOLUTION_CLASS_VALUES,
     },
     RegistryDomainEntry {
         domain: "RESOURCE_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: RESOURCE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SERVING_ACTIVATION_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: SERVING_ACTIVATION_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SEVERITY",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: SEVERITY_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: SNAPSHOT_LEASE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "SNAPSHOT_LEASE_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: SNAPSHOT_LEASE_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SOURCE_TRUST_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: SOURCE_TRUST_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_FIELD_ROLE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: SYNTAX_FIELD_ROLE_VALUES,
     },
     RegistryDomainEntry {
         domain: "SYNTAX_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: SYNTAX_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "TOKEN_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: TOKEN_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "TYPE_ORIGIN",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: TYPE_ORIGIN_VALUES,
     },
     RegistryDomainEntry {
         domain: "TYPE_ROLE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: TYPE_ROLE_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_CANDIDATE_STRATEGY",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: UPDATE_CANDIDATE_STRATEGY_VALUES,
     },
     RegistryDomainEntry {
         domain: "UPDATE_WAVE_ITEM_STATE",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: UPDATE_WAVE_ITEM_STATE_VALUES,
     },
     RegistryDomainEntry {
         domain: "VALUE_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: VALUE_KIND_VALUES,
     },
     RegistryDomainEntry {
         domain: "WORKSPACE_KIND",
         version: "1.0",
-        canonical_digest: "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb",
+        canonical_digest: "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28",
         values: WORKSPACE_KIND_VALUES,
     },
     RegistryDomainEntry {
@@ -7151,6 +7203,10 @@ pub const ENTITY_KIND_IDS: &[&str] = &[
     "AWAIT",
     "RAISE_OR_PANIC_SYNTAX",
     "IMPORT_OR_USE_SYNTAX",
+    "IMPORT_DECLARATION",
+    "IMPORT_BINDING",
+    "EXPORT",
+    "REEXPORT",
 ];
 
 pub const RELATION_KIND_IDS: &[&str] = &[
@@ -7172,6 +7228,13 @@ pub const RELATION_KIND_IDS: &[&str] = &[
     "LEXICALLY_PRECEDES",
     "DOCUMENTS",
     "DIRECTIVE_APPLIES_TO",
+    "IMPORTS_MODULE",
+    "IMPORTS_SYMBOL",
+    "EXPORTS",
+    "REEXPORTS",
+    "ALIASES",
+    "DEFINED_IN_MODULE",
+    "DEPENDS_ON_MODULE",
 ];
 
 pub const PROPERTY_KIND_IDS: &[&str] = &[
@@ -8214,6 +8277,22 @@ pub const ENTITY_KIND_CODES: &[OntologyCodeEntry] = &[
         code: 580,
         family_code: 3,
     },
+    OntologyCodeEntry {
+        code: 590,
+        family_code: 4,
+    },
+    OntologyCodeEntry {
+        code: 600,
+        family_code: 5,
+    },
+    OntologyCodeEntry {
+        code: 610,
+        family_code: 4,
+    },
+    OntologyCodeEntry {
+        code: 620,
+        family_code: 4,
+    },
 ];
 
 pub const RELATION_KIND_CODES: &[OntologyCodeEntry] = &[
@@ -8288,6 +8367,34 @@ pub const RELATION_KIND_CODES: &[OntologyCodeEntry] = &[
     OntologyCodeEntry {
         code: 180,
         family_code: 3,
+    },
+    OntologyCodeEntry {
+        code: 190,
+        family_code: 4,
+    },
+    OntologyCodeEntry {
+        code: 200,
+        family_code: 4,
+    },
+    OntologyCodeEntry {
+        code: 210,
+        family_code: 4,
+    },
+    OntologyCodeEntry {
+        code: 220,
+        family_code: 4,
+    },
+    OntologyCodeEntry {
+        code: 230,
+        family_code: 5,
+    },
+    OntologyCodeEntry {
+        code: 240,
+        family_code: 4,
+    },
+    OntologyCodeEntry {
+        code: 250,
+        family_code: 4,
     },
 ];
 

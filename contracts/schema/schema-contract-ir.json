@@ -158,7 +158,7 @@
       "authority": "ENUM_REGISTRY",
       "artifact_id": "codefabric.registry.enum-registry",
       "path": "contracts/registry/enum-registry.yaml",
-      "canonical_digest": "b3:b18c6f1488cd4da4a53dc806763cc2df9a6e5de902c60b3e23207cdf558b54eb"
+      "canonical_digest": "b3:2c31c28abfe53f4c97bae719f5447530d176a2d458e5e633f2e0648f6707ec28"
     },
     {
       "authority": "TYPE_ALGEBRA",
@@ -170,13 +170,13 @@
       "authority": "ONTOLOGY_ENTITY_REGISTRY",
       "artifact_id": "codefabric.registry.ontology-entity-registry",
       "path": "contracts/registry/ontology-entity-registry.yaml",
-      "canonical_digest": "b3:1aef53a170d4a00b4549dda8b9fe67ac7644976669b8db3f6e29380ab2b9064f"
+      "canonical_digest": "b3:90c621c9a7ace113e3d4bf89a2ac766810d08b8ced48b7bc48da7492166864f3"
     },
     {
       "authority": "ONTOLOGY_RELATION_REGISTRY",
       "artifact_id": "codefabric.registry.ontology-relation-registry",
       "path": "contracts/registry/ontology-relation-registry.yaml",
-      "canonical_digest": "b3:d6605d0f4bc7b3f374f3a7547d965e261e9e544ffb6d7705eba84ca89623aa77"
+      "canonical_digest": "b3:58081efc5a9667f8274246847564c3778b901f833c3c26ffa06036d49199fdc9"
     },
     {
       "authority": "ONTOLOGY_PROPERTY_REGISTRY",
@@ -209,6 +209,11 @@
     {
       "semantic_type": "id16",
       "authority": "INTRINSIC"
+    },
+    {
+      "semantic_type": "enum:import_kind",
+      "authority": "ENUM_REGISTRY",
+      "domain": "IMPORT_KIND"
     },
     {
       "semantic_type": "enum:analysis_context_kind",
@@ -2883,6 +2888,41 @@
       "required_for_publication": true
     },
     {
+      "table_code": 230,
+      "name": "module_import_detail",
+      "publication_pin_role": "PINNED_DATA",
+      "family": "module-import",
+      "grain": "one Python import occurrence",
+      "schema_version": "1.0",
+      "row_encoder": "module_import_details",
+      "columns": [
+        {"name": "workspace_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "analysis_context_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "source_generation", "logical_type": "int64", "nullable": false},
+        {"name": "import_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "owner_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16"},
+        {"name": "owner_bucket", "logical_type": "bucket16", "nullable": false, "hidden_operational": true},
+        {"name": "source_module_id", "logical_type": "id16", "nullable": false, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "target_module_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "imported_entity_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "local_binding_id", "logical_type": "id16", "nullable": true, "semantic_type": "id16", "foreign_key": "entity.entity_id"},
+        {"name": "import_kind_code", "logical_type": "code16", "nullable": false, "semantic_type": "enum:import_kind"},
+        {"name": "relative_level", "logical_type": "int16", "nullable": true},
+        {"name": "source_name", "logical_type": "utf8", "nullable": false},
+        {"name": "alias_name", "logical_type": "utf8", "nullable": true},
+        {"name": "star_import", "logical_type": "boolean", "nullable": false},
+        {"name": "unknown_reason_code", "logical_type": "code16", "nullable": true}
+      ],
+      "primary_key": ["import_id"],
+      "partition_columns": ["owner_bucket"],
+      "zorder_columns": ["workspace_id", "analysis_context_id", "source_module_id", "source_name"],
+      "durable_mutation": "OWNER_REPLACED_FACT",
+      "overlay_mutation": "OWNER_REPLACE",
+      "materialization_role": "DURABLE_EFFECTIVE",
+      "dependencies": [8, 100, 110, 210],
+      "required_for_publication": true
+    },
+    {
       "table_code": 900,
       "name": "owner_tombstone",
       "publication_pin_role": "NOT_PUBLISHED",
@@ -3174,6 +3214,13 @@
     },
     {
       "table_code": 220,
+      "workspace_column": "workspace_id",
+      "analysis_context_column": "analysis_context_id",
+      "source_generation_column": "source_generation",
+      "owner_column": "owner_id"
+    },
+    {
+      "table_code": 230,
       "workspace_column": "workspace_id",
       "analysis_context_column": "analysis_context_id",
       "source_generation_column": "source_generation",
@@ -5032,7 +5079,10 @@
         {"name": "bindings_json", "logical_type": "binary", "nullable": false},
         {"name": "references_json", "logical_type": "binary", "nullable": false},
         {"name": "unknown_symbols_json", "logical_type": "binary", "nullable": false},
-        {"name": "edges_json", "logical_type": "binary", "nullable": false}
+        {"name": "edges_json", "logical_type": "binary", "nullable": false},
+        {"name": "imports_json", "logical_type": "binary", "nullable": false},
+        {"name": "exports_json", "logical_type": "binary", "nullable": false},
+        {"name": "export_status", "logical_type": "utf8", "nullable": false}
       ]
     },
     {

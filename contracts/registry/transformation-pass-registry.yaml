@@ -3,7 +3,7 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: accepted
-canonical_digest: "b3:aad4324b3f28e6d87242db15e445c41ce718d020a3822caa47c867fb24103454"
+canonical_digest: "b3:215d86e1db377f55af6955531b75074ee7f59f65c89df8f902be89668ed85147"
 schema_version: 1
 authority: AC-G-05
 accepted_at: "2026-08-27"
@@ -46,6 +46,25 @@ records:
     oracles: [py_scope_binding_fixture_conformance, ruff_semantic_isolation_parity, py_unresolved_reference_unknown_falsification, py_scope_binding_owner_replacement_gate]
     implementation_paths: [src/ruff_adapter.rs, src/python_semantic.rs]
     contract_digest: "b3:44d8a1ec44400e988fccf88a93852f931637a20da9d52c292551206a050bbb2f"
+  - pass_id: PASS_PYTHON_IMPORT_EXPORT_V1
+    owner_packet: WP04
+    principles: [H-P14, H-P16]
+    inputs: [{artifact: ruff-python-module-ast, schema: ruff-adapter-snapshot-v1, preconditions: [source-digest-pinned, python-module-context-pinned]}]
+    outputs: [{artifact: python-module-import-export-facts, schema: module-import-detail-v1, postconditions: [syntax-binding-module-symbol-distinct, dynamic-exports-explicitly-incomplete]}]
+    entry_invariants: [provider-isolated, no-runtime-import-execution]
+    exit_invariants: [module-import-owner-closed, unresolved-modules-materialized]
+    preserved_identities: [workspace_id, analysis_context_id, source_file_id, module_owner_id]
+    generated_identities: [module_entity_id, import_declaration_id, import_binding_id, imported_symbol_id, export_entity_id]
+    invalidation_closure: [source-module-owner, dependent-module-owners, python-analysis-context]
+    diagnostics_failure_taxonomy: [unknown-module, dynamic-import-target, dynamic-export-construction]
+    determinism_fingerprint_inputs: [source_digest, python-context-fingerprint, ruff-version, import-projector-version]
+    resource_telemetry_contract: [import-count, export-count, unresolved-module-count]
+    behavioral_fixtures: [py_import_export_fixture_conformance]
+    negative_fixtures: [py_dynamic_export_unknown_falsification]
+    incremental_fixtures: [py_module_fact_replacement_gate]
+    oracles: [py_import_export_fixture_conformance, py_import_syntax_semantic_distinction_parity, py_dynamic_export_unknown_falsification, py_module_fact_replacement_gate]
+    implementation_paths: [src/ruff_adapter/imports.rs, src/python_semantic.rs]
+    contract_digest: "b3:6e75d875014e10b4ddbc1a7f4d3ce03e6e9b9150575db1ffe28a8dc3a5c013a2"
   - pass_id: PASS_PYTHON_CFG_V1
     owner_packet: WP06
     principles: [H-P14, H-P16]

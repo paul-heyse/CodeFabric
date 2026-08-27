@@ -9,13 +9,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use ruff_python_ast::helpers::{collect_import_from_member, from_relative_import};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{
     self as ast, Expr, ExprContext, Pattern, PySourceType, PythonVersion, Stmt, TypeParam,
 };
 use ruff_python_semantic::{
-    BindingFlags, BindingId, BindingKind, GeneratorKind, Module, ModuleKind, ModuleSource,
-    ReadResult, ScopeId, ScopeKind, SemanticModel, StarImport,
+    BindingFlags, BindingId, BindingKind, FromImport, GeneratorKind, Import, Module, ModuleKind,
+    ModuleSource, ReadResult, ScopeId, ScopeKind, SemanticModel, StarImport, SubmoduleImport,
 };
 use ruff_text_size::{Ranged, TextRange};
 use thiserror::Error;
@@ -104,6 +105,22 @@ pub enum PythonResolution {
     UnboundLocal,
 }
 
+/// Governed import occurrence forms from FAB section 25.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum PythonImportKind {
+    Module,
+    FromName,
+    Star,
+    Dynamic,
+}
+
+/// Whether the module export surface was fully established without execution.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum PythonExportStatus {
+    Complete,
+    IncompleteDynamic,
+}
+
 /// Governed semantic relation kinds emitted by this pass.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum PythonSemanticEdgeKind {
@@ -171,6 +188,41 @@ pub struct PythonSemanticEdge {
     pub kind: PythonSemanticEdgeKind,
 }
 
+/// One source import occurrence with distinct syntax, binding, module, and symbol IDs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PythonImportFact {
+    pub import_id: PythonSemanticId,
+    pub scope_id: PythonSemanticId,
+    pub kind: PythonImportKind,
+    pub relative_level: Option<i16>,
+    pub source_name: String,
+    pub alias_name: Option<String>,
+    pub star_import: bool,
+    pub target_module_id: PythonSemanticId,
+    pub target_module_name: Option<String>,
+    /// Fully-qualified import target established by Ruff's local semantic model.
+    /// Source spelling remains separately preserved in `source_name`.
+    pub ruff_qualified_name: Option<String>,
+    pub resolution: PythonResolution,
+    pub imported_entity_id: Option<PythonSemanticId>,
+    pub imported_name: Option<String>,
+    pub local_binding_id: Option<PythonSemanticId>,
+    pub unknown_reason_code: Option<String>,
+    pub start_byte: u64,
+    pub end_byte: u64,
+}
+
+/// One statically visible export or re-export occurrence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PythonExportFact {
+    pub export_id: PythonSemanticId,
+    pub name: String,
+    pub target_id: PythonSemanticId,
+    pub reexport: bool,
+    pub start_byte: u64,
+    pub end_byte: u64,
+}
+
 /// Bounded operational measurements for one deterministic traversal.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PythonSemanticMetrics {
@@ -182,6 +234,9 @@ pub struct PythonSemanticMetrics {
     pub binding_count: u64,
     pub reference_count: u64,
     pub unresolved_reference_count: u64,
+    pub import_count: u64,
+    pub export_count: u64,
+    pub unresolved_module_count: u64,
 }
 
 /// Registered terminal observation for the Ruff traversal pass.
@@ -196,6 +251,7 @@ pub struct PythonSemanticTerminal {
 /// Complete application-owned output of one Ruff semantic traversal.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PythonFrontendBatch {
+    pub module_id: PythonSemanticId,
     pub module_name: String,
     pub provider_image_fingerprint: String,
     pub scopes: Vec<PythonScopeFact>,
@@ -203,6 +259,9 @@ pub struct PythonFrontendBatch {
     pub references: Vec<PythonReferenceFact>,
     pub unknown_symbols: Vec<PythonUnknownSymbolFact>,
     pub edges: Vec<PythonSemanticEdge>,
+    pub imports: Vec<PythonImportFact>,
+    pub exports: Vec<PythonExportFact>,
+    pub export_status: PythonExportStatus,
     pub metrics: PythonSemanticMetrics,
     pub terminal: PythonSemanticTerminal,
 }
@@ -675,12 +734,22 @@ impl<'a> Visitor<'a> for BindingPass<'a> {
                         },
                         ast::Identifier::as_str,
                     );
+                    let qualified_name = alias.name.as_str().split('.').collect();
+                    let ruff_kind = if alias.asname.is_none() && alias.name.as_str().contains('.') {
+                        BindingKind::SubmoduleImport(SubmoduleImport {
+                            qualified_name: Box::new(qualified_name),
+                        })
+                    } else {
+                        BindingKind::Import(Import {
+                            qualified_name: Box::new(qualified_name),
+                        })
+                    };
                     self.bind(
                         name,
                         identifier.range(),
                         PythonBindingKind::Import,
                         PythonTargetForm::ImportAlias,
-                        BindingKind::Assignment,
+                        ruff_kind,
                     );
                 }
             }
@@ -697,12 +766,19 @@ impl<'a> Visitor<'a> for BindingPass<'a> {
                         self.scopes[scope_index].uses_star_import = true;
                     } else {
                         let identifier = alias.asname.as_ref().unwrap_or(&alias.name);
+                        let qualified_name = collect_import_from_member(
+                            node.level,
+                            node.module.as_ref().map(ast::Identifier::as_str),
+                            alias.name.as_str(),
+                        );
                         self.bind(
                             identifier.as_str(),
                             identifier.range(),
                             PythonBindingKind::Import,
                             PythonTargetForm::ImportAlias,
-                            BindingKind::Assignment,
+                            BindingKind::FromImport(FromImport {
+                                qualified_name: Box::new(qualified_name),
+                            }),
                         );
                     }
                 }
@@ -915,6 +991,37 @@ impl BindingScopeIndex for PythonBindingFact {
     }
 }
 
+fn ruff_import_qualified_names(
+    pass: &BindingPass<'_>,
+    module_name: &str,
+) -> BTreeMap<PythonSemanticId, String> {
+    let module_path = module_name
+        .split('.')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    pass.binding_by_ruff
+        .iter()
+        .filter_map(|(ruff_id, binding_index)| {
+            let qualified_name = match &pass.semantic.binding(*ruff_id).kind {
+                BindingKind::Import(Import { qualified_name })
+                | BindingKind::SubmoduleImport(SubmoduleImport { qualified_name }) => {
+                    Some(qualified_name.to_string())
+                }
+                BindingKind::FromImport(FromImport { qualified_name }) => {
+                    if qualified_name.segments().first().copied() == Some(".") {
+                        from_relative_import(&module_path, qualified_name.segments(), &[])
+                            .map(|name| name.to_string())
+                    } else {
+                        Some(qualified_name.to_string())
+                    }
+                }
+                _ => None,
+            }?;
+            Some((pass.bindings[*binding_index].binding_id, qualified_name))
+        })
+        .collect()
+}
+
 fn simple_ruff_binding_kind<'a>(
     kind: PythonBindingKind,
     form: PythonTargetForm,
@@ -948,6 +1055,7 @@ struct ReferencePass<'a, 'model> {
     bindings: &'model mut Vec<PythonBindingFact>,
     binding_by_ruff: &'model mut HashMap<BindingId, usize>,
     references: Vec<PythonReferenceFact>,
+    qualified_names: BTreeMap<PythonSemanticId, String>,
     unknown_symbols: Vec<PythonUnknownSymbolFact>,
     edges: &'model mut Vec<PythonSemanticEdge>,
     mode: ReferenceMode,
@@ -966,6 +1074,7 @@ impl<'a, 'model> ReferencePass<'a, 'model> {
             bindings: &mut pass.bindings,
             binding_by_ruff: &mut pass.binding_by_ruff,
             references: Vec::new(),
+            qualified_names: BTreeMap::new(),
             unknown_symbols: Vec::new(),
             edges: &mut pass.edges,
             mode: ReferenceMode::Normal,
@@ -1063,7 +1172,7 @@ impl<'a, 'model> ReferencePass<'a, 'model> {
         });
     }
 
-    fn emit_name(&mut self, name: &'a ast::ExprName) {
+    fn emit_name(&mut self, name: &'a ast::ExprName) -> Option<usize> {
         let class = match self.mode {
             ReferenceMode::Type => PythonReferenceClass::TypeReference,
             ReferenceMode::Call => PythonReferenceClass::CallReference,
@@ -1075,7 +1184,7 @@ impl<'a, 'model> ReferencePass<'a, 'model> {
             },
         };
         if name.ctx.is_store() && !matches!(self.mode, ReferenceMode::ReadWrite) {
-            return;
+            return None;
         }
         if name.ctx.is_del() {
             self.semantic.resolve_del(name.id.as_str(), name.range);
@@ -1096,6 +1205,7 @@ impl<'a, 'model> ReferencePass<'a, 'model> {
                     PythonResolution::Resolved,
                     None,
                 );
+                Some(binding_index)
             }
             ReadResult::UnboundLocal(ruff_id) => {
                 let binding_index = self.app_binding(ruff_id, name.id.as_str());
@@ -1107,28 +1217,38 @@ impl<'a, 'model> ReferencePass<'a, 'model> {
                     PythonResolution::UnboundLocal,
                     Some("UNBOUND_LOCAL"),
                 );
+                Some(binding_index)
             }
-            ReadResult::WildcardImport => self.emit_unknown(
-                name.id.as_str(),
-                name.range,
-                class,
-                PythonResolution::MayReferTo,
-                "STAR_IMPORT_EXPORTS_UNKNOWN",
-            ),
-            ReadResult::ImplicitGlobal => self.emit_unknown(
-                name.id.as_str(),
-                name.range,
-                class,
-                PythonResolution::UnknownSymbol,
-                "IMPLICIT_GLOBAL",
-            ),
-            ReadResult::NotFound => self.emit_unknown(
-                name.id.as_str(),
-                name.range,
-                class,
-                PythonResolution::UnknownSymbol,
-                "UNRESOLVED_LEXICAL_NAME",
-            ),
+            ReadResult::WildcardImport => {
+                self.emit_unknown(
+                    name.id.as_str(),
+                    name.range,
+                    class,
+                    PythonResolution::MayReferTo,
+                    "STAR_IMPORT_EXPORTS_UNKNOWN",
+                );
+                None
+            }
+            ReadResult::ImplicitGlobal => {
+                self.emit_unknown(
+                    name.id.as_str(),
+                    name.range,
+                    class,
+                    PythonResolution::UnknownSymbol,
+                    "IMPLICIT_GLOBAL",
+                );
+                None
+            }
+            ReadResult::NotFound => {
+                self.emit_unknown(
+                    name.id.as_str(),
+                    name.range,
+                    class,
+                    PythonResolution::UnknownSymbol,
+                    "UNRESOLVED_LEXICAL_NAME",
+                );
+                None
+            }
         }
     }
 
@@ -1256,7 +1376,16 @@ impl<'a> Visitor<'a> for ReferencePass<'a, '_> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         self.visited_nodes = self.visited_nodes.saturating_add(1);
         match expr {
-            Expr::Name(name) => self.emit_name(name),
+            Expr::Name(name) => {
+                if let Some(binding_index) = self.emit_name(name)
+                    && let Some(qualified_name) = self.semantic.resolve_qualified_name(expr)
+                {
+                    self.qualified_names.insert(
+                        self.bindings[binding_index].binding_id,
+                        qualified_name.to_string(),
+                    );
+                }
+            }
             Expr::Lambda(node) => {
                 self.enter(node.range, PythonScopeKind::Lambda);
                 self.visit_expr(&node.body);
@@ -1346,12 +1475,13 @@ pub(super) fn project_python_semantics<'a>(
     let binding_pass_duration = binding_started.elapsed();
 
     let traversal_started = Instant::now();
-    let (references, unknown_symbols, reference_visited) = {
+    let (references, unknown_symbols, reference_qualified_names, reference_visited) = {
         let mut references = ReferencePass::new(&mut pass);
         visitor::walk_body(&mut references, suite);
         (
             references.references,
             references.unknown_symbols,
+            references.qualified_names,
             references.visited_nodes,
         )
     };
@@ -1399,6 +1529,11 @@ pub(super) fn project_python_semantics<'a>(
         });
     }
     add_declaration_resolution_edges(&pass.scopes, &pass.bindings, &mut pass.edges);
+    let mut ruff_qualified_names = ruff_import_qualified_names(&pass, module_name);
+    // A real reference resolution is the strongest local signal because it has
+    // passed through `SemanticModel::resolve_qualified_name`; retain it over the
+    // equivalent import-binding metadata when both are present.
+    ruff_qualified_names.extend(reference_qualified_names);
 
     let mut scopes = pass
         .scopes
@@ -1429,6 +1564,14 @@ pub(super) fn project_python_semantics<'a>(
     pass.edges.dedup();
     let cleanup_duration = cleanup_started.elapsed();
     let unresolved_reference_count = u64::try_from(unknown_symbols.len()).unwrap_or(u64::MAX);
+    let import_projection = super::imports::project_python_imports(
+        suite,
+        module_name,
+        provider_image_fingerprint,
+        &scopes,
+        &pass.bindings,
+        &ruff_qualified_names,
+    );
     let metrics = PythonSemanticMetrics {
         binding_pass_duration,
         traversal_pass_duration,
@@ -1438,8 +1581,19 @@ pub(super) fn project_python_semantics<'a>(
         binding_count: u64::try_from(pass.bindings.len()).unwrap_or(u64::MAX),
         reference_count: u64::try_from(all_references.len()).unwrap_or(u64::MAX),
         unresolved_reference_count,
+        import_count: u64::try_from(import_projection.imports.len()).unwrap_or(u64::MAX),
+        export_count: u64::try_from(import_projection.exports.len()).unwrap_or(u64::MAX),
+        unresolved_module_count: u64::try_from(
+            import_projection
+                .imports
+                .iter()
+                .filter(|fact| fact.resolution != PythonResolution::Resolved)
+                .count(),
+        )
+        .unwrap_or(u64::MAX),
     };
     Ok(PythonFrontendBatch {
+        module_id: import_projection.module_id,
         module_name: module_name.to_owned(),
         provider_image_fingerprint: provider_image_fingerprint.to_owned(),
         scopes,
@@ -1447,6 +1601,9 @@ pub(super) fn project_python_semantics<'a>(
         references: all_references,
         unknown_symbols,
         edges: pass.edges,
+        imports: import_projection.imports,
+        exports: import_projection.exports,
+        export_status: import_projection.export_status,
         metrics,
         terminal: PythonSemanticTerminal {
             pass_id: "PASS_RUFF_SEMANTIC_TRAVERSAL_V1",
@@ -1502,7 +1659,7 @@ fn add_declaration_resolution_edges(
     }
 }
 
-fn semantic_id(
+pub(super) fn semantic_id(
     fingerprint: &str,
     domain: &str,
     start: u64,
@@ -1653,6 +1810,8 @@ def outer():
                     + first.bindings.len()
                     + first.references.len()
                     + first.unknown_symbols.len()
+                    + 1
+                    + first.exports.len()
             );
         }
     }
@@ -1714,6 +1873,242 @@ def outer():
                 .edges
                 .retain(|edge| edge.subject_id != absent.reference_id);
             assert!(project_ruff_semantic_batch(scope, [10; 16], &absent_edge).is_err());
+        }
+    }
+
+    #[test]
+    fn py_import_export_fixture_conformance() {
+        let batch = analyze(
+            r#"
+import os.path as osp
+from .pkg import item as alias
+from package import *
+import importlib
+dynamic = importlib.import_module(target)
+__all__ = ["alias"] + ("osp",)
+"#,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(batch.export_status, PythonExportStatus::Complete);
+        assert_eq!(
+            batch
+                .imports
+                .iter()
+                .filter(|fact| fact.kind != PythonImportKind::Dynamic)
+                .count(),
+            4
+        );
+        let relative = batch
+            .imports
+            .iter()
+            .find(|fact| fact.imported_name.as_deref() == Some("item"))
+            .unwrap();
+        assert_eq!(relative.relative_level, Some(1));
+        assert_eq!(relative.target_module_name.as_deref(), Some("pkg"));
+        assert_eq!(relative.ruff_qualified_name.as_deref(), Some("pkg.item"));
+        assert_eq!(relative.resolution, PythonResolution::Resolved);
+        assert_eq!(relative.alias_name.as_deref(), Some("alias"));
+        assert!(relative.local_binding_id.is_some());
+        assert!(batch.imports.iter().any(|fact| {
+            fact.star_import
+                && fact.resolution == PythonResolution::MayReferTo
+                && fact.unknown_reason_code.as_deref() == Some("STAR_IMPORT_TARGET_SOURCE_DECLARED")
+        }));
+        assert!(
+            batch
+                .exports
+                .iter()
+                .any(|fact| fact.name == "alias" && fact.reexport)
+        );
+        assert!(
+            batch
+                .exports
+                .iter()
+                .any(|fact| fact.name == "osp" && fact.reexport)
+        );
+
+        #[cfg(feature = "daemon")]
+        {
+            use crate::fact_ingest::FactScope;
+            use crate::python_semantic::project_ruff_semantic_batch;
+
+            let projection = project_ruff_semantic_batch(
+                FactScope {
+                    workspace_id: [31; 16],
+                    analysis_context_id: [32; 16],
+                    source_generation: 33,
+                    owner_id: [34; 16],
+                },
+                [35; 16],
+                &batch,
+            )
+            .unwrap();
+            assert_eq!(
+                projection.batch(230).unwrap().num_rows(),
+                batch.imports.len()
+            );
+            assert_eq!(projection.batch(9).unwrap().num_rows(), 2);
+        }
+    }
+
+    #[test]
+    fn py_import_syntax_semantic_distinction_parity() {
+        let batch = analyze("from package import symbol as local\n", false).unwrap();
+        let import = batch.imports.first().unwrap();
+        let binding = import.local_binding_id.unwrap();
+        let symbol = import.imported_entity_id.unwrap();
+        let distinct = [import.import_id, binding, import.target_module_id, symbol]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(distinct.len(), 4);
+        assert!(batch.bindings.iter().any(|fact| {
+            fact.binding_id == binding
+                && fact.name == "local"
+                && fact.target_form == PythonTargetForm::ImportAlias
+        }));
+        assert_eq!(import.target_module_name.as_deref(), Some("package"));
+        assert_eq!(
+            import.ruff_qualified_name.as_deref(),
+            Some("package.symbol")
+        );
+        assert_eq!(import.resolution, PythonResolution::Resolved);
+        assert_eq!(import.source_name, "package:symbol");
+        assert_eq!(import.imported_name.as_deref(), Some("symbol"));
+    }
+
+    #[test]
+    fn py_dynamic_export_unknown_falsification() {
+        let batch = analyze(
+            "__all__ = build_exports()\nmodule = __import__(module_name)\n",
+            false,
+        )
+        .unwrap();
+        assert_eq!(batch.export_status, PythonExportStatus::IncompleteDynamic);
+        let dynamic = batch
+            .imports
+            .iter()
+            .find(|fact| fact.kind == PythonImportKind::Dynamic)
+            .unwrap();
+        assert_eq!(dynamic.target_module_name, None);
+        assert_eq!(dynamic.ruff_qualified_name, None);
+        assert_eq!(dynamic.resolution, PythonResolution::UnknownSymbol);
+        assert_eq!(
+            dynamic.unknown_reason_code.as_deref(),
+            Some("DYNAMIC_IMPORT_TARGET")
+        );
+        let implementation = include_str!("imports.rs");
+        for prohibited in [
+            "std::process",
+            "tokio::process",
+            "Command::new",
+            "pyo3",
+            "PyImport",
+        ] {
+            assert!(
+                !implementation.contains(prohibited),
+                "runtime import machinery escaped into the adapter: {prohibited}"
+            );
+        }
+
+        #[cfg(feature = "daemon")]
+        {
+            use arrow_array::{Array as _, Int16Array};
+
+            use crate::fact_ingest::FactScope;
+            use crate::python_semantic::project_ruff_semantic_batch;
+
+            let projection = project_ruff_semantic_batch(
+                FactScope {
+                    workspace_id: [41; 16],
+                    analysis_context_id: [42; 16],
+                    source_generation: 43,
+                    owner_id: [44; 16],
+                },
+                [45; 16],
+                &batch,
+            )
+            .unwrap();
+            let capability = projection.batch(9).unwrap().batch();
+            let completeness = capability
+                .column_by_name("completeness_state_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int16Array>()
+                .unwrap();
+            assert!(completeness.iter().flatten().any(|code| code == 20));
+            let details = projection.batch(230).unwrap().batch();
+            assert!(
+                details
+                    .column_by_name("unknown_reason_code")
+                    .unwrap()
+                    .null_count()
+                    < details.num_rows()
+            );
+        }
+    }
+
+    #[test]
+    fn py_module_fact_replacement_gate() {
+        #[cfg(feature = "daemon")]
+        {
+            use arrow_array::{Array as _, Int32Array};
+
+            use crate::fabric::batch_checksum;
+            use crate::fact_ingest::FactScope;
+            use crate::python_semantic::project_ruff_semantic_batch;
+
+            let owner = FactScope {
+                workspace_id: [51; 16],
+                analysis_context_id: [52; 16],
+                source_generation: 53,
+                owner_id: [54; 16],
+            };
+            let before = project_ruff_semantic_batch(
+                owner,
+                [55; 16],
+                &analyze("import alpha\n", false).unwrap(),
+            )
+            .unwrap();
+            let after = project_ruff_semantic_batch(
+                owner,
+                [55; 16],
+                &analyze("import alpha\nimport beta\n", false).unwrap(),
+            )
+            .unwrap();
+            let stable_scope = FactScope {
+                owner_id: [56; 16],
+                ..owner
+            };
+            let stable_before = project_ruff_semantic_batch(
+                stable_scope,
+                [57; 16],
+                &analyze("import stable\n", false).unwrap(),
+            )
+            .unwrap();
+            let stable_after = project_ruff_semantic_batch(
+                stable_scope,
+                [57; 16],
+                &analyze("import stable\n", false).unwrap(),
+            )
+            .unwrap();
+            assert_ne!(
+                batch_checksum(before.batch(230).unwrap().batch()).unwrap(),
+                batch_checksum(after.batch(230).unwrap().batch()).unwrap()
+            );
+            assert_eq!(
+                batch_checksum(stable_before.batch(230).unwrap().batch()).unwrap(),
+                batch_checksum(stable_after.batch(230).unwrap().batch()).unwrap()
+            );
+            let relations = after.batch(110).unwrap().batch();
+            let relation_kinds = relations
+                .column_by_name("relation_kind_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap();
+            assert!(relation_kinds.iter().flatten().any(|code| code == 250));
         }
     }
 

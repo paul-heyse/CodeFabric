@@ -273,6 +273,7 @@ enum RowEncoderKind {
     ScopeDetails,
     BindingDetails,
     ReferenceDetails,
+    ModuleImportDetails,
 }
 
 impl RowEncoderKind {
@@ -293,6 +294,7 @@ impl RowEncoderKind {
             Self::ScopeDetails => "encode_scope_details",
             Self::BindingDetails => "encode_binding_details",
             Self::ReferenceDetails => "encode_reference_details",
+            Self::ModuleImportDetails => "encode_module_import_details",
         }
     }
 
@@ -313,6 +315,7 @@ impl RowEncoderKind {
             Self::ScopeDetails => "ScopeDetailRow",
             Self::BindingDetails => "BindingDetailRow",
             Self::ReferenceDetails => "ReferenceDetailRow",
+            Self::ModuleImportDetails => "ModuleImportDetailRow",
         }
     }
 }
@@ -830,6 +833,7 @@ impl SchemaContractIr {
             (RowEncoderKind::ScopeDetails, 200),
             (RowEncoderKind::BindingDetails, 210),
             (RowEncoderKind::ReferenceDetails, 220),
+            (RowEncoderKind::ModuleImportDetails, 230),
         ]);
         if encoders != expected_encoders {
             return invalid(

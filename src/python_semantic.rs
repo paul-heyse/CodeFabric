@@ -16,11 +16,11 @@ use crate::core_facts::{
 };
 use crate::fact_ingest::{
     BindingDetailRow, CanonicalIngestOutput, CanonicalReconciliationEngine, CapabilityStatusRow,
-    EntityRow, FactEvidenceRow, FactIngestError, FactScope, OwnerRow, ProviderFactBatch,
-    ProviderFactManifest, ProviderFactStream, ReferenceDetailRow, RelationRow, ScopeDetailRow,
-    StreamTerminal, ValidatedFactBatch, encode_binding_details, encode_capability_statuses,
-    encode_entities, encode_evidence, encode_owners, encode_reference_details, encode_relations,
-    encode_scope_details,
+    EntityRow, FactEvidenceRow, FactIngestError, FactScope, ModuleImportDetailRow, OwnerRow,
+    ProviderFactBatch, ProviderFactManifest, ProviderFactStream, ReferenceDetailRow, RelationRow,
+    ScopeDetailRow, StreamTerminal, ValidatedFactBatch, encode_binding_details,
+    encode_capability_statuses, encode_entities, encode_evidence, encode_module_import_details,
+    encode_owners, encode_reference_details, encode_relations, encode_scope_details,
 };
 use crate::registries::{
     CompletenessState, Directness, EvidenceCertainty, Language, OwnerCapabilityState, OwnerKind,
@@ -28,8 +28,9 @@ use crate::registries::{
     relation_kind,
 };
 use crate::ruff_adapter::{
-    PythonBindingKind, PythonFrontendBatch, PythonReferenceClass, PythonResolution,
-    PythonScopeKind, PythonSemanticEdgeKind, PythonTargetForm,
+    PythonBindingKind, PythonExportStatus, PythonFrontendBatch, PythonImportKind,
+    PythonReferenceClass, PythonResolution, PythonScopeKind, PythonSemanticEdgeKind,
+    PythonTargetForm,
 };
 
 const OBSERVATION_SCHEMA_ID: &str = "codefabric.ruff.semantic.v1";
@@ -81,6 +82,7 @@ pub fn project_ruff_semantic_batch(
         )));
     }
     validate_reference_edges(batch)?;
+    validate_import_export_facts(batch)?;
 
     let observation_payloads = observation_payloads(batch)?;
     let observation = observation_batch(batch, &observation_payloads)?;
@@ -129,14 +131,50 @@ pub fn project_ruff_semantic_batch(
             ));
         }
     }
+    for (domain, semantic) in std::iter::once((b"module".as_slice(), batch.module_id))
+        .chain(batch.imports.iter().flat_map(|fact| {
+            [
+                (b"import-declaration".as_slice(), fact.import_id),
+                (b"target-module".as_slice(), fact.target_module_id),
+            ]
+            .into_iter()
+            .chain(
+                fact.imported_entity_id
+                    .map(|id| (b"imported-symbol".as_slice(), id)),
+            )
+        }))
+        .chain(
+            batch
+                .exports
+                .iter()
+                .map(|fact| (b"export".as_slice(), fact.export_id)),
+        )
+    {
+        canonical_ids
+            .entry(semantic)
+            .or_insert_with(|| derived_identity(domain, &[&scope.owner_id, &semantic]));
+    }
 
+    let module_kind = required_entity_kind("MODULE")?;
     let scope_kind = required_entity_kind("SCOPE")?;
     let declaration_kind = required_entity_kind("DECLARATION")?;
+    let import_declaration_kind = required_entity_kind("IMPORT_DECLARATION")?;
+    let import_binding_kind = required_entity_kind("IMPORT_BINDING")?;
+    let export_entity_kind = required_entity_kind("EXPORT")?;
+    let reexport_entity_kind = required_entity_kind("REEXPORT")?;
+    let symbol_kind = required_entity_kind("SYMBOL")?;
     let reference_kind = required_entity_kind("REFERENCE")?;
     let unknown_kind = required_entity_kind("UNKNOWN")?;
     let contains_kind = required_relation_kind("CONTAINS")?;
     let declares_kind = required_relation_kind("DECLARES")?;
     let refers_to_kind = required_relation_kind("REFERS_TO")?;
+    let imports_module_kind = required_relation_kind("IMPORTS_MODULE")?;
+    let imports_symbol_kind = required_relation_kind("IMPORTS_SYMBOL")?;
+    let export_relation_kind = required_relation_kind("EXPORTS")?;
+    let reexport_relation_kind = required_relation_kind("REEXPORTS")?;
+    let aliases_kind = required_relation_kind("ALIASES")?;
+    let defined_in_module_kind = required_relation_kind("DEFINED_IN_MODULE")?;
+    let depends_on_module_kind = required_relation_kind("DEPENDS_ON_MODULE")?;
 
     let mut entities = Vec::with_capacity(
         batch.scopes.len()
@@ -147,13 +185,34 @@ pub fn project_ruff_semantic_batch(
     let mut scope_details = Vec::with_capacity(batch.scopes.len());
     let mut binding_details = Vec::with_capacity(batch.bindings.len());
     let mut reference_details = Vec::with_capacity(batch.references.len());
+    let mut module_import_details = Vec::with_capacity(batch.imports.len());
+
+    let module_identity = canonical_identity(&canonical_ids, batch.module_id, "module")?;
+    entities.push(EntityRow {
+        scope,
+        entity_id: module_identity.id,
+        language: Language::Python as i16,
+        entity_family_code: module_kind.family_code,
+        entity_kind_code: module_kind.code,
+        raw_kind_code: None,
+        file_id: Some(file_id),
+        start_byte: None,
+        end_byte: None,
+        name: Some(batch.module_name.clone()),
+        qualified_name: Some(batch.module_name.clone()),
+        parent_entity_id: None,
+        type_id: None,
+        flags: 0,
+        fact_hash64: digest_hash64(module_identity.digest),
+    });
 
     for fact in &batch.scopes {
         let identity = canonical_identity(&canonical_ids, fact.scope_id, "scope")?;
         let parent = fact
             .parent_scope_id
             .map(|id| canonical_identity(&canonical_ids, id, "parent scope").map(|item| item.id))
-            .transpose()?;
+            .transpose()?
+            .or((fact.kind == PythonScopeKind::Module).then_some(module_identity.id));
         let start = coordinate(fact.start_byte)?;
         let end = coordinate(fact.end_byte)?;
         entities.push(EntityRow {
@@ -189,12 +248,17 @@ pub fn project_ruff_semantic_batch(
         let owner_scope = canonical_identity(&canonical_ids, fact.scope_id, "binding scope")?.id;
         let start = coordinate(fact.start_byte)?;
         let end = coordinate(fact.end_byte)?;
+        let binding_entity_kind = if fact.target_form == PythonTargetForm::ImportAlias {
+            import_binding_kind
+        } else {
+            declaration_kind
+        };
         entities.push(EntityRow {
             scope,
             entity_id: identity.id,
             language: Language::Python as i16,
-            entity_family_code: declaration_kind.family_code,
-            entity_kind_code: declaration_kind.code,
+            entity_family_code: binding_entity_kind.family_code,
+            entity_kind_code: binding_entity_kind.code,
             raw_kind_code: None,
             file_id: Some(file_id),
             start_byte: Some(start),
@@ -279,7 +343,157 @@ pub fn project_ruff_semantic_batch(
         });
     }
 
+    for fact in &batch.imports {
+        let import = canonical_identity(&canonical_ids, fact.import_id, "import declaration")?;
+        let target_module = canonical_identity(
+            &canonical_ids,
+            fact.target_module_id,
+            "import target module",
+        )?;
+        entities.push(EntityRow {
+            scope,
+            entity_id: import.id,
+            language: Language::Python as i16,
+            entity_family_code: import_declaration_kind.family_code,
+            entity_kind_code: import_declaration_kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: Some(fact.source_name.clone()),
+            qualified_name: None,
+            parent_entity_id: Some(module_identity.id),
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(import.digest),
+        });
+        let target_unknown = fact.target_module_name.is_none();
+        let target_kind = if target_unknown {
+            unknown_kind
+        } else {
+            module_kind
+        };
+        entities.push(EntityRow {
+            scope,
+            entity_id: target_module.id,
+            language: Language::Python as i16,
+            entity_family_code: target_kind.family_code,
+            entity_kind_code: target_kind.code,
+            raw_kind_code: None,
+            file_id: None,
+            start_byte: None,
+            end_byte: None,
+            name: fact
+                .target_module_name
+                .clone()
+                .or_else(|| Some(fact.source_name.clone())),
+            qualified_name: fact.target_module_name.clone(),
+            parent_entity_id: None,
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(target_module.digest),
+        });
+        if let Some(imported_id) = fact.imported_entity_id {
+            let imported = canonical_identity(&canonical_ids, imported_id, "imported entity")?;
+            let imported_kind = if target_unknown {
+                unknown_kind
+            } else {
+                symbol_kind
+            };
+            entities.push(EntityRow {
+                scope,
+                entity_id: imported.id,
+                language: Language::Python as i16,
+                entity_family_code: imported_kind.family_code,
+                entity_kind_code: imported_kind.code,
+                raw_kind_code: None,
+                file_id: None,
+                start_byte: None,
+                end_byte: None,
+                name: fact.imported_name.clone(),
+                qualified_name: fact.ruff_qualified_name.clone().or_else(|| {
+                    fact.target_module_name
+                        .as_ref()
+                        .zip(fact.imported_name.as_ref())
+                        .map(|(module, name)| format!("{module}.{name}"))
+                }),
+                parent_entity_id: Some(target_module.id),
+                type_id: None,
+                flags: 0,
+                fact_hash64: digest_hash64(imported.digest),
+            });
+        }
+        module_import_details.push(ModuleImportDetailRow {
+            scope,
+            import_id: import.id,
+            source_module_id: module_identity.id,
+            target_module_id: (!target_unknown).then_some(target_module.id),
+            imported_entity_id: fact
+                .imported_entity_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "imported entity").map(|item| item.id)
+                })
+                .transpose()?,
+            local_binding_id: fact
+                .local_binding_id
+                .map(|id| {
+                    canonical_identity(&canonical_ids, id, "local import binding")
+                        .map(|item| item.id)
+                })
+                .transpose()?,
+            import_kind_code: import_kind_code(fact.kind),
+            relative_level: fact.relative_level,
+            source_name: fact.source_name.clone(),
+            alias_name: fact.alias_name.clone(),
+            star_import: fact.star_import,
+            unknown_reason_code: fact.unknown_reason_code.as_ref().map(|_| 30),
+        });
+    }
+
+    for fact in &batch.exports {
+        let export = canonical_identity(&canonical_ids, fact.export_id, "export")?;
+        let kind = if fact.reexport {
+            reexport_entity_kind
+        } else {
+            export_entity_kind
+        };
+        entities.push(EntityRow {
+            scope,
+            entity_id: export.id,
+            language: Language::Python as i16,
+            entity_family_code: kind.family_code,
+            entity_kind_code: kind.code,
+            raw_kind_code: None,
+            file_id: Some(file_id),
+            start_byte: Some(coordinate(fact.start_byte)?),
+            end_byte: Some(coordinate(fact.end_byte)?),
+            name: Some(fact.name.clone()),
+            qualified_name: Some(format!("{}.{}", batch.module_name, fact.name)),
+            parent_entity_id: Some(module_identity.id),
+            type_id: None,
+            flags: 0,
+            fact_hash64: digest_hash64(export.digest),
+        });
+    }
+
     let mut relations = Vec::new();
+    let module_scope = batch
+        .scopes
+        .iter()
+        .find(|fact| fact.kind == PythonScopeKind::Module)
+        .ok_or_else(|| FactIngestError::Protocol("Ruff module scope is absent".into()))?;
+    push_relation(
+        &mut relations,
+        scope,
+        file_id,
+        contains_kind,
+        module_identity.id,
+        canonical_identity(&canonical_ids, module_scope.scope_id, "module scope")?.id,
+        None,
+        None,
+        EvidenceCertainty::StaticSemantic as i16,
+        ResolutionClass::StaticallyResolved as i16,
+    );
     for fact in &batch.scopes {
         if let Some(parent) = fact.parent_scope_id {
             push_relation(
@@ -326,11 +540,124 @@ pub fn project_ruff_semantic_batch(
         );
     }
 
+    for fact in &batch.imports {
+        let import = canonical_identity(&canonical_ids, fact.import_id, "import declaration")?.id;
+        let target_module =
+            canonical_identity(&canonical_ids, fact.target_module_id, "target module")?.id;
+        let (certainty, resolution) = canonical_resolution(fact.resolution);
+        for (kind, source, target) in [
+            (imports_module_kind, import, target_module),
+            (depends_on_module_kind, module_identity.id, target_module),
+        ] {
+            push_relation(
+                &mut relations,
+                scope,
+                file_id,
+                kind,
+                source,
+                target,
+                Some(coordinate(fact.start_byte)?),
+                Some(coordinate(fact.end_byte)?),
+                certainty,
+                resolution,
+            );
+        }
+        if let Some(imported_id) = fact.imported_entity_id {
+            let imported = canonical_identity(&canonical_ids, imported_id, "imported entity")?.id;
+            push_relation(
+                &mut relations,
+                scope,
+                file_id,
+                imports_symbol_kind,
+                import,
+                imported,
+                Some(coordinate(fact.start_byte)?),
+                Some(coordinate(fact.end_byte)?),
+                certainty,
+                resolution,
+            );
+            push_relation(
+                &mut relations,
+                scope,
+                file_id,
+                defined_in_module_kind,
+                imported,
+                target_module,
+                None,
+                None,
+                certainty,
+                resolution,
+            );
+            if let Some(binding_id) = fact.local_binding_id {
+                push_relation(
+                    &mut relations,
+                    scope,
+                    file_id,
+                    aliases_kind,
+                    canonical_identity(&canonical_ids, binding_id, "local import binding")?.id,
+                    imported,
+                    Some(coordinate(fact.start_byte)?),
+                    Some(coordinate(fact.end_byte)?),
+                    certainty,
+                    resolution,
+                );
+            }
+        } else if let Some(binding_id) = fact.local_binding_id {
+            push_relation(
+                &mut relations,
+                scope,
+                file_id,
+                aliases_kind,
+                canonical_identity(&canonical_ids, binding_id, "local import binding")?.id,
+                target_module,
+                Some(coordinate(fact.start_byte)?),
+                Some(coordinate(fact.end_byte)?),
+                certainty,
+                resolution,
+            );
+        }
+    }
+
+    for fact in &batch.exports {
+        let export = canonical_identity(&canonical_ids, fact.export_id, "export")?.id;
+        push_relation(
+            &mut relations,
+            scope,
+            file_id,
+            if fact.reexport {
+                reexport_relation_kind
+            } else {
+                export_relation_kind
+            },
+            module_identity.id,
+            export,
+            Some(coordinate(fact.start_byte)?),
+            Some(coordinate(fact.end_byte)?),
+            EvidenceCertainty::StaticSemantic as i16,
+            ResolutionClass::StaticallyResolved as i16,
+        );
+        push_relation(
+            &mut relations,
+            scope,
+            file_id,
+            aliases_kind,
+            export,
+            canonical_identity(&canonical_ids, fact.target_id, "export target")?.id,
+            Some(coordinate(fact.start_byte)?),
+            Some(coordinate(fact.end_byte)?),
+            EvidenceCertainty::StaticSemantic as i16,
+            ResolutionClass::StaticallyResolved as i16,
+        );
+    }
+
     entities.sort_by_key(|row| row.entity_id);
+    entities.dedup_by_key(|row| row.entity_id);
     relations.sort_by_key(|row| row.fact_id);
+    relations.dedup_by_key(|row| row.fact_id);
     scope_details.sort_by_key(|row| row.scope_id);
     binding_details.sort_by_key(|row| row.binding_id);
     reference_details.sort_by_key(|row| row.reference_id);
+    module_import_details.sort_by_key(|row| row.import_id);
 
     let entity_form = required_fact_form("ENTITY_EXISTENCE")?;
     let relation_form = required_fact_form("RELATION")?;
@@ -394,14 +721,35 @@ pub fn project_ruff_semantic_batch(
         fallback_source_available: false,
         coverage_scope_fingerprint,
     };
+    let import_resolution = capability_code("IMPORT_RESOLUTION")
+        .and_then(|code| i16::try_from(code).ok())
+        .ok_or_else(|| {
+            FactIngestError::Protocol("IMPORT_RESOLUTION capability is absent".into())
+        })?;
+    let import_incomplete = batch.export_status == PythonExportStatus::IncompleteDynamic
+        || batch
+            .imports
+            .iter()
+            .any(|fact| fact.resolution != PythonResolution::Resolved);
+    let import_capability = CapabilityStatusRow {
+        scope,
+        snapshot_id: None,
+        capability_code: import_resolution,
+        owner_capability_state_code: OwnerCapabilityState::Current as i16,
+        completeness_state_code: if import_incomplete {
+            CompletenessState::Partial as i16
+        } else {
+            CompletenessState::Complete as i16
+        },
+        provider_run_id: Some(provider_run.id),
+        producer_code: Some(ProviderCode::RuffPython as i16),
+        reason_code: import_incomplete.then_some(30),
+        diagnostic_id: None,
+        fallback_source_available: false,
+        coverage_scope_fingerprint,
+    };
 
-    let module = batch
-        .scopes
-        .iter()
-        .find(|fact| fact.kind == PythonScopeKind::Module)
-        .ok_or_else(|| FactIngestError::Protocol("Ruff module scope is absent".into()))?;
-    let module_identity = canonical_identity(&canonical_ids, module.scope_id, "module scope")?.id;
-    let capability_bits = capability_mask(&["SCOPES_BINDINGS"])
+    let capability_bits = capability_mask(&["SCOPES_BINDINGS", "IMPORT_RESOLUTION"])
         .and_then(|mask| i64::try_from(mask).ok())
         .ok_or_else(|| FactIngestError::Protocol("SCOPES_BINDINGS mask is absent".into()))?;
     let owner = OwnerRow {
@@ -410,9 +758,9 @@ pub fn project_ruff_semantic_batch(
         owner_kind_code: OwnerKind::Module as i16,
         language: Language::Python as i16,
         file_id: Some(file_id),
-        semantic_entity_id: Some(module_identity),
-        start_byte: Some(coordinate(module.start_byte)?),
-        end_byte: Some(coordinate(module.end_byte)?),
+        semantic_entity_id: Some(module_identity.id),
+        start_byte: Some(coordinate(module_scope.start_byte)?),
+        end_byte: Some(coordinate(module_scope.end_byte)?),
         source_fingerprint: Some(
             *blake3::hash(batch.provider_image_fingerprint.as_bytes()).as_bytes(),
         ),
@@ -422,13 +770,17 @@ pub fn project_ruff_semantic_batch(
 
     let encoded = [
         (8, encode_owners(&[owner])?),
-        (9, encode_capability_statuses(&[capability])?),
+        (
+            9,
+            encode_capability_statuses(&[capability, import_capability])?,
+        ),
         (100, encode_entities(&entities)?),
         (110, encode_relations(&relations)?),
         (130, encode_evidence(&evidence)?),
         (200, encode_scope_details(&scope_details)?),
         (210, encode_binding_details(&binding_details)?),
         (220, encode_reference_details(&reference_details)?),
+        (230, encode_module_import_details(&module_import_details)?),
     ];
     let provider_batches = encoded
         .into_iter()
@@ -521,9 +873,75 @@ fn validate_reference_edges(batch: &PythonFrontendBatch) -> Result<(), FactInges
     Ok(())
 }
 
+fn validate_import_export_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngestError> {
+    let binding_ids = batch
+        .bindings
+        .iter()
+        .map(|binding| binding.binding_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    let imported_ids = batch
+        .imports
+        .iter()
+        .filter_map(|import| import.imported_entity_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    for import in &batch.imports {
+        if import.kind == PythonImportKind::Star && !import.star_import {
+            return Err(FactIngestError::Protocol(
+                "Ruff STAR import lacks star_import=true".into(),
+            ));
+        }
+        if import.target_module_name.is_none() && import.unknown_reason_code.is_none() {
+            return Err(FactIngestError::Protocol(format!(
+                "Ruff import {} has no module and no unknown reason",
+                import.source_name
+            )));
+        }
+        match import.resolution {
+            PythonResolution::Resolved
+                if import.ruff_qualified_name.is_none() || import.unknown_reason_code.is_some() =>
+            {
+                return Err(FactIngestError::Protocol(format!(
+                    "resolved Ruff import {} lacks a qualified name or carries an unknown reason",
+                    import.source_name
+                )));
+            }
+            PythonResolution::MayReferTo | PythonResolution::UnknownSymbol
+                if import.unknown_reason_code.is_none() =>
+            {
+                return Err(FactIngestError::Protocol(format!(
+                    "non-exact Ruff import {} lacks an unknown reason",
+                    import.source_name
+                )));
+            }
+            PythonResolution::Resolved
+            | PythonResolution::MayReferTo
+            | PythonResolution::UnknownSymbol
+            | PythonResolution::UnboundLocal => {}
+        }
+        if import
+            .local_binding_id
+            .is_some_and(|binding| !binding_ids.contains(&binding))
+        {
+            return Err(FactIngestError::Protocol(format!(
+                "Ruff import {} references an absent local binding",
+                import.source_name
+            )));
+        }
+    }
+    for export in &batch.exports {
+        if !binding_ids.contains(&export.target_id) && !imported_ids.contains(&export.target_id) {
+            return Err(FactIngestError::Protocol(format!(
+                "Ruff export {} references an absent binding or imported entity",
+                export.name
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn observation_batch(
     batch: &PythonFrontendBatch,
-    payloads: &[Vec<u8>; 5],
+    payloads: &[Vec<u8>; 7],
 ) -> Result<RecordBatch, FactIngestError> {
     let schema = Arc::new(registered_provider_observation_arrow_schema(
         OBSERVATION_SCHEMA_ID,
@@ -538,11 +956,17 @@ fn observation_batch(
         Arc::new(BinaryArray::from(vec![Some(payloads[2].as_slice())])),
         Arc::new(BinaryArray::from(vec![Some(payloads[3].as_slice())])),
         Arc::new(BinaryArray::from(vec![Some(payloads[4].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[5].as_slice())])),
+        Arc::new(BinaryArray::from(vec![Some(payloads[6].as_slice())])),
+        Arc::new(StringArray::from(vec![Some(export_status_name(
+            batch.export_status,
+        ))])),
     ];
     RecordBatch::try_new(schema, columns).map_err(FactIngestError::from)
 }
 
-fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 5], FactIngestError> {
+#[allow(clippy::too_many_lines)] // One ordered payload census keeps the registered observation schema auditable.
+fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 7], FactIngestError> {
     let scopes = batch
         .scopes
         .iter()
@@ -612,12 +1036,53 @@ fn observation_payloads(batch: &PythonFrontendBatch) -> Result<[Vec<u8>; 5], Fac
             })
         })
         .collect::<Vec<_>>();
+    let imports = batch
+        .imports
+        .iter()
+        .map(|fact| {
+            json!({
+                "import_id": hex_id(fact.import_id),
+                "scope_id": hex_id(fact.scope_id),
+                "kind": import_kind_name(fact.kind),
+                "relative_level": fact.relative_level,
+                "source_name": fact.source_name,
+                "alias_name": fact.alias_name,
+                "star_import": fact.star_import,
+                "target_module_id": hex_id(fact.target_module_id),
+                "target_module_name": fact.target_module_name,
+                "ruff_qualified_name": fact.ruff_qualified_name,
+                "resolution": resolution_name(fact.resolution),
+                "imported_entity_id": fact.imported_entity_id.map(hex_id),
+                "imported_name": fact.imported_name,
+                "local_binding_id": fact.local_binding_id.map(hex_id),
+                "unknown_reason_code": fact.unknown_reason_code,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
+    let exports = batch
+        .exports
+        .iter()
+        .map(|fact| {
+            json!({
+                "export_id": hex_id(fact.export_id),
+                "name": fact.name,
+                "target_id": hex_id(fact.target_id),
+                "reexport": fact.reexport,
+                "start_byte": fact.start_byte,
+                "end_byte": fact.end_byte,
+            })
+        })
+        .collect::<Vec<_>>();
     Ok([
         json_bytes(&scopes)?,
         json_bytes(&bindings)?,
         json_bytes(&references)?,
         json_bytes(&unknowns)?,
         json_bytes(&edges)?,
+        json_bytes(&imports)?,
+        json_bytes(&exports)?,
     ])
 }
 
@@ -784,6 +1249,31 @@ fn hex_id(id: [u8; 16]) -> String {
     output
 }
 
+const fn import_kind_code(kind: PythonImportKind) -> i16 {
+    match kind {
+        PythonImportKind::Module => 10,
+        PythonImportKind::FromName => 20,
+        PythonImportKind::Star => 30,
+        PythonImportKind::Dynamic => 40,
+    }
+}
+
+const fn import_kind_name(kind: PythonImportKind) -> &'static str {
+    match kind {
+        PythonImportKind::Module => "MODULE",
+        PythonImportKind::FromName => "FROM_NAME",
+        PythonImportKind::Star => "STAR",
+        PythonImportKind::Dynamic => "DYNAMIC",
+    }
+}
+
+const fn export_status_name(status: PythonExportStatus) -> &'static str {
+    match status {
+        PythonExportStatus::Complete => "COMPLETE",
+        PythonExportStatus::IncompleteDynamic => "INCOMPLETE_DYNAMIC",
+    }
+}
+
 const fn scope_kind_name(kind: PythonScopeKind) -> &'static str {
     match kind {
         PythonScopeKind::Module => "MODULE",
@@ -922,6 +1412,7 @@ mod tests {
             });
         }
         PythonFrontendBatch {
+            module_id: [9; 16],
             module_name: module.into(),
             provider_image_fingerprint: format!("b3:{module}"),
             scopes: vec![PythonScopeFact {
@@ -950,6 +1441,9 @@ mod tests {
                 object_id: binding,
                 kind: PythonSemanticEdgeKind::RefersTo,
             }],
+            imports: Vec::new(),
+            exports: Vec::new(),
+            export_status: PythonExportStatus::Complete,
             metrics: PythonSemanticMetrics {
                 binding_pass_duration: Duration::ZERO,
                 traversal_pass_duration: Duration::ZERO,
@@ -959,6 +1453,9 @@ mod tests {
                 binding_count: if extra_binding { 2 } else { 1 },
                 reference_count: 1,
                 unresolved_reference_count: 0,
+                import_count: 0,
+                export_count: 0,
+                unresolved_module_count: 0,
             },
             terminal: PythonSemanticTerminal {
                 pass_id: "PASS_RUFF_SCOPE_BINDING_V1",

@@ -59,7 +59,7 @@ pub const SEMANTIC_INGEST_CONTRACTS: &[SemanticIngestContract] = &[
         contract_id: "INGEST_RUFF_SEMANTIC_V1",
         lane: SemanticLane::Python,
         observation_schema_ids: &["codefabric.ruff.semantic.v1"],
-        output_table_codes: &[100, 110, 130, 200, 210, 220],
+        output_table_codes: &[100, 110, 130, 200, 210, 220, 230],
         required_fields: &[
             "module_name",
             "provider_image_fingerprint",
@@ -68,6 +68,9 @@ pub const SEMANTIC_INGEST_CONTRACTS: &[SemanticIngestContract] = &[
             "references_json",
             "unknown_symbols_json",
             "edges_json",
+            "imports_json",
+            "exports_json",
+            "export_status",
         ],
     },
     SemanticIngestContract {
@@ -135,7 +138,7 @@ pub const SEMANTIC_INVALIDATION_CONTRACTS: &[SemanticInvalidationContract] = &[
         contract_id: "INVALIDATE_PYTHON_SCOPE_BINDING_V1",
         lane: SemanticLane::Python,
         trigger_kinds: &["python-source-change", "python-manifest-change"],
-        invalidated_table_codes: &[200, 210, 220],
+        invalidated_table_codes: &[200, 210, 220, 230],
         scope: "module-owner-and-analysis-context",
     },
     SemanticInvalidationContract {

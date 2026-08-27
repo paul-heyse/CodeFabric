@@ -28,10 +28,12 @@ use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, Provider
 use crate::registries::{PROVIDER_RESOURCE_PROFILES, ProviderResourceProfileEntry};
 use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSnapshot};
 
+mod imports;
 mod semantic;
 
 pub use semantic::{
-    PythonBindingFact, PythonBindingKind, PythonFrontendBatch, PythonReferenceClass,
+    PythonBindingFact, PythonBindingKind, PythonExportFact, PythonExportStatus,
+    PythonFrontendBatch, PythonImportFact, PythonImportKind, PythonReferenceClass,
     PythonReferenceFact, PythonResolution, PythonScopeFact, PythonScopeKind, PythonSemanticEdge,
     PythonSemanticEdgeKind, PythonSemanticError, PythonSemanticMetrics, PythonSemanticTerminal,
     PythonTargetForm, PythonUnknownSymbolFact,

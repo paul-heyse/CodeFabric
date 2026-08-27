@@ -389,6 +389,24 @@ pub struct ReferenceDetailRow {
     pub unknown_reason_code: Option<String>,
 }
 
+/// One canonical module import occurrence. Nullable endpoints remain null only
+/// when the static provider cannot establish that distinct fact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleImportDetailRow {
+    pub scope: FactScope,
+    pub import_id: [u8; 16],
+    pub source_module_id: [u8; 16],
+    pub target_module_id: Option<[u8; 16]>,
+    pub imported_entity_id: Option<[u8; 16]>,
+    pub local_binding_id: Option<[u8; 16]>,
+    pub import_kind_code: i16,
+    pub relative_level: Option<i16>,
+    pub source_name: String,
+    pub alias_name: Option<String>,
+    pub star_import: bool,
+    pub unknown_reason_code: Option<i16>,
+}
+
 fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]>) -> ArrayRef {
     let mut builder = BinaryBuilder::with_capacity(rows.len(), rows.len().saturating_mul(16));
     for row in rows {
