@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_behavioral_conformance_corpus_design_v1_2026-08-26.md",
   "baseline_commit": "a3efb30d699f84a0d6f190a5ff3c2574bfcf039e",
   "status": "executing",
-  "current_packet": "WP09",
+  "current_packet": "WP10",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -57,8 +57,8 @@
       "blockers": []
     },
     "WP09": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "015b2ec",
       "deviations": [],
       "failed_approaches": [
         "The v3 dependency clause repeated its own packet identifier in explanatory prose and a supplemental Python check duplicated a governed Rust oracle name. V4 preserves the plan semantics while making both machine contracts unambiguous."
@@ -66,7 +66,7 @@
       "blockers": []
     },
     "WP10": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -180,6 +180,6 @@
     "Keep supplemental cross-language checks uniquely named so exact oracle-definition governance remains meaningful."
   ],
   "plan_deviations": [],
-  "next_action": "Complete WP09 gates for the authored semantic claim pack and immutable rejected-candidate boundary.",
-  "updated_at": "2026-08-27T01:12:00Z"
+  "next_action": "Execute WP10: implement the production-independent reference evaluators, fail-closed claim comparator, observation decoder, and independence governance.",
+  "updated_at": "2026-08-27T01:25:00Z"
 }
