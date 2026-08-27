@@ -59,11 +59,13 @@
       "blockers": []
     },
     "WP07": {
-      "status": "ready",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The accountable repository owner rejected codefabric-golden-v3.0.0-candidate.1: its digest and reference chain is valid, but it does not provide a sufficiently first-principles functional validation of intended CodeFabric behavior and outcomes. Replace the proof design through a versioned design and plan revision; do not accept or release this candidate."
+      ]
     },
     "WP08": {
       "status": "in_progress",
@@ -179,6 +181,6 @@
       "summary": "The user-directed design reconciliation was implemented with and is contained by trusted WP05 proof. It records intentional improvements without weakening accepted outcomes: exact byte integrity remains per execution, clean rebuilds compare an AC-G-79-governed functional projection across independent allocations, canonical identities remain application-owned, provider withdrawal is explicit, and semantic evidence is path-independent. WP08 still requires accountable closeout review before certification."
     }
   ],
-  "next_action": "Present candidate codefabric-golden-v3.0.0-candidate.1 and detached digest b3:1584bb589fc6686cccb254a17b454a05f4d5fbd1a8856bb179080309d7f9fd68 to the registered accountable repository owner, then pause for an explicit accept or reject decision before invoking gate-b-owner-accept.",
-  "updated_at": "2026-08-26T17:18:36Z"
+  "next_action": "Design a behavior-first functional validation authority, route the rejected Gate B candidate to a versioned predecessor/follow-up replan, and preserve every released corpus unchanged. The replacement must prove intended functionality from controlled source inputs through public observable outcomes rather than treating hashes or recorded references as the oracle.",
+  "updated_at": "2026-08-27T00:11:22Z"
 }
