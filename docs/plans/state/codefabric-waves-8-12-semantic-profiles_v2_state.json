@@ -4,17 +4,17 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP01",
+  "current_packet": "WP36",
   "packets": {
     "WP01": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "23f801f9cc9d6e2a79c87f30a89fbae8158abd9b",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP36": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -397,6 +397,6 @@
       "summary": "The user/design owner's execution direction moved the previously inactive draft v2 artifact to approved before the atomic activation transaction."
     }
   ],
-  "next_action": "Execute WP01 preflight against the current tree, then implement observation-schema regularization and the lane-neutral semantic contract substrate with focused WP01 checks.",
-  "updated_at": "2026-08-27T04:53:13Z"
+  "next_action": "Implement WP36 provider execution, workspace-view, sandbox, and lane-scheduling substrate with focused provider-runtime and lifecycle checks.",
+  "updated_at": "2026-08-27T14:30:00Z"
 }
