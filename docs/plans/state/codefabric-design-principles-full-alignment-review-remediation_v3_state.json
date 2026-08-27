@@ -1,0 +1,183 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v3_2026-08-26.md",
+  "design_path": "docs/designs/codefabric_behavioral_conformance_corpus_design_v1_2026-08-26.md",
+  "baseline_commit": "a3efb30d699f84a0d6f190a5ff3c2574bfcf039e",
+  "status": "executing",
+  "current_packet": "WP09",
+  "packets": {
+    "WP01": {
+      "status": "complete",
+      "proving_commit": "c5aa167",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP02": {
+      "status": "complete",
+      "proving_commit": "18d5e68",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP03": {
+      "status": "complete",
+      "proving_commit": "cd9be91",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP04": {
+      "status": "complete",
+      "proving_commit": "36abfda",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP05": {
+      "status": "complete",
+      "proving_commit": "469bb0d14f8eb27fbd404a795be624b36fd00873",
+      "deviations": [
+        "The shared provider, publication, and candidate source surface also landed bounded WP06 vertical machinery in the WP05 proving commit; v3 revalidated the full real-provider rebuild gate at current HEAD before carrying this packet forward."
+      ],
+      "failed_approaches": [
+        "A provider-enabled full-corpus validation was previously interrupted by an implementation-status pivot; v3 reran the complete provider-enabled six-test rebuild gate successfully instead of relying on that incomplete invocation."
+      ],
+      "blockers": []
+    },
+    "WP06": {
+      "status": "complete",
+      "proving_commit": "e198c7c38ad709eb4ed55100c00ecfa9f2ed62aa",
+      "deviations": [
+        "V3 carries forward WP06 only as real-provider execution, correlation, and integrity evidence. The owner-rejected candidate remains unreleased and its self-referential semantic comparison is explicitly excluded from functional authority."
+      ],
+      "failed_approaches": [
+        "The predecessor treated a shallow check-name comparison and functional projection as an independent semantic oracle. The owner rejected that approach; WP09-WP12 replace it while preserving the verified real vertical."
+      ],
+      "blockers": []
+    },
+    "WP09": {
+      "status": "in_progress",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [
+        "An initial broad repeated-key state patch applied carry-forward statuses to downstream packet fields. It was corrected before artifact validation or any completion claim; subsequent state edits use packet-scoped context."
+      ],
+      "blockers": []
+    },
+    "WP10": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP11": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP12": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP07": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP08": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M01": {
+      "status": "complete",
+      "proving_commit": "c5aa167",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M02": {
+      "status": "complete",
+      "proving_commit": "cd9be91",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M03": {
+      "status": "complete",
+      "proving_commit": "36abfda",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M04": {
+      "status": "complete",
+      "proving_commit": "e198c7c38ad709eb4ed55100c00ecfa9f2ed62aa",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB01": {
+      "status": "complete",
+      "proving_commit": "cd9be91",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB03": {
+      "status": "complete",
+      "proving_commit": "e198c7c38ad709eb4ed55100c00ecfa9f2ed62aa",
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [],
+  "discovered_obligations": [],
+  "plan_deviations": [],
+  "next_action": "Execute WP09: author the strict functional claim pack, duplicate-detecting ingress, and detached rejection boundary without modifying released corpora or the rejected candidate bytes.",
+  "updated_at": "2026-08-27T00:50:51Z"
+}
