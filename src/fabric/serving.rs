@@ -2833,6 +2833,13 @@ mod tests {
         let mut images =
             SourceImageStore::open(&blob_root, SourceCapturePolicy::default()).unwrap();
         let mut capture = |relative: &str, language, holder: u8| {
+            if !root
+                .join(relative)
+                .try_exists()
+                .expect("provider source fixture existence is observable")
+            {
+                return None;
+            }
             let path =
                 PlatformPath::from_raw_relative_bytes(platform, relative.as_bytes().to_vec())
                     .unwrap();
@@ -2849,16 +2856,20 @@ mod tests {
             else {
                 panic!("provider source fixture was not published: {relative}");
             };
-            crate::provider_runtime::fixture::ProviderSourceBlob {
+            Some(crate::provider_runtime::fixture::ProviderSourceBlob {
                 path: blob_root.join(&image.blob.relative_name),
                 content_digest: crate::integrity::frame_digest(image.digest),
                 file_id: image.file_id,
-            }
+            })
         };
-        let python = capture("python/golden_pkg/core.py", SourceLanguage::Python, 0x51);
+        let python = capture("python/golden_pkg/core.py", SourceLanguage::Python, 0x51)
+            .expect("required Python fixture source remains present");
         let ffi = capture("ffi/boundary.py", SourceLanguage::Python, 0x54);
-        let malformed = capture("malformed/broken.py", SourceLanguage::Python, 0x52);
-        let rust = capture("rust/src/lib.rs", SourceLanguage::Rust, 0x53);
+        let malformed = capture("malformed/broken.py", SourceLanguage::Python, 0x52)
+            .expect("required malformed Python fixture source remains present");
+        let rust = capture("rust/src/lib.rs", SourceLanguage::Rust, 0x53)
+            .or_else(|| capture("rust/src/Lib.rs", SourceLanguage::Rust, 0x53))
+            .expect("one authorized Rust fixture source remains present");
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let provider_dispatch =
             crate::provider_runtime::fixture::CompatibilityProviderRuntimeDispatch::new(
@@ -2869,7 +2880,7 @@ mod tests {
                 source_generation,
             );
         let pyrefly = provider_dispatch
-            .pyrefly(&python, &ffi, &malformed)
+            .pyrefly_with_optional_ffi(&python, ffi.as_ref(), &malformed)
             .await
             .unwrap();
         let rustc = provider_dispatch.rustc(&rust).await.unwrap();

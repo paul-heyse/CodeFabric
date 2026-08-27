@@ -65,6 +65,16 @@ impl<'a> CompatibilityProviderRuntimeDispatch<'a> {
         ffi_source: &ProviderSourceBlob,
         invalid_source: &ProviderSourceBlob,
     ) -> Result<AcceptedPyreflyRun, ProviderFixtureError> {
+        self.pyrefly_with_optional_ffi(source, Some(ffi_source), invalid_source)
+            .await
+    }
+
+    pub(crate) async fn pyrefly_with_optional_ffi(
+        &self,
+        source: &ProviderSourceBlob,
+        ffi_source: Option<&ProviderSourceBlob>,
+        invalid_source: &ProviderSourceBlob,
+    ) -> Result<AcceptedPyreflyRun, ProviderFixtureError> {
         run_pyrefly(
             self.repository_root,
             self.state_root,
@@ -168,7 +178,7 @@ async fn run_pyrefly(
     analysis_context_id: [u8; 16],
     source_generation: u64,
     source: &ProviderSourceBlob,
-    ffi_source: &ProviderSourceBlob,
+    ffi_source: Option<&ProviderSourceBlob>,
     invalid_source: &ProviderSourceBlob,
 ) -> Result<AcceptedPyreflyRun, ProviderFixtureError> {
     let binary = provider_binary(repository_root, "target/debug/codefabric-pyrefly-sidecar")?;
@@ -191,13 +201,38 @@ async fn run_pyrefly(
         encode_public_id(IdentityDomain::AnalysisContext, None, analysis_context_id)
             .map_err(invariant)?;
     let context_manifest = b"{\"language\":\"python\",\"profile\":\"PYTHON_SEMANTIC_V1\"}".to_vec();
-    let source_manifest_digest = digest(
-        format!(
-            "{}:{}:{}",
-            source.content_digest, ffi_source.content_digest, invalid_source.content_digest
-        )
-        .as_bytes(),
-    );
+    let mut manifest_digests = vec![source.content_digest.as_str()];
+    if let Some(ffi_source) = ffi_source {
+        manifest_digests.push(ffi_source.content_digest.as_str());
+    }
+    manifest_digests.push(invalid_source.content_digest.as_str());
+    let source_manifest_digest = digest(manifest_digests.join(":").as_bytes());
+    let mut modules = vec![PyreflyModuleInput {
+        module_id: "module:gate-b-python".to_owned(),
+        module_name: "golden_pkg.core".to_owned(),
+        file_id: encode_public_id(IdentityDomain::SourceFile, None, source.file_id)
+            .map_err(invariant)?,
+        source_blob_path: source.path.clone(),
+        content_digest: source.content_digest.clone(),
+    }];
+    if let Some(ffi_source) = ffi_source {
+        modules.push(PyreflyModuleInput {
+            module_id: "module:gate-b-ffi".to_owned(),
+            module_name: "ffi.boundary".to_owned(),
+            file_id: encode_public_id(IdentityDomain::SourceFile, None, ffi_source.file_id)
+                .map_err(invariant)?,
+            source_blob_path: ffi_source.path.clone(),
+            content_digest: ffi_source.content_digest.clone(),
+        });
+    }
+    modules.push(PyreflyModuleInput {
+        module_id: "module:gate-b-python-invalid".to_owned(),
+        module_name: "malformed.broken".to_owned(),
+        file_id: encode_public_id(IdentityDomain::SourceFile, None, invalid_source.file_id)
+            .map_err(invariant)?,
+        source_blob_path: invalid_source.path.clone(),
+        content_digest: invalid_source.content_digest.clone(),
+    });
     let request = PyreflyRunRequest {
         provider_run_id: "run:gate-b-pyrefly".to_owned(),
         workspace_id: workspace_id_text,
@@ -208,32 +243,7 @@ async fn run_pyrefly(
         context_manifest,
         source_snapshot_lease_id: "lease:gate-b-pyrefly".to_owned(),
         source_manifest_digest,
-        modules: vec![
-            PyreflyModuleInput {
-                module_id: "module:gate-b-python".to_owned(),
-                module_name: "golden_pkg.core".to_owned(),
-                file_id: encode_public_id(IdentityDomain::SourceFile, None, source.file_id)
-                    .map_err(invariant)?,
-                source_blob_path: source.path.clone(),
-                content_digest: source.content_digest.clone(),
-            },
-            PyreflyModuleInput {
-                module_id: "module:gate-b-ffi".to_owned(),
-                module_name: "ffi.boundary".to_owned(),
-                file_id: encode_public_id(IdentityDomain::SourceFile, None, ffi_source.file_id)
-                    .map_err(invariant)?,
-                source_blob_path: ffi_source.path.clone(),
-                content_digest: ffi_source.content_digest.clone(),
-            },
-            PyreflyModuleInput {
-                module_id: "module:gate-b-python-invalid".to_owned(),
-                module_name: "malformed.broken".to_owned(),
-                file_id: encode_public_id(IdentityDomain::SourceFile, None, invalid_source.file_id)
-                    .map_err(invariant)?,
-                source_blob_path: invalid_source.path.clone(),
-                content_digest: invalid_source.content_digest.clone(),
-            },
-        ],
+        modules,
         requested_capability_codes: vec![90, 110],
         deadline_unix_ms: now_millis() + 120_000,
         output_schema_bundle_digest: digest(include_bytes!(

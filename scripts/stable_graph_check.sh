@@ -96,7 +96,7 @@ printf '%s' "$root_shape" | jq -e '
     "dep:thiserror", "dep:toml"
   ] | sort)
   and (.features["fact-generation"] | sort) == ([
-    "contract-models", "dep:blake3", "dep:rayon", "dep:ruff_python_ast",
+    "contract-models", "dep:blake3", "dep:petgraph", "dep:rayon", "dep:ruff_python_ast",
     "dep:ruff_python_index", "dep:ruff_python_parser", "dep:ruff_python_semantic", "dep:ruff_python_trivia",
     "dep:ruff_source_file", "dep:ruff_text_size", "dep:tree-sitter",
     "dep:tree-sitter-python", "dep:tree-sitter-rust", "dep:thiserror"

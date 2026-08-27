@@ -302,6 +302,8 @@ struct BindingDomain {
     name: String,
 }
 
+type Reaching = BTreeMap<BindingDomain, BTreeSet<PythonSemanticId>>;
+
 fn selected_derivation() -> Result<(), PythonSemanticError> {
     let selected = DERIVATION_ENTRIES
         .iter()
@@ -389,20 +391,60 @@ fn node_for_range(
         .or(Some(cfg.entry_node_id))
 }
 
-fn event_kind(reference: &PythonReferenceFact, node: Option<&PythonCfgNodeFact>) -> PythonDataflowEventKind {
+fn event_kind(
+    reference: &PythonReferenceFact,
+    owner_id: PythonSemanticId,
+    cfgs: &[PythonCfgFact],
+    nodes: &[PythonCfgNodeFact],
+) -> PythonDataflowEventKind {
     if reference.class == PythonReferenceClass::CallReference {
         return PythonDataflowEventKind::Callee;
     }
-    let label = node.map_or("", |node| node.label);
-    if label.contains("condition") || matches!(node.map(|node| node.kind), Some(PythonCfgNodeKind::Branch)) {
-        PythonDataflowEventKind::Condition
-    } else if label.contains("return") || label.contains("yield") {
+    let Some(cfg) = cfgs.iter().find(|cfg| cfg.owner_id == owner_id) else {
+        return PythonDataflowEventKind::Read;
+    };
+    let containing = nodes.iter().filter(|node| {
+        node.cfg_id == cfg.cfg_id
+            && node
+                .start_byte
+                .zip(node.end_byte)
+                .is_some_and(|(start, end)| {
+                    start <= reference.start_byte && reference.end_byte <= end
+                })
+    });
+    let contexts = containing
+        .map(|node| (node.kind, node.label))
+        .collect::<Vec<_>>();
+    if contexts.iter().any(|(kind, label)| {
+        *kind == PythonCfgNodeKind::ReturnPoint
+            || label.contains("return")
+            || label.contains("yield")
+    }) {
         PythonDataflowEventKind::ReturnOrYield
-    } else if label.contains("decorator") {
+    } else if contexts.iter().any(|(kind, label)| {
+        label.contains("condition")
+            || matches!(
+                kind,
+                PythonCfgNodeKind::Branch
+                    | PythonCfgNodeKind::LoopHeader
+                    | PythonCfgNodeKind::Switch
+            )
+    }) {
+        PythonDataflowEventKind::Condition
+    } else if contexts
+        .iter()
+        .any(|(_, label)| label.contains("decorator"))
+    {
         PythonDataflowEventKind::Decorator
-    } else if label.contains("annotation") {
+    } else if contexts
+        .iter()
+        .any(|(_, label)| label.contains("annotation"))
+    {
         PythonDataflowEventKind::EvaluatedAnnotation
-    } else if label.contains("index") || label.contains("subscript") {
+    } else if contexts
+        .iter()
+        .any(|(_, label)| label.contains("index") || label.contains("subscript"))
+    {
         PythonDataflowEventKind::Index
     } else {
         PythonDataflowEventKind::Read
@@ -421,7 +463,14 @@ fn relation(
     name.push(':');
     name.push_str(&id_text(target_id));
     PythonDataflowRelationFact {
-        relation_id: semantic_id(fingerprint, "dataflow-relation", 0, 0, &name, kind.discriminator()),
+        relation_id: semantic_id(
+            fingerprint,
+            "dataflow-relation",
+            0,
+            0,
+            &name,
+            kind.discriminator(),
+        ),
         owner_id,
         source_id,
         target_id,
@@ -456,10 +505,6 @@ pub(super) fn project_python_dataflow(
     cfg_edges: &[PythonCfgEdgeFact],
 ) -> Result<PythonDataflowProjection, PythonSemanticError> {
     selected_derivation()?;
-    let nodes_by_id = cfg_nodes
-        .iter()
-        .map(|node| (node.cfg_node_id, node))
-        .collect::<BTreeMap<_, _>>();
     let binding_by_id = bindings
         .iter()
         .map(|binding| (binding.binding_id, binding))
@@ -484,17 +529,25 @@ pub(super) fn project_python_dataflow(
     let mut components = BTreeMap::new();
 
     for binding in bindings {
-        let Some(owner_id) = owner_for_range(binding.start_byte, binding.end_byte, callables) else {
+        let Some(owner_id) = owner_for_range(binding.start_byte, binding.end_byte, callables)
+        else {
             continue;
         };
-        let cfg_node_id = node_for_range(owner_id, binding.start_byte, binding.end_byte, cfgs, cfg_nodes);
+        let cfg_node_id = node_for_range(
+            owner_id,
+            binding.start_byte,
+            binding.end_byte,
+            cfgs,
+            cfg_nodes,
+        );
         let location_id = semantic_id(
             fingerprint,
             "memory-location",
             binding.start_byte,
             binding.end_byte,
             &binding.name,
-            binding_location_kind(binding.kind).code() as u8,
+            u8::try_from(binding_location_kind(binding.kind).code())
+                .expect("location kind code fits the semantic-ID discriminator"),
         );
         let value_id = semantic_id(
             fingerprint,
@@ -520,20 +573,22 @@ pub(super) fn project_python_dataflow(
             &id_text(binding.binding_id),
             1,
         );
-        locations.entry(location_id).or_insert_with(|| PythonMemoryLocationFact {
-            location_id,
-            owner_id,
-            kind: binding_location_kind(binding.kind),
-            base_entity_id: Some(binding.binding_id),
-            base_local_id: Some(binding.binding_id),
-            parent_location_id: None,
-            projection_depth: 0,
-            canonical_path_hash: hash_path(owner_id, &binding.name),
-            display_path: Some(binding.name.clone()),
-            flags: 0,
-            precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
-            derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
-        });
+        locations
+            .entry(location_id)
+            .or_insert_with(|| PythonMemoryLocationFact {
+                location_id,
+                owner_id,
+                kind: binding_location_kind(binding.kind),
+                base_entity_id: Some(binding.binding_id),
+                base_local_id: Some(binding.binding_id),
+                parent_location_id: None,
+                projection_depth: 0,
+                canonical_path_hash: hash_path(owner_id, &binding.name),
+                display_path: Some(binding.name.clone()),
+                flags: 0,
+                precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+            });
         let component_id = semantic_id(
             fingerprint,
             "access-path-component",
@@ -542,19 +597,21 @@ pub(super) fn project_python_dataflow(
             &binding.name,
             0,
         );
-        components.entry(component_id).or_insert(PythonAccessPathComponentFact {
-            component_id,
-            owner_id,
-            location_id,
-            ordinal: 0,
-            kind: PythonAccessProjectionKind::Base,
-            field_entity_id: Some(binding.binding_id),
-            index_value_id: None,
-            constant_index: None,
-            flags: 0,
-            precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
-            derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
-        });
+        components
+            .entry(component_id)
+            .or_insert(PythonAccessPathComponentFact {
+                component_id,
+                owner_id,
+                location_id,
+                ordinal: 0,
+                kind: PythonAccessProjectionKind::Base,
+                field_entity_id: Some(binding.binding_id),
+                index_value_id: None,
+                constant_index: None,
+                flags: 0,
+                precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+            });
         values.push(PythonValueFact {
             value_id,
             owner_id,
@@ -597,50 +654,78 @@ pub(super) fn project_python_dataflow(
     }
 
     for reference in references.iter().filter(|reference| {
-        !matches!(reference.class, PythonReferenceClass::Write | PythonReferenceClass::Delete)
+        !matches!(
+            reference.class,
+            PythonReferenceClass::Write | PythonReferenceClass::Delete
+        )
     }) {
-        let Some(owner_id) = owner_for_range(reference.start_byte, reference.end_byte, callables) else {
+        let Some(owner_id) = owner_for_range(reference.start_byte, reference.end_byte, callables)
+        else {
             continue;
         };
-        let cfg_node_id = node_for_range(owner_id, reference.start_byte, reference.end_byte, cfgs, cfg_nodes);
+        let cfg_node_id = node_for_range(
+            owner_id,
+            reference.start_byte,
+            reference.end_byte,
+            cfgs,
+            cfg_nodes,
+        );
         let location_binding = binding_by_id.get(&reference.target_id).copied();
-        let location_kind = location_binding.map_or(PythonLocationKind::Unknown, |binding| binding_location_kind(binding.kind));
+        let location_kind = location_binding.map_or(PythonLocationKind::Unknown, |binding| {
+            binding_location_kind(binding.kind)
+        });
         let location_id = semantic_id(
             fingerprint,
             "memory-location-reference",
             0,
             0,
             &format!("{}:{}", id_text(owner_id), reference.name),
-            location_kind.code() as u8,
+            u8::try_from(location_kind.code())
+                .expect("location kind code fits the semantic-ID discriminator"),
         );
-        locations.entry(location_id).or_insert_with(|| PythonMemoryLocationFact {
-            location_id,
-            owner_id,
-            kind: location_kind,
-            base_entity_id: location_binding.map(|binding| binding.binding_id),
-            base_local_id: location_binding.map(|binding| binding.binding_id),
-            parent_location_id: None,
-            projection_depth: 0,
-            canonical_path_hash: hash_path(owner_id, &reference.name),
-            display_path: Some(reference.name.clone()),
-            flags: i64::from(location_binding.is_none()),
-            precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
-            derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
-        });
-        let component_id = semantic_id(fingerprint, "access-path-component-reference", 0, 0, &format!("{}:{}", id_text(owner_id), reference.name), 0);
-        components.entry(component_id).or_insert(PythonAccessPathComponentFact {
-            component_id,
-            owner_id,
-            location_id,
-            ordinal: 0,
-            kind: if location_binding.is_some() { PythonAccessProjectionKind::Base } else { PythonAccessProjectionKind::Unknown },
-            field_entity_id: location_binding.map(|binding| binding.binding_id),
-            index_value_id: None,
-            constant_index: None,
-            flags: i64::from(location_binding.is_none()),
-            precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
-            derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
-        });
+        locations
+            .entry(location_id)
+            .or_insert_with(|| PythonMemoryLocationFact {
+                location_id,
+                owner_id,
+                kind: location_kind,
+                base_entity_id: location_binding.map(|binding| binding.binding_id),
+                base_local_id: location_binding.map(|binding| binding.binding_id),
+                parent_location_id: None,
+                projection_depth: 0,
+                canonical_path_hash: hash_path(owner_id, &reference.name),
+                display_path: Some(reference.name.clone()),
+                flags: i64::from(location_binding.is_none()),
+                precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+            });
+        let component_id = semantic_id(
+            fingerprint,
+            "access-path-component-reference",
+            0,
+            0,
+            &format!("{}:{}", id_text(owner_id), reference.name),
+            0,
+        );
+        components
+            .entry(component_id)
+            .or_insert(PythonAccessPathComponentFact {
+                component_id,
+                owner_id,
+                location_id,
+                ordinal: 0,
+                kind: if location_binding.is_some() {
+                    PythonAccessProjectionKind::Base
+                } else {
+                    PythonAccessProjectionKind::Unknown
+                },
+                field_entity_id: location_binding.map(|binding| binding.binding_id),
+                index_value_id: None,
+                constant_index: None,
+                flags: i64::from(location_binding.is_none()),
+                precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+            });
         let reference_identity = id_text(reference.reference_id);
         let value_id = semantic_id(
             fingerprint,
@@ -661,7 +746,11 @@ pub(super) fn project_python_dataflow(
         values.push(PythonValueFact {
             value_id,
             owner_id,
-            kind: if location_binding.is_some() { PythonValueKind::NameRead } else { PythonValueKind::Unknown },
+            kind: if location_binding.is_some() {
+                PythonValueKind::NameRead
+            } else {
+                PythonValueKind::Unknown
+            },
             producer_operation_id: Some(operation_id),
             syntax_id: Some(reference.reference_id),
             start_byte: Some(reference.start_byte),
@@ -692,7 +781,7 @@ pub(super) fn project_python_dataflow(
             ),
             owner_id,
             cfg_node_id,
-            kind: event_kind(reference, cfg_node_id.and_then(|id| nodes_by_id.get(&id).copied())),
+            kind: event_kind(reference, owner_id, cfgs, cfg_nodes),
             binding_id: location_binding.map(|binding| binding.binding_id),
             value_id: Some(value_id),
             location_id: Some(location_id),
@@ -715,13 +804,51 @@ pub(super) fn project_python_dataflow(
             continue;
         };
         let cfg_node_id = node_for_range(owner_id, call.start_byte, call.end_byte, cfgs, cfg_nodes);
-        let value_id = semantic_id(fingerprint, "call-return-value", call.start_byte, call.end_byte, &id_text(call.call_site_id), 1);
-        let operation_id = semantic_id(fingerprint, "call-operation", call.start_byte, call.end_byte, &id_text(call.call_site_id), 1);
-        values.push(PythonValueFact { value_id, owner_id, kind: PythonValueKind::CallReturn, producer_operation_id: Some(operation_id), syntax_id: Some(call.syntax_id), start_byte: Some(call.start_byte), end_byte: Some(call.end_byte), flags: 0, precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE, derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID });
-        operations.push(PythonOperationFact { operation_id, owner_id, cfg_node_id, kind: PythonOperationKind::Call, result_value_id: Some(value_id), syntax_id: Some(call.syntax_id), flags: 0, precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE, derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID });
+        let value_id = semantic_id(
+            fingerprint,
+            "call-return-value",
+            call.start_byte,
+            call.end_byte,
+            &id_text(call.call_site_id),
+            1,
+        );
+        let operation_id = semantic_id(
+            fingerprint,
+            "call-operation",
+            call.start_byte,
+            call.end_byte,
+            &id_text(call.call_site_id),
+            1,
+        );
+        values.push(PythonValueFact {
+            value_id,
+            owner_id,
+            kind: PythonValueKind::CallReturn,
+            producer_operation_id: Some(operation_id),
+            syntax_id: Some(call.syntax_id),
+            start_byte: Some(call.start_byte),
+            end_byte: Some(call.end_byte),
+            flags: 0,
+            precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+            derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+        });
+        operations.push(PythonOperationFact {
+            operation_id,
+            owner_id,
+            cfg_node_id,
+            kind: PythonOperationKind::Call,
+            result_value_id: Some(value_id),
+            syntax_id: Some(call.syntax_id),
+            flags: 0,
+            precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+            derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+        });
 
         if let Some(callee) = syntax_by_id.get(&call.callee_syntax_id)
-            && matches!(callee.text.as_str(), "exec" | "eval" | "getattr" | "setattr" | "__import__")
+            && matches!(
+                callee.text.as_str(),
+                "exec" | "eval" | "getattr" | "setattr" | "__import__"
+            )
         {
             let dynamic_name = format!("{}:{}", callee.text, id_text(call.call_site_id));
             let unknown_location_id = semantic_id(
@@ -748,20 +875,22 @@ pub(super) fn project_python_dataflow(
                 &dynamic_name,
                 1,
             );
-            locations.entry(unknown_location_id).or_insert(PythonMemoryLocationFact {
-                location_id: unknown_location_id,
-                owner_id,
-                kind: PythonLocationKind::Unknown,
-                base_entity_id: Some(call.callee_syntax_id),
-                base_local_id: None,
-                parent_location_id: None,
-                projection_depth: 0,
-                canonical_path_hash: hash_path(owner_id, &dynamic_name),
-                display_path: Some(format!("unknown({})", callee.text)),
-                flags: 1,
-                precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
-                derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
-            });
+            locations
+                .entry(unknown_location_id)
+                .or_insert(PythonMemoryLocationFact {
+                    location_id: unknown_location_id,
+                    owner_id,
+                    kind: PythonLocationKind::Unknown,
+                    base_entity_id: Some(call.callee_syntax_id),
+                    base_local_id: None,
+                    parent_location_id: None,
+                    projection_depth: 0,
+                    canonical_path_hash: hash_path(owner_id, &dynamic_name),
+                    display_path: Some(format!("unknown({})", callee.text)),
+                    flags: 1,
+                    precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                    derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+                });
             let component_id = semantic_id(
                 fingerprint,
                 "dynamic-unknown-component",
@@ -770,19 +899,21 @@ pub(super) fn project_python_dataflow(
                 &dynamic_name,
                 1,
             );
-            components.entry(component_id).or_insert(PythonAccessPathComponentFact {
-                component_id,
-                owner_id,
-                location_id: unknown_location_id,
-                ordinal: 0,
-                kind: PythonAccessProjectionKind::Unknown,
-                field_entity_id: None,
-                index_value_id: None,
-                constant_index: None,
-                flags: 1,
-                precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
-                derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
-            });
+            components
+                .entry(component_id)
+                .or_insert(PythonAccessPathComponentFact {
+                    component_id,
+                    owner_id,
+                    location_id: unknown_location_id,
+                    ordinal: 0,
+                    kind: PythonAccessProjectionKind::Unknown,
+                    field_entity_id: None,
+                    index_value_id: None,
+                    constant_index: None,
+                    flags: 1,
+                    precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                    derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+                });
             values.push(PythonValueFact {
                 value_id: unknown_value_id,
                 owner_id,
@@ -835,19 +966,76 @@ pub(super) fn project_python_dataflow(
             && let Some((base, field)) = callee.text.rsplit_once('.')
         {
             let display = format!("{base}.{field}");
-            let location_id = semantic_id(fingerprint, "member-location", call.start_byte, call.end_byte, &display, 1);
-            locations.entry(location_id).or_insert(PythonMemoryLocationFact { location_id, owner_id, kind: PythonLocationKind::InstanceMember, base_entity_id: call.receiver_syntax_id, base_local_id: None, parent_location_id: None, projection_depth: 1, canonical_path_hash: hash_path(owner_id, &display), display_path: Some(display.clone()), flags: 0, precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE, derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID });
-            for (ordinal, (kind, text)) in [(PythonAccessProjectionKind::Base, base), (PythonAccessProjectionKind::Field, field)].into_iter().enumerate() {
-                let component_id = semantic_id(fingerprint, "member-location-component", call.start_byte, call.end_byte, text, u8::try_from(ordinal).unwrap_or(u8::MAX));
-                components.entry(component_id).or_insert(PythonAccessPathComponentFact { component_id, owner_id, location_id, ordinal: i16::try_from(ordinal).unwrap_or(i16::MAX), kind, field_entity_id: (ordinal == 1).then_some(call.callee_syntax_id), index_value_id: None, constant_index: None, flags: 0, precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE, derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID });
+            let location_id = semantic_id(
+                fingerprint,
+                "member-location",
+                call.start_byte,
+                call.end_byte,
+                &display,
+                1,
+            );
+            locations
+                .entry(location_id)
+                .or_insert(PythonMemoryLocationFact {
+                    location_id,
+                    owner_id,
+                    kind: PythonLocationKind::InstanceMember,
+                    base_entity_id: call.receiver_syntax_id,
+                    base_local_id: None,
+                    parent_location_id: None,
+                    projection_depth: 1,
+                    canonical_path_hash: hash_path(owner_id, &display),
+                    display_path: Some(display.clone()),
+                    flags: 0,
+                    precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                    derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+                });
+            for (ordinal, (kind, text)) in [
+                (PythonAccessProjectionKind::Base, base),
+                (PythonAccessProjectionKind::Field, field),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let component_id = semantic_id(
+                    fingerprint,
+                    "member-location-component",
+                    call.start_byte,
+                    call.end_byte,
+                    text,
+                    u8::try_from(ordinal).unwrap_or(u8::MAX),
+                );
+                components
+                    .entry(component_id)
+                    .or_insert(PythonAccessPathComponentFact {
+                        component_id,
+                        owner_id,
+                        location_id,
+                        ordinal: i16::try_from(ordinal).unwrap_or(i16::MAX),
+                        kind,
+                        field_entity_id: (ordinal == 1).then_some(call.callee_syntax_id),
+                        index_value_id: None,
+                        constant_index: None,
+                        flags: 0,
+                        precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                        derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+                    });
             }
         }
     }
-    for argument in call_arguments.iter().filter(|argument| argument.start_byte.is_some()) {
-        let (start, end) = (argument.start_byte.unwrap_or(0), argument.end_byte.unwrap_or(0));
+    for argument in call_arguments
+        .iter()
+        .filter(|argument| argument.start_byte.is_some())
+    {
+        let (start, end) = (
+            argument.start_byte.unwrap_or(0),
+            argument.end_byte.unwrap_or(0),
+        );
         if let Some(owner_id) = owner_for_range(start, end, callables) {
             let cfg_node_id = node_for_range(owner_id, start, end, cfgs, cfg_nodes);
-            if let Some(event) = events.iter_mut().find(|event| event.owner_id == owner_id && event.start_byte == start && event.end_byte == end) {
+            if let Some(event) = events.iter_mut().find(|event| {
+                event.owner_id == owner_id && event.start_byte == start && event.end_byte == end
+            }) {
                 event.kind = PythonDataflowEventKind::Argument;
                 event.ordinal = Some(argument.ordinal);
                 event.cfg_node_id = cfg_node_id;
@@ -855,7 +1043,15 @@ pub(super) fn project_python_dataflow(
         }
     }
 
-    events.sort_by_key(|event| (event.owner_id, event.start_byte, event.end_byte, event.kind, event.event_id));
+    events.sort_by_key(|event| {
+        (
+            event.owner_id,
+            event.start_byte,
+            event.end_byte,
+            event.kind,
+            event.event_id,
+        )
+    });
     events.dedup_by_key(|event| event.event_id);
     for (ordinal, event) in events.iter_mut().enumerate() {
         if event.ordinal.is_none() {
@@ -883,13 +1079,24 @@ pub(super) fn project_python_dataflow(
     }
     let mut predecessors = BTreeMap::<PythonSemanticId, BTreeSet<PythonSemanticId>>::new();
     for edge in cfg_edges {
-        predecessors.entry(edge.target_node_id).or_default().insert(edge.source_node_id);
+        predecessors
+            .entry(edge.target_node_id)
+            .or_default()
+            .insert(edge.source_node_id);
     }
-    let graph_nodes = cfg_nodes.iter().map(|node| node.cfg_node_id).collect::<Vec<_>>();
-    type Reaching = BTreeMap<BindingDomain, BTreeSet<PythonSemanticId>>;
-    let mut incoming = graph_nodes.iter().map(|node| (*node, Reaching::new())).collect::<BTreeMap<_, _>>();
+    let graph_nodes = cfg_nodes
+        .iter()
+        .map(|node| node.cfg_node_id)
+        .collect::<Vec<_>>();
+    let mut incoming = graph_nodes
+        .iter()
+        .map(|node| (*node, Reaching::new()))
+        .collect::<BTreeMap<_, _>>();
     let mut outgoing = incoming.clone();
-    let convergence_limit = graph_nodes.len().saturating_mul(events.len().max(1)).saturating_add(1);
+    let convergence_limit = graph_nodes
+        .len()
+        .saturating_mul(events.len().max(1))
+        .saturating_add(1);
     let mut iteration_count = 0_usize;
     loop {
         iteration_count = iteration_count.saturating_add(1);
@@ -898,35 +1105,58 @@ pub(super) fn project_python_dataflow(
             let mut next_in = Reaching::new();
             for predecessor in predecessors.get(node).into_iter().flatten() {
                 for (domain, definitions) in &outgoing[predecessor] {
-                    next_in.entry(domain.clone()).or_default().extend(definitions);
+                    next_in
+                        .entry(domain.clone())
+                        .or_default()
+                        .extend(definitions);
                 }
             }
             let mut next_out = next_in.clone();
-            for event in events_by_node.get(node).into_iter().flatten().filter(|event| event.kind == PythonDataflowEventKind::Definition) {
+            for event in events_by_node
+                .get(node)
+                .into_iter()
+                .flatten()
+                .filter(|event| event.kind == PythonDataflowEventKind::Definition)
+            {
                 if let Some(domain) = domain_for_event.get(&event.event_id) {
                     next_out.insert(domain.clone(), BTreeSet::from([event.event_id]));
                 }
             }
-            changed |= incoming.get(node) != Some(&next_in) || outgoing.get(node) != Some(&next_out);
+            changed |=
+                incoming.get(node) != Some(&next_in) || outgoing.get(node) != Some(&next_out);
             incoming.insert(*node, next_in);
             outgoing.insert(*node, next_out);
         }
-        if !changed { break; }
+        if !changed {
+            break;
+        }
         if iteration_count > convergence_limit {
-            return Err(PythonSemanticError::Invariant("PY_OWNER_REACHING_DEFS_V1 did not converge within its finite lattice bound".into()));
+            return Err(PythonSemanticError::Invariant(
+                "PY_OWNER_REACHING_DEFS_V1 did not converge within its finite lattice bound".into(),
+            ));
         }
     }
 
     let mut relations = BTreeSet::new();
-    let mut merged_values = BTreeMap::<(PythonSemanticId, BindingDomain, BTreeSet<PythonSemanticId>), PythonSemanticId>::new();
+    let mut merged_values = BTreeMap::<
+        (PythonSemanticId, BindingDomain, BTreeSet<PythonSemanticId>),
+        PythonSemanticId,
+    >::new();
     for node in &graph_nodes {
         let mut current = incoming[node].clone();
         for event in events_by_node.get(node).into_iter().flatten() {
-            let Some(domain) = domain_for_event.get(&event.event_id) else { continue; };
+            let Some(domain) = domain_for_event.get(&event.event_id) else {
+                continue;
+            };
             if event.kind == PythonDataflowEventKind::Definition {
                 for killed in current.get(domain).into_iter().flatten() {
                     if *killed != event.event_id {
-                        relations.insert((event.owner_id, event.event_id, *killed, PythonDataflowRelationKind::KillsDefinition));
+                        relations.insert((
+                            event.owner_id,
+                            event.event_id,
+                            *killed,
+                            PythonDataflowRelationKind::KillsDefinition,
+                        ));
                     }
                 }
                 current.insert(domain.clone(), BTreeSet::from([event.event_id]));
@@ -934,40 +1164,227 @@ pub(super) fn project_python_dataflow(
             }
             let reaching = current.get(domain).cloned().unwrap_or_default();
             for definition in &reaching {
-                for kind in [PythonDataflowRelationKind::ReachingDefinition, PythonDataflowRelationKind::Reaches, PythonDataflowRelationKind::DefUse, PythonDataflowRelationKind::DataDep] {
+                for kind in [
+                    PythonDataflowRelationKind::ReachingDefinition,
+                    PythonDataflowRelationKind::Reaches,
+                    PythonDataflowRelationKind::DefUse,
+                    PythonDataflowRelationKind::DataDep,
+                ] {
                     relations.insert((event.owner_id, *definition, event.event_id, kind));
                 }
-                if let (Some(source), Some(target)) = (value_by_event.get(definition), event.value_id) {
-                    relations.insert((event.owner_id, *source, target, PythonDataflowRelationKind::ValueFlowsTo));
+                if let (Some(source), Some(target)) =
+                    (value_by_event.get(definition), event.value_id)
+                {
+                    relations.insert((
+                        event.owner_id,
+                        *source,
+                        target,
+                        PythonDataflowRelationKind::ValueFlowsTo,
+                    ));
                 }
             }
             if reaching.len() > 1 {
                 let key = (*node, domain.clone(), reaching.clone());
-                let merged = *merged_values.entry(key).or_insert_with(|| semantic_id(fingerprint, "merged-value", event.start_byte, event.end_byte, &domain.name, 1));
-                values.push(PythonValueFact { value_id: merged, owner_id: event.owner_id, kind: PythonValueKind::Merged, producer_operation_id: None, syntax_id: event.syntax_id, start_byte: Some(event.start_byte), end_byte: Some(event.end_byte), flags: 0, precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE, derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID });
+                let merged = *merged_values.entry(key).or_insert_with(|| {
+                    semantic_id(
+                        fingerprint,
+                        "merged-value",
+                        event.start_byte,
+                        event.end_byte,
+                        &domain.name,
+                        1,
+                    )
+                });
+                values.push(PythonValueFact {
+                    value_id: merged,
+                    owner_id: event.owner_id,
+                    kind: PythonValueKind::Merged,
+                    producer_operation_id: None,
+                    syntax_id: event.syntax_id,
+                    start_byte: Some(event.start_byte),
+                    end_byte: Some(event.end_byte),
+                    flags: 0,
+                    precision_profile_id: PYTHON_DATAFLOW_PRECISION_PROFILE,
+                    derivation_bundle_id: PYTHON_DATAFLOW_BUNDLE_ID,
+                });
                 for definition in &reaching {
                     if let Some(source) = value_by_event.get(definition) {
-                        relations.insert((event.owner_id, *source, merged, PythonDataflowRelationKind::ValueFlowsTo));
+                        relations.insert((
+                            event.owner_id,
+                            *source,
+                            merged,
+                            PythonDataflowRelationKind::ValueFlowsTo,
+                        ));
                     }
                 }
                 if let Some(target) = event.value_id {
-                    relations.insert((event.owner_id, merged, target, PythonDataflowRelationKind::ValueFlowsTo));
+                    relations.insert((
+                        event.owner_id,
+                        merged,
+                        target,
+                        PythonDataflowRelationKind::ValueFlowsTo,
+                    ));
                 }
             }
         }
     }
 
-    values.sort_by_key(|fact| (fact.owner_id, fact.start_byte, fact.end_byte, fact.kind, fact.value_id));
+    values.sort_by_key(|fact| {
+        (
+            fact.owner_id,
+            fact.start_byte,
+            fact.end_byte,
+            fact.kind,
+            fact.value_id,
+        )
+    });
     values.dedup_by_key(|fact| fact.value_id);
     operations.sort_by_key(|fact| (fact.owner_id, fact.cfg_node_id, fact.operation_id));
     operations.dedup_by_key(|fact| fact.operation_id);
     let mut locations = locations.into_values().collect::<Vec<_>>();
     locations.sort_by_key(|fact| (fact.owner_id, fact.display_path.clone(), fact.location_id));
     let mut components = components.into_values().collect::<Vec<_>>();
-    components.sort_by_key(|fact| (fact.owner_id, fact.location_id, fact.ordinal, fact.component_id));
+    components.sort_by_key(|fact| {
+        (
+            fact.owner_id,
+            fact.location_id,
+            fact.ordinal,
+            fact.component_id,
+        )
+    });
     let relations = relations
         .into_iter()
         .map(|(owner, source, target, kind)| relation(fingerprint, owner, source, target, kind))
         .collect();
-    Ok(PythonDataflowProjection { values, operations, events, locations, components, relations, iteration_count: u64::try_from(iteration_count).unwrap_or(u64::MAX) })
+    Ok(PythonDataflowProjection {
+        values,
+        operations,
+        events,
+        locations,
+        components,
+        relations,
+        iteration_count: u64::try_from(iteration_count).unwrap_or(u64::MAX),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use ruff_python_ast::{PySourceType, PythonVersion};
+    use ruff_python_parser::{ParseOptions, parse_unchecked};
+
+    use super::*;
+
+    fn analyze(source: &str) -> super::super::semantic::PythonFrontendBatch {
+        let parsed = parse_unchecked(
+            source,
+            ParseOptions::from(PySourceType::Python).with_target_version(PythonVersion::PY314),
+        )
+        .try_into_module()
+        .expect("module parse");
+        super::super::semantic::project_python_semantics(
+            source,
+            parsed.syntax().body.as_slice(),
+            "fixture",
+            Path::new("fixture.py"),
+            "b3:dataflow-fixture",
+            false,
+        )
+        .expect("semantic projection")
+    }
+
+    #[test]
+    fn py_defuse_fixture_conformance() {
+        let source = r"
+def choose(flag):
+    value = 1
+    if flag:
+        value = 2
+    return value
+";
+        let batch = analyze(source);
+        let owner = batch
+            .callables
+            .iter()
+            .find(|callable| callable.name == "choose")
+            .expect("choose callable")
+            .callable_id;
+        let binding_names = batch
+            .bindings
+            .iter()
+            .map(|binding| (binding.binding_id, binding.name.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let value_definitions = batch
+            .dataflow_events
+            .iter()
+            .filter(|event| {
+                event.owner_id == owner
+                    && event.kind == PythonDataflowEventKind::Definition
+                    && event
+                        .binding_id
+                        .and_then(|binding| binding_names.get(&binding).copied())
+                        == Some("value")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(value_definitions.len(), 2);
+        let return_use = batch
+            .dataflow_events
+            .iter()
+            .find(|event| {
+                event.owner_id == owner
+                    && event.kind == PythonDataflowEventKind::ReturnOrYield
+                    && source.get(
+                        usize::try_from(event.start_byte).expect("test offset fits usize")
+                            ..usize::try_from(event.end_byte).expect("test offset fits usize"),
+                    ) == Some("value")
+            })
+            .expect("return use event");
+        let reaching = batch
+            .dataflow_relations
+            .iter()
+            .filter(|relation| {
+                relation.owner_id == owner
+                    && relation.kind == PythonDataflowRelationKind::DefUse
+                    && relation.target_id == return_use.event_id
+            })
+            .map(|relation| relation.source_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            reaching,
+            value_definitions
+                .iter()
+                .map(|event| event.event_id)
+                .collect()
+        );
+
+        let merged = batch
+            .values
+            .iter()
+            .find(|value| value.owner_id == owner && value.kind == PythonValueKind::Merged)
+            .expect("branch merge value");
+        let definition_values = value_definitions
+            .iter()
+            .map(|event| event.value_id.expect("definition value"))
+            .collect::<BTreeSet<_>>();
+        let merge_inputs = batch
+            .dataflow_relations
+            .iter()
+            .filter(|relation| {
+                relation.kind == PythonDataflowRelationKind::ValueFlowsTo
+                    && relation.target_id == merged.value_id
+            })
+            .map(|relation| relation.source_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(merge_inputs, definition_values);
+        assert!(batch.dataflow_relations.iter().any(|relation| {
+            relation.kind == PythonDataflowRelationKind::ValueFlowsTo
+                && relation.source_id == merged.value_id
+                && relation.target_id == return_use.value_id.expect("return value")
+        }));
+        assert!(batch.dataflow_relations.iter().all(|relation| {
+            relation.precision_profile_id == PYTHON_DATAFLOW_PRECISION_PROFILE
+                && relation.derivation_bundle_id == PYTHON_DATAFLOW_BUNDLE_ID
+        }));
+    }
 }

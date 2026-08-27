@@ -8209,6 +8209,22 @@ pub const PROPERTY_KIND_IDS: &[&str] = &[
     "CALLABLE_SIGNATURE_REF",
     "RAW_TYPE_SHAPE_HASH",
     "NULLABLE_SEMANTICS",
+    "SCOPE_KIND",
+    "BINDING_KIND",
+    "REFERENCE_CLASS",
+    "IMPORT_KIND",
+    "CALLABLE_FLAGS",
+    "PARAMETER_KIND",
+    "CALL_DISPATCH_KIND",
+    "ARGUMENT_BINDING_STATUS",
+    "CFG_KIND",
+    "CFG_NODE_KIND",
+    "CFG_EDGE_FLAGS",
+    "DATAFLOW_VALUE_KIND",
+    "OPERATION_KIND",
+    "DATAFLOW_EVENT_KIND",
+    "MEMORY_LOCATION_KIND",
+    "ACCESS_PROJECTION_KIND",
 ];
 
 pub const FACT_KIND_IDS: &[&str] = &["ENTITY_EXISTENCE", "RELATION", "PROPERTY"];
@@ -9587,6 +9603,70 @@ pub const PROPERTY_KIND_CODES: &[OntologyCodeEntry] = &[
     },
     OntologyCodeEntry {
         code: 170,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 180,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 190,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 200,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 210,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 220,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 230,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 240,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 250,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 260,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 270,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 280,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 290,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 300,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 310,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 320,
+        family_code: 0,
+    },
+    OntologyCodeEntry {
+        code: 330,
         family_code: 0,
     },
 ];

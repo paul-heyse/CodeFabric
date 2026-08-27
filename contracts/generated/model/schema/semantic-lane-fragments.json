@@ -175,7 +175,7 @@
     {
       "artifact_id": "codefabric.semantic-fragment.python",
       "artifact_kind": "semantic-lane-fragment",
-      "canonical_digest": "b3:01ff2eeda90d0cf0ff753d38c338a839278d672a288498ffe90777d877485687",
+      "canonical_digest": "b3:9764214f2bce8dfd5ae5ec266b4c9a6b777950c3a5432291928c52939419d653",
       "compatible_suite_major": 1,
       "contexts": [
         {
@@ -3296,8 +3296,541 @@
             "domain": "PYTHON_ACCESS_PROJECTION_KIND"
           }
         ],
-        "property_codes": [],
-        "property_record_additions": []
+        "property_codes": [
+          180,
+          190,
+          200,
+          210,
+          220,
+          230,
+          240,
+          250,
+          260,
+          270,
+          280,
+          290,
+          300,
+          310,
+          320,
+          330
+        ],
+        "property_record_additions": [
+          {
+            "canonical_name": "SCOPE_KIND",
+            "canonicalization_rule": "scope-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 180,
+            "property_slug": "scope-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "NOT_APPLICABLE",
+            "source_span_allowed": true,
+            "statement_template_id": "scope-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "scope_detail.scope_kind"
+            },
+            "subject_kind_constraints": [
+              "SCOPE"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "BINDING_KIND",
+            "canonicalization_rule": "binding-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 190,
+            "property_slug": "binding-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "NOT_APPLICABLE",
+            "source_span_allowed": true,
+            "statement_template_id": "binding-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "binding_detail.binding_kind"
+            },
+            "subject_kind_constraints": [
+              "SYMBOL",
+              "DECLARATION",
+              "IMPORT_BINDING"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "REFERENCE_CLASS",
+            "canonicalization_rule": "reference-class-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 200,
+            "property_slug": "reference-class",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "NOT_APPLICABLE",
+            "source_span_allowed": true,
+            "statement_template_id": "reference-class",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "reference_detail.reference_class"
+            },
+            "subject_kind_constraints": [
+              "REFERENCE"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "IMPORT_KIND",
+            "canonicalization_rule": "import-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 210,
+            "property_slug": "import-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": true,
+            "statement_template_id": "import-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "module_import_detail.import_kind_code"
+            },
+            "subject_kind_constraints": [
+              "IMPORT_DECLARATION"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "CALLABLE_FLAGS",
+            "canonicalization_rule": "callable-flags-bitset",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 220,
+            "property_slug": "callable-flags",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "NOT_APPLICABLE",
+            "source_span_allowed": true,
+            "statement_template_id": "callable-flags",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "callable_detail.callable_flags"
+            },
+            "subject_kind_constraints": [
+              "CALLABLE"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "unsigned_integer"
+            }
+          },
+          {
+            "canonical_name": "PARAMETER_KIND",
+            "canonicalization_rule": "parameter-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 230,
+            "property_slug": "parameter-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "NOT_APPLICABLE",
+            "source_span_allowed": true,
+            "statement_template_id": "parameter-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "parameter_detail.parameter_kind_code"
+            },
+            "subject_kind_constraints": [
+              "PARAMETER"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "CALL_DISPATCH_KIND",
+            "canonicalization_rule": "call-dispatch-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 240,
+            "property_slug": "call-dispatch-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": true,
+            "statement_template_id": "call-dispatch-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "call_site_detail.dispatch_kind_code"
+            },
+            "subject_kind_constraints": [
+              "CALL_SITE"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "ARGUMENT_BINDING_STATUS",
+            "canonicalization_rule": "argument-binding-status-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "semantic-owner",
+            "property_code": 250,
+            "property_slug": "argument-binding-status",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": true,
+            "statement_template_id": "argument-binding-status",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "call_argument_detail.binding_status_code"
+            },
+            "subject_kind_constraints": [
+              "ARGUMENT"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "CFG_KIND",
+            "canonicalization_rule": "cfg-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 260,
+            "property_slug": "cfg-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT",
+            "source_span_allowed": false,
+            "statement_template_id": "cfg-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "cfg_graph.cfg_kind_code"
+            },
+            "subject_kind_constraints": [
+              "CALLABLE"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "CFG_NODE_KIND",
+            "canonicalization_rule": "cfg-node-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 270,
+            "property_slug": "cfg-node-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT",
+            "source_span_allowed": true,
+            "statement_template_id": "cfg-node-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "cfg_node_detail.node_kind_code"
+            },
+            "subject_kind_constraints": [
+              "CFG_BLOCK"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "CFG_EDGE_FLAGS",
+            "canonicalization_rule": "cfg-edge-flags-bitset",
+            "cardinality": "ZERO_OR_MORE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 280,
+            "property_slug": "cfg-edge-flags",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT",
+            "source_span_allowed": false,
+            "statement_template_id": "cfg-edge-flags",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "cfg_edge_detail.edge_flags"
+            },
+            "subject_kind_constraints": [
+              "CFG_BLOCK"
+            ],
+            "unknown_value_policy": "capability-unavailable",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "unsigned_integer"
+            }
+          },
+          {
+            "canonical_name": "DATAFLOW_VALUE_KIND",
+            "canonicalization_rule": "dataflow-value-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 290,
+            "property_slug": "dataflow-value-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": true,
+            "statement_template_id": "dataflow-value-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "value_detail.value_kind_code"
+            },
+            "subject_kind_constraints": [
+              "VALUE"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "OPERATION_KIND",
+            "canonicalization_rule": "python-operation-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 300,
+            "property_slug": "operation-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": true,
+            "statement_template_id": "operation-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "operation_detail.operation_kind_code"
+            },
+            "subject_kind_constraints": [
+              "DATAFLOW_OPERATION"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "DATAFLOW_EVENT_KIND",
+            "canonicalization_rule": "python-dataflow-event-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 310,
+            "property_slug": "dataflow-event-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": true,
+            "statement_template_id": "dataflow-event-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "dataflow_event_detail.event_kind_code"
+            },
+            "subject_kind_constraints": [
+              "DEFINITION_EVENT",
+              "USE_EVENT"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "MEMORY_LOCATION_KIND",
+            "canonicalization_rule": "python-location-kind-registry-code",
+            "cardinality": "EXACTLY_ONE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 320,
+            "property_slug": "memory-location-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": false,
+            "statement_template_id": "memory-location-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "memory_location_detail.location_kind_code"
+            },
+            "subject_kind_constraints": [
+              "MEMORY_LOCATION"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          },
+          {
+            "canonical_name": "ACCESS_PROJECTION_KIND",
+            "canonicalization_rule": "python-access-projection-kind-registry-code",
+            "cardinality": "ONE_OR_MORE",
+            "certainty_required": true,
+            "context_rule": "semantic",
+            "directness_applicability": "DIRECT",
+            "introduced": "1.3",
+            "null_semantics": "prohibited",
+            "owner_rule": "owner-local-derivation",
+            "property_code": 330,
+            "property_slug": "access-projection-kind",
+            "query_phrase_ids": [],
+            "required_profiles": [
+              "PYTHON_SEMANTIC_V1"
+            ],
+            "resolution_applicability": "EXACT_OR_UNRESOLVED",
+            "source_span_allowed": false,
+            "statement_template_id": "access-projection-kind",
+            "storage": {
+              "canonical_table": "property_fact",
+              "extension_table_column": "access_path_component.projection_kind_code"
+            },
+            "subject_kind_constraints": [
+              "MEMORY_LOCATION"
+            ],
+            "unknown_value_policy": "explicit-unknown-value",
+            "value_type": {
+              "kind": "scalar",
+              "scalar": "enum"
+            }
+          }
+        ]
       },
       "status": "accepted",
       "version": "1.0"
@@ -3384,7 +3917,7 @@
     }
   ],
   "source_digests": {
-    "contracts/semantic-fragments/python.json": "b3:01ff2eeda90d0cf0ff753d38c338a839278d672a288498ffe90777d877485687",
+    "contracts/semantic-fragments/python.json": "b3:9764214f2bce8dfd5ae5ec266b4c9a6b777950c3a5432291928c52939419d653",
     "contracts/semantic-fragments/rust.json": "b3:22056b1ab97fa275036659a4fbf2251adec0d4d372660ea88d596938e8248ba3",
     "contracts/semantic-fragments/shared.json": "b3:5d17416334af0893e17599cdc20122360092ff508e9a2a90845040e63048671b"
   },

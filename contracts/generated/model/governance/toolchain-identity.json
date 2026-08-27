@@ -23,7 +23,7 @@
   },
   "families": [
     {
-      "action_key": "b3:c7a69fc055c9c78217cf42e0aa0b78c2003b28c999368e54c75ff0c1645c86ec",
+      "action_key": "b3:7936e65e65ec9aa1621cf505606d950e235bdbc5d6ae832bd358d4f809343886",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -59,7 +59,7 @@
       }
     },
     {
-      "action_key": "b3:0c9b335d1da8122925416434cecde5f221cab02be16eeb053e9294a3bdbb1a9a",
+      "action_key": "b3:953141fe3a196eaea81177787a261ca651e04d69dedfd2bcc70852a683b9e15b",
       "family": "schemas",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",

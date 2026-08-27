@@ -4,7 +4,7 @@
   "artifacts": [
     {
       "artifact_id": "codefabric.schema.analysis-context.schema",
-      "canonical_digest": "b3:0bbc7f13f53e14a24eaf1b4cf20dcb4859be8d8d7e596332ec0a9ba3322efbe3",
+      "canonical_digest": "b3:9cd72af205052232804e377fe4adfde213f3536fd484aa8054eebe9b28958574",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -25,41 +25,41 @@
     },
     {
       "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
-      "canonical_digest": "b3:d5e2a461624bc3a4f590e093d1ce253335471985d88cd36aaa27386a6ff4694d",
+      "canonical_digest": "b3:5ec07dd7962cf68eb2b97b11cb2d74dfe527ca7a1a636bbfee40fad97b43b2d7",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     },
     {
       "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
-      "canonical_digest": "b3:de034bd053224653b2e8eb1793f2e93d6fffbcc528de562a0925a58ac91be2cf",
+      "canonical_digest": "b3:307313edb8c33db6377fc3599fbd0ca0db01a4d106fb8220e73bdc09e6ed6eb1",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     },
     {
       "artifact_id": "codefabric.schema.public-status.schema",
-      "canonical_digest": "b3:996e43263343ab5f74af4e22c223bdf62e086fd62f96b8f87515ef017f4f1e4a",
+      "canonical_digest": "b3:9ba77e9a3ed7f8d31b7ad7524934a8d6fa3c0559c4999bf5c4c6ca6a9ecc02e5",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     },
     {
       "artifact_id": "codefabric.schema.serving-snapshot.schema",
-      "canonical_digest": "b3:49225300ddea6841fc28cb61a102c780ef01c14bd9f73e79ca764c80a579098f",
+      "canonical_digest": "b3:16153b894c3252e9ec7fc2ec6896da9e261140fae43da4492a2ff5ab22b7c38b",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     },
     {
       "artifact_id": "codefabric.schema.source-context.schema",
-      "canonical_digest": "b3:962b50cb0f31ddf05d13935f60cd77726f42a2e5ca60a8ee450baa4e5fe34a56",
+      "canonical_digest": "b3:59708340d0e0951a074eb057b9dbcd7ce85aa690189029fd9943b5e45cc8f1b7",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:30e2ea377c77a3be1990873a83c5aa4dd1006863f85fe190bd83b1ccf9591b61",
+  "bundle_digest": "b3:31197eddc0b76e582fba23b33e5272c7822a37a48ae9d1f9f019440b0c732fe4",
   "bundle_kind": "schema",
   "bundle_major": 1,
   "bundle_version": "1.0",

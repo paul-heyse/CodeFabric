@@ -57,9 +57,9 @@ def _seal(root: Path, registry: dict[str, object], schema: dict[str, object]) ->
 
 def test_current_schema_has_bidirectional_property_closure() -> None:
     result = check()
-    assert result["property_count"] == 17
-    assert result["semantic_extension_table_count"] == 2
-    assert result["extension_mapping_count"] == 12
+    assert result["property_count"] == 33
+    assert result["semantic_extension_table_count"] == 18
+    assert result["extension_mapping_count"] == 28
 
 
 def test_rejects_unregistered_semantic_extension_table(tmp_path: Path) -> None:
@@ -68,7 +68,7 @@ def test_rejects_unregistered_semantic_extension_table(tmp_path: Path) -> None:
     assert isinstance(tables, list)
     tables.append(
         {
-            "table_code": 200,
+            "table_code": 999,
             "name": "unregistered_detail",
             "columns": [{"name": "semantic_value"}],
         }

@@ -265,8 +265,8 @@ impl WorkspaceNamespace {
             "control" | "bundle" => &self.control,
             "universal-fact" | "source" | "lexical" | "syntax" | "semantic-type"
             | "semantic-binding" | "module-import" | "callable" | "call" | "control-flow"
-            | "dataflow-value" | "dataflow-operation" | "dataflow-event"
-            | "memory-location" | "access-path" => &self.facts,
+            | "dataflow-value" | "dataflow-operation" | "dataflow-event" | "memory-location"
+            | "access-path" => &self.facts,
             "overlay-control" => &self.derived,
             family => {
                 return Err(FabricError::TableInvariant {

@@ -348,7 +348,7 @@ struct ScopeState {
 
 struct BindingPass<'a> {
     semantic: SemanticModel<'a>,
-    fingerprint: &'a str,
+    fingerprint: String,
     scopes: Vec<ScopeState>,
     scope_by_key: HashMap<ScopeKey, usize>,
     scope_stack: Vec<usize>,
@@ -363,7 +363,7 @@ impl<'a> BindingPass<'a> {
         suite: &'a [Stmt],
         module_name: &'a str,
         module_path: &'a Path,
-        fingerprint: &'a str,
+        fingerprint: &str,
         source_len: u64,
     ) -> Self {
         let module = Module {
@@ -404,7 +404,7 @@ impl<'a> BindingPass<'a> {
         };
         Self {
             semantic,
-            fingerprint,
+            fingerprint: fingerprint.to_owned(),
             scopes: vec![state],
             scope_by_key: HashMap::new(),
             scope_stack: vec![0],
@@ -433,7 +433,7 @@ impl<'a> BindingPass<'a> {
         let start = u64::from(u32::from(range.start()));
         let end = u64::from(u32::from(range.end()));
         let scope_id = semantic_id(
-            self.fingerprint,
+            &self.fingerprint,
             "scope",
             start,
             end,
@@ -512,7 +512,7 @@ impl<'a> BindingPass<'a> {
         let start = u64::from(u32::from(range.start()));
         let end = u64::from(u32::from(range.end()));
         let binding_id = semantic_id(
-            self.fingerprint,
+            &self.fingerprint,
             "binding",
             start,
             end,
@@ -1112,7 +1112,7 @@ enum ReferenceMode {
 
 struct ReferencePass<'a, 'model> {
     semantic: &'model mut SemanticModel<'a>,
-    fingerprint: &'a str,
+    fingerprint: &'model str,
     scopes: &'model [ScopeState],
     scope_by_key: &'model HashMap<ScopeKey, usize>,
     scope_stack: Vec<usize>,
@@ -1131,7 +1131,7 @@ impl<'a, 'model> ReferencePass<'a, 'model> {
         pass.semantic.scope_id = ScopeId::global();
         Self {
             semantic: &mut pass.semantic,
-            fingerprint: pass.fingerprint,
+            fingerprint: pass.fingerprint.as_str(),
             scopes: &pass.scopes,
             scope_by_key: &pass.scope_by_key,
             scope_stack: vec![0],
@@ -1542,6 +1542,7 @@ pub(super) fn project_python_semantics<'a>(
     provider_image_fingerprint: &'a str,
     inject_cleanup_failure: bool,
 ) -> Result<PythonFrontendBatch, PythonSemanticError> {
+    let identity_fingerprint = python_module_identity_fingerprint(module_name, module_path);
     let binding_started = Instant::now();
     let source_len = suite
         .last()
@@ -1550,7 +1551,7 @@ pub(super) fn project_python_semantics<'a>(
         suite,
         module_name,
         module_path,
-        provider_image_fingerprint,
+        &identity_fingerprint,
         source_len,
     );
     visitor::walk_body(&mut pass, suite);
@@ -1580,7 +1581,7 @@ pub(super) fn project_python_semantics<'a>(
     let mut all_references = references;
     for binding in &pass.bindings {
         let reference_id = semantic_id(
-            provider_image_fingerprint,
+            &identity_fingerprint,
             "write-reference",
             binding.start_byte,
             binding.end_byte,
@@ -1649,7 +1650,7 @@ pub(super) fn project_python_semantics<'a>(
     let import_projection = super::imports::project_python_imports(
         suite,
         module_name,
-        provider_image_fingerprint,
+        &identity_fingerprint,
         &scopes,
         &pass.bindings,
         &ruff_qualified_names,
@@ -1658,7 +1659,7 @@ pub(super) fn project_python_semantics<'a>(
         source,
         suite,
         module_name,
-        provider_image_fingerprint,
+        &identity_fingerprint,
         import_projection.module_id,
         &scopes,
         &pass.bindings,
@@ -1667,11 +1668,11 @@ pub(super) fn project_python_semantics<'a>(
     let cfg_projection = super::cfg::project_python_cfgs(
         suite,
         module_name,
-        provider_image_fingerprint,
+        &identity_fingerprint,
         &callable_projection.callables,
     )?;
     let dataflow_projection = super::dataflow::project_python_dataflow(
-        provider_image_fingerprint,
+        &identity_fingerprint,
         &pass.bindings,
         &all_references,
         &callable_projection.callables,
@@ -1712,8 +1713,7 @@ pub(super) fn project_python_semantics<'a>(
         dataflow_value_count: u64::try_from(dataflow_projection.values.len()).unwrap_or(u64::MAX),
         dataflow_operation_count: u64::try_from(dataflow_projection.operations.len())
             .unwrap_or(u64::MAX),
-        dataflow_event_count: u64::try_from(dataflow_projection.events.len())
-            .unwrap_or(u64::MAX),
+        dataflow_event_count: u64::try_from(dataflow_projection.events.len()).unwrap_or(u64::MAX),
         memory_location_count: u64::try_from(dataflow_projection.locations.len())
             .unwrap_or(u64::MAX),
         access_path_component_count: u64::try_from(dataflow_projection.components.len())
@@ -1826,10 +1826,23 @@ pub(super) fn semantic_id(
     id
 }
 
+fn python_module_identity_fingerprint(module_name: &str, module_path: &Path) -> String {
+    let mut hasher =
+        blake3::Hasher::new_derive_key("codefabric.python-module-identity-namespace.v1");
+    hasher.update(&(module_name.len() as u64).to_be_bytes());
+    hasher.update(module_name.as_bytes());
+    let path = module_path.as_os_str().as_encoded_bytes();
+    hasher.update(&(path.len() as u64).to_be_bytes());
+    hasher.update(path);
+    format!("b3:{}", hasher.finalize().to_hex())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
+    #[cfg(feature = "daemon")]
+    use arrow_array::{Array as _, FixedSizeBinaryArray, Int32Array, StringArray};
     use ruff_python_parser::{ParseOptions, parse_unchecked};
 
     use super::super::callables::{
@@ -1878,6 +1891,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // One fixture asserts the scope, binding, reference, and edge contract together.
     fn py_scope_binding_fixture_conformance() {
         let source = r"
 x = 1
@@ -2048,6 +2062,7 @@ def outer():
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // The oracle cross-checks syntax, semantic, and canonical import/export views.
     fn py_import_export_fixture_conformance() {
         let batch = analyze(
             r#"
@@ -2120,8 +2135,184 @@ __all__ = ["alias"] + ("osp",)
                 projection.batch(230).unwrap().num_rows(),
                 batch.imports.len()
             );
-            assert_eq!(projection.batch(9).unwrap().num_rows(), 3);
+            let entities = projection.batch(100).unwrap().batch();
+            let entity_ids = entities
+                .column_by_name("entity_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            let kinds = entities
+                .column_by_name("entity_kind_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap();
+            let file_ids = entities
+                .column_by_name("file_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            let names = entities
+                .column_by_name("name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let import_names = (0..entities.num_rows())
+                .filter(|&row| kinds.value(row) == 590)
+                .map(|row| names.value(row))
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                import_names,
+                batch
+                    .imports
+                    .iter()
+                    .map(|fact| fact.source_name.as_str())
+                    .collect()
+            );
+            let export_names = (0..entities.num_rows())
+                .filter(|&row| matches!(kinds.value(row), 610 | 620))
+                .map(|row| names.value(row))
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                export_names,
+                batch
+                    .exports
+                    .iter()
+                    .map(|fact| fact.name.as_str())
+                    .collect()
+            );
+            let owned_modules = (0..entities.num_rows())
+                .filter(|&row| kinds.value(row) == 70 && !file_ids.is_null(row))
+                .collect::<Vec<_>>();
+            assert_eq!(owned_modules.len(), 1);
+            assert_eq!(names.value(owned_modules[0]), batch.module_name);
+            assert_eq!(entity_ids.value(owned_modules[0]).len(), 16);
             assert_eq!(projection.batch(280).unwrap().num_rows(), batch.cfgs.len());
+        }
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // The oracle verifies the complete profile algebra and derivation stamps.
+    fn py_semantic_profile_partial_parity() {
+        let batch = analyze(
+            "def choose(flag: bool) -> int:\n    value = 1\n    if flag:\n        value = 2\n    return value\n",
+            false,
+        )
+        .unwrap();
+
+        #[cfg(feature = "daemon")]
+        {
+            use crate::fact_ingest::FactScope;
+            use crate::python_semantic::project_ruff_semantic_batch;
+            use crate::registries::{
+                Completeness, DERIVATION_ENTRIES, OwnerCapabilityState, capability_code,
+            };
+            use crate::ruff_adapter::{
+                PYTHON_DATAFLOW_BUNDLE_ID, PYTHON_DATAFLOW_DERIVATION_ID,
+                PYTHON_DATAFLOW_PRECISION_PROFILE,
+            };
+
+            let projection = project_ruff_semantic_batch(
+                FactScope {
+                    workspace_id: [0x71; 16],
+                    analysis_context_id: [0x72; 16],
+                    source_generation: 73,
+                    owner_id: [0x74; 16],
+                },
+                [0x75; 16],
+                &batch,
+            )
+            .unwrap();
+            assert_eq!(projection.profile_completeness, Completeness::Partial);
+
+            let capability_rows = projection.batch(9).unwrap().batch();
+            let codes = capability_rows
+                .column_by_name("capability_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow_array::Int16Array>()
+                .unwrap();
+            let states = capability_rows
+                .column_by_name("owner_capability_state_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow_array::Int16Array>()
+                .unwrap();
+            let reasons = capability_rows
+                .column_by_name("reason_code")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow_array::Int16Array>()
+                .unwrap();
+            let unavailable = (0..capability_rows.num_rows())
+                .filter(|&row| {
+                    states.value(row) == OwnerCapabilityState::UnavailableProvider as i16
+                })
+                .map(|row| {
+                    assert_eq!(reasons.value(row), 30);
+                    codes.value(row)
+                })
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                unavailable,
+                ["COMPUTED_TYPES", "MEMBER_RESOLUTION", "CALL_TARGETS"]
+                    .into_iter()
+                    .map(|name| i16::try_from(capability_code(name).unwrap()).unwrap())
+                    .collect()
+            );
+            for name in [
+                "TYPED_AST",
+                "SCOPES_BINDINGS",
+                "IMPORT_RESOLUTION",
+                "DECLARED_TYPES",
+                "CFG",
+                "DEF_USE",
+            ] {
+                let code = i16::try_from(capability_code(name).unwrap()).unwrap();
+                assert_eq!(
+                    codes.iter().flatten().filter(|seen| *seen == code).count(),
+                    1
+                );
+            }
+
+            let derivations = DERIVATION_ENTRIES
+                .iter()
+                .filter(|entry| entry.derivation_id == PYTHON_DATAFLOW_DERIVATION_ID)
+                .collect::<Vec<_>>();
+            assert_eq!(derivations.len(), 1);
+            assert_eq!(
+                derivations[0].output_fact_families,
+                [
+                    "reaching-definition",
+                    "reaches",
+                    "def-use",
+                    "data-dep",
+                    "value-flows-to",
+                    "kills-definition",
+                ]
+            );
+            assert!(batch.values.iter().all(|fact| fact.precision_profile_id
+                == PYTHON_DATAFLOW_PRECISION_PROFILE
+                && fact.derivation_bundle_id == PYTHON_DATAFLOW_BUNDLE_ID));
+            assert!(batch.operations.iter().all(|fact| fact.precision_profile_id
+                == PYTHON_DATAFLOW_PRECISION_PROFILE
+                && fact.derivation_bundle_id == PYTHON_DATAFLOW_BUNDLE_ID));
+            assert!(
+                batch
+                    .dataflow_events
+                    .iter()
+                    .all(
+                        |fact| fact.precision_profile_id == PYTHON_DATAFLOW_PRECISION_PROFILE
+                            && fact.derivation_bundle_id == PYTHON_DATAFLOW_BUNDLE_ID
+                    )
+            );
+            assert!(batch.dataflow_relations.iter().all(|fact| {
+                fact.precision_profile_id == PYTHON_DATAFLOW_PRECISION_PROFILE
+                    && fact.derivation_bundle_id == PYTHON_DATAFLOW_BUNDLE_ID
+            }));
         }
     }
 

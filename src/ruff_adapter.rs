@@ -45,12 +45,11 @@ pub use cfg::{
     PythonCfgNodeKind, PythonCfgValidationError, validate_python_cfg,
 };
 pub use dataflow::{
-    PYTHON_DATAFLOW_BUNDLE_ID, PYTHON_DATAFLOW_DERIVATION_ID,
-    PYTHON_DATAFLOW_PRECISION_PROFILE, PythonAccessPathComponentFact,
-    PythonAccessProjectionKind, PythonDataflowEventFact, PythonDataflowEventKind,
-    PythonDataflowRelationFact, PythonDataflowRelationKind, PythonLocationKind,
-    PythonMemoryLocationFact, PythonOperationFact, PythonOperationKind, PythonValueFact,
-    PythonValueKind,
+    PYTHON_DATAFLOW_BUNDLE_ID, PYTHON_DATAFLOW_DERIVATION_ID, PYTHON_DATAFLOW_PRECISION_PROFILE,
+    PythonAccessPathComponentFact, PythonAccessProjectionKind, PythonDataflowEventFact,
+    PythonDataflowEventKind, PythonDataflowRelationFact, PythonDataflowRelationKind,
+    PythonLocationKind, PythonMemoryLocationFact, PythonOperationFact, PythonOperationKind,
+    PythonValueFact, PythonValueKind,
 };
 pub use semantic::{
     PythonBindingFact, PythonBindingKind, PythonExportFact, PythonExportStatus,
@@ -1870,10 +1869,12 @@ const fn elapsed_exceeds_deadline(elapsed: Duration, max_wall_millis: u64) -> bo
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fmt::Write as _;
+    use std::path::Path;
 
     use super::*;
-    use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterLanguage};
+    use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterEdit, TreeSitterLanguage};
 
     type ConfigureBound = fn(&mut RuffLimits);
 
@@ -1905,6 +1906,315 @@ mod tests {
             .unwrap()
             .parse_full(revision, source.clone(), &Cancellation::default())
             .unwrap()
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // The falsification transaction covers current CST retention and semantic withdrawal.
+    fn py_parse_error_capability_gap_falsification() {
+        use arrow_array::{Array as _, Int16Array};
+
+        use crate::fact_ingest::FactScope;
+        use crate::python_semantic::{
+            project_python_parse_unavailable, project_ruff_semantic_batch,
+        };
+        use crate::registries::{Completeness, OwnerCapabilityState, capability_code};
+
+        let valid_source = provider_text(
+            "def dynamic(flag, obj, name, code):\n    value = 1\n    if flag:\n        value = 2\n    exec(code)\n    return getattr(obj, name) or value\n",
+        );
+        let valid_tree = tree_snapshot(1, &valid_source);
+        let mut adapter = RuffAdapter::new().unwrap();
+        let valid_snapshot = adapter
+            .parse(
+                1,
+                valid_source.clone(),
+                &valid_tree,
+                &Cancellation::default(),
+            )
+            .unwrap();
+        let valid = adapter
+            .semantic_batch(1, "fixture", Path::new("fixture.py"), false)
+            .unwrap();
+        assert_eq!(
+            valid_snapshot.source.end_byte,
+            u64::try_from(valid_source.text.len()).unwrap()
+        );
+
+        let valid_scope = FactScope {
+            workspace_id: [0x81; 16],
+            analysis_context_id: [0x82; 16],
+            source_generation: 1,
+            owner_id: [0x83; 16],
+        };
+        let valid_projection =
+            project_ruff_semantic_batch(valid_scope, [0x84; 16], &valid).unwrap();
+        assert!(valid_projection.batch(100).unwrap().num_rows() > 0);
+
+        let mut missing_unknown = valid.clone();
+        let removed_values = missing_unknown
+            .values
+            .iter()
+            .filter(|fact| fact.kind == PythonValueKind::Unknown)
+            .map(|fact| fact.value_id)
+            .collect::<BTreeSet<_>>();
+        let removed_locations = missing_unknown
+            .memory_locations
+            .iter()
+            .filter(|fact| fact.kind == PythonLocationKind::Unknown)
+            .map(|fact| fact.location_id)
+            .collect::<BTreeSet<_>>();
+        let removed_events = missing_unknown
+            .dataflow_events
+            .iter()
+            .filter(|fact| fact.kind == PythonDataflowEventKind::DynamicUnknown)
+            .map(|fact| fact.event_id)
+            .collect::<BTreeSet<_>>();
+        missing_unknown
+            .values
+            .retain(|fact| !removed_values.contains(&fact.value_id));
+        missing_unknown.operations.retain(|fact| {
+            fact.result_value_id
+                .is_none_or(|id| !removed_values.contains(&id))
+        });
+        missing_unknown
+            .dataflow_events
+            .retain(|fact| !removed_events.contains(&fact.event_id));
+        missing_unknown
+            .memory_locations
+            .retain(|fact| !removed_locations.contains(&fact.location_id));
+        missing_unknown
+            .access_path_components
+            .retain(|fact| !removed_locations.contains(&fact.location_id));
+        missing_unknown.dataflow_relations.retain(|fact| {
+            !removed_values.contains(&fact.source_id)
+                && !removed_values.contains(&fact.target_id)
+                && !removed_events.contains(&fact.source_id)
+                && !removed_events.contains(&fact.target_id)
+        });
+        assert!(
+            project_ruff_semantic_batch(valid_scope, [0x84; 16], &missing_unknown).is_err(),
+            "dynamic syntax without an unknown semantic remainder must be rejected"
+        );
+
+        let mut direct_publication = valid.clone();
+        direct_publication
+            .dataflow_relations
+            .first_mut()
+            .expect("registered derivation relation")
+            .precision_profile_id = "DIRECT_PROVIDER_PUBLICATION";
+        assert!(
+            project_ruff_semantic_batch(valid_scope, [0x84; 16], &direct_publication).is_err(),
+            "a generation adapter cannot publish derived rows without the selected stamps"
+        );
+
+        let broken_source = provider_text("def dynamic(flag, obj:\n    return getattr(obj, name\n");
+        let broken_tree = tree_snapshot(2, &broken_source);
+        assert!(
+            broken_tree
+                .facts
+                .iter()
+                .any(|fact| fact.error || fact.missing)
+        );
+        let broken_snapshot = adapter
+            .parse(
+                2,
+                broken_source.clone(),
+                &broken_tree,
+                &Cancellation::default(),
+            )
+            .unwrap();
+        let parse_diagnostics = broken_snapshot
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == RuffDiagnosticKind::Parse)
+            .count();
+        assert!(parse_diagnostics > 0);
+        assert_eq!(
+            broken_snapshot.source.end_byte,
+            u64::try_from(broken_source.text.len()).unwrap()
+        );
+        assert!(matches!(
+            adapter.semantic_batch(2, "fixture", Path::new("fixture.py"), false),
+            Err(PythonSemanticError::UnavailableParse(count)) if count == parse_diagnostics
+        ));
+
+        let unavailable = project_python_parse_unavailable(
+            FactScope {
+                source_generation: 2,
+                ..valid_scope
+            },
+            [0x84; 16],
+            parse_diagnostics,
+        )
+        .unwrap();
+        assert_eq!(unavailable.profile_completeness, Completeness::Unavailable);
+        for table_code in [
+            100, 110, 130, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330,
+            340, 350,
+        ] {
+            assert_eq!(
+                unavailable.canonical.batches[&table_code].num_rows(),
+                0,
+                "parse failure must owner-replace table {table_code} to zero"
+            );
+        }
+        let capability_rows = unavailable.canonical.batches[&9].batch();
+        let codes = capability_rows
+            .column_by_name("capability_code")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        let states = capability_rows
+            .column_by_name("owner_capability_state_code")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        for name in [
+            "TYPED_AST",
+            "SCOPES_BINDINGS",
+            "IMPORT_RESOLUTION",
+            "DECLARED_TYPES",
+            "CFG",
+            "DEF_USE",
+        ] {
+            let code = i16::try_from(capability_code(name).unwrap()).unwrap();
+            let row = codes
+                .iter()
+                .position(|seen| seen == Some(code))
+                .expect("named parse gap");
+            assert_eq!(
+                states.value(row),
+                OwnerCapabilityState::UnavailableParse as i16
+            );
+        }
+        assert_eq!(unavailable.canonical.batches[&10].num_rows(), 1);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // The operational oracle compares retained incremental and clean pipelines end to end.
+    fn wave8_integration_operational_gate() {
+        use crate::fabric::batch_checksum;
+        use crate::fact_ingest::FactScope;
+        use crate::python_semantic::project_ruff_semantic_batch;
+
+        let before_source = provider_text(
+            "def stable(value):\n    return value + 1\n\ndef changed(flag):\n    value = 1\n    if flag:\n        value = 2\n    return value\n",
+        );
+        let after_source = provider_text(
+            "def stable(value):\n    return value + 1\n\ndef changed(flag):\n    value = 12\n    if flag:\n        value = 2\n    return value\n",
+        );
+        let insertion = before_source
+            .text
+            .find("    value = 1\n")
+            .map(|start| start + "    value = 1".len())
+            .expect("edited literal");
+        let edit = TreeSitterEdit {
+            start_byte: insertion,
+            old_end_byte: insertion,
+            new_end_byte: insertion + 1,
+        };
+
+        let mut incremental_tree = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
+        let before_tree = incremental_tree
+            .parse_full(1, before_source.clone(), &Cancellation::default())
+            .unwrap();
+        let mut incremental_ruff = RuffAdapter::new().unwrap();
+        incremental_ruff
+            .parse(
+                1,
+                before_source.clone(),
+                &before_tree,
+                &Cancellation::default(),
+            )
+            .unwrap();
+        let before = incremental_ruff
+            .semantic_batch(1, "fixture", Path::new("fixture.py"), false)
+            .unwrap();
+        let incremental_tree_snapshot = incremental_tree
+            .parse_incremental(2, after_source.clone(), edit, &Cancellation::default())
+            .unwrap();
+        incremental_ruff
+            .parse(
+                2,
+                after_source.clone(),
+                &incremental_tree_snapshot,
+                &Cancellation::default(),
+            )
+            .unwrap();
+        let incremental = incremental_ruff
+            .semantic_batch(2, "fixture", Path::new("fixture.py"), false)
+            .unwrap();
+
+        let clean_tree = tree_snapshot(2, &after_source);
+        let mut clean_ruff = RuffAdapter::new().unwrap();
+        clean_ruff
+            .parse(2, after_source, &clean_tree, &Cancellation::default())
+            .unwrap();
+        let rebuilt = clean_ruff
+            .semantic_batch(2, "fixture", Path::new("fixture.py"), false)
+            .unwrap();
+
+        let stable_before = before
+            .callables
+            .iter()
+            .find(|callable| callable.name == "stable")
+            .unwrap()
+            .callable_id;
+        let stable_after = incremental
+            .callables
+            .iter()
+            .find(|callable| callable.name == "stable")
+            .unwrap()
+            .callable_id;
+        assert_eq!(stable_before, stable_after);
+
+        let scope = FactScope {
+            workspace_id: [0x91; 16],
+            analysis_context_id: [0x92; 16],
+            source_generation: 2,
+            owner_id: [0x93; 16],
+        };
+        let incremental_projection =
+            project_ruff_semantic_batch(scope, [0x94; 16], &incremental).unwrap();
+        let rebuilt_projection = project_ruff_semantic_batch(scope, [0x94; 16], &rebuilt).unwrap();
+        assert_eq!(
+            incremental_projection
+                .canonical
+                .batches
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            rebuilt_projection
+                .canonical
+                .batches
+                .keys()
+                .copied()
+                .collect::<Vec<_>>()
+        );
+        for (table_code, incremental_batch) in &incremental_projection.canonical.batches {
+            assert_eq!(
+                batch_checksum(incremental_batch.batch()).unwrap(),
+                batch_checksum(rebuilt_projection.canonical.batches[table_code].batch()).unwrap(),
+                "incremental and clean Wave 8 table {table_code} diverged"
+            );
+        }
+
+        let before_projection = project_ruff_semantic_batch(
+            FactScope {
+                source_generation: 1,
+                ..scope
+            },
+            [0x94; 16],
+            &before,
+        )
+        .unwrap();
+        assert_ne!(
+            batch_checksum(before_projection.batch(310).unwrap().batch()).unwrap(),
+            batch_checksum(incremental_projection.batch(310).unwrap().batch()).unwrap(),
+            "the edited owner must replace its value facts"
+        );
     }
 
     fn ast_fact(

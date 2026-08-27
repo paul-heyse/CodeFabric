@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:64cc3e34a9a2c7d2b07b3551d626e401eac2b49ff661dee4443e166b5fe5a14b; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:3fcec223a46e71a76c8736405dc911ced2a9a989a5743c9f835844c76821b196; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";

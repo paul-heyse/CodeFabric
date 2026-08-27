@@ -25,11 +25,10 @@ use crate::fact_ingest::{
     StreamTerminal, ValidatedFactBatch, ValueDetailRow, encode_access_path_components,
     encode_binding_details, encode_call_argument_details, encode_call_site_details,
     encode_callable_details, encode_capability_statuses, encode_cfg_edge_details,
-    encode_cfg_graphs, encode_cfg_node_details, encode_dataflow_event_details,
-    encode_diagnostics, encode_entities, encode_evidence, encode_memory_location_details,
-    encode_module_import_details, encode_operation_details, encode_owners,
-    encode_parameter_details, encode_reference_details, encode_relations, encode_scope_details,
-    encode_value_details,
+    encode_cfg_graphs, encode_cfg_node_details, encode_dataflow_event_details, encode_diagnostics,
+    encode_entities, encode_evidence, encode_memory_location_details, encode_module_import_details,
+    encode_operation_details, encode_owners, encode_parameter_details, encode_reference_details,
+    encode_relations, encode_scope_details, encode_value_details,
 };
 use crate::registries::{
     ArgumentBindingStatus, ArgumentSpreadKind, CallDispatchKind, Completeness, CompletenessState,
@@ -71,6 +70,225 @@ impl PythonSemanticProjection {
     pub fn batch(&self, table_code: i16) -> Option<&ValidatedFactBatch> {
         self.canonical.batches.get(&table_code)
     }
+}
+
+/// Owner-replacement result for a source-current Python module whose Ruff AST is unavailable.
+#[derive(Debug)]
+pub struct PythonSemanticUnavailableProjection {
+    pub canonical: CanonicalIngestOutput,
+    pub profile_completeness: Completeness,
+}
+
+/// Withdraw every typed-AST-dependent Python family while publishing explicit capability gaps.
+///
+/// The fast source/Tree-sitter lane is published independently and remains current. This
+/// transaction uses the same semantic owner and complete generated table set as a successful
+/// projection, so applying its empty owner batches removes stale semantic rows atomically.
+///
+/// # Errors
+///
+/// Rejects a zero diagnostic count, missing governed capability/table declarations, or any
+/// generated Arrow/reconciliation contract mismatch.
+#[allow(clippy::too_many_lines)] // One owner-replacement transaction makes its full table closure auditable.
+pub fn project_python_parse_unavailable(
+    scope: FactScope,
+    file_id: [u8; 16],
+    diagnostic_count: usize,
+) -> Result<PythonSemanticUnavailableProjection, FactIngestError> {
+    if diagnostic_count == 0 {
+        return Err(FactIngestError::Protocol(
+            "Python parse-unavailable projection requires a source-invalid diagnostic".into(),
+        ));
+    }
+    let local_capabilities = [
+        "TYPED_AST",
+        "SCOPES_BINDINGS",
+        "IMPORT_RESOLUTION",
+        "DECLARED_TYPES",
+        "CFG",
+        "DEF_USE",
+    ];
+    let missing_provider_capabilities = ["COMPUTED_TYPES", "MEMBER_RESOLUTION", "CALL_TARGETS"];
+    let capability_bits = capability_mask(&local_capabilities)
+        .and_then(|mask| i64::try_from(mask).ok())
+        .ok_or_else(|| {
+            FactIngestError::Protocol("Python local capability mask is absent".into())
+        })?;
+    let coverage_scope_fingerprint = *blake3::hash(
+        [
+            scope.workspace_id.as_slice(),
+            scope.analysis_context_id.as_slice(),
+            scope.owner_id.as_slice(),
+            scope.source_generation.to_be_bytes().as_slice(),
+            file_id.as_slice(),
+            diagnostic_count.to_be_bytes().as_slice(),
+        ]
+        .concat()
+        .as_slice(),
+    )
+    .as_bytes();
+    let owner = OwnerRow {
+        scope,
+        parent_owner_id: None,
+        owner_kind_code: OwnerKind::Module as i16,
+        language: Language::Python as i16,
+        file_id: Some(file_id),
+        semantic_entity_id: None,
+        start_byte: None,
+        end_byte: None,
+        source_fingerprint: None,
+        semantic_fingerprint: Some(coverage_scope_fingerprint),
+        capability_mask: capability_bits,
+    };
+    let diagnostic_id = derived_identity(
+        b"python-parse-unavailable",
+        &[
+            &scope.owner_id,
+            &scope.source_generation.to_be_bytes(),
+            &diagnostic_count.to_be_bytes(),
+        ],
+    )
+    .id;
+    let diagnostic = DiagnosticRow {
+        diagnostic_id,
+        workspace_id: scope.workspace_id,
+        analysis_context_id: Some(scope.analysis_context_id),
+        source_generation: scope.source_generation,
+        owner_id: Some(scope.owner_id),
+        diagnostic_code: 90,
+        severity_code: Severity::Error as i16,
+        message: format!(
+            "RUFF_SEMANTIC_UNAVAILABLE_PARSE: {diagnostic_count} source-invalid diagnostics"
+        ),
+        cold_payload: None,
+        created_at_micros: 0,
+    };
+    let mut statuses = local_capabilities
+        .iter()
+        .map(|name| {
+            capability_code(name)
+                .and_then(|code| i16::try_from(code).ok())
+                .map(|capability_code| CapabilityStatusRow {
+                    scope,
+                    snapshot_id: None,
+                    capability_code,
+                    owner_capability_state_code: OwnerCapabilityState::UnavailableParse as i16,
+                    completeness_state_code: CompletenessState::Unavailable as i16,
+                    provider_run_id: None,
+                    producer_code: Some(ProviderCode::RuffPython as i16),
+                    reason_code: Some(90),
+                    diagnostic_id: Some(diagnostic_id),
+                    fallback_source_available: true,
+                    coverage_scope_fingerprint,
+                })
+                .ok_or_else(|| FactIngestError::Protocol(format!("{name} capability is absent")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    statuses.extend(
+        missing_provider_capabilities
+            .iter()
+            .map(|name| {
+                capability_code(name)
+                    .and_then(|code| i16::try_from(code).ok())
+                    .map(|capability_code| CapabilityStatusRow {
+                        scope,
+                        snapshot_id: None,
+                        capability_code,
+                        owner_capability_state_code: OwnerCapabilityState::UnavailableProvider
+                            as i16,
+                        completeness_state_code: CompletenessState::Unavailable as i16,
+                        provider_run_id: None,
+                        producer_code: None,
+                        reason_code: Some(30),
+                        diagnostic_id: None,
+                        fallback_source_available: true,
+                        coverage_scope_fingerprint,
+                    })
+                    .ok_or_else(|| {
+                        FactIngestError::Protocol(format!("{name} capability is absent"))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+
+    let encoded = [
+        (8, encode_owners(&[owner])?),
+        (9, encode_capability_statuses(&statuses)?),
+        (10, encode_diagnostics(&[diagnostic])?),
+        (100, encode_entities(&[])?),
+        (110, encode_relations(&[])?),
+        (130, encode_evidence(&[])?),
+        (200, encode_scope_details(&[])?),
+        (210, encode_binding_details(&[])?),
+        (220, encode_reference_details(&[])?),
+        (230, encode_module_import_details(&[])?),
+        (240, encode_callable_details(&[])?),
+        (250, encode_parameter_details(&[])?),
+        (260, encode_call_site_details(&[])?),
+        (270, encode_call_argument_details(&[])?),
+        (280, encode_cfg_graphs(&[])?),
+        (290, encode_cfg_node_details(&[])?),
+        (300, encode_cfg_edge_details(&[])?),
+        (310, encode_value_details(&[])?),
+        (320, encode_operation_details(&[])?),
+        (330, encode_dataflow_event_details(&[])?),
+        (340, encode_memory_location_details(&[])?),
+        (350, encode_access_path_components(&[])?),
+    ];
+    let batches = encoded
+        .into_iter()
+        .map(|(table_code, batch)| ProviderFactBatch { table_code, batch })
+        .collect::<Vec<_>>();
+    let schema_fingerprints = batches
+        .iter()
+        .map(|batch| {
+            crate::schema_registry::table_spec(batch.table_code)
+                .map(|spec| (batch.table_code, spec.schema_digest.clone()))
+                .ok_or_else(|| {
+                    FactIngestError::Protocol(format!(
+                        "generated table {} is absent",
+                        batch.table_code
+                    ))
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    let provider_run_id = derived_identity(
+        b"python-parse-unavailable-run",
+        &[&scope.owner_id, &scope.source_generation.to_be_bytes()],
+    )
+    .id;
+    let stream = ProviderFactStream {
+        manifest: ProviderFactManifest {
+            stream_id: derived_identity(b"stream", &[&provider_run_id, &scope.owner_id]).id,
+            workspace_id: scope.workspace_id,
+            analysis_context_id: scope.analysis_context_id,
+            source_generation: scope.source_generation,
+            provider_code: ProviderCode::RuffPython as i16,
+            provider_version: PROVIDER_VERSION.into(),
+            provider_run_id,
+            emitted_at_micros: 0,
+            schema_fingerprints,
+            declared_rows: batches.iter().map(|batch| batch.batch.num_rows()).sum(),
+        },
+        batches,
+        terminal: StreamTerminal::Partial,
+    };
+    let canonical = CanonicalReconciliationEngine::default().ingest(
+        scope,
+        &[stream],
+        &BTreeMap::from([(ProviderCode::RuffPython as i16, 0)]),
+    )?;
+    Ok(PythonSemanticUnavailableProjection {
+        canonical,
+        profile_completeness: aggregate_capability(&[CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Unavailable,
+            has_facts: false,
+            missing_remainder_characterized: true,
+            required_context_covered: false,
+            external_policy_allows_closure: true,
+        }]),
+    })
 }
 
 /// Project a complete application-owned Ruff batch into canonical facts.
@@ -247,9 +465,12 @@ pub fn project_ruff_semantic_batch(
                 .iter()
                 .map(|fact| (b"memory-location".as_slice(), fact.location_id)),
         )
-        .chain(batch.access_path_components.iter().map(|fact| {
-            (b"access-path-component".as_slice(), fact.component_id)
-        }))
+        .chain(
+            batch
+                .access_path_components
+                .iter()
+                .map(|fact| (b"access-path-component".as_slice(), fact.component_id)),
+        )
     {
         canonical_ids
             .entry(semantic)
@@ -996,8 +1217,7 @@ pub fn project_ruff_semantic_batch(
         });
     }
     for fact in &batch.operations {
-        let identity =
-            canonical_identity(&canonical_ids, fact.operation_id, "dataflow operation")?;
+        let identity = canonical_identity(&canonical_ids, fact.operation_id, "dataflow operation")?;
         let owner =
             canonical_identity(&canonical_ids, fact.owner_id, "dataflow operation owner")?.id;
         entities.push(EntityRow {
@@ -1754,6 +1974,22 @@ pub fn project_ruff_semantic_batch(
         coverage_hasher.update(payload);
     }
     let coverage_scope_fingerprint = *coverage_hasher.finalize().as_bytes();
+    let typed_ast = capability_code("TYPED_AST")
+        .and_then(|code| i16::try_from(code).ok())
+        .ok_or_else(|| FactIngestError::Protocol("TYPED_AST capability is absent".into()))?;
+    let typed_ast_capability = CapabilityStatusRow {
+        scope,
+        snapshot_id: None,
+        capability_code: typed_ast,
+        owner_capability_state_code: OwnerCapabilityState::Current as i16,
+        completeness_state_code: CompletenessState::Complete as i16,
+        provider_run_id: Some(provider_run.id),
+        producer_code: Some(ProviderCode::RuffPython as i16),
+        reason_code: None,
+        diagnostic_id: None,
+        fallback_source_available: false,
+        coverage_scope_fingerprint,
+    };
     let scopes_bindings = capability_code("SCOPES_BINDINGS")
         .and_then(|code| i16::try_from(code).ok())
         .ok_or_else(|| FactIngestError::Protocol("SCOPES_BINDINGS capability is absent".into()))?;
@@ -1793,6 +2029,22 @@ pub fn project_ruff_semantic_batch(
         provider_run_id: Some(provider_run.id),
         producer_code: Some(ProviderCode::RuffPython as i16),
         reason_code: import_incomplete.then_some(30),
+        diagnostic_id: None,
+        fallback_source_available: false,
+        coverage_scope_fingerprint,
+    };
+    let declared_types = capability_code("DECLARED_TYPES")
+        .and_then(|code| i16::try_from(code).ok())
+        .ok_or_else(|| FactIngestError::Protocol("DECLARED_TYPES capability is absent".into()))?;
+    let declared_types_capability = CapabilityStatusRow {
+        scope,
+        snapshot_id: None,
+        capability_code: declared_types,
+        owner_capability_state_code: OwnerCapabilityState::Current as i16,
+        completeness_state_code: CompletenessState::Complete as i16,
+        provider_run_id: Some(provider_run.id),
+        producer_code: Some(ProviderCode::RuffPython as i16),
+        reason_code: None,
         diagnostic_id: None,
         fallback_source_available: false,
         coverage_scope_fingerprint,
@@ -1849,28 +2101,37 @@ pub fn project_ruff_semantic_batch(
         fallback_source_available: false,
         coverage_scope_fingerprint,
     };
-    let unavailable_provider_capability = |name: &str| -> Result<CapabilityStatusRow, FactIngestError> {
-        let code = capability_code(name)
-            .and_then(|code| i16::try_from(code).ok())
-            .ok_or_else(|| FactIngestError::Protocol(format!("{name} capability is absent")))?;
-        Ok(CapabilityStatusRow {
-            scope,
-            snapshot_id: None,
-            capability_code: code,
-            owner_capability_state_code: OwnerCapabilityState::UnavailableProvider as i16,
-            completeness_state_code: CompletenessState::Unavailable as i16,
-            provider_run_id: None,
-            producer_code: None,
-            reason_code: Some(30),
-            diagnostic_id: None,
-            fallback_source_available: false,
-            coverage_scope_fingerprint,
-        })
-    };
+    let unavailable_provider_capability =
+        |name: &str| -> Result<CapabilityStatusRow, FactIngestError> {
+            let code = capability_code(name)
+                .and_then(|code| i16::try_from(code).ok())
+                .ok_or_else(|| FactIngestError::Protocol(format!("{name} capability is absent")))?;
+            Ok(CapabilityStatusRow {
+                scope,
+                snapshot_id: None,
+                capability_code: code,
+                owner_capability_state_code: OwnerCapabilityState::UnavailableProvider as i16,
+                completeness_state_code: CompletenessState::Unavailable as i16,
+                provider_run_id: None,
+                producer_code: None,
+                reason_code: Some(30),
+                diagnostic_id: None,
+                fallback_source_available: false,
+                coverage_scope_fingerprint,
+            })
+        };
     let computed_types_capability = unavailable_provider_capability("COMPUTED_TYPES")?;
     let member_resolution_capability = unavailable_provider_capability("MEMBER_RESOLUTION")?;
     let call_targets_capability = unavailable_provider_capability("CALL_TARGETS")?;
     let profile_completeness = aggregate_capability(&[
+        CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Complete,
+            has_facts: true,
+            missing_remainder_characterized: true,
+            required_context_covered: true,
+            external_policy_allows_closure: true,
+        },
         CapabilityChild {
             applicable: true,
             completeness: Completeness::Complete,
@@ -1887,6 +2148,22 @@ pub fn project_ruff_semantic_batch(
                 Completeness::Complete
             },
             has_facts: true,
+            missing_remainder_characterized: true,
+            required_context_covered: true,
+            external_policy_allows_closure: true,
+        },
+        CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Complete,
+            has_facts: true,
+            missing_remainder_characterized: true,
+            required_context_covered: true,
+            external_policy_allows_closure: true,
+        },
+        CapabilityChild {
+            applicable: true,
+            completeness: Completeness::Complete,
+            has_facts: !batch.cfgs.is_empty(),
             missing_remainder_characterized: true,
             required_context_covered: true,
             external_policy_allows_closure: true,
@@ -1930,13 +2207,15 @@ pub fn project_ruff_semantic_batch(
     ]);
 
     let capability_bits = capability_mask(&[
+        "TYPED_AST",
         "SCOPES_BINDINGS",
         "IMPORT_RESOLUTION",
+        "DECLARED_TYPES",
         "CFG",
         "DEF_USE",
     ])
-        .and_then(|mask| i64::try_from(mask).ok())
-        .ok_or_else(|| FactIngestError::Protocol("SCOPES_BINDINGS mask is absent".into()))?;
+    .and_then(|mask| i64::try_from(mask).ok())
+    .ok_or_else(|| FactIngestError::Protocol("Python local capability mask is absent".into()))?;
     let owner = OwnerRow {
         scope,
         parent_owner_id: None,
@@ -1958,8 +2237,10 @@ pub fn project_ruff_semantic_batch(
         (
             9,
             encode_capability_statuses(&[
+                typed_ast_capability,
                 capability,
                 import_capability,
+                declared_types_capability,
                 cfg_capability,
                 def_use_capability,
                 computed_types_capability,
@@ -1985,7 +2266,10 @@ pub fn project_ruff_semantic_batch(
         (310, encode_value_details(&value_details)?),
         (320, encode_operation_details(&operation_details)?),
         (330, encode_dataflow_event_details(&dataflow_event_details)?),
-        (340, encode_memory_location_details(&memory_location_details)?),
+        (
+            340,
+            encode_memory_location_details(&memory_location_details)?,
+        ),
         (350, encode_access_path_components(&access_path_components)?),
     ];
     let provider_batches = encoded
@@ -2427,6 +2711,7 @@ fn validate_cfg_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngestError
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // Cross-family integrity checks are kept together at the ingest boundary.
 fn validate_dataflow_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngestError> {
     let callable_ids = batch
         .callables
@@ -2494,9 +2779,7 @@ fn validate_dataflow_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngest
             || fact
                 .producer_operation_id
                 .is_some_and(|id| !operation_ids.contains(&id))
-            || fact
-                .syntax_id
-                .is_some_and(|id| !syntax_ids.contains(&id))
+            || fact.syntax_id.is_some_and(|id| !syntax_ids.contains(&id))
     }) || batch.operations.iter().any(|fact| {
         !callable_ids.contains(&fact.owner_id)
             || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
@@ -2506,25 +2789,19 @@ fn validate_dataflow_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngest
             || fact
                 .result_value_id
                 .is_some_and(|id| !value_ids.contains(&id))
-            || fact
-                .syntax_id
-                .is_some_and(|id| !syntax_ids.contains(&id))
+            || fact.syntax_id.is_some_and(|id| !syntax_ids.contains(&id))
     }) || batch.dataflow_events.iter().any(|fact| {
         !callable_ids.contains(&fact.owner_id)
             || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
             || fact
                 .cfg_node_id
                 .is_some_and(|id| !cfg_node_ids.contains(&id))
-            || fact
-                .binding_id
-                .is_some_and(|id| !binding_ids.contains(&id))
+            || fact.binding_id.is_some_and(|id| !binding_ids.contains(&id))
             || fact.value_id.is_some_and(|id| !value_ids.contains(&id))
             || fact
                 .location_id
                 .is_some_and(|id| !location_ids.contains(&id))
-            || fact
-                .syntax_id
-                .is_some_and(|id| !syntax_ids.contains(&id))
+            || fact.syntax_id.is_some_and(|id| !syntax_ids.contains(&id))
     }) || batch.memory_locations.iter().any(|fact| {
         !callable_ids.contains(&fact.owner_id)
             || !stamped(fact.precision_profile_id, fact.derivation_bundle_id)
@@ -2558,6 +2835,32 @@ fn validate_dataflow_facts(batch: &PythonFrontendBatch) -> Result<(), FactIngest
             "Python dataflow relation contains a dangling endpoint or missing derivation stamp"
                 .into(),
         ));
+    }
+    let syntax_by_id = batch
+        .callable_syntax
+        .iter()
+        .map(|syntax| (syntax.syntax_id, syntax))
+        .collect::<BTreeMap<_, _>>();
+    for call in &batch.call_sites {
+        let Some(callee) = syntax_by_id.get(&call.callee_syntax_id) else {
+            continue;
+        };
+        if matches!(
+            callee.text.as_str(),
+            "exec" | "eval" | "getattr" | "setattr" | "__import__"
+        ) && !batch.dataflow_events.iter().any(|event| {
+            event.kind == PythonDataflowEventKind::DynamicUnknown
+                && event.syntax_id == Some(call.syntax_id)
+                && event.value_id.is_some_and(|id| value_ids.contains(&id))
+                && event
+                    .location_id
+                    .is_some_and(|id| location_ids.contains(&id))
+        }) {
+            return Err(FactIngestError::Protocol(format!(
+                "dynamic Python call {} lacks its explicit unknown semantic remainder",
+                callee.text
+            )));
+        }
     }
     Ok(())
 }
@@ -3564,6 +3867,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // The fixture deliberately materializes every governed Python semantic family.
     fn fixture(module: &str, extra_binding: bool) -> PythonFrontendBatch {
         let module_scope = [10; 16];
         let binding = [20; 16];

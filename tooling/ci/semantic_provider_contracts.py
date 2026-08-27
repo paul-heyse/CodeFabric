@@ -39,6 +39,11 @@ TELEMETRY_FIELDS = (
     ("chunk_count", "chunks", "provider-run"),
     ("cache_hits", "entries", "provider-run"),
     ("cancellation_count", "requests", "provider-run"),
+    ("visited_node_count", "nodes", "provider-run"),
+    ("scope_count", "scopes", "provider-run"),
+    ("binding_count", "bindings", "provider-run"),
+    ("reference_count", "references", "provider-run"),
+    ("unresolved_reference_count", "references", "provider-run"),
     ("failure_count", "failures", "provider-run"),
     ("wall_time", "microseconds", "provider-run"),
 )
@@ -105,7 +110,7 @@ def check_observability() -> None:
         provider: profile["profile_id"]
         for profile in profiles
         for provider in profile.get("provider_ids", [])
-        if provider in {"pyrefly-python", "rustc-mir"}
+        if provider in {"ruff-python", "pyrefly-python", "rustc-mir"}
     }
     if bindings != contract.get("resource_profiles"):
         raise AssertionError(f"resource profile bindings differ: {bindings}")
