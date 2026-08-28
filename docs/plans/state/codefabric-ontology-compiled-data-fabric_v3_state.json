@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
   "status": "executing",
-  "current_packet": "WP24",
+  "current_packet": "WP25",
   "packets": {
     "WP18": {
       "status": "complete",
@@ -54,14 +54,14 @@
       "blockers": []
     },
     "WP24": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "605137e1248a6ddfaf8d6b740560ff7d82c7acfa",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP25": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -184,6 +184,6 @@
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
     }
   ],
-  "next_action": "Implement WP22's sealed-session ingress, analyzer closure, exhaustive ID-domain enforcement, and structural rejection of unsealed execution paths.",
-  "updated_at": "2026-08-28T17:20:00Z"
+  "next_action": "Implement WP25's sole daemon admin activation route, restart reconstruction, and lease-scoped result authority.",
+  "updated_at": "2026-08-28T17:21:00Z"
 }
