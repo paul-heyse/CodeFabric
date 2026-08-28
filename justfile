@@ -81,6 +81,16 @@ ontology-program-compiler-check:
 ontology-program-packaging-check:
     cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(digest_acyclicity|ipc_reproducibility)/)' --no-tests=fail
 
+[doc("Prove a bijective current-profile catalog of native DataFusion calculations")]
+[group('test')]
+ontology-calculation-catalog-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_native_profile|calculation_catalog_bijection)/)' --no-tests=fail
+
+[doc("Mutate compiled operators and phrase operands and prove governed DataFusion outcomes change")]
+[group('test')]
+ontology-program-causality-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_causality_matrix|phrase_binding_fail_closed)/)' --no-tests=fail
+
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]
 lib-outline *args:
