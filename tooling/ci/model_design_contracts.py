@@ -201,7 +201,7 @@ def validate_model_design_contract(
         checked_paths.add(rule.path)
     combined = "\n".join(
         (root / path).read_text(encoding="utf-8")
-        for path in sorted(EVOLVED_DESIGN_INPUTS)
+        for path in sorted(checked_paths)
     )
     present = [phrase for phrase in FORBIDDEN_DESIGN_PHRASES if phrase in combined]
     if present:
