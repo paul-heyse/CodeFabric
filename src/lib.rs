@@ -50,6 +50,8 @@ pub mod gate_b_candidate;
 pub mod gate_b_release;
 #[cfg(feature = "daemon")]
 pub mod golden_corpus;
+#[cfg(feature = "data-fabric")]
+pub mod governed_session;
 #[cfg(any(
     all(feature = "canonical-json", not(feature = "model-compiler")),
     feature = "daemon",

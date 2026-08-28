@@ -317,7 +317,7 @@ def _oracle_contracts(plan_path: Path) -> dict[str, list[tuple[str, str]]]:
         )
         if not pairs:
             catalog = re.search(
-                r"Oracle catalog:\s*(.*?)(?=\n\n- \*\*Behavioral)",
+                r"Oracle catalog:\s*(.*?)(?=\n\n(?:- \*\*Behavioral|\*\*Edit-Local Gates\.\*\*))",
                 block,
                 re.DOTALL,
             )

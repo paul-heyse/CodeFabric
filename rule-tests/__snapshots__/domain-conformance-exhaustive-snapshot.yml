@@ -1,0 +1,14 @@
+id: domain-conformance-exhaustive
+snapshots:
+  ? |
+    fn validate(expr: Expr) -> Result<()> {
+        match expr {
+            Expr::Column(_) => Ok(()),
+            _ => Ok(()),
+        }
+    }
+  : labels:
+    - source: _ => Ok(()),
+      style: primary
+      start: 100
+      end: 112

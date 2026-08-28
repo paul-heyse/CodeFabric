@@ -178,6 +178,29 @@ def test_ordered_oracle_catalog_gets_stable_criterion_ids(tmp_path: Path) -> Non
     ]
 
 
+def test_multiline_oracle_catalog_stops_at_edit_local_gates(tmp_path: Path) -> None:
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "### WP01 — Example\n\n"
+        "**Target invariants.** GI-01.\n\n"
+        "**Design and library references.** QRY §1.\n\n"
+        "**Acceptance Checks.**\n\n"
+        "Oracle catalog:\n\n"
+        "- Executable oracle: `example_behavior`\n"
+        "- Executable oracle: `example_structure`\n"
+        "- Executable oracle: `example_negative`\n"
+        "- Executable oracle: `example_operation`\n\n"
+        "**Edit-Local Gates.** Focused tests.\n",
+        encoding="utf-8",
+    )
+    assert assurance._oracle_contracts(plan)["WP01"] == [
+        ("example_behavior", "PC-WP01-BEH"),
+        ("example_structure", "PC-WP01-STR"),
+        ("example_negative", "PC-WP01-NEG"),
+        ("example_operation", "PC-WP01-OPS"),
+    ]
+
+
 def test_wp54_negative_zero_state(tmp_path: Path) -> None:
     tree = ast.parse("def test_wp54_negative_zero_state():\n    alias()\n")
     function = tree.body[0]

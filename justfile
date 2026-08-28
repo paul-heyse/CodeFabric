@@ -91,20 +91,25 @@ ontology-calculation-catalog-check:
 ontology-program-causality-check:
     cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_causality_matrix|phrase_binding_fail_closed)/)' --no-tests=fail
 
-[doc("Prove the separate gate checksum recursively rejects noncanonical Arrow maps")]
+[doc("Prove the gate checksum's canonical Arrow KATs, including actual map entries")]
 [group('test')]
-ontology-gate-checksum-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_gate_checksum_map_value_canonicalization/)' --no-tests=fail
+ontology-gate-result-checksum-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_gate_checksum_canonical_kats/)' --no-tests=fail
 
-[doc("Prove one terminal gate action and post-exhaustion diagnostic collection")]
+[doc("Prove one terminal execution, post-exhaustion metrics, and artifact identity separation")]
 [group('test')]
-ontology-gate-single-execution-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_gate_(single_terminal_action|execution_artifact_separation)/)' --no-tests=fail
+ontology-gate-execution-artifact-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_gate_(single_execution_metric_closure|artifact_identity_separation)/)' --no-tests=fail
 
-[doc("Prove deterministic bounded gate failures leave authority unchanged")]
+[doc("Prove deterministic bounded candidate failures leave durable authority unchanged")]
 [group('test')]
-ontology-gate-resource-contract-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_gate_resource_limit_determinism/)' --no-tests=fail
+ontology-runtime-resource-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_candidate_resource_failure_no_mutation/)' --no-tests=fail
+
+[doc("Prove sealed DataFusion ingress, exhaustive pinned variants, and Arrow ID-domain boundaries")]
+[group('gate')]
+id-domain-plan-enforcement-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)/)' --no-tests=fail
 
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]
@@ -707,8 +712,8 @@ probe-suite:
 [doc("Prove per-domain ID extensions, lowering, analyzer coverage, and retired generic typing")]
 [group('gate')]
 id-domain-extension-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP07
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP08
+    cargo nextest run --locked --lib -E 'test(/odf_(id_domain_lowering_conformance|domain_conformant_plans_execute|cross_domain_plan_rejection|all_plan_ingresses_domain_checked)/)' --no-tests=fail
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'id_domain'
 
 [doc("Execute compiled ontology FK, membership, conformance, cardinality, and one-of gates")]
 [group('gate')]

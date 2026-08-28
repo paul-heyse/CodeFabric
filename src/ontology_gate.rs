@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn ontology_gate_checksum_map_value_canonicalization() {
+    fn ontology_gate_checksum_canonical_kats() {
         let sorted = map_batch(vec!["a", "b"]);
         assert!(
             gate_result_checksum_v1(sorted.schema().as_ref(), &[sorted.clone()], 1_048_576).is_ok()
@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ontology_gate_single_terminal_action() {
+    async fn ontology_gate_single_execution_metric_closure() {
         let (context, plan) = plan().await;
         let outcome = execute_ontology_gate_once(
             &context,
@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ontology_gate_execution_artifact_separation() {
+    async fn ontology_gate_artifact_identity_separation() {
         let (context, plan) = plan().await;
         let outcome = execute_ontology_gate_once(
             &context,
@@ -408,7 +408,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ontology_gate_resource_limit_determinism() {
+    async fn ontology_candidate_resource_failure_no_mutation() {
         let limits = GateResourceEnvelope {
             max_output_rows: 1,
             ..GateResourceEnvelope::default()
