@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
   "status": "executing",
-  "current_packet": "WP25",
+  "current_packet": "WP26",
   "packets": {
     "WP18": {
       "status": "complete",
@@ -61,14 +61,14 @@
       "blockers": []
     },
     "WP25": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "2bee352baf16e95b0e686e98361d12949c058cf1",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP26": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -98,14 +98,14 @@
       "blockers": []
     },
     "M07": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "2bee352baf16e95b0e686e98361d12949c058cf1",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M08": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -184,6 +184,6 @@
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
     }
   ],
-  "next_action": "Implement WP25's sole daemon admin activation route, restart reconstruction, and lease-scoped result authority.",
-  "updated_at": "2026-08-28T17:21:00Z"
+  "next_action": "Implement WP26's real-storage admin cutover, restart, lease, publication-continuity, and forward-rollback integration vertical, then remove the temporary comparison authority.",
+  "updated_at": "2026-08-28T18:30:00Z"
 }
