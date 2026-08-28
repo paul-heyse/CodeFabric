@@ -147,6 +147,14 @@ ontology-datafabric-integration-check:
     cargo nextest run --locked --test integration -E 'test(/ontology_datafabric_(end_to_end_cutover|predecessor_failure_atomicity|old_new_lease_restart|post_cutover_fact_publication)/)' --no-tests=fail
     @if rg -n 'ProgramExecutionComparison|execute_phrase_probe|unoptimized_batches|optimized_batches' src tests; then echo 'temporary ontology dual-execution comparison authority remains' >&2; exit 1; fi
 
+[doc("Prove successor-only ontology authority across the hidden live envelope and retired command surface")]
+[group('gate')]
+ontology-datafabric-legacy-zero-state-check:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/ontology_datafabric_legacy_zero_state.py
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'ontology_datafabric_successor_authority or ontology_datafabric_legacy_zero_state or ontology_datafabric_retired_command_absence or ontology_datafabric_release_certification'
+    cargo check --all-targets
+    just gate-filter-census
+
 [doc("Prove diagnostic artifacts, checksums, and opaque receipts remain separate 1:1 identities")]
 [group('gate')]
 ontology-plan-artifact-boundary-check:
@@ -224,12 +232,6 @@ publication-referential-integrity-check:
 data-fabric-upgrade-check:
     cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|wp05_|wp06_(behavioral|structural|negative)|delta_43a0cf10_|data_fabric_(old_write_new_read|new_write_old_read)_compatibility|data_fabric_(target_stack_release|old_live_authority|current_reference_routing|gate_b_empty))/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(datafusion_55_|delta_43a0cf10_|wp03_operational|wp05_|wp2[12]_)/)' --no-tests=fail
-
-[doc("Prove FixedSizeBinary(16) extension preservation, fallback, and staged schema instances")]
-[group('test')]
-id16-extension-contract-check:
-    cargo nextest run --locked --lib -E 'test(/wp58_(structural_acceptance|negative_zero_state)/)' --no-tests=fail
-    just model-family-check schemas
 
 [doc("Prove effective-relation statistics, pushdown truth, and observed runtime evidence")]
 [group('test')]
@@ -745,11 +747,6 @@ plan-dependency-check:
 gate-filter-census:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python scripts/gate_filter_census.py check
 
-[doc("Run the pinned ontology-fabric capability probes and emit target-only reports")]
-[group('test')]
-probe-suite:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python scripts/ontology_fabric_probe_suite.py run
-
 [doc("Prove per-domain ID extensions, lowering, analyzer coverage, and retired generic typing")]
 [group('gate')]
 id-domain-extension-check:
@@ -776,11 +773,6 @@ structure-classification-check:
 [group('gate')]
 ontology-self-description-check:
     cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|self_description_additive_relation)/)' --no-tests=fail
-
-[doc("Prove atomic Stage-2b acceptance, fault rollback, and idempotent pointer advance")]
-[group('gate')]
-ontology-stage2b-activation-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP17
 
 [doc("Execute every released negative fixture and cited assurance registry")]
 [group('gate')]

@@ -653,9 +653,9 @@ and raw namespace in its key because raw numeric codes are only local to those s
 Every relation is a `BundleDimension`, `BaseImmutable` Delta table pinned by the publication
 manifest. A workspace bootstrap, or a changed compiled authority digest, creates candidate
 versions; ordinary fact publications reuse the exact active versions. Candidate relations
-are invisible to active leases until one complete Stage-2b dossier is validated, accepted
-by the owner, and advanced through the atomic manifest-pointer transaction. No individual
-dimension may activate independently.
+are invisible to active leases until one sealed candidate is validated, independently accepted
+by the owner through the administrative command, and advanced through the atomic durable pointer
+transaction. No individual dimension may activate independently.
 
 ### 6.4 Daemon and coordinator topology
 

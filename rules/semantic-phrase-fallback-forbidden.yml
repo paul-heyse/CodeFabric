@@ -1,0 +1,16 @@
+id: semantic-phrase-fallback-forbidden
+language: Rust
+severity: error
+message: Unknown or unbound semantic phrases must return a typed error, never an empty or false fallback.
+files:
+  - src/semantic_query.rs
+  - src/ontology_executor.rs
+rule:
+  any:
+    - all:
+        - kind: match_arm
+        - regex: '^\s*(?:Err\([^)]*\)|None)\s*=>\s*(?:Vec::new\(\)|lit\(false\))'
+    - pattern: $LOWER.unwrap_or_default()
+constraints:
+  LOWER:
+    regex: '(?i)phrase|semantic'

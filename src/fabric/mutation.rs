@@ -8,13 +8,13 @@ use arrow_schema::Schema;
 use arrow_select::concat::concat_batches;
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::{Expr, col, lit};
-use datafusion::prelude::SessionContext;
 use deltalake::kernel::{Transaction, transaction::CommitProperties};
 use deltalake::protocol::SaveMode;
 use serde_json::Value;
 
 use super::{DeltaAccessProfile, DeltaHandleFactory, FabricError, WorkspaceFabric, exact_provider};
 use crate::fact_ingest::{FactBatchScope, ValidatedFactBatch};
+use crate::governed_session::{ProviderReadRequest, collect_provider};
 use crate::identity::{IdentityDomain, encode_public_id};
 use crate::schema_registry::{DurableMutationClass, TableSpec, table_spec, table_specs};
 
@@ -531,11 +531,13 @@ async fn owner_batch(
     scope: FactBatchScope,
     owners: &[[u8; 16]],
 ) -> Result<RecordBatch, FabricError> {
-    let batches = SessionContext::new()
-        .read_table(Arc::clone(&table.provider))?
-        .filter(owner_predicate(scope, owners))?
-        .collect()
-        .await?;
+    let batches = collect_provider(ProviderReadRequest {
+        provider: Arc::clone(&table.provider),
+        filter: Some(owner_predicate(scope, owners)),
+        projection: None,
+        limit: None,
+    })
+    .await?;
     Ok(concat_batches(&spec.arrow_schema, &batches)?)
 }
 

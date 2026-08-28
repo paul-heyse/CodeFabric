@@ -3880,7 +3880,7 @@ mod tests {
         config: ServingRuntimeConfig,
     ) -> Result<ServingQuerySession, ServingQueryError> {
         runtime
-            .activate(store, Arc::clone(&candidate), None, 0, 7, 100, None)
+            .commit_fact_snapshot(store, Arc::clone(&candidate), None, 0, 7, 100, None)
             .unwrap();
         let lease = SnapshotLeaseManager::new([0x66; 16])
             .acquire(
@@ -4928,7 +4928,7 @@ mod tests {
         let predecessor = first.manifest().raw_snapshot_id().unwrap();
         let second = candidate([0x23; 16], 2, 2);
         runtime
-            .activate(&mut store, second, Some(predecessor), 1, 8, 102, None)
+            .commit_fact_snapshot(&mut store, second, Some(predecessor), 1, 8, 102, None)
             .unwrap();
         resume.wait().await;
         let pinned = query_task.await.unwrap().unwrap();
@@ -5358,10 +5358,7 @@ mod tests {
         assert_eq!(control.artifact.arrow_version, arrow::ARROW_VERSION);
         assert!(control.artifact.plan_template_id.starts_with("b3:"));
         assert!(control.artifact.bound_query_id.starts_with("b3:"));
-        assert_eq!(
-            control.artifact.result_checksum_version,
-            crate::fabric::RESULT_CHECKSUM_VERSION
-        );
+        assert_eq!(control.artifact.result_checksum_version, "ResultChecksumV2");
         assert!(control.artifact.reproducibility.deterministic);
         assert!(control.artifact.result_checksum.starts_with("b3:"));
         assert_eq!(

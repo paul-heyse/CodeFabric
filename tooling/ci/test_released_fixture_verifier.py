@@ -30,7 +30,7 @@ def test_released_assurance_contracts_execute() -> None:
     report = verifier.verify_released_assurance()
     assert report["fixtures"]["negative_fixture_count"] == 5
     assert report["security"]["case_count"] == 5
-    assert report["faults"]["fault_point_count"] == 35
+    assert report["faults"]["fault_point_count"] == 32
     assert report["comparison"]["semantic_difference_detected"] is True
 
 

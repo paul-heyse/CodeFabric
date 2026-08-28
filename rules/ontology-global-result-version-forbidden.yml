@@ -1,0 +1,10 @@
+id: ontology-global-result-version-forbidden
+language: Rust
+severity: error
+message: Serving result/checksum version must come from the lease-pinned ontology program.
+files:
+  - src/**/*.rs
+rule:
+  all:
+    - kind: identifier
+    - regex: '^RESULT_CHECKSUM_VERSION$'

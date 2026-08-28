@@ -51,6 +51,36 @@ records:
   - {phrase_id: Q93_RUST_UNSAFE_FFI, owner_section: 93, canonical_text: Rust unsafe FFI, accepted_aliases: [Rust foreign operations], ast_node_kind: fact-phrase, slot_type: projection-id, contract_reference: {family: projection, code: EFFECT_V1}, allowed_request_forms: [retrieve-facts], allowed_subject_roles: [subject], allowed_object_roles: [], required_modifiers: [rust], incompatible_modifiers: [python], planspec_mapping: {node_kind: retrieve-facts, typed_slot_bindings: [{slot: unsafe-owner, value_type: entity-selector, target_field: subject-selector, required: false}], constant_fields: [{target_field: projection-id, value: {value_kind: text, text: EFFECT_V1}}, {target_field: language-profile, value: {value_kind: text, text: rust}}], output_role: fact-set}, introduced: "1.3", examples: [retrieve Rust unsafe FFI], negative_fixtures: [unsafe conclusion without exact fact is invalid]}
   - {phrase_id: Q94_RUST_COMPILE_TIME_VALUES, owner_section: 94, canonical_text: Rust compile time values, accepted_aliases: [Rust constants and statics], ast_node_kind: fact-phrase, slot_type: projection-id, contract_reference: {family: projection, code: DATAFLOW_V1}, allowed_request_forms: [retrieve-facts], allowed_subject_roles: [subject], allowed_object_roles: [], required_modifiers: [rust], incompatible_modifiers: [python], planspec_mapping: {node_kind: retrieve-facts, typed_slot_bindings: [{slot: constant, value_type: entity-selector, target_field: subject-selector, required: false}], constant_fields: [{target_field: projection-id, value: {value_kind: text, text: DATAFLOW_V1}}, {target_field: language-profile, value: {value_kind: text, text: rust}}], output_role: fact-set}, introduced: "1.3", examples: [retrieve Rust compile time values], negative_fixtures: [runtime value as compile time fact is invalid]}
 semantic_operation_bindings:
+  - phrase_id: CONDITION_ENTITY_CALLABLE
+    canonical_text: entities whose semantic kind is function
+    column_role: entity_kind_code
+    operator: equals
+    operand_domain: ONTOLOGY_ENTITY_KIND
+    operand_names: [CALLABLE]
+    null_policy: unknown_is_false
+    output_role: predicate
+    ingresses: [relational, graph]
+    diagnostic_code: QUERY_PREDICATE_DOMAIN_MISMATCH
+  - phrase_id: CONDITION_LANGUAGE_PYTHON
+    canonical_text: language is Python
+    column_role: language
+    operator: equals
+    operand_domain: LANGUAGE
+    operand_names: [PYTHON]
+    null_policy: unknown_is_false
+    output_role: predicate
+    ingresses: [relational, graph]
+    diagnostic_code: QUERY_PREDICATE_DOMAIN_MISMATCH
+  - phrase_id: CONDITION_LANGUAGE_RUST
+    canonical_text: language is Rust
+    column_role: language
+    operator: equals
+    operand_domain: LANGUAGE
+    operand_names: [RUST]
+    null_policy: unknown_is_false
+    output_role: predicate
+    ingresses: [relational, graph]
+    diagnostic_code: QUERY_PREDICATE_DOMAIN_MISMATCH
   - phrase_id: CONDITION_CERTAINTY_EXACT
     canonical_text: certainty is exact
     column_role: certainty_code
@@ -81,6 +111,142 @@ semantic_operation_bindings:
     output_role: predicate
     ingresses: [relational, graph]
     diagnostic_code: QUERY_PREDICATE_DOMAIN_MISMATCH
+semantic_projection_bindings:
+  - phrase_id: Q50_SOURCE_FILES
+    target: entity_kind
+    operand_names: [SOURCE_FILE]
+  - phrase_id: Q51_SYNTAX_NODES
+    target: entity_kind
+    operand_names: [SYNTAX_NODE, CALL_SITE, IDENTIFIER_TOKEN, KEYWORD_TOKEN, OPERATOR_TOKEN, PUNCTUATION_TOKEN, LITERAL_TOKEN, STRING_TOKEN, NUMBER_TOKEN, COMMENT, DOCUMENTATION, PRAGMA_OR_DIRECTIVE, MISSING_SYNTAX, STATEMENT, EXPRESSION, PATTERN, DECLARATION_SYNTAX, TYPE_SYNTAX, PARAMETER_SYNTAX, ARGUMENT_SYNTAX, BLOCK, LITERAL, OPERATION, ATTRIBUTE_ACCESS, MEMBER_ACCESS, SUBSCRIPT_ACCESS, INDEX_ACCESS, CALL_EXPRESSION, ASSIGNMENT, BRANCH, LOOP, RETURN, YIELD, AWAIT, RAISE_OR_PANIC_SYNTAX, IMPORT_OR_USE_SYNTAX]
+  - phrase_id: Q52_SEMANTIC_SYMBOLS
+    target: entity_kind
+    operand_names: [SYMBOL]
+  - phrase_id: Q54_SEMANTIC_TYPES
+    target: entity_kind
+    operand_names: [SEMANTIC_TYPE]
+  - phrase_id: Q56_CALLABLE_CONTRACTS
+    target: property_kind
+    operand_names: [NAME, QUALIFIED_NAME, TYPE_REF, VISIBILITY]
+  - phrase_id: Q61_PROGRAM_POINT_STATE
+    target: property_kind
+    operand_names: [TYPE_REF, CATEGORICAL_KIND]
+  - phrase_id: Q70_EXPLICIT_UNKNOWNS
+    target: property_kind
+    operand_names: [CATEGORICAL_KIND]
+  - phrase_id: Q71_PYTHON_BINDINGS
+    target: entity_kind
+    operand_names: [SYMBOL]
+  - phrase_id: Q72_PYTHON_TYPES
+    target: entity_kind
+    operand_names: [SEMANTIC_TYPE]
+  - phrase_id: Q78_PYTHON_COMPREHENSIONS
+    target: entity_kind
+    operand_names: [EXPRESSION]
+  - phrase_id: Q80_PYTHON_ASYNC_GENERATORS
+    target: entity_kind
+    operand_names: [CALLABLE]
+  - phrase_id: Q81_RUST_SEMANTIC_ITEMS
+    target: entity_kind
+    operand_names: [CALLABLE]
+  - phrase_id: Q82_RUST_GENERICS
+    target: entity_kind
+    operand_names: [SEMANTIC_TYPE]
+  - phrase_id: Q84_RUST_MIR_STRUCTURE
+    target: entity_kind
+    operand_names: [CFG_BLOCK]
+  - phrase_id: Q53_MODULE_DEPENDENCIES
+    target: relation_kind
+    operand_names: [REFERS_TO]
+  - phrase_id: Q54_SEMANTIC_TYPES
+    target: relation_kind
+    operand_names: [HAS_TYPE]
+  - phrase_id: Q55_OBJECT_MEMBERS
+    target: relation_kind
+    operand_names: [HAS_TYPE]
+  - phrase_id: Q56_CALLABLE_CONTRACTS
+    target: relation_kind
+    operand_names: [CALLS]
+  - phrase_id: Q57_CALL_TARGETS
+    target: relation_kind
+    operand_names: [CALLS]
+  - phrase_id: Q58_CONTROL_FLOW
+    target: relation_kind
+    operand_names: [CFG_NORMAL]
+  - phrase_id: Q59_DATA_FLOW
+    target: relation_kind
+    operand_names: [DEF_USE]
+  - phrase_id: Q60_MEMORY_ALIASES
+    target: relation_kind
+    operand_names: [POINTS_TO]
+  - phrase_id: Q61_PROGRAM_POINT_STATE
+    target: relation_kind
+    operand_names: [DEF_USE]
+  - phrase_id: Q62_EFFECTS
+    target: relation_kind
+    operand_names: [HAS_EFFECT]
+  - phrase_id: Q63_EXCEPTIONAL_FLOW
+    target: relation_kind
+    operand_names: [CFG_NORMAL]
+  - phrase_id: Q64_RESOURCE_LIFETIMES
+    target: relation_kind
+    operand_names: [HAS_EFFECT]
+  - phrase_id: Q66_CLOSURE_CAPTURES
+    target: relation_kind
+    operand_names: [DEF_USE]
+  - phrase_id: Q68_GRAPH_METRICS
+    target: relation_kind
+    operand_names: [CFG_NORMAL]
+  - phrase_id: Q69_CALLABLE_SUMMARIES
+    target: relation_kind
+    operand_names: [CALLS]
+  - phrase_id: Q72_PYTHON_TYPES
+    target: relation_kind
+    operand_names: [HAS_TYPE]
+  - phrase_id: Q73_PYTHON_OBJECT_MEMBERS
+    target: relation_kind
+    operand_names: [HAS_TYPE]
+  - phrase_id: Q74_PYTHON_CALL_TARGETS
+    target: relation_kind
+    operand_names: [CALLS]
+  - phrase_id: Q75_PYTHON_DYNAMIC_SEMANTICS
+    target: relation_kind
+    operand_names: [HAS_EFFECT]
+  - phrase_id: Q79_PYTHON_CONTEXT_MANAGERS
+    target: relation_kind
+    operand_names: [HAS_EFFECT]
+  - phrase_id: Q82_RUST_GENERICS
+    target: relation_kind
+    operand_names: [HAS_TYPE]
+  - phrase_id: Q83_RUST_TYPE_ADJUSTMENTS
+    target: relation_kind
+    operand_names: [HAS_TYPE]
+  - phrase_id: Q84_RUST_MIR_STRUCTURE
+    target: relation_kind
+    operand_names: [CFG_NORMAL]
+  - phrase_id: Q85_RUST_PLACE_PROJECTIONS
+    target: relation_kind
+    operand_names: [POINTS_TO]
+  - phrase_id: Q86_RUST_MIR_TRANSITIONS
+    target: relation_kind
+    operand_names: [DEF_USE]
+  - phrase_id: Q88_RUST_EXECUTABLE_INSTANCES
+    target: relation_kind
+    operand_names: [CALLS]
+  - phrase_id: Q89_RUST_TRAIT_DISPATCH
+    target: relation_kind
+    operand_names: [HAS_TYPE]
+  - phrase_id: Q91_RUST_DROP_BEHAVIOR
+    target: relation_kind
+    operand_names: [HAS_EFFECT]
+  - phrase_id: Q92_RUST_COROUTINE_LOWERING
+    target: relation_kind
+    operand_names: [CFG_NORMAL]
+  - phrase_id: Q93_RUST_UNSAFE_FFI
+    target: relation_kind
+    operand_names: [HAS_EFFECT]
+  - phrase_id: Q94_RUST_COMPILE_TIME_VALUES
+    target: relation_kind
+    operand_names: [DEF_USE]
 owner_acceptance:
   approver: semantic-query-owner
   accepted_at: "2026-08-21"

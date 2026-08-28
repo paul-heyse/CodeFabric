@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(RESOURCE_KIND_VALUES.len(), 10);
         assert_eq!(PROJECTION_IDS.len(), 13);
         assert_eq!(CAPABILITY_IDS.len(), 22);
-        assert_eq!(PUBLIC_ERROR_IDS.len(), 65);
+        assert_eq!(PUBLIC_ERROR_IDS.len(), 79);
     }
 
     #[test]

@@ -258,7 +258,9 @@ pub const FAMILY_RULES: &[FamilyRule] = &[
     FamilyRule {
         family_id: "contracts",
         root: "contracts",
-        suffixes: &[".ebnf", ".json", ".jsonl", ".md", ".proto", ".sql", ".yaml"],
+        suffixes: &[
+            ".arrow", ".ebnf", ".json", ".jsonl", ".md", ".proto", ".sql", ".yaml",
+        ],
         parser: NativeParser::Opaque,
         claim_policy: ClaimPolicy::ContractTree,
         output_convention: OutputConvention::MixedTransition,

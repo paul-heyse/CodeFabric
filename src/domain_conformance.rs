@@ -144,6 +144,7 @@ pub(crate) fn analyze_governed_plan(plan: LogicalPlan) -> Result<LogicalPlan> {
     DomainConformanceRule::new().analyze(plan, &ConfigOptions::default())
 }
 
+#[allow(clippy::too_many_lines)] // Exhaustive DataFusion Expr coverage is intentionally centralized.
 fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
     #[allow(deprecated)]
     match expression {
@@ -152,7 +153,9 @@ fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
         | Expr::ScalarVariable(_, _)
         | Expr::Literal(_, _)
         | Expr::OuterReferenceColumn(_, _)
-        | Expr::LambdaVariable(_) => {}
+        | Expr::LambdaVariable(_)
+        | Expr::Exists(_)
+        | Expr::ScalarSubquery(_) => {}
         Expr::BinaryExpr(binary) => {
             let left = expression_domain(plan, &binary.left)?;
             let right = expression_domain(plan, &binary.right)?;
@@ -286,7 +289,6 @@ fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
                 "window ordering",
             )?;
         }
-        Expr::Exists(_) | Expr::ScalarSubquery(_) => {}
         Expr::InSubquery(subquery) => {
             if expression_domain(plan, &subquery.expr)?.is_some() {
                 return domain_error(
@@ -385,13 +387,15 @@ fn expression_domain<'a>(plan: &'a LogicalPlan, expression: &'a Expr) -> Result<
         | Expr::InSubquery(_)
         | Expr::SetComparison(_)
         | Expr::ScalarSubquery(_)
-        | Expr::Wildcard { .. }
         | Expr::GroupingSet(_)
         | Expr::Placeholder(_)
         | Expr::Unnest(_)
         | Expr::HigherOrderFunction(_)
         | Expr::Lambda(_)
         | Expr::LambdaVariable(_) => Ok(None),
+        Expr::Wildcard { .. } => {
+            domain_error("unresolved wildcard is forbidden after governed resolution")
+        }
     }
 }
 

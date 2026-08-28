@@ -16,7 +16,6 @@ pub mod cancellation;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
 #[cfg(feature = "data-fabric")]
-pub mod compiled_ontology;
 #[cfg(feature = "daemon")]
 pub mod continuous;
 #[cfg(any(feature = "canonical-json", feature = "contract-models"))]

@@ -1,0 +1,13 @@
+id: ontology-process-local-activation-forbidden
+language: Rust
+severity: error
+message: Ontology activation authority must be durable and must not have a process-local duplicate.
+files:
+  - src/**/*.rs
+ignores:
+  - src/ontology_admin.rs
+rule:
+  any:
+    - pattern: struct OntologyActivationState { $$$FIELDS }
+    - pattern: fn activate_stage2b($$$ARGS) { $$$BODY }
+    - pattern: async fn activate_stage2b($$$ARGS) { $$$BODY }

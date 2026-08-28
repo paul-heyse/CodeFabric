@@ -1,0 +1,11 @@
+id: ontology-operation-dispatch-generic
+language: Rust
+severity: error
+message: Ontology validators must consume the generic lowerer's closed native operation.
+files:
+  - src/ontology_rules.rs
+  - src/fabric/publication.rs
+rule:
+  any:
+    - pattern: match $OP.operation_kind.as_str() { $$$ARMS }
+    - pattern: match $OP.calculation_id.as_str() { $$$ARMS }

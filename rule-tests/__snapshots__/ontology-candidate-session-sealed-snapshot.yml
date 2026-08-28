@@ -1,0 +1,20 @@
+id: ontology-candidate-session-sealed
+snapshots:
+  ? |
+    fn validate() {
+        let context = SessionContext::new();
+    }
+  : labels:
+    - source: SessionContext::new()
+      style: primary
+      start: 34
+      end: 55
+  ? |
+    fn validate() {
+        let state = SessionStateBuilder::new().build();
+    }
+  : labels:
+    - source: SessionStateBuilder::new()
+      style: primary
+      start: 32
+      end: 58

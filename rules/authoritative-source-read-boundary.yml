@@ -14,6 +14,8 @@ ignores:
   # never live workspace source.
   - src/functional_scenario.rs
   - src/gate_b_candidate/functional_candidate.rs
+  # The ontology program store reads only generated package artifacts below its private root.
+  - src/ontology_program.rs
   - src/contracts/**/*.rs
   - src/bin/codefabric_model/**/*.rs
 rule:

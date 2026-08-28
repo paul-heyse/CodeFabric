@@ -1808,7 +1808,7 @@ impl ConsolidatedOverlay {
             })?;
         request
             .runtime
-            .activate(
+            .commit_fact_snapshot(
                 request.store,
                 Arc::clone(&snapshot),
                 Some(predecessor),

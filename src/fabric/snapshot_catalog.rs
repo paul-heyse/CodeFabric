@@ -32,13 +32,16 @@ use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, TrackCon
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
-use datafusion::physical_plan::{ExecutionPlan, execute_stream};
-use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::prelude::SessionConfig;
 use deltalake::{DeltaTable, DeltaTableBuilder};
 use futures::StreamExt as _;
 use std::num::NonZeroUsize;
 
 use crate::error::ErrorEnvelope;
+use crate::governed_session::stream_provider;
+#[cfg(test)]
+use crate::governed_session::{ProviderReadRequest, collect_provider, provider_session_state};
 use crate::registries::Phase;
 
 const BASE_CATALOG_SCHEMA: &str = "cpg_base";
@@ -1032,10 +1035,13 @@ async fn provider_batch(
     provider: Arc<dyn TableProvider>,
     spec: &TableSpec,
 ) -> Result<RecordBatch, FabricError> {
-    let batches = SessionContext::new()
-        .read_table(provider)?
-        .collect()
-        .await?;
+    let batches = collect_provider(ProviderReadRequest {
+        provider,
+        filter: None,
+        projection: None,
+        limit: None,
+    })
+    .await?;
     Ok(concat_batches(&spec.arrow_schema, &batches)?)
 }
 
@@ -1084,15 +1090,12 @@ async fn stream_provider_evidence(
         NonZeroUsize::new(5).expect("positive tracked-consumer count"),
     ));
     let runtime = Arc::new(RuntimeEnvBuilder::new().with_memory_pool(pool).build()?);
-    let context = SessionContext::new_with_config_rt(
+    let mut stream = stream_provider(
         SessionConfig::new().with_batch_size(limits.batch_size),
-        runtime,
-    );
-    let plan = context
-        .state()
-        .create_physical_plan(&context.read_table(provider)?.into_optimized_plan()?)
-        .await?;
-    let mut stream = execute_stream(plan, context.task_ctx())?;
+        Arc::clone(&runtime),
+        provider,
+    )
+    .await?;
     let full_converter = RowConverter::new(
         spec.arrow_schema
             .fields()
@@ -1114,8 +1117,8 @@ async fn stream_provider_evidence(
             .collect(),
     )?;
     let owner_index = spec.arrow_schema.index_of("owner_id").ok();
-    let reservation = MemoryConsumer::new("snapshot-provider-validation")
-        .register(&context.runtime_env().memory_pool);
+    let reservation =
+        MemoryConsumer::new("snapshot-provider-validation").register(&runtime.memory_pool);
     let mut rows = Vec::<Vec<u8>>::new();
     let mut primary_rows = Vec::<Vec<u8>>::new();
     let mut owners = BTreeSet::new();
@@ -1663,11 +1666,10 @@ mod tests {
                 "workspace_kind",
             ))),
         ];
-        let context = SessionContext::new();
-        let state = context.state();
+        let state = provider_session_state(SessionConfig::new());
         provider
             .scan_with_args(
-                &state,
+                state.as_ref(),
                 ScanArgs::default()
                     .with_projection(Some(&projection))
                     .with_filters(Some(&filters))

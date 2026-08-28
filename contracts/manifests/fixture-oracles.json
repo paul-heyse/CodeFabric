@@ -1,7 +1,7 @@
 {
   "artifact_id": "codefabric.manifests.fixture-oracles",
   "artifact_kind": "manifest",
-  "canonical_digest": "b3:683803b0770c74fda682ebe6ee0af4c15b64660fb12aacb60d6b99f8e2669541",
+  "canonical_digest": "b3:f460182c20fbd308baf64013feb18bdca70e89c2e5e90f26257f15e98654b66b",
   "compatible_suite_major": 1,
   "digest_projection": "json-jcs-v1",
   "generator_revision": "codefabric-model/1.0",
@@ -339,7 +339,63 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-activation-fastmcp-forbidden-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-activation-query-ingress-forbidden-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rule-tests/__snapshots__/ontology-candidate-receipt-opaque-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-candidate-session-sealed-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-global-result-version-forbidden-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-operation-dispatch-generic-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-process-local-activation-forbidden-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-raw-planner-sealed-snapshot.yml",
       "version": "1.0"
     },
     {
@@ -364,6 +420,30 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rule-tests/__snapshots__/ruff-no-runtime-import-execution-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/semantic-code-literal-forbidden-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/semantic-phrase-binding-required-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/semantic-phrase-fallback-forbidden-snapshot.yml",
       "version": "1.0"
     },
     {
@@ -547,7 +627,63 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rule-tests/ontology-activation-fastmcp-forbidden-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ontology-activation-query-ingress-forbidden-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rule-tests/ontology-candidate-receipt-opaque-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ontology-candidate-session-sealed-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ontology-global-result-version-forbidden-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ontology-operation-dispatch-generic-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ontology-process-local-activation-forbidden-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ontology-raw-planner-sealed-test.yml",
       "version": "1.0"
     },
     {
@@ -572,6 +708,30 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rule-tests/ruff-no-runtime-import-execution-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/semantic-code-literal-forbidden-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/semantic-phrase-binding-required-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/semantic-phrase-fallback-forbidden-test.yml",
       "version": "1.0"
     },
     {
@@ -755,7 +915,63 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rules/ontology-activation-fastmcp-forbidden.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ontology-activation-query-ingress-forbidden.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rules/ontology-candidate-receipt-opaque.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ontology-candidate-session-sealed.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ontology-global-result-version-forbidden.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ontology-operation-dispatch-generic.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ontology-process-local-activation-forbidden.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ontology-raw-planner-sealed.yml",
       "version": "1.0"
     },
     {
@@ -780,6 +996,30 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rules/ruff-no-runtime-import-execution.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/semantic-code-literal-forbidden.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/semantic-phrase-binding-required.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/semantic-phrase-fallback-forbidden.yml",
       "version": "1.0"
     },
     {

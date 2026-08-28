@@ -1637,8 +1637,9 @@ This roadmap is complete when it can be used to create detailed implementation p
 
 ## Ontology-compiled data-fabric transition sequence
 
-The ontology/data-fabric remediation supersedes the earlier special Stage-2b implementation
-sequence while preserving completed factual substrate work. Its dependency order is:
+The ontology/data-fabric remediation replaces the earlier special ontology activation sequence
+with the unified candidate state machine while preserving completed factual substrate work. Its
+dependency order is:
 
 1. release all eight master designs under `docs/authoritative_design/` and reconcile generated
    manifests/indexes before candidate identity is sealed;

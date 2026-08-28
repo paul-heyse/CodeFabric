@@ -9,9 +9,8 @@ use arrow_array::{
 };
 use arrow_select::concat::concat_batches;
 use datafusion::common::ScalarValue;
-use datafusion::datasource::MemTable;
 use datafusion::logical_expr::{Expr, JoinType, col, lit};
-use datafusion::prelude::SessionContext;
+use datafusion::prelude::SessionConfig;
 use deltalake::protocol::SaveMode;
 use thiserror::Error;
 
@@ -26,6 +25,7 @@ use crate::fabric::{
     MutationJournal, MutationPhase, MutationPhaseSpec, OwnerMutationRequest, batch_checksum,
 };
 use crate::fact_ingest::ValidatedFactBatch;
+use crate::governed_session::{GovernedSession, ProviderReadRequest, collect_provider};
 use crate::identity::context_set_identity;
 use crate::registries::{
     DURABLE_PUBLICATION_STATE_TRANSITIONS, DURABLE_PUBLICATION_STATE_VALUES,
@@ -417,13 +417,13 @@ async fn collect_table(
     spec: &TableSpec,
     filter: Option<Expr>,
 ) -> Result<RecordBatch, FabricError> {
-    let frame = SessionContext::new().read_table(Arc::clone(&table.provider))?;
-    let frame = if let Some(filter) = filter {
-        frame.filter(filter)?
-    } else {
-        frame
-    };
-    let batches = frame.collect().await?;
+    let batches = collect_provider(ProviderReadRequest {
+        provider: Arc::clone(&table.provider),
+        filter,
+        projection: None,
+        limit: None,
+    })
+    .await?;
     Ok(concat_batches(&spec.arrow_schema, &batches)?)
 }
 
@@ -678,6 +678,7 @@ fn owner_scope(batch: &RecordBatch, scope: &PublicationScope) -> Result<String, 
 async fn validate_references(
     request: &PublicationRequest,
     batches: &BTreeMap<i16, RecordBatch>,
+    session: &GovernedSession,
 ) -> Result<usize, FabricError> {
     let scope = request.pins.scope()?;
     let mut validated = 0;
@@ -705,27 +706,20 @@ async fn validate_references(
             )));
         }
 
-        let context = SessionContext::new();
-        let source_provider = Arc::new(MemTable::try_new(
-            source.schema(),
-            vec![vec![source.clone()]],
-        )?);
-        let target_provider = Arc::new(MemTable::try_new(
-            target.schema(),
-            vec![vec![target.clone()]],
-        )?);
         let mut source_projection = vec![contract.source_column];
         if source.schema().index_of("owner_id").is_ok() && contract.source_column != "owner_id" {
             source_projection.push("owner_id");
         }
-        let source_frame = context
-            .read_table(source_provider)?
+        let source_frame = session
+            .frame(source)
+            .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?
             .filter(col(contract.source_column).is_not_null())?
             .select_columns(&source_projection)?;
-        let target_frame = context
-            .read_table(target_provider)?
+        let target_frame = session
+            .frame(target)
+            .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?
             .select_columns(&[contract.target_column])?;
-        let missing = source_frame
+        let missing_frame = source_frame
             .join(
                 target_frame,
                 JoinType::LeftAnti,
@@ -733,9 +727,19 @@ async fn validate_references(
                 &[contract.target_column],
                 None,
             )?
-            .limit(0, Some(1))?
-            .collect()
-            .await?;
+            .limit(0, Some(1))?;
+        let action_id = format!(
+            "foreign-key:{}:{}->{}:{}",
+            contract.source_table_code,
+            contract.source_column,
+            contract.target_table_code,
+            contract.target_column
+        );
+        let outcome = session
+            .execute_frame(missing_frame, &action_id)
+            .await
+            .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+        let missing = outcome.batches;
         let Some(missing) = missing.first() else {
             validated += 1;
             continue;
@@ -775,8 +779,22 @@ async fn validate_candidate(
     validate_manifest_row_counts(records, batches)?;
     validate_identifier_domains(batches)?;
     let effective = candidate_effective_batches(request, records, batches)?;
-    crate::ontology_rules::validate_compiled_ontology_rules(&effective).await?;
-    validate_references(request, &effective).await.map(|_| ())
+    let package = crate::ontology_program::build_ontology_program_package(
+        &crate::ontology_program::OntologyPackagingProfile::default(),
+    )
+    .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+    let session = GovernedSession::new(
+        SessionConfig::new(),
+        format!(
+            "policy:publication-candidate:{}",
+            package.manifest.logical_program_identity
+        ),
+    )
+    .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+    crate::ontology_rules::execute_ontology_program(&effective, &package, &session).await?;
+    validate_references(request, &effective, &session)
+        .await
+        .map(|_| ())
 }
 
 struct PublicationTransition<'a> {
@@ -1622,15 +1640,17 @@ mod tests {
         let catalog = SnapshotProviderCatalog::build(outcome, &EmptySnapshotOverlay)
             .await
             .unwrap();
-        SessionContext::new()
-            .read_table(catalog.provider(table_code).unwrap())
-            .unwrap()
-            .collect()
-            .await
-            .unwrap()
-            .iter()
-            .map(RecordBatch::num_rows)
-            .sum()
+        collect_provider(ProviderReadRequest {
+            provider: catalog.provider(table_code).unwrap(),
+            filter: None,
+            projection: None,
+            limit: None,
+        })
+        .await
+        .unwrap()
+        .iter()
+        .map(RecordBatch::num_rows)
+        .sum()
     }
 
     #[tokio::test]
@@ -1963,8 +1983,12 @@ mod tests {
                     })
             })
             .collect::<BTreeSet<_>>();
+        let session = GovernedSession::new(SessionConfig::new(), "policy:test:references")
+            .expect("governed reference session");
         assert_eq!(
-            validate_references(&request, &candidate).await.unwrap(),
+            validate_references(&request, &candidate, &session)
+                .await
+                .unwrap(),
             foreign_key_contracts().len()
         );
         assert_eq!(generated_contracts, annotated_contracts);

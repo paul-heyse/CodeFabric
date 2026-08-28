@@ -12,7 +12,7 @@
       "deviations": [],
       "failed_approaches": [
         "A first bulk path-rewrite loop used zsh's reserved path array as its loop variable, temporarily destroying command lookup. The failed loop made no bulk edits; it was replaced with an explicitly named source_file variable and bounded live-file selection.",
-        "The first completion-state edit copied an unverified full hash behind the correct c36dbe0 prefix; commit trust rejected it. The state now records the exact git rev-parse result."
+        "The first completion-state edit copied an unverified full hash behind the correct seven-character prefix; commit trust rejected it. The state now records the exact git rev-parse result."
       ],
       "blockers": []
     },

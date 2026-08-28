@@ -2,7 +2,7 @@
   "data_fabric": {
     "arrow_version": "59.2.0",
     "cargo_lock_digest": "b3:21b01693b4c54ae62fff218bc444ecf9c8e60573047295d44efaf8a1c0bbd5da",
-    "cargo_manifest_digest": "b3:88fa35ed55f67137e686e95da2ddb645a31161fd75e97809d6ec3d6c9b180413",
+    "cargo_manifest_digest": "b3:95b5beb32566318b79adf1828a40788db8e19e3acb8f5a5c49e6668f25a9b0ca",
     "datafusion_version": "55.0.0",
     "delta_rs_git_rev": "43a0cf10a313e5077c48637ad786a05359136bbb",
     "deltalake_declared_version": "1.0.0",
@@ -23,7 +23,7 @@
   },
   "families": [
     {
-      "action_key": "b3:3407cf2894ab04e6969641e248dc38d853609f99d59a1ae8b17192e8da9eb82d",
+      "action_key": "b3:09ca686495ad374bfd56a2c6e535a0814aa7447e004a11e2585f08c9bcf760ac",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -45,9 +45,9 @@
       },
       "rule_version": "registry-cbef-driver-v1",
       "tool_identity": {
-        "action_key": "b3:2a4064a2273c3d1814db854352483b3a46cec6d0fdf273fa23794a5797013bd9",
+        "action_key": "b3:69ff90cd4bb28c2ffa52ef26c0d7f652ec234191416dbd6211062b3f70b2270b",
         "cargo_lock_digest": "b3:21b01693b4c54ae62fff218bc444ecf9c8e60573047295d44efaf8a1c0bbd5da",
-        "cargo_manifest_digest": "b3:88fa35ed55f67137e686e95da2ddb645a31161fd75e97809d6ec3d6c9b180413",
+        "cargo_manifest_digest": "b3:95b5beb32566318b79adf1828a40788db8e19e3acb8f5a5c49e6668f25a9b0ca",
         "executable_digest": "b3:a3e552c7b5342f0b0a7e3449880876d4ff27566e73ecdc52f3473952fcb40ce2",
         "features": [
           "provider-inventory-tooling"
@@ -59,11 +59,12 @@
       }
     },
     {
-      "action_key": "b3:9d2081a8d2fe9b59c85c3418bea888e712f7a1d0d706e08f5e87f05170d31e35",
+      "action_key": "b3:aeab03d3ede2342f8a712467b67caf32c9e107d71111e9702c9d3a6eee25f542",
       "family": "schemas",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query_forms.py",
+        "contracts/generated/model/ontology/ontology-program-bundle.arrow",
         "contracts/generated/model/schema/operational-store.sql",
         "contracts/generated/model/schema/public-schema-golden-instances.json",
         "contracts/generated/model/schema/schema-evolution-policy.json",
@@ -78,18 +79,18 @@
         "contracts/schema/public-status.schema.json",
         "contracts/schema/serving-snapshot.schema.json",
         "contracts/schema/source-context.schema.json",
-        "src/generated/compiled_ontology.rs",
         "src/generated/fact_row_encoders.rs",
         "src/generated/id_domains.rs",
         "src/generated/model_query_forms.rs",
         "src/generated/model_schema_tables.rs",
         "src/generated/model_semantic_lane_fragments.rs",
+        "src/generated/ontology_program_bundle.rs",
         "src/generated/result_schemas.rs",
         "src/generated/table_specs.rs"
       ],
       "resource_profile": {
         "max_output_bytes": 8388608,
-        "max_outputs": 24,
+        "max_outputs": 25,
         "max_source_bytes": 16777216
       },
       "rule_version": "schema-contract-driver-v1",
@@ -99,7 +100,7 @@
       }
     },
     {
-      "action_key": "b3:335bd482f70335c3f8b756b94dd2215f6fa031b3b2ee45a600b7a9c9d71086ff",
+      "action_key": "b3:159e46933056b9e99df1e070d59e4a3efa180c4c2aed6ace0754cc061039638e",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -132,7 +133,7 @@
       }
     },
     {
-      "action_key": "b3:8f45e2174b588ee9a7357db32a59f01a8c9528753d3f3fff815473c0475b33c2",
+      "action_key": "b3:394fba5643cb18cc13e70d6ac8c8ee184e8731ccd26af14dc49b3b75e0898c9e",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -176,10 +177,10 @@
           "script_digest": "b3:7304585e5f9a044259627968bb2b42e1f1c4342596fb128c41a430e28ff1bfea"
         },
         "rust": {
-          "action_key": "b3:aa5cd8754775a1c42cea11e391a0dc99c3f34fd6d67485565b6b2de56cb3ace1",
+          "action_key": "b3:941d48b8a7831fff70748b35801347952c4cc99b4f6f9e55757a1edc65664393",
           "binary_digest": "b3:d33cec558851f123c5c61f7c585c94768374a2befb7d1eee2507e0e0328653cd",
           "cargo_lock_digest": "b3:21b01693b4c54ae62fff218bc444ecf9c8e60573047295d44efaf8a1c0bbd5da",
-          "cargo_manifest_digest": "b3:88fa35ed55f67137e686e95da2ddb645a31161fd75e97809d6ec3d6c9b180413",
+          "cargo_manifest_digest": "b3:95b5beb32566318b79adf1828a40788db8e19e3acb8f5a5c49e6668f25a9b0ca",
           "descriptor_api": "tonic_prost_build::Builder::compile_fds",
           "features": [
             "proto-tooling"

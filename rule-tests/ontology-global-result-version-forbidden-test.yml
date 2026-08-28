@@ -1,0 +1,9 @@
+id: ontology-global-result-version-forbidden
+valid:
+  - |
+      fn result_version(package: &OntologyProgramPackage) {
+          result_checksum_version(package);
+      }
+invalid:
+  - |
+      const RESULT_CHECKSUM_VERSION: &str = "ResultChecksumV2";

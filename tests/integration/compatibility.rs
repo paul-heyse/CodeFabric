@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use codefabric::compatibility;
-use datafusion::prelude::SessionContext;
 use serde_json::Value;
 
 fn repository_root() -> PathBuf {
@@ -14,21 +13,10 @@ fn repository_root() -> PathBuf {
 async fn stable_dependency_contract_is_executable() {
     assert_eq!(arrow::ARROW_VERSION, "59.2.0");
     assert_eq!(datafusion::DATAFUSION_VERSION, "55.0.0");
-    let context: SessionContext = compatibility::session_with_provider().expect("provider");
-    let batches = context
-        .sql("SELECT id FROM compatibility ORDER BY id")
+    let row_count = compatibility::provider_row_count()
         .await
-        .expect("plan")
-        .collect()
-        .await
-        .expect("execute");
-    assert_eq!(
-        batches
-            .iter()
-            .map(arrow_array::RecordBatch::num_rows)
-            .sum::<usize>(),
-        2
-    );
+        .expect("provider execution");
+    assert_eq!(row_count, 2);
 
     compatibility::arrow_family_probe().expect("Arrow family kernels");
     compatibility::utility_probe().expect("utilities");

@@ -1,0 +1,18 @@
+id: semantic-phrase-binding-required
+snapshots:
+  ? |
+    fn lower(phrase: &ResolvedPhrase) {
+        match phrase.phrase_id.as_str() {
+            "Q51_SYNTAX_NODES" => syntax(),
+            _ => none(),
+        }
+    }
+  : labels:
+    - source: |-
+        match phrase.phrase_id.as_str() {
+                "Q51_SYNTAX_NODES" => syntax(),
+                _ => none(),
+            }
+      style: primary
+      start: 40
+      end: 140

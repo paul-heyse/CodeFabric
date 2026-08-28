@@ -1,0 +1,26 @@
+id: ontology-process-local-activation-forbidden
+snapshots:
+  ? |
+    async fn activate_stage2b(candidate: Candidate) {
+        ACTIVE.store(candidate);
+    }
+  : labels:
+    - source: |-
+        async fn activate_stage2b(candidate: Candidate) {
+            ACTIVE.store(candidate);
+        }
+      style: primary
+      start: 0
+      end: 80
+  ? |
+    struct OntologyActivationState {
+        active_candidate: Option<String>,
+    }
+  : labels:
+    - source: |-
+        struct OntologyActivationState {
+            active_candidate: Option<String>,
+        }
+      style: primary
+      start: 0
+      end: 72

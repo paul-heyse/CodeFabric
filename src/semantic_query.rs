@@ -35,8 +35,8 @@ pub use crate::model_generated::query_forms::{
 pub use crate::registries::QueryForm;
 use crate::registries::{
     COMPLETENESS_STATE_VALUES, CompletenessState, DEPENDENCY_STATE_VALUES, DependencyState,
-    FRESHNESS_STATE_VALUES, FreshnessState, LIMIT_STATE_VALUES, LimitState, PHRASE_ENTRIES,
-    PhraseEntry, QUERY_AVAILABILITY_STATE_VALUES, QUERY_EXECUTION_STATE_VALUES, QUERY_FORM_VALUES,
+    FRESHNESS_STATE_VALUES, FreshnessState, LIMIT_STATE_VALUES, LimitState,
+    QUERY_AVAILABILITY_STATE_VALUES, QUERY_EXECUTION_STATE_VALUES, QUERY_FORM_VALUES,
     QueryAvailabilityState, QueryExecutionState, registry_state_name,
 };
 
@@ -556,10 +556,34 @@ fn valid_id(value: &str, maximum: usize) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.'))
 }
 
-fn resolve_phrase(
+fn ontology_compiler()
+-> Result<crate::ontology_executor::OntologyProgramCompiler, SemanticQueryError> {
+    let package = crate::ontology_program::build_ontology_program_package(
+        &crate::ontology_program::OntologyPackagingProfile::default(),
+    )
+    .map_err(|error| {
+        phase_error(
+            "ONTOLOGY_PROGRAM_INVALID",
+            "semantic_binding",
+            "",
+            error.to_string(),
+        )
+    })?;
+    crate::ontology_executor::OntologyProgramCompiler::decode(&package).map_err(|error| {
+        phase_error(
+            "ONTOLOGY_PROGRAM_INVALID",
+            "semantic_binding",
+            "",
+            error.to_string(),
+        )
+    })
+}
+
+fn resolve_phrase_in<'a>(
+    compiler: &'a crate::ontology_executor::OntologyProgramCompiler,
     form: QueryForm,
     label: Option<&str>,
-) -> Result<Option<&'static PhraseEntry>, SemanticQueryError> {
+) -> Result<Option<&'a crate::ontology_executor::DecodedQueryPhrase>, SemanticQueryError> {
     let Some(label) = label else {
         return Ok(None);
     };
@@ -569,8 +593,8 @@ fn resolve_phrase(
         ));
     }
     let plan_node_kind = form.plan_node_kind();
-    let mut matches = PHRASE_ENTRIES.iter().filter(|entry| {
-        (entry.canonical_text == label || entry.accepted_aliases.contains(&label))
+    let mut matches = compiler.query_phrases.values().filter(|entry| {
+        (entry.canonical_text == label || entry.accepted_aliases.iter().any(|alias| alias == label))
             && entry.plan_node_kind == plan_node_kind
     });
     let resolved = matches.next().ok_or_else(|| {
@@ -586,13 +610,23 @@ fn resolve_phrase(
     Ok(Some(resolved))
 }
 
-fn resolved_phrase(
+#[cfg(test)]
+fn resolve_phrase(
+    form: QueryForm,
+    label: Option<&str>,
+) -> Result<Option<crate::ontology_executor::DecodedQueryPhrase>, SemanticQueryError> {
+    let compiler = ontology_compiler()?;
+    Ok(resolve_phrase_in(&compiler, form, label)?.cloned())
+}
+
+fn resolved_phrase_in(
+    compiler: &crate::ontology_executor::OntologyProgramCompiler,
     form: QueryForm,
     value: &str,
     pointer: impl Into<String>,
 ) -> Result<ResolvedPhrase, SemanticQueryError> {
     let pointer = pointer.into();
-    let entry = resolve_phrase(form, Some(value)).map_err(|error| {
+    let entry = resolve_phrase_in(compiler, form, Some(value)).map_err(|error| {
         phase_error(
             "SEMANTIC_PHRASE_UNSUPPORTED",
             "semantic_binding",
@@ -608,19 +642,23 @@ fn resolved_phrase(
             "a governed semantic phrase is required",
         )
     })?;
-    let language_code = if entry.required_modifiers.contains(&"python") {
+    let language_code = if entry
+        .required_modifiers
+        .iter()
+        .any(|value| value == "python")
+    {
         Some(crate::registries::Language::Python as u16)
-    } else if entry.required_modifiers.contains(&"rust") {
+    } else if entry.required_modifiers.iter().any(|value| value == "rust") {
         Some(crate::registries::Language::Rust as u16)
     } else {
         None
     };
     Ok(ResolvedPhrase {
         source_pointer: pointer,
-        phrase_id: entry.phrase_id.to_owned(),
-        canonical_text: entry.canonical_text.to_owned(),
-        contract_family: entry.contract_family.to_owned(),
-        contract_code: entry.contract_code.to_owned(),
+        phrase_id: entry.phrase_id.clone(),
+        canonical_text: entry.canonical_text.clone(),
+        contract_family: entry.contract_family.clone(),
+        contract_code: entry.contract_code.clone(),
         language_code,
     })
 }
@@ -629,11 +667,13 @@ fn resolve_query_phrases(
     query: &SemanticQueryClause,
     query_pointer: &str,
 ) -> Result<Vec<ResolvedPhrase>, SemanticQueryError> {
+    let compiler = ontology_compiler()?;
     let form = query.form();
     let mut phrases = Vec::new();
     match query {
         SemanticQueryClause::FindEntities { looking_for, .. } => {
-            phrases.push(resolved_phrase(
+            phrases.push(resolved_phrase_in(
+                &compiler,
                 form,
                 looking_for,
                 format!("{query_pointer}/looking_for"),
@@ -641,7 +681,8 @@ fn resolve_query_phrases(
         }
         SemanticQueryClause::RetrieveFacts { facts, .. } => {
             for (index, phrase) in facts.iter().enumerate() {
-                phrases.push(resolved_phrase(
+                phrases.push(resolved_phrase_in(
+                    &compiler,
                     form,
                     phrase,
                     format!("{query_pointer}/facts/{index}"),
@@ -649,7 +690,8 @@ fn resolve_query_phrases(
             }
         }
         SemanticQueryClause::FollowRelationships { relationship, .. } => {
-            phrases.push(resolved_phrase(
+            phrases.push(resolved_phrase_in(
+                &compiler,
                 form,
                 relationship,
                 format!("{query_pointer}/relationship"),
@@ -657,7 +699,8 @@ fn resolve_query_phrases(
         }
         SemanticQueryClause::FindPaths { through, .. } => {
             for (index, phrase) in through.iter().enumerate() {
-                phrases.push(resolved_phrase(
+                phrases.push(resolved_phrase_in(
+                    &compiler,
                     form,
                     phrase,
                     format!("{query_pointer}/through/{index}"),
@@ -672,14 +715,16 @@ fn resolve_query_phrases(
             for (index, binding) in bindings.iter().enumerate() {
                 // Binding selectors use the find-entities phrase vocabulary even though the
                 // enclosing operator is the pattern matcher.
-                phrases.push(resolved_phrase(
+                phrases.push(resolved_phrase_in(
+                    &compiler,
                     QueryForm::FindEntities,
                     &binding.looking_for,
                     format!("{query_pointer}/bindings/{index}/looking_for"),
                 )?);
             }
             for (index, relationship) in relationships.iter().enumerate() {
-                phrases.push(resolved_phrase(
+                phrases.push(resolved_phrase_in(
+                    &compiler,
                     QueryForm::FollowRelationships,
                     &relationship.relationship,
                     format!("{query_pointer}/relationships/{index}/relationship"),
@@ -688,7 +733,8 @@ fn resolve_query_phrases(
         }
         SemanticQueryClause::SummarizeFacts { summaries, .. } => {
             for (index, phrase) in summaries.iter().enumerate() {
-                phrases.push(resolved_phrase(
+                phrases.push(resolved_phrase_in(
+                    &compiler,
                     form,
                     phrase,
                     format!("{query_pointer}/summaries/{index}"),
@@ -1159,31 +1205,9 @@ fn all_of(expressions: Vec<Expr>) -> Option<Expr> {
     expressions.into_iter().reduce(Expr::and)
 }
 
-fn ontology_code(family: &str, name: &str) -> i32 {
-    let ontology = crate::compiled_ontology::compiled_ontology();
-    match family {
-        "entity" => ontology
-            .entity_kinds
-            .iter()
-            .find(|value| value.name == name)
-            .map(|value| value.code),
-        "relation" => ontology
-            .relation_kinds
-            .iter()
-            .find(|value| value.name == name)
-            .map(|value| value.code),
-        "property" => ontology
-            .property_kinds
-            .iter()
-            .find(|value| value.name == name)
-            .map(|value| value.code),
-        _ => None,
-    }
-    .unwrap_or_else(|| panic!("compiled ontology value {family}.{name} is absent"))
-}
-
 fn compiled_enum_code(domain: &str, name: &str) -> i16 {
-    crate::compiled_ontology::compiled_ontology()
+    crate::ontology_program::ontology_program_vocabulary()
+        .expect("generated ontology program was model-validated")
         .enum_values
         .iter()
         .find(|value| value.domain == domain && value.name == name)
@@ -1191,134 +1215,37 @@ fn compiled_enum_code(domain: &str, name: &str) -> i16 {
         .unwrap_or_else(|| panic!("compiled enum value {domain}.{name} is absent or not code16"))
 }
 
-fn entity_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
-    let mut names = BTreeSet::new();
-    for phrase in phrases {
-        match phrase.phrase_id.as_str() {
-            "Q50_SOURCE_FILES" => {
-                names.insert("SOURCE_FILE");
-            }
-            "Q51_SYNTAX_NODES" => {
-                names.extend([
-                    "SYNTAX_NODE",
-                    "CALL_SITE",
-                    "IDENTIFIER_TOKEN",
-                    "KEYWORD_TOKEN",
-                    "OPERATOR_TOKEN",
-                    "PUNCTUATION_TOKEN",
-                    "LITERAL_TOKEN",
-                    "STRING_TOKEN",
-                    "NUMBER_TOKEN",
-                    "COMMENT",
-                    "DOCUMENTATION",
-                    "PRAGMA_OR_DIRECTIVE",
-                    "MISSING_SYNTAX",
-                    "STATEMENT",
-                    "EXPRESSION",
-                    "PATTERN",
-                    "DECLARATION_SYNTAX",
-                    "TYPE_SYNTAX",
-                    "PARAMETER_SYNTAX",
-                    "ARGUMENT_SYNTAX",
-                    "BLOCK",
-                    "LITERAL",
-                    "OPERATION",
-                    "ATTRIBUTE_ACCESS",
-                    "MEMBER_ACCESS",
-                    "SUBSCRIPT_ACCESS",
-                    "INDEX_ACCESS",
-                    "CALL_EXPRESSION",
-                    "ASSIGNMENT",
-                    "BRANCH",
-                    "LOOP",
-                    "RETURN",
-                    "YIELD",
-                    "AWAIT",
-                    "RAISE_OR_PANIC_SYNTAX",
-                    "IMPORT_OR_USE_SYNTAX",
-                ]);
-            }
-            "Q52_SEMANTIC_SYMBOLS" | "Q71_PYTHON_BINDINGS" => {
-                names.insert("SYMBOL");
-            }
-            "Q54_SEMANTIC_TYPES" | "Q72_PYTHON_TYPES" | "Q82_RUST_GENERICS" => {
-                names.insert("SEMANTIC_TYPE");
-            }
-            "Q78_PYTHON_COMPREHENSIONS" => {
-                names.insert("EXPRESSION");
-            }
-            "Q80_PYTHON_ASYNC_GENERATORS" | "Q81_RUST_SEMANTIC_ITEMS" => {
-                names.insert("CALLABLE");
-            }
-            "Q84_RUST_MIR_STRUCTURE" => {
-                names.insert("CFG_BLOCK");
-            }
-            _ => {}
-        }
-    }
-    names
+fn query_projection_codes(
+    phrases: &[ResolvedPhrase],
+    target_kind: &str,
+) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+    let compiler = ontology_compiler()?;
+    Ok(phrases
+        .iter()
+        .flat_map(|phrase| {
+            compiler
+                .query_projection_codes
+                .get(&(phrase.phrase_id.clone(), target_kind.to_owned()))
+                .into_iter()
+                .flatten()
+                .copied()
+        })
+        .collect::<BTreeSet<_>>()
         .into_iter()
-        .map(|name| ScalarValue::Int32(Some(ontology_code("entity", name))))
-        .collect()
+        .map(|code| ScalarValue::Int32(Some(code)))
+        .collect())
 }
 
-fn relation_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
-    let mut names = BTreeSet::new();
-    for phrase in phrases {
-        match phrase.contract_code.as_str() {
-            "CALL_EXACT_V1" | "CALL_SOUND_V1" => {
-                names.insert("CALLS");
-            }
-            "TYPE_GRAPH_V1" => {
-                names.insert("HAS_TYPE");
-            }
-            "CFG_FULL_V1" => {
-                names.insert("CFG_NORMAL");
-            }
-            "DATAFLOW_V1" => {
-                names.insert("DEF_USE");
-            }
-            "ALIAS_V1" => {
-                names.insert("POINTS_TO");
-            }
-            "EFFECT_V1" => {
-                names.insert("HAS_EFFECT");
-            }
-            "RESOURCE_V1" => {
-                names.insert("USES_RESOURCE");
-            }
-            "DEPENDENCY_V1" => {
-                names.insert("REFERS_TO");
-            }
-            _ => {}
-        }
-    }
-    names
-        .into_iter()
-        .map(|name| ScalarValue::Int32(Some(ontology_code("relation", name))))
-        .collect()
+fn entity_kind_codes(phrases: &[ResolvedPhrase]) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+    query_projection_codes(phrases, "entity_kind")
 }
 
-fn property_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
-    let mut names = BTreeSet::new();
-    for phrase in phrases {
-        match phrase.phrase_id.as_str() {
-            "Q56_CALLABLE_CONTRACTS" => {
-                names.extend(["NAME", "QUALIFIED_NAME", "TYPE_REF", "VISIBILITY"]);
-            }
-            "Q61_PROGRAM_POINT_STATE" => {
-                names.extend(["TYPE_REF", "CATEGORICAL_KIND"]);
-            }
-            "Q70_EXPLICIT_UNKNOWNS" => {
-                names.insert("CATEGORICAL_KIND");
-            }
-            _ => {}
-        }
-    }
-    names
-        .into_iter()
-        .map(|name| ScalarValue::Int32(Some(ontology_code("property", name))))
-        .collect()
+fn relation_kind_codes(phrases: &[ResolvedPhrase]) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+    query_projection_codes(phrases, "relation_kind")
+}
+
+fn property_kind_codes(phrases: &[ResolvedPhrase]) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+    query_projection_codes(phrases, "property_kind")
 }
 
 fn language_predicate(column: &'static str, phrases: &[ResolvedPhrase]) -> Option<Expr> {
@@ -1332,48 +1259,29 @@ fn language_predicate(column: &'static str, phrases: &[ResolvedPhrase]) -> Optio
     any_of(column, values)
 }
 
-fn compiled_condition_predicate(condition: &str, qualifier: &str) -> Option<Expr> {
-    let operation = crate::model_generated::schema_tables::SEMANTIC_OPERATION_SPECS
-        .iter()
-        .find(|operation| operation.canonical_text == condition)?;
-    let column = col(format!("{qualifier}.{}", operation.column_role));
-    let values = operation
-        .operand_codes
-        .iter()
-        .map(|code| lit(ScalarValue::Int16(Some(*code))))
-        .collect::<Vec<_>>();
-    match operation.operator {
-        crate::model_generated::schema_tables::SemanticPredicateOperator::Equals => {
-            values.into_iter().next().map(|value| column.eq(value))
-        }
-        crate::model_generated::schema_tables::SemanticPredicateOperator::InSet => {
-            Some(column.in_list(values, false))
-        }
-    }
+fn compiled_condition_predicate(
+    condition: &str,
+    qualifier: &str,
+) -> Result<Expr, SemanticQueryError> {
+    ontology_compiler()?
+        .lower_phrase_text_for_qualifier(condition, qualifier)
+        .map_err(|error| {
+            phase_error(
+                "SEMANTIC_PHRASE_UNSUPPORTED",
+                "logical_compile",
+                "",
+                error.to_string(),
+            )
+        })
 }
 
-fn condition_predicates(query: &SemanticQueryClause, qualifier: &str) -> Vec<Expr> {
+fn condition_predicates(
+    query: &SemanticQueryClause,
+    qualifier: &str,
+) -> Result<Vec<Expr>, SemanticQueryError> {
     query_where_conditions(query)
         .iter()
-        .filter_map(|condition| {
-            if let Some(predicate) = compiled_condition_predicate(condition, qualifier) {
-                return Some(predicate);
-            }
-            match condition.as_str() {
-                "entities whose semantic kind is function" => Some(
-                    col(format!("{qualifier}.entity_kind_code")).eq(lit(ScalarValue::Int32(Some(
-                        ontology_code("entity", "CALLABLE"),
-                    )))),
-                ),
-                "language is Python" => Some(col(format!("{qualifier}.language")).eq(lit(
-                    ScalarValue::Int16(Some(crate::registries::Language::Python as i16)),
-                ))),
-                "language is Rust" => Some(col(format!("{qualifier}.language")).eq(lit(
-                    ScalarValue::Int16(Some(crate::registries::Language::Rust as i16)),
-                ))),
-                _ => None,
-            }
-        })
+        .map(|condition| compiled_condition_predicate(condition, qualifier))
         .collect()
 }
 
@@ -1406,7 +1314,7 @@ async fn compile_find_entities(
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<LogicalPlan, SemanticQueryError> {
-    let mut predicates = condition_predicates(query, "entity");
+    let mut predicates = condition_predicates(query, "entity")?;
     let identities = query
         .direct_entity_ids()
         .into_iter()
@@ -1415,7 +1323,7 @@ async fn compile_find_entities(
     if let Some(predicate) = any_of_expr("entity.entity_id", identities) {
         predicates.push(predicate);
     }
-    let kinds = entity_kind_codes(&typed.resolved_phrases);
+    let kinds = entity_kind_codes(&typed.resolved_phrases)?;
     if let Some(predicate) = any_of("entity.entity_kind_code", kinds) {
         predicates.push(predicate);
     }
@@ -1482,15 +1390,15 @@ async fn compile_retrieve_facts(
         .map(|value| id16_literal(value, "fact:", "fact"))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut property_predicates = condition_predicates(query, "property");
+    let mut property_predicates = condition_predicates(query, "property")?;
     if let Some(predicate) = any_of_expr("property.fact_id", direct_facts.clone()) {
         property_predicates.push(predicate);
     }
     if let Some(predicate) = fact_about_predicates(query, "property.subject_entity_id", None)? {
         property_predicates.push(predicate);
     }
-    let property_kinds = property_kind_codes(&typed.resolved_phrases);
-    let relation_kinds = relation_kind_codes(&typed.resolved_phrases);
+    let property_kinds = property_kind_codes(&typed.resolved_phrases)?;
+    let relation_kinds = relation_kind_codes(&typed.resolved_phrases)?;
     if let Some(predicate) = any_of("property.property_kind_code", property_kinds.clone()) {
         property_predicates.push(predicate);
     } else if !relation_kinds.is_empty() {
@@ -1518,7 +1426,7 @@ async fn compile_retrieve_facts(
         ])?
         .build()?;
 
-    let mut relation_predicates = condition_predicates(query, "relation");
+    let mut relation_predicates = condition_predicates(query, "relation")?;
     if let Some(predicate) = any_of_expr("relation.fact_id", direct_facts) {
         relation_predicates.push(predicate);
     }
@@ -1994,8 +1902,10 @@ fn path_policy(value: &str, pointer: &str) -> Result<PathPolicy, SemanticQueryEr
     }
 }
 
-fn resolved_relation_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<i32> {
-    let mut codes = relation_kind_codes(phrases)
+fn resolved_relation_kind_codes(
+    phrases: &[ResolvedPhrase],
+) -> Result<Vec<i32>, SemanticQueryError> {
+    let mut codes = relation_kind_codes(phrases)?
         .into_iter()
         .filter_map(|value| match value {
             ScalarValue::Int32(Some(code)) => Some(code),
@@ -2004,20 +1914,28 @@ fn resolved_relation_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<i32> {
         .collect::<Vec<_>>();
     codes.sort_unstable();
     codes.dedup();
-    codes
+    Ok(codes)
 }
 
-fn graph_certainty_codes(query: &SemanticQueryClause) -> Vec<i16> {
+fn graph_certainty_codes(query: &SemanticQueryClause) -> Result<Vec<i16>, SemanticQueryError> {
+    let compiler = ontology_compiler()?;
     let mut codes = BTreeSet::new();
     for condition in query_where_conditions(query) {
-        if let Some(operation) = crate::model_generated::schema_tables::SEMANTIC_OPERATION_SPECS
-            .iter()
-            .find(|operation| operation.canonical_text == condition)
-        {
-            codes.extend(operation.operand_codes.iter().copied());
-        }
+        let operation = compiler
+            .phrases
+            .values()
+            .find(|operation| operation.canonical_text == *condition)
+            .ok_or_else(|| {
+                phase_error(
+                    "SEMANTIC_PHRASE_UNSUPPORTED",
+                    "logical_compile",
+                    "",
+                    format!("unbound semantic condition {condition:?}"),
+                )
+            })?;
+        codes.extend(operation.operand_codes.iter().copied());
     }
-    codes.into_iter().collect()
+    Ok(codes.into_iter().collect())
 }
 
 fn graph_output_schema(form: QueryForm) -> Result<SchemaRef, SemanticQueryError> {
@@ -2061,7 +1979,7 @@ fn graph_operator_plan(
             "relational form reached graph lowering".to_owned(),
         ));
     }
-    let relationship_kind_codes = resolved_relation_kind_codes(&typed.resolved_phrases);
+    let relationship_kind_codes = resolved_relation_kind_codes(&typed.resolved_phrases)?;
     let (semantics, maximum_depth) = match query {
         SemanticQueryClause::FollowRelationships {
             direction,
@@ -2115,7 +2033,7 @@ fn graph_operator_plan(
                             })
                             .cloned()
                             .collect::<Vec<_>>(),
-                    ),
+                    )?,
                 },
                 maximum_length.unwrap_or(64),
             )
@@ -2153,7 +2071,7 @@ fn graph_operator_plan(
         block_id: typed.block_id.clone(),
         semantics,
         relationship_kind_codes,
-        certainty_codes: graph_certainty_codes(query),
+        certainty_codes: graph_certainty_codes(query)?,
         input_roles: typed.input_roles.clone(),
         output_role: typed.output_role,
         output_schema: graph_output_schema(typed.form)?,
@@ -5481,9 +5399,12 @@ mod tests {
 
     #[test]
     fn odf_phrase_binding_dual_path_parity() {
-        let operation = crate::model_generated::schema_tables::SEMANTIC_OPERATION_SPECS
+        let compiler = ontology_compiler().expect("ontology compiler");
+        let operation = compiler
+            .phrases
             .iter()
-            .find(|operation| operation.canonical_text == "certainty is exact")
+            .find(|(_, operation)| operation.canonical_text == "certainty is exact")
+            .map(|(_, operation)| operation)
             .expect("compiled phrase operation");
         let expected = operation
             .operand_codes
@@ -5502,7 +5423,7 @@ mod tests {
             .iter()
             .find(|query| query.form() == QueryForm::FindEntities)
             .unwrap();
-        let predicates = condition_predicates(relational, "entity");
+        let predicates = condition_predicates(relational, "entity").unwrap();
         assert_eq!(predicates.len(), 1);
         let rendered = predicates[0].to_string();
         for code in &expected {
@@ -5517,6 +5438,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             graph_certainty_codes(graph)
+                .unwrap()
                 .into_iter()
                 .collect::<BTreeSet<_>>(),
             expected

@@ -339,7 +339,12 @@ mod tests {
     fn ontology_gate_checksum_canonical_kats() {
         let sorted = map_batch(vec!["a", "b"]);
         assert!(
-            gate_result_checksum_v1(sorted.schema().as_ref(), &[sorted.clone()], 1_048_576).is_ok()
+            gate_result_checksum_v1(
+                sorted.schema().as_ref(),
+                std::slice::from_ref(&sorted),
+                1_048_576,
+            )
+            .is_ok()
         );
         for keys in [vec!["b", "a"], vec!["a", "a"]] {
             let invalid = map_batch(keys);
@@ -350,7 +355,7 @@ mod tests {
         }
     }
 
-    async fn plan() -> (SessionContext, datafusion::logical_expr::LogicalPlan) {
+    fn plan() -> (SessionContext, datafusion::logical_expr::LogicalPlan) {
         let context = SessionContext::new();
         let batch = RecordBatch::try_from_iter([(
             "value",
@@ -368,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn ontology_gate_single_execution_metric_closure() {
-        let (context, plan) = plan().await;
+        let (context, plan) = plan();
         let outcome = execute_ontology_gate_once(
             &context,
             &plan,
@@ -386,7 +391,7 @@ mod tests {
 
     #[tokio::test]
     async fn ontology_gate_artifact_identity_separation() {
-        let (context, plan) = plan().await;
+        let (context, plan) = plan();
         let outcome = execute_ontology_gate_once(
             &context,
             &plan,
@@ -415,7 +420,7 @@ mod tests {
         };
         let mut observed = Vec::new();
         for execution in ["limited-1", "limited-2"] {
-            let (context, plan) = plan().await;
+            let (context, plan) = plan();
             let error = execute_ontology_gate_once(
                 &context,
                 &plan,

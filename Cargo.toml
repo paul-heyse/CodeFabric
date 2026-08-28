@@ -34,6 +34,9 @@ contract-models = [
 ]
 model-compiler = [
     "contract-models",
+    "dep:arrow-array",
+    "dep:arrow-ipc",
+    "dep:arrow-schema",
     "dep:blake3",
     "dep:gix",
     "dep:notify-debouncer-full",

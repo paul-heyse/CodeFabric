@@ -1,0 +1,15 @@
+id: semantic-phrase-fallback-forbidden
+valid:
+  - |
+      fn lower(result: Result<Expr, Error>) -> Result<Expr, Error> {
+          result
+      }
+invalid:
+  - |
+      fn lower(result: Result<Vec<i32>, Error>) -> Vec<i32> {
+          match result { Ok(value) => value, Err(error) => Vec::new() }
+      }
+  - |
+      fn lower(phrase_result: Result<Expr, Error>) -> Expr {
+          phrase_result.unwrap_or_default()
+      }

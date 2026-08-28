@@ -2,12 +2,17 @@
 
 use std::sync::Arc;
 
+use arrow_array::RecordBatch;
 use arrow_schema::ArrowError;
+use datafusion::catalog::TableProvider;
+use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
 use datafusion::execution::SessionStateBuilder;
-use datafusion::logical_expr::LogicalPlan;
+use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::registry::MemoryExtensionTypeRegistry;
-use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion::logical_expr::{Expr, LogicalPlan};
+use datafusion::physical_plan::{SendableRecordBatchStream, execute_stream};
+use datafusion::prelude::{DataFrame, SessionConfig, SessionContext};
 use thiserror::Error;
 
 use crate::ontology_gate::{
@@ -46,6 +51,58 @@ pub struct GovernedSession {
     session_identity: String,
     config_identity: String,
     policy_identity: String,
+}
+
+/// Exact-provider read request admitted by the internal DataFusion adapter.
+///
+/// The closed request shape prevents fabric callers from acquiring a raw context, optimizer,
+/// planner, or physical plan merely to inspect an exact-version provider.
+pub(crate) struct ProviderReadRequest {
+    pub provider: Arc<dyn TableProvider>,
+    pub filter: Option<Expr>,
+    pub projection: Option<Vec<Expr>>,
+    pub limit: Option<usize>,
+}
+
+/// Collect one exact-provider read without exposing DataFusion session or action APIs.
+pub(crate) async fn collect_provider(
+    request: ProviderReadRequest,
+) -> Result<Vec<RecordBatch>, DataFusionError> {
+    let context = SessionContext::new();
+    let mut frame = context.read_table(request.provider)?;
+    if let Some(filter) = request.filter {
+        frame = frame.filter(filter)?;
+    }
+    if let Some(projection) = request.projection {
+        frame = frame.select(projection)?;
+    }
+    if let Some(limit) = request.limit {
+        frame = frame.limit(0, Some(limit))?;
+    }
+    frame.collect().await
+}
+
+/// Build the exact Delta-provider session state behind the internal adapter boundary.
+pub(crate) fn provider_session_state(
+    config: SessionConfig,
+) -> Arc<datafusion::execution::SessionState> {
+    Arc::new(SessionContext::new_with_config(config).state())
+}
+
+/// Execute one exact-provider scan under a caller-supplied bounded runtime.
+///
+/// The caller receives only the result stream; logical and physical planning remain sealed.
+pub(crate) async fn stream_provider(
+    config: SessionConfig,
+    runtime: Arc<RuntimeEnv>,
+    provider: Arc<dyn TableProvider>,
+) -> Result<SendableRecordBatchStream, DataFusionError> {
+    let context = SessionContext::new_with_config_rt(config, runtime);
+    let plan = context
+        .state()
+        .create_physical_plan(&context.read_table(provider)?.into_optimized_plan()?)
+        .await?;
+    execute_stream(plan, context.task_ctx())
 }
 
 /// Failures at the sole governed ingress.
@@ -161,6 +218,47 @@ impl GovernedSession {
         &self.policy_identity
     }
 
+    /// Construct an in-memory relational input inside this sealed session.
+    pub(crate) fn frame(
+        &self,
+        batch: &arrow_array::RecordBatch,
+    ) -> Result<DataFrame, GovernedSessionError> {
+        let schema = batch.schema();
+        Ok(self.context.read_table(Arc::new(MemTable::try_new(
+            Arc::clone(&schema),
+            vec![vec![batch.clone()]],
+        )?))?)
+    }
+
+    /// Seal, execute once, and report whether a bounded violation frame has any rows.
+    pub(crate) async fn rejects_any(
+        &self,
+        frame: DataFrame,
+        action_id: &str,
+    ) -> Result<bool, GovernedSessionError> {
+        let outcome = self
+            .execute_frame(frame.limit(0, Some(1))?, action_id)
+            .await?;
+        Ok(outcome.receipt.gate_checksum.row_count != 0)
+    }
+
+    /// Seal and execute one relational validation frame through the once-only gate action.
+    pub(crate) async fn execute_frame(
+        &self,
+        frame: DataFrame,
+        action_id: &str,
+    ) -> Result<OntologyGateOutcome, GovernedSessionError> {
+        let governed = self.seal_plan(frame.into_unoptimized_plan())?;
+        self.execute_gate(
+            &governed,
+            &format!("validation:{action_id}"),
+            "candidate:publication",
+            action_id,
+            &GateResourceEnvelope::default(),
+        )
+        .await
+    }
+
     /// Seal an already-built plan only after default and application analyzers accept it.
     ///
     /// # Errors
@@ -206,6 +304,11 @@ impl GovernedSession {
     }
 
     /// Execute one sealed gate plan without exposing raw optimizer/planner/physical APIs.
+    ///
+    /// # Errors
+    ///
+    /// Rejects plans sealed by another governed session or policy, planning failures,
+    /// execution failures, resource-limit breaches, and result-checksum failures.
     pub async fn execute_gate(
         &self,
         governed: &GovernedPlan,

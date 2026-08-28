@@ -54,6 +54,13 @@ impl StoreFaultPoint {
     ];
 }
 
+/// Released ontology-activation fault seams, including the natural CAS-conflict branch.
+pub const ONTOLOGY_ACTIVATION_FAULT_POINT_CODES: [&str; 3] = [
+    "ONTOLOGY_ACTIVATION_BEFORE_COMMIT",
+    "ONTOLOGY_ACTIVATION_AFTER_COMMIT_RESPONSE_LOST",
+    "ONTOLOGY_ACTIVATION_CAS_CONFLICT",
+];
+
 /// Exact read-back of the AC-G-27 `SQLite` settings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PragmaState {
@@ -145,6 +152,10 @@ pub struct OntologyOwnerDecision {
 
 impl OntologyOwnerDecision {
     /// Construct a canonical owner decision after the caller has authenticated the owner.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty identities or canonicalization failures.
     pub fn new(
         candidate_identity: impl Into<String>,
         owner_identity: impl Into<String>,
@@ -410,6 +421,7 @@ fn json_string<'a>(
         })
 }
 
+#[allow(clippy::too_many_lines)] // The complete durable proof census must remain one transaction.
 fn validated_receipt_set_identity(
     transaction: &Transaction<'_>,
     candidate: &OntologyCandidateProjection,
@@ -1361,6 +1373,7 @@ impl OperationalStore {
     /// # Errors
     ///
     /// Rejects identity drift, non-canonical evidence, incomplete bindings, or `SQLite` errors.
+    #[allow(clippy::too_many_lines)] // Candidate proof persistence is intentionally atomic.
     pub fn persist_proved_ontology_candidate(
         &mut self,
         report: &crate::ontology_candidate::CandidateClosureReport,
@@ -1565,6 +1578,10 @@ impl OperationalStore {
     }
 
     /// Persist one accountable owner decision separately from observations and gate metrics.
+    ///
+    /// # Errors
+    ///
+    /// Rejects identity drift, a non-PROVED candidate, conflicting replay, or persistence errors.
     pub fn record_ontology_owner_decision(
         &mut self,
         decision: &OntologyOwnerDecision,
@@ -1644,6 +1661,10 @@ impl OperationalStore {
     }
 
     /// Atomically accept a proved candidate and advance the ontology pointer with CAS.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid proof, decision, predecessor, generation, or transaction state.
     pub fn activate_ontology_candidate(
         &mut self,
         request: &OntologyActivationRequest,
@@ -1653,6 +1674,11 @@ impl OperationalStore {
 
     /// Resolve an identity-only admin command to the current durable predecessor and CAS
     /// generation. The command cannot inject pointer, policy, or proof contents.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed identities, conflicting replay, missing candidates or decisions,
+    /// predecessor drift, and persistence errors.
     pub fn resolve_ontology_activation_request(
         &self,
         workspace_id: [u8; 16],
@@ -1744,6 +1770,7 @@ impl OperationalStore {
         })
     }
 
+    #[allow(clippy::too_many_lines)] // The CAS transition and its fault seams share one transaction.
     fn activate_ontology_candidate_with_fault(
         &mut self,
         request: &OntologyActivationRequest,
@@ -1971,6 +1998,10 @@ impl OperationalStore {
     }
 
     /// Reconcile an activation after restart or a lost response and persist that observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an outcome-unknown error when no committed replay exists, or a persistence error.
     pub fn reconcile_ontology_activation(
         &mut self,
         request: &OntologyActivationRequest,
@@ -2012,6 +2043,10 @@ impl OperationalStore {
     }
 
     /// Read a candidate projection after reopen without exposing receipt trust fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the durable candidate projection cannot be read or decoded.
     pub fn ontology_candidate(
         &self,
         candidate_identity: &str,
@@ -2030,6 +2065,10 @@ impl OperationalStore {
     }
 
     /// Resolve the active epoch to its complete versioned result authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the active authority cannot be read or decoded.
     pub fn active_ontology_authority(
         &self,
         workspace_id: [u8; 16],
@@ -2093,6 +2132,7 @@ impl OperationalStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)] // The ordered schema-version ladder is audited as one unit.
     fn migrate_from(
         &mut self,
         version: u32,
@@ -2645,7 +2685,12 @@ fn migrate_v11_to_v12(transaction: &Transaction<'_>) -> Result<(), OperationalSt
         "ontology_result_authority",
         "ontology_serving_epoch",
     ] {
-        transaction.execute_batch(&generated_table_ddl(table)?)?;
+        // Historical migration fixtures may retain current generated tables while exercising
+        // an older version of an unrelated table. The post-migration generated census still
+        // validates the exact table and column shapes before the store is admitted.
+        if !table_exists(transaction, table)? {
+            transaction.execute_batch(&generated_table_ddl(table)?)?;
+        }
     }
     Ok(())
 }
@@ -2658,6 +2703,16 @@ fn migrate_v12_to_v13(transaction: &Transaction<'_>) -> Result<(), OperationalSt
         )?;
     }
     Ok(())
+}
+
+fn table_exists(transaction: &Transaction<'_>, table: &str) -> Result<bool, OperationalStoreError> {
+    transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+            [table],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
 }
 
 fn table_has_column(
@@ -3302,7 +3357,7 @@ mod tests {
     #[test]
     #[allow(clippy::too_many_lines)] // One oracle covers the ordered migration/fault/retention proof.
     fn wp13_operational_acceptance() {
-        assert_eq!(StoreFaultPoint::ALL.len(), 2);
+        assert_eq!(StoreFaultPoint::ALL.len(), 4);
         let migration_backup_marker = format!("pre-migration-v{SCHEMA_VERSION}");
         let (_directory, path) = database();
         assert!(matches!(

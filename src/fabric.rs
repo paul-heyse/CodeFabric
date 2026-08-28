@@ -19,7 +19,7 @@ use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
 use datafusion::physical_expr::expressions::{cast, col as physical_col};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::projection::{ProjectionExec, ProjectionExpr};
-use datafusion::prelude::{SessionConfig, SessionContext, col};
+use datafusion::prelude::{SessionConfig, col};
 use deltalake::DeltaTable;
 use deltalake::kernel::engine::arrow_conversion::{TryIntoArrow as _, TryIntoKernel as _};
 use deltalake::operations::create::CreateBuilder;
@@ -27,6 +27,7 @@ use deltalake::protocol::SaveMode;
 use thiserror::Error;
 use url::Url;
 
+use crate::governed_session::{ProviderReadRequest, collect_provider, provider_session_state};
 use crate::identity::{IdentityDomain, SOURCE_CONTEXT_ID, context_set_identity, encode_public_id};
 use crate::registries::{
     AnalysisContextKind as AnalysisContextKindCode, PathEncoding, WorkspaceKind,
@@ -60,9 +61,9 @@ pub use publication::{
     PublicationTableRecord,
 };
 pub use result_checksum::{
-    GATE_RESULT_CHECKSUM_VERSION, GateResultChecksumV1, RESULT_CHECKSUM_VERSION,
-    ResultChecksumError, ResultChecksumV1, ResultChecksumV2, VersionedResultChecksum,
-    gate_result_checksum_v1, result_checksum_for_version, result_checksum_v1, result_checksum_v2,
+    GATE_RESULT_CHECKSUM_VERSION, GateResultChecksumV1, ResultChecksumError, ResultChecksumV1,
+    ResultChecksumV2, VersionedResultChecksum, gate_result_checksum_v1,
+    result_checksum_for_version, result_checksum_v1, result_checksum_v2,
 };
 #[cfg(feature = "daemon")]
 pub(crate) use serving::logical_plan_template_serialization;
@@ -411,13 +412,13 @@ impl WorkspaceFabric {
 
     async fn current_workspace_revision(&self) -> Result<Option<u64>, FabricError> {
         let provider = Arc::clone(&self.table(1).expect("generated workspace table").provider);
-        let context = SessionContext::new();
-        let batches = context
-            .read_table(provider)?
-            .select(vec![col("registration_revision")])?
-            .limit(0, Some(1))?
-            .collect()
-            .await?;
+        let batches = collect_provider(ProviderReadRequest {
+            provider,
+            filter: None,
+            projection: Some(vec![col("registration_revision")]),
+            limit: Some(1),
+        })
+        .await?;
         let Some(batch) = batches.first() else {
             return Ok(None);
         };
@@ -481,11 +482,13 @@ impl WorkspaceFabric {
                     table: table_code.to_string(),
                     detail: "compiled ontology table is absent".into(),
                 })?;
-            let context = SessionContext::new();
-            let current_batches = context
-                .read_table(Arc::clone(&table.provider))?
-                .collect()
-                .await?;
+            let current_batches = collect_provider(ProviderReadRequest {
+                provider: Arc::clone(&table.provider),
+                filter: None,
+                projection: None,
+                limit: None,
+            })
+            .await?;
             let current = if current_batches.is_empty() {
                 RecordBatch::new_empty(Arc::clone(&desired_batch.schema()))
             } else {
@@ -891,7 +894,7 @@ pub(super) async fn exact_provider(
         )
         .set_bool("datafusion.execution.parquet.pushdown_filters", false)
         .set_bool("datafusion.execution.parquet.reorder_filters", false);
-    let session = Arc::new(SessionContext::new_with_config(config).state());
+    let session = provider_session_state(config);
     let inner = table.table_provider().with_session(session).await?;
     let provider_schema = inner.schema();
     if provider_schema.fields().len() != spec.arrow_schema.fields().len()
@@ -1578,8 +1581,14 @@ mod tests {
             .build()
             .unwrap();
         let view = Arc::new(ViewTable::new(effective, None));
-        let context = SessionContext::new();
-        let rows = context.read_table(view).unwrap().collect().await.unwrap();
+        let rows = collect_provider(ProviderReadRequest {
+            provider: view,
+            filter: None,
+            projection: None,
+            limit: None,
+        })
+        .await
+        .unwrap();
         assert_eq!(rows.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
     }
 

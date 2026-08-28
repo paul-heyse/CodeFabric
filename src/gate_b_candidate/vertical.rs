@@ -815,7 +815,7 @@ async fn run_query_vertical(
     }
     let runtime = ServingSnapshotRuntime::default();
     runtime
-        .activate(
+        .commit_fact_snapshot(
             &mut store,
             Arc::clone(&candidate),
             None,

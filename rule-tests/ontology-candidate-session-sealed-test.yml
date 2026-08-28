@@ -1,0 +1,15 @@
+id: ontology-candidate-session-sealed
+valid:
+  - |
+      async fn validate(session: &GovernedSession, frame: DataFrame) {
+          session.rejects_any(frame, "rule").await;
+      }
+invalid:
+  - |
+      fn validate() {
+          let context = SessionContext::new();
+      }
+  - |
+      fn validate() {
+          let state = SessionStateBuilder::new().build();
+      }

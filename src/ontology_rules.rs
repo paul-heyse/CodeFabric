@@ -1,46 +1,48 @@
 //! Closed typed ontology-rule contracts and their DataFusion lowering.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use arrow_array::{Int16Array, Int32Array, RecordBatch};
+use arrow_array::RecordBatch;
 use arrow_schema::Schema;
-use datafusion::datasource::MemTable;
 use datafusion::functions_aggregate::expr_fn::count;
 use datafusion::logical_expr::expr_fn::cast;
 use datafusion::logical_expr::{Expr, JoinType, col, lit};
-use datafusion::prelude::{DataFrame, SessionContext};
+use datafusion::prelude::DataFrame;
 
-use crate::compiled_ontology::{CompiledRuleContract, compiled_ontology};
 use crate::fabric::FabricError;
+use crate::governed_session::GovernedSession;
+use crate::ontology_executor::{NativeValidationOperation, OntologyProgramCompiler};
 use crate::schema_registry::{SemanticAuthority, semantic_type_binding, table_spec};
 
-#[must_use]
-pub fn rule_contracts() -> &'static [CompiledRuleContract] {
-    compiled_ontology().rules
-}
-
-fn frame(batch: &RecordBatch) -> Result<DataFrame, FabricError> {
-    let context = SessionContext::new();
+fn frame(session: &GovernedSession, batch: &RecordBatch) -> Result<DataFrame, FabricError> {
     let validation_schema = Arc::new(Schema::new(batch.schema().fields().clone()));
     let validation_batch =
         RecordBatch::try_new(validation_schema.clone(), batch.columns().to_vec())?;
-    Ok(context.read_table(Arc::new(MemTable::try_new(
-        validation_schema,
-        vec![vec![validation_batch]],
-    )?))?)
+    session.frame(&validation_batch).map_err(|error| {
+        FabricError::PublicationIntegrity(format!("governed validation input failed: {error}"))
+    })
 }
 
-async fn rejects_any(frame: DataFrame) -> Result<bool, FabricError> {
-    Ok(frame
-        .limit(0, Some(1))?
-        .collect()
-        .await?
-        .first()
-        .is_some_and(|batch| batch.num_rows() != 0))
+async fn rejects_any(
+    session: &GovernedSession,
+    frame: DataFrame,
+    action_id: &str,
+) -> Result<bool, FabricError> {
+    session
+        .rejects_any(frame, action_id)
+        .await
+        .map_err(|error| {
+            FabricError::PublicationIntegrity(format!(
+                "governed validation execution failed: {error}"
+            ))
+        })
 }
 
-async fn validate_primary_keys(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+async fn validate_primary_keys(
+    session: &GovernedSession,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<(), FabricError> {
     for (&table_code, batch) in batches {
         let spec = table_spec(table_code).expect("candidate table is generated");
         if spec.primary_key.is_empty() || batch.num_rows() < 2 {
@@ -51,10 +53,10 @@ async fn validate_primary_keys(batches: &BTreeMap<i16, RecordBatch>) -> Result<(
             .iter()
             .map(|name| col(*name))
             .collect::<Vec<_>>();
-        let invalid = frame(batch)?
+        let invalid = frame(session, batch)?
             .aggregate(keys, vec![count(lit(1_i64)).alias("row_count")])?
             .filter(col("row_count").gt(lit(1_i64)))?;
-        if rejects_any(invalid).await? {
+        if rejects_any(session, invalid, "primary-key-uniqueness").await? {
             return Err(FabricError::PublicationIntegrity(format!(
                 "{} violates compiled rule ontology.primary-key.v1",
                 spec.name
@@ -82,7 +84,10 @@ fn code_dimension(semantic_type: &str) -> Option<(i16, &'static str, Option<&'st
     }
 }
 
-async fn validate_governed_codes(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+async fn validate_governed_codes(
+    session: &GovernedSession,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<(), FabricError> {
     for (&table_code, source) in batches {
         let spec = table_spec(table_code).expect("candidate table is generated");
         for field in source.schema().fields() {
@@ -99,14 +104,14 @@ async fn validate_governed_codes(batches: &BTreeMap<i16, RecordBatch>) -> Result
                     "compiled governed-code rule lacks dimension {dimension_code}"
                 )));
             };
-            let mut target = frame(dimension)?;
+            let mut target = frame(session, dimension)?;
             if let Some(domain) = domain {
                 target = target.filter(col("domain").eq(lit(domain)))?;
             }
             target = target.select(vec![
                 cast(col(dimension_column), arrow_schema::DataType::Int64).alias("governed_code"),
             ])?;
-            let source_frame = frame(source)?
+            let source_frame = frame(session, source)?
                 .filter(col(field.name()).is_not_null())?
                 .select(vec![
                     cast(col(field.name()), arrow_schema::DataType::Int64).alias("candidate_code"),
@@ -118,7 +123,7 @@ async fn validate_governed_codes(batches: &BTreeMap<i16, RecordBatch>) -> Result
                 &["governed_code"],
                 None,
             )?;
-            if rejects_any(invalid).await? {
+            if rejects_any(session, invalid, "governed-code-anti-join").await? {
                 return Err(FabricError::PublicationIntegrity(format!(
                     "{}.{} violates compiled governed-code rule",
                     spec.name,
@@ -130,7 +135,10 @@ async fn validate_governed_codes(batches: &BTreeMap<i16, RecordBatch>) -> Result
     Ok(())
 }
 
-async fn validate_property_one_of(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+async fn validate_property_one_of(
+    session: &GovernedSession,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<(), FabricError> {
     let Some(properties) = batches.get(&120) else {
         return Ok(());
     };
@@ -168,9 +176,9 @@ async fn validate_property_one_of(batches: &BTreeMap<i16, RecordBatch>) -> Resul
         })
         .reduce(Expr::or)
         .expect("nonempty value tags");
-    let invalid =
-        frame(properties)?.filter(none.or(multiple.expect("multiple pairs")).or(tag_mismatch))?;
-    if rejects_any(invalid).await? {
+    let invalid = frame(session, properties)?
+        .filter(none.or(multiple.expect("multiple pairs")).or(tag_mismatch))?;
+    if rejects_any(session, invalid, "property-value-one-of").await? {
         return Err(FabricError::PublicationIntegrity(
             "property_fact violates compiled one-of rule".into(),
         ));
@@ -179,14 +187,16 @@ async fn validate_property_one_of(batches: &BTreeMap<i16, RecordBatch>) -> Resul
 }
 
 async fn validate_membership_edges(
+    session: &GovernedSession,
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<(), FabricError> {
     let (Some(edges), Some(terms)) = (batches.get(&21), batches.get(&20)) else {
         return Ok(());
     };
-    let targets = frame(terms)?.select(vec![col("term_id").alias("known_term_id")])?;
+    let targets = frame(session, terms)?.select(vec![col("term_id").alias("known_term_id")])?;
     for endpoint in ["subject_term_id", "predicate_term_id", "object_term_id"] {
-        let source = frame(edges)?.select(vec![col(endpoint).alias("candidate_term_id")])?;
+        let source =
+            frame(session, edges)?.select(vec![col(endpoint).alias("candidate_term_id")])?;
         let invalid = source.join(
             targets.clone(),
             JoinType::LeftAnti,
@@ -194,7 +204,7 @@ async fn validate_membership_edges(
             &["known_term_id"],
             None,
         )?;
-        if rejects_any(invalid).await? {
+        if rejects_any(session, invalid, "ontology-membership-anti-join").await? {
             return Err(FabricError::PublicationIntegrity(format!(
                 "ontology_edge.{endpoint} violates compiled membership closure"
             )));
@@ -203,15 +213,18 @@ async fn validate_membership_edges(
     Ok(())
 }
 
-async fn validate_relation_family(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+async fn validate_relation_family(
+    session: &GovernedSession,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<(), FabricError> {
     let (Some(relations), Some(kinds)) = (batches.get(&110), batches.get(&14)) else {
         return Ok(());
     };
-    let facts = frame(relations)?.select(vec![
+    let facts = frame(session, relations)?.select(vec![
         col("relation_kind_code").alias("fact_kind"),
         col("relation_family_code").alias("fact_family"),
     ])?;
-    let dimensions = frame(kinds)?.select(vec![
+    let dimensions = frame(session, kinds)?.select(vec![
         col("code").alias("dimension_kind"),
         col("family_code").alias("dimension_family"),
     ])?;
@@ -224,7 +237,7 @@ async fn validate_relation_family(batches: &BTreeMap<i16, RecordBatch>) -> Resul
             None,
         )?
         .filter(col("fact_family").not_eq(col("dimension_family")))?;
-    if rejects_any(invalid).await? {
+    if rejects_any(session, invalid, "relation-family-conformance").await? {
         return Err(FabricError::PublicationIntegrity(
             "relation violates compiled relation-family rule".into(),
         ));
@@ -233,23 +246,24 @@ async fn validate_relation_family(batches: &BTreeMap<i16, RecordBatch>) -> Resul
 }
 
 fn allowed_family_pairs(
+    session: &GovernedSession,
     edges: &RecordBatch,
     terms: &RecordBatch,
     predicate: &str,
 ) -> Result<DataFrame, FabricError> {
-    let relation_terms = frame(terms)?
+    let relation_terms = frame(session, terms)?
         .filter(col("semantic_type").eq(lit("ontology:relation-kind")))?
         .select(vec![
             cast(col("code_int64"), arrow_schema::DataType::Int32).alias("allowed_kind"),
             col("term_id").alias("allowed_relation_term_id"),
         ])?;
-    let family_terms = frame(terms)?
+    let family_terms = frame(session, terms)?
         .filter(col("semantic_type").eq(lit("ontology:entity-family")))?
         .select(vec![
             col("term_id").alias("allowed_family_term_id"),
             cast(col("code_int64"), arrow_schema::DataType::Int16).alias("allowed_family"),
         ])?;
-    Ok(frame(edges)?
+    Ok(frame(session, edges)?
         .filter(col("predicate_term_id").eq(lit(predicate)))?
         .select(vec![
             col("subject_term_id").alias("relation_term_id"),
@@ -273,6 +287,7 @@ fn allowed_family_pairs(
 }
 
 async fn validate_relation_memberships(
+    session: &GovernedSession,
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<(), FabricError> {
     let (Some(relations), Some(entities), Some(edges), Some(terms)) = (
@@ -283,16 +298,16 @@ async fn validate_relation_memberships(
     ) else {
         return Ok(());
     };
-    let relation_rows = frame(relations)?.select(vec![
+    let relation_rows = frame(session, relations)?.select(vec![
         col("relation_kind_code").alias("candidate_kind"),
         col("source_id").alias("candidate_source_id"),
         col("target_id").alias("candidate_target_id"),
     ])?;
-    let source_entities = frame(entities)?.select(vec![
+    let source_entities = frame(session, entities)?.select(vec![
         col("entity_id").alias("source_entity_id"),
         col("entity_family_code").alias("candidate_source_family"),
     ])?;
-    let target_entities = frame(entities)?.select(vec![
+    let target_entities = frame(session, entities)?.select(vec![
         col("entity_id").alias("target_entity_id"),
         col("entity_family_code").alias("candidate_target_family"),
     ])?;
@@ -320,7 +335,7 @@ async fn validate_relation_memberships(
         ("candidate_source_family", "allows_subject_family"),
         ("candidate_target_family", "allows_object_family"),
     ] {
-        let allowed = allowed_family_pairs(edges, terms, predicate)?;
+        let allowed = allowed_family_pairs(session, edges, terms, predicate)?;
         let source = candidates.clone().select(vec![
             col("candidate_kind"),
             col(candidate_family).alias("candidate_family"),
@@ -332,32 +347,9 @@ async fn validate_relation_memberships(
             &["allowed_kind", "allowed_family"],
             None,
         )?;
-        let invalid = invalid.collect().await?;
-        let mut violations = BTreeSet::new();
-        for batch in &invalid {
-            let kinds = batch
-                .column_by_name("candidate_kind")
-                .and_then(|column| column.as_any().downcast_ref::<Int32Array>())
-                .ok_or_else(|| {
-                    FabricError::PublicationIntegrity(
-                        "compiled relation membership kind column is not Int32".into(),
-                    )
-                })?;
-            let families = batch
-                .column_by_name("candidate_family")
-                .and_then(|column| column.as_any().downcast_ref::<Int16Array>())
-                .ok_or_else(|| {
-                    FabricError::PublicationIntegrity(
-                        "compiled relation membership family column is not Int16".into(),
-                    )
-                })?;
-            for row in 0..batch.num_rows() {
-                violations.insert((kinds.value(row), families.value(row)));
-            }
-        }
-        if !violations.is_empty() {
+        if rejects_any(session, invalid, "relation-membership-anti-join").await? {
             return Err(FabricError::PublicationIntegrity(format!(
-                "relation violates compiled {predicate} membership rule: {violations:?}"
+                "relation violates compiled {predicate} membership rule"
             )));
         }
     }
@@ -365,12 +357,13 @@ async fn validate_relation_memberships(
 }
 
 async fn validate_relation_cardinality(
+    session: &GovernedSession,
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<(), FabricError> {
     let (Some(relations), Some(kinds)) = (batches.get(&110), batches.get(&14)) else {
         return Ok(());
     };
-    let relation_rows = frame(relations)?.select(vec![
+    let relation_rows = frame(session, relations)?.select(vec![
         col("relation_kind_code").alias("candidate_kind"),
         col("source_id").alias("candidate_source"),
         col("target_id").alias("candidate_target"),
@@ -379,7 +372,7 @@ async fn validate_relation_cardinality(
         (["many-to-one", "one-to-one"], "candidate_source"),
         (["one-to-many", "one-to-many-ordered"], "candidate_target"),
     ] {
-        let constrained = frame(kinds)?
+        let constrained = frame(session, kinds)?
             .filter(
                 col("cardinality")
                     .eq(lit(cardinalities[0]))
@@ -400,13 +393,13 @@ async fn validate_relation_cardinality(
                 vec![count(lit(1_i64)).alias("relation_count")],
             )?
             .filter(col("relation_count").gt(lit(1_i64)))?;
-        if rejects_any(invalid).await? {
+        if rejects_any(session, invalid, "relation-cardinality").await? {
             return Err(FabricError::PublicationIntegrity(
                 "relation violates compiled cardinality rule".into(),
             ));
         }
     }
-    let one_to_one = frame(kinds)?
+    let one_to_one = frame(session, kinds)?
         .filter(col("cardinality").eq(lit("one-to-one")))?
         .select(vec![col("code").alias("constrained_kind")])?;
     let invalid = relation_rows
@@ -422,7 +415,7 @@ async fn validate_relation_cardinality(
             vec![count(lit(1_i64)).alias("relation_count")],
         )?
         .filter(col("relation_count").gt(lit(1_i64)))?;
-    if rejects_any(invalid).await? {
+    if rejects_any(session, invalid, "relation-cardinality-one-to-one").await? {
         return Err(FabricError::PublicationIntegrity(
             "relation violates compiled one-to-one target cardinality".into(),
         ));
@@ -430,22 +423,25 @@ async fn validate_relation_cardinality(
     Ok(())
 }
 
-async fn validate_relation_owners(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+async fn validate_relation_owners(
+    session: &GovernedSession,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<(), FabricError> {
     let (Some(relations), Some(entities), Some(kinds)) =
         (batches.get(&110), batches.get(&100), batches.get(&14))
     else {
         return Ok(());
     };
-    let relation_rows = frame(relations)?.select(vec![
+    let relation_rows = frame(session, relations)?.select(vec![
         col("relation_kind_code").alias("candidate_kind"),
         col("source_id").alias("candidate_source"),
         col("owner_id").alias("candidate_owner"),
     ])?;
-    let source_owners = frame(entities)?.select(vec![
+    let source_owners = frame(session, entities)?.select(vec![
         col("entity_id").alias("source_entity_id"),
         col("owner_id").alias("selected_owner"),
     ])?;
-    let registered_rules = frame(kinds)?
+    let registered_rules = frame(session, kinds)?
         .filter(
             [
                 "subject-owner",
@@ -477,7 +473,7 @@ async fn validate_relation_owners(batches: &BTreeMap<i16, RecordBatch>) -> Resul
             None,
         )?
         .filter(col("candidate_owner").not_eq(col("selected_owner")))?;
-    if rejects_any(invalid).await? {
+    if rejects_any(session, invalid, "relation-owner-conformance").await? {
         return Err(FabricError::PublicationIntegrity(
             "relation violates compiled owner-selection rule".into(),
         ));
@@ -485,7 +481,10 @@ async fn validate_relation_owners(batches: &BTreeMap<i16, RecordBatch>) -> Resul
     Ok(())
 }
 
-async fn validate_source_spans(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+async fn validate_source_spans(
+    session: &GovernedSession,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<(), FabricError> {
     for (&table_code, batch) in batches {
         if batch.schema().index_of("start_byte").is_err()
             || batch.schema().index_of("end_byte").is_err()
@@ -494,7 +493,7 @@ async fn validate_source_spans(batches: &BTreeMap<i16, RecordBatch>) -> Result<(
         }
         let start = col("start_byte");
         let end = col("end_byte");
-        let invalid = frame(batch)?.filter(
+        let invalid = frame(session, batch)?.filter(
             start
                 .clone()
                 .is_null()
@@ -502,7 +501,7 @@ async fn validate_source_spans(batches: &BTreeMap<i16, RecordBatch>) -> Result<(
                 .or(start.clone().lt(lit(0_i64)))
                 .or(end.lt(start)),
         )?;
-        if rejects_any(invalid).await? {
+        if rejects_any(session, invalid, "source-span-all-or-none").await? {
             let spec = table_spec(table_code).expect("candidate table is generated");
             return Err(FabricError::PublicationIntegrity(format!(
                 "{} violates compiled source-span coherence",
@@ -513,12 +512,15 @@ async fn validate_source_spans(batches: &BTreeMap<i16, RecordBatch>) -> Result<(
     Ok(())
 }
 
-async fn validate_self_edges(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+async fn validate_self_edges(
+    session: &GovernedSession,
+    batches: &BTreeMap<i16, RecordBatch>,
+) -> Result<(), FabricError> {
     let (Some(relations), Some(kinds)) = (batches.get(&110), batches.get(&14)) else {
         return Ok(());
     };
-    let relation = frame(relations)?.filter(col("source_id").eq(col("target_id")))?;
-    let forbidden = frame(kinds)?
+    let relation = frame(session, relations)?.filter(col("source_id").eq(col("target_id")))?;
+    let forbidden = frame(session, kinds)?
         .filter(col("self_edge_policy").eq(lit("forbidden")))?
         .select(vec![col("code").alias("forbidden_kind")])?;
     let invalid = relation.join(
@@ -528,7 +530,7 @@ async fn validate_self_edges(batches: &BTreeMap<i16, RecordBatch>) -> Result<(),
         &["forbidden_kind"],
         None,
     )?;
-    if rejects_any(invalid).await? {
+    if rejects_any(session, invalid, "relation-self-edge").await? {
         return Err(FabricError::PublicationIntegrity(
             "relation violates compiled self-edge rule".into(),
         ));
@@ -536,25 +538,59 @@ async fn validate_self_edges(batches: &BTreeMap<i16, RecordBatch>) -> Result<(),
     Ok(())
 }
 
-/// Execute the closed compiled rule set as DataFusion relational plans.
+/// Execute every rule operation selected by the digest-checked Arrow program.
 ///
 /// # Errors
 ///
 /// Returns an integrity or DataFusion error when any governed key, code, membership,
 /// cardinality, owner, property, self-edge, or span rule is violated or cannot execute.
-pub async fn validate_compiled_ontology_rules(
+pub async fn execute_ontology_program(
     batches: &BTreeMap<i16, RecordBatch>,
+    package: &crate::ontology_program::OntologyProgramPackage,
+    session: &GovernedSession,
 ) -> Result<(), FabricError> {
-    validate_primary_keys(batches).await?;
-    validate_governed_codes(batches).await?;
-    validate_membership_edges(batches).await?;
-    validate_relation_family(batches).await?;
-    validate_relation_memberships(batches).await?;
-    validate_relation_cardinality(batches).await?;
-    validate_relation_owners(batches).await?;
-    validate_property_one_of(batches).await?;
-    validate_self_edges(batches).await?;
-    validate_source_spans(batches).await
+    let compiler = OntologyProgramCompiler::decode(package)
+        .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+    for lowered in compiler
+        .validation_operations()
+        .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?
+    {
+        match lowered.native {
+            // Referential and ID-domain relations are executed by their shared publication
+            // compilers immediately before this program. They remain explicit package nodes so
+            // their policy/receipt identity cannot be omitted by a caller.
+            NativeValidationOperation::ExternalReferential => {}
+            NativeValidationOperation::GovernedCodeAntiJoin => {
+                validate_governed_codes(session, batches).await?;
+            }
+            NativeValidationOperation::PrimaryKeyUniquenessAggregate => {
+                validate_primary_keys(session, batches).await?;
+            }
+            NativeValidationOperation::OntologyMembershipAntiJoin => {
+                validate_membership_edges(session, batches).await?;
+                validate_relation_memberships(session, batches).await?;
+            }
+            NativeValidationOperation::RelationFamilyConformanceJoin => {
+                validate_relation_family(session, batches).await?;
+            }
+            NativeValidationOperation::RelationCardinalityAggregate => {
+                validate_relation_cardinality(session, batches).await?;
+            }
+            NativeValidationOperation::RelationOwnerConformanceJoin => {
+                validate_relation_owners(session, batches).await?;
+            }
+            NativeValidationOperation::RelationSelfEdgeJoin => {
+                validate_self_edges(session, batches).await?;
+            }
+            NativeValidationOperation::PropertyValueOneOf => {
+                validate_property_one_of(session, batches).await?;
+            }
+            NativeValidationOperation::SourceSpanAllOrNone => {
+                validate_source_spans(session, batches).await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -564,9 +600,10 @@ mod tests {
 
     use arrow_array::{Int16Array, Int64Array, RecordBatch, StringArray};
     use arrow_select::concat::concat_batches;
+    use datafusion::prelude::SessionConfig;
 
     use super::{
-        validate_compiled_ontology_rules, validate_membership_edges, validate_property_one_of,
+        execute_ontology_program, validate_membership_edges, validate_property_one_of,
         validate_source_spans,
     };
     use crate::fact_ingest::{
@@ -584,6 +621,11 @@ mod tests {
         }
     }
 
+    fn validation_session(label: &str) -> super::GovernedSession {
+        super::GovernedSession::new(SessionConfig::new(), format!("policy:test:{label}"))
+            .expect("governed validation session")
+    }
+
     fn replace_column(
         batch: &RecordBatch,
         name: &str,
@@ -597,7 +639,8 @@ mod tests {
     #[tokio::test]
     async fn odf_ontology_referential_zero() {
         let batches = ontology_dimension_batches().expect("valid ontology");
-        validate_membership_edges(&batches)
+        let session = validation_session("membership");
+        validate_membership_edges(&session, &batches)
             .await
             .expect("generated ontology edge closure");
         for endpoint in ["subject_term_id", "predicate_term_id", "object_term_id"] {
@@ -608,14 +651,19 @@ mod tests {
                 edges.num_rows()
             ]));
             invalid.insert(21, replace_column(edges, endpoint, unknown));
-            assert!(validate_membership_edges(&invalid).await.is_err());
+            assert!(validate_membership_edges(&session, &invalid).await.is_err());
         }
     }
 
     #[tokio::test]
     async fn odf_ontology_violation_rejection() {
         let mut invalid = ontology_dimension_batches().expect("valid ontology");
-        validate_compiled_ontology_rules(&invalid)
+        let package = crate::ontology_program::build_ontology_program_package(
+            &crate::ontology_program::OntologyPackagingProfile::default(),
+        )
+        .expect("program package");
+        let session = validation_session("violation");
+        execute_ontology_program(&invalid, &package, &session)
             .await
             .expect("generated ontology satisfies compiled rules");
         let dimension = invalid.get(&11).expect("enum domain");
@@ -624,7 +672,7 @@ mod tests {
             concat_batches(&dimension.schema(), [dimension, dimension])
                 .expect("duplicate dimension rows"),
         );
-        let error = validate_compiled_ontology_rules(&invalid)
+        let error = execute_ontology_program(&invalid, &package, &session)
             .await
             .expect_err("duplicate primary key must fail");
         assert!(error.to_string().contains("primary-key"));
@@ -651,7 +699,8 @@ mod tests {
         };
         let valid = encode_properties(&[row]).expect("property batch");
         let valid_map = BTreeMap::from([(120, valid.clone())]);
-        validate_property_one_of(&valid_map)
+        let session = validation_session("property-one-of");
+        validate_property_one_of(&session, &valid_map)
             .await
             .expect("matching property tag");
         let invalid = replace_column(
@@ -660,7 +709,11 @@ mod tests {
             Arc::new(Int16Array::from(vec![20_i16])),
         );
         let invalid_map = BTreeMap::from([(120, invalid)]);
-        assert!(validate_property_one_of(&invalid_map).await.is_err());
+        assert!(
+            validate_property_one_of(&session, &invalid_map)
+                .await
+                .is_err()
+        );
     }
 
     fn entity_batch() -> RecordBatch {
@@ -691,7 +744,8 @@ mod tests {
             Some(LogicalStructureClass::StructurallyOwnedCohesive)
         );
         let batches = BTreeMap::from([(100, entity_batch())]);
-        validate_source_spans(&batches)
+        let session = validation_session("source-spans");
+        validate_source_spans(&session, &batches)
             .await
             .expect("coherent flat source span");
     }
@@ -705,6 +759,7 @@ mod tests {
             Arc::new(Int64Array::from(vec![None::<i64>])),
         );
         let batches = BTreeMap::from([(100, invalid)]);
-        assert!(validate_source_spans(&batches).await.is_err());
+        let session = validation_session("source-span-incoherent");
+        assert!(validate_source_spans(&session, &batches).await.is_err());
     }
 }

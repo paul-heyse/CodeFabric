@@ -1,0 +1,17 @@
+id: ontology-operation-dispatch-generic
+valid:
+  - |
+      fn execute(lowered: LoweredValidationOperation) {
+          match lowered.native {
+              NativeValidationOperation::ExternalReferential => external(),
+              NativeValidationOperation::PropertyValueOneOf => property(),
+          }
+      }
+invalid:
+  - |
+      fn execute(operation: DecodedProgramOperation) {
+          match operation.operation_kind.as_str() {
+              "property_value_one_of" => property(),
+              _ => unsupported(),
+          }
+      }

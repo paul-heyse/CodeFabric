@@ -229,7 +229,7 @@
         },
         {
           "artifact_id": "codefabric.registry.phrase-registry",
-          "canonical_digest": "b3:9831f349ab2bc62efff6bf0b500157379eb737a465b555a3d63a935e8f70ba61",
+          "canonical_digest": "b3:ca18a4713c2bc042df3a79e118080b342f96f2a1ad227880b419f45464e05538",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -263,7 +263,7 @@
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:4da6d78e987b08e38911cb61113662f3be9fbbd5fd6e06f955bf886938267c87",
+      "bundle_digest": "b3:70fb2b562f75414bd9fb4a526057380c791674576a834bdbe69823e0ed0fa74c",
       "bundle_kind": "query-language",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -387,7 +387,7 @@
         },
         {
           "artifact_id": "codefabric.registry.error-registry",
-          "canonical_digest": "b3:3eaf37463f83aa5db8fcbb73c16fb00bb772a472546fd373fb3f9c414082d02f",
+          "canonical_digest": "b3:7f0e35251163baeffe5fd74fcaf490a6730462f536dc675e297b64e736ac97e6",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -421,7 +421,7 @@
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:d5fc29cbcc7f9aef3971c5e080b7d695c049ff2ff21aeec447439593993ff672",
+      "bundle_digest": "b3:410ceaffac82ea27749cdaf3bf2e0ee05a0935d4890b499be8aaf6ee5ba93503",
       "bundle_kind": "tool-contract",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -438,13 +438,13 @@
       "artifacts": [
         {
           "artifact_id": "codefabric.toolchain.identity",
-          "canonical_digest": "b3:533ad8dc7bfb8a324ece3b026ae9bcb6cea2b3d4bf4b99f8dd32bf80bbd80c20",
+          "canonical_digest": "b3:9556dbebfb7cbb13227633efe2145dd5c389ecdd17f2de19da437a71196867bb",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:c194cdfe8c31224f36bf14dc71dc5c5d6d0ce56bc8460e9c47b1560264fc799e",
+      "bundle_digest": "b3:a04058e8e5f24eae6a937555362b870c9671f8c84ef03740d4c4113f922b1ae1",
       "bundle_kind": "toolchain",
       "bundle_major": 1,
       "bundle_version": "1.0",

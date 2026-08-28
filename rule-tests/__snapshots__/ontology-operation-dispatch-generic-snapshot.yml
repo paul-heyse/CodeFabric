@@ -1,0 +1,18 @@
+id: ontology-operation-dispatch-generic
+snapshots:
+  ? |
+    fn execute(operation: DecodedProgramOperation) {
+        match operation.operation_kind.as_str() {
+            "property_value_one_of" => property(),
+            _ => unsupported(),
+        }
+    }
+  : labels:
+    - source: |-
+        match operation.operation_kind.as_str() {
+                "property_value_one_of" => property(),
+                _ => unsupported(),
+            }
+      style: primary
+      start: 53
+      end: 175

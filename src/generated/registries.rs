@@ -8394,6 +8394,18 @@ pub const PUBLIC_ERROR_ENTRIES: &[PublicErrorEntry] = &[
         grpc_status: "FAILED_PRECONDITION",
         mcp_mapping: "internal-error",
     },
+    PublicErrorEntry {
+        code: 7190,
+        name: "ONTOLOGY_PROGRAM_ARTIFACT_INVALID",
+        owning_layer: "compatibility",
+        severity: "ERROR",
+        retryability: "AFTER_RECONFIGURATION",
+        scope: "WORKSPACE",
+        public_message_template: "Compiled ontology program artifact is invalid",
+        diagnostic_linkage: "required",
+        grpc_status: "DATA_LOSS",
+        mcp_mapping: "internal-error",
+    },
 ];
 
 pub const ENTITY_KIND_IDS: &[&str] = &[
@@ -8746,6 +8758,7 @@ pub const PUBLIC_ERROR_IDS: &[&str] = &[
     "ONTOLOGY_PROGRAM_UNSUPPORTED",
     "ONTOLOGY_CANDIDATE_CLOSURE_INVALID",
     "ONTOLOGY_ACTIVATION_TRANSACTION_INVALID",
+    "ONTOLOGY_PROGRAM_ARTIFACT_INVALID",
 ];
 
 pub const DERIVATION_IDS: &[&str] = &["SYNTAX_TREE_V1", "PY_OWNER_REACHING_DEFS_V1"];

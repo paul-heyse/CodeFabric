@@ -168,7 +168,7 @@
     {
       "class": "property",
       "path": "rule-tests/__snapshots__/governed-datafusion-ingress-only-snapshot.yml",
-      "source_digest": "b3:ca3d9d20d5674579d370910505145b583264b0fac5bb453c53a6063e27bf789a"
+      "source_digest": "b3:3ad1cdd26e8b36074413dc95685f1fb307974cbccf497602352a50ad3b9b8335"
     },
     {
       "class": "property",
@@ -207,8 +207,43 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-activation-fastmcp-forbidden-snapshot.yml",
+      "source_digest": "b3:ab65f94667b733c26fee66832c059f135943822830f1ca57a272621ec18f252e"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-activation-query-ingress-forbidden-snapshot.yml",
+      "source_digest": "b3:1617cb5b3a5e3a77d7c9b084d272345b97e3ddfb40cbe9976080530a076eaa4c"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/__snapshots__/ontology-candidate-receipt-opaque-snapshot.yml",
       "source_digest": "b3:b9cdc80b64047cfb8fc278c9adf30747c6ac64725596bd2f0ce17ddae655d17c"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-candidate-session-sealed-snapshot.yml",
+      "source_digest": "b3:d09c620b9b4bee3e0e296928a82c2517eaabad9062a285f2422b77f9b1a8f55f"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-global-result-version-forbidden-snapshot.yml",
+      "source_digest": "b3:ff94cf74010ecc995d546ee3dd21fd9041639540c68122338f35b33986a80df4"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-operation-dispatch-generic-snapshot.yml",
+      "source_digest": "b3:67e6408587f6cdcfde2f481911f29054aba1eb37f1bc7b8f750170a03ad1bca5"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-process-local-activation-forbidden-snapshot.yml",
+      "source_digest": "b3:33b0e480c14d4d73303cdb7326e10371e459142505fd95d12154c8988fd210be"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-raw-planner-sealed-snapshot.yml",
+      "source_digest": "b3:90c6a8c140ef6f26e64585da04af66b56b1b17b3db1932419b203aeac01a79c5"
     },
     {
       "class": "property",
@@ -224,6 +259,21 @@
       "class": "property",
       "path": "rule-tests/__snapshots__/ruff-no-runtime-import-execution-snapshot.yml",
       "source_digest": "b3:ec93dedf011a466dbc674bc95e6f22d57f04c91157015ae00a55a9c30f61d769"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/semantic-code-literal-forbidden-snapshot.yml",
+      "source_digest": "b3:20e4051da25af518eb19051a2290eda78353c1c52dac1da0882eb0eafca3573f"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/semantic-phrase-binding-required-snapshot.yml",
+      "source_digest": "b3:72bf3dc8582ec8e7cc6bd61e0af3c4dd0dd9c583055184e91cd1e0f5654b2f2e"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/semantic-phrase-fallback-forbidden-snapshot.yml",
+      "source_digest": "b3:f296d742a275cc3bf7a23228fad393addb081d08f1aba49b83cdba6fd4563124"
     },
     {
       "class": "property",
@@ -337,8 +387,43 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/ontology-activation-fastmcp-forbidden-test.yml",
+      "source_digest": "b3:65e09d77876aa88873cafbe3a3efea11010ec924c6e0b5b63c1123f84e4fa1a4"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ontology-activation-query-ingress-forbidden-test.yml",
+      "source_digest": "b3:2745cd787cde3236fc3bf5bf0ecc8349e25583d2ac1fe6b58dd0407419487330"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/ontology-candidate-receipt-opaque-test.yml",
       "source_digest": "b3:61dd0927bd7cdf5eb8811658f7132f4f509977acbc0a686baa19e51d62eecf3c"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ontology-candidate-session-sealed-test.yml",
+      "source_digest": "b3:8486a5d2a59fdda7e5452602efc9881e6e2247dd000c5e06ddd1947434cb890d"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ontology-global-result-version-forbidden-test.yml",
+      "source_digest": "b3:3266055f1b298d89da38d9082ddabacaebf7da40b0c30c6fedfc51b717994820"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ontology-operation-dispatch-generic-test.yml",
+      "source_digest": "b3:073c1ec5dc451702ca90c16fb957349cd7aedb213813c3ec55ff5e56288f8bd6"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ontology-process-local-activation-forbidden-test.yml",
+      "source_digest": "b3:c20a7206c1472c2fca0fea7a5e15f3d29fcbd789925f1d97e90a8cb8ebfb037e"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ontology-raw-planner-sealed-test.yml",
+      "source_digest": "b3:ce907da1f087023b0b66cc2a8e0056bf5f55edad2049a0d19a73372a8326a581"
     },
     {
       "class": "property",
@@ -354,6 +439,21 @@
       "class": "property",
       "path": "rule-tests/ruff-no-runtime-import-execution-test.yml",
       "source_digest": "b3:ca3cc028a07eeb1dcfaa3a35ce088a47e633c8c50e7e4b2d19693755d6081824"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/semantic-code-literal-forbidden-test.yml",
+      "source_digest": "b3:a794f5e778f4cdd6c0c5c7f3c3353dbf0666b1d7cba91f18897b9c7f3a656013"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/semantic-phrase-binding-required-test.yml",
+      "source_digest": "b3:f7da1ea1738d02b6637a92e00e882faf3a228a78cfbd8cf5b54c4df665fd8476"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/semantic-phrase-fallback-forbidden-test.yml",
+      "source_digest": "b3:b5b96c948bfbc0392e3fb94c1c7e6b42ff446e80aa6d41376d4ad95c39bcd024"
     },
     {
       "class": "property",
@@ -398,7 +498,7 @@
     {
       "class": "property",
       "path": "rules/authoritative-source-read-boundary.yml",
-      "source_digest": "b3:d7770af973b9de1016cb1d9e5253bbecf0f56fd2951580edb35db1e42ca0cea3"
+      "source_digest": "b3:66dbd36c2e3ddf236ebd056fe4e19272227d08482a999a88e0e7efeb7f2c076b"
     },
     {
       "class": "property",
@@ -467,8 +567,43 @@
     },
     {
       "class": "property",
+      "path": "rules/ontology-activation-fastmcp-forbidden.yml",
+      "source_digest": "b3:42c6574791681575a9d4d6f85f1034de7ff4689e2ef28cac2d1c0424fb4af6e3"
+    },
+    {
+      "class": "property",
+      "path": "rules/ontology-activation-query-ingress-forbidden.yml",
+      "source_digest": "b3:8b9c10328d1051ad70f8a8f8d427cdb7e18e634cbcd85dc91c21b87638858151"
+    },
+    {
+      "class": "property",
       "path": "rules/ontology-candidate-receipt-opaque.yml",
       "source_digest": "b3:596701d5e835dc8a3de842c1a57c043c6bcb0f0b84603ceef35d2503da2f4de3"
+    },
+    {
+      "class": "property",
+      "path": "rules/ontology-candidate-session-sealed.yml",
+      "source_digest": "b3:2548d2e789eb1ae9c39939aa54ae24d8787d404569faf383d1fb56909e0969ce"
+    },
+    {
+      "class": "property",
+      "path": "rules/ontology-global-result-version-forbidden.yml",
+      "source_digest": "b3:3e312b03b64480f6e84e4b9177bb39250bf9506cc24709ecf49f7f4f36ff7384"
+    },
+    {
+      "class": "property",
+      "path": "rules/ontology-operation-dispatch-generic.yml",
+      "source_digest": "b3:440cef1af5d1b1b6eb3583d4cc5b6b22259f091be43c36b1fa7e75ac4418d31c"
+    },
+    {
+      "class": "property",
+      "path": "rules/ontology-process-local-activation-forbidden.yml",
+      "source_digest": "b3:5662f366258134c06c4977e7de4b673a3d3c9cda7a1de6ea24e569a8f034968a"
+    },
+    {
+      "class": "property",
+      "path": "rules/ontology-raw-planner-sealed.yml",
+      "source_digest": "b3:2e751063b877d6015b43e39143414034a477659c3aa60f5b29de2928685ed56c"
     },
     {
       "class": "property",
@@ -484,6 +619,21 @@
       "class": "property",
       "path": "rules/ruff-no-runtime-import-execution.yml",
       "source_digest": "b3:ac621fcbe406f8de9811ec7ad6d9fa4c093b8a4d480b23e56800f458dec5b1a9"
+    },
+    {
+      "class": "property",
+      "path": "rules/semantic-code-literal-forbidden.yml",
+      "source_digest": "b3:621d442d39a97b2e46081e71da46a20c0f61634dd52282b3c86ae5dc9537d19a"
+    },
+    {
+      "class": "property",
+      "path": "rules/semantic-phrase-binding-required.yml",
+      "source_digest": "b3:4ca4b845467d16d7958961cd637dc4975f25610298ffa7499231d5b92f29c673"
+    },
+    {
+      "class": "property",
+      "path": "rules/semantic-phrase-fallback-forbidden.yml",
+      "source_digest": "b3:830a1528a73b3684821b5fdaeab1bb92116c78ac4b9e765be33f3455fdbb5efb"
     },
     {
       "class": "property",

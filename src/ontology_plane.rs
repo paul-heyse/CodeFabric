@@ -1,7 +1,8 @@
 //! Generated, normalized ontology-plane batches.
 //!
-//! Runtime code consumes only compiled Rust values. YAML/JSON authorities are parsed once by the
-//! model compiler and never reopened while bootstrapping or serving a workspace.
+//! Runtime code consumes only the digest-checked Arrow ontology-program artifact. YAML/JSON
+//! authorities are parsed once by the model compiler and never reopened while bootstrapping or
+//! serving a workspace.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -12,8 +13,9 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, SchemaRef};
 
-use crate::compiled_ontology::{CompiledAuthority, compiled_ontology};
 use crate::fabric::FabricError;
+use crate::ontology_executor::OntologyProgramCompiler;
+use crate::ontology_program::{ProgramAuthority, ontology_program_vocabulary};
 use crate::schema_registry::{
     LogicalType, SemanticAuthority, schema_contract_digest, semantic_type_bindings,
     table_column_contracts, table_spec, table_specs,
@@ -56,26 +58,26 @@ fn digest(value: &str, table: &str) -> Result<[u8; 32], FabricError> {
     Ok(result)
 }
 
-fn authority_cells(authority: CompiledAuthority, table: &str) -> Result<Vec<Cell>, FabricError> {
+fn authority_cells(authority: &ProgramAuthority, table: &str) -> Result<Vec<Cell>, FabricError> {
     Ok(vec![
-        Cell::utf8(authority.authority_id),
-        Cell::utf8(authority.authority_version),
-        Cell::Hash32(digest(authority.canonical_digest, table)?),
+        Cell::utf8(&authority.authority_id),
+        Cell::utf8(&authority.authority_version),
+        Cell::Hash32(digest(&authority.canonical_digest, table)?),
     ])
 }
 
-fn schema_authority() -> CompiledAuthority {
-    CompiledAuthority {
-        authority_id: "codefabric.schema.contract-ir",
-        authority_version: crate::schema_registry::ontology_version(),
-        canonical_digest: schema_contract_digest(),
-        canonical_source_path: "contracts/schema/schema-contract-ir.json",
+fn schema_authority() -> ProgramAuthority {
+    ProgramAuthority {
+        authority_id: "codefabric.schema.contract-ir".into(),
+        authority_version: crate::schema_registry::ontology_version().into(),
+        canonical_digest: schema_contract_digest().into(),
+        canonical_source_path: "contracts/schema/schema-contract-ir.json".into(),
     }
 }
 
 fn push_authority(
     row: &mut Vec<Cell>,
-    authority: CompiledAuthority,
+    authority: &ProgramAuthority,
     table: &str,
 ) -> Result<(), FabricError> {
     row.extend(authority_cells(authority, table)?);
@@ -251,38 +253,41 @@ fn framed(value: &str) -> Result<[u8; 32], FabricError> {
 /// ordinal, which cannot occur for a validated model pack.
 #[allow(clippy::too_many_lines)] // One exhaustive compiler owns all normalized relations.
 pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, FabricError> {
-    let ontology = compiled_ontology();
+    let ontology = ontology_program_vocabulary().map_err(|error| FabricError::TableInvariant {
+        table: "ontology_program".into(),
+        detail: error.to_string(),
+    })?;
     let mut result = BTreeMap::new();
 
     let mut rows = Vec::new();
-    for value in ontology.enum_values {
+    for value in &ontology.enum_values {
         let mut row = vec![
-            Cell::utf8(value.domain),
+            Cell::utf8(&value.domain),
             Cell::I32(value.code),
-            Cell::utf8(value.name),
+            Cell::utf8(&value.name),
         ];
-        push_authority(&mut row, value.authority, "enum_domain")?;
+        push_authority(&mut row, &value.authority, "enum_domain")?;
         rows.push(row);
     }
     result.insert(11, batch(11, rows)?);
 
     let mut rows = Vec::new();
-    for value in ontology.entity_kinds {
+    for value in &ontology.entity_kinds {
         let mut row = vec![
             Cell::I32(value.code),
-            Cell::utf8(value.name),
+            Cell::utf8(&value.name),
             Cell::I16(value.family_code),
-            Cell::utf8(value.language_applicability),
+            Cell::utf8(&value.language_applicability),
             Cell::Bool(value.query_visible),
         ];
-        push_authority(&mut row, value.authority, "entity_kind")?;
+        push_authority(&mut row, &value.authority, "entity_kind")?;
         rows.push(row);
     }
     result.insert(12, batch(12, rows)?);
 
     let mut seen = BTreeSet::new();
     let mut rows = Vec::new();
-    for value in ontology.entity_kinds {
+    for value in &ontology.entity_kinds {
         if seen.insert(value.family_code) {
             let name = ontology
                 .enum_values
@@ -292,81 +297,81 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
                 })
                 .map_or_else(
                     || format!("ENTITY_FAMILY_{}", value.family_code),
-                    |entry| entry.name.to_owned(),
+                    |entry| entry.name.clone(),
                 );
             let mut row = vec![Cell::I16(value.family_code), Cell::utf8(name)];
-            push_authority(&mut row, value.authority, "entity_family")?;
+            push_authority(&mut row, &value.authority, "entity_family")?;
             rows.push(row);
         }
     }
     result.insert(13, batch(13, rows)?);
 
     let mut rows = Vec::new();
-    for value in ontology.relation_kinds {
+    for value in &ontology.relation_kinds {
         let mut row = vec![
             Cell::I32(value.code),
-            Cell::utf8(value.name),
+            Cell::utf8(&value.name),
             Cell::I16(value.family_code),
-            Cell::utf8(value.cardinality),
+            Cell::utf8(&value.cardinality),
             Cell::Bool(value.symmetric),
             Cell::Bool(value.transitive),
-            Cell::utf8(value.self_edge_policy),
-            Cell::utf8(value.owner_selection_rule),
+            Cell::utf8(&value.self_edge_policy),
+            Cell::utf8(&value.owner_selection_rule),
             Cell::Bool(value.query_visible),
         ];
-        push_authority(&mut row, value.authority, "relation_kind")?;
+        push_authority(&mut row, &value.authority, "relation_kind")?;
         rows.push(row);
     }
     result.insert(14, batch(14, rows)?);
 
     let mut seen = BTreeSet::new();
     let mut rows = Vec::new();
-    for value in ontology.relation_kinds {
+    for value in &ontology.relation_kinds {
         if seen.insert(value.family_code) {
-            let mut row = vec![Cell::I16(value.family_code), Cell::utf8(value.family_name)];
-            push_authority(&mut row, value.authority, "relation_family")?;
+            let mut row = vec![Cell::I16(value.family_code), Cell::utf8(&value.family_name)];
+            push_authority(&mut row, &value.authority, "relation_family")?;
             rows.push(row);
         }
     }
     result.insert(15, batch(15, rows)?);
 
     let mut rows = Vec::new();
-    for value in ontology.property_kinds {
+    for value in &ontology.property_kinds {
         let mut row = vec![
             Cell::I32(value.code),
-            Cell::utf8(value.name),
+            Cell::utf8(&value.name),
             Cell::I16(value.value_kind_code),
-            Cell::utf8(value.cardinality),
-            Cell::utf8(value.storage_mapping),
+            Cell::utf8(&value.cardinality),
+            Cell::utf8(&value.storage_mapping),
         ];
-        push_authority(&mut row, value.authority, "property_kind")?;
+        push_authority(&mut row, &value.authority, "property_kind")?;
         rows.push(row);
     }
     result.insert(16, batch(16, rows)?);
 
     let mut rows = Vec::new();
-    for value in ontology.fact_kinds {
+    for value in &ontology.fact_kinds {
         let mut row = vec![
             Cell::I16(value.code),
-            Cell::utf8(value.name),
-            Cell::utf8(value.fact_form),
+            Cell::utf8(&value.name),
+            Cell::utf8(&value.fact_form),
         ];
-        push_authority(&mut row, value.authority, "fact_kind")?;
+        push_authority(&mut row, &value.authority, "fact_kind")?;
         rows.push(row);
     }
     result.insert(17, batch(17, rows)?);
 
     let mut rows = Vec::new();
-    for value in ontology.provider_raw_kinds {
+    for value in &ontology.provider_raw_kinds {
         let mut row = vec![
             Cell::I16(value.provider_code),
-            Cell::utf8(value.raw_catalog_id),
-            Cell::utf8(value.raw_namespace),
+            Cell::utf8(&value.raw_catalog_id),
+            Cell::utf8(&value.raw_namespace),
             Cell::I32(value.raw_kind_code),
-            Cell::utf8(value.raw_name),
+            Cell::utf8(&value.raw_name),
             value.normalized_kind_code.map_or(Cell::Null, Cell::I32),
         ];
-        push_authority(&mut row, value.authority, "provider_raw_kind")?;
+        push_authority(&mut row, &value.authority, "provider_raw_kind")?;
         rows.push(row);
     }
     result.insert(18, batch(18, rows)?);
@@ -380,25 +385,25 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
             Cell::utf8(value.preimage_recipe_id),
             Cell::utf8(value.preimage_version),
         ];
-        push_authority(&mut row, schema_authority, "id_domain")?;
+        push_authority(&mut row, &schema_authority, "id_domain")?;
         rows.push(row);
     }
     result.insert(19, batch(19, rows)?);
 
     let mut rows = Vec::new();
-    for value in ontology.enum_values {
+    for value in &ontology.enum_values {
         let mut row = vec![
             Cell::utf8(format!("enum:{}:{}", value.domain, value.code)),
             Cell::utf8(format!("enum:{}", value.domain)),
             Cell::I64(i64::from(value.code)),
             Cell::Null,
-            Cell::utf8(value.name),
+            Cell::utf8(&value.name),
         ];
-        push_authority(&mut row, value.authority, "ontology_term")?;
+        push_authority(&mut row, &value.authority, "ontology_term")?;
         rows.push(row);
     }
     let mut seen_entity_families = BTreeSet::new();
-    for value in ontology.entity_kinds {
+    for value in &ontology.entity_kinds {
         if seen_entity_families.insert(value.family_code) {
             let canonical_name = ontology
                 .enum_values
@@ -408,7 +413,7 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
                 })
                 .map_or_else(
                     || format!("ENTITY_FAMILY_{}", value.family_code),
-                    |entry| entry.name.to_owned(),
+                    |entry| entry.name.clone(),
                 );
             let mut row = vec![
                 Cell::utf8(format!("entity_family:{}", value.family_code)),
@@ -417,30 +422,30 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
                 Cell::Null,
                 Cell::utf8(canonical_name),
             ];
-            push_authority(&mut row, value.authority, "ontology_term")?;
+            push_authority(&mut row, &value.authority, "ontology_term")?;
             rows.push(row);
         }
     }
-    for value in ontology.entity_kinds {
+    for value in &ontology.entity_kinds {
         let mut row = vec![
             Cell::utf8(format!("entity_kind:{}", value.code)),
             Cell::utf8("ontology:entity-kind"),
             Cell::I64(i64::from(value.code)),
             Cell::Null,
-            Cell::utf8(value.name),
+            Cell::utf8(&value.name),
         ];
-        push_authority(&mut row, value.authority, "ontology_term")?;
+        push_authority(&mut row, &value.authority, "ontology_term")?;
         rows.push(row);
     }
-    for value in ontology.relation_kinds {
+    for value in &ontology.relation_kinds {
         let mut row = vec![
             Cell::utf8(format!("relation_kind:{}", value.code)),
             Cell::utf8("ontology:relation-kind"),
             Cell::I64(i64::from(value.code)),
             Cell::Null,
-            Cell::utf8(value.name),
+            Cell::utf8(&value.name),
         ];
-        push_authority(&mut row, value.authority, "ontology_term")?;
+        push_authority(&mut row, &value.authority, "ontology_term")?;
         rows.push(row);
     }
     let mut term_ids = rows
@@ -450,11 +455,11 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    for edge in ontology.edges {
+    for edge in &ontology.edges {
         for term_id in [
-            edge.subject_term_id,
-            edge.predicate_term_id,
-            edge.object_term_id,
+            &edge.subject_term_id,
+            &edge.predicate_term_id,
+            &edge.object_term_id,
         ] {
             if term_ids.insert(term_id.to_owned()) {
                 let mut row = vec![
@@ -464,7 +469,7 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
                     Cell::utf8(term_id),
                     Cell::utf8(term_id),
                 ];
-                push_authority(&mut row, edge.authority, "ontology_term")?;
+                push_authority(&mut row, &edge.authority, "ontology_term")?;
                 rows.push(row);
             }
         }
@@ -472,14 +477,14 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
     result.insert(20, batch(20, rows)?);
 
     let mut rows = Vec::new();
-    for value in ontology.edges {
+    for value in &ontology.edges {
         let mut row = vec![
-            Cell::utf8(value.subject_term_id),
-            Cell::utf8(value.predicate_term_id),
-            Cell::utf8(value.object_term_id),
+            Cell::utf8(&value.subject_term_id),
+            Cell::utf8(&value.predicate_term_id),
+            Cell::utf8(&value.object_term_id),
             Cell::I32(value.ordinal),
         ];
-        push_authority(&mut row, value.authority, "ontology_edge")?;
+        push_authority(&mut row, &value.authority, "ontology_edge")?;
         rows.push(row);
     }
     result.insert(21, batch(21, rows)?);
@@ -488,30 +493,30 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
     for authority in ontology
         .enum_values
         .iter()
-        .map(|value| value.authority)
-        .chain(ontology.entity_kinds.iter().map(|value| value.authority))
-        .chain(ontology.relation_kinds.iter().map(|value| value.authority))
-        .chain(ontology.property_kinds.iter().map(|value| value.authority))
-        .chain(ontology.fact_kinds.iter().map(|value| value.authority))
+        .map(|value| &value.authority)
+        .chain(ontology.entity_kinds.iter().map(|value| &value.authority))
+        .chain(ontology.relation_kinds.iter().map(|value| &value.authority))
+        .chain(ontology.property_kinds.iter().map(|value| &value.authority))
+        .chain(ontology.fact_kinds.iter().map(|value| &value.authority))
         .chain(
             ontology
                 .provider_raw_kinds
                 .iter()
-                .map(|value| value.authority),
+                .map(|value| &value.authority),
         )
-        .chain([ontology.phrase_authority, ontology.query_form_authority])
-        .chain(std::iter::once(schema_authority))
+        .chain([&ontology.phrase_authority, &ontology.query_form_authority])
+        .chain(std::iter::once(&schema_authority))
     {
         authorities
-            .entry(authority.authority_id)
+            .entry(authority.authority_id.as_str())
             .or_insert(authority);
     }
     let mut rows = Vec::new();
     for authority in authorities.values().copied() {
         let mut row = vec![
-            Cell::utf8(authority.authority_id),
+            Cell::utf8(&authority.authority_id),
             Cell::utf8("compiled_registry"),
-            Cell::utf8(authority.canonical_source_path),
+            Cell::utf8(&authority.canonical_source_path),
         ];
         push_authority(&mut row, authority, "registry_authority")?;
         rows.push(row);
@@ -546,7 +551,7 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
             resolver_table.map_or(Cell::Null, Cell::utf8),
             resolver_column.map_or(Cell::Null, Cell::utf8),
         ];
-        push_authority(&mut row, schema_authority, "semantic_type_binding")?;
+        push_authority(&mut row, &schema_authority, "semantic_type_binding")?;
         rows.push(row);
     }
     result.insert(23, batch(23, rows)?);
@@ -565,7 +570,7 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
             Cell::Bool(spec.required_for_publication),
             Cell::Hash32(framed(&spec.primary_key.join(","))?),
         ];
-        push_authority(&mut row, schema_authority, "table_contract")?;
+        push_authority(&mut row, &schema_authority, "table_contract")?;
         rows.push(row);
     }
     result.insert(24, batch(24, rows)?);
@@ -616,7 +621,7 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
                 }),
                 Cell::Hash32(framed(&metadata_identity)?),
             ];
-            push_authority(&mut row, schema_authority, "column_contract")?;
+            push_authority(&mut row, &schema_authority, "column_contract")?;
             rows.push(row);
         }
     }
@@ -631,7 +636,7 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
             Cell::utf8(schema.result_role),
             Cell::utf8(schema.version),
         ];
-        push_authority(&mut row, schema_authority, "result_schema")?;
+        push_authority(&mut row, &schema_authority, "result_schema")?;
         result_rows.push(row);
         for (ordinal, field) in schema.fields.iter().enumerate() {
             let mut row = vec![
@@ -646,7 +651,7 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
                     .map_or(Cell::Null, Cell::utf8),
                 Cell::Bool(field.nullable),
             ];
-            push_authority(&mut row, schema_authority, "result_field")?;
+            push_authority(&mut row, &schema_authority, "result_field")?;
             field_rows.push(row);
         }
     }
@@ -661,43 +666,55 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
             Cell::utf8(domain.domain_slug),
             Cell::utf8("id16"),
         ];
-        push_authority(&mut row, schema_authority, "identity_recipe")?;
+        push_authority(&mut row, &schema_authority, "identity_recipe")?;
         rows.push(row);
     }
     result.insert(28, batch(28, rows)?);
 
+    let package = crate::ontology_program::build_ontology_program_package(
+        &crate::ontology_program::OntologyPackagingProfile::default(),
+    )
+    .map_err(|error| FabricError::TableInvariant {
+        table: "phrase_binding".into(),
+        detail: error.to_string(),
+    })?;
+    let compiler =
+        OntologyProgramCompiler::decode(&package).map_err(|error| FabricError::TableInvariant {
+            table: "ontology_program".into(),
+            detail: error.to_string(),
+        })?;
     let mut rows = Vec::new();
-    for operation in crate::model_generated::schema_tables::SEMANTIC_OPERATION_SPECS {
+    for operation in compiler.phrases.values() {
         for (ordinal, operand) in operation.operand_codes.iter().enumerate() {
             let mut row = vec![
-                Cell::utf8(operation.phrase_id),
+                Cell::utf8(&operation.phrase_id),
                 Cell::I32(i32::try_from(ordinal).expect("operand ordinal fits i32")),
-                Cell::utf8(operation.canonical_text),
-                Cell::utf8(format!("{:?}", operation.operator)),
-                Cell::utf8(operation.column_role),
-                Cell::utf8(operation.operand_domain),
+                Cell::utf8(&operation.canonical_text),
+                Cell::utf8(&operation.operation_kind),
+                Cell::utf8(&operation.column_ref),
+                Cell::utf8(&operation.operand_domain),
                 Cell::I64(i64::from(*operand)),
-                Cell::utf8(format!("{:?}", operation.null_policy)),
-                Cell::utf8(operation.output_role),
-                Cell::utf8(operation.diagnostic_code),
+                Cell::utf8(&operation.null_policy),
+                Cell::utf8(&operation.expected_result_contract),
+                Cell::utf8(&operation.diagnostic_code),
             ];
-            push_authority(&mut row, ontology.phrase_authority, "phrase_binding")?;
+            push_authority(&mut row, &ontology.phrase_authority, "phrase_binding")?;
             rows.push(row);
         }
     }
     result.insert(29, batch(29, rows)?);
 
     let mut rows = Vec::new();
-    for rule in crate::ontology_rules::rule_contracts() {
+    for rule in compiler.operations.values() {
         let mut row = vec![
-            Cell::utf8(rule.rule_id),
-            Cell::utf8(format!("{:?}", rule.operation_kind)),
-            Cell::Hash32(framed(rule.input_contract)?),
-            Cell::Hash32(framed(rule.output_contract)?),
-            Cell::utf8(rule.determinism_class),
-            Cell::utf8(rule.diagnostic_code),
+            Cell::utf8(&rule.operation_id),
+            Cell::utf8(&rule.operation_kind),
+            Cell::Hash32(framed(&rule.input_contract)?),
+            Cell::Hash32(framed(&rule.expected_result_contract)?),
+            Cell::utf8(&rule.determinism_class),
+            Cell::utf8(&rule.diagnostic_code),
         ];
-        push_authority(&mut row, schema_authority, "rule_contract")?;
+        push_authority(&mut row, &schema_authority, "rule_contract")?;
         rows.push(row);
     }
     result.insert(30, batch(30, rows)?);
@@ -706,35 +723,19 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
 
 /// Digest of every ontology authority input. Ordinary fact publications reuse the exact Delta
 /// versions while this value is unchanged.
+///
+/// # Panics
+///
+/// Panics only if the generated ontology package violates the contracts already checked by the
+/// model compiler and generated-artifact validation gates.
 #[must_use]
 pub fn ontology_input_digest() -> String {
-    let ontology = compiled_ontology();
-    let mut identities = BTreeSet::new();
-    for authority in ontology
-        .enum_values
-        .iter()
-        .map(|value| value.authority)
-        .chain(ontology.entity_kinds.iter().map(|value| value.authority))
-        .chain(ontology.relation_kinds.iter().map(|value| value.authority))
-        .chain(ontology.property_kinds.iter().map(|value| value.authority))
-        .chain(ontology.fact_kinds.iter().map(|value| value.authority))
-        .chain(
-            ontology
-                .provider_raw_kinds
-                .iter()
-                .map(|value| value.authority),
-        )
-        .chain([ontology.phrase_authority, ontology.query_form_authority])
-    {
-        identities.insert((authority.authority_id, authority.canonical_digest));
-    }
-    identities.insert(("codefabric.schema.contract-ir", schema_contract_digest()));
-    let payload = identities
-        .into_iter()
-        .map(|(id, digest)| format!("{id}={digest}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    crate::integrity::framed_digest(payload.as_bytes())
+    crate::ontology_program::build_ontology_program_package(
+        &crate::ontology_program::OntologyPackagingProfile::default(),
+    )
+    .expect("generated ontology program was model-validated")
+    .manifest
+    .authored_content_identity
 }
 
 #[cfg(test)]

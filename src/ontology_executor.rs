@@ -19,7 +19,9 @@ pub struct DecodedProgramOperation {
     pub operands: Vec<DecodedProgramOperand>,
     pub calculation_id: String,
     pub policy_id: String,
+    pub input_contract: String,
     pub expected_result_contract: String,
+    pub determinism_class: String,
     pub diagnostic_code: String,
 }
 
@@ -40,10 +42,25 @@ pub struct DecodedPhraseBinding {
     pub column_ref: String,
     pub operation_kind: String,
     pub operand_domain: String,
+    pub operand_logical_type: String,
     pub operand_codes: Vec<i16>,
+    pub null_policy: String,
     pub calculation_id: String,
     pub expected_result_contract: String,
     pub diagnostic_code: String,
+}
+
+/// One governed query phrase decoded from Arrow, including all accepted labels and modifiers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecodedQueryPhrase {
+    pub phrase_id: String,
+    pub canonical_text: String,
+    pub accepted_aliases: Vec<String>,
+    pub plan_node_kind: String,
+    pub output_role: String,
+    pub contract_family: String,
+    pub contract_code: String,
+    pub required_modifiers: Vec<String>,
 }
 
 /// One native DataFusion calculation; `engine` must remain `datafusion-native`.
@@ -53,6 +70,28 @@ pub struct DecodedCalculation {
     pub engine: String,
     pub native_operation: String,
     pub return_contract: String,
+}
+
+/// Closed DataFusion-native validation operation selected only by the generic lowerer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeValidationOperation {
+    ExternalReferential,
+    GovernedCodeAntiJoin,
+    PrimaryKeyUniquenessAggregate,
+    OntologyMembershipAntiJoin,
+    RelationFamilyConformanceJoin,
+    RelationCardinalityAggregate,
+    RelationOwnerConformanceJoin,
+    RelationSelfEdgeJoin,
+    PropertyValueOneOf,
+    SourceSpanAllOrNone,
+}
+
+/// One decoded operation paired with its exhaustively lowered native calculation.
+#[derive(Clone, Copy, Debug)]
+pub struct LoweredValidationOperation<'a> {
+    pub operation: &'a DecodedProgramOperation,
+    pub native: NativeValidationOperation,
 }
 
 /// Typed decoder/lowering failures.
@@ -126,7 +165,9 @@ fn decode_rules(
     let logical_types = utf8(batch, "logical_type")?;
     let calculations = utf8(batch, "calculation_id")?;
     let policies = utf8(batch, "policy_id")?;
+    let inputs = utf8(batch, "input_contract")?;
     let outputs = utf8(batch, "expected_result_contract")?;
+    let determinism = utf8(batch, "determinism_class")?;
     let diagnostics = utf8(batch, "diagnostic_code")?;
     let mut operations: BTreeMap<String, DecodedProgramOperation> = BTreeMap::new();
     for row in 0..batch.num_rows() {
@@ -140,7 +181,9 @@ fn decode_rules(
                     operands: Vec::new(),
                     calculation_id: calculations.value(row).into(),
                     policy_id: policies.value(row).into(),
+                    input_contract: inputs.value(row).into(),
                     expected_result_contract: outputs.value(row).into(),
+                    determinism_class: determinism.value(row).into(),
                     diagnostic_code: diagnostics.value(row).into(),
                 });
         if operation.operation_kind != operation_kinds.value(row)
@@ -179,7 +222,9 @@ fn decode_phrases(
     let columns = utf8(batch, "column_ref")?;
     let operations = utf8(batch, "operation_kind")?;
     let domains = utf8(batch, "operand_domain")?;
+    let logical_types = utf8(batch, "operand_logical_type")?;
     let codes = int16(batch, "operand_code")?;
+    let null_policies = utf8(batch, "null_policy")?;
     let calculations = utf8(batch, "calculation_id")?;
     let outputs = utf8(batch, "expected_result_contract")?;
     let diagnostics = utf8(batch, "diagnostic_code")?;
@@ -194,7 +239,9 @@ fn decode_phrases(
                 column_ref: columns.value(row).into(),
                 operation_kind: operations.value(row).into(),
                 operand_domain: domains.value(row).into(),
+                operand_logical_type: logical_types.value(row).into(),
                 operand_codes: Vec::new(),
+                null_policy: null_policies.value(row).into(),
                 calculation_id: calculations.value(row).into(),
                 expected_result_contract: outputs.value(row).into(),
                 diagnostic_code: diagnostics.value(row).into(),
@@ -202,6 +249,7 @@ fn decode_phrases(
         if phrase.canonical_text != texts.value(row)
             || phrase.column_ref != columns.value(row)
             || phrase.operation_kind != operations.value(row)
+            || phrase.operand_logical_type != logical_types.value(row)
             || phrase.calculation_id != calculations.value(row)
         {
             return Err(OntologyProgramCompileError::Decode(format!(
@@ -225,6 +273,115 @@ fn decode_phrases(
         }
     }
     Ok(phrases)
+}
+
+fn decode_query_phrases(
+    package: &OntologyProgramPackage,
+) -> Result<BTreeMap<String, DecodedQueryPhrase>, OntologyProgramCompileError> {
+    let batch = one_batch(package, "program.query_phrase")?;
+    let ids = utf8(batch, "phrase_id")?;
+    let texts = utf8(batch, "canonical_text")?;
+    let node_kinds = utf8(batch, "plan_node_kind")?;
+    let output_roles = utf8(batch, "output_role")?;
+    let contract_families = utf8(batch, "contract_family")?;
+    let contract_codes = utf8(batch, "contract_code")?;
+    let mut phrases = BTreeMap::new();
+    for row in 0..batch.num_rows() {
+        let phrase = DecodedQueryPhrase {
+            phrase_id: ids.value(row).into(),
+            canonical_text: texts.value(row).into(),
+            accepted_aliases: Vec::new(),
+            plan_node_kind: node_kinds.value(row).into(),
+            output_role: output_roles.value(row).into(),
+            contract_family: contract_families.value(row).into(),
+            contract_code: contract_codes.value(row).into(),
+            required_modifiers: Vec::new(),
+        };
+        if phrase.phrase_id.is_empty()
+            || phrase.canonical_text.is_empty()
+            || phrases.insert(phrase.phrase_id.clone(), phrase).is_some()
+        {
+            return Err(OntologyProgramCompileError::Decode(
+                "query phrase identity is empty or duplicated".into(),
+            ));
+        }
+    }
+
+    let aliases = one_batch(package, "program.query_phrase_alias")?;
+    let alias_ids = utf8(aliases, "phrase_id")?;
+    let alias_ordinals = uint16(aliases, "alias_ordinal")?;
+    let alias_texts = utf8(aliases, "alias_text")?;
+    for row in 0..aliases.num_rows() {
+        let phrase = phrases.get_mut(alias_ids.value(row)).ok_or_else(|| {
+            OntologyProgramCompileError::Decode(format!(
+                "query phrase alias references {}",
+                alias_ids.value(row)
+            ))
+        })?;
+        if usize::from(alias_ordinals.value(row)) != phrase.accepted_aliases.len()
+            || alias_texts.value(row).is_empty()
+        {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "{} has unordered or empty aliases",
+                phrase.phrase_id
+            )));
+        }
+        phrase.accepted_aliases.push(alias_texts.value(row).into());
+    }
+
+    let modifiers = one_batch(package, "program.query_phrase_modifier")?;
+    let modifier_ids = utf8(modifiers, "phrase_id")?;
+    let modifier_ordinals = uint16(modifiers, "modifier_ordinal")?;
+    let modifier_values = utf8(modifiers, "modifier")?;
+    for row in 0..modifiers.num_rows() {
+        let phrase = phrases.get_mut(modifier_ids.value(row)).ok_or_else(|| {
+            OntologyProgramCompileError::Decode(format!(
+                "query phrase modifier references {}",
+                modifier_ids.value(row)
+            ))
+        })?;
+        if usize::from(modifier_ordinals.value(row)) != phrase.required_modifiers.len()
+            || modifier_values.value(row).is_empty()
+        {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "{} has unordered or empty modifiers",
+                phrase.phrase_id
+            )));
+        }
+        phrase
+            .required_modifiers
+            .push(modifier_values.value(row).into());
+    }
+    Ok(phrases)
+}
+
+fn decode_query_projections(
+    package: &OntologyProgramPackage,
+) -> Result<BTreeMap<(String, String), Vec<i32>>, OntologyProgramCompileError> {
+    let batch = one_batch(package, "program.query_projection")?;
+    let phrase_ids = utf8(batch, "phrase_id")?;
+    let target_kinds = utf8(batch, "target_kind")?;
+    let ordinals = uint16(batch, "operand_ordinal")?;
+    let codes = batch
+        .column_by_name("operand_code")
+        .and_then(|column| column.as_any().downcast_ref::<arrow_array::Int32Array>())
+        .ok_or_else(|| OntologyProgramCompileError::Decode("operand_code is not Int32".into()))?;
+    let mut projections: BTreeMap<(String, String), Vec<i32>> = BTreeMap::new();
+    for row in 0..batch.num_rows() {
+        let key = (
+            phrase_ids.value(row).to_owned(),
+            target_kinds.value(row).to_owned(),
+        );
+        let operands = projections.entry(key.clone()).or_default();
+        if usize::from(ordinals.value(row)) != operands.len() || codes.is_null(row) {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "query projection {}:{} has unordered or null operands",
+                key.0, key.1
+            )));
+        }
+        operands.push(codes.value(row));
+    }
+    Ok(projections)
 }
 
 fn decode_calculations(
@@ -262,10 +419,61 @@ pub struct OntologyProgramCompiler {
     pub package_identity: String,
     pub operations: BTreeMap<String, DecodedProgramOperation>,
     pub phrases: BTreeMap<String, DecodedPhraseBinding>,
+    pub query_phrases: BTreeMap<String, DecodedQueryPhrase>,
+    pub query_projection_codes: BTreeMap<(String, String), Vec<i32>>,
     pub calculations: BTreeMap<String, DecodedCalculation>,
 }
 
 impl OntologyProgramCompiler {
+    fn lower_decoded_phrase(
+        &self,
+        phrase: &DecodedPhraseBinding,
+        qualifier: Option<&str>,
+    ) -> Result<Expr, OntologyProgramCompileError> {
+        if phrase.expected_result_contract != "predicate" {
+            return Err(OntologyProgramCompileError::Unsupported(format!(
+                "{}:{}",
+                phrase.diagnostic_code, phrase.expected_result_contract
+            )));
+        }
+        let calculation = self
+            .calculations
+            .get(&phrase.calculation_id)
+            .ok_or_else(|| {
+                OntologyProgramCompileError::Unsupported(phrase.calculation_id.clone())
+            })?;
+        let column_ref = qualifier.map_or_else(
+            || phrase.column_ref.clone(),
+            |qualifier| format!("{qualifier}.{}", phrase.column_ref),
+        );
+        let column = col(column_ref);
+        let values = phrase
+            .operand_codes
+            .iter()
+            .map(|code| match phrase.operand_logical_type.as_str() {
+                "int16" => Ok(lit(ScalarValue::Int16(Some(*code)))),
+                "int32" => Ok(lit(ScalarValue::Int32(Some(i32::from(*code))))),
+                logical_type => Err(OntologyProgramCompileError::Unsupported(format!(
+                    "{}:{logical_type}",
+                    phrase.diagnostic_code
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let predicate = match calculation.native_operation.as_str() {
+            "eq" if values.len() == 1 => column.clone().eq(values[0].clone()),
+            "in_list" if !values.is_empty() => column.clone().in_list(values, false),
+            operation => return Err(OntologyProgramCompileError::Unsupported(operation.into())),
+        };
+        match phrase.null_policy.as_str() {
+            "unknown_is_false" => Ok(predicate.is_true()),
+            "reject_unknown" => Ok(column.is_not_null().and(predicate)),
+            policy => Err(OntologyProgramCompileError::Unsupported(format!(
+                "{}:{policy}",
+                phrase.diagnostic_code
+            ))),
+        }
+    }
+
     /// Decode and cross-link one package before any expression is lowered.
     ///
     /// # Errors
@@ -276,6 +484,8 @@ impl OntologyProgramCompiler {
         validate_ontology_program_package(package)?;
         let operations = decode_rules(package)?;
         let phrases = decode_phrases(package)?;
+        let query_phrases = decode_query_phrases(package)?;
+        let query_projection_codes = decode_query_projections(package)?;
         let calculations = decode_calculations(package)?;
         let referenced = operations
             .values()
@@ -323,6 +533,8 @@ impl OntologyProgramCompiler {
             package_identity: package.manifest.package_identity.clone(),
             operations,
             phrases,
+            query_phrases,
+            query_projection_codes,
             calculations,
         })
     }
@@ -337,26 +549,14 @@ impl OntologyProgramCompiler {
             .phrases
             .get(phrase_id)
             .ok_or_else(|| OntologyProgramCompileError::Phrase(phrase_id.into()))?;
-        let calculation = self
-            .calculations
-            .get(&phrase.calculation_id)
-            .ok_or_else(|| {
-                OntologyProgramCompileError::Unsupported(phrase.calculation_id.clone())
-            })?;
-        let column = col(&phrase.column_ref);
-        let values = phrase
-            .operand_codes
-            .iter()
-            .map(|code| lit(ScalarValue::Int16(Some(*code))))
-            .collect::<Vec<_>>();
-        match calculation.native_operation.as_str() {
-            "eq" if values.len() == 1 => Ok(column.eq(values[0].clone())),
-            "in_list" if !values.is_empty() => Ok(column.in_list(values, false)),
-            operation => Err(OntologyProgramCompileError::Unsupported(operation.into())),
-        }
+        self.lower_decoded_phrase(phrase, None)
     }
 
     /// Resolve canonical phrase text through the package; no literal fallback is allowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the phrase is absent or cannot be lowered by the catalog.
     pub fn lower_phrase_text(&self, text: &str) -> Result<Expr, OntologyProgramCompileError> {
         let phrase = self
             .phrases
@@ -365,13 +565,92 @@ impl OntologyProgramCompiler {
             .ok_or_else(|| OntologyProgramCompileError::Phrase(text.into()))?;
         self.lower_phrase(&phrase.phrase_id)
     }
+
+    /// Resolve and lower canonical phrase text against a qualified relational input.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the phrase is absent or cannot be lowered by the catalog.
+    pub fn lower_phrase_text_for_qualifier(
+        &self,
+        text: &str,
+        qualifier: &str,
+    ) -> Result<Expr, OntologyProgramCompileError> {
+        let phrase = self
+            .phrases
+            .values()
+            .find(|phrase| phrase.canonical_text == text)
+            .ok_or_else(|| OntologyProgramCompileError::Phrase(text.into()))?;
+        self.lower_decoded_phrase(phrase, Some(qualifier))
+    }
+
+    /// Exhaustively lower every validation operation through the calculation catalog.
+    ///
+    /// # Errors
+    ///
+    /// Rejects missing, mismatched, or non-native calculation bindings.
+    pub fn validation_operations(
+        &self,
+    ) -> Result<Vec<LoweredValidationOperation<'_>>, OntologyProgramCompileError> {
+        self.operations
+            .values()
+            .map(|operation| {
+                let calculation = self
+                    .calculations
+                    .get(&operation.calculation_id)
+                    .ok_or_else(|| {
+                        OntologyProgramCompileError::Unsupported(operation.calculation_id.clone())
+                    })?;
+                if calculation.engine != "datafusion-native"
+                    || calculation.native_operation != operation.operation_kind
+                    || calculation.return_contract != operation.expected_result_contract
+                    || operation.expected_result_contract.is_empty()
+                    || operation.input_contract.is_empty()
+                    || operation.determinism_class.is_empty()
+                {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "{} is not bound to its typed native calculation and contracts",
+                        operation.operation_id
+                    )));
+                }
+                let native = match calculation.native_operation.as_str() {
+                    "foreign_key_anti_join" | "id_domain_conformance" => {
+                        NativeValidationOperation::ExternalReferential
+                    }
+                    "governed_code_anti_join" => NativeValidationOperation::GovernedCodeAntiJoin,
+                    "primary_key_uniqueness_aggregate" => {
+                        NativeValidationOperation::PrimaryKeyUniquenessAggregate
+                    }
+                    "ontology_membership_anti_join" => {
+                        NativeValidationOperation::OntologyMembershipAntiJoin
+                    }
+                    "relation_family_conformance_join" => {
+                        NativeValidationOperation::RelationFamilyConformanceJoin
+                    }
+                    "relation_cardinality_aggregate" => {
+                        NativeValidationOperation::RelationCardinalityAggregate
+                    }
+                    "relation_owner_conformance_join" => {
+                        NativeValidationOperation::RelationOwnerConformanceJoin
+                    }
+                    "relation_self_edge_join" => NativeValidationOperation::RelationSelfEdgeJoin,
+                    "property_value_one_of" => NativeValidationOperation::PropertyValueOneOf,
+                    "source_span_all_or_none" => NativeValidationOperation::SourceSpanAllOrNone,
+                    unsupported => {
+                        return Err(OntologyProgramCompileError::Unsupported(unsupported.into()));
+                    }
+                };
+                Ok(LoweredValidationOperation { operation, native })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use arrow_array::{Int16Array, RecordBatch, UInt64Array};
+    use arrow_array::{ArrayRef, Int16Array, Int32Array, RecordBatch, UInt64Array};
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::datasource::{MemTable, provider_as_source};
     use datafusion::logical_expr::LogicalPlanBuilder;
@@ -393,24 +672,42 @@ mod tests {
         phrase_id: &str,
         codes: Vec<Option<i16>>,
     ) -> OntologyGateOutcome {
+        let phrase = compiler.phrases.get(phrase_id).expect("compiled phrase");
         let mut metadata = std::collections::HashMap::new();
         metadata.insert(
             "com.codefabric.cpg.semantic_type".into(),
-            "enum:EVIDENCE_CERTAINTY".into(),
+            format!("enum:{}", phrase.operand_domain),
         );
+        let row_count = codes.len();
+        let code_values: ArrayRef = match phrase.operand_logical_type.as_str() {
+            "int16" => Arc::new(Int16Array::from(codes)),
+            "int32" => Arc::new(Int32Array::from(
+                codes
+                    .into_iter()
+                    .map(|value| value.map(i32::from))
+                    .collect::<Vec<_>>(),
+            )),
+            logical_type => panic!("unsupported phrase fixture type {logical_type}"),
+        };
         let schema = Arc::new(Schema::new(vec![
             Field::new("row_id", DataType::UInt64, false),
-            Field::new("certainty_code", DataType::Int16, true).with_metadata(metadata),
+            Field::new(
+                &phrase.column_ref,
+                match phrase.operand_logical_type.as_str() {
+                    "int16" => DataType::Int16,
+                    "int32" => DataType::Int32,
+                    logical_type => panic!("unsupported phrase fixture type {logical_type}"),
+                },
+                true,
+            )
+            .with_metadata(metadata),
         ]));
-        let row_ids = (0..codes.len())
+        let row_ids = (0..row_count)
             .map(|value| u64::try_from(value).expect("fixture row index"))
             .collect::<Vec<_>>();
         let batch = RecordBatch::try_new(
             Arc::clone(&schema),
-            vec![
-                Arc::new(UInt64Array::from(row_ids)),
-                Arc::new(Int16Array::from(codes)),
-            ],
+            vec![Arc::new(UInt64Array::from(row_ids)), code_values],
         )
         .expect("phrase fixture batch");
         let provider = Arc::new(MemTable::try_new(schema, vec![vec![batch]]).expect("fixture"));
@@ -439,7 +736,13 @@ mod tests {
     async fn ontology_compiled_program_native_profile() {
         let compiler = compiler();
         assert_eq!(compiler.operations.len(), 11);
-        assert_eq!(compiler.phrases.len(), 3);
+        assert!(compiler.phrases.len() >= 3);
+        assert!(compiler.phrases.values().all(|phrase| {
+            !phrase.column_ref.is_empty()
+                && !phrase.operand_domain.is_empty()
+                && !phrase.operand_codes.is_empty()
+                && phrase.expected_result_contract == "predicate"
+        }));
         assert!(compiler.calculations.values().all(|calculation| {
             calculation.engine == "datafusion-native" && !calculation.native_operation.is_empty()
         }));

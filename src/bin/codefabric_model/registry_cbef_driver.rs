@@ -193,6 +193,11 @@ pub fn detached_registry_identity(
                 .map_err(RegistryCbefError::RegistryModel)?;
             governed::validate_phrase_operation_bindings(&document.semantic_operation_bindings)
                 .map_err(RegistryCbefError::RegistryModel)?;
+            governed::validate_phrase_projection_bindings(
+                &document.records,
+                &document.semantic_projection_bindings,
+            )
+            .map_err(RegistryCbefError::RegistryModel)?;
             Some(detached_typed_digest(&document)?)
         }
         "codefabric.comparison.comparison-ignore-registry" => accepted!(

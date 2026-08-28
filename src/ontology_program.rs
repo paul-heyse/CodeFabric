@@ -9,18 +9,17 @@ use std::fs::{self, OpenOptions};
 use std::io::Cursor;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use arrow_array::{ArrayRef, Int16Array, RecordBatch, StringArray, UInt16Array};
+use arrow_array::{
+    Array as _, BinaryArray, BooleanArray, Int16Array, Int32Array, RecordBatch, StringArray,
+};
 use arrow_ipc::reader::StreamReader;
-use arrow_ipc::writer::StreamWriter;
-use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
+use arrow_schema::{ArrowError, SchemaRef};
 use thiserror::Error;
 
-use crate::compiled_ontology::{
-    CompiledRuleContract, CompiledRuleOperationKind, compiled_ontology,
-};
-use crate::model_generated::schema_tables::{SEMANTIC_OPERATION_SPECS, SemanticPredicateOperator};
+mod generated_bundle {
+    include!("generated/ontology_program_bundle.rs");
+}
 
 /// Stable ontology-program package format.
 pub const ONTOLOGY_PROGRAM_PACKAGE_VERSION: &str = "ontology-program-package.v1";
@@ -109,33 +108,121 @@ pub struct CandidateProgramBinding {
     pub member_identities: BTreeMap<String, String>,
 }
 
+/// Application-owned authority DTO decoded from the Arrow program artifact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramAuthority {
+    pub authority_id: String,
+    pub authority_version: String,
+    pub canonical_digest: String,
+    pub canonical_source_path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramEnumValue {
+    pub domain: String,
+    pub code: i32,
+    pub name: String,
+    pub authority: ProgramAuthority,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramEntityKind {
+    pub code: i32,
+    pub name: String,
+    pub family_code: i16,
+    pub language_applicability: String,
+    pub query_visible: bool,
+    pub authority: ProgramAuthority,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramRelationKind {
+    pub code: i32,
+    pub name: String,
+    pub family_code: i16,
+    pub family_name: String,
+    pub cardinality: String,
+    pub symmetric: bool,
+    pub transitive: bool,
+    pub self_edge_policy: String,
+    pub owner_selection_rule: String,
+    pub query_visible: bool,
+    pub authority: ProgramAuthority,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramPropertyKind {
+    pub code: i32,
+    pub name: String,
+    pub value_kind_code: i16,
+    pub cardinality: String,
+    pub storage_mapping: String,
+    pub authority: ProgramAuthority,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramFactKind {
+    pub code: i16,
+    pub name: String,
+    pub fact_form: String,
+    pub authority: ProgramAuthority,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramProviderRawKind {
+    pub provider_code: i16,
+    pub raw_catalog_id: String,
+    pub raw_namespace: String,
+    pub raw_kind_code: i32,
+    pub raw_name: String,
+    pub normalized_kind_code: Option<i32>,
+    pub authority: ProgramAuthority,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProgramOntologyEdge {
+    pub subject_term_id: String,
+    pub predicate_term_id: String,
+    pub object_term_id: String,
+    pub ordinal: i32,
+    pub authority: ProgramAuthority,
+}
+
+/// Typed runtime view decoded from the digest-checked Arrow bundle.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct OntologyProgramVocabulary {
+    pub enum_values: Vec<ProgramEnumValue>,
+    pub entity_kinds: Vec<ProgramEntityKind>,
+    pub relation_kinds: Vec<ProgramRelationKind>,
+    pub property_kinds: Vec<ProgramPropertyKind>,
+    pub fact_kinds: Vec<ProgramFactKind>,
+    pub provider_raw_kinds: Vec<ProgramProviderRawKind>,
+    pub phrase_authority: ProgramAuthority,
+    pub query_form_authority: ProgramAuthority,
+    pub edges: Vec<ProgramOntologyEdge>,
+}
+
 fn manifest_for_members(
     profile_id: &str,
     members: &BTreeMap<String, OntologyProgramMember>,
-) -> Result<OntologyProgramManifest, OntologyProgramError> {
+) -> OntologyProgramManifest {
     let bootstrap_schema_identity = framed(
         members
             .values()
             .map(|member| format!("{}:{:?}", member.relation_id, member.schema))
             .map(String::into_bytes),
     );
-    let ontology = compiled_ontology();
     let authored_content_identity = framed([
-        ontology.phrase_authority.canonical_digest.as_bytes(),
-        ontology.query_form_authority.canonical_digest.as_bytes(),
-        crate::schema_registry::schema_contract_digest().as_bytes(),
+        generated_bundle::ONTOLOGY_PROGRAM_SOURCE_IDENTITY.as_bytes(),
+        generated_bundle::ONTOLOGY_PROGRAM_PHRASE_AUTHORITY_IDENTITY.as_bytes(),
+        generated_bundle::ONTOLOGY_PROGRAM_QUERY_FORM_AUTHORITY_IDENTITY.as_bytes(),
     ]);
     let logical_program_identity = framed(
         std::iter::once(bootstrap_schema_identity.as_bytes().to_vec())
             .chain(std::iter::once(
                 authored_content_identity.as_bytes().to_vec(),
             ))
-            .chain(
-                members
-                    .values()
-                    .map(logical_rows)
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
+            .chain(members.values().map(logical_rows)),
     );
     let member_identities = members
         .iter()
@@ -154,7 +241,7 @@ fn manifest_for_members(
                 .map(|(name, digest)| format!("{name}:{digest}").into_bytes()),
         ),
     );
-    Ok(OntologyProgramManifest {
+    OntologyProgramManifest {
         package_version: ONTOLOGY_PROGRAM_PACKAGE_VERSION.into(),
         bootstrap_schema_identity,
         authored_content_identity,
@@ -162,7 +249,7 @@ fn manifest_for_members(
         packaging_profile_id: profile_id.to_owned(),
         member_identities,
         package_identity,
-    })
+    }
 }
 
 impl From<&OntologyProgramPackage> for CandidateProgramBinding {
@@ -388,370 +475,326 @@ fn framed(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
     crate::integrity::framed_digest(&bytes)
 }
 
-fn operation_name(operation: CompiledRuleOperationKind) -> &'static str {
-    match operation {
-        CompiledRuleOperationKind::ForeignKeyAntiJoin => "foreign_key_anti_join",
-        CompiledRuleOperationKind::GovernedCodeAntiJoin => "governed_code_anti_join",
-        CompiledRuleOperationKind::PrimaryKeyUniquenessAggregate => {
-            "primary_key_uniqueness_aggregate"
-        }
-        CompiledRuleOperationKind::IdDomainConformance => "id_domain_conformance",
-        CompiledRuleOperationKind::OntologyMembershipAntiJoin => "ontology_membership_anti_join",
-        CompiledRuleOperationKind::RelationFamilyConformanceJoin => {
-            "relation_family_conformance_join"
-        }
-        CompiledRuleOperationKind::RelationCardinalityAggregate => "relation_cardinality_aggregate",
-        CompiledRuleOperationKind::RelationOwnerConformanceJoin => {
-            "relation_owner_conformance_join"
-        }
-        CompiledRuleOperationKind::RelationSelfEdgeJoin => "relation_self_edge_join",
-        CompiledRuleOperationKind::PropertyValueOneOf => "property_value_one_of",
-        CompiledRuleOperationKind::SourceSpanAllOrNone => "source_span_all_or_none",
-    }
-}
-
-fn phrase_calculation(operator: SemanticPredicateOperator) -> &'static str {
-    match operator {
-        SemanticPredicateOperator::Equals => "calculation.phrase-equals.v1",
-        SemanticPredicateOperator::InSet => "calculation.phrase-in-set.v1",
-    }
-}
-
-fn rule_schema() -> SchemaRef {
-    Arc::new(Schema::new(vec![
-        Field::new("operation_id", DataType::Utf8, false),
-        Field::new("operation_kind", DataType::Utf8, false),
-        Field::new("operand_ordinal", DataType::UInt16, false),
-        Field::new("relation_ref", DataType::Utf8, false),
-        Field::new("column_ref", DataType::Utf8, false),
-        Field::new("logical_type", DataType::Utf8, false),
-        Field::new("calculation_id", DataType::Utf8, false),
-        Field::new("policy_id", DataType::Utf8, false),
-        Field::new("expected_result_contract", DataType::Utf8, false),
-        Field::new("diagnostic_code", DataType::Utf8, false),
-    ]))
-}
-
-fn rule_batch(rules: &[CompiledRuleContract]) -> Result<RecordBatch, OntologyProgramError> {
-    let mut operation_ids = Vec::new();
-    let mut operation_kinds = Vec::new();
-    let mut ordinals = Vec::new();
-    let mut relations = Vec::new();
-    let mut columns = Vec::new();
-    let mut logical_types = Vec::new();
-    let mut calculations = Vec::new();
-    let mut policies = Vec::new();
-    let mut outputs = Vec::new();
-    let mut diagnostics = Vec::new();
-    for rule in rules {
-        if rule.ordered_operands.is_empty()
-            || rule.calculation_id.is_empty()
-            || rule.policy_id.is_empty()
-        {
-            return Err(OntologyProgramError::Contract(format!(
-                "{} is a bare executable record",
-                rule.rule_id
-            )));
-        }
-        for (index, operand) in rule.ordered_operands.iter().enumerate() {
-            if usize::from(operand.ordinal) != index
-                || operand.relation_ref.is_empty()
-                || operand.column_ref.is_empty()
-                || operand.logical_type.is_empty()
-            {
-                return Err(OntologyProgramError::Contract(format!(
-                    "{} has an invalid ordered operand",
-                    rule.rule_id
-                )));
-            }
-            operation_ids.push(rule.rule_id);
-            operation_kinds.push(operation_name(rule.operation_kind));
-            ordinals.push(operand.ordinal);
-            relations.push(operand.relation_ref);
-            columns.push(operand.column_ref);
-            logical_types.push(operand.logical_type);
-            calculations.push(rule.calculation_id);
-            policies.push(rule.policy_id);
-            outputs.push(rule.output_contract);
-            diagnostics.push(rule.diagnostic_code);
-        }
-    }
-    let columns: Vec<ArrayRef> = vec![
-        Arc::new(StringArray::from(operation_ids)),
-        Arc::new(StringArray::from(operation_kinds)),
-        Arc::new(UInt16Array::from(ordinals)),
-        Arc::new(StringArray::from(relations)),
-        Arc::new(StringArray::from(columns)),
-        Arc::new(StringArray::from(logical_types)),
-        Arc::new(StringArray::from(calculations)),
-        Arc::new(StringArray::from(policies)),
-        Arc::new(StringArray::from(outputs)),
-        Arc::new(StringArray::from(diagnostics)),
-    ];
-    Ok(RecordBatch::try_new(rule_schema(), columns)?)
-}
-
-fn phrase_batch() -> Result<RecordBatch, OntologyProgramError> {
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("phrase_id", DataType::Utf8, false),
-        Field::new("canonical_text", DataType::Utf8, false),
-        Field::new("column_ref", DataType::Utf8, false),
-        Field::new("operation_kind", DataType::Utf8, false),
-        Field::new("operand_domain", DataType::Utf8, false),
-        Field::new("operand_code", DataType::Int16, false),
-        Field::new("calculation_id", DataType::Utf8, false),
-        Field::new("expected_result_contract", DataType::Utf8, false),
-        Field::new("diagnostic_code", DataType::Utf8, false),
-    ]));
-    let mut phrases = Vec::new();
-    let mut texts = Vec::new();
-    let mut columns = Vec::new();
-    let mut operations = Vec::new();
-    let mut domains = Vec::new();
-    let mut codes = Vec::new();
-    let mut calculations = Vec::new();
-    let mut outputs = Vec::new();
-    let mut diagnostics = Vec::new();
-    for operation in SEMANTIC_OPERATION_SPECS {
-        if operation.operand_codes.is_empty() {
-            return Err(OntologyProgramError::Contract(format!(
-                "{} has no governed operand",
-                operation.phrase_id
-            )));
-        }
-        for code in operation.operand_codes {
-            phrases.push(operation.phrase_id);
-            texts.push(operation.canonical_text);
-            columns.push(operation.column_role);
-            operations.push(match operation.operator {
-                SemanticPredicateOperator::Equals => "equals",
-                SemanticPredicateOperator::InSet => "in_set",
-            });
-            domains.push(operation.operand_domain);
-            codes.push(*code);
-            calculations.push(phrase_calculation(operation.operator));
-            outputs.push(operation.output_role);
-            diagnostics.push(operation.diagnostic_code);
-        }
-    }
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(StringArray::from(phrases)),
-            Arc::new(StringArray::from(texts)),
-            Arc::new(StringArray::from(columns)),
-            Arc::new(StringArray::from(operations)),
-            Arc::new(StringArray::from(domains)),
-            Arc::new(Int16Array::from(codes)),
-            Arc::new(StringArray::from(calculations)),
-            Arc::new(StringArray::from(outputs)),
-            Arc::new(StringArray::from(diagnostics)),
-        ],
-    )?)
-}
-
-fn calculation_batch(rules: &[CompiledRuleContract]) -> Result<RecordBatch, OntologyProgramError> {
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("calculation_id", DataType::Utf8, false),
-        Field::new("engine", DataType::Utf8, false),
-        Field::new("native_operation", DataType::Utf8, false),
-        Field::new("return_contract", DataType::Utf8, false),
-    ]));
-    let mut catalog = BTreeMap::new();
-    for rule in rules {
-        if catalog
-            .insert(
-                rule.calculation_id,
-                (operation_name(rule.operation_kind), rule.output_contract),
-            )
-            .is_some()
-        {
-            return Err(OntologyProgramError::Contract(format!(
-                "duplicate calculation identity {}",
-                rule.calculation_id
-            )));
-        }
-    }
-    for operation in SEMANTIC_OPERATION_SPECS {
-        catalog
-            .entry(phrase_calculation(operation.operator))
-            .or_insert((
-                match operation.operator {
-                    SemanticPredicateOperator::Equals => "eq",
-                    SemanticPredicateOperator::InSet => "in_list",
-                },
-                "predicate",
-            ));
-    }
-    let ids = catalog.keys().copied().collect::<Vec<_>>();
-    let operations = catalog.values().map(|value| value.0).collect::<Vec<_>>();
-    let returns = catalog.values().map(|value| value.1).collect::<Vec<_>>();
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(StringArray::from(ids)),
-            Arc::new(StringArray::from(vec!["datafusion-native"; catalog.len()])),
-            Arc::new(StringArray::from(operations)),
-            Arc::new(StringArray::from(returns)),
-        ],
-    )?)
-}
-
-fn bootstrap_batch() -> Result<RecordBatch, OntologyProgramError> {
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("ordinal", DataType::UInt16, false),
-        Field::new("family_id", DataType::Utf8, false),
-        Field::new("binding_kind", DataType::Utf8, false),
-        Field::new("relation_id", DataType::Utf8, false),
-        Field::new("depends_on", DataType::Utf8, true),
-    ]));
-    let rows = [
-        ("codes", "authored", "authority.codes", None),
-        (
-            "edges_memberships",
-            "authored",
-            "authority.edges_memberships",
-            Some("codes"),
-        ),
-        (
-            "semantic_types",
-            "authored",
-            "authority.semantic_types",
-            Some("codes"),
-        ),
-        (
-            "table_contracts",
-            "authored",
-            "authority.table_contracts",
-            Some("semantic_types"),
-        ),
-        (
-            "column_contracts",
-            "authored",
-            "authority.column_contracts",
-            Some("table_contracts"),
-        ),
-        (
-            "result_contracts",
-            "authored",
-            "authority.result_contracts",
-            Some("column_contracts"),
-        ),
-        (
-            "identity_recipes",
-            "authored",
-            "authority.identity_recipes",
-            Some("semantic_types"),
-        ),
-        (
-            "phrase_bindings",
-            "program_member",
-            "program.phrase_operation",
-            Some("codes"),
-        ),
-        (
-            "calculation_bindings",
-            "program_member",
-            "program.calculation_catalog",
-            Some("phrase_bindings"),
-        ),
-        (
-            "rule_bindings",
-            "program_member",
-            "program.rule_operation",
-            Some("calculation_bindings"),
-        ),
-        (
-            "snapshot_identity",
-            "candidate",
-            "candidate.snapshot",
-            Some("table_contracts"),
-        ),
-        (
-            "publication_identity",
-            "candidate",
-            "candidate.publication",
-            Some("snapshot_identity"),
-        ),
-        (
-            "plan_identity",
-            "candidate",
-            "candidate.plan",
-            Some("rule_bindings"),
-        ),
-        (
-            "package_identity",
-            "candidate",
-            "candidate.package",
-            Some("rule_bindings"),
-        ),
-        (
-            "policy_identity",
-            "candidate",
-            "candidate.policy",
-            Some("package_identity"),
-        ),
-        (
-            "exact_table_identities",
-            "candidate",
-            "candidate.exact_tables",
-            Some("publication_identity"),
-        ),
-    ];
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(UInt16Array::from_iter_values((0..rows.len()).map(
-                |ordinal| u16::try_from(ordinal).expect("bootstrap ordinal"),
-            ))),
-            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| row.0))),
-            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| row.1))),
-            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| row.2))),
-            Arc::new(StringArray::from(
-                rows.iter().map(|row| row.3).collect::<Vec<_>>(),
-            )),
-        ],
-    )?)
-}
-
-fn encode_member(
+fn decode_member(
     relation_id: &str,
-    batches: Vec<RecordBatch>,
+    ipc_bytes: &[u8],
 ) -> Result<OntologyProgramMember, OntologyProgramError> {
-    let schema = batches
-        .first()
-        .ok_or_else(|| OntologyProgramError::Contract(format!("{relation_id} is empty")))?
-        .schema();
-    if batches.iter().any(|batch| batch.schema() != schema) {
+    let reader = StreamReader::try_new(Cursor::new(ipc_bytes), None)?;
+    let schema = reader.schema();
+    let batches = reader.collect::<Result<Vec<_>, _>>()?;
+    if batches.is_empty() || batches.iter().any(|batch| batch.schema() != schema) {
         return Err(OntologyProgramError::Contract(format!(
-            "{relation_id} contains heterogeneous schemas"
+            "{relation_id} has an empty or heterogeneous artifact stream"
         )));
     }
-    let mut ipc_bytes = Vec::new();
-    {
-        let mut writer = StreamWriter::try_new(&mut ipc_bytes, schema.as_ref())?;
-        for batch in &batches {
-            writer.write(batch)?;
-        }
-        writer.finish()?;
-    }
-    let member_identity = framed([relation_id.as_bytes(), ipc_bytes.as_slice()]);
     Ok(OntologyProgramMember {
-        relation_id: relation_id.into(),
+        relation_id: relation_id.to_owned(),
         schema,
         batches,
-        ipc_bytes,
-        member_identity,
+        ipc_bytes: ipc_bytes.to_vec(),
+        member_identity: framed([relation_id.as_bytes(), ipc_bytes]),
     })
 }
 
-fn logical_rows(member: &OntologyProgramMember) -> Result<Vec<u8>, OntologyProgramError> {
+fn generated_program_members(
+    max_rows_per_batch: usize,
+) -> Result<BTreeMap<String, OntologyProgramMember>, OntologyProgramError> {
+    let mut outer = StreamReader::try_new(
+        Cursor::new(generated_bundle::ONTOLOGY_PROGRAM_BUNDLE_IPC),
+        None,
+    )?;
+    let Some(container) = outer.next().transpose()? else {
+        return Err(OntologyProgramError::Artifact(
+            "generated ontology-program bundle is empty".into(),
+        ));
+    };
+    if outer.next().is_some() {
+        return Err(OntologyProgramError::Artifact(
+            "generated ontology-program bundle has multiple container batches".into(),
+        ));
+    }
+    let relation_ids = container
+        .column_by_name("relation_id")
+        .and_then(|column| column.as_any().downcast_ref::<StringArray>())
+        .ok_or_else(|| OntologyProgramError::Artifact("bundle relation_id is not Utf8".into()))?;
+    let streams = container
+        .column_by_name("ipc_stream")
+        .and_then(|column| column.as_any().downcast_ref::<BinaryArray>())
+        .ok_or_else(|| OntologyProgramError::Artifact("bundle ipc_stream is not Binary".into()))?;
+    let mut members = BTreeMap::new();
+    for row in 0..container.num_rows() {
+        let relation_id = relation_ids.value(row);
+        let member = decode_member(relation_id, streams.value(row))?;
+        if member
+            .batches
+            .iter()
+            .any(|batch| batch.num_rows() > max_rows_per_batch)
+        {
+            return Err(OntologyProgramError::Resource(format!(
+                "{relation_id} exceeds profile row limit {max_rows_per_batch}"
+            )));
+        }
+        if members.insert(relation_id.to_owned(), member).is_some() {
+            return Err(OntologyProgramError::Contract(format!(
+                "duplicate generated relation {relation_id}"
+            )));
+        }
+    }
+    Ok(members)
+}
+
+fn program_batch<'a>(
+    package: &'a OntologyProgramPackage,
+    relation_id: &str,
+) -> Result<&'a RecordBatch, OntologyProgramError> {
+    let member = package
+        .members
+        .get(relation_id)
+        .ok_or_else(|| OntologyProgramError::Contract(format!("missing {relation_id}")))?;
+    if member.batches.len() != 1 {
+        return Err(OntologyProgramError::Contract(format!(
+            "{relation_id} is not one canonical batch"
+        )));
+    }
+    Ok(&member.batches[0])
+}
+
+fn strings<'a>(
+    batch: &'a RecordBatch,
+    name: &str,
+) -> Result<&'a StringArray, OntologyProgramError> {
+    batch
+        .column_by_name(name)
+        .and_then(|column| column.as_any().downcast_ref::<StringArray>())
+        .ok_or_else(|| OntologyProgramError::Contract(format!("{name} is not Utf8")))
+}
+
+fn int16s<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int16Array, OntologyProgramError> {
+    batch
+        .column_by_name(name)
+        .and_then(|column| column.as_any().downcast_ref::<Int16Array>())
+        .ok_or_else(|| OntologyProgramError::Contract(format!("{name} is not Int16")))
+}
+
+fn int32s<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int32Array, OntologyProgramError> {
+    batch
+        .column_by_name(name)
+        .and_then(|column| column.as_any().downcast_ref::<Int32Array>())
+        .ok_or_else(|| OntologyProgramError::Contract(format!("{name} is not Int32")))
+}
+
+fn bools<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a BooleanArray, OntologyProgramError> {
+    batch
+        .column_by_name(name)
+        .and_then(|column| column.as_any().downcast_ref::<BooleanArray>())
+        .ok_or_else(|| OntologyProgramError::Contract(format!("{name} is not Boolean")))
+}
+
+fn decoded_authority(
+    batch: &RecordBatch,
+    row: usize,
+) -> Result<ProgramAuthority, OntologyProgramError> {
+    Ok(ProgramAuthority {
+        authority_id: strings(batch, "authority_id")?.value(row).to_owned(),
+        authority_version: strings(batch, "authority_version")?.value(row).to_owned(),
+        canonical_digest: strings(batch, "canonical_digest")?.value(row).to_owned(),
+        canonical_source_path: strings(batch, "canonical_source_path")?
+            .value(row)
+            .to_owned(),
+    })
+}
+
+/// Decode the generated Arrow bundle into application DTOs used by ontology publication.
+#[allow(clippy::too_many_lines)] // Keeps one auditable decoder for the generated relation family.
+pub(crate) fn ontology_program_vocabulary()
+-> Result<OntologyProgramVocabulary, OntologyProgramError> {
+    let package = build_ontology_program_package(&OntologyPackagingProfile::default())?;
+    let enum_batch = program_batch(&package, "program.enum_value")?;
+    let enum_domains = strings(enum_batch, "domain")?;
+    let enum_codes = int32s(enum_batch, "code")?;
+    let enum_names = strings(enum_batch, "name")?;
+    let enum_values = (0..enum_batch.num_rows())
+        .map(|row| {
+            Ok(ProgramEnumValue {
+                domain: enum_domains.value(row).to_owned(),
+                code: enum_codes.value(row),
+                name: enum_names.value(row).to_owned(),
+                authority: decoded_authority(enum_batch, row)?,
+            })
+        })
+        .collect::<Result<Vec<_>, OntologyProgramError>>()?;
+
+    let entity_batch = program_batch(&package, "program.entity_kind")?;
+    let entity_codes = int32s(entity_batch, "code")?;
+    let entity_names = strings(entity_batch, "name")?;
+    let entity_families = int16s(entity_batch, "family_code")?;
+    let entity_languages = strings(entity_batch, "language_applicability")?;
+    let entity_visible = bools(entity_batch, "query_visible")?;
+    let entity_kinds = (0..entity_batch.num_rows())
+        .map(|row| {
+            Ok(ProgramEntityKind {
+                code: entity_codes.value(row),
+                name: entity_names.value(row).to_owned(),
+                family_code: entity_families.value(row),
+                language_applicability: entity_languages.value(row).to_owned(),
+                query_visible: entity_visible.value(row),
+                authority: decoded_authority(entity_batch, row)?,
+            })
+        })
+        .collect::<Result<Vec<_>, OntologyProgramError>>()?;
+
+    let relation_batch = program_batch(&package, "program.relation_kind")?;
+    let relation_codes = int32s(relation_batch, "code")?;
+    let relation_names = strings(relation_batch, "name")?;
+    let relation_families = int16s(relation_batch, "family_code")?;
+    let relation_family_names = strings(relation_batch, "family_name")?;
+    let relation_cardinality = strings(relation_batch, "cardinality")?;
+    let relation_symmetric = bools(relation_batch, "symmetric")?;
+    let relation_transitive = bools(relation_batch, "transitive")?;
+    let relation_self_edges = strings(relation_batch, "self_edge_policy")?;
+    let relation_owners = strings(relation_batch, "owner_selection_rule")?;
+    let relation_visible = bools(relation_batch, "query_visible")?;
+    let relation_kinds = (0..relation_batch.num_rows())
+        .map(|row| {
+            Ok(ProgramRelationKind {
+                code: relation_codes.value(row),
+                name: relation_names.value(row).to_owned(),
+                family_code: relation_families.value(row),
+                family_name: relation_family_names.value(row).to_owned(),
+                cardinality: relation_cardinality.value(row).to_owned(),
+                symmetric: relation_symmetric.value(row),
+                transitive: relation_transitive.value(row),
+                self_edge_policy: relation_self_edges.value(row).to_owned(),
+                owner_selection_rule: relation_owners.value(row).to_owned(),
+                query_visible: relation_visible.value(row),
+                authority: decoded_authority(relation_batch, row)?,
+            })
+        })
+        .collect::<Result<Vec<_>, OntologyProgramError>>()?;
+
+    let property_batch = program_batch(&package, "program.property_kind")?;
+    let property_codes = int32s(property_batch, "code")?;
+    let property_names = strings(property_batch, "name")?;
+    let property_value_kinds = int16s(property_batch, "value_kind_code")?;
+    let property_cardinality = strings(property_batch, "cardinality")?;
+    let property_storage = strings(property_batch, "storage_mapping")?;
+    let property_kinds = (0..property_batch.num_rows())
+        .map(|row| {
+            Ok(ProgramPropertyKind {
+                code: property_codes.value(row),
+                name: property_names.value(row).to_owned(),
+                value_kind_code: property_value_kinds.value(row),
+                cardinality: property_cardinality.value(row).to_owned(),
+                storage_mapping: property_storage.value(row).to_owned(),
+                authority: decoded_authority(property_batch, row)?,
+            })
+        })
+        .collect::<Result<Vec<_>, OntologyProgramError>>()?;
+
+    let fact_batch = program_batch(&package, "program.fact_kind")?;
+    let fact_codes = int16s(fact_batch, "code")?;
+    let fact_names = strings(fact_batch, "name")?;
+    let fact_forms = strings(fact_batch, "fact_form")?;
+    let fact_kinds = (0..fact_batch.num_rows())
+        .map(|row| {
+            Ok(ProgramFactKind {
+                code: fact_codes.value(row),
+                name: fact_names.value(row).to_owned(),
+                fact_form: fact_forms.value(row).to_owned(),
+                authority: decoded_authority(fact_batch, row)?,
+            })
+        })
+        .collect::<Result<Vec<_>, OntologyProgramError>>()?;
+
+    let raw_batch = program_batch(&package, "program.provider_raw_kind")?;
+    let raw_provider_codes = int16s(raw_batch, "provider_code")?;
+    let raw_catalogs = strings(raw_batch, "raw_catalog_id")?;
+    let raw_namespaces = strings(raw_batch, "raw_namespace")?;
+    let raw_codes = int32s(raw_batch, "raw_kind_code")?;
+    let raw_names = strings(raw_batch, "raw_name")?;
+    let raw_normalized = int32s(raw_batch, "normalized_kind_code")?;
+    let provider_raw_kinds = (0..raw_batch.num_rows())
+        .map(|row| {
+            Ok(ProgramProviderRawKind {
+                provider_code: raw_provider_codes.value(row),
+                raw_catalog_id: raw_catalogs.value(row).to_owned(),
+                raw_namespace: raw_namespaces.value(row).to_owned(),
+                raw_kind_code: raw_codes.value(row),
+                raw_name: raw_names.value(row).to_owned(),
+                normalized_kind_code: (!raw_normalized.is_null(row))
+                    .then(|| raw_normalized.value(row)),
+                authority: decoded_authority(raw_batch, row)?,
+            })
+        })
+        .collect::<Result<Vec<_>, OntologyProgramError>>()?;
+
+    let edge_batch = program_batch(&package, "program.ontology_edge")?;
+    let edge_subjects = strings(edge_batch, "subject_term_id")?;
+    let edge_predicates = strings(edge_batch, "predicate_term_id")?;
+    let edge_objects = strings(edge_batch, "object_term_id")?;
+    let edge_ordinals = int32s(edge_batch, "ordinal")?;
+    let edges = (0..edge_batch.num_rows())
+        .map(|row| {
+            Ok(ProgramOntologyEdge {
+                subject_term_id: edge_subjects.value(row).to_owned(),
+                predicate_term_id: edge_predicates.value(row).to_owned(),
+                object_term_id: edge_objects.value(row).to_owned(),
+                ordinal: edge_ordinals.value(row),
+                authority: decoded_authority(edge_batch, row)?,
+            })
+        })
+        .collect::<Result<Vec<_>, OntologyProgramError>>()?;
+
+    let phrase_authority = ProgramAuthority {
+        authority_id: "codefabric.registry.phrase-registry".into(),
+        authority_version: "1.0".into(),
+        canonical_digest: generated_bundle::ONTOLOGY_PROGRAM_PHRASE_AUTHORITY_IDENTITY.into(),
+        canonical_source_path: "contracts/registry/phrase-registry.yaml".into(),
+    };
+    let query_form_authority = ProgramAuthority {
+        authority_id: "codefabric.query.form-contract".into(),
+        authority_version: "1.0".into(),
+        canonical_digest: generated_bundle::ONTOLOGY_PROGRAM_QUERY_FORM_AUTHORITY_IDENTITY.into(),
+        canonical_source_path: "contracts/query/query-form-contract.json".into(),
+    };
+    Ok(OntologyProgramVocabulary {
+        enum_values,
+        entity_kinds,
+        relation_kinds,
+        property_kinds,
+        fact_kinds,
+        provider_raw_kinds,
+        phrase_authority,
+        query_form_authority,
+        edges,
+    })
+}
+
+/// Resolve the result checksum algorithm from the candidate's Arrow result bindings.
+pub(crate) fn result_checksum_version(
+    package: &OntologyProgramPackage,
+) -> Result<String, OntologyProgramError> {
+    validate_ontology_program_package(package)?;
+    let batch = program_batch(package, "program.result_binding")?;
+    let versions = strings(batch, "checksum_algorithm_version")?;
+    let values = (0..batch.num_rows())
+        .map(|row| versions.value(row))
+        .collect::<BTreeSet<_>>();
+    if values.len() != 1 {
+        return Err(OntologyProgramError::Contract(
+            "result bindings do not select exactly one checksum algorithm".into(),
+        ));
+    }
+    Ok((*values.iter().next().expect("one value was counted")).to_owned())
+}
+
+fn logical_rows(member: &OntologyProgramMember) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(member.relation_id.as_bytes());
     for batch in &member.batches {
         bytes.extend_from_slice(format!("{batch:?}").as_bytes());
     }
-    Ok(bytes)
+    bytes
 }
 
 /// Build one deterministic, publication-neutral ontology-program package.
@@ -768,25 +811,9 @@ pub fn build_ontology_program_package(
             "packaging profile is empty or admits zero rows".into(),
         ));
     }
-    let rules = compiled_ontology().rules;
-    let mut members: BTreeMap<String, OntologyProgramMember> = BTreeMap::new();
-    for (relation_id, batch) in [
-        ("program.bootstrap", bootstrap_batch()?),
-        ("program.rule_operation", rule_batch(rules)?),
-        ("program.phrase_operation", phrase_batch()?),
-        ("program.calculation_catalog", calculation_batch(rules)?),
-    ] {
-        if batch.num_rows() > profile.max_rows_per_batch {
-            return Err(OntologyProgramError::Resource(format!(
-                "{relation_id} has {} rows beyond profile limit {}",
-                batch.num_rows(),
-                profile.max_rows_per_batch
-            )));
-        }
-        members.insert(relation_id.into(), encode_member(relation_id, vec![batch])?);
-    }
+    let members = generated_program_members(profile.max_rows_per_batch)?;
 
-    let manifest = manifest_for_members(&profile.profile_id, &members)?;
+    let manifest = manifest_for_members(&profile.profile_id, &members);
     let package = OntologyProgramPackage { manifest, members };
     validate_ontology_program_package(&package)?;
     Ok(package)
@@ -823,7 +850,7 @@ pub fn validate_ontology_program_package(
             )));
         }
     }
-    let expected = manifest_for_members(&package.manifest.packaging_profile_id, &package.members)?;
+    let expected = manifest_for_members(&package.manifest.packaging_profile_id, &package.members);
     if package.manifest != expected {
         return Err(OntologyProgramError::Digest(
             "package manifest identity closure".into(),
@@ -837,40 +864,40 @@ pub(crate) fn reseal_ontology_program_package(
     package: &mut OntologyProgramPackage,
 ) -> Result<(), OntologyProgramError> {
     package.manifest =
-        manifest_for_members(&package.manifest.packaging_profile_id, &package.members)?;
+        manifest_for_members(&package.manifest.packaging_profile_id, &package.members);
     validate_ontology_program_package(package)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use super::{
         CandidateProgramBinding, OntologyPackagingProfile, build_ontology_program_package,
         validate_ontology_program_package,
     };
+    use crate::ontology_executor::OntologyProgramCompiler;
 
     #[test]
     fn ontology_program_bundle_semantic_parity() {
         let package = build_ontology_program_package(&OntologyPackagingProfile::default())
             .expect("compiled package");
-        assert_eq!(package.members.len(), 4);
+        assert_eq!(package.members.len(), 16);
         let rules = &package.members["program.rule_operation"];
+        let compiler = OntologyProgramCompiler::decode(&package).expect("decoded program");
         assert_eq!(
             rules.batches[0].num_rows(),
-            crate::compiled_ontology::compiled_ontology()
-                .rules
-                .iter()
-                .map(|rule| rule.ordered_operands.len())
+            compiler
+                .operations
+                .values()
+                .map(|rule| rule.operands.len())
                 .sum::<usize>()
         );
         assert!(
-            crate::compiled_ontology::compiled_ontology()
-                .rules
-                .iter()
+            compiler
+                .operations
+                .values()
                 .all(|rule| !rule.calculation_id.is_empty()
                     && !rule.policy_id.is_empty()
-                    && !rule.ordered_operands.is_empty())
+                    && !rule.operands.is_empty())
         );
     }
 
@@ -923,12 +950,8 @@ mod tests {
         let package = build_ontology_program_package(&OntologyPackagingProfile::default())
             .expect("compiled package");
         let calculation_rows = package.members["program.calculation_catalog"].batches[0].num_rows();
-        let calculation_ids = crate::compiled_ontology::compiled_ontology()
-            .rules
-            .iter()
-            .map(|rule| rule.calculation_id)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(calculation_rows, calculation_ids.len() + 2);
+        let compiler = OntologyProgramCompiler::decode(&package).expect("decoded program");
+        assert_eq!(calculation_rows, compiler.calculations.len());
         assert!(
             package
                 .manifest

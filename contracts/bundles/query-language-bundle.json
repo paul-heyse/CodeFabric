@@ -18,7 +18,7 @@
     },
     {
       "artifact_id": "codefabric.registry.phrase-registry",
-      "canonical_digest": "b3:9831f349ab2bc62efff6bf0b500157379eb737a465b555a3d63a935e8f70ba61",
+      "canonical_digest": "b3:ca18a4713c2bc042df3a79e118080b342f96f2a1ad227880b419f45464e05538",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -52,7 +52,7 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:4da6d78e987b08e38911cb61113662f3be9fbbd5fd6e06f955bf886938267c87",
+  "bundle_digest": "b3:70fb2b562f75414bd9fb4a526057380c791674576a834bdbe69823e0ed0fa74c",
   "bundle_kind": "query-language",
   "bundle_major": 1,
   "bundle_version": "1.0",

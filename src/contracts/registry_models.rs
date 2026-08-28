@@ -774,6 +774,27 @@ pub struct PhraseOperationBinding {
     pub diagnostic_code: String,
 }
 
+/// Ontology-code family selected by one governed query phrase.
+// The repeated suffix is intentional: these names serialize directly to the governed
+// `entity_kind`, `relation_kind`, and `property_kind` registry vocabulary.
+#[allow(clippy::enum_variant_names)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhraseProjectionTarget {
+    EntityKind,
+    RelationKind,
+    PropertyKind,
+}
+
+/// Authored phrase-to-ontology operands consumed by both relational and graph compilers.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhraseProjectionBinding {
+    pub phrase_id: String,
+    pub target: PhraseProjectionTarget,
+    pub operand_names: Vec<String>,
+}
+
 /// Phrase authority envelope extended with compiled semantic operations.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -790,6 +811,7 @@ pub struct PhraseRegistry {
     pub generator_revision: Option<String>,
     pub records: Vec<PhraseRecord>,
     pub semantic_operation_bindings: Vec<PhraseOperationBinding>,
+    pub semantic_projection_bindings: Vec<PhraseProjectionBinding>,
     pub owner_acceptance: OwnerAcceptance,
 }
 
@@ -1765,6 +1787,7 @@ pub fn validate_provider_normalizations(records: &[ProviderNormalization]) -> Re
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // One exhaustive public-error census is easier to audit in place.
 pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
     let mut codes = BTreeSet::new();
     let mut names = BTreeSet::new();
@@ -1856,6 +1879,7 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
             "ONTOLOGY_PROGRAM_UNSUPPORTED",
             "ONTOLOGY_CANDIDATE_CLOSURE_INVALID",
             "ONTOLOGY_ACTIVATION_TRANSACTION_INVALID",
+            "ONTOLOGY_PROGRAM_ARTIFACT_INVALID",
             "INTERNAL",
         ],
         "public-error",
@@ -2099,6 +2123,35 @@ pub fn validate_phrase_operation_bindings(
     Ok(())
 }
 
+pub fn validate_phrase_projection_bindings(
+    phrases: &[PhraseRecord],
+    bindings: &[PhraseProjectionBinding],
+) -> Result<(), String> {
+    let phrase_ids = phrases
+        .iter()
+        .map(|phrase| phrase.phrase_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut keys = BTreeSet::new();
+    for binding in bindings {
+        let target = match binding.target {
+            PhraseProjectionTarget::EntityKind => "entity_kind",
+            PhraseProjectionTarget::RelationKind => "relation_kind",
+            PhraseProjectionTarget::PropertyKind => "property_kind",
+        };
+        if !phrase_ids.contains(binding.phrase_id.as_str())
+            || !keys.insert((binding.phrase_id.as_str(), target))
+            || binding.operand_names.is_empty()
+            || binding.operand_names.iter().any(|name| !upper_snake(name))
+        {
+            return Err(format!(
+                "phrase projection {}:{target} is dangling, duplicated, or operand-free",
+                binding.phrase_id
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)] // One pass keeps every cross-machine registry invariant adjacent.
 pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
     const REQUIRED: [&str; 14] = [
@@ -2260,6 +2313,10 @@ pub fn replay_bounded_registry_ingress(selector: u8, source: &[u8]) {
             if let Ok(document) = serde_yaml_ng::from_slice::<PhraseRegistry>(source) {
                 let _ = validate_phrase_records(&document.records);
                 let _ = validate_phrase_operation_bindings(&document.semantic_operation_bindings);
+                let _ = validate_phrase_projection_bindings(
+                    &document.records,
+                    &document.semantic_projection_bindings,
+                );
             }
         }
     }
@@ -2299,6 +2356,11 @@ mod tests {
         let phrases = phrases();
         validate_phrase_records(&phrases.records).unwrap();
         validate_phrase_operation_bindings(&phrases.semantic_operation_bindings).unwrap();
+        validate_phrase_projection_bindings(
+            &phrases.records,
+            &phrases.semantic_projection_bindings,
+        )
+        .unwrap();
         assert_eq!(phrases.records.len(), 45);
         assert_eq!(
             phrases
@@ -2491,16 +2553,12 @@ mod tests {
                 .map(crate::fabric::OverlayRebaseFaultPoint::code),
         );
         executable.extend(
-            crate::ontology_activation::OntologyActivationFaultPoint::ALL
-                .into_iter()
-                .map(crate::ontology_activation::OntologyActivationFaultPoint::code),
-        );
-        executable.extend(
             crate::query_service::QueryArtifactFaultPoint::ALL
                 .into_iter()
                 .map(crate::query_service::QueryArtifactFaultPoint::code),
         );
         executable.extend(crate::provider_runtime::SEMANTIC_PROVIDER_FAULT_POINT_CODES);
+        executable.extend(crate::operational_store::ONTOLOGY_ACTIVATION_FAULT_POINT_CODES);
         assert_eq!(released, executable);
     }
 }

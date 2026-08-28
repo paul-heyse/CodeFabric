@@ -294,7 +294,8 @@ mod tests {
             .map(|output| output.path.as_path())
             .collect::<BTreeSet<_>>();
         for required in [
-            Path::new("src/generated/compiled_ontology.rs"),
+            Path::new("contracts/generated/model/ontology/ontology-program-bundle.arrow"),
+            Path::new("src/generated/ontology_program_bundle.rs"),
             Path::new("src/generated/id_domains.rs"),
             Path::new("src/generated/result_schemas.rs"),
         ] {

@@ -1,0 +1,29 @@
+id: ontology-raw-planner-sealed
+snapshots:
+  ? |
+    async fn bypass(context: &SessionContext, plan: &LogicalPlan) {
+        context.state().create_physical_plan(plan).await;
+    }
+  : labels:
+    - source: context.state().create_physical_plan(plan)
+      style: primary
+      start: 68
+      end: 110
+  ? |
+    fn analyze(plan: LogicalPlan) {
+        if let LogicalPlan::Analyze(node) = plan { consume(node); }
+    }
+  : labels:
+    - source: LogicalPlan::Analyze
+      style: primary
+      start: 43
+      end: 63
+  ? |
+    fn instrument() {
+        let sql = "EXPLAIN ANALYZE SELECT 1";
+    }
+  : labels:
+    - source: '"EXPLAIN ANALYZE SELECT 1"'
+      style: primary
+      start: 32
+      end: 58

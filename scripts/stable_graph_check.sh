@@ -90,6 +90,7 @@ printf '%s' "$root_shape" | jq -e '
   and .features["contract-models"] == ["canonical-json", "dep:serde_yaml_ng"]
   and (.features["model-compiler"] | sort) == ([
     "contract-models",
+    "dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema",
     "dep:blake3", "dep:gix", "dep:notify-debouncer-full", "dep:petgraph",
     "dep:rustix", "dep:serde", "dep:serde_json",
     "dep:serde_json_canonicalizer", "dep:serde_yaml_ng", "dep:tempfile",
@@ -205,10 +206,10 @@ forbid_in_tree "$contract_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rus
   'contract-models graph'
 
 model_tree="$(cargo_tree --no-default-features --features model-compiler)"
-for package in gix notify-debouncer-full petgraph rustix serde_yaml_ng tempfile; do
+for package in arrow-array arrow-ipc arrow-schema gix notify-debouncer-full petgraph rustix serde_yaml_ng tempfile; do
   require_in_tree "$model_tree" "$package" 'model-compiler graph'
 done
-forbid_in_tree "$model_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rusqlite|ruff_python_.*|tree-sitter.*|prost.*' \
+forbid_in_tree "$model_tree" 'datafusion.*|deltalake.*|arrow|pyo3|tonic|rusqlite|ruff_python_.*|tree-sitter.*|prost.*' \
   'model-compiler graph'
 
 s3_tree="$(cargo_tree --no-default-features --features s3-storage)"

@@ -11,7 +11,6 @@ use arrow_array::{ArrayRef, Int32Array, RecordBatch};
 use arrow_buffer::Buffer;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::datasource::MemTable;
-use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
 
 /// Small serializable record used to prove the stable utility stack.
@@ -27,19 +26,25 @@ pub fn schema() -> SchemaRef {
     Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)]))
 }
 
-/// Builds a batch and registers it as a DataFusion table provider.
+/// Builds a batch and reads it through the sealed provider adapter.
 ///
 /// # Errors
 ///
-/// Returns a DataFusion error if batch construction or provider registration fails.
-pub fn session_with_provider() -> datafusion::error::Result<SessionContext> {
+/// Returns a DataFusion error if batch construction or provider execution fails.
+pub async fn provider_row_count() -> datafusion::error::Result<usize> {
     let schema = schema();
     let values: ArrayRef = Arc::new(Int32Array::from(vec![1_i32, 2_i32]));
     let batch = RecordBatch::try_new(Arc::clone(&schema), vec![values])?;
     let provider = MemTable::try_new(schema, vec![vec![batch]])?;
-    let context = SessionContext::new();
-    context.register_table("compatibility", Arc::new(provider))?;
-    Ok(context)
+    let batches =
+        crate::governed_session::collect_provider(crate::governed_session::ProviderReadRequest {
+            provider: Arc::new(provider),
+            filter: None,
+            projection: None,
+            limit: None,
+        })
+        .await?;
+    Ok(batches.iter().map(RecordBatch::num_rows).sum())
 }
 
 /// Exercises direct Arrow-family crates that carry types across the data plane.

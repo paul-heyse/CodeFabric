@@ -3,13 +3,11 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
-
-from scripts import ontology_fabric_probe_suite
 
 ROOT = Path(__file__).resolve().parents[2]
 IR_PATH = ROOT / "contracts/schema/schema-contract-ir.json"
-_PROBE_DECISION: Path | None = None
 
 
 def _text(path: str) -> str:
@@ -28,73 +26,10 @@ def _ontology_tables() -> list[dict[str, object]]:
     return [table for table in _ir()["tables"] if table["family"] == "ontology"]
 
 
-def _reviewed_probe_decision() -> Path:
-    global _PROBE_DECISION
-    if _PROBE_DECISION is None:
-        reports = ontology_fabric_probe_suite.run_suite()
-        _PROBE_DECISION = ontology_fabric_probe_suite.record_reviewed_decision(reports)
-    ontology_fabric_probe_suite.validate_reviewed_decision(_PROBE_DECISION)
-    return _PROBE_DECISION
-
-
 def _assert_absent(pattern: str, *paths: str) -> None:
     expression = re.compile(pattern)
     matches = [path for path in paths if expression.search(_text(path))]
     assert not matches, f"retired pattern {pattern!r} remains in {matches}"
-
-
-def test_odf_probe_suite_observations_complete() -> None:
-    ontology_fabric_probe_suite.validate_contract()
-    assert len(ontology_fabric_probe_suite.PROBES) == 8
-    assert {key.split("-")[1] for key in ontology_fabric_probe_suite.PROBES} == {
-        "1",
-        "2",
-        "3a",
-        "3b",
-        "4",
-        "5",
-        "6",
-        "7",
-    }
-    decision = ontology_fabric_probe_suite.validate_reviewed_decision(
-        _reviewed_probe_decision()
-    )
-    assert len(decision["decisions"]) == 8
-    for record in decision["decisions"]:
-        assert record["report_digest"].startswith("b3:")
-        assert record["pin_config_digest"].startswith("b3:")
-
-
-def test_odf_probe_pin_identity() -> None:
-    decision = ontology_fabric_probe_suite.validate_reviewed_decision(
-        _reviewed_probe_decision()
-    )
-    identity = ontology_fabric_probe_suite.stack_identity()
-    assert identity["datafusion"] == "55.0.0"
-    assert identity["arrow"] == "59.2.0"
-    assert identity["delta_revision"].startswith("43a0cf10")
-    assert decision["resolved_stack"] == identity
-
-
-def test_odf_probe_decision_transaction_closure() -> None:
-    contracts = ontology_fabric_probe_suite.PROBES.values()
-    assert all(contract["branch"] and contract["fallback"] for contract in contracts)
-    assert ontology_fabric_probe_suite.PROBES["PR-7"]["performance_posture"] == (
-        "owner-waived-no-measurement"
-    )
-    decision = ontology_fabric_probe_suite.validate_reviewed_decision(
-        _reviewed_probe_decision()
-    )
-    assert decision["reviewer"] == "plan-owner-v2-implementation-authorization"
-    assert all(record["rationale"] for record in decision["decisions"])
-
-
-def test_odf_probe_worktree_immutability() -> None:
-    before = ontology_fabric_probe_suite.worktree_fingerprint()
-    _reviewed_probe_decision()
-    after = ontology_fabric_probe_suite.worktree_fingerprint()
-    assert before == after
-    assert str(ontology_fabric_probe_suite.REPORT_ROOT).startswith(str(ROOT / "target"))
 
 
 def test_odf_compiled_ontology_reproducible() -> None:
@@ -115,7 +50,13 @@ def test_odf_schema_contract_pass_closure() -> None:
     assert "struct CompiledOntology" in driver
     assert all(
         name in driver
-        for name in ("semantic_operations", "provider_raw_kinds", "vocabulary")
+        for name in (
+            "semantic_operations",
+            "semantic_projections",
+            "query_phrases",
+            "provider_raw_kinds",
+            "vocabulary",
+        )
     )
 
 
@@ -155,15 +96,20 @@ def test_odf_handwritten_row_struct_zero() -> None:
 
 def test_odf_phrase_arm_registry_coverage() -> None:
     compiler = _text("src/semantic_query.rs")
-    generated = _text("src/generated/model_schema_tables.rs")
-    assert "SEMANTIC_OPERATION_SPECS" in compiler
-    assert "SemanticOperationSpec" in generated
+    executor = _text("src/ontology_executor.rs")
+    bundle = _text("src/generated/ontology_program_bundle.rs")
+    assert "query_phrases.values()" in compiler
+    assert "lower_phrase_text_for_qualifier" in compiler
+    assert "decode_query_phrases" in executor
+    assert "ontology-program-bundle.arrow" in bundle
+    assert "SEMANTIC_OPERATION_" + "SPECS" not in compiler
 
 
 def test_odf_literal_code_predicate_zero() -> None:
     semantic = _text("src/semantic_query.rs")
     assert "compiled_enum_code" in semantic
-    assert "ontology_code(" in semantic
+    assert "ontology_code(" not in semantic
+    assert "query_projection_codes" in semantic
     assert "ENTITY_KIND_IDS," not in semantic
 
 
@@ -326,6 +272,94 @@ def test_odf_spec_index_navigation_current() -> None:
     traceability = _text("docs/spec_index/wave-traceability.md")
     assert "GraphOperatorPlan" in routing
     assert "cpg_ontology" in traceability
+
+
+def test_ontology_datafabric_successor_authority() -> None:
+    bundle = ROOT / "contracts/generated/model/ontology/ontology-program-bundle.arrow"
+    adapter = _text("src/generated/ontology_program_bundle.rs")
+    runtime = _text("src/ontology_program.rs")
+    semantic = _text("src/semantic_query.rs")
+    assert bundle.is_file() and bundle.stat().st_size > 0
+    assert (
+        'include_bytes!("../../contracts/generated/model/ontology/ontology-program-bundle.arrow")'
+        in adapter
+    )
+    assert "program.query_phrase" in runtime or "OntologyProgramCompiler" in semantic
+    assert "SEMANTIC_OPERATION_" + "SPECS" not in semantic
+    assert not (ROOT / "src/compiled_ontology.rs").exists()
+    assert not (ROOT / "src/generated/compiled_ontology.rs").exists()
+
+
+def test_ontology_datafabric_legacy_zero_state() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "tooling/ci/ontology_datafabric_legacy_zero_state.py",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["candidate_file_count"] > 0
+    assert report["text_findings"] == []
+    assert report["structural_scan_returncode"] == 0
+    assert report["historical_exclusions"]
+
+
+def test_ontology_datafabric_retired_command_absence() -> None:
+    commands = subprocess.run(
+        ["just", "--list", "--unsorted"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    for fragments in (
+        ("id16-extension-", "contract-check"),
+        ("probe-", "suite"),
+        ("ontology-stage2b-", "activation-check"),
+    ):
+        assert "".join(fragments) not in commands
+    assert "id-domain-extension-check" in commands
+    assert "ontology-datafabric-legacy-zero-state-check" in commands
+
+
+def test_ontology_datafabric_release_certification() -> None:
+    commands = subprocess.run(
+        ["just", "--list", "--unsorted"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    required = {
+        "authoritative-design-conformance-check",
+        "ontology-program-compiler-check",
+        "ontology-program-packaging-check",
+        "ontology-program-causality-check",
+        "ontology-calculation-catalog-check",
+        "id-domain-plan-enforcement-check",
+        "ontology-candidate-receipt-check",
+        "ontology-gate-result-checksum-check",
+        "ontology-gate-execution-artifact-check",
+        "ontology-activation-route-check",
+        "ontology-activation-recovery-check",
+        "result-authority-lease-check",
+        "ontology-runtime-resource-check",
+        "ontology-decision-integrity-check",
+        "ontology-datafabric-integration-check",
+        "ontology-datafabric-legacy-zero-state-check",
+        "ontology-candidate-delta-binding-check",
+        "ontology-plan-artifact-boundary-check",
+    }
+    missing = sorted(name for name in required if name not in commands)
+    assert not missing, missing
+    assert "hyperfine" not in _text(
+        "tooling/ci/ontology_datafabric_legacy_zero_state.py"
+    )
 
 
 def test_odf_retired_name_reference_zero() -> None:

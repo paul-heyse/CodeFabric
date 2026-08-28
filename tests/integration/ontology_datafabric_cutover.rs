@@ -38,6 +38,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)] // Independent proof claims are intentionally explicit.
 struct IntegrationEvidence {
     exact_delta_readback: bool,
     single_cas_winner: bool,
@@ -181,6 +182,7 @@ fn activation_command(
     command
 }
 
+#[allow(clippy::needless_pass_by_value)] // Test commands hand ownership of ephemeral output here.
 fn response(output: Output) -> Value {
     assert!(
         !output.stdout.is_empty(),
@@ -385,6 +387,7 @@ fn decision(report: &CandidateClosureReport, accepted_at: i64) -> OntologyOwnerD
     .expect("owner decision")
 }
 
+#[allow(clippy::too_many_lines)] // One end-to-end process scenario preserves causal ordering.
 async fn run_scenario() -> IntegrationEvidence {
     let root = TempDir::new().expect("ontology cutover root");
     let config = write_daemon_config(root.path());
@@ -432,7 +435,7 @@ async fn run_scenario() -> IntegrationEvidence {
     )
     .await;
     serving_runtime
-        .activate(
+        .commit_fact_snapshot(
             &mut store,
             Arc::clone(&legacy),
             None,
@@ -571,7 +574,7 @@ async fn run_scenario() -> IntegrationEvidence {
     )
     .await;
     serving_runtime
-        .activate(
+        .commit_fact_snapshot(
             &mut store,
             Arc::clone(&target),
             Some(
@@ -628,7 +631,7 @@ async fn run_scenario() -> IntegrationEvidence {
     )
     .await;
     serving_runtime
-        .activate(
+        .commit_fact_snapshot(
             &mut store,
             Arc::clone(&continuity),
             Some(

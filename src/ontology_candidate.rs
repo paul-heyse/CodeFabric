@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use arrow_array::{Array as _, RecordBatch, StringArray, UInt16Array};
+use arrow_array::{Array as _, BooleanArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use datafusion::datasource::{MemTable, provider_as_source};
 use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder, col};
@@ -275,7 +275,12 @@ fn validate_table_binding(
     Ok(())
 }
 
-/// Decode the bootstrap member and validate its complete, acyclic, ordinal-stable graph.
+/// Decode the bootstrap member and validate its complete non-bootstrap member census.
+///
+/// # Errors
+///
+/// Rejects an invalid package, missing or malformed bootstrap columns, duplicate relations,
+/// incomplete membership, or inconsistent content-set identities.
 pub fn decode_bootstrap(
     package: &OntologyProgramPackage,
 ) -> Result<Vec<BootstrapRequirement>, CandidateClosureError> {
@@ -288,50 +293,88 @@ pub fn decode_bootstrap(
         .batches
         .first()
         .ok_or_else(|| CandidateClosureError::Invalid("program.bootstrap has no batch".into()))?;
-    let ordinals = column::<UInt16Array>(batch, "ordinal")?;
-    let families = column::<StringArray>(batch, "family_id")?;
-    let kinds = column::<StringArray>(batch, "binding_kind")?;
     let relations = column::<StringArray>(batch, "relation_id")?;
-    let dependencies = column::<StringArray>(batch, "depends_on")?;
+    let addresses = column::<StringArray>(batch, "member_address")?;
+    let roles = column::<StringArray>(batch, "relation_role")?;
+    let schema_identities = column::<StringArray>(batch, "schema_identity")?;
+    let content_identities = column::<StringArray>(batch, "content_identity")?;
+    let required = column::<BooleanArray>(batch, "required")?;
+    let content_sets = column::<StringArray>(batch, "content_set_identity")?;
     let mut requirements = Vec::with_capacity(batch.num_rows());
     let mut seen = BTreeSet::new();
+    let mut content_set = None;
     for row in 0..batch.num_rows() {
-        let ordinal = ordinals.value(row);
-        if usize::from(ordinal) != row
-            || families.is_null(row)
-            || kinds.is_null(row)
-            || relations.is_null(row)
+        if relations.is_null(row)
+            || addresses.is_null(row)
+            || roles.is_null(row)
+            || schema_identities.is_null(row)
+            || content_identities.is_null(row)
+            || required.is_null(row)
+            || content_sets.is_null(row)
         {
             return Err(CandidateClosureError::Invalid(format!(
                 "bootstrap row {row} is not canonical"
             )));
         }
-        let family_id = families.value(row).to_owned();
-        if family_id.is_empty() || !seen.insert(family_id.clone()) {
-            return Err(CandidateClosureError::Invalid(format!(
-                "bootstrap family {family_id:?} is empty or duplicated"
-            )));
-        }
-        let depends_on = (!dependencies.is_null(row)).then(|| dependencies.value(row).to_owned());
-        if depends_on
-            .as_ref()
-            .is_some_and(|value| !seen.contains(value))
+        let relation_id = relations.value(row).to_owned();
+        let member = package.members.get(&relation_id).ok_or_else(|| {
+            CandidateClosureError::Invalid(format!("bootstrap names absent relation {relation_id}"))
+        })?;
+        if relation_id == "program.bootstrap"
+            || addresses.value(row) != relation_id
+            || roles.value(row) != "program_relation"
+            || !required.value(row)
+            || !seen.insert(relation_id.clone())
         {
             return Err(CandidateClosureError::Invalid(format!(
-                "bootstrap family {family_id} has a forward or missing dependency"
+                "bootstrap relation {relation_id:?} is invalid or duplicated"
             )));
         }
+        let expected_schema = format!(
+            "b3:{}",
+            blake3::hash(format!("{:?}", member.schema).as_bytes()).to_hex()
+        );
+        let expected_content = format!("b3:{}", blake3::hash(&member.ipc_bytes).to_hex());
+        if schema_identities.value(row) != expected_schema
+            || content_identities.value(row) != expected_content
+        {
+            return Err(CandidateClosureError::Invalid(format!(
+                "bootstrap relation {relation_id} has changed schema or content identity"
+            )));
+        }
+        let row_content_set = content_sets.value(row);
+        if content_set
+            .replace(row_content_set)
+            .is_some_and(|prior| prior != row_content_set)
+        {
+            return Err(CandidateClosureError::Invalid(
+                "bootstrap rows disagree on content-set identity".into(),
+            ));
+        }
         requirements.push(BootstrapRequirement {
-            ordinal,
-            family_id,
-            binding_kind: kinds.value(row).to_owned(),
-            relation_id: relations.value(row).to_owned(),
-            depends_on,
+            ordinal: u16::try_from(row).map_err(|_| {
+                CandidateClosureError::Invalid("bootstrap relation census exceeds UInt16".into())
+            })?,
+            family_id: relation_id.clone(),
+            binding_kind: "program_member".into(),
+            relation_id,
+            depends_on: None,
         });
     }
     if requirements.is_empty() {
         return Err(CandidateClosureError::Invalid(
             "bootstrap closure is empty".into(),
+        ));
+    }
+    let expected = package
+        .members
+        .keys()
+        .filter(|relation| relation.as_str() != "program.bootstrap")
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if seen != expected {
+        return Err(CandidateClosureError::Invalid(
+            "bootstrap census differs from the non-bootstrap package census".into(),
         ));
     }
     Ok(requirements)
@@ -555,6 +598,10 @@ pub struct CandidateClosureRunner {
 
 impl CandidateClosureRunner {
     /// Build a closure runner from a digest-checked package and exact candidate manifest.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an invalid package, publication, governed session, or closure binding.
     pub fn new(
         package: OntologyProgramPackage,
         publication: PublicationOutcome,
@@ -565,6 +612,10 @@ impl CandidateClosureRunner {
 
     /// Build a closure runner whose sealed candidate is explicitly bound to its predecessor
     /// ontology epoch and rollback-retention deadline.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an invalid package, publication, governed session, or epoch binding.
     pub fn new_for_epoch(
         package: OntologyProgramPackage,
         publication: PublicationOutcome,
@@ -656,18 +707,27 @@ impl CandidateClosureRunner {
     }
 
     /// Open and freeze the exact Delta provider graph from the candidate manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any exact manifest-pinned provider cannot be opened.
     pub async fn open_frozen_catalog(
         &self,
     ) -> Result<crate::fabric::SnapshotProviderCatalog, CandidateClosureError> {
-        Ok(crate::fabric::SnapshotProviderCatalog::build(
+        crate::fabric::SnapshotProviderCatalog::build(
             &self.publication,
             &crate::fabric::EmptySnapshotOverlay,
         )
         .await
-        .map_err(|error| CandidateClosureError::Invalid(error.to_string()))?)
+        .map_err(|error| CandidateClosureError::Invalid(error.to_string()))
     }
 
     /// Execute every bootstrap-discovered closure gate once and issue one opaque receipt each.
+    ///
+    /// # Errors
+    ///
+    /// Rejects planning, execution, resource, checksum, receipt, or binding failures.
+    #[allow(clippy::too_many_lines)] // One pass preserves auditable gate-to-receipt causality.
     pub async fn execute(
         &self,
         limits: &GateResourceEnvelope,
@@ -810,7 +870,7 @@ impl CandidateClosureRunner {
             "exact_table_set_identity": self.exact_tables.identity(),
             "function_catalog_identity": self.package.manifest.member_identities["program.calculation_catalog"],
             "query_form_identity": self.package.manifest.member_identities["program.phrase_operation"],
-            "checksum_version": crate::fabric::RESULT_CHECKSUM_VERSION,
+            "checksum_version": crate::ontology_program::result_checksum_version(&self.package)?,
             "predecessor_epoch_identity": self.predecessor_epoch_identity,
             "rollback_retain_until": self.rollback_retain_until,
             "receipt_set_identity": receipt_set_identity,
@@ -820,7 +880,7 @@ impl CandidateClosureRunner {
             self.package.manifest.member_identities["program.calculation_catalog"].clone();
         let query_form_identity =
             self.package.manifest.member_identities["program.phrase_operation"].clone();
-        let checksum_version = crate::fabric::RESULT_CHECKSUM_VERSION.to_owned();
+        let checksum_version = crate::ontology_program::result_checksum_version(&self.package)?;
         let result_policy_identity = framed([
             b"candidate-policy.v1".as_slice(),
             self.session.policy_identity().as_bytes(),
@@ -869,7 +929,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use arrow_array::{ArrayRef, RecordBatch, StringArray, UInt16Array};
+    use arrow_array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
     use arrow_ipc::writer::StreamWriter;
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::prelude::SessionConfig;
@@ -936,18 +996,18 @@ mod tests {
     async fn ontology_bootstrap_program_package_closure() {
         let runner = runner();
         let requirements = decode_bootstrap(&runner.package).expect("bootstrap closure");
-        assert_eq!(requirements.len(), 16);
+        assert_eq!(requirements.len(), runner.package.members.len() - 1);
         assert!(
             requirements
                 .iter()
-                .any(|value| value.family_id == "exact_table_identities")
+                .any(|value| value.family_id == "program.rule_operation")
         );
         let report = runner
             .execute(&GateResourceEnvelope::default())
             .await
             .expect("complete closure");
-        assert_eq!(report.operation_count(), 16);
-        assert_eq!(report.receipt_count(), 16);
+        assert_eq!(report.operation_count(), requirements.len());
+        assert_eq!(report.receipt_count(), requirements.len());
     }
 
     #[tokio::test]
@@ -983,52 +1043,77 @@ mod tests {
     }
 
     fn append_additive_family(package: &mut OntologyProgramPackage) {
-        let requirements = decode_bootstrap(package).expect("bootstrap");
-        let row_count = requirements.len() + 1;
-        let mut ordinals = requirements
+        let additive_relation = "authority.additive_domain";
+        let mut additive = package
+            .members
+            .get("program.enum_value")
+            .expect("source member")
+            .clone();
+        additive.relation_id = additive_relation.into();
+        additive.member_identity = framed([additive_relation.as_bytes(), &additive.ipc_bytes]);
+        package.members.insert(additive_relation.into(), additive);
+
+        let content_rows = package
+            .members
             .iter()
-            .map(|value| value.ordinal)
+            .filter(|(relation, _)| relation.as_str() != "program.bootstrap")
+            .map(|(relation, member)| {
+                (
+                    relation.clone(),
+                    format!(
+                        "b3:{}",
+                        blake3::hash(format!("{:?}", member.schema).as_bytes()).to_hex()
+                    ),
+                    format!("b3:{}", blake3::hash(&member.ipc_bytes).to_hex()),
+                )
+            })
             .collect::<Vec<_>>();
-        ordinals.push(u16::try_from(requirements.len()).expect("ordinal"));
-        let mut families = requirements
-            .iter()
-            .map(|value| value.family_id.as_str())
-            .collect::<Vec<_>>();
-        families.push("additive_domain");
-        let mut kinds = requirements
-            .iter()
-            .map(|value| value.binding_kind.as_str())
-            .collect::<Vec<_>>();
-        kinds.push("authored");
-        let mut relations = requirements
-            .iter()
-            .map(|value| value.relation_id.as_str())
-            .collect::<Vec<_>>();
-        relations.push("authority.additive_domain");
-        let mut dependencies = requirements
-            .iter()
-            .map(|value| value.depends_on.as_deref())
-            .collect::<Vec<_>>();
-        dependencies.push(Some("codes"));
+        let mut content_set = blake3::Hasher::new();
+        content_set.update(b"codefabric.ontology-program.content-set.v1\0");
+        for (relation, schema_identity, content_identity) in &content_rows {
+            for value in [relation, schema_identity, content_identity] {
+                content_set.update(&(value.len() as u64).to_be_bytes());
+                content_set.update(value.as_bytes());
+            }
+        }
+        let content_set_identity = format!("b3:{}", content_set.finalize().to_hex());
         let schema = Arc::new(Schema::new(vec![
-            Field::new("ordinal", DataType::UInt16, false),
-            Field::new("family_id", DataType::Utf8, false),
-            Field::new("binding_kind", DataType::Utf8, false),
             Field::new("relation_id", DataType::Utf8, false),
-            Field::new("depends_on", DataType::Utf8, true),
+            Field::new("member_address", DataType::Utf8, false),
+            Field::new("relation_role", DataType::Utf8, false),
+            Field::new("schema_identity", DataType::Utf8, false),
+            Field::new("content_identity", DataType::Utf8, false),
+            Field::new("required", DataType::Boolean, false),
+            Field::new("content_set_identity", DataType::Utf8, false),
         ]));
         let batch = RecordBatch::try_new(
             Arc::clone(&schema),
             vec![
-                Arc::new(UInt16Array::from(ordinals)) as ArrayRef,
-                Arc::new(StringArray::from(families)),
-                Arc::new(StringArray::from(kinds)),
-                Arc::new(StringArray::from(relations)),
-                Arc::new(StringArray::from(dependencies)),
+                Arc::new(StringArray::from_iter_values(
+                    content_rows.iter().map(|row| row.0.as_str()),
+                )) as ArrayRef,
+                Arc::new(StringArray::from_iter_values(
+                    content_rows.iter().map(|row| row.0.as_str()),
+                )),
+                Arc::new(StringArray::from(vec![
+                    "program_relation";
+                    content_rows.len()
+                ])),
+                Arc::new(StringArray::from_iter_values(
+                    content_rows.iter().map(|row| row.1.as_str()),
+                )),
+                Arc::new(StringArray::from_iter_values(
+                    content_rows.iter().map(|row| row.2.as_str()),
+                )),
+                Arc::new(BooleanArray::from(vec![true; content_rows.len()])),
+                Arc::new(StringArray::from(vec![
+                    content_set_identity.as_str();
+                    content_rows.len()
+                ])),
             ],
         )
         .expect("additive bootstrap batch");
-        assert_eq!(batch.num_rows(), row_count);
+        assert_eq!(batch.num_rows(), content_rows.len());
         let member = package
             .members
             .get_mut("program.bootstrap")
@@ -1053,6 +1138,7 @@ mod tests {
         let mut package =
             build_ontology_program_package(&OntologyPackagingProfile::default()).expect("package");
         append_additive_family(&mut package);
+        let expected = package.members.len() - 1;
         let runner = CandidateClosureRunner::new(
             package,
             publication(),
@@ -1064,8 +1150,8 @@ mod tests {
             .execute(&GateResourceEnvelope::default())
             .await
             .expect("additive closure");
-        assert_eq!(report.operation_count(), 17);
-        assert_eq!(report.receipt_count(), 17);
+        assert_eq!(report.operation_count(), expected);
+        assert_eq!(report.receipt_count(), expected);
     }
 
     #[tokio::test]

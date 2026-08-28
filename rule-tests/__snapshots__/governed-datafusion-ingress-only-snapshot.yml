@@ -1,15 +1,6 @@
 id: governed-datafusion-ingress-only
 snapshots:
   ? |
-    fn bypass() {
-        let context = SessionContext::new();
-    }
-  : labels:
-    - source: SessionContext::new()
-      style: primary
-      start: 32
-      end: 53
-  ? |
     async fn bypass(context: &SessionContext, plan: &LogicalPlan) {
         context.state().create_physical_plan(plan).await;
     }
@@ -18,6 +9,15 @@ snapshots:
       style: primary
       start: 68
       end: 110
+  ? |
+    fn bypass() {
+        let context = SessionContext::new();
+    }
+  : labels:
+    - source: SessionContext::new()
+      style: primary
+      start: 32
+      end: 53
   ? |
     fn bypass() {
         let state = SessionStateBuilder::new().with_default_features().build();

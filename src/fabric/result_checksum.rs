@@ -7,9 +7,6 @@ use arrow_row::{RowConverter, SortField};
 use arrow_schema::{ArrowError, DataType, Schema};
 use thiserror::Error;
 
-/// Exact persisted result-checksum contract version.
-pub const RESULT_CHECKSUM_VERSION: &str = "ResultChecksumV2";
-
 /// Result checksum plus the canonical schema and row census it commits to.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResultChecksumV1 {
@@ -423,7 +420,7 @@ mod tests {
         )
         .unwrap();
         let v2_replay = result_checksum_for_version(
-            RESULT_CHECKSUM_VERSION,
+            "ResultChecksumV2",
             repartitioned.schema().as_ref(),
             &[repartitioned.slice(0, 2), repartitioned.slice(2, 2)],
             LIMIT,
@@ -487,7 +484,6 @@ mod tests {
 
     #[test]
     fn wp64_structural_acceptance() {
-        assert_eq!(RESULT_CHECKSUM_VERSION, "ResultChecksumV2");
         assert_eq!(
             crate::integrity::IntegrityDomain::QueryResultChecksumV1.bytes(),
             b"codefabric.query-result-checksum.v1\0"

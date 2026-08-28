@@ -16,6 +16,11 @@ from tooling.ci.test_artifact_contracts import (
     _write_activation_fixture,
 )
 
+ONTOLOGY_FABRIC_V2_PLAN = (
+    assurance.ROOT
+    / "docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md"
+)
+
 
 def test_cycle_is_rejected() -> None:
     with pytest.raises(assurance.PlanAssuranceError, match="cycle"):
@@ -36,8 +41,7 @@ def test_known_touch_parser_ignores_fenced_preflight_and_reads_owned_paths() -> 
 
 
 def test_ontology_fabric_release_barrier_is_structural() -> None:
-    plan = artifact_contracts.active_plan_path()
-    dependencies = assurance._dependency_map(plan)
+    dependencies = assurance._dependency_map(ONTOLOGY_FABRIC_V2_PLAN)
     assert assurance._validate_ontology_fabric_readiness_states(dependencies) == 60
     dependencies["WP17"].remove("WP16")
     with pytest.raises(assurance.PlanAssuranceError, match="release-barrier"):

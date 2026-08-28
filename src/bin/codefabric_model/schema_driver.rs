@@ -5,6 +5,12 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
+use arrow_array::{
+    ArrayRef, BinaryArray, BooleanArray, Int16Array, Int32Array, RecordBatch, StringArray,
+    UInt16Array,
+};
+use arrow_ipc::writer::StreamWriter;
+use arrow_schema::{DataType, Field, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -32,7 +38,9 @@ const RUST_BINDINGS_PATH: &str = "src/generated/model_schema_tables.rs";
 const RUST_RUNTIME_BINDINGS_PATH: &str = "src/generated/table_specs.rs";
 const RUST_ID_DOMAIN_BINDINGS_PATH: &str = "src/generated/id_domains.rs";
 const RUST_RESULT_SCHEMA_BINDINGS_PATH: &str = "src/generated/result_schemas.rs";
-const RUST_COMPILED_ONTOLOGY_PATH: &str = "src/generated/compiled_ontology.rs";
+const ONTOLOGY_PROGRAM_BUNDLE_PATH: &str =
+    "contracts/generated/model/ontology/ontology-program-bundle.arrow";
+const RUST_ONTOLOGY_PROGRAM_ADAPTER_PATH: &str = "src/generated/ontology_program_bundle.rs";
 const RUST_ROW_ENCODERS_PATH: &str = "src/generated/fact_row_encoders.rs";
 const VALIDATION_PATH: &str = "contracts/generated/model/schema/schema-validation.json";
 const EVOLUTION_POLICY_PATH: &str = "contracts/generated/model/schema/schema-evolution-policy.json";
@@ -1739,6 +1747,8 @@ struct CompiledOntology {
     semantic_fragments: super::semantic_fragment_driver::SemanticFragmentSet,
     query_forms: QueryFormContract,
     semantic_operations: Vec<CompiledSemanticOperation>,
+    semantic_projections: Vec<CompiledSemanticProjection>,
+    query_phrases: Vec<super::registry_models::PhraseRecord>,
     provider_raw_kinds: Vec<CompiledProviderRawKind>,
     phrase_authority: CompiledAuthorityRecord,
     query_form_authority: CompiledAuthorityRecord,
@@ -1782,9 +1792,17 @@ struct CompiledSemanticOperation {
     operator: super::registry_models::PhrasePredicateOperator,
     operand_domain: String,
     operand_codes: Vec<i16>,
+    operand_logical_type: &'static str,
     null_policy: super::registry_models::PhraseNullPolicy,
     output_role: String,
     diagnostic_code: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CompiledSemanticProjection {
+    phrase_id: String,
+    target_kind: &'static str,
+    operand_codes: Vec<i32>,
 }
 
 /// Resolved, source-fenced schema plan.
@@ -1847,11 +1865,15 @@ impl SchemaDriver {
                 )?)?,
             ),
             (
-                safe(RUST_COMPILED_ONTOLOGY_PATH)?,
-                rustfmt_source(&render_compiled_ontology(
+                safe(ONTOLOGY_PROGRAM_BUNDLE_PATH)?,
+                render_ontology_program_bundle(&plan.compiled)?,
+            ),
+            (
+                safe(RUST_ONTOLOGY_PROGRAM_ADAPTER_PATH)?,
+                rustfmt_source(&render_ontology_program_adapter(
                     &plan.compiled,
                     &plan.source_digest,
-                )?)?,
+                ))?,
             ),
             (
                 safe(RUST_ROW_ENCODERS_PATH)?,
@@ -1939,8 +1961,13 @@ impl ModelDriver for SchemaDriver {
                 DriverOutputRole::RustBinding,
             )?,
             Self::output(
-                "output:model-compiled-ontology-rust",
-                RUST_COMPILED_ONTOLOGY_PATH,
+                "output:model-ontology-program-bundle",
+                ONTOLOGY_PROGRAM_BUNDLE_PATH,
+                DriverOutputRole::CanonicalProjection,
+            )?,
+            Self::output(
+                "output:model-ontology-program-adapter-rust",
+                RUST_ONTOLOGY_PROGRAM_ADAPTER_PATH,
                 DriverOutputRole::RustBinding,
             )?,
             Self::output(
@@ -2019,12 +2046,13 @@ impl ModelDriver for SchemaDriver {
             output_roots: vec![
                 safe_protocol("contracts/schema")?,
                 safe_protocol("contracts/query")?,
+                safe_protocol("contracts/generated/model/ontology")?,
             ],
             outputs,
             resource_profile: DriverResourceProfile {
                 max_source_bytes: MAX_AUTHORITY_BYTES,
                 max_output_bytes: 8 * 1024 * 1024,
-                max_outputs: 24,
+                max_outputs: 25,
             },
         };
         descriptor.validate()?;
@@ -2122,10 +2150,25 @@ impl ModelDriver for SchemaDriver {
                 super::registry_models::validate_phrase_operation_bindings(
                     &phrase_registry.semantic_operation_bindings,
                 )
+                .and_then(|()| {
+                    super::registry_models::validate_phrase_projection_bindings(
+                        &phrase_registry.records,
+                        &phrase_registry.semantic_projection_bindings,
+                    )
+                })
             })
             .map_err(DriverProtocolError::InvalidAuthority)?;
-        let semantic_operations = compile_semantic_operations(&phrase_registry, &enum_registry)
-            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let semantic_operations =
+            compile_semantic_operations(&phrase_registry, &enum_registry, &entity_registry)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let semantic_projections = compile_semantic_projections(
+            &phrase_registry,
+            &entity_registry,
+            &relation_registry,
+            &property_registry,
+        )
+        .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let query_phrases = phrase_registry.records.clone();
         let provider_raw_kinds =
             compile_provider_raw_kinds(repository_root, &enum_registry, &entity_registry)
                 .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
@@ -2180,6 +2223,8 @@ impl ModelDriver for SchemaDriver {
                 semantic_fragments,
                 query_forms,
                 semantic_operations,
+                semantic_projections,
+                query_phrases,
                 provider_raw_kinds,
                 phrase_authority,
                 query_form_authority,
@@ -3005,33 +3050,64 @@ fn render_operational_table_ddl(table: &OperationalTableContract) -> String {
 fn compile_semantic_operations(
     phrases: &super::registry_models::PhraseRegistry,
     enums: &super::registry_models::AcceptedRegistry<super::registry_models::EnumDomain>,
+    entities: &super::registry_models::AcceptedRegistry<super::registry_models::EntityKind>,
 ) -> Result<Vec<CompiledSemanticOperation>, SchemaDriverError> {
     let mut operations = Vec::with_capacity(phrases.semantic_operation_bindings.len());
     for binding in &phrases.semantic_operation_bindings {
-        let domain = enums
-            .records
-            .iter()
-            .find(|domain| domain.domain == binding.operand_domain)
-            .ok_or_else(|| SchemaDriverError::Invalid {
-                path: "$.semantic_operation_bindings[*].operand_domain".to_owned(),
-                detail: format!("unknown enum domain {}", binding.operand_domain),
-            })?;
         let mut operand_codes = Vec::with_capacity(binding.operand_names.len());
-        for name in &binding.operand_names {
-            let code = domain
-                .values
+        let operand_logical_type = if binding.operand_domain == "ONTOLOGY_ENTITY_KIND" {
+            for name in &binding.operand_names {
+                let code = entities
+                    .records
+                    .iter()
+                    .find(|entity| entity.canonical_name == *name)
+                    .ok_or_else(|| SchemaDriverError::Invalid {
+                        path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
+                        detail: format!("unknown entity kind {name}"),
+                    })?
+                    .kind_code;
+                operand_codes.push(i16::try_from(code).map_err(|_| {
+                    SchemaDriverError::Invalid {
+                        path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
+                        detail: format!(
+                            "entity kind code {code} exceeds the current Int16 catalog"
+                        ),
+                    }
+                })?);
+            }
+            "int32"
+        } else {
+            let domain = enums
+                .records
                 .iter()
-                .find(|value| value.name == *name)
+                .find(|domain| domain.domain == binding.operand_domain)
                 .ok_or_else(|| SchemaDriverError::Invalid {
-                    path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
-                    detail: format!("unknown {} value {name}", binding.operand_domain),
-                })?
-                .code;
-            operand_codes.push(i16::try_from(code).map_err(|_| SchemaDriverError::Invalid {
-                path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
-                detail: format!("{} code {code} exceeds Int16", binding.operand_domain),
-            })?);
-        }
+                    path: "$.semantic_operation_bindings[*].operand_domain".to_owned(),
+                    detail: format!("unknown enum domain {}", binding.operand_domain),
+                })?;
+            for name in &binding.operand_names {
+                let code = domain
+                    .values
+                    .iter()
+                    .find(|value| value.name == *name)
+                    .ok_or_else(|| SchemaDriverError::Invalid {
+                        path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
+                        detail: format!("unknown {} value {name}", binding.operand_domain),
+                    })?
+                    .code;
+                operand_codes.push(i16::try_from(code).map_err(|_| {
+                    SchemaDriverError::Invalid {
+                        path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
+                        detail: format!("{} code {code} exceeds Int16", binding.operand_domain),
+                    }
+                })?);
+            }
+            if domain.width_bits == 16 {
+                "int16"
+            } else {
+                "int32"
+            }
+        };
         operations.push(CompiledSemanticOperation {
             phrase_id: binding.phrase_id.clone(),
             canonical_text: binding.canonical_text.clone(),
@@ -3039,6 +3115,7 @@ fn compile_semantic_operations(
             operator: binding.operator,
             operand_domain: binding.operand_domain.clone(),
             operand_codes,
+            operand_logical_type,
             null_policy: binding.null_policy,
             output_role: binding.output_role.clone(),
             diagnostic_code: binding.diagnostic_code.clone(),
@@ -3046,6 +3123,82 @@ fn compile_semantic_operations(
     }
     operations.sort_by(|left, right| left.phrase_id.cmp(&right.phrase_id));
     Ok(operations)
+}
+
+fn compile_semantic_projections(
+    phrases: &super::registry_models::PhraseRegistry,
+    entities: &super::registry_models::AcceptedRegistry<super::registry_models::EntityKind>,
+    relations: &super::registry_models::AcceptedRegistry<super::registry_models::RelationKind>,
+    properties: &super::registry_models::AcceptedRegistry<super::registry_models::PropertyKind>,
+) -> Result<Vec<CompiledSemanticProjection>, SchemaDriverError> {
+    let mut projections = Vec::with_capacity(phrases.semantic_projection_bindings.len());
+    for binding in &phrases.semantic_projection_bindings {
+        let (target_kind, operand_codes) = match binding.target {
+            super::registry_models::PhraseProjectionTarget::EntityKind => (
+                "entity_kind",
+                binding
+                    .operand_names
+                    .iter()
+                    .map(|name| {
+                        entities
+                            .records
+                            .iter()
+                            .find(|entity| entity.canonical_name == *name)
+                            .map(|entity| i32::from(entity.kind_code))
+                            .ok_or_else(|| SchemaDriverError::Invalid {
+                                path: "$.semantic_projection_bindings[*].operand_names".into(),
+                                detail: format!("unknown entity kind {name}"),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            super::registry_models::PhraseProjectionTarget::RelationKind => (
+                "relation_kind",
+                binding
+                    .operand_names
+                    .iter()
+                    .map(|name| {
+                        relations
+                            .records
+                            .iter()
+                            .find(|relation| relation.canonical_name == *name)
+                            .map(|relation| i32::from(relation.relation_code))
+                            .ok_or_else(|| SchemaDriverError::Invalid {
+                                path: "$.semantic_projection_bindings[*].operand_names".into(),
+                                detail: format!("unknown relation kind {name}"),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            super::registry_models::PhraseProjectionTarget::PropertyKind => (
+                "property_kind",
+                binding
+                    .operand_names
+                    .iter()
+                    .map(|name| {
+                        properties
+                            .records
+                            .iter()
+                            .find(|property| property.canonical_name == *name)
+                            .map(|property| i32::from(property.property_code))
+                            .ok_or_else(|| SchemaDriverError::Invalid {
+                                path: "$.semantic_projection_bindings[*].operand_names".into(),
+                                detail: format!("unknown property kind {name}"),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+        };
+        projections.push(CompiledSemanticProjection {
+            phrase_id: binding.phrase_id.clone(),
+            target_kind,
+            operand_codes,
+        });
+    }
+    projections.sort_by(|left, right| {
+        (&left.phrase_id, left.target_kind).cmp(&(&right.phrase_id, right.target_kind))
+    });
+    Ok(projections)
 }
 
 fn render_rust(compiled: &CompiledOntology) -> Vec<u8> {
@@ -3084,42 +3237,6 @@ fn render_rust(compiled: &CompiledOntology) -> Vec<u8> {
         output.push_str("    ] },\n");
     }
     output.push_str("];\n\n");
-    output.push_str(
-        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
-         pub enum SemanticPredicateOperator { Equals, InSet }\n\n\
-         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
-         pub enum SemanticNullPolicy { UnknownIsFalse, RejectUnknown }\n\n\
-         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
-         pub struct SemanticOperationSpec {\n\
-             pub phrase_id: &'static str,\n\
-             pub canonical_text: &'static str,\n\
-             pub column_role: &'static str,\n\
-             pub operator: SemanticPredicateOperator,\n\
-             pub operand_domain: &'static str,\n\
-             pub operand_codes: &'static [i16],\n\
-             pub null_policy: SemanticNullPolicy,\n\
-             pub output_role: &'static str,\n\
-             pub diagnostic_code: &'static str,\n\
-         }\n\n\
-         pub const SEMANTIC_OPERATION_SPECS: &[SemanticOperationSpec] = &[\n",
-    );
-    for operation in &compiled.semantic_operations {
-        writeln!(
-            output,
-            "    SemanticOperationSpec {{ phrase_id: {:?}, canonical_text: {:?}, column_role: {:?}, operator: SemanticPredicateOperator::{:?}, operand_domain: {:?}, operand_codes: &{:?}, null_policy: SemanticNullPolicy::{:?}, output_role: {:?}, diagnostic_code: {:?} }},",
-            operation.phrase_id,
-            operation.canonical_text,
-            operation.column_role,
-            operation.operator,
-            operation.operand_domain,
-            operation.operand_codes,
-            operation.null_policy,
-            operation.output_role,
-            operation.diagnostic_code,
-        )
-        .unwrap();
-    }
-    output.push_str("];\n");
     output.into_bytes()
 }
 
@@ -3231,12 +3348,6 @@ fn render_result_schemas(
     }
     output.push_str("];\n");
     Ok(output.into_bytes())
-}
-
-fn render_compiled_authority(artifact_id: &str, version: &str, digest: &str, path: &str) -> String {
-    format!(
-        "CompiledAuthority {{ authority_id: {artifact_id:?}, authority_version: {version:?}, canonical_digest: {digest:?}, canonical_source_path: {path:?} }}"
-    )
 }
 
 fn compiled_property_value_kind(property: &super::registry_models::PropertyKind) -> i16 {
@@ -3403,279 +3514,1034 @@ fn compile_provider_raw_kinds(
     Ok(result)
 }
 
-fn render_compiled_ontology(
+fn ontology_artifact_error(detail: impl Into<String>) -> SchemaDriverError {
+    SchemaDriverError::Invalid {
+        path: ONTOLOGY_PROGRAM_BUNDLE_PATH.to_owned(),
+        detail: detail.into(),
+    }
+}
+
+fn authority_fields() -> Vec<Field> {
+    vec![
+        Field::new("authority_id", DataType::Utf8, false),
+        Field::new("authority_version", DataType::Utf8, false),
+        Field::new("canonical_digest", DataType::Utf8, false),
+        Field::new("canonical_source_path", DataType::Utf8, false),
+    ]
+}
+
+fn authority_arrays(authority: &CompiledAuthorityRecord, rows: usize) -> Vec<ArrayRef> {
+    vec![
+        std::sync::Arc::new(StringArray::from(vec![
+            authority.authority_id.as_str();
+            rows
+        ])),
+        std::sync::Arc::new(StringArray::from(vec![
+            authority.authority_version.as_str();
+            rows
+        ])),
+        std::sync::Arc::new(StringArray::from(vec![
+            authority.canonical_digest.as_str();
+            rows
+        ])),
+        std::sync::Arc::new(StringArray::from(vec![
+            authority
+                .canonical_source_path
+                .as_str();
+            rows
+        ])),
+    ]
+}
+
+fn authority(
+    artifact_id: &str,
+    version: &str,
+    digest: &str,
+    source_path: &str,
+) -> CompiledAuthorityRecord {
+    CompiledAuthorityRecord {
+        authority_id: artifact_id.to_owned(),
+        authority_version: version.to_owned(),
+        canonical_digest: digest.to_owned(),
+        canonical_source_path: source_path.to_owned(),
+    }
+}
+
+fn ontology_record_batch(
+    mut fields: Vec<Field>,
+    mut columns: Vec<ArrayRef>,
+    authority: &CompiledAuthorityRecord,
+) -> Result<RecordBatch, SchemaDriverError> {
+    let rows = columns.first().map_or(0, |column| column.len());
+    fields.extend(authority_fields());
+    columns.extend(authority_arrays(authority, rows));
+    RecordBatch::try_new(std::sync::Arc::new(Schema::new(fields)), columns)
+        .map_err(|error| ontology_artifact_error(error.to_string()))
+}
+
+fn encode_ontology_member(batch: &RecordBatch) -> Result<Vec<u8>, SchemaDriverError> {
+    let mut bytes = Vec::new();
+    {
+        let mut writer = StreamWriter::try_new(&mut bytes, batch.schema().as_ref())
+            .map_err(|error| ontology_artifact_error(error.to_string()))?;
+        writer
+            .write(batch)
+            .map_err(|error| ontology_artifact_error(error.to_string()))?;
+        writer
+            .finish()
+            .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    }
+    Ok(bytes)
+}
+
+fn ontology_operation_name(operation: OntologyRuleOperationKind) -> &'static str {
+    match operation {
+        OntologyRuleOperationKind::ForeignKeyAntiJoin => "foreign_key_anti_join",
+        OntologyRuleOperationKind::GovernedCodeAntiJoin => "governed_code_anti_join",
+        OntologyRuleOperationKind::PrimaryKeyUniquenessAggregate => {
+            "primary_key_uniqueness_aggregate"
+        }
+        OntologyRuleOperationKind::IdDomainConformance => "id_domain_conformance",
+        OntologyRuleOperationKind::OntologyMembershipAntiJoin => "ontology_membership_anti_join",
+        OntologyRuleOperationKind::RelationFamilyConformanceJoin => {
+            "relation_family_conformance_join"
+        }
+        OntologyRuleOperationKind::RelationCardinalityAggregate => "relation_cardinality_aggregate",
+        OntologyRuleOperationKind::RelationOwnerConformanceJoin => {
+            "relation_owner_conformance_join"
+        }
+        OntologyRuleOperationKind::RelationSelfEdgeJoin => "relation_self_edge_join",
+        OntologyRuleOperationKind::PropertyValueOneOf => "property_value_one_of",
+        OntologyRuleOperationKind::SourceSpanAllOrNone => "source_span_all_or_none",
+    }
+}
+
+fn ontology_program_members(
     compiled: &CompiledOntology,
-    source_digest: &str,
-) -> Result<Vec<u8>, SchemaDriverError> {
+) -> Result<BTreeMap<String, Vec<u8>>, SchemaDriverError> {
     let vocabulary = &compiled.vocabulary;
-    let mut output = format!(
-        "// @generated from CompiledOntology {source_digest}; schema-contract-driver-v1; do not edit.\n\nconst COMPILED_ENUM_VALUES: &[CompiledEnumValue] = &[\n"
-    );
-    let enum_authority = render_compiled_authority(
+    let mut members = BTreeMap::new();
+    let enum_authority = authority(
         &vocabulary.enums.artifact_id,
         &vocabulary.enums.version,
         &vocabulary.enums.canonical_digest,
         ENUM_REGISTRY_PATH,
     );
-    for domain in &vocabulary.enums.records {
-        for value in &domain.values {
-            writeln!(
-                output,
-                "    CompiledEnumValue {{ domain: {:?}, code: {}, name: {:?}, authority: {} }},",
-                domain.domain, value.code, value.name, enum_authority,
-            )
-            .unwrap();
-        }
-    }
-    output.push_str("];\n\nconst COMPILED_ENTITY_KINDS: &[CompiledEntityKind] = &[\n");
-    let entity_authority = render_compiled_authority(
+    let enum_rows = vocabulary
+        .enums
+        .records
+        .iter()
+        .flat_map(|domain| {
+            domain.values.iter().map(move |value| {
+                (
+                    domain.domain.as_str(),
+                    i32::from(value.code),
+                    value.name.as_str(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let batch = ontology_record_batch(
+        vec![
+            Field::new("domain", DataType::Utf8, false),
+            Field::new("code", DataType::Int32, false),
+            Field::new("name", DataType::Utf8, false),
+        ],
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                enum_rows.iter().map(|row| row.0),
+            )),
+            std::sync::Arc::new(Int32Array::from_iter_values(
+                enum_rows.iter().map(|row| row.1),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                enum_rows.iter().map(|row| row.2),
+            )),
+        ],
+        &enum_authority,
+    )?;
+    members.insert(
+        "program.enum_value".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let entity_authority = authority(
         &vocabulary.entities.artifact_id,
         &vocabulary.entities.version,
         &vocabulary.entities.canonical_digest,
         ENTITY_REGISTRY_PATH,
     );
-    for value in &vocabulary.entities.records {
-        writeln!(
-            output,
-            "    CompiledEntityKind {{ code: {}, name: {:?}, family_code: {}, language_applicability: {:?}, query_visible: {}, authority: {} }},",
-            value.kind_code,
-            value.canonical_name,
-            value.family_code,
-            value.language_profile,
-            value.query_visibility != "HIDDEN",
-            entity_authority,
-        )
-        .unwrap();
-    }
-    output.push_str("];\n\nconst COMPILED_RELATION_KINDS: &[CompiledRelationKind] = &[\n");
-    let relation_authority = render_compiled_authority(
+    let entities = &vocabulary.entities.records;
+    let batch = ontology_record_batch(
+        vec![
+            Field::new("code", DataType::Int32, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("family_code", DataType::Int16, false),
+            Field::new("language_applicability", DataType::Utf8, false),
+            Field::new("query_visible", DataType::Boolean, false),
+        ],
+        vec![
+            std::sync::Arc::new(Int32Array::from_iter_values(
+                entities.iter().map(|value| i32::from(value.kind_code)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                entities.iter().map(|value| value.canonical_name.as_str()),
+            )),
+            std::sync::Arc::new(Int16Array::from_iter_values(
+                entities.iter().map(|value| i16::from(value.family_code)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                entities.iter().map(|value| value.language_profile.as_str()),
+            )),
+            std::sync::Arc::new(BooleanArray::from(
+                entities
+                    .iter()
+                    .map(|value| value.query_visibility != "HIDDEN")
+                    .collect::<Vec<_>>(),
+            )),
+        ],
+        &entity_authority,
+    )?;
+    members.insert(
+        "program.entity_kind".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let relation_authority = authority(
         &vocabulary.relations.artifact_id,
         &vocabulary.relations.version,
         &vocabulary.relations.canonical_digest,
         RELATION_REGISTRY_PATH,
     );
-    for value in &vocabulary.relations.records {
-        writeln!(
-            output,
-            "    CompiledRelationKind {{ code: {}, name: {:?}, family_code: {}, family_name: {:?}, cardinality: {:?}, symmetric: {}, transitive: {}, self_edge_policy: {:?}, owner_selection_rule: {:?}, query_visible: {}, authority: {} }},",
-            value.relation_code,
-            value.canonical_name,
-            value.family_code,
-            value.family,
-            value.cardinality,
-            value.symmetric,
-            value.transitive,
-            value.self_edge_policy,
-            value.owner_selection_rule,
-            value.query_visibility != "HIDDEN",
-            relation_authority,
-        )
-        .unwrap();
-    }
-    output.push_str("];\n\nconst COMPILED_PROPERTY_KINDS: &[CompiledPropertyKind] = &[\n");
-    let property_authority = render_compiled_authority(
+    let relations = &vocabulary.relations.records;
+    let batch = ontology_record_batch(
+        vec![
+            Field::new("code", DataType::Int32, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("family_code", DataType::Int16, false),
+            Field::new("family_name", DataType::Utf8, false),
+            Field::new("cardinality", DataType::Utf8, false),
+            Field::new("symmetric", DataType::Boolean, false),
+            Field::new("transitive", DataType::Boolean, false),
+            Field::new("self_edge_policy", DataType::Utf8, false),
+            Field::new("owner_selection_rule", DataType::Utf8, false),
+            Field::new("query_visible", DataType::Boolean, false),
+        ],
+        vec![
+            std::sync::Arc::new(Int32Array::from_iter_values(
+                relations.iter().map(|value| i32::from(value.relation_code)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                relations.iter().map(|value| value.canonical_name.as_str()),
+            )),
+            std::sync::Arc::new(Int16Array::from_iter_values(
+                relations.iter().map(|value| i16::from(value.family_code)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                relations.iter().map(|value| value.family.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                relations.iter().map(|value| value.cardinality.as_str()),
+            )),
+            std::sync::Arc::new(BooleanArray::from(
+                relations
+                    .iter()
+                    .map(|value| value.symmetric)
+                    .collect::<Vec<_>>(),
+            )),
+            std::sync::Arc::new(BooleanArray::from(
+                relations
+                    .iter()
+                    .map(|value| value.transitive)
+                    .collect::<Vec<_>>(),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                relations
+                    .iter()
+                    .map(|value| value.self_edge_policy.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                relations
+                    .iter()
+                    .map(|value| value.owner_selection_rule.as_str()),
+            )),
+            std::sync::Arc::new(BooleanArray::from(
+                relations
+                    .iter()
+                    .map(|value| value.query_visibility != "HIDDEN")
+                    .collect::<Vec<_>>(),
+            )),
+        ],
+        &relation_authority,
+    )?;
+    members.insert(
+        "program.relation_kind".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let property_authority = authority(
         &vocabulary.properties.artifact_id,
         &vocabulary.properties.version,
         &vocabulary.properties.canonical_digest,
         PROPERTY_REGISTRY_PATH,
     );
-    for value in &vocabulary.properties.records {
-        let storage_mapping = format!(
-            "{}:{}:{}",
-            value.storage.canonical_table,
-            value
-                .storage
-                .denormalized_entity_column
-                .as_deref()
-                .unwrap_or(""),
-            value
-                .storage
-                .extension_table_column
-                .as_deref()
-                .unwrap_or("")
-        );
-        writeln!(
-            output,
-            "    CompiledPropertyKind {{ code: {}, name: {:?}, value_kind_code: {}, cardinality: {:?}, storage_mapping: {:?}, authority: {} }},",
-            value.property_code,
-            value.canonical_name,
-            compiled_property_value_kind(value),
-            value.cardinality,
-            storage_mapping,
-            property_authority,
-        )
-        .unwrap();
-    }
-    output.push_str("];\n\nconst COMPILED_FACT_KINDS: &[CompiledFactKind] = &[\n");
-    let fact_authority = render_compiled_authority(
+    let properties = &vocabulary.properties.records;
+    let storage = properties
+        .iter()
+        .map(|value| {
+            format!(
+                "{}:{}:{}",
+                value.storage.canonical_table,
+                value
+                    .storage
+                    .denormalized_entity_column
+                    .as_deref()
+                    .unwrap_or(""),
+                value
+                    .storage
+                    .extension_table_column
+                    .as_deref()
+                    .unwrap_or("")
+            )
+        })
+        .collect::<Vec<_>>();
+    let batch = ontology_record_batch(
+        vec![
+            Field::new("code", DataType::Int32, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("value_kind_code", DataType::Int16, false),
+            Field::new("cardinality", DataType::Utf8, false),
+            Field::new("storage_mapping", DataType::Utf8, false),
+        ],
+        vec![
+            std::sync::Arc::new(Int32Array::from_iter_values(
+                properties
+                    .iter()
+                    .map(|value| i32::from(value.property_code)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                properties.iter().map(|value| value.canonical_name.as_str()),
+            )),
+            std::sync::Arc::new(Int16Array::from_iter_values(
+                properties.iter().map(compiled_property_value_kind),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                properties.iter().map(|value| value.cardinality.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                storage.iter().map(String::as_str),
+            )),
+        ],
+        &property_authority,
+    )?;
+    members.insert(
+        "program.property_kind".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let fact_authority = authority(
         &vocabulary.facts.artifact_id,
         &vocabulary.facts.version,
         &vocabulary.facts.canonical_digest,
         FACT_REGISTRY_PATH,
     );
-    for value in &vocabulary.facts.records {
-        writeln!(
-            output,
-            "    CompiledFactKind {{ code: {}, name: {:?}, fact_form: {:?}, authority: {} }},",
-            value.fact_code, value.canonical_name, value.shape, fact_authority,
-        )
-        .unwrap();
-    }
-    output.push_str("];\n\nconst COMPILED_PROVIDER_RAW_KINDS: &[CompiledProviderRawKind] = &[\n");
-    for value in &compiled.provider_raw_kinds {
-        let authority = render_compiled_authority(
-            &value.raw_catalog_id,
-            &value.authority_version,
-            &value.canonical_digest,
-            &value.canonical_source_path,
-        );
-        writeln!(
-            output,
-            "    CompiledProviderRawKind {{ provider_code: {}, raw_catalog_id: {:?}, raw_namespace: {:?}, raw_kind_code: {}, raw_name: {:?}, normalized_kind_code: {:?}, authority: {} }},",
-            value.provider_code,
-            value.raw_catalog_id,
-            value.raw_namespace,
-            value.raw_kind_code,
-            value.raw_name,
-            value.normalized_kind_code,
-            authority,
-        )
-        .unwrap();
-    }
-    output.push_str("];\n\nconst COMPILED_ONTOLOGY_EDGES: &[CompiledOntologyEdge] = &[\n");
-    for value in &vocabulary.entities.records {
+    let facts = &vocabulary.facts.records;
+    let batch = ontology_record_batch(
+        vec![
+            Field::new("code", DataType::Int16, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("fact_form", DataType::Utf8, false),
+        ],
+        vec![
+            std::sync::Arc::new(Int16Array::from_iter_values(
+                facts
+                    .iter()
+                    .map(|value| i16::try_from(value.fact_code).expect("fact code")),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                facts.iter().map(|value| value.canonical_name.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                facts.iter().map(|value| value.shape.as_str()),
+            )),
+        ],
+        &fact_authority,
+    )?;
+    members.insert(
+        "program.fact_kind".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let raw = &compiled.provider_raw_kinds;
+    let provider_fields = vec![
+        Field::new("provider_code", DataType::Int16, false),
+        Field::new("raw_catalog_id", DataType::Utf8, false),
+        Field::new("raw_namespace", DataType::Utf8, false),
+        Field::new("raw_kind_code", DataType::Int32, false),
+        Field::new("raw_name", DataType::Utf8, false),
+        Field::new("normalized_kind_code", DataType::Int32, true),
+    ]
+    .into_iter()
+    .chain(authority_fields())
+    .collect::<Vec<_>>();
+    let provider_columns: Vec<ArrayRef> = vec![
+        std::sync::Arc::new(Int16Array::from_iter_values(
+            raw.iter().map(|value| value.provider_code),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            raw.iter().map(|value| value.raw_catalog_id.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            raw.iter().map(|value| value.raw_namespace.as_str()),
+        )),
+        std::sync::Arc::new(Int32Array::from_iter_values(
+            raw.iter().map(|value| value.raw_kind_code),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            raw.iter().map(|value| value.raw_name.as_str()),
+        )),
+        std::sync::Arc::new(Int32Array::from(
+            raw.iter()
+                .map(|value| value.normalized_kind_code)
+                .collect::<Vec<_>>(),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            raw.iter().map(|value| value.raw_catalog_id.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            raw.iter().map(|value| value.authority_version.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            raw.iter().map(|value| value.canonical_digest.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            raw.iter().map(|value| value.canonical_source_path.as_str()),
+        )),
+    ];
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(provider_fields)),
+        provider_columns,
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.provider_raw_kind".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let mut edges: Vec<(String, String, String, i32, &CompiledAuthorityRecord)> = Vec::new();
+    for value in entities {
         let subject = format!("entity_kind:{}", value.kind_code);
         for (ordinal, owner) in value.allowed_owner_kinds.iter().enumerate() {
-            writeln!(
-                output,
-                "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: \"allows_owner_kind\", object_term_id: {:?}, ordinal: {}, authority: {} }},",
-                subject,
+            edges.push((
+                subject.clone(),
+                "allows_owner_kind".into(),
                 format!("entity_kind_name:{owner}"),
-                ordinal,
-                entity_authority,
-            )
-            .unwrap();
+                i32::try_from(ordinal).expect("edge ordinal"),
+                &entity_authority,
+            ));
         }
-        for (ordinal, code) in value.required_property_codes.iter().enumerate() {
-            writeln!(
-                output,
-                "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: \"requires_property\", object_term_id: {:?}, ordinal: {}, authority: {} }},",
-                subject,
-                format!("property_kind:{code}"),
-                ordinal,
-                entity_authority,
-            )
-            .unwrap();
-        }
-        for (ordinal, code) in value.optional_property_codes.iter().enumerate() {
-            writeln!(
-                output,
-                "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: \"allows_property\", object_term_id: {:?}, ordinal: {}, authority: {} }},",
-                subject,
-                format!("property_kind:{code}"),
-                ordinal,
-                entity_authority,
-            )
-            .unwrap();
+        for (predicate, codes) in [
+            ("requires_property", &value.required_property_codes),
+            ("allows_property", &value.optional_property_codes),
+        ] {
+            for (ordinal, code) in codes.iter().enumerate() {
+                edges.push((
+                    subject.clone(),
+                    predicate.into(),
+                    format!("property_kind:{code}"),
+                    i32::try_from(ordinal).expect("edge ordinal"),
+                    &entity_authority,
+                ));
+            }
         }
     }
-    for value in &vocabulary.relations.records {
+    for value in relations {
         let subject = format!("relation_kind:{}", value.relation_code);
-        for (predicate, members) in [
+        for (predicate, values) in [
             ("allows_subject_family", &value.allowed_subject_families),
             ("allows_object_family", &value.allowed_object_families),
             ("projection_membership", &value.projection_memberships),
         ] {
-            for (ordinal, member) in members.iter().enumerate() {
-                let object_term_id = if matches!(
-                    predicate,
-                    "allows_subject_family" | "allows_object_family"
-                ) {
-                    let exact_family_codes = vocabulary
-                        .entities
-                        .records
+            for (ordinal, member) in values.iter().enumerate() {
+                let object = if predicate == "projection_membership" {
+                    format!("term:{member}")
+                } else {
+                    let exact = entities
                         .iter()
                         .filter(|entity| entity.kind_slug == *member)
                         .map(|entity| entity.family_code)
                         .collect::<BTreeSet<_>>();
-                    let family_code = if exact_family_codes.len() == 1 {
-                        *exact_family_codes
-                            .iter()
-                            .next()
-                            .expect("one exact family code was counted")
-                    } else if exact_family_codes.is_empty()
-                        && vocabulary
-                            .entities
-                            .records
+                    let family = if exact.len() == 1 {
+                        *exact.iter().next().expect("one family")
+                    } else if exact.is_empty()
+                        && entities
                             .iter()
                             .any(|entity| entity.family_code == value.family_code)
                     {
-                        // Some registry members are layer-family aliases (for example
-                        // `definition`, `use`, and `concurrency-event`) rather than entity
-                        // kind slugs. Their relation-family code is the governed ontology
-                        // layer code, so the same compiled family dimension remains the
-                        // single membership authority.
                         value.family_code
                     } else {
-                        return Err(SchemaDriverError::Invalid {
-                            path: RELATION_REGISTRY_PATH.to_owned(),
-                            detail: format!(
-                                "relation family member {member} has no unique entity-family mapping"
-                            ),
-                        });
+                        return Err(ontology_artifact_error(format!(
+                            "relation family member {member} has no unique entity-family mapping"
+                        )));
                     };
-                    format!("entity_family:{family_code}")
-                } else {
-                    format!("term:{member}")
+                    format!("entity_family:{family}")
                 };
-                writeln!(
-                    output,
-                    "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: {:?}, object_term_id: {:?}, ordinal: {}, authority: {} }},",
-                    subject,
-                    predicate,
-                    object_term_id,
-                    ordinal,
-                    relation_authority,
-                )
-                .unwrap();
+                edges.push((
+                    subject.clone(),
+                    predicate.into(),
+                    object,
+                    i32::try_from(ordinal).expect("edge ordinal"),
+                    &relation_authority,
+                ));
             }
         }
     }
-    output.push_str("];\n\nconst COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[\n");
-    for rule in &compiled.schema.ontology_rule_contracts {
-        writeln!(
-            output,
-            "    CompiledRuleContract {{ rule_id: {:?}, operation_kind: CompiledRuleOperationKind::{:?}, ordered_operands: &[{}], calculation_id: {:?}, policy_id: {:?}, input_contract: {:?}, output_contract: {:?}, determinism_class: {:?}, diagnostic_code: {:?} }},",
-            rule.rule_id,
-            rule.operation_kind,
-            rule.ordered_operands.iter().map(|operand| format!("CompiledRuleOperand {{ ordinal: {}, relation_ref: {:?}, column_ref: {:?}, logical_type: {:?} }}", operand.ordinal, operand.relation_ref, operand.column_ref, operand.logical_type)).collect::<Vec<_>>().join(", "),
-            rule.calculation_id,
-            rule.policy_id,
-            rule.input_contract,
-            rule.output_contract,
-            rule.determinism_class,
-            rule.diagnostic_code,
-        )
-        .unwrap();
-    }
-    let phrase_authority = render_compiled_authority(
-        &compiled.phrase_authority.authority_id,
-        &compiled.phrase_authority.authority_version,
-        &compiled.phrase_authority.canonical_digest,
-        &compiled.phrase_authority.canonical_source_path,
+    let edge_fields = vec![
+        Field::new("subject_term_id", DataType::Utf8, false),
+        Field::new("predicate_term_id", DataType::Utf8, false),
+        Field::new("object_term_id", DataType::Utf8, false),
+        Field::new("ordinal", DataType::Int32, false),
+    ]
+    .into_iter()
+    .chain(authority_fields())
+    .collect::<Vec<_>>();
+    let edge_columns: Vec<ArrayRef> = vec![
+        std::sync::Arc::new(StringArray::from_iter_values(
+            edges.iter().map(|row| row.0.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            edges.iter().map(|row| row.1.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            edges.iter().map(|row| row.2.as_str()),
+        )),
+        std::sync::Arc::new(Int32Array::from_iter_values(edges.iter().map(|row| row.3))),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            edges.iter().map(|row| row.4.authority_id.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            edges.iter().map(|row| row.4.authority_version.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            edges.iter().map(|row| row.4.canonical_digest.as_str()),
+        )),
+        std::sync::Arc::new(StringArray::from_iter_values(
+            edges.iter().map(|row| row.4.canonical_source_path.as_str()),
+        )),
+    ];
+    let batch = RecordBatch::try_new(std::sync::Arc::new(Schema::new(edge_fields)), edge_columns)
+        .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.ontology_edge".to_owned(),
+        encode_ontology_member(&batch)?,
     );
-    let query_form_authority = render_compiled_authority(
-        &compiled.query_form_authority.authority_id,
-        &compiled.query_form_authority.authority_version,
-        &compiled.query_form_authority.canonical_digest,
-        &compiled.query_form_authority.canonical_source_path,
-    );
-    writeln!(
-        output,
-        "];\n\nconst COMPILED_ONTOLOGY: RuntimeCompiledOntology = RuntimeCompiledOntology {{\n    enum_values: COMPILED_ENUM_VALUES,\n    entity_kinds: COMPILED_ENTITY_KINDS,\n    relation_kinds: COMPILED_RELATION_KINDS,\n    property_kinds: COMPILED_PROPERTY_KINDS,\n    fact_kinds: COMPILED_FACT_KINDS,\n    provider_raw_kinds: COMPILED_PROVIDER_RAW_KINDS,\n    phrase_authority: {phrase_authority},\n    query_form_authority: {query_form_authority},\n    edges: COMPILED_ONTOLOGY_EDGES,\n    rules: COMPILED_ONTOLOGY_RULES,\n}};"
+
+    let rules = &compiled.schema.ontology_rule_contracts;
+    let rule_rows = rules
+        .iter()
+        .flat_map(|rule| {
+            rule.ordered_operands
+                .iter()
+                .map(move |operand| (rule, operand))
+        })
+        .collect::<Vec<_>>();
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("operation_id", DataType::Utf8, false),
+            Field::new("operation_kind", DataType::Utf8, false),
+            Field::new("operand_ordinal", DataType::UInt16, false),
+            Field::new("relation_ref", DataType::Utf8, false),
+            Field::new("column_ref", DataType::Utf8, false),
+            Field::new("logical_type", DataType::Utf8, false),
+            Field::new("calculation_id", DataType::Utf8, false),
+            Field::new("policy_id", DataType::Utf8, false),
+            Field::new("input_contract", DataType::Utf8, false),
+            Field::new("expected_result_contract", DataType::Utf8, false),
+            Field::new("determinism_class", DataType::Utf8, false),
+            Field::new("diagnostic_code", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.0.rule_id.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows
+                    .iter()
+                    .map(|row| ontology_operation_name(row.0.operation_kind)),
+            )),
+            std::sync::Arc::new(UInt16Array::from_iter_values(
+                rule_rows.iter().map(|row| row.1.ordinal),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.1.relation_ref.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.1.column_ref.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.1.logical_type.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.0.calculation_id.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.0.policy_id.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.0.input_contract.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.0.output_contract.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.0.determinism_class.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_rows.iter().map(|row| row.0.diagnostic_code.as_str()),
+            )),
+        ],
     )
-    .unwrap();
-    Ok(output.into_bytes())
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.rule_operation".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let phrase_rows = compiled
+        .semantic_operations
+        .iter()
+        .flat_map(|operation| {
+            operation
+                .operand_codes
+                .iter()
+                .map(move |code| (operation, *code))
+        })
+        .collect::<Vec<_>>();
+    let phrase_calculation =
+        |operation: super::registry_models::PhrasePredicateOperator| match operation {
+            super::registry_models::PhrasePredicateOperator::Equals => "datafusion.eq.i16.v1",
+            super::registry_models::PhrasePredicateOperator::InSet => "datafusion.in-list.i16.v1",
+        };
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("phrase_id", DataType::Utf8, false),
+            Field::new("canonical_text", DataType::Utf8, false),
+            Field::new("column_ref", DataType::Utf8, false),
+            Field::new("operation_kind", DataType::Utf8, false),
+            Field::new("operand_domain", DataType::Utf8, false),
+            Field::new("operand_logical_type", DataType::Utf8, false),
+            Field::new("operand_code", DataType::Int16, false),
+            Field::new("null_policy", DataType::Utf8, false),
+            Field::new("calculation_id", DataType::Utf8, false),
+            Field::new("expected_result_contract", DataType::Utf8, false),
+            Field::new("diagnostic_code", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows.iter().map(|row| row.0.phrase_id.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows.iter().map(|row| row.0.canonical_text.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows.iter().map(|row| row.0.column_role.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(phrase_rows.iter().map(
+                |row| match row.0.operator {
+                    super::registry_models::PhrasePredicateOperator::Equals => "equals",
+                    super::registry_models::PhrasePredicateOperator::InSet => "in_set",
+                },
+            ))),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows.iter().map(|row| row.0.operand_domain.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows.iter().map(|row| row.0.operand_logical_type),
+            )),
+            std::sync::Arc::new(Int16Array::from_iter_values(
+                phrase_rows.iter().map(|row| row.1),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(phrase_rows.iter().map(
+                |row| match row.0.null_policy {
+                    super::registry_models::PhraseNullPolicy::UnknownIsFalse => "unknown_is_false",
+                    super::registry_models::PhraseNullPolicy::RejectUnknown => "reject_unknown",
+                },
+            ))),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows
+                    .iter()
+                    .map(|row| phrase_calculation(row.0.operator)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows.iter().map(|row| row.0.output_role.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                phrase_rows.iter().map(|row| row.0.diagnostic_code.as_str()),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.phrase_operation".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let query_phrases = &compiled.query_phrases;
+    let reference_family = |family: super::registry_models::PhraseReferenceFamily| match family {
+        super::registry_models::PhraseReferenceFamily::EntityKind => "entity-kind",
+        super::registry_models::PhraseReferenceFamily::FactKind => "fact-kind",
+        super::registry_models::PhraseReferenceFamily::RelationKind => "relation-kind",
+        super::registry_models::PhraseReferenceFamily::PropertyKind => "property-kind",
+        super::registry_models::PhraseReferenceFamily::Projection => "projection",
+        super::registry_models::PhraseReferenceFamily::EffectKind => "effect-kind",
+        super::registry_models::PhraseReferenceFamily::ResourceKind => "resource-kind",
+        super::registry_models::PhraseReferenceFamily::UnknownKind => "unknown-kind",
+    };
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("phrase_id", DataType::Utf8, false),
+            Field::new("canonical_text", DataType::Utf8, false),
+            Field::new("plan_node_kind", DataType::Utf8, false),
+            Field::new("output_role", DataType::Utf8, false),
+            Field::new("contract_family", DataType::Utf8, false),
+            Field::new("contract_code", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                query_phrases.iter().map(|phrase| phrase.phrase_id.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                query_phrases
+                    .iter()
+                    .map(|phrase| phrase.canonical_text.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                query_phrases
+                    .iter()
+                    .map(|phrase| phrase.planspec_mapping.node_kind.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                query_phrases
+                    .iter()
+                    .map(|phrase| phrase.planspec_mapping.output_role.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                query_phrases
+                    .iter()
+                    .map(|phrase| reference_family(phrase.contract_reference.family)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                query_phrases
+                    .iter()
+                    .map(|phrase| phrase.contract_reference.code.as_str()),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.query_phrase".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let aliases = query_phrases
+        .iter()
+        .flat_map(|phrase| {
+            phrase
+                .accepted_aliases
+                .iter()
+                .enumerate()
+                .map(move |(ordinal, alias)| (phrase, ordinal, alias))
+        })
+        .collect::<Vec<_>>();
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("phrase_id", DataType::Utf8, false),
+            Field::new("alias_ordinal", DataType::UInt16, false),
+            Field::new("alias_text", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                aliases.iter().map(|row| row.0.phrase_id.as_str()),
+            )),
+            std::sync::Arc::new(UInt16Array::from_iter_values(
+                aliases
+                    .iter()
+                    .map(|row| u16::try_from(row.1).expect("alias ordinal")),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                aliases.iter().map(|row| row.2.as_str()),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.query_phrase_alias".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let modifiers = query_phrases
+        .iter()
+        .flat_map(|phrase| {
+            phrase
+                .required_modifiers
+                .iter()
+                .enumerate()
+                .map(move |(ordinal, modifier)| (phrase, ordinal, modifier))
+        })
+        .collect::<Vec<_>>();
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("phrase_id", DataType::Utf8, false),
+            Field::new("modifier_ordinal", DataType::UInt16, false),
+            Field::new("modifier", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                modifiers.iter().map(|row| row.0.phrase_id.as_str()),
+            )),
+            std::sync::Arc::new(UInt16Array::from_iter_values(
+                modifiers
+                    .iter()
+                    .map(|row| u16::try_from(row.1).expect("modifier ordinal")),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                modifiers.iter().map(|row| row.2.as_str()),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.query_phrase_modifier".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let projection_rows = compiled
+        .semantic_projections
+        .iter()
+        .flat_map(|projection| {
+            projection
+                .operand_codes
+                .iter()
+                .enumerate()
+                .map(move |(ordinal, code)| (projection, ordinal, *code))
+        })
+        .collect::<Vec<_>>();
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("phrase_id", DataType::Utf8, false),
+            Field::new("target_kind", DataType::Utf8, false),
+            Field::new("operand_ordinal", DataType::UInt16, false),
+            Field::new("operand_code", DataType::Int32, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                projection_rows.iter().map(|row| row.0.phrase_id.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                projection_rows.iter().map(|row| row.0.target_kind),
+            )),
+            std::sync::Arc::new(UInt16Array::from_iter_values(
+                projection_rows
+                    .iter()
+                    .map(|row| u16::try_from(row.1).expect("projection operand ordinal")),
+            )),
+            std::sync::Arc::new(Int32Array::from_iter_values(
+                projection_rows.iter().map(|row| row.2),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.query_projection".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let mut calculations = BTreeMap::new();
+    for rule in rules {
+        calculations.insert(
+            rule.calculation_id.as_str(),
+            (
+                ontology_operation_name(rule.operation_kind),
+                rule.output_contract.as_str(),
+            ),
+        );
+    }
+    for operation in &compiled.semantic_operations {
+        calculations
+            .entry(phrase_calculation(operation.operator))
+            .or_insert((
+                match operation.operator {
+                    super::registry_models::PhrasePredicateOperator::Equals => "eq",
+                    super::registry_models::PhrasePredicateOperator::InSet => "in_list",
+                },
+                "predicate",
+            ));
+    }
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("calculation_id", DataType::Utf8, false),
+            Field::new("engine", DataType::Utf8, false),
+            Field::new("native_operation", DataType::Utf8, false),
+            Field::new("return_contract", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(calculations.keys().copied())),
+            std::sync::Arc::new(StringArray::from(vec![
+                "datafusion-native";
+                calculations.len()
+            ])),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                calculations.values().map(|value| value.0),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                calculations.values().map(|value| value.1),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.calculation_catalog".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let result_schemas = &compiled.schema.result_schemas;
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("result_schema_id", DataType::Utf8, false),
+            Field::new("query_form_code", DataType::Int16, false),
+            Field::new("result_role", DataType::Utf8, false),
+            Field::new("schema_version", DataType::Utf8, false),
+            Field::new("checksum_algorithm_version", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                result_schemas
+                    .iter()
+                    .map(|schema| schema.result_schema_id.as_str()),
+            )),
+            std::sync::Arc::new(Int16Array::from_iter_values(result_schemas.iter().map(
+                |schema| i16::try_from(schema.query_form_code).expect("query-form code"),
+            ))),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                result_schemas
+                    .iter()
+                    .map(|schema| schema.result_role.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                result_schemas.iter().map(|schema| schema.version.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from(vec![
+                "ResultChecksumV2";
+                result_schemas.len()
+            ])),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.result_binding".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+    Ok(members)
+}
+
+fn render_ontology_program_bundle(
+    compiled: &CompiledOntology,
+) -> Result<Vec<u8>, SchemaDriverError> {
+    let mut members = ontology_program_members(compiled)?;
+    let content_rows = members
+        .iter()
+        .map(|(relation, bytes)| {
+            let schema =
+                arrow_ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
+                    .map_err(|error| ontology_artifact_error(error.to_string()))?
+                    .schema();
+            Ok((
+                relation.clone(),
+                format!(
+                    "b3:{}",
+                    blake3::hash(format!("{schema:?}").as_bytes()).to_hex()
+                ),
+                format!("b3:{}", blake3::hash(bytes).to_hex()),
+            ))
+        })
+        .collect::<Result<Vec<_>, SchemaDriverError>>()?;
+    let mut content_set = blake3::Hasher::new();
+    content_set.update(b"codefabric.ontology-program.content-set.v1\0");
+    for (relation, schema_identity, content_identity) in &content_rows {
+        for value in [relation, schema_identity, content_identity] {
+            content_set.update(&(value.len() as u64).to_be_bytes());
+            content_set.update(value.as_bytes());
+        }
+    }
+    let content_set_identity = format!("b3:{}", content_set.finalize().to_hex());
+    let bootstrap = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("relation_id", DataType::Utf8, false),
+            Field::new("member_address", DataType::Utf8, false),
+            Field::new("relation_role", DataType::Utf8, false),
+            Field::new("schema_identity", DataType::Utf8, false),
+            Field::new("content_identity", DataType::Utf8, false),
+            Field::new("required", DataType::Boolean, false),
+            Field::new("content_set_identity", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.0.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.0.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(content_rows.iter().map(
+                |row| {
+                    if row.0.starts_with("program.") {
+                        "program_relation"
+                    } else {
+                        "ontology_relation"
+                    }
+                },
+            ))),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.1.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.2.as_str()),
+            )),
+            std::sync::Arc::new(BooleanArray::from(vec![true; content_rows.len()])),
+            std::sync::Arc::new(StringArray::from(vec![
+                content_set_identity.as_str();
+                content_rows.len()
+            ])),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.bootstrap".to_owned(),
+        encode_ontology_member(&bootstrap)?,
+    );
+
+    let relation_ids = members.keys().map(String::as_str).collect::<Vec<_>>();
+    let member_bytes = members.values().map(Vec::as_slice).collect::<Vec<_>>();
+    let container = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("relation_id", DataType::Utf8, false),
+            Field::new("ipc_stream", DataType::Binary, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from(relation_ids)),
+            std::sync::Arc::new(BinaryArray::from_vec(member_bytes)),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    encode_ontology_member(&container)
+}
+
+fn render_ontology_program_adapter(compiled: &CompiledOntology, source_digest: &str) -> Vec<u8> {
+    format!(
+        "// @generated from the ontology program bundle {source_digest}; schema-contract-driver-v1; do not edit.\n\npub const ONTOLOGY_PROGRAM_BUNDLE_IPC: &[u8] = include_bytes!(\"../../{ONTOLOGY_PROGRAM_BUNDLE_PATH}\");\npub const ONTOLOGY_PROGRAM_SOURCE_IDENTITY: &str = {source_digest:?};\npub const ONTOLOGY_PROGRAM_PHRASE_AUTHORITY_IDENTITY: &str = {:?};\npub const ONTOLOGY_PROGRAM_QUERY_FORM_AUTHORITY_IDENTITY: &str = {:?};\n",
+        compiled.phrase_authority.canonical_digest,
+        compiled.query_form_authority.canonical_digest,
+    )
+    .into_bytes()
 }
 
 #[allow(clippy::too_many_lines)] // One linear pass keeps the complete runtime view tied to one IR.
@@ -4670,7 +5536,7 @@ mod tests {
                     .any(|source| source.display() == fragment)
             );
         }
-        assert_eq!(descriptor.output_roots.len(), 2);
+        assert_eq!(descriptor.output_roots.len(), 3);
     }
 
     #[test]

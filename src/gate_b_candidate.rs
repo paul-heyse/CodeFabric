@@ -976,9 +976,13 @@ fn validated_functional_claims(
         || combine_result["group_ids"].as_array().map_or(0, Vec::len) != 4
         || summary_result["group_ids"].as_array().map_or(0, Vec::len) != 1
     {
-        return Err(invariant(
-            "pattern/combine/summary public semantics differ from the authored graph",
-        ));
+        return Err(invariant(format!(
+            "pattern/combine/summary public semantics differ from the authored graph: pattern_groups={}, pattern_coverage={}, combine_groups={}, summary_groups={}",
+            pattern_result["group_ids"].as_array().map_or(0, Vec::len),
+            pattern_result["coverage"],
+            combine_result["group_ids"].as_array().map_or(0, Vec::len),
+            summary_result["group_ids"].as_array().map_or(0, Vec::len),
+        )));
     }
     if &execution.planes["mcp"]["structured_content"]["delivery"]["response"] != decoded_response {
         return Err(invariant(
