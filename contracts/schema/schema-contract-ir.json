@@ -8376,6 +8376,18 @@
           "logical_type": "id16",
           "id_domain": "observation",
           "nullable": true
+        },
+        {
+          "name": "ontology_epoch_identity",
+          "sqlite_type": "TEXT",
+          "logical_type": "utf8",
+          "nullable": true
+        },
+        {
+          "name": "result_authority_identity",
+          "sqlite_type": "TEXT",
+          "logical_type": "utf8",
+          "nullable": true
         }
       ],
       "primary_key": [

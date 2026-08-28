@@ -1,7 +1,7 @@
-// @generated from codefabric.schema.contract-ir b3:92daa3bdca698f0dcdc09014c9e31c87220f9ec7ffc9f888d057f6973fd5109c; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:4d524d6389ffcdd3b6f55485b43ffbd1c1994b3371aabcfb1d693e7ac01a68f2; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_SCHEMA_CONTRACT_DIGEST: &str =
-    "b3:92daa3bdca698f0dcdc09014c9e31c87220f9ec7ffc9f888d057f6973fd5109c";
+    "b3:4d524d6389ffcdd3b6f55485b43ffbd1c1994b3371aabcfb1d693e7ac01a68f2";
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
 const GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY: bool = true;
@@ -11413,7 +11413,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "snapshot_lease",
-        sqlite_ddl: "CREATE TABLE snapshot_lease (\n  lease_id BLOB NOT NULL,\n  lease_kind_code INTEGER NOT NULL,\n  workspace_id BLOB NOT NULL,\n  snapshot_id BLOB NOT NULL,\n  base_publication_id BLOB NOT NULL,\n  required_delta_versions_bytes BLOB NOT NULL,\n  requires_overlay INTEGER NOT NULL,\n  agent_instance_id BLOB,\n  created_at INTEGER NOT NULL,\n  last_heartbeat_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  state_code INTEGER NOT NULL,\n  process_instance_id BLOB NOT NULL,\n  orphaned_at INTEGER,\n  artifact_expires_at INTEGER,\n  source_blob_lease_id BLOB,\n  PRIMARY KEY (lease_id)\n) STRICT;\n",
+        sqlite_ddl: "CREATE TABLE snapshot_lease (\n  lease_id BLOB NOT NULL,\n  lease_kind_code INTEGER NOT NULL,\n  workspace_id BLOB NOT NULL,\n  snapshot_id BLOB NOT NULL,\n  base_publication_id BLOB NOT NULL,\n  required_delta_versions_bytes BLOB NOT NULL,\n  requires_overlay INTEGER NOT NULL,\n  agent_instance_id BLOB,\n  created_at INTEGER NOT NULL,\n  last_heartbeat_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  state_code INTEGER NOT NULL,\n  process_instance_id BLOB NOT NULL,\n  orphaned_at INTEGER,\n  artifact_expires_at INTEGER,\n  source_blob_lease_id BLOB,\n  ontology_epoch_identity TEXT,\n  result_authority_identity TEXT,\n  PRIMARY KEY (lease_id)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "lease_id",
@@ -11525,6 +11525,20 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
                 sqlite_type: OperationalSqliteType::Blob,
                 logical_type: LogicalType::Id16,
                 id_domain: Some("observation"),
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "ontology_epoch_identity",
+                sqlite_type: OperationalSqliteType::Text,
+                logical_type: LogicalType::Utf8,
+                id_domain: None,
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "result_authority_identity",
+                sqlite_type: OperationalSqliteType::Text,
+                logical_type: LogicalType::Utf8,
+                id_domain: None,
                 nullable: true,
             },
         ],

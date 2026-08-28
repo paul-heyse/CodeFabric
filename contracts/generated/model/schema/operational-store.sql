@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir semantic=b3:7b35f25e04142aec9f9df34955d2ab529178c023d624b004b9ef70116a8f44fe source=b3:92daa3bdca698f0dcdc09014c9e31c87220f9ec7ffc9f888d057f6973fd5109c; schema-contract-driver-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir semantic=b3:6596f19279c7001b83b24a16d4d40fd85faab58da2ea4f6cef111c55ae223acc source=b3:4d524d6389ffcdd3b6f55485b43ffbd1c1994b3371aabcfb1d693e7ac01a68f2; schema-contract-driver-v1; do not edit.
 -- Cross-store Arrow/Delta foreign keys are generated as application contracts, not SQLite reference clauses.
 
 CREATE TABLE workspace_registration (
@@ -329,6 +329,8 @@ CREATE TABLE snapshot_lease (
   orphaned_at INTEGER,
   artifact_expires_at INTEGER,
   source_blob_lease_id BLOB,
+  ontology_epoch_identity TEXT,
+  result_authority_identity TEXT,
   PRIMARY KEY (lease_id)
 ) STRICT;
 

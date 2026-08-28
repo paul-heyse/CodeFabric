@@ -465,6 +465,7 @@ fn snapshot_body(
                 ("rustc-mir".into(), digest(b"gate-b-rustc-sandbox")),
             ]),
         },
+        result_authority: None,
         limits_profile_digest: digest(b"gate-b-limits"),
         source_blob_digests: Vec::new(),
     })

@@ -129,7 +129,17 @@ ontology-decision-integrity-check:
 [doc("Prove ontology activation rollback, lost-response reconciliation, and restart idempotency")]
 [group('gate')]
 ontology-activation-recovery-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency|activation_concurrency_forward_rollback)/)' --no-tests=fail
+
+[doc("Prove the sole identity-only workspace admin route resolves durable ontology authority")]
+[group('gate')]
+ontology-activation-route-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_admin_activation_owner_route/)' --no-tests=fail
+
+[doc("Prove legacy and target leases retain their explicit versioned result authority")]
+[group('gate')]
+result-authority-lease-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_result_authority_lease_matrix|odf_result_checksum_v2_continuity/)' --no-tests=fail
 
 [doc("Prove diagnostic artifacts, checksums, and opaque receipts remain separate 1:1 identities")]
 [group('gate')]

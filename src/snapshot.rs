@@ -117,6 +117,19 @@ pub struct SnapshotBundles {
     pub sandbox_profile_digests: BTreeMap<String, String>,
 }
 
+/// Versioned interpretation authority pinned by a serving snapshot and every derived lease.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultAuthorityPin {
+    pub result_authority_identity: String,
+    pub program_identity: String,
+    pub function_catalog_identity: String,
+    pub policy_identity: String,
+    pub query_form_identity: String,
+    pub checksum_version: String,
+    pub exact_table_set_identity: String,
+}
+
 /// Immutable AC-G-19 manifest body; mutable activation observations are absent.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -132,6 +145,9 @@ pub struct ServingSnapshotManifestBody {
     pub overlay: SnapshotOverlay,
     pub indexes: SnapshotIndexes,
     pub bundles: SnapshotBundles,
+    /// Absent only for deterministically decoded legacy manifests with no ontology epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_authority: Option<ResultAuthorityPin>,
     pub limits_profile_digest: String,
     /// Ordered unique source-image digests that make snapshot-to-bytes provenance resolvable.
     pub source_blob_digests: Vec<String>,
@@ -490,7 +506,13 @@ impl ServingSnapshotManifestBody {
     /// Returns a bounded field error for malformed IDs/digests or a CBEF error.
     #[allow(clippy::too_many_lines)] // AC-G-19 fixes one auditable top-level field order.
     pub fn canonical_body(&self) -> Result<Vec<u8>, SnapshotManifestError> {
-        if self.manifest_version != "1.0" {
+        if !matches!(
+            (
+                self.manifest_version.as_str(),
+                self.result_authority.as_ref()
+            ),
+            ("1.0", None) | ("2.0", Some(_))
+        ) {
             return Err(SnapshotManifestError::InvalidField("manifest_version"));
         }
         self.validated_context_ids()?;
@@ -707,78 +729,134 @@ impl ServingSnapshotManifestBody {
                 sandbox_profile_digests(&self.bundles.sandbox_profile_digests)?,
             ),
         ]);
+        let mut fields = vec![
+            CbefField {
+                tag: 1,
+                value: text(&self.manifest_version),
+            },
+            CbefField {
+                tag: 2,
+                value: public_id(
+                    &self.workspace_id,
+                    IdentityDomain::Workspace,
+                    "workspace_id",
+                )?,
+            },
+            CbefField {
+                tag: 3,
+                value: optional(
+                    self.repository_id
+                        .as_deref()
+                        .map(|value| public_id(value, IdentityDomain::Repository, "repository_id"))
+                        .transpose()?,
+                ),
+            },
+            CbefField {
+                tag: 4,
+                value: optional(
+                    self.worktree_id
+                        .as_deref()
+                        .map(|value| public_id(value, IdentityDomain::Worktree, "worktree_id"))
+                        .transpose()?,
+                ),
+            },
+            CbefField {
+                tag: 5,
+                value: unsigned(self.registration_revision),
+            },
+            CbefField {
+                tag: 6,
+                value: source,
+            },
+            CbefField {
+                tag: 7,
+                value: contexts,
+            },
+            CbefField {
+                tag: 8,
+                value: base,
+            },
+            CbefField {
+                tag: 9,
+                value: overlay,
+            },
+            CbefField {
+                tag: 10,
+                value: indexes,
+            },
+            CbefField {
+                tag: 11,
+                value: bundles,
+            },
+            CbefField {
+                tag: 12,
+                value: digest(&self.limits_profile_digest, "limits_profile_digest")?,
+            },
+            CbefField {
+                tag: 13,
+                value: CbefValue::OrderedList(source_blob_digests),
+            },
+        ];
+        if let Some(authority) = &self.result_authority {
+            if authority.checksum_version != "ResultChecksumV1"
+                && authority.checksum_version != "ResultChecksumV2"
+            {
+                return Err(SnapshotManifestError::InvalidField(
+                    "result_authority.checksum_version",
+                ));
+            }
+            fields.push(CbefField {
+                tag: 14,
+                value: map(vec![
+                    (
+                        "result_authority_identity",
+                        digest(
+                            &authority.result_authority_identity,
+                            "result_authority.result_authority_identity",
+                        )?,
+                    ),
+                    (
+                        "program_identity",
+                        digest(
+                            &authority.program_identity,
+                            "result_authority.program_identity",
+                        )?,
+                    ),
+                    (
+                        "function_catalog_identity",
+                        digest(
+                            &authority.function_catalog_identity,
+                            "result_authority.function_catalog_identity",
+                        )?,
+                    ),
+                    (
+                        "policy_identity",
+                        digest(
+                            &authority.policy_identity,
+                            "result_authority.policy_identity",
+                        )?,
+                    ),
+                    (
+                        "query_form_identity",
+                        digest(
+                            &authority.query_form_identity,
+                            "result_authority.query_form_identity",
+                        )?,
+                    ),
+                    ("checksum_version", text(&authority.checksum_version)),
+                    (
+                        "exact_table_set_identity",
+                        digest(
+                            &authority.exact_table_set_identity,
+                            "result_authority.exact_table_set_identity",
+                        )?,
+                    ),
+                ]),
+            });
+        }
         Ok(encode_record(&CbefRecord {
             domain: IdentityDomain::ServingSnapshot,
-            fields: vec![
-                CbefField {
-                    tag: 1,
-                    value: text(&self.manifest_version),
-                },
-                CbefField {
-                    tag: 2,
-                    value: public_id(
-                        &self.workspace_id,
-                        IdentityDomain::Workspace,
-                        "workspace_id",
-                    )?,
-                },
-                CbefField {
-                    tag: 3,
-                    value: optional(
-                        self.repository_id
-                            .as_deref()
-                            .map(|value| {
-                                public_id(value, IdentityDomain::Repository, "repository_id")
-                            })
-                            .transpose()?,
-                    ),
-                },
-                CbefField {
-                    tag: 4,
-                    value: optional(
-                        self.worktree_id
-                            .as_deref()
-                            .map(|value| public_id(value, IdentityDomain::Worktree, "worktree_id"))
-                            .transpose()?,
-                    ),
-                },
-                CbefField {
-                    tag: 5,
-                    value: unsigned(self.registration_revision),
-                },
-                CbefField {
-                    tag: 6,
-                    value: source,
-                },
-                CbefField {
-                    tag: 7,
-                    value: contexts,
-                },
-                CbefField {
-                    tag: 8,
-                    value: base,
-                },
-                CbefField {
-                    tag: 9,
-                    value: overlay,
-                },
-                CbefField {
-                    tag: 10,
-                    value: indexes,
-                },
-                CbefField {
-                    tag: 11,
-                    value: bundles,
-                },
-                CbefField {
-                    tag: 12,
-                    value: digest(&self.limits_profile_digest, "limits_profile_digest")?,
-                },
-                CbefField {
-                    tag: 13,
-                    value: CbefValue::OrderedList(source_blob_digests),
-                },
-            ],
+            fields,
         })?)
     }
 
@@ -907,6 +985,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".to_owned(),
                 sandbox_profile_digests: BTreeMap::new(),
             },
+            result_authority: None,
             limits_profile_digest: digest_value(16),
             source_blob_digests: vec![digest_value(17)],
         }

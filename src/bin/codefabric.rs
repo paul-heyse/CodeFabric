@@ -126,6 +126,25 @@ fn workspace_command(arguments: &[String]) -> Result<WorkspaceAdminCommand, Stri
         ("reconcile", [workspace_id]) => Ok(WorkspaceAdminCommand::Reconcile {
             workspace_id: workspace_id_value(workspace_id)?,
         }),
+        (
+            "activate-candidate",
+            [
+                workspace_id,
+                candidate_identity,
+                decision_identity,
+                request_key,
+            ],
+        ) if !candidate_identity.is_empty()
+            && !decision_identity.is_empty()
+            && !request_key.is_empty() =>
+        {
+            Ok(WorkspaceAdminCommand::ActivateCandidate {
+                workspace_id: workspace_id_value(workspace_id)?,
+                candidate_identity: candidate_identity.clone(),
+                decision_identity: decision_identity.clone(),
+                request_key: request_key.clone(),
+            })
+        }
         ("remove", [workspace_id, flag]) if flag == "--retain-data" => {
             Ok(WorkspaceAdminCommand::Remove {
                 workspace_id: workspace_id_value(workspace_id)?,

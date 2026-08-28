@@ -271,6 +271,12 @@ pub enum WorkspaceAdminCommand {
     Reconcile {
         workspace_id: [u8; 16],
     },
+    ActivateCandidate {
+        workspace_id: [u8; 16],
+        candidate_identity: String,
+        decision_identity: String,
+        request_key: String,
+    },
     Remove {
         workspace_id: [u8; 16],
         policy: RemovalPolicy,
@@ -509,6 +515,7 @@ fn open_operational_store_with_provider_recovery(
     path: &Path,
 ) -> Result<OperationalStore, DaemonError> {
     let mut store = OperationalStore::open(path)?;
+    store.validate_ontology_activation_recovery()?;
     let recovered_at = now_millis()?.to_string();
     let recovered_provider_runs = store.recover_incomplete_provider_runs(&recovered_at)?;
     tracing::info!(
@@ -616,9 +623,34 @@ async fn execute_workspace_command(
         | WorkspaceAdminCommand::Remove { workspace_id, .. } => Some(*workspace_id),
         _ => None,
     };
-    let result = {
+    let result: Result<Vec<WorkspaceRecord>, String> = {
         let mut store = store.lock().await;
-        execute_workspace_command_inner(&mut store, command)
+        match command {
+            WorkspaceAdminCommand::ActivateCandidate {
+                workspace_id,
+                candidate_identity,
+                decision_identity,
+                request_key,
+            } => {
+                let requested_at = now_millis()
+                    .ok()
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MAX);
+                store
+                    .resolve_ontology_activation_request(
+                        workspace_id,
+                        &candidate_identity,
+                        &decision_identity,
+                        &request_key,
+                        requested_at,
+                    )
+                    .and_then(|request| store.activate_ontology_candidate(&request))
+                    .map(|_| Vec::new())
+                    .map_err(|error| ontology_activation_error_code(&error).to_owned())
+            }
+            other => execute_workspace_command_inner(&mut store, other)
+                .map_err(|error| workspace_error_code(&error).to_owned()),
+        }
     };
     match result {
         Ok(workspaces) => {
@@ -665,7 +697,7 @@ async fn execute_workspace_command(
             shutdown_mode: None,
             workspaces: Vec::new(),
             workspace_health: Vec::new(),
-            error_code: Some(workspace_error_code(&error).to_owned()),
+            error_code: Some(error),
         },
     }
 }
@@ -814,12 +846,25 @@ fn execute_workspace_command_inner(
         WorkspaceAdminCommand::Reconcile { workspace_id } => {
             vec![registry.reconcile(workspace_id)?]
         }
+        WorkspaceAdminCommand::ActivateCandidate { .. } => unreachable!(
+            "ontology activation is handled by the sole durable owner route before registry dispatch"
+        ),
         WorkspaceAdminCommand::Remove {
             workspace_id,
             policy,
             purge_confirmations,
         } => vec![registry.remove(workspace_id, policy, purge_confirmations)?],
     })
+}
+
+const fn ontology_activation_error_code(error: &OperationalStoreError) -> &'static str {
+    match error {
+        OperationalStoreError::OntologyActivation(_)
+        | OperationalStoreError::OntologyActivationOutcomeUnknown { .. } => {
+            "ONTOLOGY_ACTIVATION_TRANSACTION_INVALID"
+        }
+        _ => "INTERNAL",
+    }
 }
 
 const fn workspace_error_code(error: &WorkspaceRegistryError) -> &'static str {

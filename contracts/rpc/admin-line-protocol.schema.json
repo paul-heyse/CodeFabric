@@ -36,6 +36,10 @@
       "maxItems": 32,
       "items": {"type": "integer", "minimum": 0, "maximum": 255}
     },
+    "B3Identity": {
+      "type": "string",
+      "pattern": "^b3:[0-9a-f]{64}$"
+    },
     "PublicWorkspaceId": {
       "type": "string",
       "pattern": "^workspace:[0-9a-f]{32}$"
@@ -127,6 +131,18 @@
           "additionalProperties": false,
           "required": ["command", "workspace_id"],
           "properties": {"command": {"enum": ["enable", "disable", "reconcile"]}, "workspace_id": {"$ref": "#/$defs/Id16"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "workspace_id", "candidate_identity", "decision_identity", "request_key"],
+          "properties": {
+            "command": {"const": "activate_candidate"},
+            "workspace_id": {"$ref": "#/$defs/Id16"},
+            "candidate_identity": {"$ref": "#/$defs/B3Identity"},
+            "decision_identity": {"$ref": "#/$defs/B3Identity"},
+            "request_key": {"type": "string", "minLength": 1, "maxLength": 256}
+          }
         },
         {
           "type": "object",

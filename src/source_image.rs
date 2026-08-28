@@ -1832,6 +1832,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1".into(),
                 sandbox_profile_digests: std::collections::BTreeMap::new(),
             },
+            result_authority: None,
             limits_profile_digest: framed(9),
             source_blob_digests: vec![crate::integrity::frame_digest(source_digest)],
         }

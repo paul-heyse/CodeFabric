@@ -417,6 +417,8 @@ pub struct QueryPlanArtifact {
     pub output_partition_count: usize,
     pub output_row_count: usize,
     pub result_checksum_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_authority: Option<crate::snapshot::ResultAuthorityPin>,
     pub canonical_output_schema_digest: String,
     pub result_checksum: String,
     pub reproducibility: Reproducibility,
@@ -874,13 +876,32 @@ impl ServingQuerySession {
                     "query output exhausts checksum working memory".to_owned(),
                 )
             })?;
-        let result = super::result_checksum::result_checksum_v2(
+        let snapshot = self.lease.snapshot();
+        let manifest = snapshot.manifest();
+        let result_authority = self
+            .lease
+            .result_authority()
+            .cloned()
+            .or_else(|| manifest.body.result_authority.clone());
+        let result_checksum_version = result_authority
+            .as_ref()
+            .map_or("ResultChecksumV2", |authority| {
+                authority.checksum_version.as_str()
+            });
+        let result = super::result_checksum::result_checksum_for_version(
+            result_checksum_version,
             physical.schema().as_ref(),
             &batches,
             checksum_encoding_budget,
         )?;
-        let snapshot = self.lease.snapshot();
-        let manifest = snapshot.manifest();
+        let (result_checksum, canonical_schema) = match result {
+            super::result_checksum::VersionedResultChecksum::V1(result) => {
+                (result.checksum, result.canonical_schema)
+            }
+            super::result_checksum::VersionedResultChecksum::V2(result) => {
+                (result.checksum, result.canonical_schema)
+            }
+        };
         let bound_query_id = bound_query_id(
             &plan_template_id,
             &logical_plan,
@@ -970,11 +991,10 @@ impl ServingQuerySession {
             output_schema,
             output_partition_count,
             output_row_count,
-            result_checksum_version: super::result_checksum::RESULT_CHECKSUM_VERSION.to_owned(),
-            canonical_output_schema_digest: crate::integrity::framed_digest(
-                &result.canonical_schema,
-            ),
-            result_checksum: result.checksum,
+            result_checksum_version: result_checksum_version.to_owned(),
+            result_authority,
+            canonical_output_schema_digest: crate::integrity::framed_digest(&canonical_schema),
+            result_checksum,
             reproducibility: Reproducibility {
                 deterministic: true,
                 inputs_pinned: true,
@@ -2301,6 +2321,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".into(),
                 sandbox_profile_digests: BTreeMap::new(),
             },
+            result_authority: None,
             limits_profile_digest: digest(8),
             source_blob_digests: Vec::new(),
         }

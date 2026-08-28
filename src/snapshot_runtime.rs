@@ -17,14 +17,14 @@ use crate::ontology_activation::{
     OntologyActivationFaultPoint, OntologyActivationState, OntologyCandidateDossier,
     OntologyOwnerAcceptance,
 };
-use crate::operational_store::{OperationalStore, OperationalStoreError};
+use crate::operational_store::{ActiveOntologyAuthority, OperationalStore, OperationalStoreError};
 use crate::registries::{
     Phase, ServingActivationState, SnapshotLeaseKind, SnapshotLeaseState,
     WorkspaceRegistryLifecycle,
 };
 use crate::snapshot::{
-    ServingSnapshotManifest, ServingSnapshotManifestBody, SnapshotBasePublication,
-    SnapshotBaseTable, SnapshotManifestError,
+    ResultAuthorityPin, ServingSnapshotManifest, ServingSnapshotManifestBody,
+    SnapshotBasePublication, SnapshotBaseTable, SnapshotManifestError,
 };
 use crate::source_image::{SourceImageError, SourceImageStore};
 
@@ -739,6 +739,20 @@ pub struct SnapshotLeaseRecord {
     pub state: SnapshotLeaseState,
     pub process_instance_id: [u8; 16],
     pub source_blob_lease_id: Option<[u8; 16]>,
+    pub ontology_epoch_identity: Option<String>,
+    pub result_authority: Option<ResultAuthorityPin>,
+}
+
+fn result_authority_pin(authority: ActiveOntologyAuthority) -> ResultAuthorityPin {
+    ResultAuthorityPin {
+        result_authority_identity: authority.result_authority_identity,
+        program_identity: authority.program_identity,
+        function_catalog_identity: authority.function_catalog_identity,
+        policy_identity: authority.policy_identity,
+        query_form_identity: authority.query_form_identity,
+        checksum_version: authority.checksum_version,
+        exact_table_set_identity: authority.exact_table_set_identity,
+    }
 }
 
 /// In-process lease guard retaining the exact immutable snapshot graph.
@@ -757,6 +771,11 @@ impl SnapshotLeaseGuard {
     #[must_use]
     pub fn snapshot(&self) -> Arc<ServingSnapshotCandidate> {
         Arc::clone(&self.snapshot)
+    }
+
+    #[must_use]
+    pub const fn result_authority(&self) -> Option<&ResultAuthorityPin> {
+        self.record.result_authority.as_ref()
     }
 }
 
@@ -795,6 +814,18 @@ impl SnapshotLeaseManager {
         let workspace_id = candidate.manifest.raw_workspace_id()?;
         let snapshot_id = candidate.manifest.raw_snapshot_id()?;
         let publication_id = candidate.manifest.raw_publication_id()?;
+        let active_authority = store.active_ontology_authority(workspace_id)?;
+        let ontology_epoch_identity = active_authority
+            .as_ref()
+            .map(|authority| authority.epoch_identity.clone());
+        let result_authority = active_authority.map(result_authority_pin);
+        if let Some(manifest_authority) = candidate.manifest.body.result_authority.as_ref() {
+            if result_authority.as_ref() != Some(manifest_authority) {
+                return Err(SnapshotRuntimeError::Lease(
+                    "snapshot result authority does not match the active ontology epoch".into(),
+                ));
+            }
+        }
         let expires_at = now
             .checked_add(ttl.as_secs())
             .ok_or_else(|| SnapshotRuntimeError::Lease("expiry overflow".into()))?;
@@ -834,9 +865,10 @@ impl SnapshotLeaseManager {
                  snapshot_id, base_publication_id, required_delta_versions_bytes,
                  requires_overlay, agent_instance_id, created_at, last_heartbeat_at,
                  expires_at, state_code, process_instance_id, orphaned_at,
-                 artifact_expires_at, source_blob_lease_id)
+                 artifact_expires_at, source_blob_lease_id, ontology_epoch_identity,
+                 result_authority_identity)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11,
-                         ?12, NULL, ?13, ?14)",
+                         ?12, NULL, ?13, ?14, ?15, ?16)",
                 params![
                     lease_id.as_slice(),
                     i64::from(kind as u16),
@@ -852,6 +884,10 @@ impl SnapshotLeaseManager {
                     self.process_instance_id.as_slice(),
                     artifact_expires_at.map(sql_u64).transpose()?,
                     source_lease_id.as_ref().map(<[u8; 16]>::as_slice),
+                    ontology_epoch_identity.as_deref(),
+                    result_authority
+                        .as_ref()
+                        .map(|authority| authority.result_authority_identity.as_str()),
                 ],
             )?;
             let updated = transaction.execute(
@@ -885,6 +921,8 @@ impl SnapshotLeaseManager {
                 state: SnapshotLeaseState::Active,
                 process_instance_id: self.process_instance_id,
                 source_blob_lease_id: source_lease_id,
+                ontology_epoch_identity,
+                result_authority,
             },
             snapshot: candidate,
         })
@@ -1123,10 +1161,18 @@ impl SnapshotLeaseManager {
             .open()?
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                    "SELECT lease_id, lease_kind_code, workspace_id, snapshot_id,
-                 base_publication_id, created_at, last_heartbeat_at, expires_at,
-                 state_code, process_instance_id, source_blob_lease_id
-                 FROM snapshot_lease WHERE workspace_id=?1 ORDER BY lease_id",
+                    "SELECT lease.lease_id, lease.lease_kind_code, lease.workspace_id,
+                 lease.snapshot_id, lease.base_publication_id, lease.created_at,
+                 lease.last_heartbeat_at, lease.expires_at, lease.state_code,
+                 lease.process_instance_id, lease.source_blob_lease_id,
+                 lease.ontology_epoch_identity, authority.result_authority_identity,
+                 authority.program_identity, authority.function_catalog_identity,
+                 authority.policy_identity, authority.query_form_identity,
+                 authority.checksum_version, authority.exact_table_set_identity
+                 FROM snapshot_lease AS lease
+                 LEFT JOIN ontology_result_authority AS authority
+                   ON authority.result_authority_identity=lease.result_authority_identity
+                 WHERE lease.workspace_id=?1 ORDER BY lease.lease_id",
                 )?;
                 statement
                     .query_map([workspace_id.as_slice()], |row| {
@@ -1134,6 +1180,20 @@ impl SnapshotLeaseManager {
                             .map_err(|_| rusqlite::Error::InvalidQuery)?;
                         let state = SnapshotLeaseState::try_from(row.get::<_, u16>(8)?)
                             .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                        let result_authority_identity = row.get::<_, Option<String>>(12)?;
+                        let result_authority = result_authority_identity
+                            .map(|result_authority_identity| {
+                                Ok::<_, rusqlite::Error>(ResultAuthorityPin {
+                                    result_authority_identity,
+                                    program_identity: row.get(13)?,
+                                    function_catalog_identity: row.get(14)?,
+                                    policy_identity: row.get(15)?,
+                                    query_form_identity: row.get(16)?,
+                                    checksum_version: row.get(17)?,
+                                    exact_table_set_identity: row.get(18)?,
+                                })
+                            })
+                            .transpose()?;
                         Ok(SnapshotLeaseRecord {
                             lease_id: fixed_blob_sql(row.get(0)?)?,
                             kind,
@@ -1149,6 +1209,8 @@ impl SnapshotLeaseManager {
                                 .get::<_, Option<Vec<u8>>>(10)?
                                 .map(fixed_blob_sql)
                                 .transpose()?,
+                            ontology_epoch_identity: row.get(11)?,
+                            result_authority,
                         })
                     })?
                     .collect::<Result<Vec<_>, _>>()
@@ -1371,10 +1433,15 @@ fn sql_timestamp(value: i64) -> rusqlite::Result<u64> {
 mod tests {
     use super::*;
     use crate::fabric::SnapshotProviderCatalog;
+    use crate::governed_session::GovernedSession;
+    use crate::ontology_candidate::CandidateClosureRunner;
+    use crate::ontology_gate::GateResourceEnvelope;
+    use crate::ontology_program::{OntologyPackagingProfile, build_ontology_program_package};
     use crate::snapshot::{
         SnapshotBundles, SnapshotContextRecord, SnapshotContexts, SnapshotIndexes, SnapshotOverlay,
         SnapshotSource,
     };
+    use datafusion::prelude::SessionConfig;
     use rusqlite::params;
     use tempfile::tempdir;
 
@@ -1467,6 +1534,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".into(),
                 sandbox_profile_digests: std::collections::BTreeMap::new(),
             },
+            result_authority: None,
             limits_profile_digest: digest(8),
             source_blob_digests: Vec::new(),
         }
@@ -1480,6 +1548,50 @@ mod tests {
             publication_scope(source_generation),
         ));
         Arc::new(ServingSnapshotCandidate::build(body(source_generation), catalog, &[]).unwrap())
+    }
+
+    async fn ontology_report(
+        predecessor: Option<String>,
+    ) -> crate::ontology_candidate::CandidateClosureReport {
+        let publication_id = [0x61; 16];
+        let publication = crate::fabric::PublicationOutcome {
+            publication_id,
+            scope: publication_scope(1),
+            pointer: crate::fabric::CurrentPublicationRecord {
+                workspace_id: WORKSPACE,
+                publication_id,
+                pointer_generation: 1,
+                updated_at_micros: 100,
+            },
+            tables: BTreeMap::from([(
+                1,
+                crate::fabric::PublicationTableRecord {
+                    publication_id,
+                    workspace_id: WORKSPACE,
+                    table_code: 1,
+                    table_uri: "file:///ontology-authority/workspace".into(),
+                    delta_version: 7,
+                    schema_fingerprint: [0x62; 32],
+                    row_count: 1,
+                    owner_count: 1,
+                    table_checksum: [0x63; 32],
+                    primary_key_digest: [0x64; 32],
+                    required: true,
+                    validated: true,
+                },
+            )]),
+        };
+        CandidateClosureRunner::new_for_epoch(
+            build_ontology_program_package(&OntologyPackagingProfile::default()).unwrap(),
+            publication,
+            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1").unwrap(),
+            predecessor,
+            100_000,
+        )
+        .unwrap()
+        .execute(&GateResourceEnvelope::default())
+        .await
+        .unwrap()
     }
 
     fn candidate_with_table() -> Arc<ServingSnapshotCandidate> {
@@ -2123,5 +2235,121 @@ mod tests {
         assert_eq!(metrics.recovery_count, 1);
         assert_eq!(metrics.minimum_window_count, 1);
         assert_eq!(metrics.retained_count, 3);
+    }
+
+    #[tokio::test]
+    async fn ontology_result_authority_lease_matrix() {
+        let (directory, mut store) = store();
+        let database_path = directory.path().join("state.sqlite3");
+        let runtime = ServingSnapshotRuntime::default();
+        let legacy = candidate(1);
+        runtime
+            .activate(&mut store, Arc::clone(&legacy), None, 0, 1, 10, None)
+            .unwrap();
+        let mut sources = source_store(&directory);
+        let manager = SnapshotLeaseManager::new([0x72; 16]);
+        let old_lease = manager
+            .acquire(
+                &mut store,
+                &mut sources,
+                Arc::clone(&legacy),
+                SnapshotLeaseKind::ResourceRead,
+                None,
+                11,
+                Duration::from_secs(100),
+                None,
+            )
+            .unwrap();
+        assert!(old_lease.result_authority().is_none());
+
+        let report = ontology_report(None).await;
+        store
+            .persist_proved_ontology_candidate(&report, 12)
+            .unwrap();
+        let decision = crate::operational_store::OntologyOwnerDecision::new(
+            report.candidate_identity(),
+            "owner:ontology-release",
+            report.durable_evidence().policy_identity.clone(),
+            13,
+        )
+        .unwrap();
+        store.record_ontology_owner_decision(&decision).unwrap();
+        let request = store
+            .resolve_ontology_activation_request(
+                WORKSPACE,
+                report.candidate_identity(),
+                decision.identity(),
+                "lease-authority-activation",
+                13,
+            )
+            .unwrap();
+        store.activate_ontology_candidate(&request).unwrap();
+        let authority = store.active_ontology_authority(WORKSPACE).unwrap().unwrap();
+
+        let mut target_body = body(2);
+        target_body.manifest_version = "2.0".into();
+        target_body.result_authority = Some(result_authority_pin(authority.clone()));
+        let target_catalog = Arc::new(SnapshotProviderCatalog::empty_for_snapshot_tests(
+            PUBLICATION,
+            0,
+            OVERLAY,
+            publication_scope(2),
+        ));
+        let target =
+            Arc::new(ServingSnapshotCandidate::build(target_body, target_catalog, &[]).unwrap());
+        runtime
+            .activate(
+                &mut store,
+                Arc::clone(&target),
+                Some(legacy.manifest().raw_snapshot_id().unwrap()),
+                1,
+                2,
+                20,
+                None,
+            )
+            .unwrap();
+        let new_lease = manager
+            .acquire(
+                &mut store,
+                &mut sources,
+                target,
+                SnapshotLeaseKind::ResourceRead,
+                None,
+                21,
+                Duration::from_secs(100),
+                None,
+            )
+            .unwrap();
+        let new_authority = new_lease.result_authority().unwrap();
+        assert_eq!(
+            new_authority.result_authority_identity,
+            authority.result_authority_identity
+        );
+        assert_eq!(new_authority.checksum_version, "ResultChecksumV2");
+        assert_ne!(
+            old_lease.record().snapshot_id,
+            new_lease.record().snapshot_id
+        );
+
+        drop(store);
+        let reopened = OperationalStore::open(&database_path).unwrap();
+        let leases = SnapshotLeaseManager::list(&reopened, WORKSPACE).unwrap();
+        assert_eq!(leases.len(), 2);
+        assert_eq!(
+            leases
+                .iter()
+                .filter(|lease| lease.result_authority.is_some())
+                .count(),
+            1
+        );
+        assert!(leases.iter().any(|lease| {
+            lease.result_authority.as_ref().is_some_and(|pin| {
+                pin.program_identity == authority.program_identity
+                    && pin.function_catalog_identity == authority.function_catalog_identity
+                    && pin.policy_identity == authority.policy_identity
+                    && pin.query_form_identity == authority.query_form_identity
+                    && pin.exact_table_set_identity == authority.exact_table_set_identity
+            })
+        }));
     }
 }

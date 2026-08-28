@@ -156,6 +156,7 @@ pub(crate) struct DurableCandidateEvidence {
     pub package_identity: String,
     pub config_identity: String,
     pub policy_identity: String,
+    pub result_policy_identity: String,
     pub exact_table_set_identity: String,
     pub function_catalog_identity: String,
     pub query_form_identity: String,
@@ -799,6 +800,7 @@ impl CandidateClosureRunner {
             "session_identity": self.session.session_identity(),
             "config_identity": self.session.config_identity(),
             "policy_identity": self.session.policy_identity(),
+            "result_policy_identity": framed([b"candidate-policy.v1".as_slice(), self.session.policy_identity().as_bytes()]),
             "exact_table_set_identity": self.exact_tables.identity(),
             "function_catalog_identity": self.package.manifest.member_identities["program.calculation_catalog"],
             "query_form_identity": self.package.manifest.member_identities["program.phrase_operation"],
@@ -813,11 +815,15 @@ impl CandidateClosureRunner {
         let query_form_identity =
             self.package.manifest.member_identities["program.phrase_operation"].clone();
         let checksum_version = crate::fabric::RESULT_CHECKSUM_VERSION.to_owned();
+        let result_policy_identity = framed([
+            b"candidate-policy.v1".as_slice(),
+            self.session.policy_identity().as_bytes(),
+        ]);
         let result_authority_identity = framed([
             b"ontology-result-authority.v1".as_slice(),
             self.package.manifest.logical_program_identity.as_bytes(),
             function_catalog_identity.as_bytes(),
-            self.session.policy_identity().as_bytes(),
+            result_policy_identity.as_bytes(),
             query_form_identity.as_bytes(),
             checksum_version.as_bytes(),
             self.exact_tables.identity().as_bytes(),
@@ -831,6 +837,7 @@ impl CandidateClosureRunner {
             package_identity: self.package.manifest.package_identity.clone(),
             config_identity: self.session.config_identity().to_owned(),
             policy_identity: self.session.policy_identity().to_owned(),
+            result_policy_identity,
             exact_table_set_identity: self.exact_tables.identity().to_owned(),
             function_catalog_identity,
             query_form_identity,

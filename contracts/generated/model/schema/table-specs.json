@@ -2218,6 +2218,20 @@
           "name": "source_blob_lease_id",
           "nullable": true,
           "sqlite_type": "BLOB"
+        },
+        {
+          "id_domain": null,
+          "logical_type": "utf8",
+          "name": "ontology_epoch_identity",
+          "nullable": true,
+          "sqlite_type": "TEXT"
+        },
+        {
+          "id_domain": null,
+          "logical_type": "utf8",
+          "name": "result_authority_identity",
+          "nullable": true,
+          "sqlite_type": "TEXT"
         }
       ],
       "name": "snapshot_lease",
@@ -3802,7 +3816,7 @@
   },
   "source": {
     "artifact_id": "codefabric.schema.contract-ir",
-    "source_digest": "b3:92daa3bdca698f0dcdc09014c9e31c87220f9ec7ffc9f888d057f6973fd5109c"
+    "source_digest": "b3:4d524d6389ffcdd3b6f55485b43ffbd1c1994b3371aabcfb1d693e7ac01a68f2"
   },
   "sqlite_foreign_key_posture": "NOT_EMITTED_CROSS_STORE",
   "table_scopes": [

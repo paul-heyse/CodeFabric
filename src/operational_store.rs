@@ -20,7 +20,7 @@ use crate::model_generated::semantic_lane_fragments::{
 };
 use crate::snapshot::ServingSnapshotManifest;
 
-const SCHEMA_VERSION: u32 = 12;
+const SCHEMA_VERSION: u32 = 13;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str =
     include_str!("../contracts/generated/model/schema/operational-store.sql");
@@ -204,6 +204,20 @@ pub struct OntologyActivationOutcome {
     pub pointer_generation: i64,
     pub receipt_set_identity: String,
     pub idempotent_replay: bool,
+}
+
+/// Complete immutable interpretation authority selected by the active ontology epoch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActiveOntologyAuthority {
+    pub epoch_identity: String,
+    pub candidate_identity: String,
+    pub result_authority_identity: String,
+    pub program_identity: String,
+    pub function_catalog_identity: String,
+    pub policy_identity: String,
+    pub query_form_identity: String,
+    pub checksum_version: String,
+    pub exact_table_set_identity: String,
 }
 
 fn query_execution_terminal_from_row(
@@ -1088,6 +1102,96 @@ impl OperationalStore {
         })
     }
 
+    /// Validate every durable ontology activation before the daemon admits new work.
+    ///
+    /// Activation is a single `SQLite` transaction, so a normal restart can observe only a
+    /// fully committed epoch or no epoch. This check treats any non-terminal request, detached
+    /// active row, or pointer whose acceptance/result-authority closure is incomplete as durable
+    /// corruption instead of attempting to repair or infer authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OperationalStoreError::OntologyActivation`] when the persisted activation
+    /// closure is not self-consistent, or a `SQLite` error when validation cannot be completed.
+    pub fn validate_ontology_activation_recovery(&self) -> Result<(), OperationalStoreError> {
+        let non_terminal_requests = self.connection.query_row(
+            "SELECT COUNT(*) FROM ontology_activation_request WHERE state <> 'COMPLETED'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        if non_terminal_requests != 0 {
+            return Err(OperationalStoreError::OntologyActivation(format!(
+                "restart observed {non_terminal_requests} non-terminal activation request(s)"
+            )));
+        }
+
+        let invalid_pointers = self.connection.query_row(
+            "SELECT COUNT(*)
+             FROM ontology_active_pointer AS pointer
+             LEFT JOIN ontology_candidate AS candidate
+               ON candidate.candidate_identity=pointer.candidate_identity
+              AND candidate.workspace_id=pointer.workspace_id
+             LEFT JOIN ontology_serving_epoch AS epoch
+               ON epoch.epoch_identity=pointer.epoch_identity
+              AND epoch.workspace_id=pointer.workspace_id
+              AND epoch.candidate_identity=pointer.candidate_identity
+             LEFT JOIN ontology_result_authority AS authority
+               ON authority.result_authority_identity=epoch.result_authority_identity
+              AND authority.workspace_id=pointer.workspace_id
+             LEFT JOIN ontology_acceptance AS acceptance
+               ON acceptance.candidate_identity=pointer.candidate_identity
+              AND acceptance.workspace_id=pointer.workspace_id
+              AND acceptance.pointer_generation=pointer.pointer_generation
+             LEFT JOIN ontology_activation_request AS request
+               ON request.request_key=acceptance.request_key
+              AND request.workspace_id=pointer.workspace_id
+              AND request.candidate_identity=pointer.candidate_identity
+             WHERE candidate.candidate_identity IS NULL
+                OR candidate.state <> 'ACTIVE'
+                OR epoch.epoch_identity IS NULL
+                OR epoch.state <> 'ACTIVE'
+                OR epoch.predecessor_epoch_identity IS NOT pointer.predecessor_epoch_identity
+                OR authority.result_authority_identity IS NULL
+                OR authority.exact_table_set_identity <> candidate.exact_table_set_identity
+                OR acceptance.candidate_identity IS NULL
+                OR request.request_key IS NULL
+                OR request.state <> 'COMPLETED'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let detached_active_candidates = self.connection.query_row(
+            "SELECT COUNT(*) FROM ontology_candidate AS candidate
+             WHERE candidate.state='ACTIVE'
+               AND NOT EXISTS (
+                 SELECT 1 FROM ontology_active_pointer AS pointer
+                 WHERE pointer.workspace_id=candidate.workspace_id
+                   AND pointer.candidate_identity=candidate.candidate_identity
+               )",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let detached_active_epochs = self.connection.query_row(
+            "SELECT COUNT(*) FROM ontology_serving_epoch AS epoch
+             WHERE epoch.state='ACTIVE'
+               AND NOT EXISTS (
+                 SELECT 1 FROM ontology_active_pointer AS pointer
+                 WHERE pointer.workspace_id=epoch.workspace_id
+                   AND pointer.candidate_identity=epoch.candidate_identity
+                   AND pointer.epoch_identity=epoch.epoch_identity
+               )",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        if invalid_pointers != 0 || detached_active_candidates != 0 || detached_active_epochs != 0 {
+            return Err(OperationalStoreError::OntologyActivation(format!(
+                "restart activation closure is invalid: invalid_pointers={invalid_pointers}, \
+                 detached_active_candidates={detached_active_candidates}, \
+                 detached_active_epochs={detached_active_epochs}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Commit one terminal meaning and its primary payload lease atomically.
     ///
     /// # Errors
@@ -1405,7 +1509,7 @@ impl OperationalStore {
                     evidence.workspace_id.as_slice(),
                     evidence.program_identity,
                     evidence.function_catalog_identity,
-                    evidence.policy_identity,
+                    evidence.result_policy_identity,
                     evidence.query_form_identity,
                     evidence.checksum_version,
                     evidence.exact_table_set_identity,
@@ -1511,6 +1615,54 @@ impl OperationalStore {
         request: &OntologyActivationRequest,
     ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
         self.activate_ontology_candidate_with_fault(request, None)
+    }
+
+    /// Resolve an identity-only admin command to the current durable predecessor and CAS
+    /// generation. The command cannot inject pointer, policy, or proof contents.
+    pub fn resolve_ontology_activation_request(
+        &self,
+        workspace_id: [u8; 16],
+        candidate_identity: &str,
+        decision_identity: &str,
+        request_key: &str,
+        requested_at: i64,
+    ) -> Result<OntologyActivationRequest, OperationalStoreError> {
+        let candidate = self
+            .ontology_candidate(candidate_identity)?
+            .ok_or_else(|| {
+                OperationalStoreError::OntologyActivation(format!(
+                    "candidate {candidate_identity} is absent"
+                ))
+            })?;
+        if candidate.workspace_id != workspace_id {
+            return Err(OperationalStoreError::OntologyActivation(
+                "admin workspace does not own the candidate".into(),
+            ));
+        }
+        let pointer = self
+            .connection
+            .query_row(
+                "SELECT epoch_identity, pointer_generation FROM ontology_active_pointer
+                 WHERE workspace_id=?1",
+                [workspace_id.as_slice()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        let (expected_predecessor_identity, expected_pointer_generation) =
+            pointer.map_or((None, 0), |(epoch, generation)| (Some(epoch), generation));
+        if candidate.predecessor_epoch_identity != expected_predecessor_identity {
+            return Err(OperationalStoreError::OntologyActivation(
+                "candidate is not sealed against the current predecessor epoch".into(),
+            ));
+        }
+        Ok(OntologyActivationRequest {
+            request_key: request_key.into(),
+            candidate_identity: candidate_identity.into(),
+            decision_identity: decision_identity.into(),
+            expected_predecessor_identity,
+            expected_pointer_generation,
+            requested_at,
+        })
     }
 
     fn activate_ontology_candidate_with_fault(
@@ -1632,6 +1784,10 @@ impl OperationalStore {
                 [prior_candidate],
             )?;
         }
+        let result_policy_identity = framed_digest_parts([
+            b"candidate-policy.v1".as_slice(),
+            candidate.policy_identity.as_bytes(),
+        ]);
         let result_authority_identity: String = transaction.query_row(
             "SELECT result_authority_identity FROM ontology_result_authority
              WHERE workspace_id=?1 AND program_identity=?2 AND policy_identity=?3
@@ -1639,7 +1795,7 @@ impl OperationalStore {
             params![
                 candidate.workspace_id,
                 candidate.program_identity,
-                candidate.policy_identity,
+                result_policy_identity,
                 candidate.exact_table_set_identity,
             ],
             |row| row.get(0),
@@ -1786,6 +1942,44 @@ impl OperationalStore {
             .map_err(Into::into)
     }
 
+    /// Resolve the active epoch to its complete versioned result authority.
+    pub fn active_ontology_authority(
+        &self,
+        workspace_id: [u8; 16],
+    ) -> Result<Option<ActiveOntologyAuthority>, OperationalStoreError> {
+        self.connection
+            .query_row(
+                "SELECT pointer.epoch_identity, pointer.candidate_identity,
+                   authority.result_authority_identity, authority.program_identity,
+                   authority.function_catalog_identity, authority.policy_identity,
+                   authority.query_form_identity, authority.checksum_version,
+                   authority.exact_table_set_identity
+                 FROM ontology_active_pointer AS pointer
+                 JOIN ontology_serving_epoch AS epoch
+                   ON epoch.epoch_identity=pointer.epoch_identity
+                  AND epoch.candidate_identity=pointer.candidate_identity
+                 JOIN ontology_result_authority AS authority
+                   ON authority.result_authority_identity=epoch.result_authority_identity
+                 WHERE pointer.workspace_id=?1 AND epoch.state='ACTIVE'",
+                [workspace_id.as_slice()],
+                |row| {
+                    Ok(ActiveOntologyAuthority {
+                        epoch_identity: row.get(0)?,
+                        candidate_identity: row.get(1)?,
+                        result_authority_identity: row.get(2)?,
+                        program_identity: row.get(3)?,
+                        function_catalog_identity: row.get(4)?,
+                        policy_identity: row.get(5)?,
+                        query_form_identity: row.get(6)?,
+                        checksum_version: row.get(7)?,
+                        exact_table_set_identity: row.get(8)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Checkpoint the WAL during drain without changing journal mode.
     ///
     /// # Errors
@@ -1910,11 +2104,15 @@ impl OperationalStore {
                 migrate_v11_to_v12(&transaction)?;
             }
             11 => migrate_v11_to_v12(&transaction)?,
+            12 => {}
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
                 )));
             }
+        }
+        if version != 0 {
+            migrate_v12_to_v13(&transaction)?;
         }
         if fault == Some(StoreFaultPoint::MigrationBeforeCommit) {
             return Err(OperationalStoreError::InjectedFault(
@@ -2361,6 +2559,16 @@ fn migrate_v11_to_v12(transaction: &Transaction<'_>) -> Result<(), OperationalSt
         "ontology_serving_epoch",
     ] {
         transaction.execute_batch(&generated_table_ddl(table)?)?;
+    }
+    Ok(())
+}
+
+fn migrate_v12_to_v13(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    if !table_has_column(transaction, "snapshot_lease", "ontology_epoch_identity")? {
+        transaction.execute_batch(
+            "ALTER TABLE snapshot_lease ADD COLUMN ontology_epoch_identity TEXT;
+             ALTER TABLE snapshot_lease ADD COLUMN result_authority_identity TEXT;",
+        )?;
     }
     Ok(())
 }
@@ -3300,6 +3508,21 @@ mod tests {
                 .unwrap(),
             12
         );
+        for column in ["ontology_epoch_identity", "result_authority_identity"] {
+            assert!(
+                migrated
+                    .connection
+                    .query_row(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM pragma_table_info('snapshot_lease') WHERE name=?1
+                         )",
+                        [column],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .unwrap(),
+                "missing migrated snapshot_lease.{column}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -3470,6 +3693,7 @@ mod tests {
         ));
         drop(store);
         let mut reopened = OperationalStore::open(&path).unwrap();
+        reopened.validate_ontology_activation_recovery().unwrap();
         let recovered = reopened.reconcile_ontology_activation(&request).unwrap();
         assert!(recovered.idempotent_replay);
         assert_eq!(recovered.pointer_generation, 1);
@@ -3481,6 +3705,171 @@ mod tests {
                 })
                 .unwrap(),
             1
+        );
+        reopened
+            .connection
+            .execute(
+                "UPDATE ontology_activation_request SET state='COMMITTING' WHERE request_key=?1",
+                [&request.request_key],
+            )
+            .unwrap();
+        assert!(matches!(
+            reopened.validate_ontology_activation_recovery(),
+            Err(OperationalStoreError::OntologyActivation(message))
+                if message.contains("non-terminal activation request")
+        ));
+    }
+
+    #[tokio::test]
+    async fn ontology_admin_activation_owner_route() {
+        let (_directory, path) = database();
+        let workspace = [0x7b; 16];
+        let report = proved_candidate(workspace, 0x7c, 37, None).await;
+        let decision = owner_decision(&report, 2_500);
+        let mut store = OperationalStore::open(&path).unwrap();
+        let command = crate::daemon::WorkspaceAdminCommand::ActivateCandidate {
+            workspace_id: workspace,
+            candidate_identity: report.candidate_identity().into(),
+            decision_identity: decision.identity().into(),
+            request_key: "admin-owner-route".into(),
+        };
+        let command_value = serde_json::to_value(&command).unwrap();
+        assert_eq!(
+            command_value
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "candidate_identity".into(),
+                "command".into(),
+                "decision_identity".into(),
+                "request_key".into(),
+                "workspace_id".into(),
+            ])
+        );
+        let mut forged = command_value;
+        forged["policy_identity"] = serde_json::Value::String("caller-forbidden".into());
+        assert!(serde_json::from_value::<crate::daemon::WorkspaceAdminCommand>(forged).is_err());
+        store
+            .persist_proved_ontology_candidate(&report, 1_500)
+            .unwrap();
+        store.record_ontology_owner_decision(&decision).unwrap();
+        let resolved = store
+            .resolve_ontology_activation_request(
+                workspace,
+                report.candidate_identity(),
+                decision.identity(),
+                "admin-owner-route",
+                2_500,
+            )
+            .unwrap();
+        assert_eq!(resolved.expected_pointer_generation, 0);
+        assert!(resolved.expected_predecessor_identity.is_none());
+        let outcome = store.activate_ontology_candidate(&resolved).unwrap();
+        assert_eq!(outcome.pointer_generation, 1);
+        assert_eq!(
+            store
+                .active_ontology_authority(workspace)
+                .unwrap()
+                .unwrap()
+                .candidate_identity,
+            report.candidate_identity()
+        );
+    }
+
+    #[tokio::test]
+    async fn ontology_activation_concurrency_forward_rollback() {
+        let (_directory, path) = database();
+        let workspace = [0x7d; 16];
+        let first = proved_candidate(workspace, 0x7e, 41, None).await;
+        let first_decision = owner_decision(&first, 2_600);
+        let mut store = OperationalStore::open(&path).unwrap();
+        store
+            .persist_proved_ontology_candidate(&first, 1_600)
+            .unwrap();
+        store
+            .record_ontology_owner_decision(&first_decision)
+            .unwrap();
+        let first_request = store
+            .resolve_ontology_activation_request(
+                workspace,
+                first.candidate_identity(),
+                first_decision.identity(),
+                "activate-first",
+                2_600,
+            )
+            .unwrap();
+        let first_outcome = store.activate_ontology_candidate(&first_request).unwrap();
+
+        let successor = proved_candidate(
+            workspace,
+            0x7f,
+            43,
+            Some(first_outcome.epoch_identity.clone()),
+        )
+        .await;
+        let successor_decision = owner_decision(&successor, 2_700);
+        store
+            .persist_proved_ontology_candidate(&successor, 1_700)
+            .unwrap();
+        store
+            .record_ontology_owner_decision(&successor_decision)
+            .unwrap();
+        let winner = store
+            .resolve_ontology_activation_request(
+                workspace,
+                successor.candidate_identity(),
+                successor_decision.identity(),
+                "activate-successor-winner",
+                2_700,
+            )
+            .unwrap();
+        let mut loser = winner.clone();
+        loser.request_key = "activate-successor-loser".into();
+        let successor_outcome = store.activate_ontology_candidate(&winner).unwrap();
+        assert_eq!(successor_outcome.pointer_generation, 2);
+        assert!(store.activate_ontology_candidate(&loser).is_err());
+
+        let rollback = proved_candidate(
+            workspace,
+            0x80,
+            41,
+            Some(successor_outcome.epoch_identity.clone()),
+        )
+        .await;
+        let rollback_decision = owner_decision(&rollback, 2_800);
+        store
+            .persist_proved_ontology_candidate(&rollback, 1_800)
+            .unwrap();
+        store
+            .record_ontology_owner_decision(&rollback_decision)
+            .unwrap();
+        let rollback_request = store
+            .resolve_ontology_activation_request(
+                workspace,
+                rollback.candidate_identity(),
+                rollback_decision.identity(),
+                "activate-forward-rollback",
+                2_800,
+            )
+            .unwrap();
+        let rollback_outcome = store
+            .activate_ontology_candidate(&rollback_request)
+            .unwrap();
+        assert_eq!(rollback_outcome.pointer_generation, 3);
+        assert_ne!(
+            rollback_outcome.epoch_identity,
+            first_outcome.epoch_identity
+        );
+        assert_eq!(
+            store
+                .active_ontology_authority(workspace)
+                .unwrap()
+                .unwrap()
+                .candidate_identity,
+            rollback.candidate_identity()
         );
     }
 }

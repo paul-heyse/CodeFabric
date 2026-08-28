@@ -2620,6 +2620,7 @@ mod tests {
                 toolchain_bundle_id: "toolchain:1.0".into(),
                 sandbox_profile_digests: BTreeMap::new(),
             },
+            result_authority: None,
             limits_profile_digest: framed(9),
             source_blob_digests: Vec::new(),
         }
