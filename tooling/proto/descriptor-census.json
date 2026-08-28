@@ -5638,6 +5638,45 @@
               "proto3_optional": false,
               "type": "TYPE_UINT64",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 14,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "trustProfile",
+              "label": "LABEL_OPTIONAL",
+              "name": "trust_profile",
+              "number": 15,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 16,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeModulesRequest",
@@ -6431,6 +6470,45 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.provider.v1.SourceSnapshotLease"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "maximumContexts",
+              "label": "LABEL_OPTIONAL",
+              "name": "maximum_contexts",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "maximumMemoryMib",
+              "label": "LABEL_OPTIONAL",
+              "name": "maximum_memory_mib",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.OpenContextRequest",
@@ -6653,6 +6731,45 @@
               "proto3_optional": false,
               "type": "TYPE_ENUM",
               "type_name": ".codefabric.provider.v1.ProviderRunState"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "recheckedModuleIds",
+              "label": "LABEL_REPEATED",
+              "name": "rechecked_module_ids",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "trustProfile",
+              "label": "LABEL_OPTIONAL",
+              "name": "trust_profile",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.RunTerminal",

@@ -154,6 +154,11 @@ provider-statistics-contract-check:
 [group('test')]
 provider-protocol-check:
     cargo nextest run --locked --lib -E 'test(/wp59_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail
+
+[doc("Exercise the fail-closed semantic-provider sandbox escape matrix on the current host")]
+[group('test')]
+semantic-sandbox-host-matrix-check:
+    cargo nextest run --locked --lib -E 'test(/semantic_sandbox_current_host_escape_matrix/)' --no-tests=fail
     @if rg -n 'ObservationMessage|CanonicalFact|encode_selected|with_skip_validation' src/ rustc-extractor/src/; then echo 'provider protocol legacy or unsafe IPC validation bypass remains' >&2; exit 1; fi
     @rg -n 'StreamDecoder::new\(\)\.with_require_alignment\(false\)' src/fact_ingest.rs >/dev/null
 

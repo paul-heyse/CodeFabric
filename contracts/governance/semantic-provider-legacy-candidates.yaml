@@ -3,7 +3,7 @@ artifact_kind: governance-registry
 version: "1.0"
 compatible_suite_major: 1
 status: accepted
-canonical_digest: "b3:1d03aa938d72e3fa5d4ce0972cd996d5a83efcabf3579ce7f81ce3af267ad82b"
+canonical_digest: "b3:f8c6b906cffde2b8ec9e8c234259306f8249bfcfbf03388c6286205041a905c8"
 active_state_path: docs/plans/state/codefabric-waves-8-12-semantic-profiles_v2_state.json
 candidates:
   - candidate_id: DB01_DIRECT_PYREFLY_INVOCATION
@@ -37,7 +37,6 @@ candidates:
     probe: {kind: regex, paths: [src, rustc-extractor/src], pattern: '(statement_kinds|terminator_kinds)'}
     zero_state_after: WP19
 allows:
-  - {allow_id: ALLOW_DB01_PY_RUNTIME_AUTHORITY, candidate_id: DB01_DIRECT_PYREFLY_INVOCATION, path: src/provider_runtime/fixture.rs, scope: python, rationale: ProviderRuntime-owned fixture adapter is the current execution authority, owner: provider-runtime-owner, expiry_packet: NEVER, replacement: production ProviderRuntime adapter}
   - {allow_id: ALLOW_DB01_RS_RUNTIME_AUTHORITY, candidate_id: DB01_DIRECT_RUSTC_INVOCATION, path: src/provider_runtime/fixture.rs, scope: rust, rationale: ProviderRuntime-owned fixture adapter is the current execution authority, owner: provider-runtime-owner, expiry_packet: NEVER, replacement: production ProviderRuntime adapter}
   - {allow_id: ALLOW_DB03_PY_SIDECAR_TRANSITION, candidate_id: DB03_PYTHON_OPAQUE_SEMANTIC_INGEST, path: pyrefly-sidecar/src/pyrefly_link.rs, scope: python, rationale: pinned Pyrefly output remains opaque until typed observation tables land, owner: pyrefly-provider-owner, expiry_packet: WP13, replacement: typed registered Python observation columns}
   - {allow_id: ALLOW_DB03_PY_SCHEMA_TRANSITION, candidate_id: DB03_PYTHON_OPAQUE_SEMANTIC_INGEST, path: src/bin/codefabric_model/schema_driver.rs, scope: python, rationale: schema compiler names the transitional opaque fields until typed observations land, owner: schema-owner, expiry_packet: WP13, replacement: typed observation Contract IR}

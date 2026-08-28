@@ -26,7 +26,7 @@
   },
   "families": [
     {
-      "action_key": "b3:7936e65e65ec9aa1621cf505606d950e235bdbc5d6ae832bd358d4f809343886",
+      "action_key": "b3:feff5f4b81d4d4e263993c2aa636ba9ea4371678ee14af230d7878661ab7b850",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -132,7 +132,7 @@
       }
     },
     {
-      "action_key": "b3:283cd2671e12ea027268c80a0a30c0bab2e7e77d8fd7322ea569f367a3c9260e",
+      "action_key": "b3:3a4b9e3df99f5f34aa839c8a655478e7548c3436d7e6bcc2208f751d242b2c36",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -163,7 +163,7 @@
       "rule_version": "one-fds-grpc-tools-compile-fds-v1",
       "tool_identity": {
         "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
-        "descriptor_sha256": "be46a9f5f85cd79f2f202c1d2f2b0452f90d0b6c9d33cd1bae9244b2b0bf7b18",
+        "descriptor_sha256": "e38a6a97780819d1ec410ab685e621e7c05b2fc31b982895dcc8db27a57a6ccc",
         "python": {
           "grpcio": "1.83.0",
           "grpcio-tools": "1.83.0",
@@ -192,7 +192,7 @@
         "sources": {
           "contracts/rpc/cpg_query_service.proto": "b3:f87f09b6d8a39927fee8a4693c7b0b274807ebc6f06ef3a231b91b1acf74f510",
           "contracts/rpc/provider_control.proto": "b3:a8aa0d10cddb81ff8c1eb5a9b1de9068a79b2719437949c04aa24baeddebad33",
-          "contracts/rpc/pyrefly_sidecar.proto": "b3:84a7aba3389ec9cefcc956c25c8ba3725221b161d6540f72fa4880a2e63f2e2c",
+          "contracts/rpc/pyrefly_sidecar.proto": "b3:ea18ab5217275f5f54e5c4d61bb2413f3ad2d785d324ab46e025f7d94b66cc8c",
           "contracts/rpc/rustc_extractor.proto": "b3:3fb3384fa6dfd521b4ed4690102d5e00e8c7fda7f4a95c5c2543d81bd156fac6"
         }
       }

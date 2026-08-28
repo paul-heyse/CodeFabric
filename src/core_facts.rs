@@ -2545,6 +2545,9 @@ mod tests {
             }],
             capability_codes: Vec::new(),
             overall_digest: framed(0x25),
+            rechecked_module_ids: vec!["module:fixture".to_owned()],
+            sandbox_profile_digest: framed(0x26),
+            trust_profile: "UNTRUSTED_SANDBOXED".to_owned(),
         }
     }
 

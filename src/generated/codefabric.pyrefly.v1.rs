@@ -59,6 +59,12 @@ pub struct OpenContextRequest {
     #[prost(message, optional, tag = "5")]
     pub source_snapshot_lease:
         ::core::option::Option<super::super::provider::v1::SourceSnapshotLease>,
+    #[prost(string, tag = "6")]
+    pub resource_profile_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "7")]
+    pub maximum_contexts: u32,
+    #[prost(uint64, tag = "8")]
+    pub maximum_memory_mib: u64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OpenContextResponse {
@@ -114,6 +120,12 @@ pub struct AnalyzeModulesRequest {
     pub initial_chunk_credits: u32,
     #[prost(uint64, tag = "13")]
     pub initial_credit_bytes: u64,
+    #[prost(string, tag = "14")]
+    pub sandbox_profile_digest: ::prost::alloc::string::String,
+    #[prost(string, tag = "15")]
+    pub trust_profile: ::prost::alloc::string::String,
+    #[prost(string, tag = "16")]
+    pub resource_profile_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnalyzeCommand {
@@ -222,6 +234,12 @@ pub struct RunTerminal {
         tag = "5"
     )]
     pub terminal_state: i32,
+    #[prost(string, repeated, tag = "6")]
+    pub rechecked_module_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, tag = "7")]
+    pub sandbox_profile_digest: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub trust_profile: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnalyzeEvent {

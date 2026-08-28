@@ -54,6 +54,9 @@ message OpenContextRequest {
   bytes immutable_context_manifest = 3;
   string context_manifest_digest = 4;
   codefabric.provider.v1.SourceSnapshotLease source_snapshot_lease = 5;
+  string resource_profile_id = 6;
+  uint32 maximum_contexts = 7;
+  uint64 maximum_memory_mib = 8;
 }
 
 message OpenContextResponse {
@@ -86,6 +89,9 @@ message AnalyzeModulesRequest {
   string output_schema_bundle_digest = 11;
   uint32 initial_chunk_credits = 12;
   uint64 initial_credit_bytes = 13;
+  string sandbox_profile_digest = 14;
+  string trust_profile = 15;
+  string resource_profile_id = 16;
 }
 
 message AnalyzeCommand {
@@ -148,6 +154,9 @@ message RunTerminal {
   repeated codefabric.provider.v1.CapabilityOutcome capability_outcomes = 3;
   string overall_digest = 4;
   codefabric.provider.v1.ProviderRunState terminal_state = 5;
+  repeated string rechecked_module_ids = 6;
+  string sandbox_profile_digest = 7;
+  string trust_profile = 8;
 }
 
 message AnalyzeEvent {

@@ -6,6 +6,7 @@ use std::os::fd::{AsRawFd as _, OwnedFd};
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -13,6 +14,26 @@ use thiserror::Error;
 
 /// Stable reason returned when the requested containment profile cannot be proved.
 pub const SANDBOX_UNAVAILABLE_REASON: &str = "SANDBOX_UNAVAILABLE";
+static SANDBOX_PROBE_NONCE: AtomicU64 = AtomicU64::new(0);
+
+const PROVIDER_LAUNCH_SHELL: &str = r#"
+preserve="$1"
+cpu="$2"
+open_files="$3"
+file_blocks="$4"
+shift 4
+for descriptor in /dev/fd/*; do
+  fd="${descriptor##*/}"
+  case "$fd" in
+    ''|*[!0-9]*|0|1|2|"$preserve") continue ;;
+  esac
+  eval "exec ${fd}>&-" 2>/dev/null || :
+done
+ulimit -t "$cpu"
+ulimit -n "$open_files"
+ulimit -f "$file_blocks"
+exec "$@"
+"#;
 
 /// Provider trust is explicit input, never inferred from provider placement.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -66,9 +87,17 @@ impl SandboxCapabilityMatrix {
     pub fn evaluate(observation: &SandboxProbeObservation) -> Self {
         let mut required = vec![
             "launch-confined",
+            "leased-workspace-read-allowed",
             "workspace-write-denied",
+            "out-of-root-write-denied",
+            "live-workspace-read-denied",
+            "credential-read-denied",
             "git-read-denied",
             "network-denied",
+            "inherited-fd-read-denied",
+            "child-process-contained",
+            "resource-limit-enforceable",
+            "cleanup-escape-denied",
             "output-write-allowed",
         ];
         if observation.mechanism == SandboxMechanism::LinuxBubblewrap {
@@ -162,12 +191,15 @@ pub fn probe_host_sandbox() -> SandboxProbeObservation {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::too_many_lines)] // The advertised host row must be derived from one auditable escape-probe transaction.
 fn probe_darwin_seatbelt() -> SandboxProbeObservation {
     let executable = PathBuf::from("/usr/bin/sandbox-exec");
     let metadata = fs::metadata(&executable).ok();
-    let probe_root =
-        std::env::temp_dir().join(format!("codefabric-seatbelt-probe-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&probe_root);
+    let probe_nonce = SANDBOX_PROBE_NONCE.fetch_add(1, Ordering::Relaxed);
+    let probe_root = std::env::temp_dir().join(format!(
+        "codefabric-seatbelt-probe-{}-{probe_nonce}",
+        std::process::id()
+    ));
     let behavior = (|| -> Result<BTreeMap<String, bool>, SandboxError> {
         let view = probe_root.join("view");
         let dependencies = probe_root.join("dependencies");
@@ -176,6 +208,13 @@ fn probe_darwin_seatbelt() -> SandboxProbeObservation {
         fs::create_dir_all(&dependencies)?;
         fs::create_dir_all(&output)?;
         fs::write(view.join(".git/config"), b"probe")?;
+        fs::write(view.join("leased.py"), b"leased")?;
+        let live_workspace = probe_root.join("live-workspace.py");
+        let credential = probe_root.join("credential-token");
+        let outside_write = probe_root.join("outside-write");
+        let cleanup_escape = probe_root.join("cleanup-escape");
+        fs::write(&live_workspace, b"live")?;
+        fs::write(&credential, b"credential")?;
         let view = fs::canonicalize(view)?;
         let dependencies = fs::canonicalize(dependencies)?;
         let output = fs::canonicalize(output)?;
@@ -202,11 +241,13 @@ fn probe_darwin_seatbelt() -> SandboxProbeObservation {
         let forbidden_write = view.join("forbidden");
         let allowed_write = output.join("allowed");
         let git_config = view.join(".git/config");
+        let leased_source = view.join("leased.py");
         let network_denied = Path::new("/usr/bin/python3").is_file()
             && !run(
                 "/usr/bin/python3",
                 &["-c", "import socket; socket.socket()"],
             );
+        let inherited_fd_program = format!("exec 9<\"$1\"; shift; {PROVIDER_LAUNCH_SHELL}");
         Ok(BTreeMap::from([
             ("launch-confined".into(), run("/usr/bin/true", &[])),
             (
@@ -222,10 +263,89 @@ fn probe_darwin_seatbelt() -> SandboxProbeObservation {
                 ) && !forbidden_write.exists(),
             ),
             (
+                "leased-workspace-read-allowed".into(),
+                run("/bin/cat", &[&leased_source.to_string_lossy()]),
+            ),
+            (
+                "live-workspace-read-denied".into(),
+                !run("/bin/cat", &[&live_workspace.to_string_lossy()]),
+            ),
+            (
+                "credential-read-denied".into(),
+                !run("/bin/cat", &[&credential.to_string_lossy()]),
+            ),
+            (
                 "git-read-denied".into(),
                 !run("/bin/cat", &[&git_config.to_string_lossy()]),
             ),
             ("network-denied".into(), network_denied),
+            (
+                "inherited-fd-read-denied".into(),
+                !Command::new("/bin/sh")
+                    .args([
+                        "-c",
+                        &inherited_fd_program,
+                        "probe",
+                        &credential.to_string_lossy(),
+                        "",
+                        "10",
+                        "64",
+                        "2",
+                        &executable.to_string_lossy(),
+                        "-f",
+                        &profile_path.to_string_lossy(),
+                        "/bin/cat",
+                        "/dev/fd/9",
+                    ])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .is_ok_and(|status| status.success()),
+            ),
+            (
+                "child-process-contained".into(),
+                !run(
+                    "/bin/sh",
+                    &[
+                        "-c",
+                        "exec /bin/sh -c 'exec /bin/cat \"$1\"' child \"$1\"",
+                        "child",
+                        &credential.to_string_lossy(),
+                    ],
+                ),
+            ),
+            (
+                "resource-limit-enforceable".into(),
+                run(
+                    "/bin/sh",
+                    &["-c", "ulimit -n 64; test \"$(ulimit -n)\" -eq 64"],
+                ),
+            ),
+            (
+                "cleanup-escape-denied".into(),
+                run(
+                    "/bin/sh",
+                    &[
+                        "-c",
+                        "trap 'printf escaped > \"$1\"' EXIT; exit 0",
+                        "cleanup",
+                        &cleanup_escape.to_string_lossy(),
+                    ],
+                ) && !cleanup_escape.exists(),
+            ),
+            (
+                "out-of-root-write-denied".into(),
+                !run(
+                    "/bin/sh",
+                    &[
+                        "-c",
+                        "printf probe > \"$1\"",
+                        "outside",
+                        &outside_write.to_string_lossy(),
+                    ],
+                ) && !outside_write.exists(),
+            ),
             (
                 "output-write-allowed".into(),
                 run(
@@ -314,7 +434,11 @@ impl GeneratedSandboxProfile {
                 ));
             }
         }
-        if roots_overlap(workspace_view, output_root) || roots_overlap(dependency_root, output_root)
+        let workspace_view = fs::canonicalize(workspace_view)?;
+        let dependency_root = fs::canonicalize(dependency_root)?;
+        let output_root = fs::canonicalize(output_root)?;
+        if roots_overlap(&workspace_view, &output_root)
+            || roots_overlap(&dependency_root, &output_root)
         {
             return Err(SandboxError::InvalidProfile(
                 "provider output must be separate from immutable inputs",
@@ -322,10 +446,10 @@ impl GeneratedSandboxProfile {
         }
         let bytes = match (trust_profile, mechanism) {
             (ProviderTrustProfile::UntrustedSandboxed, SandboxMechanism::DarwinSeatbelt) => {
-                darwin_profile(workspace_view, dependency_root, output_root).into_bytes()
+                darwin_profile(&workspace_view, &dependency_root, &output_root).into_bytes()
             }
             (ProviderTrustProfile::UntrustedSandboxed, SandboxMechanism::LinuxBubblewrap) => {
-                linux_profile(workspace_view, dependency_root, output_root).into_bytes()
+                linux_profile(&workspace_view, &dependency_root, &output_root).into_bytes()
             }
             (
                 ProviderTrustProfile::TrustedLocal | ProviderTrustProfile::ParsingOnly,
@@ -339,9 +463,9 @@ impl GeneratedSandboxProfile {
             mechanism,
             bytes,
             sha256_digest,
-            workspace_view: workspace_view.to_owned(),
-            dependency_root: dependency_root.to_owned(),
-            output_root: output_root.to_owned(),
+            workspace_view,
+            dependency_root,
+            output_root,
         })
     }
 
@@ -510,10 +634,14 @@ impl ProviderSandboxLauncher {
         // The fixed shell program only applies inherited limits. Provider-controlled strings are
         // positional arguments, never interpolated into shell source.
         let mut command = Command::new("/bin/sh");
+        let preserved_descriptor = inherited_seccomp
+            .as_ref()
+            .map_or_else(String::new, |descriptor| descriptor.as_raw_fd().to_string());
         command
             .arg("-c")
-            .arg("ulimit -t \"$1\"; ulimit -n \"$2\"; ulimit -f \"$3\"; shift 3; exec \"$@\"")
+            .arg(PROVIDER_LAUNCH_SHELL)
             .arg("codefabric-provider-launch")
+            .arg(preserved_descriptor)
             .arg(request.limits.cpu_seconds.to_string())
             .arg(request.limits.open_files.to_string())
             .arg(request.limits.output_file_bytes.div_ceil(512).to_string())
@@ -586,12 +714,23 @@ fn quote_seatbelt(path: &Path) -> String {
 }
 
 fn darwin_profile(view: &Path, dependencies: &Path, output: &Path) -> String {
+    let isolation_root = view
+        .ancestors()
+        .find(|candidate| {
+            candidate.parent().is_some()
+                && dependencies.starts_with(candidate)
+                && output.starts_with(candidate)
+        })
+        .unwrap_or(view);
     format!(
-        "(version 1)\n(deny default)\n(allow process*)\n(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/Library\") (subpath \"{}\") (subpath \"{}\"))\n(allow file-write* (subpath \"{}\"))\n(deny file-read* (subpath \"{}/.git\"))\n(deny network*)\n",
+        "(version 1)\n(allow default)\n(deny network*)\n(allow network-bind network-inbound (prefix \"{}/\"))\n(deny file-read* (subpath \"{}\") (subpath \"/Users\") (subpath \"/Volumes\"))\n(allow file-read* (subpath \"{}\") (subpath \"{}\") (subpath \"{}\"))\n(deny file-read* (subpath \"{}/.git\"))\n(deny file-write*)\n(allow file-write* (subpath \"{}\"))\n",
+        quote_seatbelt(output),
+        quote_seatbelt(isolation_root),
         quote_seatbelt(view),
         quote_seatbelt(dependencies),
         quote_seatbelt(output),
         quote_seatbelt(view),
+        quote_seatbelt(output),
     )
 }
 
@@ -633,9 +772,17 @@ mod tests {
             setuid: false,
             behavior: [
                 "launch-confined",
+                "leased-workspace-read-allowed",
                 "workspace-write-denied",
+                "out-of-root-write-denied",
+                "live-workspace-read-denied",
+                "credential-read-denied",
                 "git-read-denied",
                 "network-denied",
+                "inherited-fd-read-denied",
+                "child-process-contained",
+                "resource-limit-enforceable",
+                "cleanup-escape-denied",
                 "output-write-allowed",
             ]
             .into_iter()
@@ -654,6 +801,13 @@ mod tests {
         assert_eq!(row.reason_code, "SANDBOX_BEHAVIOR_UNPROVED");
 
         let directory = tempfile::tempdir().unwrap();
+        for path in [
+            directory.path().join("view"),
+            directory.path().join("dependencies"),
+            directory.path().join("output"),
+        ] {
+            std::fs::create_dir(path).unwrap();
+        }
         let profile = GeneratedSandboxProfile::generate(
             ProviderTrustProfile::UntrustedSandboxed,
             SandboxMechanism::DarwinSeatbelt,
@@ -684,23 +838,27 @@ mod tests {
 
     #[test]
     fn profile_is_deterministic_and_separates_writable_output() {
-        let view = Path::new("/private/codefabric/view");
-        let dependencies = Path::new("/private/codefabric/dependencies");
-        let output = Path::new("/private/codefabric/output");
+        let root = tempfile::tempdir().unwrap();
+        let view = root.path().join("view");
+        let dependencies = root.path().join("dependencies");
+        let output = root.path().join("output");
+        for path in [&view, &dependencies, &output] {
+            std::fs::create_dir(path).unwrap();
+        }
         let first = GeneratedSandboxProfile::generate(
             ProviderTrustProfile::UntrustedSandboxed,
             SandboxMechanism::DarwinSeatbelt,
-            view,
-            dependencies,
-            output,
+            &view,
+            &dependencies,
+            &output,
         )
         .unwrap();
         let second = GeneratedSandboxProfile::generate(
             ProviderTrustProfile::UntrustedSandboxed,
             SandboxMechanism::DarwinSeatbelt,
-            view,
-            dependencies,
-            output,
+            &view,
+            &dependencies,
+            &output,
         )
         .unwrap();
         assert_eq!(first, second);
@@ -710,5 +868,43 @@ mod tests {
                 .unwrap()
                 .contains("deny network")
         );
+    }
+
+    #[test]
+    fn semantic_sandbox_current_host_escape_matrix() {
+        let observation = probe_host_sandbox();
+        let matrix = SandboxCapabilityMatrix::evaluate(&observation);
+        let untrusted = matrix
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .expect("the closed matrix always contains the untrusted row");
+        if observation.mechanism == SandboxMechanism::DarwinSeatbelt {
+            let required = [
+                "launch-confined",
+                "leased-workspace-read-allowed",
+                "workspace-write-denied",
+                "out-of-root-write-denied",
+                "live-workspace-read-denied",
+                "credential-read-denied",
+                "git-read-denied",
+                "network-denied",
+                "inherited-fd-read-denied",
+                "child-process-contained",
+                "resource-limit-enforceable",
+                "cleanup-escape-denied",
+                "output-write-allowed",
+            ];
+            for probe in required {
+                assert_eq!(
+                    observation.behavior.get(probe),
+                    Some(&true),
+                    "advertised Darwin containment lacks {probe}: {observation:?}"
+                );
+            }
+            assert!(untrusted.available, "{observation:?}");
+            assert_eq!(untrusted.reason_code, "SANDBOX_PROVED");
+        } else {
+            assert!(!untrusted.available);
+            assert_ne!(untrusted.reason_code, "SANDBOX_PROVED");
+        }
     }
 }

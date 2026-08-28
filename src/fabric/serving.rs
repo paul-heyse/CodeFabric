@@ -2860,6 +2860,7 @@ mod tests {
                 path: blob_root.join(&image.blob.relative_name),
                 content_digest: crate::integrity::frame_digest(image.digest),
                 file_id: image.file_id,
+                image: *image,
             })
         };
         let python = capture("python/golden_pkg/core.py", SourceLanguage::Python, 0x51)

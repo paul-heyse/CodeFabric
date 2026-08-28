@@ -57,18 +57,24 @@ class HelloAck(_message.Message):
     def __init__(self, protocol_major: _Optional[int] = ..., protocol_minor: _Optional[int] = ..., negotiated_feature_bits: _Optional[int] = ..., sidecar_build: _Optional[str] = ..., pyrefly_source_digest: _Optional[str] = ..., supported_python_versions: _Optional[_Iterable[str]] = ..., observation_schema_digests: _Optional[_Iterable[str]] = ..., maximum_frame_bytes: _Optional[int] = ..., maximum_arrow_chunk_bytes: _Optional[int] = ..., sandbox_profile_digest: _Optional[str] = ...) -> None: ...
 
 class OpenContextRequest(_message.Message):
-    __slots__ = ("workspace_id", "analysis_context_id", "immutable_context_manifest", "context_manifest_digest", "source_snapshot_lease")
+    __slots__ = ("workspace_id", "analysis_context_id", "immutable_context_manifest", "context_manifest_digest", "source_snapshot_lease", "resource_profile_id", "maximum_contexts", "maximum_memory_mib")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     ANALYSIS_CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
     IMMUTABLE_CONTEXT_MANIFEST_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_MANIFEST_DIGEST_FIELD_NUMBER: _ClassVar[int]
     SOURCE_SNAPSHOT_LEASE_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_PROFILE_ID_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_CONTEXTS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_MEMORY_MIB_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     analysis_context_id: str
     immutable_context_manifest: bytes
     context_manifest_digest: str
     source_snapshot_lease: _provider_control_pb2.SourceSnapshotLease
-    def __init__(self, workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., immutable_context_manifest: _Optional[bytes] = ..., context_manifest_digest: _Optional[str] = ..., source_snapshot_lease: _Optional[_Union[_provider_control_pb2.SourceSnapshotLease, _Mapping]] = ...) -> None: ...
+    resource_profile_id: str
+    maximum_contexts: int
+    maximum_memory_mib: int
+    def __init__(self, workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., immutable_context_manifest: _Optional[bytes] = ..., context_manifest_digest: _Optional[str] = ..., source_snapshot_lease: _Optional[_Union[_provider_control_pb2.SourceSnapshotLease, _Mapping]] = ..., resource_profile_id: _Optional[str] = ..., maximum_contexts: _Optional[int] = ..., maximum_memory_mib: _Optional[int] = ...) -> None: ...
 
 class OpenContextResponse(_message.Message):
     __slots__ = ("context_handle", "context_manifest_digest", "opened_at_unix_ms")
@@ -99,7 +105,7 @@ class ModuleRequest(_message.Message):
     def __init__(self, module_id: _Optional[str] = ..., module_name: _Optional[str] = ..., file_id: _Optional[str] = ..., source_digest: _Optional[str] = ..., source_blob: _Optional[_Union[_provider_control_pb2.BlobReference, _Mapping]] = ..., dependency_generation: _Optional[int] = ..., module_resolution_generation: _Optional[int] = ...) -> None: ...
 
 class AnalyzeModulesRequest(_message.Message):
-    __slots__ = ("provider_run_id", "workspace_id", "analysis_context_id", "context_handle", "context_manifest_digest", "source_generation", "source_snapshot_lease_id", "modules", "requested_capability_codes", "deadline_unix_ms", "output_schema_bundle_digest", "initial_chunk_credits", "initial_credit_bytes")
+    __slots__ = ("provider_run_id", "workspace_id", "analysis_context_id", "context_handle", "context_manifest_digest", "source_generation", "source_snapshot_lease_id", "modules", "requested_capability_codes", "deadline_unix_ms", "output_schema_bundle_digest", "initial_chunk_credits", "initial_credit_bytes", "sandbox_profile_digest", "trust_profile", "resource_profile_id")
     PROVIDER_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     ANALYSIS_CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -113,6 +119,9 @@ class AnalyzeModulesRequest(_message.Message):
     OUTPUT_SCHEMA_BUNDLE_DIGEST_FIELD_NUMBER: _ClassVar[int]
     INITIAL_CHUNK_CREDITS_FIELD_NUMBER: _ClassVar[int]
     INITIAL_CREDIT_BYTES_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    TRUST_PROFILE_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_PROFILE_ID_FIELD_NUMBER: _ClassVar[int]
     provider_run_id: str
     workspace_id: str
     analysis_context_id: str
@@ -126,7 +135,10 @@ class AnalyzeModulesRequest(_message.Message):
     output_schema_bundle_digest: str
     initial_chunk_credits: int
     initial_credit_bytes: int
-    def __init__(self, provider_run_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., context_handle: _Optional[str] = ..., context_manifest_digest: _Optional[str] = ..., source_generation: _Optional[int] = ..., source_snapshot_lease_id: _Optional[str] = ..., modules: _Optional[_Iterable[_Union[ModuleRequest, _Mapping]]] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., deadline_unix_ms: _Optional[int] = ..., output_schema_bundle_digest: _Optional[str] = ..., initial_chunk_credits: _Optional[int] = ..., initial_credit_bytes: _Optional[int] = ...) -> None: ...
+    sandbox_profile_digest: str
+    trust_profile: str
+    resource_profile_id: str
+    def __init__(self, provider_run_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., context_handle: _Optional[str] = ..., context_manifest_digest: _Optional[str] = ..., source_generation: _Optional[int] = ..., source_snapshot_lease_id: _Optional[str] = ..., modules: _Optional[_Iterable[_Union[ModuleRequest, _Mapping]]] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., deadline_unix_ms: _Optional[int] = ..., output_schema_bundle_digest: _Optional[str] = ..., initial_chunk_credits: _Optional[int] = ..., initial_credit_bytes: _Optional[int] = ..., sandbox_profile_digest: _Optional[str] = ..., trust_profile: _Optional[str] = ..., resource_profile_id: _Optional[str] = ...) -> None: ...
 
 class AnalyzeCommand(_message.Message):
     __slots__ = ("start", "chunk_accepted", "chunk_rejected", "cancel")
@@ -226,18 +238,24 @@ class ModuleEnd(_message.Message):
     def __init__(self, header: _Optional[_Union[AnalyzeEventHeader, _Mapping]] = ..., module_id: _Optional[str] = ..., family_counts: _Optional[_Mapping[int, int]] = ..., module_digest: _Optional[str] = ...) -> None: ...
 
 class RunTerminal(_message.Message):
-    __slots__ = ("header", "ordered_module_digests", "capability_outcomes", "overall_digest", "terminal_state")
+    __slots__ = ("header", "ordered_module_digests", "capability_outcomes", "overall_digest", "terminal_state", "rechecked_module_ids", "sandbox_profile_digest", "trust_profile")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     ORDERED_MODULE_DIGESTS_FIELD_NUMBER: _ClassVar[int]
     CAPABILITY_OUTCOMES_FIELD_NUMBER: _ClassVar[int]
     OVERALL_DIGEST_FIELD_NUMBER: _ClassVar[int]
     TERMINAL_STATE_FIELD_NUMBER: _ClassVar[int]
+    RECHECKED_MODULE_IDS_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    TRUST_PROFILE_FIELD_NUMBER: _ClassVar[int]
     header: AnalyzeEventHeader
     ordered_module_digests: _containers.RepeatedScalarFieldContainer[str]
     capability_outcomes: _containers.RepeatedCompositeFieldContainer[_provider_control_pb2.CapabilityOutcome]
     overall_digest: str
     terminal_state: _provider_control_pb2.ProviderRunState
-    def __init__(self, header: _Optional[_Union[AnalyzeEventHeader, _Mapping]] = ..., ordered_module_digests: _Optional[_Iterable[str]] = ..., capability_outcomes: _Optional[_Iterable[_Union[_provider_control_pb2.CapabilityOutcome, _Mapping]]] = ..., overall_digest: _Optional[str] = ..., terminal_state: _Optional[_Union[_provider_control_pb2.ProviderRunState, str]] = ...) -> None: ...
+    rechecked_module_ids: _containers.RepeatedScalarFieldContainer[str]
+    sandbox_profile_digest: str
+    trust_profile: str
+    def __init__(self, header: _Optional[_Union[AnalyzeEventHeader, _Mapping]] = ..., ordered_module_digests: _Optional[_Iterable[str]] = ..., capability_outcomes: _Optional[_Iterable[_Union[_provider_control_pb2.CapabilityOutcome, _Mapping]]] = ..., overall_digest: _Optional[str] = ..., terminal_state: _Optional[_Union[_provider_control_pb2.ProviderRunState, str]] = ..., rechecked_module_ids: _Optional[_Iterable[str]] = ..., sandbox_profile_digest: _Optional[str] = ..., trust_profile: _Optional[str] = ...) -> None: ...
 
 class AnalyzeEvent(_message.Message):
     __slots__ = ("run_accepted", "run_progress", "module_begin", "observation_batch_chunk", "module_end", "run_terminal")

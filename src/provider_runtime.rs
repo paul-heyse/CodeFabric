@@ -3067,4 +3067,118 @@ mod tests {
             .unwrap();
         assert_eq!(persisted, (3, 2, 1, 1));
     }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Runtime, registry, mapping, journal, and zero-state parity are one structural oracle.
+    async fn pyrefly_provider_runtime_parity() {
+        fn implements_semantic_driver<T: SemanticProviderDriver>() {}
+        implements_semantic_driver::<crate::pyrefly_service::PyreflyProviderDriver>();
+
+        let registry = SemanticProviderAdapterRegistry::new(
+            Arc::new(FakeSemanticDriver),
+            Arc::new(FakeSemanticDriver),
+        )
+        .unwrap();
+        let provider = PROVIDER_ENTRIES
+            .iter()
+            .find(|entry| entry.provider_id == "pyrefly-python")
+            .unwrap();
+        assert_eq!(provider.placement, "SIDECAR");
+        assert_eq!(provider.resource_profile_id, "sidecar-semantic-standard");
+        assert_eq!(provider.event_mapping_version, "1.0");
+
+        let directory = tempdir().unwrap();
+        let view = crate::source_image::ProviderWorkspaceView {
+            workspace_id: [2; 16],
+            source_generation: 7,
+            workspace_root: directory.path().join("view"),
+            dependency_root: directory.path().join("dependencies"),
+            output_root: directory.path().join("output"),
+            manifest_path: directory.path().join("manifest.json"),
+            manifest_digest: [0x51; 32],
+            dependency_manifest_digest: [0x52; 32],
+            sandbox_profile_digest: format!("b3:{}", "53".repeat(32)),
+            entries: Vec::new(),
+        };
+        let store = OperationalStore::open(&directory.path().join("journal.sqlite")).unwrap();
+        let reader = store.reader_factory();
+        let generation: Arc<dyn SourceGenerationOracle> = Arc::new(Generation(AtomicU64::new(7)));
+        let journal: Arc<dyn ProviderRunJournal> =
+            Arc::new(OperationalProviderRunJournal::new(store));
+        let dispatch =
+            ProviderRuntimeDispatch::semantic(&[0x61; 16], &registry, &generation, &journal)
+                .unwrap();
+        let mut accepted = dispatch
+            .submit(
+                "pyrefly-python",
+                semantic_job("pyrefly-python", "pyrefly-runtime-parity", view.clone()),
+            )
+            .await
+            .unwrap();
+        let mut observed = Vec::new();
+        while let Some(event) = accepted.events.recv().await {
+            match event {
+                ProviderEvent::Accepted { .. } => observed.push("ACCEPTED"),
+                ProviderEvent::Progress { .. } => observed.push("PROGRESS"),
+                ProviderEvent::Completed { state, .. } => {
+                    assert_eq!(state, ProviderRunState::Succeeded);
+                    observed.push("TERMINAL");
+                    break;
+                }
+                ProviderEvent::Failed { state, code, .. } => {
+                    panic!("Pyrefly runtime parity failed as {state:?}: {code}")
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(observed, ["ACCEPTED", "PROGRESS", "TERMINAL"]);
+        let persisted = reader
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT provider_code, state_code, sandbox_profile_digest FROM provider_run",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            persisted,
+            (
+                i64::from(provider.provider_code),
+                i64::from(ProviderRunState::Succeeded as u16),
+                view.sandbox_profile_digest,
+            )
+        );
+
+        let provider_registry = include_str!("../contracts/registry/provider-registry.yaml");
+        assert!(provider_registry.contains("protocol_package: codefabric.pyrefly.v1"));
+        assert!(provider_registry.contains("protocol_service: PyreflySidecar"));
+        let feature_registry = include_str!("../contracts/rpc/feature-registry.yaml");
+        for mapping in [
+            "ACCEPTED",
+            "PROGRESS",
+            "SCOPE_BEGIN",
+            "OBSERVATION_CHUNK",
+            "SCOPE_END",
+            "TERMINAL",
+            "CANCEL_ACKNOWLEDGED",
+        ] {
+            assert!(feature_registry.contains(&format!("wire_event: {mapping}")));
+        }
+        let fixture_source = include_str!("provider_runtime/fixture.rs");
+        assert!(fixture_source.contains("ProviderRuntimeDispatch::semantic"));
+        assert!(!fixture_source.contains(concat!("run_", "pyrefly(")));
+        assert!(!include_str!("fabric/serving.rs").contains("codefabric-pyrefly-sidecar"));
+        assert!(
+            !include_str!("gate_b_candidate/vertical.rs").contains("codefabric-pyrefly-sidecar")
+        );
+    }
 }

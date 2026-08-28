@@ -14,14 +14,21 @@ const PYREFLY_LOCK_SOURCE_BLAKE3: &str = env!("PYREFLY_LOCK_SOURCE_BLAKE3");
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Identity,
-    Serve,
+    Serve(Option<OsString>),
 }
 
 fn parse_command(args: impl IntoIterator<Item = OsString>) -> Result<Command, &'static str> {
     let mut args = args.into_iter();
     match args.next().as_deref() {
         Some(value) if value == "--identity" && args.next().is_none() => Ok(Command::Identity),
-        Some(value) if value == "--serve" && args.next().is_none() => Ok(Command::Serve),
+        Some(value) if value == "--serve" => {
+            let endpoint = args.next();
+            if args.next().is_none() {
+                Ok(Command::Serve(endpoint))
+            } else {
+                Err("expected at most one private UDS endpoint")
+            }
+        }
         _ => Err("expected --identity or --serve"),
     }
 }
@@ -38,8 +45,12 @@ fn run(
             writeln!(stderr, "{}", IDENTITY.trim())
                 .map_err(|_| "failed to write identity".to_owned())?;
         }
-        Command::Serve => {
-            let endpoint = std::env::var("CODEFABRIC_PYREFLY_ENDPOINT")
+        Command::Serve(endpoint) => {
+            let endpoint = endpoint
+                .map_or_else(
+                    || std::env::var("CODEFABRIC_PYREFLY_ENDPOINT"),
+                    |value| Ok(value.to_string_lossy().into_owned()),
+                )
                 .map_err(|_| "CODEFABRIC_PYREFLY_ENDPOINT is required".to_owned())?;
             let socket = endpoint
                 .strip_prefix("unix://")

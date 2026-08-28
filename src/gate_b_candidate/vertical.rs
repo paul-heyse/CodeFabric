@@ -1302,6 +1302,7 @@ fn execute_with_hot_edit(
                 path: clean_root.join("source-blobs").join(&image.blob.relative_name),
                 content_digest: format!("b3:{}", lower_hex(&image.digest)),
                 file_id: image.file_id,
+                image: image.clone(),
             })
         };
         let mut python_blob = captured_blob("python/golden_pkg/core.py")?;
