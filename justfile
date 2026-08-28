@@ -121,6 +121,16 @@ ontology-candidate-receipt-check:
 ontology-candidate-delta-binding-check:
     cargo nextest run --locked --lib -E 'test(/ontology_candidate_delta_(binding_exact_version|catalog_reopen)/)' --no-tests=fail
 
+[doc("Prove owner decisions are separate from observations and bind the complete opaque receipt ledger")]
+[group('gate')]
+ontology-decision-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_(candidate_receipt_binding_matrix|decision_observation_separation|activation_state_transaction_atomicity)/)' --no-tests=fail
+
+[doc("Prove ontology activation rollback, lost-response reconciliation, and restart idempotency")]
+[group('gate')]
+ontology-activation-recovery-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency)/)' --no-tests=fail
+
 [doc("Prove diagnostic artifacts, checksums, and opaque receipts remain separate 1:1 identities")]
 [group('gate')]
 ontology-plan-artifact-boundary-check:

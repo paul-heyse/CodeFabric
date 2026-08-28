@@ -66,6 +66,7 @@ pub struct ExactTableSet {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateGateReceipt {
     operation_id: String,
+    execution_identity: String,
     candidate_identity: String,
     program_identity: String,
     package_identity: String,
@@ -92,6 +93,7 @@ pub struct CandidateClosureReport {
     candidate_identity: String,
     requirements: Vec<BootstrapRequirement>,
     receipts: BTreeMap<String, CandidateGateReceipt>,
+    durable: DurableCandidateEvidence,
 }
 
 impl CandidateClosureReport {
@@ -117,6 +119,53 @@ impl CandidateClosureReport {
             .map(CandidateGateReceipt::identity)
             .collect()
     }
+
+    pub(crate) const fn durable_evidence(&self) -> &DurableCandidateEvidence {
+        &self.durable
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DurableExactTableBinding {
+    pub table_code: i16,
+    pub table_uri: String,
+    pub delta_version: u64,
+    pub schema_identity: [u8; 32],
+    pub content_identity: [u8; 32],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DurableGateEvidence {
+    pub operation_id: String,
+    pub execution_identity: String,
+    pub semantic_checksum: String,
+    pub artifact_identity: String,
+    pub artifact_bytes: Vec<u8>,
+    pub receipt_identity: String,
+    pub receipt_bytes: Vec<u8>,
+    pub expected_result_contract: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DurableCandidateEvidence {
+    pub candidate_identity: String,
+    pub workspace_id: [u8; 16],
+    pub manifest_bytes: Vec<u8>,
+    pub manifest_digest: String,
+    pub program_identity: String,
+    pub package_identity: String,
+    pub config_identity: String,
+    pub policy_identity: String,
+    pub exact_table_set_identity: String,
+    pub function_catalog_identity: String,
+    pub query_form_identity: String,
+    pub checksum_version: String,
+    pub result_authority_identity: String,
+    pub predecessor_epoch_identity: Option<String>,
+    pub rollback_retain_until: i64,
+    pub exact_tables: Vec<DurableExactTableBinding>,
+    pub gate_evidence: Vec<DurableGateEvidence>,
+    pub receipt_set_identity: String,
 }
 
 /// Candidate semantic-closure failures. No error can advance activation authority.
@@ -148,6 +197,11 @@ fn digest_is_valid(value: &str) -> bool {
     value.len() == 67
         && value.starts_with("b3:")
         && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn canonical_value_bytes(value: &serde_json::Value) -> Result<Vec<u8>, CandidateClosureError> {
+    crate::contracts::jcs::canonicalize_value(value)
+        .map_err(|error| CandidateClosureError::Invalid(error.to_string()))
 }
 
 impl ExactTableSet {
@@ -446,6 +500,7 @@ fn make_receipt(
     let artifact_identity = outcome.artifact.artifact_identity.clone();
     let mut receipt = CandidateGateReceipt {
         operation_id: operation_id.to_owned(),
+        execution_identity: outcome.receipt.execution_id.clone(),
         candidate_identity: candidate_identity.to_owned(),
         program_identity: package.manifest.logical_program_identity.clone(),
         package_identity: package.manifest.package_identity.clone(),
@@ -461,6 +516,7 @@ fn make_receipt(
     receipt.receipt_identity = framed([
         b"ontology-candidate-gate-receipt.v1".as_slice(),
         receipt.operation_id.as_bytes(),
+        receipt.execution_identity.as_bytes(),
         receipt.candidate_identity.as_bytes(),
         receipt.program_identity.as_bytes(),
         receipt.package_identity.as_bytes(),
@@ -486,6 +542,8 @@ pub struct CandidateClosureRunner {
     expected_bindings: BTreeMap<String, String>,
     observed_bindings: BTreeMap<String, String>,
     candidate_identity: String,
+    predecessor_epoch_identity: Option<String>,
+    rollback_retain_until: i64,
 }
 
 impl CandidateClosureRunner {
@@ -495,13 +553,34 @@ impl CandidateClosureRunner {
         publication: PublicationOutcome,
         session: GovernedSession,
     ) -> Result<Self, CandidateClosureError> {
-        Self::new_with_observed(package, publication, session, None)
+        Self::new_for_epoch(package, publication, session, None, 0)
+    }
+
+    /// Build a closure runner whose sealed candidate is explicitly bound to its predecessor
+    /// ontology epoch and rollback-retention deadline.
+    pub fn new_for_epoch(
+        package: OntologyProgramPackage,
+        publication: PublicationOutcome,
+        session: GovernedSession,
+        predecessor_epoch_identity: Option<String>,
+        rollback_retain_until: i64,
+    ) -> Result<Self, CandidateClosureError> {
+        Self::new_with_observed(
+            package,
+            publication,
+            session,
+            predecessor_epoch_identity,
+            rollback_retain_until,
+            None,
+        )
     }
 
     fn new_with_observed(
         package: OntologyProgramPackage,
         publication: PublicationOutcome,
         session: GovernedSession,
+        predecessor_epoch_identity: Option<String>,
+        rollback_retain_until: i64,
         observed_overrides: Option<BTreeMap<String, String>>,
     ) -> Result<Self, CandidateClosureError> {
         let requirements = decode_bootstrap(&package)?;
@@ -540,13 +619,21 @@ impl CandidateClosureRunner {
                 *slot = identity;
             }
         }
-        let candidate_identity = candidate_identity(
+        let mut candidate_identity = candidate_identity(
             &package,
             &publication,
             &session,
             &exact_tables,
             &expected_bindings,
         );
+        candidate_identity = framed([
+            candidate_identity.as_bytes(),
+            predecessor_epoch_identity
+                .as_deref()
+                .unwrap_or("")
+                .as_bytes(),
+            rollback_retain_until.to_be_bytes().as_slice(),
+        ]);
         Ok(Self {
             package,
             publication,
@@ -556,6 +643,8 @@ impl CandidateClosureRunner {
             expected_bindings,
             observed_bindings,
             candidate_identity,
+            predecessor_epoch_identity,
+            rollback_retain_until,
         })
     }
 
@@ -577,6 +666,7 @@ impl CandidateClosureRunner {
         limits: &GateResourceEnvelope,
     ) -> Result<CandidateClosureReport, CandidateClosureError> {
         let mut receipts = BTreeMap::new();
+        let mut gate_evidence = BTreeMap::new();
         for requirement in &self.requirements {
             let expected = &self.expected_bindings[&requirement.family_id];
             let observed = &self.observed_bindings[&requirement.family_id];
@@ -618,6 +708,48 @@ impl CandidateClosureRunner {
                 &self.exact_tables,
                 &outcome,
             );
+            let artifact_bytes = canonical_value_bytes(&serde_json::json!({
+                "execution_identity": outcome.artifact.execution_id,
+                "candidate_identity": outcome.artifact.candidate_id,
+                "operation_id": outcome.artifact.action_id,
+                "terminal_action_count": outcome.artifact.terminal_action_count,
+                "physical_plan_diagnostic": outcome.artifact.physical_plan_diagnostic,
+                "metrics": outcome.artifact.metrics,
+                "artifact_identity": outcome.artifact.artifact_identity,
+            }))?;
+            let receipt_bytes = canonical_value_bytes(&serde_json::json!({
+                "operation_id": receipt.operation_id,
+                "execution_identity": receipt.execution_identity,
+                "candidate_identity": receipt.candidate_identity,
+                "program_identity": receipt.program_identity,
+                "package_identity": receipt.package_identity,
+                "session_identity": receipt.session_identity,
+                "config_identity": receipt.config_identity,
+                "policy_identity": receipt.policy_identity,
+                "exact_table_set_identity": receipt.exact_table_set_identity,
+                "semantic_checksum": receipt.semantic_checksum,
+                "expected_result_contract": receipt.expected_result_contract,
+                "artifact_identity": receipt.artifact_identity,
+                "receipt_identity": receipt.receipt_identity,
+            }))?;
+            let durable_gate = DurableGateEvidence {
+                operation_id: requirement.family_id.clone(),
+                execution_identity: outcome.receipt.execution_id.clone(),
+                semantic_checksum: receipt.semantic_checksum.clone(),
+                artifact_identity: receipt.artifact_identity.clone(),
+                artifact_bytes,
+                receipt_identity: receipt.receipt_identity.clone(),
+                receipt_bytes,
+                expected_result_contract: receipt.expected_result_contract.clone(),
+            };
+            if gate_evidence
+                .insert(requirement.family_id.clone(), durable_gate)
+                .is_some()
+            {
+                return Err(CandidateClosureError::Invalid(
+                    "one operation produced multiple durable evidence records".into(),
+                ));
+            }
             if receipts
                 .insert(requirement.family_id.clone(), receipt)
                 .is_some()
@@ -639,10 +771,82 @@ impl CandidateClosureRunner {
                 "program/execution/checksum/artifact/receipt mapping is not bijective".into(),
             ));
         }
+        let receipt_set_identity = framed(gate_evidence.values().map(|evidence| {
+            framed([
+                evidence.operation_id.as_bytes(),
+                evidence.execution_identity.as_bytes(),
+                evidence.semantic_checksum.as_bytes(),
+                evidence.artifact_identity.as_bytes(),
+                evidence.receipt_identity.as_bytes(),
+            ])
+        }));
+        let exact_tables = self
+            .exact_tables
+            .bindings()
+            .map(|binding| DurableExactTableBinding {
+                table_code: binding.table_code,
+                table_uri: binding.table_uri.clone(),
+                delta_version: binding.delta_version,
+                schema_identity: binding.schema_fingerprint,
+                content_identity: binding.table_checksum,
+            })
+            .collect::<Vec<_>>();
+        let manifest_bytes = canonical_value_bytes(&serde_json::json!({
+            "candidate_identity": self.candidate_identity,
+            "workspace_id": self.publication.scope.workspace_id,
+            "program_identity": self.package.manifest.logical_program_identity,
+            "package_identity": self.package.manifest.package_identity,
+            "session_identity": self.session.session_identity(),
+            "config_identity": self.session.config_identity(),
+            "policy_identity": self.session.policy_identity(),
+            "exact_table_set_identity": self.exact_tables.identity(),
+            "function_catalog_identity": self.package.manifest.member_identities["program.calculation_catalog"],
+            "query_form_identity": self.package.manifest.member_identities["program.phrase_operation"],
+            "checksum_version": crate::fabric::RESULT_CHECKSUM_VERSION,
+            "predecessor_epoch_identity": self.predecessor_epoch_identity,
+            "rollback_retain_until": self.rollback_retain_until,
+            "receipt_set_identity": receipt_set_identity,
+            "operation_count": self.requirements.len(),
+        }))?;
+        let function_catalog_identity =
+            self.package.manifest.member_identities["program.calculation_catalog"].clone();
+        let query_form_identity =
+            self.package.manifest.member_identities["program.phrase_operation"].clone();
+        let checksum_version = crate::fabric::RESULT_CHECKSUM_VERSION.to_owned();
+        let result_authority_identity = framed([
+            b"ontology-result-authority.v1".as_slice(),
+            self.package.manifest.logical_program_identity.as_bytes(),
+            function_catalog_identity.as_bytes(),
+            self.session.policy_identity().as_bytes(),
+            query_form_identity.as_bytes(),
+            checksum_version.as_bytes(),
+            self.exact_tables.identity().as_bytes(),
+        ]);
+        let durable = DurableCandidateEvidence {
+            candidate_identity: self.candidate_identity.clone(),
+            workspace_id: self.publication.scope.workspace_id,
+            manifest_digest: crate::integrity::framed_digest(&manifest_bytes),
+            manifest_bytes,
+            program_identity: self.package.manifest.logical_program_identity.clone(),
+            package_identity: self.package.manifest.package_identity.clone(),
+            config_identity: self.session.config_identity().to_owned(),
+            policy_identity: self.session.policy_identity().to_owned(),
+            exact_table_set_identity: self.exact_tables.identity().to_owned(),
+            function_catalog_identity,
+            query_form_identity,
+            checksum_version,
+            result_authority_identity,
+            predecessor_epoch_identity: self.predecessor_epoch_identity.clone(),
+            rollback_retain_until: self.rollback_retain_until,
+            exact_tables,
+            gate_evidence: gate_evidence.into_values().collect(),
+            receipt_set_identity,
+        };
         Ok(CandidateClosureReport {
             candidate_identity: self.candidate_identity.clone(),
             requirements: self.requirements.clone(),
             receipts,
+            durable,
         })
     }
 }
@@ -749,6 +953,8 @@ mod tests {
                 publication(),
                 GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
                     .expect("governed session"),
+                None,
+                0,
                 Some(BTreeMap::from([(
                     family.clone(),
                     "b3:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),

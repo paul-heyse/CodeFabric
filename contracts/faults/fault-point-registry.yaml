@@ -85,6 +85,24 @@ records:
     production_exposable: false
     expected_invariants: [pointer-transaction-rollback, active-leases-preserved]
     scenarios: [ontology-stage2b-atomic-activation]
+  - code: ONTOLOGY_ACTIVATION_BEFORE_COMMIT
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [acceptance-and-pointer-atomic, active-pointer-unchanged, request-retry-safe]
+    scenarios: [ontology-activation-state-transaction]
+  - code: ONTOLOGY_ACTIVATION_AFTER_COMMIT_RESPONSE_LOST
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [committed-pointer-recoverable, request-idempotent, no-double-activation]
+    scenarios: [ontology-activation-restart-recovery]
+  - code: ONTOLOGY_ACTIVATION_CAS_CONFLICT
+    owner: data-fabric
+    allowed_actions: [return_error, block_on_barrier]
+    production_exposable: false
+    expected_invariants: [single-pointer-winner, losing-candidate-remains-proved, active-pointer-monotonic]
+    scenarios: [ontology-activation-concurrency]
   - code: MUTATION_AFTER_DELETE_COMMIT
     owner: data-fabric
     allowed_actions: [return_error, terminate_process]

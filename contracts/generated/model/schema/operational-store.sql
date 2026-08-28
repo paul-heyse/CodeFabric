@@ -1,4 +1,4 @@
--- @generated from codefabric.schema.contract-ir semantic=b3:15d0ac09e5b63e050b5bd2097486f8cb6de42a3d78f2e68f26d04812beda735c source=b3:7a07cfedce4e088509b5c450b5beeb2c2398eee4aa5fa4be4d9474a87ea5563d; schema-contract-driver-v1; do not edit.
+-- @generated from codefabric.schema.contract-ir semantic=b3:7b35f25e04142aec9f9df34955d2ab529178c023d624b004b9ef70116a8f44fe source=b3:92daa3bdca698f0dcdc09014c9e31c87220f9ec7ffc9f888d057f6973fd5109c; schema-contract-driver-v1; do not edit.
 -- Cross-store Arrow/Delta foreign keys are generated as application contracts, not SQLite reference clauses.
 
 CREATE TABLE workspace_registration (
@@ -382,6 +382,154 @@ CREATE TABLE active_snapshot (
   active_pointer_generation INTEGER NOT NULL,
   lease_count INTEGER NOT NULL,
   PRIMARY KEY (workspace_id)
+) STRICT;
+
+CREATE TABLE ontology_candidate (
+  candidate_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  state TEXT NOT NULL,
+  manifest_bytes BLOB NOT NULL,
+  manifest_digest TEXT NOT NULL,
+  program_identity TEXT NOT NULL,
+  package_identity TEXT NOT NULL,
+  config_identity TEXT NOT NULL,
+  policy_identity TEXT NOT NULL,
+  exact_table_set_identity TEXT NOT NULL,
+  predecessor_epoch_identity TEXT,
+  rollback_retain_until INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (candidate_identity)
+) STRICT;
+
+CREATE TABLE ontology_candidate_exact_table (
+  candidate_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  table_code INTEGER NOT NULL,
+  table_uri TEXT NOT NULL,
+  delta_version INTEGER NOT NULL,
+  schema_identity BLOB NOT NULL,
+  content_identity BLOB NOT NULL,
+  PRIMARY KEY (candidate_identity, table_code)
+) STRICT;
+
+CREATE TABLE ontology_gate_execution (
+  execution_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  semantic_checksum TEXT NOT NULL,
+  artifact_identity TEXT NOT NULL,
+  receipt_identity TEXT NOT NULL,
+  completed_at INTEGER NOT NULL,
+  PRIMARY KEY (execution_identity),
+  UNIQUE (candidate_identity, operation_id)
+) STRICT;
+
+CREATE TABLE ontology_gate_receipt (
+  receipt_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  receipt_bytes BLOB NOT NULL,
+  semantic_checksum TEXT NOT NULL,
+  expected_result_contract TEXT NOT NULL,
+  artifact_identity TEXT NOT NULL,
+  PRIMARY KEY (receipt_identity),
+  UNIQUE (candidate_identity, operation_id)
+) STRICT;
+
+CREATE TABLE ontology_gate_artifact (
+  artifact_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  artifact_bytes BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (artifact_identity),
+  UNIQUE (candidate_identity, operation_id)
+) STRICT;
+
+CREATE TABLE ontology_owner_decision (
+  decision_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  owner_identity TEXT NOT NULL,
+  policy_identity TEXT NOT NULL,
+  decision_bytes BLOB NOT NULL,
+  accepted_at INTEGER NOT NULL,
+  PRIMARY KEY (decision_identity),
+  UNIQUE (candidate_identity)
+) STRICT;
+
+CREATE TABLE ontology_activation_request (
+  request_key TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  decision_identity TEXT NOT NULL,
+  request_digest TEXT NOT NULL,
+  expected_predecessor_identity TEXT,
+  expected_pointer_generation INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  PRIMARY KEY (request_key)
+) STRICT;
+
+CREATE TABLE ontology_acceptance (
+  candidate_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  request_key TEXT NOT NULL,
+  decision_identity TEXT NOT NULL,
+  receipt_set_identity TEXT NOT NULL,
+  pointer_generation INTEGER NOT NULL,
+  accepted_at INTEGER NOT NULL,
+  PRIMARY KEY (candidate_identity)
+) STRICT;
+
+CREATE TABLE ontology_active_pointer (
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  epoch_identity TEXT NOT NULL,
+  predecessor_epoch_identity TEXT,
+  pointer_generation INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id)
+) STRICT;
+
+CREATE TABLE ontology_recovery (
+  request_key TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  observed_pointer_generation INTEGER NOT NULL,
+  reconciled_at INTEGER NOT NULL,
+  PRIMARY KEY (request_key)
+) STRICT;
+
+CREATE TABLE ontology_result_authority (
+  result_authority_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  program_identity TEXT NOT NULL,
+  function_catalog_identity TEXT NOT NULL,
+  policy_identity TEXT NOT NULL,
+  query_form_identity TEXT NOT NULL,
+  checksum_version TEXT NOT NULL,
+  exact_table_set_identity TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (result_authority_identity)
+) STRICT;
+
+CREATE TABLE ontology_serving_epoch (
+  epoch_identity TEXT NOT NULL,
+  workspace_id BLOB NOT NULL,
+  candidate_identity TEXT NOT NULL,
+  predecessor_epoch_identity TEXT,
+  result_authority_identity TEXT NOT NULL,
+  state TEXT NOT NULL,
+  activated_at INTEGER NOT NULL,
+  retained_until INTEGER NOT NULL,
+  PRIMARY KEY (epoch_identity)
 ) STRICT;
 
 CREATE VIEW workspace_update_state AS

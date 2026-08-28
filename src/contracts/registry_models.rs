@@ -1836,6 +1836,13 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
             "ID_COLLISION_DETECTED",
             "COMPARATOR_ERROR",
             "PUBLICATION_REFERENTIAL_INTEGRITY",
+            "GOVERNED_PLAN_INGRESS_REJECTED",
+            "SEMANTIC_PHRASE_UNSUPPORTED",
+            "ONTOLOGY_GATE_ROW_LIMIT",
+            "ONTOLOGY_GATE_BYTE_LIMIT",
+            "ONTOLOGY_GATE_BATCH_LIMIT",
+            "ONTOLOGY_GATE_COUNTER_OVERFLOW",
+            "ONTOLOGY_PROGRAM_RESOURCE_LIMIT",
             "REQUIRED_FEATURE_UNSUPPORTED",
             "SCHEMA_DIGEST_MISMATCH",
             "TOOLCHAIN_MISMATCH",
@@ -1843,6 +1850,12 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
             "PLATFORM_UNSUPPORTED",
             "DAEMON_UNAVAILABLE",
             "CONTRACT_MISMATCH",
+            "ONTOLOGY_PROGRAM_CONTRACT_INVALID",
+            "ONTOLOGY_PROGRAM_DECODE_INVALID",
+            "ONTOLOGY_PROGRAM_DIGEST_MISMATCH",
+            "ONTOLOGY_PROGRAM_UNSUPPORTED",
+            "ONTOLOGY_CANDIDATE_CLOSURE_INVALID",
+            "ONTOLOGY_ACTIVATION_TRANSACTION_INVALID",
             "INTERNAL",
         ],
         "public-error",
@@ -2088,7 +2101,7 @@ pub fn validate_phrase_operation_bindings(
 
 #[allow(clippy::too_many_lines)] // One pass keeps every cross-machine registry invariant adjacent.
 pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
-    const REQUIRED: [&str; 13] = [
+    const REQUIRED: [&str; 14] = [
         "WorkspaceLifecycle",
         "SourceTrustState",
         "EventStreamHealth",
@@ -2102,16 +2115,14 @@ pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
         "QueryExecutionState",
         "ArtifactState",
         "WorkspaceRegistryLifecycle",
+        "OntologyCandidateLifecycle",
     ];
     let ids: BTreeSet<_> = records
         .iter()
         .map(|record| record.machine_id.as_str())
         .collect();
     if ids != REQUIRED.into_iter().collect() {
-        return Err(
-            "state-machine registry must contain the exact AC-G-25/AC-G-23 roster plus AC-G-10"
-                .into(),
-        );
+        return Err("state-machine registry must contain the governed lifecycle roster".into());
     }
     for machine in records {
         let states: BTreeSet<_> = machine

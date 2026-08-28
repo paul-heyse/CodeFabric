@@ -243,6 +243,20 @@ records:
       - {from: REMOVING, event: removal-complete, guard: retention-policy-applied, to: REMOVED, actions: [retire-registration], idempotency_key: registry:removed, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: FAILED, event: disable, guard: operator-authorized, to: DISABLED, actions: [persist-disabled], idempotency_key: registry:disabled, error_on_illegal: STATE_TRANSITION_VIOLATION}
       - {from: FAILED, event: remove, guard: no-active-leases, to: REMOVING, actions: [stop-workspace], idempotency_key: registry:remove, error_on_illegal: STATE_TRANSITION_VIOLATION}
+  - machine_id: OntologyCandidateLifecycle
+    version: "1.0"
+    states: [{code: 10, name: BUILDING, slug: building, meaning: Candidate artifacts are being assembled}, {code: 20, name: SEALED, slug: sealed, meaning: Candidate manifest and exact table set are immutable}, {code: 30, name: PROVED, slug: proved, meaning: Trusted DataFusion gate runner persisted a complete receipt set}, {code: 40, name: ACCEPTED, slug: accepted, meaning: Owner decision and activation acceptance are committed}, {code: 50, name: ACTIVE, slug: active, meaning: Candidate is the workspace ontology pointer}, {code: 60, name: SUPERSEDED, slug: superseded, meaning: A successor candidate is active and rollback retention applies}, {code: 70, name: FAILED, slug: failed, meaning: Candidate failed before activation}]
+    initial_state: BUILDING
+    terminal_states: [SUPERSEDED, FAILED]
+    transitions:
+      - {from: BUILDING, event: candidate-sealed, guard: manifest-and-exact-tables-complete, to: SEALED, actions: [persist-sealed-manifest], idempotency_key: ontology-candidate:seal, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SEALED, event: trusted-gates-complete, guard: receipt-bijection-complete, to: PROVED, actions: [persist-gate-evidence], idempotency_key: ontology-candidate:prove, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PROVED, event: owner-accepted, guard: decision-candidate-policy-match, to: ACCEPTED, actions: [persist-acceptance], idempotency_key: ontology-candidate:accept, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACCEPTED, event: pointer-cas-succeeded, guard: predecessor-and-generation-match, to: ACTIVE, actions: [publish-serving-epoch], idempotency_key: ontology-candidate:activate, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: ACTIVE, event: successor-activated, guard: successor-pointer-committed, to: SUPERSEDED, actions: [retain-for-rollback], idempotency_key: ontology-candidate:supersede, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: BUILDING, event: terminal-failure, guard: no-acceptance-committed, to: FAILED, actions: [persist-diagnostic], idempotency_key: ontology-candidate:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: SEALED, event: terminal-failure, guard: no-acceptance-committed, to: FAILED, actions: [persist-diagnostic], idempotency_key: ontology-candidate:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
+      - {from: PROVED, event: terminal-failure, guard: no-acceptance-committed, to: FAILED, actions: [persist-diagnostic], idempotency_key: ontology-candidate:failed, error_on_illegal: STATE_TRANSITION_VIOLATION}
 owner_acceptance:
   approver: lifecycle-owner
   accepted_at: "2026-08-21"

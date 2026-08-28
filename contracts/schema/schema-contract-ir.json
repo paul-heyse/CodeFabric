@@ -8651,6 +8651,189 @@
       "primary_key": [
         "workspace_id"
       ]
+    },
+    {
+      "name": "ontology_candidate",
+      "columns": [
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "state", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "manifest_bytes", "sqlite_type": "BLOB", "logical_type": "binary", "nullable": false},
+        {"name": "manifest_digest", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "program_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "package_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "config_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "policy_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "exact_table_set_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "predecessor_epoch_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": true},
+        {"name": "rollback_retain_until", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false},
+        {"name": "created_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false},
+        {"name": "updated_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["candidate_identity"],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_candidate_exact_table",
+      "columns": [
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "table_code", "sqlite_type": "INTEGER", "logical_type": "int16", "nullable": false},
+        {"name": "table_uri", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "delta_version", "sqlite_type": "INTEGER", "logical_type": "int64", "nullable": false},
+        {"name": "schema_identity", "sqlite_type": "BLOB", "logical_type": "hash32", "nullable": false},
+        {"name": "content_identity", "sqlite_type": "BLOB", "logical_type": "hash32", "nullable": false}
+      ],
+      "primary_key": ["candidate_identity", "table_code"],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_gate_execution",
+      "columns": [
+        {"name": "execution_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "operation_id", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "semantic_checksum", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "artifact_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "receipt_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "completed_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["execution_identity"],
+      "unique": [["candidate_identity", "operation_id"]],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_gate_receipt",
+      "columns": [
+        {"name": "receipt_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "operation_id", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "receipt_bytes", "sqlite_type": "BLOB", "logical_type": "binary", "nullable": false},
+        {"name": "semantic_checksum", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "expected_result_contract", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "artifact_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false}
+      ],
+      "primary_key": ["receipt_identity"],
+      "unique": [["candidate_identity", "operation_id"]],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_gate_artifact",
+      "columns": [
+        {"name": "artifact_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "operation_id", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "artifact_bytes", "sqlite_type": "BLOB", "logical_type": "binary", "nullable": false},
+        {"name": "created_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["artifact_identity"],
+      "unique": [["candidate_identity", "operation_id"]],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_owner_decision",
+      "columns": [
+        {"name": "decision_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "owner_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "policy_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "decision_bytes", "sqlite_type": "BLOB", "logical_type": "binary", "nullable": false},
+        {"name": "accepted_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["decision_identity"],
+      "unique": [["candidate_identity"]],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_activation_request",
+      "columns": [
+        {"name": "request_key", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "decision_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "request_digest", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "expected_predecessor_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": true},
+        {"name": "expected_pointer_generation", "sqlite_type": "INTEGER", "logical_type": "int64", "nullable": false},
+        {"name": "state", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "created_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false},
+        {"name": "completed_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": true}
+      ],
+      "primary_key": ["request_key"],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_acceptance",
+      "columns": [
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "request_key", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "decision_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "receipt_set_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "pointer_generation", "sqlite_type": "INTEGER", "logical_type": "int64", "nullable": false},
+        {"name": "accepted_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["candidate_identity"],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_active_pointer",
+      "columns": [
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "epoch_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "predecessor_epoch_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": true},
+        {"name": "pointer_generation", "sqlite_type": "INTEGER", "logical_type": "int64", "nullable": false},
+        {"name": "updated_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["workspace_id"]
+    },
+    {
+      "name": "ontology_recovery",
+      "columns": [
+        {"name": "request_key", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "outcome", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "observed_pointer_generation", "sqlite_type": "INTEGER", "logical_type": "int64", "nullable": false},
+        {"name": "reconciled_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["request_key"],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_result_authority",
+      "columns": [
+        {"name": "result_authority_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "program_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "function_catalog_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "policy_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "query_form_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "checksum_version", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "exact_table_set_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "created_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["result_authority_identity"],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
+    },
+    {
+      "name": "ontology_serving_epoch",
+      "columns": [
+        {"name": "epoch_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "workspace_id", "sqlite_type": "BLOB", "logical_type": "id16", "id_domain": "workspace", "nullable": false},
+        {"name": "candidate_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "predecessor_epoch_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": true},
+        {"name": "result_authority_identity", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "state", "sqlite_type": "TEXT", "logical_type": "utf8", "nullable": false},
+        {"name": "activated_at", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false},
+        {"name": "retained_until", "sqlite_type": "INTEGER", "logical_type": "timestamp_utc", "nullable": false}
+      ],
+      "primary_key": ["epoch_identity"],
+      "workspace_scope": {"kind": "DIRECT", "workspace_column": "workspace_id"}
     }
   ],
   "serving_projections": [

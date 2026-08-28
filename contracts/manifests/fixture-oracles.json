@@ -1,7 +1,7 @@
 {
   "artifact_id": "codefabric.manifests.fixture-oracles",
   "artifact_kind": "manifest",
-  "canonical_digest": "b3:a566a6733c4a637c2e33c7897cca7483013c57d184188726a80d5ecfadb694a4",
+  "canonical_digest": "b3:683803b0770c74fda682ebe6ee0af4c15b64660fb12aacb60d6b99f8e2669541",
   "compatible_suite_major": 1,
   "digest_projection": "json-jcs-v1",
   "generator_revision": "codefabric-model/1.0",
@@ -251,6 +251,14 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rule-tests/__snapshots__/domain-conformance-exhaustive-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rule-tests/__snapshots__/gix-boundary-only-snapshot.yml",
       "version": "1.0"
     },
@@ -260,6 +268,14 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rule-tests/__snapshots__/gix-read-only-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/governed-datafusion-ingress-only-snapshot.yml",
       "version": "1.0"
     },
     {
@@ -316,6 +332,14 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rule-tests/__snapshots__/no-source-text-policy-oracles-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/__snapshots__/ontology-candidate-receipt-opaque-snapshot.yml",
       "version": "1.0"
     },
     {
@@ -435,6 +459,14 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rule-tests/domain-conformance-exhaustive-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rule-tests/gix-boundary-only-test.yml",
       "version": "1.0"
     },
@@ -444,6 +476,14 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rule-tests/gix-read-only-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/governed-datafusion-ingress-only-test.yml",
       "version": "1.0"
     },
     {
@@ -500,6 +540,14 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rule-tests/no-source-text-policy-oracles-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rule-tests/ontology-candidate-receipt-opaque-test.yml",
       "version": "1.0"
     },
     {
@@ -619,6 +667,14 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rules/domain-conformance-exhaustive.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rules/gix-boundary-only.yml",
       "version": "1.0"
     },
@@ -628,6 +684,14 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rules/gix-read-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/governed-datafusion-ingress-only.yml",
       "version": "1.0"
     },
     {
@@ -684,6 +748,14 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rules/no-source-text-policy-oracles.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ontology-candidate-receipt-opaque.yml",
       "version": "1.0"
     },
     {

@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:7a07cfedce4e088509b5c450b5beeb2c2398eee4aa5fa4be4d9474a87ea5563d; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:92daa3bdca698f0dcdc09014c9e31c87220f9ec7ffc9f888d057f6973fd5109c; schema-contract-driver-v1; do not edit.
 
 define_id_domain_extension!(
     WorkspaceIdExtension,

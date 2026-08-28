@@ -45,10 +45,10 @@
     "sqlite-strict",
     "jsonschema-draft-2020-12"
   ],
-  "operational_table_count": 27,
+  "operational_table_count": 39,
   "public_schema_count": 8,
   "schema_version": 1,
-  "source_digest": "b3:7a07cfedce4e088509b5c450b5beeb2c2398eee4aa5fa4be4d9474a87ea5563d",
+  "source_digest": "b3:92daa3bdca698f0dcdc09014c9e31c87220f9ec7ffc9f888d057f6973fd5109c",
   "stable_field_id_rule": "<table-name>.<field-name>",
   "table_count": 58
 }

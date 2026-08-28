@@ -20,7 +20,7 @@ use crate::model_generated::semantic_lane_fragments::{
 };
 use crate::snapshot::ServingSnapshotManifest;
 
-const SCHEMA_VERSION: u32 = 11;
+const SCHEMA_VERSION: u32 = 12;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str =
     include_str!("../contracts/generated/model/schema/operational-store.sql");
@@ -38,11 +38,20 @@ pub enum StoreFaultPoint {
     MigrationBeforeCommit,
     /// Abort a normal write after the caller's statements but before commit.
     TransactionBeforeCommit,
+    /// Abort the ontology activation transaction before its commit.
+    OntologyActivationBeforeCommit,
+    /// Commit ontology activation, then simulate loss of the response.
+    OntologyActivationAfterCommitResponseLost,
 }
 
 impl StoreFaultPoint {
     /// Closed set used by the deterministic fault-matrix registry.
-    pub const ALL: [Self; 2] = [Self::MigrationBeforeCommit, Self::TransactionBeforeCommit];
+    pub const ALL: [Self; 4] = [
+        Self::MigrationBeforeCommit,
+        Self::TransactionBeforeCommit,
+        Self::OntologyActivationBeforeCommit,
+        Self::OntologyActivationAfterCommitResponseLost,
+    ];
 }
 
 /// Exact read-back of the AC-G-27 `SQLite` settings.
@@ -107,6 +116,96 @@ pub struct QueryExecutionTerminalRecord {
     pub expires_at: i64,
 }
 
+/// Persisted candidate lifecycle projection. The generated tables remain authoritative.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OntologyCandidateProjection {
+    pub candidate_identity: String,
+    pub workspace_id: Vec<u8>,
+    pub state: String,
+    pub manifest_digest: String,
+    pub program_identity: String,
+    pub package_identity: String,
+    pub config_identity: String,
+    pub policy_identity: String,
+    pub exact_table_set_identity: String,
+    pub predecessor_epoch_identity: Option<String>,
+    pub rollback_retain_until: i64,
+}
+
+/// Canonical accountable owner decision. Its identity is derived from all decision fields.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OntologyOwnerDecision {
+    decision_identity: String,
+    candidate_identity: String,
+    owner_identity: String,
+    policy_identity: String,
+    decision_bytes: Vec<u8>,
+    accepted_at: i64,
+}
+
+impl OntologyOwnerDecision {
+    /// Construct a canonical owner decision after the caller has authenticated the owner.
+    pub fn new(
+        candidate_identity: impl Into<String>,
+        owner_identity: impl Into<String>,
+        policy_identity: impl Into<String>,
+        accepted_at: i64,
+    ) -> Result<Self, OperationalStoreError> {
+        let candidate_identity = candidate_identity.into();
+        let owner_identity = owner_identity.into();
+        let policy_identity = policy_identity.into();
+        if candidate_identity.is_empty() || owner_identity.is_empty() || policy_identity.is_empty()
+        {
+            return Err(OperationalStoreError::OntologyActivation(
+                "owner decision contains an empty identity".into(),
+            ));
+        }
+        let decision_bytes = crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+            "candidate_identity": candidate_identity,
+            "owner_identity": owner_identity,
+            "policy_identity": policy_identity,
+            "accepted_at": accepted_at,
+        }))
+        .map_err(|error| OperationalStoreError::OntologyActivation(error.to_string()))?;
+        let decision_identity = crate::integrity::framed_digest(&decision_bytes);
+        Ok(Self {
+            decision_identity,
+            candidate_identity,
+            owner_identity,
+            policy_identity,
+            decision_bytes,
+            accepted_at,
+        })
+    }
+
+    #[must_use]
+    pub fn identity(&self) -> &str {
+        &self.decision_identity
+    }
+}
+
+/// Identity-only activation request accepted by the durable owner route.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OntologyActivationRequest {
+    pub request_key: String,
+    pub candidate_identity: String,
+    pub decision_identity: String,
+    pub expected_predecessor_identity: Option<String>,
+    pub expected_pointer_generation: i64,
+    pub requested_at: i64,
+}
+
+/// Committed activation result, reconstructed identically after a lost response.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OntologyActivationOutcome {
+    pub request_key: String,
+    pub candidate_identity: String,
+    pub epoch_identity: String,
+    pub pointer_generation: i64,
+    pub receipt_set_identity: String,
+    pub idempotent_replay: bool,
+}
+
 fn query_execution_terminal_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<QueryExecutionTerminalRecord> {
@@ -127,6 +226,411 @@ fn query_execution_terminal_from_row(
         created_at: row.get(13)?,
         expires_at: row.get(14)?,
     })
+}
+
+fn ontology_candidate_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<OntologyCandidateProjection> {
+    Ok(OntologyCandidateProjection {
+        candidate_identity: row.get(0)?,
+        workspace_id: row.get(1)?,
+        state: row.get(2)?,
+        manifest_digest: row.get(3)?,
+        program_identity: row.get(4)?,
+        package_identity: row.get(5)?,
+        config_identity: row.get(6)?,
+        policy_identity: row.get(7)?,
+        exact_table_set_identity: row.get(8)?,
+        predecessor_epoch_identity: row.get(9)?,
+        rollback_retain_until: row.get(10)?,
+    })
+}
+
+fn framed_digest_parts(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
+    let mut bytes = Vec::new();
+    for part in parts {
+        let part = part.as_ref();
+        bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(part);
+    }
+    crate::integrity::framed_digest(&bytes)
+}
+
+fn ontology_activation_request_digest(
+    request: &OntologyActivationRequest,
+) -> Result<String, OperationalStoreError> {
+    if request.request_key.is_empty()
+        || request.candidate_identity.is_empty()
+        || request.decision_identity.is_empty()
+        || request.expected_pointer_generation < 0
+    {
+        return Err(OperationalStoreError::OntologyActivation(
+            "activation request contains an empty identity or negative generation".into(),
+        ));
+    }
+    let bytes = crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+        "request_key": request.request_key,
+        "candidate_identity": request.candidate_identity,
+        "decision_identity": request.decision_identity,
+        "expected_predecessor_identity": request.expected_predecessor_identity,
+        "expected_pointer_generation": request.expected_pointer_generation,
+    }))
+    .map_err(|error| OperationalStoreError::OntologyActivation(error.to_string()))?;
+    Ok(crate::integrity::framed_digest(&bytes))
+}
+
+fn candidate_for_activation(
+    transaction: &Transaction<'_>,
+    candidate_identity: &str,
+) -> Result<OntologyCandidateProjection, OperationalStoreError> {
+    transaction
+        .query_row(
+            "SELECT candidate_identity, workspace_id, state, manifest_digest,
+               program_identity, package_identity, config_identity, policy_identity,
+               exact_table_set_identity, predecessor_epoch_identity, rollback_retain_until
+             FROM ontology_candidate WHERE candidate_identity=?1",
+            [candidate_identity],
+            ontology_candidate_from_row,
+        )
+        .map_err(Into::into)
+}
+
+fn current_ontology_pointer(
+    transaction: &Transaction<'_>,
+    workspace_id: &[u8],
+) -> Result<Option<(String, String, i64)>, OperationalStoreError> {
+    transaction
+        .query_row(
+            "SELECT candidate_identity, epoch_identity, pointer_generation
+             FROM ontology_active_pointer WHERE workspace_id=?1",
+            [workspace_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn activation_replay(
+    transaction: &Transaction<'_>,
+    request: &OntologyActivationRequest,
+    request_digest: &str,
+) -> Result<Option<OntologyActivationOutcome>, OperationalStoreError> {
+    let existing = transaction
+        .query_row(
+            "SELECT candidate_identity, decision_identity, request_digest, state
+             FROM ontology_activation_request WHERE request_key=?1",
+            [&request.request_key],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((candidate_identity, decision_identity, stored_digest, state)) = existing else {
+        return Ok(None);
+    };
+    if candidate_identity != request.candidate_identity
+        || decision_identity != request.decision_identity
+        || stored_digest != request_digest
+    {
+        return Err(OperationalStoreError::OntologyActivation(format!(
+            "request-key collision for {}",
+            request.request_key
+        )));
+    }
+    if state != "COMPLETED" {
+        return Err(OperationalStoreError::OntologyActivationOutcomeUnknown {
+            request_key: request.request_key.clone(),
+        });
+    }
+    let (receipt_set_identity, pointer_generation): (String, i64) = transaction.query_row(
+        "SELECT receipt_set_identity, pointer_generation FROM ontology_acceptance
+         WHERE candidate_identity=?1 AND request_key=?2",
+        params![request.candidate_identity, request.request_key],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let (active_candidate, epoch_identity, active_generation) = transaction.query_row(
+        "SELECT candidate_identity, epoch_identity, pointer_generation
+         FROM ontology_active_pointer
+         WHERE workspace_id=(SELECT workspace_id FROM ontology_activation_request
+                             WHERE request_key=?1)",
+        [&request.request_key],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
+    )?;
+    if active_candidate != request.candidate_identity || active_generation != pointer_generation {
+        return Err(OperationalStoreError::OntologyActivation(
+            "completed request does not own the active pointer".into(),
+        ));
+    }
+    Ok(Some(OntologyActivationOutcome {
+        request_key: request.request_key.clone(),
+        candidate_identity,
+        epoch_identity,
+        pointer_generation,
+        receipt_set_identity,
+        idempotent_replay: true,
+    }))
+}
+
+fn json_string<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Result<&'a str, OperationalStoreError> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            OperationalStoreError::OntologyActivation(format!(
+                "receipt or artifact field {field} is absent"
+            ))
+        })
+}
+
+fn validated_receipt_set_identity(
+    transaction: &Transaction<'_>,
+    candidate: &OntologyCandidateProjection,
+) -> Result<String, OperationalStoreError> {
+    let exact_table_identity = {
+        let mut statement = transaction.prepare(
+            "SELECT table_code, table_uri, delta_version, schema_identity, content_identity
+             FROM ontology_candidate_exact_table WHERE candidate_identity=?1
+             ORDER BY table_code",
+        )?;
+        let rows = statement
+            .query_map([&candidate.candidate_identity], |row| {
+                Ok((
+                    row.get::<_, i16>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if rows.is_empty() {
+            return Err(OperationalStoreError::OntologyActivation(
+                "candidate exact table set is empty".into(),
+            ));
+        }
+        framed_digest_parts(rows.iter().map(|(code, uri, version, schema, content)| {
+            framed_digest_parts([
+                code.to_be_bytes().as_slice(),
+                uri.as_bytes(),
+                u64::try_from(*version)
+                    .unwrap_or_default()
+                    .to_be_bytes()
+                    .as_slice(),
+                schema.as_slice(),
+                content.as_slice(),
+            ])
+        }))
+    };
+    if exact_table_identity != candidate.exact_table_set_identity {
+        return Err(OperationalStoreError::OntologyActivation(
+            "candidate exact table set identity drifted".into(),
+        ));
+    }
+    let counts = (
+        transaction.query_row(
+            "SELECT count(*) FROM ontology_gate_execution WHERE candidate_identity=?1",
+            [&candidate.candidate_identity],
+            |row| row.get::<_, i64>(0),
+        )?,
+        transaction.query_row(
+            "SELECT count(*) FROM ontology_gate_receipt WHERE candidate_identity=?1",
+            [&candidate.candidate_identity],
+            |row| row.get::<_, i64>(0),
+        )?,
+        transaction.query_row(
+            "SELECT count(*) FROM ontology_gate_artifact WHERE candidate_identity=?1",
+            [&candidate.candidate_identity],
+            |row| row.get::<_, i64>(0),
+        )?,
+    );
+    if counts.0 == 0 || counts.0 != counts.1 || counts.1 != counts.2 {
+        return Err(OperationalStoreError::OntologyActivation(
+            "execution, receipt, and artifact ledgers are not bijective".into(),
+        ));
+    }
+    let mut statement = transaction.prepare(
+        "SELECT execution.operation_id, execution.execution_identity,
+           execution.semantic_checksum, execution.artifact_identity,
+           execution.receipt_identity, receipt.receipt_bytes,
+           receipt.expected_result_contract, artifact.artifact_bytes
+         FROM ontology_gate_execution AS execution
+         JOIN ontology_gate_receipt AS receipt
+           ON receipt.receipt_identity=execution.receipt_identity
+          AND receipt.candidate_identity=execution.candidate_identity
+          AND receipt.operation_id=execution.operation_id
+          AND receipt.semantic_checksum=execution.semantic_checksum
+          AND receipt.artifact_identity=execution.artifact_identity
+         JOIN ontology_gate_artifact AS artifact
+           ON artifact.artifact_identity=execution.artifact_identity
+          AND artifact.candidate_identity=execution.candidate_identity
+          AND artifact.operation_id=execution.operation_id
+         WHERE execution.candidate_identity=?1 ORDER BY execution.operation_id",
+    )?;
+    let rows = statement
+        .query_map([&candidate.candidate_identity], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Vec<u8>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Vec<u8>>(7)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    if i64::try_from(rows.len()).unwrap_or(-1) != counts.0 {
+        return Err(OperationalStoreError::OntologyActivation(
+            "opaque receipt joins are incomplete".into(),
+        ));
+    }
+    let mut identities = Vec::with_capacity(rows.len());
+    for (
+        operation,
+        execution,
+        checksum,
+        artifact,
+        receipt,
+        receipt_bytes,
+        contract,
+        artifact_bytes,
+    ) in rows
+    {
+        if crate::contracts::jcs::canonicalize_slice(&receipt_bytes)
+            .map_err(|error| OperationalStoreError::OntologyActivation(error.to_string()))?
+            != receipt_bytes
+            || crate::contracts::jcs::canonicalize_slice(&artifact_bytes)
+                .map_err(|error| OperationalStoreError::OntologyActivation(error.to_string()))?
+                != artifact_bytes
+        {
+            return Err(OperationalStoreError::OntologyActivation(
+                "receipt or artifact bytes are not canonical".into(),
+            ));
+        }
+        let receipt_value: serde_json::Value = serde_json::from_slice(&receipt_bytes)
+            .map_err(|error| OperationalStoreError::OntologyActivation(error.to_string()))?;
+        for (field, expected) in [
+            ("operation_id", operation.as_str()),
+            ("execution_identity", execution.as_str()),
+            ("candidate_identity", candidate.candidate_identity.as_str()),
+            ("program_identity", candidate.program_identity.as_str()),
+            ("package_identity", candidate.package_identity.as_str()),
+            ("config_identity", candidate.config_identity.as_str()),
+            ("policy_identity", candidate.policy_identity.as_str()),
+            (
+                "exact_table_set_identity",
+                candidate.exact_table_set_identity.as_str(),
+            ),
+            ("semantic_checksum", checksum.as_str()),
+            ("expected_result_contract", contract.as_str()),
+            ("artifact_identity", artifact.as_str()),
+            ("receipt_identity", receipt.as_str()),
+        ] {
+            if json_string(&receipt_value, field)? != expected {
+                return Err(OperationalStoreError::OntologyActivation(format!(
+                    "receipt field {field} differs from durable authority"
+                )));
+            }
+        }
+        let recomputed_receipt = framed_digest_parts([
+            b"ontology-candidate-gate-receipt.v1".as_slice(),
+            operation.as_bytes(),
+            execution.as_bytes(),
+            candidate.candidate_identity.as_bytes(),
+            candidate.program_identity.as_bytes(),
+            candidate.package_identity.as_bytes(),
+            json_string(&receipt_value, "session_identity")?.as_bytes(),
+            candidate.config_identity.as_bytes(),
+            candidate.policy_identity.as_bytes(),
+            candidate.exact_table_set_identity.as_bytes(),
+            checksum.as_bytes(),
+            contract.as_bytes(),
+            artifact.as_bytes(),
+        ]);
+        if recomputed_receipt != receipt {
+            return Err(OperationalStoreError::OntologyActivation(
+                "opaque receipt identity does not recompute".into(),
+            ));
+        }
+        let artifact_value: serde_json::Value = serde_json::from_slice(&artifact_bytes)
+            .map_err(|error| OperationalStoreError::OntologyActivation(error.to_string()))?;
+        for (field, expected) in [
+            ("operation_id", operation.as_str()),
+            ("execution_identity", execution.as_str()),
+            ("candidate_identity", candidate.candidate_identity.as_str()),
+            ("artifact_identity", artifact.as_str()),
+        ] {
+            if json_string(&artifact_value, field)? != expected {
+                return Err(OperationalStoreError::OntologyActivation(format!(
+                    "artifact field {field} differs from durable authority"
+                )));
+            }
+        }
+        let terminal_action_count = artifact_value
+            .get("terminal_action_count")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                OperationalStoreError::OntologyActivation(
+                    "artifact terminal action count is absent".into(),
+                )
+            })?;
+        let metrics = artifact_value
+            .get("metrics")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| {
+                OperationalStoreError::OntologyActivation("artifact metrics are absent".into())
+            })?;
+        let recomputed_artifact = framed_digest_parts(
+            [
+                execution.as_bytes().to_vec(),
+                candidate.candidate_identity.as_bytes().to_vec(),
+                operation.as_bytes().to_vec(),
+                u16::try_from(terminal_action_count)
+                    .map_err(|_| {
+                        OperationalStoreError::OntologyActivation(
+                            "terminal action count exceeds u16".into(),
+                        )
+                    })?
+                    .to_be_bytes()
+                    .to_vec(),
+                json_string(&artifact_value, "physical_plan_diagnostic")?
+                    .as_bytes()
+                    .to_vec(),
+            ]
+            .into_iter()
+            .chain(metrics.iter().map(|(name, value)| {
+                format!("{name}:{}", value.as_u64().unwrap_or_default()).into_bytes()
+            })),
+        );
+        if recomputed_artifact != artifact {
+            return Err(OperationalStoreError::OntologyActivation(
+                "diagnostic artifact identity does not recompute".into(),
+            ));
+        }
+        identities.push(framed_digest_parts([
+            operation.as_bytes(),
+            execution.as_bytes(),
+            checksum.as_bytes(),
+            artifact.as_bytes(),
+            receipt.as_bytes(),
+        ]));
+    }
+    Ok(framed_digest_parts(identities))
 }
 
 /// Stable operational-store failures.
@@ -154,6 +658,10 @@ pub enum OperationalStoreError {
     ProviderRunRecord(String),
     #[error("query execution terminal record conflict: {0}")]
     QueryExecutionTerminalRecord(String),
+    #[error("ONTOLOGY_ACTIVATION_TRANSACTION_INVALID:{0}")]
+    OntologyActivation(String),
+    #[error("ontology activation outcome is unknown for request {request_key}")]
+    OntologyActivationOutcomeUnknown { request_key: String },
 }
 
 #[derive(Debug)]
@@ -743,6 +1251,541 @@ impl OperationalStore {
         }
     }
 
+    /// Persist a sealed candidate and the complete trusted-runner evidence ledger before any
+    /// activation transaction is allowed to begin.
+    ///
+    /// # Errors
+    ///
+    /// Rejects identity drift, non-canonical evidence, incomplete bindings, or `SQLite` errors.
+    pub fn persist_proved_ontology_candidate(
+        &mut self,
+        report: &crate::ontology_candidate::CandidateClosureReport,
+        persisted_at: i64,
+    ) -> Result<(), OperationalStoreError> {
+        let evidence = report.durable_evidence();
+        if evidence.gate_evidence.is_empty()
+            || evidence.exact_tables.is_empty()
+            || evidence.candidate_identity != report.candidate_identity()
+            || crate::integrity::framed_digest(&evidence.manifest_bytes) != evidence.manifest_digest
+        {
+            return Err(OperationalStoreError::OntologyActivation(
+                "trusted candidate evidence is incomplete or inconsistent".into(),
+            ));
+        }
+        self.write_transaction(|transaction| {
+            let existing = transaction
+                .query_row(
+                    "SELECT manifest_digest, state FROM ontology_candidate
+                     WHERE candidate_identity=?1",
+                    [&evidence.candidate_identity],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?;
+            if let Some((manifest_digest, state)) = existing {
+                if manifest_digest == evidence.manifest_digest
+                    && matches!(
+                        state.as_str(),
+                        "PROVED" | "ACCEPTED" | "ACTIVE" | "SUPERSEDED"
+                    )
+                {
+                    return Ok(());
+                }
+                return Err(OperationalStoreError::OntologyActivation(format!(
+                    "candidate identity collision for {}",
+                    evidence.candidate_identity
+                )));
+            }
+            transaction.execute(
+                "INSERT INTO ontology_candidate(
+                   candidate_identity, workspace_id, state, manifest_bytes, manifest_digest,
+                   program_identity, package_identity, config_identity, policy_identity,
+                   exact_table_set_identity, predecessor_epoch_identity, rollback_retain_until,
+                   created_at, updated_at
+                 ) VALUES (?1,?2,'BUILDING',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12)",
+                params![
+                    evidence.candidate_identity,
+                    evidence.workspace_id.as_slice(),
+                    evidence.manifest_bytes,
+                    evidence.manifest_digest,
+                    evidence.program_identity,
+                    evidence.package_identity,
+                    evidence.config_identity,
+                    evidence.policy_identity,
+                    evidence.exact_table_set_identity,
+                    evidence.predecessor_epoch_identity,
+                    evidence.rollback_retain_until,
+                    persisted_at,
+                ],
+            )?;
+            for table in &evidence.exact_tables {
+                let delta_version = i64::try_from(table.delta_version).map_err(|_| {
+                    OperationalStoreError::OntologyActivation(format!(
+                        "Delta version exceeds i64 for table {}",
+                        table.table_code
+                    ))
+                })?;
+                transaction.execute(
+                    "INSERT INTO ontology_candidate_exact_table(
+                       candidate_identity, workspace_id, table_code, table_uri, delta_version,
+                       schema_identity, content_identity
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    params![
+                        evidence.candidate_identity,
+                        evidence.workspace_id.as_slice(),
+                        table.table_code,
+                        table.table_uri,
+                        delta_version,
+                        table.schema_identity.as_slice(),
+                        table.content_identity.as_slice(),
+                    ],
+                )?;
+            }
+            transaction.execute(
+                "UPDATE ontology_candidate SET state='SEALED', updated_at=?2
+                 WHERE candidate_identity=?1 AND state='BUILDING'",
+                params![evidence.candidate_identity, persisted_at],
+            )?;
+            for gate in &evidence.gate_evidence {
+                transaction.execute(
+                    "INSERT INTO ontology_gate_artifact(
+                       artifact_identity, workspace_id, candidate_identity, operation_id,
+                       artifact_bytes, created_at
+                     ) VALUES (?1,?2,?3,?4,?5,?6)",
+                    params![
+                        gate.artifact_identity,
+                        evidence.workspace_id.as_slice(),
+                        evidence.candidate_identity,
+                        gate.operation_id,
+                        gate.artifact_bytes,
+                        persisted_at,
+                    ],
+                )?;
+                transaction.execute(
+                    "INSERT INTO ontology_gate_receipt(
+                       receipt_identity, workspace_id, candidate_identity, operation_id,
+                       receipt_bytes, semantic_checksum, expected_result_contract,
+                       artifact_identity
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    params![
+                        gate.receipt_identity,
+                        evidence.workspace_id.as_slice(),
+                        evidence.candidate_identity,
+                        gate.operation_id,
+                        gate.receipt_bytes,
+                        gate.semantic_checksum,
+                        gate.expected_result_contract,
+                        gate.artifact_identity,
+                    ],
+                )?;
+                transaction.execute(
+                    "INSERT INTO ontology_gate_execution(
+                       execution_identity, workspace_id, candidate_identity, operation_id,
+                       semantic_checksum, artifact_identity, receipt_identity, completed_at
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    params![
+                        gate.execution_identity,
+                        evidence.workspace_id.as_slice(),
+                        evidence.candidate_identity,
+                        gate.operation_id,
+                        gate.semantic_checksum,
+                        gate.artifact_identity,
+                        gate.receipt_identity,
+                        persisted_at,
+                    ],
+                )?;
+            }
+            transaction.execute(
+                "INSERT INTO ontology_result_authority(
+                   result_authority_identity, workspace_id, program_identity,
+                   function_catalog_identity, policy_identity, query_form_identity,
+                   checksum_version, exact_table_set_identity, created_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![
+                    evidence.result_authority_identity,
+                    evidence.workspace_id.as_slice(),
+                    evidence.program_identity,
+                    evidence.function_catalog_identity,
+                    evidence.policy_identity,
+                    evidence.query_form_identity,
+                    evidence.checksum_version,
+                    evidence.exact_table_set_identity,
+                    persisted_at,
+                ],
+            )?;
+            let changed = transaction.execute(
+                "UPDATE ontology_candidate SET state='PROVED', updated_at=?2
+                 WHERE candidate_identity=?1 AND state='SEALED'",
+                params![evidence.candidate_identity, persisted_at],
+            )?;
+            if changed != 1 {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "trusted runner could not advance SEALED candidate to PROVED".into(),
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    /// Persist one accountable owner decision separately from observations and gate metrics.
+    pub fn record_ontology_owner_decision(
+        &mut self,
+        decision: &OntologyOwnerDecision,
+    ) -> Result<(), OperationalStoreError> {
+        if crate::integrity::framed_digest(&decision.decision_bytes) != decision.decision_identity {
+            return Err(OperationalStoreError::OntologyActivation(
+                "owner decision bytes do not match their identity".into(),
+            ));
+        }
+        self.write_transaction(|transaction| {
+            let (workspace_id, state, policy_identity) = transaction.query_row(
+                "SELECT workspace_id, state, policy_identity FROM ontology_candidate
+                 WHERE candidate_identity=?1",
+                [&decision.candidate_identity],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?;
+            if state != "PROVED" || policy_identity != decision.policy_identity {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "owner decision does not match a PROVED candidate policy".into(),
+                ));
+            }
+            let existing = transaction
+                .query_row(
+                    "SELECT decision_identity, owner_identity, policy_identity, decision_bytes,
+                       accepted_at FROM ontology_owner_decision WHERE candidate_identity=?1",
+                    [&decision.candidate_identity],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Vec<u8>>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if let Some(existing) = existing {
+                if existing
+                    == (
+                        decision.decision_identity.clone(),
+                        decision.owner_identity.clone(),
+                        decision.policy_identity.clone(),
+                        decision.decision_bytes.clone(),
+                        decision.accepted_at,
+                    )
+                {
+                    return Ok(());
+                }
+                return Err(OperationalStoreError::OntologyActivation(
+                    "candidate already has a different owner decision".into(),
+                ));
+            }
+            transaction.execute(
+                "INSERT INTO ontology_owner_decision(
+                   decision_identity, workspace_id, candidate_identity, owner_identity,
+                   policy_identity, decision_bytes, accepted_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                params![
+                    decision.decision_identity,
+                    workspace_id,
+                    decision.candidate_identity,
+                    decision.owner_identity,
+                    decision.policy_identity,
+                    decision.decision_bytes,
+                    decision.accepted_at,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Atomically accept a proved candidate and advance the ontology pointer with CAS.
+    pub fn activate_ontology_candidate(
+        &mut self,
+        request: &OntologyActivationRequest,
+    ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
+        self.activate_ontology_candidate_with_fault(request, None)
+    }
+
+    fn activate_ontology_candidate_with_fault(
+        &mut self,
+        request: &OntologyActivationRequest,
+        fault: Option<StoreFaultPoint>,
+    ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
+        let request_digest = ontology_activation_request_digest(request)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(outcome) = activation_replay(&transaction, request, &request_digest)? {
+            transaction.commit()?;
+            return Ok(outcome);
+        }
+        let candidate = candidate_for_activation(&transaction, &request.candidate_identity)?;
+        if candidate.state != "PROVED" {
+            return Err(OperationalStoreError::OntologyActivation(format!(
+                "candidate {} is not PROVED",
+                request.candidate_identity
+            )));
+        }
+        if candidate.predecessor_epoch_identity != request.expected_predecessor_identity {
+            return Err(OperationalStoreError::OntologyActivation(
+                "candidate predecessor binding differs from the request".into(),
+            ));
+        }
+        let (owner_candidate, decision_policy) = transaction.query_row(
+            "SELECT candidate_identity, policy_identity FROM ontology_owner_decision
+             WHERE decision_identity=?1",
+            [&request.decision_identity],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        if owner_candidate != request.candidate_identity
+            || decision_policy != candidate.policy_identity
+        {
+            return Err(OperationalStoreError::OntologyActivation(
+                "owner decision candidate or policy does not match".into(),
+            ));
+        }
+        let current = current_ontology_pointer(&transaction, &candidate.workspace_id)?;
+        match &current {
+            Some((_, epoch, generation))
+                if *generation == request.expected_pointer_generation
+                    && Some(epoch.as_str()) == request.expected_predecessor_identity.as_deref() => {
+            }
+            None if request.expected_pointer_generation == 0
+                && request.expected_predecessor_identity.is_none() => {}
+            _ => {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "ontology pointer CAS predecessor or generation differs".into(),
+                ));
+            }
+        }
+        let receipt_set_identity = validated_receipt_set_identity(&transaction, &candidate)?;
+        let pointer_generation = request
+            .expected_pointer_generation
+            .checked_add(1)
+            .ok_or_else(|| {
+                OperationalStoreError::OntologyActivation(
+                    "ontology pointer generation overflow".into(),
+                )
+            })?;
+        let epoch_identity = crate::integrity::framed_digest(
+            &[
+                candidate.workspace_id.as_slice(),
+                request.candidate_identity.as_bytes(),
+                request.request_key.as_bytes(),
+                &pointer_generation.to_be_bytes(),
+            ]
+            .concat(),
+        );
+        transaction.execute(
+            "INSERT INTO ontology_activation_request(
+               request_key, workspace_id, candidate_identity, decision_identity,
+               request_digest, expected_predecessor_identity, expected_pointer_generation,
+               state, created_at, completed_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,'COMMITTING',?8,NULL)",
+            params![
+                request.request_key,
+                candidate.workspace_id,
+                request.candidate_identity,
+                request.decision_identity,
+                request_digest,
+                request.expected_predecessor_identity,
+                request.expected_pointer_generation,
+                request.requested_at,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO ontology_acceptance(
+               candidate_identity, workspace_id, request_key, decision_identity,
+               receipt_set_identity, pointer_generation, accepted_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                request.candidate_identity,
+                candidate.workspace_id,
+                request.request_key,
+                request.decision_identity,
+                receipt_set_identity,
+                pointer_generation,
+                request.requested_at,
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE ontology_candidate SET state='ACCEPTED', updated_at=?2
+             WHERE candidate_identity=?1 AND state='PROVED'",
+            params![request.candidate_identity, request.requested_at],
+        )?;
+        if let Some((prior_candidate, _, _)) = &current {
+            transaction.execute(
+                "UPDATE ontology_candidate SET state='SUPERSEDED', updated_at=?2
+                 WHERE candidate_identity=?1 AND state='ACTIVE'",
+                params![prior_candidate, request.requested_at],
+            )?;
+            transaction.execute(
+                "UPDATE ontology_serving_epoch SET state='SUPERSEDED'
+                 WHERE candidate_identity=?1 AND state='ACTIVE'",
+                [prior_candidate],
+            )?;
+        }
+        let result_authority_identity: String = transaction.query_row(
+            "SELECT result_authority_identity FROM ontology_result_authority
+             WHERE workspace_id=?1 AND program_identity=?2 AND policy_identity=?3
+               AND exact_table_set_identity=?4",
+            params![
+                candidate.workspace_id,
+                candidate.program_identity,
+                candidate.policy_identity,
+                candidate.exact_table_set_identity,
+            ],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            "INSERT INTO ontology_serving_epoch(
+               epoch_identity, workspace_id, candidate_identity, predecessor_epoch_identity,
+               result_authority_identity, state, activated_at, retained_until
+             ) VALUES (?1,?2,?3,?4,?5,'ACTIVE',?6,?7)",
+            params![
+                epoch_identity,
+                candidate.workspace_id,
+                request.candidate_identity,
+                request.expected_predecessor_identity,
+                result_authority_identity,
+                request.requested_at,
+                candidate.rollback_retain_until,
+            ],
+        )?;
+        let pointer_changed = if current.is_some() {
+            transaction.execute(
+                "UPDATE ontology_active_pointer
+                 SET candidate_identity=?2, epoch_identity=?3,
+                     predecessor_epoch_identity=?4, pointer_generation=?5, updated_at=?6
+                 WHERE workspace_id=?1 AND pointer_generation=?7",
+                params![
+                    candidate.workspace_id,
+                    request.candidate_identity,
+                    epoch_identity,
+                    request.expected_predecessor_identity,
+                    pointer_generation,
+                    request.requested_at,
+                    request.expected_pointer_generation,
+                ],
+            )?
+        } else {
+            transaction.execute(
+                "INSERT INTO ontology_active_pointer(
+                   workspace_id, candidate_identity, epoch_identity,
+                   predecessor_epoch_identity, pointer_generation, updated_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6)",
+                params![
+                    candidate.workspace_id,
+                    request.candidate_identity,
+                    epoch_identity,
+                    request.expected_predecessor_identity,
+                    pointer_generation,
+                    request.requested_at,
+                ],
+            )?
+        };
+        if pointer_changed != 1 {
+            return Err(OperationalStoreError::OntologyActivation(
+                "ontology pointer CAS lost".into(),
+            ));
+        }
+        transaction.execute(
+            "UPDATE ontology_candidate SET state='ACTIVE', updated_at=?2
+             WHERE candidate_identity=?1 AND state='ACCEPTED'",
+            params![request.candidate_identity, request.requested_at],
+        )?;
+        transaction.execute(
+            "UPDATE ontology_activation_request SET state='COMPLETED', completed_at=?2
+             WHERE request_key=?1 AND state='COMMITTING'",
+            params![request.request_key, request.requested_at],
+        )?;
+        if fault == Some(StoreFaultPoint::OntologyActivationBeforeCommit) {
+            return Err(OperationalStoreError::InjectedFault(
+                StoreFaultPoint::OntologyActivationBeforeCommit,
+            ));
+        }
+        transaction.commit()?;
+        if fault == Some(StoreFaultPoint::OntologyActivationAfterCommitResponseLost) {
+            return Err(OperationalStoreError::OntologyActivationOutcomeUnknown {
+                request_key: request.request_key.clone(),
+            });
+        }
+        Ok(OntologyActivationOutcome {
+            request_key: request.request_key.clone(),
+            candidate_identity: request.candidate_identity.clone(),
+            epoch_identity,
+            pointer_generation,
+            receipt_set_identity,
+            idempotent_replay: false,
+        })
+    }
+
+    /// Reconcile an activation after restart or a lost response and persist that observation.
+    pub fn reconcile_ontology_activation(
+        &mut self,
+        request: &OntologyActivationRequest,
+    ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
+        let request_digest = ontology_activation_request_digest(request)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let outcome =
+            activation_replay(&transaction, request, &request_digest)?.ok_or_else(|| {
+                OperationalStoreError::OntologyActivationOutcomeUnknown {
+                    request_key: request.request_key.clone(),
+                }
+            })?;
+        let workspace_id: Vec<u8> = transaction.query_row(
+            "SELECT workspace_id FROM ontology_activation_request WHERE request_key=?1",
+            [&request.request_key],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            "INSERT INTO ontology_recovery(
+               request_key, workspace_id, candidate_identity, outcome,
+               observed_pointer_generation, reconciled_at
+             ) VALUES (?1,?2,?3,'COMMITTED',?4,?5)
+             ON CONFLICT(request_key) DO UPDATE SET
+               outcome=excluded.outcome,
+               observed_pointer_generation=excluded.observed_pointer_generation,
+               reconciled_at=excluded.reconciled_at",
+            params![
+                request.request_key,
+                workspace_id,
+                request.candidate_identity,
+                outcome.pointer_generation,
+                request.requested_at,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(outcome)
+    }
+
+    /// Read a candidate projection after reopen without exposing receipt trust fields.
+    pub fn ontology_candidate(
+        &self,
+        candidate_identity: &str,
+    ) -> Result<Option<OntologyCandidateProjection>, OperationalStoreError> {
+        self.connection
+            .query_row(
+                "SELECT candidate_identity, workspace_id, state, manifest_digest,
+                   program_identity, package_identity, config_identity, policy_identity,
+                   exact_table_set_identity, predecessor_epoch_identity, rollback_retain_until
+                 FROM ontology_candidate WHERE candidate_identity=?1",
+                [candidate_identity],
+                ontology_candidate_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Checkpoint the WAL during drain without changing journal mode.
     ///
     /// # Errors
@@ -792,6 +1835,7 @@ impl OperationalStore {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             2 => {
                 migrate_v2_to_v3(&transaction)?;
@@ -803,6 +1847,7 @@ impl OperationalStore {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             3 => {
                 migrate_v3_to_v4(&transaction)?;
@@ -813,6 +1858,7 @@ impl OperationalStore {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             4 => {
                 migrate_v4_to_v5(&transaction)?;
@@ -822,6 +1868,7 @@ impl OperationalStore {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             5 => {
                 migrate_v5_to_v6(&transaction)?;
@@ -830,6 +1877,7 @@ impl OperationalStore {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             6 => {
                 migrate_v6_to_v7(&transaction)?;
@@ -837,23 +1885,31 @@ impl OperationalStore {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             7 => {
                 migrate_v7_to_v8(&transaction)?;
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             8 => {
                 migrate_v8_to_v9(&transaction)?;
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
             9 => {
                 migrate_v9_to_v10(&transaction)?;
                 migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
             }
-            10 => migrate_v10_to_v11(&transaction)?,
+            10 => {
+                migrate_v10_to_v11(&transaction)?;
+                migrate_v11_to_v12(&transaction)?;
+            }
+            11 => migrate_v11_to_v12(&transaction)?,
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -1289,6 +2345,26 @@ fn migrate_v10_to_v11(transaction: &Transaction<'_>) -> Result<(), OperationalSt
     Ok(())
 }
 
+fn migrate_v11_to_v12(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    for table in [
+        "ontology_candidate",
+        "ontology_candidate_exact_table",
+        "ontology_gate_execution",
+        "ontology_gate_receipt",
+        "ontology_gate_artifact",
+        "ontology_owner_decision",
+        "ontology_activation_request",
+        "ontology_acceptance",
+        "ontology_active_pointer",
+        "ontology_recovery",
+        "ontology_result_authority",
+        "ontology_serving_epoch",
+    ] {
+        transaction.execute_batch(&generated_table_ddl(table)?)?;
+    }
+    Ok(())
+}
+
 fn table_has_column(
     transaction: &Transaction<'_>,
     table: &str,
@@ -1578,12 +2654,107 @@ fn generated_column_shapes() -> Result<GeneratedColumnShapes, OperationalStoreEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use datafusion::prelude::SessionConfig;
     use tempfile::TempDir;
+
+    use crate::fabric::{
+        CurrentPublicationRecord, PublicationOutcome, PublicationScope, PublicationTableRecord,
+    };
+    use crate::governed_session::GovernedSession;
+    use crate::ontology_candidate::{CandidateClosureReport, CandidateClosureRunner};
+    use crate::ontology_gate::GateResourceEnvelope;
+    use crate::ontology_program::{OntologyPackagingProfile, build_ontology_program_package};
 
     fn database() -> (TempDir, PathBuf) {
         let directory = TempDir::new().unwrap();
         let path = directory.path().join("operational.sqlite3");
         (directory, path)
+    }
+
+    fn candidate_publication(
+        workspace_id: [u8; 16],
+        marker: u8,
+        delta_version: u64,
+    ) -> PublicationOutcome {
+        let publication_id = [marker; 16];
+        PublicationOutcome {
+            publication_id,
+            scope: PublicationScope {
+                workspace_id,
+                source_generation: i64::from(marker),
+                analysis_context_set_id: [marker.wrapping_add(1); 16],
+                analysis_context_ids: vec![[marker.wrapping_add(2); 16]],
+            },
+            pointer: CurrentPublicationRecord {
+                workspace_id,
+                publication_id,
+                pointer_generation: i64::from(marker),
+                updated_at_micros: 1_000,
+            },
+            tables: BTreeMap::from([(
+                1,
+                PublicationTableRecord {
+                    publication_id,
+                    workspace_id,
+                    table_code: 1,
+                    table_uri: format!("file:///ontology-candidate/{marker}"),
+                    delta_version,
+                    schema_fingerprint: [marker.wrapping_add(3); 32],
+                    row_count: 1,
+                    owner_count: 1,
+                    table_checksum: [marker.wrapping_add(4); 32],
+                    primary_key_digest: [marker.wrapping_add(5); 32],
+                    required: true,
+                    validated: true,
+                },
+            )]),
+        }
+    }
+
+    async fn proved_candidate(
+        workspace_id: [u8; 16],
+        marker: u8,
+        delta_version: u64,
+        predecessor: Option<String>,
+    ) -> CandidateClosureReport {
+        CandidateClosureRunner::new_for_epoch(
+            build_ontology_program_package(&OntologyPackagingProfile::default()).unwrap(),
+            candidate_publication(workspace_id, marker, delta_version),
+            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1").unwrap(),
+            predecessor,
+            99_999,
+        )
+        .unwrap()
+        .execute(&GateResourceEnvelope::default())
+        .await
+        .unwrap()
+    }
+
+    fn owner_decision(report: &CandidateClosureReport, accepted_at: i64) -> OntologyOwnerDecision {
+        OntologyOwnerDecision::new(
+            report.candidate_identity(),
+            "owner:ontology-release",
+            report.durable_evidence().policy_identity.clone(),
+            accepted_at,
+        )
+        .unwrap()
+    }
+
+    fn activation_request(
+        report: &CandidateClosureReport,
+        decision: &OntologyOwnerDecision,
+        request_key: &str,
+        predecessor: Option<String>,
+        generation: i64,
+    ) -> OntologyActivationRequest {
+        OntologyActivationRequest {
+            request_key: request_key.into(),
+            candidate_identity: report.candidate_identity().into(),
+            decision_identity: decision.identity().into(),
+            expected_predecessor_identity: predecessor,
+            expected_pointer_generation: generation,
+            requested_at: 2_000 + generation,
+        }
     }
 
     #[test]
@@ -2087,5 +3258,229 @@ mod tests {
             )
             .unwrap();
         assert!(present);
+    }
+
+    #[test]
+    fn ontology_operational_tables_migrate_from_v11() {
+        let (_directory, path) = database();
+        let store = OperationalStore::open(&path).unwrap();
+        drop(store);
+        let connection = Connection::open(&path).unwrap();
+        for table in [
+            "ontology_candidate",
+            "ontology_candidate_exact_table",
+            "ontology_gate_execution",
+            "ontology_gate_receipt",
+            "ontology_gate_artifact",
+            "ontology_owner_decision",
+            "ontology_activation_request",
+            "ontology_acceptance",
+            "ontology_active_pointer",
+            "ontology_recovery",
+            "ontology_result_authority",
+            "ontology_serving_epoch",
+        ] {
+            connection
+                .execute_batch(&format!("DROP TABLE {table};"))
+                .unwrap();
+        }
+        connection.pragma_update(None, "user_version", 11).unwrap();
+        drop(connection);
+        let migrated = OperationalStore::open(&path).unwrap();
+        assert_eq!(user_version(&migrated.connection).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            migrated
+                .connection
+                .query_row(
+                    "SELECT count(*) FROM sqlite_schema
+                     WHERE type='table' AND name LIKE 'ontology_%'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            12
+        );
+    }
+
+    #[tokio::test]
+    async fn ontology_candidate_receipt_binding_matrix() {
+        let (_directory, path) = database();
+        let report = proved_candidate([0x71; 16], 0x72, 17, None).await;
+        let decision = owner_decision(&report, 2_000);
+        let request = activation_request(&report, &decision, "activate-receipt-matrix", None, 0);
+        let mut store = OperationalStore::open(&path).unwrap();
+        store
+            .persist_proved_ontology_candidate(&report, 1_000)
+            .unwrap();
+        store.record_ontology_owner_decision(&decision).unwrap();
+        let projection = store
+            .ontology_candidate(report.candidate_identity())
+            .unwrap()
+            .unwrap();
+        assert_eq!(projection.state, "PROVED");
+        assert_eq!(
+            projection.exact_table_set_identity,
+            report.durable_evidence().exact_table_set_identity
+        );
+        drop(store);
+
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE ontology_gate_receipt SET receipt_bytes=X'7b7d'
+                 WHERE receipt_identity=(SELECT receipt_identity FROM ontology_gate_receipt
+                                         ORDER BY receipt_identity LIMIT 1)",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        let mut reopened = OperationalStore::open(&path).unwrap();
+        let error = reopened.activate_ontology_candidate(&request).unwrap_err();
+        assert!(error.to_string().contains("receipt"));
+        assert_eq!(
+            reopened
+                .ontology_candidate(report.candidate_identity())
+                .unwrap()
+                .unwrap()
+                .state,
+            "PROVED"
+        );
+    }
+
+    #[tokio::test]
+    async fn ontology_activation_state_transaction_atomicity() {
+        let (_directory, path) = database();
+        let report = proved_candidate([0x73; 16], 0x74, 18, None).await;
+        let decision = owner_decision(&report, 2_100);
+        let request = activation_request(&report, &decision, "activate-atomic", None, 0);
+        let mut store = OperationalStore::open(&path).unwrap();
+        store
+            .persist_proved_ontology_candidate(&report, 1_100)
+            .unwrap();
+        store.record_ontology_owner_decision(&decision).unwrap();
+        let error = store
+            .activate_ontology_candidate_with_fault(
+                &request,
+                Some(StoreFaultPoint::OntologyActivationBeforeCommit),
+            )
+            .unwrap_err();
+        assert!(matches!(error, OperationalStoreError::InjectedFault(_)));
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT count(*) FROM ontology_active_pointer", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        let first = store.activate_ontology_candidate(&request).unwrap();
+        assert_eq!(first.pointer_generation, 1);
+        assert!(!first.idempotent_replay);
+        let replay = store.activate_ontology_candidate(&request).unwrap();
+        assert!(replay.idempotent_replay);
+        assert_eq!(first.epoch_identity, replay.epoch_identity);
+        assert_eq!(
+            store
+                .ontology_candidate(report.candidate_identity())
+                .unwrap()
+                .unwrap()
+                .state,
+            "ACTIVE"
+        );
+    }
+
+    #[tokio::test]
+    async fn ontology_candidate_delta_exact_version_binding() {
+        let (_directory, path) = database();
+        let report = proved_candidate([0x75; 16], 0x76, 23, None).await;
+        let mut store = OperationalStore::open(&path).unwrap();
+        store
+            .persist_proved_ontology_candidate(&report, 1_200)
+            .unwrap();
+        drop(store);
+        let reopened = OperationalStore::open(&path).unwrap();
+        let tuple = reopened
+            .connection
+            .query_row(
+                "SELECT table_uri, delta_version, length(schema_identity),
+                   length(content_identity) FROM ontology_candidate_exact_table
+                 WHERE candidate_identity=?1",
+                [report.candidate_identity()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(tuple, ("file:///ontology-candidate/118".into(), 23, 32, 32));
+    }
+
+    #[tokio::test]
+    async fn ontology_decision_observation_separation() {
+        let (_directory, path) = database();
+        let report = proved_candidate([0x77; 16], 0x78, 29, None).await;
+        let decision = owner_decision(&report, 2_300);
+        assert!(!String::from_utf8_lossy(&decision.decision_bytes).contains("metrics"));
+        assert!(!String::from_utf8_lossy(&decision.decision_bytes).contains("artifact"));
+        let mut store = OperationalStore::open(&path).unwrap();
+        store
+            .persist_proved_ontology_candidate(&report, 1_300)
+            .unwrap();
+        store.record_ontology_owner_decision(&decision).unwrap();
+        let stored: (String, Vec<u8>) = store
+            .connection
+            .query_row(
+                "SELECT decision_identity, decision_bytes FROM ontology_owner_decision
+                 WHERE candidate_identity=?1",
+                [report.candidate_identity()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            (decision.identity().into(), decision.decision_bytes)
+        );
+    }
+
+    #[tokio::test]
+    async fn ontology_activation_restart_idempotency() {
+        let (_directory, path) = database();
+        let report = proved_candidate([0x79; 16], 0x7a, 31, None).await;
+        let decision = owner_decision(&report, 2_400);
+        let request = activation_request(&report, &decision, "activate-lost-response", None, 0);
+        let mut store = OperationalStore::open(&path).unwrap();
+        store
+            .persist_proved_ontology_candidate(&report, 1_400)
+            .unwrap();
+        store.record_ontology_owner_decision(&decision).unwrap();
+        let error = store
+            .activate_ontology_candidate_with_fault(
+                &request,
+                Some(StoreFaultPoint::OntologyActivationAfterCommitResponseLost),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            OperationalStoreError::OntologyActivationOutcomeUnknown { .. }
+        ));
+        drop(store);
+        let mut reopened = OperationalStore::open(&path).unwrap();
+        let recovered = reopened.reconcile_ontology_activation(&request).unwrap();
+        assert!(recovered.idempotent_replay);
+        assert_eq!(recovered.pointer_generation, 1);
+        assert_eq!(
+            reopened
+                .connection
+                .query_row("SELECT count(*) FROM ontology_acceptance", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
     }
 }

@@ -152,6 +152,11 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/__snapshots__/domain-conformance-exhaustive-snapshot.yml",
+      "source_digest": "b3:3d04ba045c35043a643638c7b3431fe00dc4c58b4f1e6355a8b1b049562cd326"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/__snapshots__/gix-boundary-only-snapshot.yml",
       "source_digest": "b3:ae2b5ea0f07328c6ff221020433518b44d3834cd17e172a10595ab5c473dda8b"
     },
@@ -159,6 +164,11 @@
       "class": "property",
       "path": "rule-tests/__snapshots__/gix-read-only-snapshot.yml",
       "source_digest": "b3:c9683a61abaa2ceca86edac9564f610513248c99ce67e61061eac3fe7393fcc6"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/governed-datafusion-ingress-only-snapshot.yml",
+      "source_digest": "b3:ca3d9d20d5674579d370910505145b583264b0fac5bb453c53a6063e27bf789a"
     },
     {
       "class": "property",
@@ -194,6 +204,11 @@
       "class": "property",
       "path": "rule-tests/__snapshots__/no-source-text-policy-oracles-snapshot.yml",
       "source_digest": "b3:2f05616273228aeccf50e23ca6d4ca937bb0f34bb67c767c0ff393dbc3d7386a"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/__snapshots__/ontology-candidate-receipt-opaque-snapshot.yml",
+      "source_digest": "b3:b9cdc80b64047cfb8fc278c9adf30747c6ac64725596bd2f0ce17ddae655d17c"
     },
     {
       "class": "property",
@@ -267,6 +282,11 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/domain-conformance-exhaustive-test.yml",
+      "source_digest": "b3:05997b5bcd925d62cdb9fa3a16ae471d1d3fc79ebfcc4fdaab0215eef3e511eb"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/gix-boundary-only-test.yml",
       "source_digest": "b3:c28d2a2c3456168c0efe64a3a4004fb9426489226b71e47a70f7760ffc85de04"
     },
@@ -274,6 +294,11 @@
       "class": "property",
       "path": "rule-tests/gix-read-only-test.yml",
       "source_digest": "b3:c39f73428b418b1395579fa13aedf1b7d315435ee12f22331d7244bfc05ed2ca"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/governed-datafusion-ingress-only-test.yml",
+      "source_digest": "b3:1705e5b37c0976d2071275b401b0b6e2752c071500f6306322759d251f418ba3"
     },
     {
       "class": "property",
@@ -309,6 +334,11 @@
       "class": "property",
       "path": "rule-tests/no-source-text-policy-oracles-test.yml",
       "source_digest": "b3:27c4e8e8132339f85ffb1b1b36f90fef14b35be7d6520fad3b31c0b5ba52f73f"
+    },
+    {
+      "class": "property",
+      "path": "rule-tests/ontology-candidate-receipt-opaque-test.yml",
+      "source_digest": "b3:61dd0927bd7cdf5eb8811658f7132f4f509977acbc0a686baa19e51d62eecf3c"
     },
     {
       "class": "property",
@@ -382,6 +412,11 @@
     },
     {
       "class": "property",
+      "path": "rules/domain-conformance-exhaustive.yml",
+      "source_digest": "b3:464eb2f7f5557be2616a416913a6cedf743acb10dd1f1698cf3d149a5ca58053"
+    },
+    {
+      "class": "property",
       "path": "rules/gix-boundary-only.yml",
       "source_digest": "b3:baecf96e40dc27d1159a8bb32c990e10be81a7f8211d033e90f14f8cbe1ab231"
     },
@@ -389,6 +424,11 @@
       "class": "property",
       "path": "rules/gix-read-only.yml",
       "source_digest": "b3:eee38859243302460f9a6edce0bbebdce96f81d0c0a6f19b3ed9a92c1d6b35fe"
+    },
+    {
+      "class": "property",
+      "path": "rules/governed-datafusion-ingress-only.yml",
+      "source_digest": "b3:1eb810cd7419bebcbdc1646c16c3da7efcfa79abc99b40f9e049374eb79d9aa8"
     },
     {
       "class": "property",
@@ -424,6 +464,11 @@
       "class": "property",
       "path": "rules/no-source-text-policy-oracles.yml",
       "source_digest": "b3:b1bb109e65664f61fce9fac4ab5e65ff22052cb73fe42a783a8bad0963e34c1e"
+    },
+    {
+      "class": "property",
+      "path": "rules/ontology-candidate-receipt-opaque.yml",
+      "source_digest": "b3:596701d5e835dc8a3de842c1a57c043c6bcb0f0b84603ceef35d2503da2f4de3"
     },
     {
       "class": "property",

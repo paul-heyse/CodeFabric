@@ -777,6 +777,16 @@ class WorkspaceRegistryLifecycle(IntEnum):
     FAILED = 100
 
 
+class OntologyCandidateLifecycle(IntEnum):
+    BUILDING = 10
+    SEALED = 20
+    PROVED = 30
+    ACCEPTED = 40
+    ACTIVE = 50
+    SUPERSEDED = 60
+    FAILED = 70
+
+
 class FactFlags(IntFlag):
     NONE = 0
     GENERATED = 1
@@ -1426,6 +1436,15 @@ ENUM_TRIPLES = MappingProxyType({
         (90, "REMOVED", "removed"),
         (100, "FAILED", "failed"),
     ),
+    "ONTOLOGY_CANDIDATE_LIFECYCLE": (
+        (10, "BUILDING", "building"),
+        (20, "SEALED", "sealed"),
+        (30, "PROVED", "proved"),
+        (40, "ACCEPTED", "accepted"),
+        (50, "ACTIVE", "active"),
+        (60, "SUPERSEDED", "superseded"),
+        (70, "FAILED", "failed"),
+    ),
 })
 
 
@@ -1806,6 +1825,19 @@ REGISTRY_IDS = MappingProxyType({
         "DAEMON_UNAVAILABLE",
         "CONTRACT_MISMATCH",
         "INTERNAL",
+        "GOVERNED_PLAN_INGRESS_REJECTED",
+        "SEMANTIC_PHRASE_UNSUPPORTED",
+        "ONTOLOGY_GATE_ROW_LIMIT",
+        "ONTOLOGY_GATE_BYTE_LIMIT",
+        "ONTOLOGY_GATE_BATCH_LIMIT",
+        "ONTOLOGY_GATE_COUNTER_OVERFLOW",
+        "ONTOLOGY_PROGRAM_CONTRACT_INVALID",
+        "ONTOLOGY_PROGRAM_DECODE_INVALID",
+        "ONTOLOGY_PROGRAM_DIGEST_MISMATCH",
+        "ONTOLOGY_PROGRAM_RESOURCE_LIMIT",
+        "ONTOLOGY_PROGRAM_UNSUPPORTED",
+        "ONTOLOGY_CANDIDATE_CLOSURE_INVALID",
+        "ONTOLOGY_ACTIVATION_TRANSACTION_INVALID",
     ),
     "derivations": (
         "SYNTAX_TREE_V1",
