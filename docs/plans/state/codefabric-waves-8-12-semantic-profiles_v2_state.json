@@ -455,6 +455,10 @@
     {
       "kind": "pre_activation_approval_transition",
       "summary": "The user/design owner's execution direction moved the previously inactive draft v2 artifact to approved before the atomic activation transaction."
+    },
+    {
+      "kind": "successor_plan_interruption",
+      "summary": "The owner directed execution of the accepted ontology-compiled data-fabric plan on 2026-08-28 before remaining Wave 9-12 work. Completed packet history stays authoritative; WP09 and later remain not started. The successor's WP16 must audit and disposition every remaining packet before this plan may resume."
     }
   ],
   "next_action": "When execution resumes, run WP09 preflight over source leases, immutable ProviderWorkspaceView construction, dependency bundles, encoding maps, and sidecar source resolution; do not begin WP38 until WP09 is complete.",

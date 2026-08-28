@@ -3,7 +3,7 @@ artifact: implementation-plan
 plan_id: codefabric-ontology-compiled-data-fabric
 version: v2
 date: 2026-08-27
-status: draft
+status: approved
 design_path: docs/designs/codefabric_ontology_compiled_data_fabric_design_v3_2026-08-27.md
 design_version: v3
 baseline_commit: eb7a738fa55037b19706fd842737cecad65ffe16
@@ -100,7 +100,7 @@ scope here.
 
 | Path | sha256 |
 |---|---|
-| docs/designs/codefabric_ontology_compiled_data_fabric_design_v3_2026-08-27.md | 20beab86f78d5492646d9b68d486eed72e000874040375e07b4dcea137d23851 |
+| docs/designs/codefabric_ontology_compiled_data_fabric_design_v3_2026-08-27.md | add58c3a620d033aaa0d5d56c4d84b5001d5536fb74b6c106cabc70911148c18 |
 | docs/reviews/plan_audit_codefabric_ontology_compiled_data_fabric_implementation_plan_v1_2026-08-27_v1.md | 4c853904a3ff5ee96dbfe5b844ed785210c568f1972fd88d7348f61db432d23e |
 | docs/reviews/representative_datafusion_arrow_relational_usage.md | ab9d8c58fbb48ab8e6d80b5be631c81ae9a9d9a3ae94481cdce1cbfd964bdb97 |
 | docs/library_ref/full_data_fabric_design_principles.md | c20ba5e3f2d499fb439c9aadebf72d2fa98f795368faf7a7a168f420a64b48e1 |

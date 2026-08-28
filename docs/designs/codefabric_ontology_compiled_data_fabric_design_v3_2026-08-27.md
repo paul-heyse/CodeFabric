@@ -3,7 +3,7 @@ artifact: design-dossier
 design_id: codefabric-ontology-compiled-data-fabric
 version: v3
 date: 2026-08-27
-status: draft
+status: accepted
 baseline_commit: eb7a738fa55037b19706fd842737cecad65ffe16
 working_tree_digest: 174abedf68765285989783ba89d8d7de09657bc60cc8390730d4f802c6a16395
 supersedes: codefabric_ontology_compiled_data_fabric_design_v2_2026-08-27.md
@@ -960,11 +960,12 @@ Log is the authoritative finding-by-finding disposition ledger.
 
 ## 9. Acceptance
 
-**not-ready — pending focused re-audit of v3/v2 integration.** The target decisions are
-complete enough for focused audit, but this revision does not self-approve. After the
-focused re-audit finds no unresolved Blocker/Major integration defect, the owner may
-accept the dossier and activate implementation plan v2. Assumptions retained for that
-review (each labeled per evidence policy):
+**accepted — focused re-audit passed 2026-08-28.** The independent focused audit at
+`docs/reviews/plan_audit_codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27_v1.md`
+found no unresolved Blocker or Major integration defect. The owner's 2026-08-28
+instruction to implement the complete plan accepts this dossier and authorizes
+implementation plan v2 activation. Assumptions retained for execution (each labeled per
+evidence policy):
 
 1. **A-1 (assumption):** PR-1..PR-7 outcomes as tabled; every fallback named above is
    architecture-preserving, so no probe outcome invalidates the design — only Stage-2
