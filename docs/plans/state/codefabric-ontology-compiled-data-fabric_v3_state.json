@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
   "status": "executing",
-  "current_packet": "WP19",
+  "current_packet": "WP20",
   "packets": {
     "WP18": {
       "status": "complete",
@@ -17,21 +17,21 @@
       "blockers": []
     },
     "WP19": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "b5622ac7c2a59406420505e75fcddf7c939cb80f",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP20": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP21": {
-      "status": "in_progress",
+      "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -82,14 +82,14 @@
   },
   "milestones": {
     "M05": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "b5622ac7c2a59406420505e75fcddf7c939cb80f",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M06": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -112,7 +112,7 @@
   },
   "decommission_batches": {
     "DB07": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -182,6 +182,6 @@
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
     }
   ],
-  "next_action": "Implement WP19's authored semantic contracts and reproducible Arrow ontology-program package without changing production authority.",
-  "updated_at": "2026-08-28T16:12:00Z"
+  "next_action": "Implement WP20's generic DataFusion decoder/lowerer, native calculation catalog, phrase closure, and causal mutation matrix in a bounded non-authoritative session.",
+  "updated_at": "2026-08-28T16:42:00Z"
 }
