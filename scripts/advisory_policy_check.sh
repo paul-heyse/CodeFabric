@@ -63,6 +63,7 @@ done < <(jq -r '.exceptions[] | [.package, .version] | @tsv' "$registry" | sort 
 audit_json="$(cargo audit --json 2>/dev/null || true)"
 observed="$(printf '%s' "$audit_json" | jq -r '
   (.vulnerabilities.list[]?, (.warnings | to_entries[] | .value[]?))
+  | select(.advisory.id? != null)
   | [.advisory.id, .package.name, .package.version]
   | @tsv
 ' | sort)"
