@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
   "status": "executing",
-  "current_packet": "WP26",
+  "current_packet": "WP27",
   "packets": {
     "WP18": {
       "status": "complete",
@@ -68,14 +68,14 @@
       "blockers": []
     },
     "WP26": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "d311e872b0d63419a7ba9d88547c65f9c7796b18",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP27": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -142,8 +142,8 @@
       "blockers": []
     },
     "DB11": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "d311e872b0d63419a7ba9d88547c65f9c7796b18",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -184,6 +184,6 @@
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
     }
   ],
-  "next_action": "Implement WP26's real-storage admin cutover, restart, lease, publication-continuity, and forward-rollback integration vertical, then remove the temporary comparison authority.",
-  "updated_at": "2026-08-28T18:30:00Z"
+  "next_action": "Execute WP27's DB07-DB10 and DB12 deletions, install structural bypass governance, prove the live-envelope legacy zero state, and run final certification.",
+  "updated_at": "2026-08-28T19:35:00Z"
 }
