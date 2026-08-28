@@ -1,4 +1,4 @@
-// @generated from CompiledOntology b3:c031d6a10f0ce26c45bec2310ce4b079a4465ffc5fe31897c2c330278fe40b0d; schema-contract-driver-v1; do not edit.
+// @generated from CompiledOntology b3:7a07cfedce4e088509b5c450b5beeb2c2398eee4aa5fa4be4d9474a87ea5563d; schema-contract-driver-v1; do not edit.
 
 const COMPILED_ENUM_VALUES: &[CompiledEnumValue] = &[
     CompiledEnumValue {
@@ -25120,6 +25120,28 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.fk.v1",
         operation_kind: CompiledRuleOperationKind::ForeignKeyAntiJoin,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "schema.foreign_key_contract",
+                column_ref: "source_columns,target_columns",
+                logical_type: "contract",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "candidate.relations",
+                column_ref: "referencing_columns",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 2,
+                relation_ref: "candidate.relations",
+                column_ref: "referenced_columns",
+                logical_type: "relation",
+            },
+        ],
+        calculation_id: "calculation.foreign-key-anti-join.v1",
+        policy_id: "policy.publication.referential-integrity.v1",
         input_contract: "generated foreign-key contracts plus candidate tables",
         output_contract: "zero missing target rows",
         determinism_class: "DETERMINISTIC",
@@ -25128,6 +25150,28 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.governed-code.v1",
         operation_kind: CompiledRuleOperationKind::GovernedCodeAntiJoin,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "schema.semantic_type_binding",
+                column_ref: "semantic_type,authority,domain",
+                logical_type: "contract",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "candidate.relations",
+                column_ref: "governed_code",
+                logical_type: "column",
+            },
+            CompiledRuleOperand {
+                ordinal: 2,
+                relation_ref: "ontology.dimension",
+                column_ref: "code",
+                logical_type: "column",
+            },
+        ],
+        calculation_id: "calculation.governed-code-anti-join.v1",
+        policy_id: "policy.publication.governed-code.v1",
         input_contract: "semantic type bindings plus ontology dimensions",
         output_contract: "zero unknown governed codes",
         determinism_class: "DETERMINISTIC",
@@ -25136,6 +25180,28 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.primary-key.v1",
         operation_kind: CompiledRuleOperationKind::PrimaryKeyUniquenessAggregate,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "schema.table_contract",
+                column_ref: "primary_key",
+                logical_type: "contract",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "candidate.relations",
+                column_ref: "primary_key_columns",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 2,
+                relation_ref: "datafusion.aggregate",
+                column_ref: "row_count",
+                logical_type: "scalar",
+            },
+        ],
+        calculation_id: "calculation.primary-key-uniqueness.v1",
+        policy_id: "policy.publication.primary-key.v1",
         input_contract: "generated table primary keys",
         output_contract: "zero grouped counts greater than one",
         determinism_class: "DETERMINISTIC",
@@ -25144,6 +25210,22 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.id-domain.v1",
         operation_kind: CompiledRuleOperationKind::IdDomainConformance,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "schema.id_domain",
+                column_ref: "extension_name,preimage_recipe_id",
+                logical_type: "contract",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "candidate.expressions",
+                column_ref: "extension_metadata",
+                logical_type: "column",
+            },
+        ],
+        calculation_id: "calculation.id-domain-conformance.v1",
+        policy_id: "policy.query.id-domain.v1",
         input_contract: "generated ID-domain fields and literals",
         output_contract: "one registered domain at every expression boundary",
         determinism_class: "DETERMINISTIC",
@@ -25152,6 +25234,22 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.membership.v1",
         operation_kind: CompiledRuleOperationKind::OntologyMembershipAntiJoin,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "cpg_ontology.ontology_edge",
+                column_ref: "subject_term_id,predicate_term_id,object_term_id",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "cpg_ontology.ontology_term",
+                column_ref: "term_id",
+                logical_type: "relation",
+            },
+        ],
+        calculation_id: "calculation.ontology-membership-anti-join.v1",
+        policy_id: "policy.publication.ontology-membership.v1",
         input_contract: "ontology_edge endpoints plus ontology_term",
         output_contract: "zero unresolved membership endpoints",
         determinism_class: "DETERMINISTIC",
@@ -25160,6 +25258,22 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.relation-family.v1",
         operation_kind: CompiledRuleOperationKind::RelationFamilyConformanceJoin,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "cpg_base.relation",
+                column_ref: "relation_kind_code,relation_family_code",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "cpg_ontology.relation_kind",
+                column_ref: "code,family_code",
+                logical_type: "relation",
+            },
+        ],
+        calculation_id: "calculation.relation-family-conformance.v1",
+        policy_id: "policy.publication.relation-family.v1",
         input_contract: "relation rows plus relation_kind family assignments",
         output_contract: "zero relation-family mismatches",
         determinism_class: "DETERMINISTIC",
@@ -25168,6 +25282,22 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.relation-cardinality.v1",
         operation_kind: CompiledRuleOperationKind::RelationCardinalityAggregate,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "cpg_base.relation",
+                column_ref: "relation_kind_code,source_id,target_id",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "cpg_ontology.relation_kind",
+                column_ref: "code,cardinality",
+                logical_type: "relation",
+            },
+        ],
+        calculation_id: "calculation.relation-cardinality.v1",
+        policy_id: "policy.publication.relation-cardinality.v1",
         input_contract: "relation rows plus relation_kind cardinality",
         output_contract: "zero per-kind source or target cardinality violations",
         determinism_class: "DETERMINISTIC",
@@ -25176,6 +25306,28 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.relation-owner.v1",
         operation_kind: CompiledRuleOperationKind::RelationOwnerConformanceJoin,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "cpg_base.relation",
+                column_ref: "owner_id,source_id,target_id,relation_kind_code",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "cpg_base.entity",
+                column_ref: "entity_id,owner_id",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 2,
+                relation_ref: "cpg_ontology.relation_kind",
+                column_ref: "code,owner_selection_rule",
+                logical_type: "relation",
+            },
+        ],
+        calculation_id: "calculation.relation-owner-conformance.v1",
+        policy_id: "policy.publication.relation-owner.v1",
         input_contract: "relation owner plus source and target entity owners",
         output_contract: "relation owner conforms to the registered selection rule",
         determinism_class: "DETERMINISTIC",
@@ -25184,6 +25336,22 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.relation-self-edge.v1",
         operation_kind: CompiledRuleOperationKind::RelationSelfEdgeJoin,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "cpg_base.relation",
+                column_ref: "source_id,target_id,relation_kind_code",
+                logical_type: "relation",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "cpg_ontology.relation_kind",
+                column_ref: "code,self_edge_policy",
+                logical_type: "relation",
+            },
+        ],
+        calculation_id: "calculation.relation-self-edge.v1",
+        policy_id: "policy.publication.relation-self-edge.v1",
         input_contract: "relation plus relation_kind self-edge policy",
         output_contract: "zero forbidden self edges",
         determinism_class: "DETERMINISTIC",
@@ -25192,6 +25360,22 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.property-one-of.v1",
         operation_kind: CompiledRuleOperationKind::PropertyValueOneOf,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "cpg_base.property_fact",
+                column_ref: "value_kind_code",
+                logical_type: "column",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "cpg_base.property_fact",
+                column_ref: "value_entity_id,value_bool,value_int64,value_float64,value_text,value_bytes,value_type_id",
+                logical_type: "relation",
+            },
+        ],
+        calculation_id: "calculation.property-value-one-of.v1",
+        policy_id: "policy.publication.property-value.v1",
         input_contract: "property_fact value tag plus typed value columns",
         output_contract: "exactly one matching value column populated",
         determinism_class: "DETERMINISTIC",
@@ -25200,6 +25384,22 @@ const COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[
     CompiledRuleContract {
         rule_id: "ontology.source-span.v1",
         operation_kind: CompiledRuleOperationKind::SourceSpanAllOrNone,
+        ordered_operands: &[
+            CompiledRuleOperand {
+                ordinal: 0,
+                relation_ref: "candidate.span_group",
+                column_ref: "start_byte",
+                logical_type: "column",
+            },
+            CompiledRuleOperand {
+                ordinal: 1,
+                relation_ref: "candidate.span_group",
+                column_ref: "end_byte",
+                logical_type: "column",
+            },
+        ],
+        calculation_id: "calculation.source-span-all-or-none.v1",
+        policy_id: "policy.publication.source-span.v1",
         input_contract: "flat start_byte and end_byte column group",
         output_contract: "both absent or ordered nonnegative pair",
         determinism_class: "DETERMINISTIC",

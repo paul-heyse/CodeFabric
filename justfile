@@ -71,6 +71,16 @@ spec-outline *args:
 authoritative-design-conformance-check:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_authoritative_design_conformance.py
 
+[doc("Compile every authored ontology operation into the normalized Arrow program package")]
+[group('contracts')]
+ontology-program-compiler-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(semantic_parity|model_rebuild)/)' --no-tests=fail
+
+[doc("Prove ontology-program identity acyclicity and byte-reproducible Arrow IPC packaging")]
+[group('contracts')]
+ontology-program-packaging-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(digest_acyclicity|ipc_reproducibility)/)' --no-tests=fail
+
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]
 lib-outline *args:

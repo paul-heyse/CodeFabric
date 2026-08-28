@@ -1142,7 +1142,10 @@ fn requirements(
 ) -> Result<Vec<RequirementRecord>, AggregateError> {
     let mut records = BTreeMap::new();
     for claim in model.claims.values().filter(|claim| {
-        claim.path.display().starts_with("docs/authoritative_design/")
+        claim
+            .path
+            .display()
+            .starts_with("docs/authoritative_design/")
             && claim.path.display().ends_with(".md")
     }) {
         let Some(header) = &claim.header else {

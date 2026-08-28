@@ -1,7 +1,7 @@
-// @generated from codefabric.schema.contract-ir b3:c031d6a10f0ce26c45bec2310ce4b079a4465ffc5fe31897c2c330278fe40b0d; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:7a07cfedce4e088509b5c450b5beeb2c2398eee4aa5fa4be4d9474a87ea5563d; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_SCHEMA_CONTRACT_DIGEST: &str =
-    "b3:c031d6a10f0ce26c45bec2310ce4b079a4465ffc5fe31897c2c330278fe40b0d";
+    "b3:7a07cfedce4e088509b5c450b5beeb2c2398eee4aa5fa4be4d9474a87ea5563d";
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
 const GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY: bool = true;

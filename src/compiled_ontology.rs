@@ -98,9 +98,21 @@ pub enum CompiledRuleOperationKind {
 
 /// One source-fenced typed rule contract compiled with the ontology vocabulary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CompiledRuleOperand {
+    pub ordinal: u16,
+    pub relation_ref: &'static str,
+    pub column_ref: &'static str,
+    pub logical_type: &'static str,
+}
+
+/// One source-fenced typed rule contract compiled with the ontology vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CompiledRuleContract {
     pub rule_id: &'static str,
     pub operation_kind: CompiledRuleOperationKind,
+    pub ordered_operands: &'static [CompiledRuleOperand],
+    pub calculation_id: &'static str,
+    pub policy_id: &'static str,
     pub input_contract: &'static str,
     pub output_contract: &'static str,
     pub determinism_class: &'static str,

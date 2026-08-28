@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:c031d6a10f0ce26c45bec2310ce4b079a4465ffc5fe31897c2c330278fe40b0d; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:7a07cfedce4e088509b5c450b5beeb2c2398eee4aa5fa4be4d9474a87ea5563d; schema-contract-driver-v1; do not edit.
 
 /// Generated encoder input for the canonical `owner` relation.
 #[derive(Clone, Debug, Eq, PartialEq)]

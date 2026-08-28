@@ -523,10 +523,22 @@ enum OntologyRuleOperationKind {
 struct OntologyRuleContract {
     rule_id: String,
     operation_kind: OntologyRuleOperationKind,
+    ordered_operands: Vec<OntologyRuleOperandContract>,
+    calculation_id: String,
+    policy_id: String,
     input_contract: String,
     output_contract: String,
     determinism_class: String,
     diagnostic_code: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OntologyRuleOperandContract {
+    ordinal: u16,
+    relation_ref: String,
+    column_ref: String,
+    logical_type: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1230,6 +1242,9 @@ impl SchemaContractIr {
         for (rule_index, rule) in self.ontology_rule_contracts.iter().enumerate() {
             let path = format!("$.ontology_rule_contracts[{rule_index}]");
             if rule.rule_id.trim().is_empty()
+                || rule.ordered_operands.is_empty()
+                || rule.calculation_id.trim().is_empty()
+                || rule.policy_id.trim().is_empty()
                 || rule.input_contract.trim().is_empty()
                 || rule.output_contract.trim().is_empty()
                 || rule.determinism_class != "DETERMINISTIC"
@@ -1238,6 +1253,22 @@ impl SchemaContractIr {
                 || !rule_operations.insert(rule.operation_kind)
             {
                 return invalid(&path, "invalid or duplicate typed ontology rule");
+            }
+            for (operand_index, operand) in rule.ordered_operands.iter().enumerate() {
+                let operand_path = format!("{path}.ordered_operands[{operand_index}]");
+                if usize::from(operand.ordinal) != operand_index
+                    || operand.relation_ref.trim().is_empty()
+                    || operand.column_ref.trim().is_empty()
+                    || !matches!(
+                        operand.logical_type.as_str(),
+                        "relation" | "column" | "scalar" | "contract"
+                    )
+                {
+                    return invalid(
+                        &operand_path,
+                        "operand order, reference, or logical type is invalid",
+                    );
+                }
             }
         }
         if rule_ids != required_rule_ids {
@@ -3614,9 +3645,12 @@ fn render_compiled_ontology(
     for rule in &compiled.schema.ontology_rule_contracts {
         writeln!(
             output,
-            "    CompiledRuleContract {{ rule_id: {:?}, operation_kind: CompiledRuleOperationKind::{:?}, input_contract: {:?}, output_contract: {:?}, determinism_class: {:?}, diagnostic_code: {:?} }},",
+            "    CompiledRuleContract {{ rule_id: {:?}, operation_kind: CompiledRuleOperationKind::{:?}, ordered_operands: &[{}], calculation_id: {:?}, policy_id: {:?}, input_contract: {:?}, output_contract: {:?}, determinism_class: {:?}, diagnostic_code: {:?} }},",
             rule.rule_id,
             rule.operation_kind,
+            rule.ordered_operands.iter().map(|operand| format!("CompiledRuleOperand {{ ordinal: {}, relation_ref: {:?}, column_ref: {:?}, logical_type: {:?} }}", operand.ordinal, operand.relation_ref, operand.column_ref, operand.logical_type)).collect::<Vec<_>>().join(", "),
+            rule.calculation_id,
+            rule.policy_id,
             rule.input_contract,
             rule.output_contract,
             rule.determinism_class,
