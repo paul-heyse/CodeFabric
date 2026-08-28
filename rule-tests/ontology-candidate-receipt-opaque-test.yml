@@ -1,0 +1,11 @@
+id: ontology-candidate-receipt-opaque
+valid:
+  - |
+      struct CandidateGateReceipt {
+          receipt_identity: String,
+      }
+invalid:
+  - |
+      struct CandidateGateReceipt {
+          pub candidate_identity: String,
+      }

@@ -75,6 +75,62 @@ pub struct CandidateProgramBinding {
     pub member_identities: BTreeMap<String, String>,
 }
 
+fn manifest_for_members(
+    profile_id: &str,
+    members: &BTreeMap<String, OntologyProgramMember>,
+) -> Result<OntologyProgramManifest, OntologyProgramError> {
+    let bootstrap_schema_identity = framed(
+        members
+            .values()
+            .map(|member| format!("{}:{:?}", member.relation_id, member.schema))
+            .map(String::into_bytes),
+    );
+    let ontology = compiled_ontology();
+    let authored_content_identity = framed([
+        ontology.phrase_authority.canonical_digest.as_bytes(),
+        ontology.query_form_authority.canonical_digest.as_bytes(),
+        crate::schema_registry::schema_contract_digest().as_bytes(),
+    ]);
+    let logical_program_identity = framed(
+        std::iter::once(bootstrap_schema_identity.as_bytes().to_vec())
+            .chain(std::iter::once(
+                authored_content_identity.as_bytes().to_vec(),
+            ))
+            .chain(
+                members
+                    .values()
+                    .map(logical_rows)
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+    );
+    let member_identities = members
+        .iter()
+        .map(|(name, member)| (name.clone(), member.member_identity.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let package_identity = framed(
+        [
+            ONTOLOGY_PROGRAM_PACKAGE_VERSION.as_bytes().to_vec(),
+            logical_program_identity.as_bytes().to_vec(),
+            profile_id.as_bytes().to_vec(),
+        ]
+        .into_iter()
+        .chain(
+            member_identities
+                .iter()
+                .map(|(name, digest)| format!("{name}:{digest}").into_bytes()),
+        ),
+    );
+    Ok(OntologyProgramManifest {
+        package_version: ONTOLOGY_PROGRAM_PACKAGE_VERSION.into(),
+        bootstrap_schema_identity,
+        authored_content_identity,
+        logical_program_identity,
+        packaging_profile_id: profile_id.to_owned(),
+        member_identities,
+        package_identity,
+    })
+}
+
 impl From<&OntologyProgramPackage> for CandidateProgramBinding {
     fn from(package: &OntologyProgramPackage) -> Self {
         Self {
@@ -320,23 +376,116 @@ fn calculation_batch(rules: &[CompiledRuleContract]) -> Result<RecordBatch, Onto
 fn bootstrap_batch() -> Result<RecordBatch, OntologyProgramError> {
     let schema = Arc::new(Schema::new(vec![
         Field::new("ordinal", DataType::UInt16, false),
+        Field::new("family_id", DataType::Utf8, false),
+        Field::new("binding_kind", DataType::Utf8, false),
         Field::new("relation_id", DataType::Utf8, false),
         Field::new("depends_on", DataType::Utf8, true),
     ]));
+    let rows = [
+        ("codes", "authored", "authority.codes", None),
+        (
+            "edges_memberships",
+            "authored",
+            "authority.edges_memberships",
+            Some("codes"),
+        ),
+        (
+            "semantic_types",
+            "authored",
+            "authority.semantic_types",
+            Some("codes"),
+        ),
+        (
+            "table_contracts",
+            "authored",
+            "authority.table_contracts",
+            Some("semantic_types"),
+        ),
+        (
+            "column_contracts",
+            "authored",
+            "authority.column_contracts",
+            Some("table_contracts"),
+        ),
+        (
+            "result_contracts",
+            "authored",
+            "authority.result_contracts",
+            Some("column_contracts"),
+        ),
+        (
+            "identity_recipes",
+            "authored",
+            "authority.identity_recipes",
+            Some("semantic_types"),
+        ),
+        (
+            "phrase_bindings",
+            "program_member",
+            "program.phrase_operation",
+            Some("codes"),
+        ),
+        (
+            "calculation_bindings",
+            "program_member",
+            "program.calculation_catalog",
+            Some("phrase_bindings"),
+        ),
+        (
+            "rule_bindings",
+            "program_member",
+            "program.rule_operation",
+            Some("calculation_bindings"),
+        ),
+        (
+            "snapshot_identity",
+            "candidate",
+            "candidate.snapshot",
+            Some("table_contracts"),
+        ),
+        (
+            "publication_identity",
+            "candidate",
+            "candidate.publication",
+            Some("snapshot_identity"),
+        ),
+        (
+            "plan_identity",
+            "candidate",
+            "candidate.plan",
+            Some("rule_bindings"),
+        ),
+        (
+            "package_identity",
+            "candidate",
+            "candidate.package",
+            Some("rule_bindings"),
+        ),
+        (
+            "policy_identity",
+            "candidate",
+            "candidate.policy",
+            Some("package_identity"),
+        ),
+        (
+            "exact_table_identities",
+            "candidate",
+            "candidate.exact_tables",
+            Some("publication_identity"),
+        ),
+    ];
     Ok(RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(UInt16Array::from(vec![0, 1, 2])),
-            Arc::new(StringArray::from(vec![
-                "program.rule_operation",
-                "program.phrase_operation",
-                "program.calculation_catalog",
-            ])),
-            Arc::new(StringArray::from(vec![
-                None,
-                Some("program.rule_operation"),
-                Some("program.phrase_operation"),
-            ])),
+            Arc::new(UInt16Array::from_iter_values((0..rows.len()).map(
+                |ordinal| u16::try_from(ordinal).expect("bootstrap ordinal"),
+            ))),
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| row.0))),
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| row.1))),
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|row| row.2))),
+            Arc::new(StringArray::from(
+                rows.iter().map(|row| row.3).collect::<Vec<_>>(),
+            )),
         ],
     )?)
 }
@@ -413,59 +562,8 @@ pub fn build_ontology_program_package(
         members.insert(relation_id.into(), encode_member(relation_id, vec![batch])?);
     }
 
-    let bootstrap_schema_identity = framed(
-        members
-            .values()
-            .map(|member| format!("{}:{:?}", member.relation_id, member.schema))
-            .map(String::into_bytes),
-    );
-    let ontology = compiled_ontology();
-    let authored_content_identity = framed([
-        ontology.phrase_authority.canonical_digest.as_bytes(),
-        ontology.query_form_authority.canonical_digest.as_bytes(),
-        crate::schema_registry::schema_contract_digest().as_bytes(),
-    ]);
-    let logical_program_identity = framed(
-        std::iter::once(bootstrap_schema_identity.as_bytes().to_vec())
-            .chain(std::iter::once(
-                authored_content_identity.as_bytes().to_vec(),
-            ))
-            .chain(
-                members
-                    .values()
-                    .map(logical_rows)
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-    );
-    let member_identities = members
-        .iter()
-        .map(|(name, member)| (name.clone(), member.member_identity.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let package_identity = framed(
-        [
-            ONTOLOGY_PROGRAM_PACKAGE_VERSION.as_bytes().to_vec(),
-            logical_program_identity.as_bytes().to_vec(),
-            profile.profile_id.as_bytes().to_vec(),
-        ]
-        .into_iter()
-        .chain(
-            member_identities
-                .iter()
-                .map(|(name, digest)| format!("{name}:{digest}").into_bytes()),
-        ),
-    );
-    let package = OntologyProgramPackage {
-        manifest: OntologyProgramManifest {
-            package_version: ONTOLOGY_PROGRAM_PACKAGE_VERSION.into(),
-            bootstrap_schema_identity,
-            authored_content_identity,
-            logical_program_identity,
-            packaging_profile_id: profile.profile_id.clone(),
-            member_identities,
-            package_identity,
-        },
-        members,
-    };
+    let manifest = manifest_for_members(&profile.profile_id, &members)?;
+    let package = OntologyProgramPackage { manifest, members };
     validate_ontology_program_package(&package)?;
     Ok(package)
 }
@@ -501,7 +599,22 @@ pub fn validate_ontology_program_package(
             )));
         }
     }
+    let expected = manifest_for_members(&package.manifest.packaging_profile_id, &package.members)?;
+    if package.manifest != expected {
+        return Err(OntologyProgramError::Digest(
+            "package manifest identity closure".into(),
+        ));
+    }
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn reseal_ontology_program_package(
+    package: &mut OntologyProgramPackage,
+) -> Result<(), OntologyProgramError> {
+    package.manifest =
+        manifest_for_members(&package.manifest.packaging_profile_id, &package.members)?;
+    validate_ontology_program_package(package)
 }
 
 #[cfg(test)]

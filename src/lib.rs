@@ -84,6 +84,8 @@ pub(crate) mod model_generated;
 #[cfg(feature = "data-fabric")]
 pub mod ontology_activation;
 #[cfg(feature = "data-fabric")]
+pub mod ontology_candidate;
+#[cfg(feature = "data-fabric")]
 pub mod ontology_executor;
 #[cfg(feature = "data-fabric")]
 pub mod ontology_gate;

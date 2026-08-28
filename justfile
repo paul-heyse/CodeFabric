@@ -111,6 +111,21 @@ ontology-runtime-resource-check:
 id-domain-plan-enforcement-check:
     cargo nextest run --locked --lib -E 'test(/ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)/)' --no-tests=fail
 
+[doc("Execute the bootstrap-discovered semantic closure and prove additive self-description")]
+[group('gate')]
+ontology-candidate-receipt-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|semantic_closure_corruption_matrix|self_description_additive_relation|program_execution_receipt_bijection)/)' --no-tests=fail
+
+[doc("Prove candidate catalogs reopen only exact manifest Delta versions with retained schema and statistics")]
+[group('gate')]
+ontology-candidate-delta-binding-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_candidate_delta_(binding_exact_version|catalog_reopen)/)' --no-tests=fail
+
+[doc("Prove diagnostic artifacts, checksums, and opaque receipts remain separate 1:1 identities")]
+[group('gate')]
+ontology-plan-artifact-boundary-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_(plan_artifact_receipt_boundary|gate_artifact_identity_separation|program_execution_receipt_bijection)/)' --no-tests=fail
+
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]
 lib-outline *args:
@@ -718,7 +733,7 @@ id-domain-extension-check:
 [doc("Execute compiled ontology FK, membership, conformance, cardinality, and one-of gates")]
 [group('gate')]
 ontology-relational-closure-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP11
+    cargo nextest run --locked --lib -E 'test(/odf_(ontology_referential_zero|ontology_violation_rejection|property_value_one_of_gate|span_decision_conformance|span_incoherence_rejection)/)' --no-tests=fail
 
 [doc("Validate normalized ontology parity, relational closure, and serving decoration")]
 [group('gate')]
@@ -734,7 +749,7 @@ structure-classification-check:
 [doc("Resolve the complete ontology plane dynamically from a leased catalog")]
 [group('gate')]
 ontology-self-description-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP17
+    cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|self_description_additive_relation)/)' --no-tests=fail
 
 [doc("Prove atomic Stage-2b acceptance, fault rollback, and idempotent pointer advance")]
 [group('gate')]

@@ -44,6 +44,7 @@ impl GovernedPlan {
 pub struct GovernedSession {
     context: SessionContext,
     session_identity: String,
+    config_identity: String,
     policy_identity: String,
 }
 
@@ -115,6 +116,10 @@ impl GovernedSession {
                 "policy identity is empty".into(),
             ));
         }
+        let config_identity = framed([
+            b"governed-datafusion-config.v1".as_slice(),
+            format!("{config:?}").as_bytes(),
+        ]);
         let extension_types = MemoryExtensionTypeRegistry::new_with_types(
             crate::schema_registry::extension_type_registrations(),
         )?;
@@ -130,13 +135,30 @@ impl GovernedSession {
         let session_identity = framed([
             b"governed-datafusion-session.v1".as_slice(),
             policy_identity.as_bytes(),
+            config_identity.as_bytes(),
             crate::schema_registry::schema_contract_digest().as_bytes(),
         ]);
         Ok(Self {
             context,
             session_identity,
+            config_identity,
             policy_identity,
         })
+    }
+
+    #[must_use]
+    pub fn session_identity(&self) -> &str {
+        &self.session_identity
+    }
+
+    #[must_use]
+    pub fn config_identity(&self) -> &str {
+        &self.config_identity
+    }
+
+    #[must_use]
+    pub fn policy_identity(&self) -> &str {
+        &self.policy_identity
     }
 
     /// Seal an already-built plan only after default and application analyzers accept it.

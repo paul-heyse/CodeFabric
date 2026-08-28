@@ -1528,6 +1528,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ontology_candidate_delta_catalog_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let (_fabric, publication) = fixture(root.path()).await;
+        let candidate = SnapshotProviderCatalog::build(&publication, &EmptySnapshotOverlay)
+            .await
+            .expect("freeze exact candidate catalog");
+        assert_eq!(candidate.metrics().provider_count, publication.tables.len());
+        assert_eq!(
+            candidate.metrics().exact_version_count,
+            publication.tables.len()
+        );
+        for (&table_code, manifest) in &publication.tables {
+            let record = candidate
+                .provider_record(table_code)
+                .expect("exact provider record");
+            assert_eq!(record.manifest.table_uri, manifest.table_uri);
+            assert_eq!(record.manifest.delta_version, manifest.delta_version);
+            assert_eq!(record.access_profile, DeltaAccessProfile::QueryServing);
+            assert_eq!(
+                record.provider().schema().fields(),
+                table_spec(table_code)
+                    .expect("table spec")
+                    .arrow_schema
+                    .fields()
+            );
+            for field in record.provider().schema().fields() {
+                crate::schema_registry::validate_logical_extension_field(field)
+                    .expect("reopened extension field");
+            }
+            assert_eq!(
+                record
+                    .provider()
+                    .statistics()
+                    .expect("authenticated statistics")
+                    .num_rows,
+                Precision::Exact(usize::try_from(manifest.row_count).expect("row count"))
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn odf_constraints_classification_gate() {
         let root = tempfile::tempdir().unwrap();
         let (_fabric, publication) = fixture(root.path()).await;

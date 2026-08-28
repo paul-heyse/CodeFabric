@@ -12,3 +12,5 @@ their allocations. No temporary transition root is part of the live policy.
 surfaces. WP26 removes those exemptions as the candidate and serving paths converge on
 `GovernedSession`. `domain-conformance-exhaustive` keeps the pinned DataFusion expression and
 logical-plan enums compile-time exhaustive by rejecting accepting wildcard arms.
+`ontology-candidate-receipt-opaque` prevents the successor receipt from becoming a public bag of
+caller-supplied trust fields while the DB09 compatibility shim remains scheduled for WP27.

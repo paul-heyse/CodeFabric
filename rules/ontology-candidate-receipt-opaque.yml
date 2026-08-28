@@ -1,0 +1,14 @@
+id: ontology-candidate-receipt-opaque
+language: Rust
+severity: error
+message: Candidate gate receipts must not expose caller-constructible trust-bearing fields.
+note: Only the trusted candidate gate runner may construct receipt content; consumers receive an opaque identity.
+files:
+  - src/ontology_candidate.rs
+rule:
+  all:
+    - kind: field_declaration
+    - regex: '^pub\s+'
+    - inside:
+        pattern: 'struct CandidateGateReceipt { $$$FIELDS }'
+        stopBy: end

@@ -1,0 +1,888 @@
+//! Bootstrap-discovered semantic closure and opaque candidate-bound gate receipts.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+
+use arrow_array::{Array as _, RecordBatch, StringArray, UInt16Array};
+use arrow_schema::{DataType, Field, Schema};
+use datafusion::datasource::{MemTable, provider_as_source};
+use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder, col};
+use thiserror::Error;
+
+use crate::fabric::{PublicationOutcome, PublicationTableRecord};
+use crate::governed_session::{GovernedSession, GovernedSessionError};
+use crate::ontology_gate::{GateResourceEnvelope, OntologyGateOutcome};
+use crate::ontology_program::{
+    OntologyProgramError, OntologyProgramPackage, validate_ontology_program_package,
+};
+
+const EXPECTED_RESULT_CONTRACT: &str = "zero-violation-rows.v1";
+
+/// One requirement discovered from the stable bootstrap member.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BootstrapRequirement {
+    pub ordinal: u16,
+    pub family_id: String,
+    pub binding_kind: String,
+    pub relation_id: String,
+    pub depends_on: Option<String>,
+}
+
+/// Immutable URI/version identity copied from the candidate publication manifest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExactTableBinding {
+    table_code: i16,
+    table_uri: String,
+    delta_version: u64,
+    schema_fingerprint: [u8; 32],
+    table_checksum: [u8; 32],
+}
+
+impl ExactTableBinding {
+    #[must_use]
+    pub const fn table_code(&self) -> i16 {
+        self.table_code
+    }
+
+    #[must_use]
+    pub fn table_uri(&self) -> &str {
+        &self.table_uri
+    }
+
+    #[must_use]
+    pub const fn delta_version(&self) -> u64 {
+        self.delta_version
+    }
+}
+
+/// Frozen exact table set. No latest-version lookup or raw-file fallback is represented.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExactTableSet {
+    bindings: BTreeMap<i16, ExactTableBinding>,
+    identity: String,
+}
+
+/// One semantic gate receipt. All trust-bearing fields and its constructor are private.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CandidateGateReceipt {
+    operation_id: String,
+    candidate_identity: String,
+    program_identity: String,
+    package_identity: String,
+    session_identity: String,
+    config_identity: String,
+    policy_identity: String,
+    exact_table_set_identity: String,
+    semantic_checksum: String,
+    expected_result_contract: String,
+    artifact_identity: String,
+    receipt_identity: String,
+}
+
+impl CandidateGateReceipt {
+    #[must_use]
+    pub fn identity(&self) -> &str {
+        &self.receipt_identity
+    }
+}
+
+/// Successful closure evidence with a private 1:1 receipt ledger.
+#[derive(Clone, Debug)]
+pub struct CandidateClosureReport {
+    candidate_identity: String,
+    requirements: Vec<BootstrapRequirement>,
+    receipts: BTreeMap<String, CandidateGateReceipt>,
+}
+
+impl CandidateClosureReport {
+    #[must_use]
+    pub fn candidate_identity(&self) -> &str {
+        &self.candidate_identity
+    }
+
+    #[must_use]
+    pub fn operation_count(&self) -> usize {
+        self.requirements.len()
+    }
+
+    #[must_use]
+    pub fn receipt_count(&self) -> usize {
+        self.receipts.len()
+    }
+
+    #[must_use]
+    pub fn receipt_identities(&self) -> BTreeSet<&str> {
+        self.receipts
+            .values()
+            .map(CandidateGateReceipt::identity)
+            .collect()
+    }
+}
+
+/// Candidate semantic-closure failures. No error can advance activation authority.
+#[derive(Debug, Error)]
+pub enum CandidateClosureError {
+    #[error(transparent)]
+    Arrow(#[from] arrow_schema::ArrowError),
+    #[error(transparent)]
+    DataFusion(#[from] datafusion::error::DataFusionError),
+    #[error(transparent)]
+    Program(#[from] OntologyProgramError),
+    #[error(transparent)]
+    Session(#[from] GovernedSessionError),
+    #[error("ONTOLOGY_CANDIDATE_CLOSURE_INVALID:{0}")]
+    Invalid(String),
+}
+
+fn framed(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
+    let mut bytes = Vec::new();
+    for part in parts {
+        let part = part.as_ref();
+        bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(part);
+    }
+    crate::integrity::framed_digest(&bytes)
+}
+
+fn digest_is_valid(value: &str) -> bool {
+    value.len() == 67
+        && value.starts_with("b3:")
+        && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+impl ExactTableSet {
+    /// Bind every table to the exact immutable manifest tuple.
+    fn from_publication(publication: &PublicationOutcome) -> Result<Self, CandidateClosureError> {
+        if publication.tables.is_empty() {
+            return Err(CandidateClosureError::Invalid(
+                "candidate publication has no exact table bindings".into(),
+            ));
+        }
+        let mut bindings = BTreeMap::new();
+        for (&table_code, record) in &publication.tables {
+            validate_table_binding(publication, table_code, record)?;
+            bindings.insert(
+                table_code,
+                ExactTableBinding {
+                    table_code,
+                    table_uri: record.table_uri.clone(),
+                    delta_version: record.delta_version,
+                    schema_fingerprint: record.schema_fingerprint,
+                    table_checksum: record.table_checksum,
+                },
+            );
+        }
+        let identity = framed(bindings.values().map(|binding| {
+            framed([
+                binding.table_code.to_be_bytes().as_slice(),
+                binding.table_uri.as_bytes(),
+                binding.delta_version.to_be_bytes().as_slice(),
+                binding.schema_fingerprint.as_slice(),
+                binding.table_checksum.as_slice(),
+            ])
+        }));
+        Ok(Self { bindings, identity })
+    }
+
+    #[must_use]
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> impl ExactSizeIterator<Item = &ExactTableBinding> {
+        self.bindings.values()
+    }
+}
+
+fn validate_table_binding(
+    publication: &PublicationOutcome,
+    table_code: i16,
+    record: &PublicationTableRecord,
+) -> Result<(), CandidateClosureError> {
+    if record.table_code != table_code
+        || record.publication_id != publication.publication_id
+        || record.workspace_id != publication.scope.workspace_id
+        || !record.required
+        || !record.validated
+        || !record.table_uri.starts_with("file://")
+    {
+        return Err(CandidateClosureError::Invalid(format!(
+            "table {table_code} is not an exact validated candidate tuple"
+        )));
+    }
+    Ok(())
+}
+
+/// Decode the bootstrap member and validate its complete, acyclic, ordinal-stable graph.
+pub fn decode_bootstrap(
+    package: &OntologyProgramPackage,
+) -> Result<Vec<BootstrapRequirement>, CandidateClosureError> {
+    validate_ontology_program_package(package)?;
+    let member = package
+        .members
+        .get("program.bootstrap")
+        .ok_or_else(|| CandidateClosureError::Invalid("program.bootstrap is absent".into()))?;
+    let batch = member
+        .batches
+        .first()
+        .ok_or_else(|| CandidateClosureError::Invalid("program.bootstrap has no batch".into()))?;
+    let ordinals = column::<UInt16Array>(batch, "ordinal")?;
+    let families = column::<StringArray>(batch, "family_id")?;
+    let kinds = column::<StringArray>(batch, "binding_kind")?;
+    let relations = column::<StringArray>(batch, "relation_id")?;
+    let dependencies = column::<StringArray>(batch, "depends_on")?;
+    let mut requirements = Vec::with_capacity(batch.num_rows());
+    let mut seen = BTreeSet::new();
+    for row in 0..batch.num_rows() {
+        let ordinal = ordinals.value(row);
+        if usize::from(ordinal) != row
+            || families.is_null(row)
+            || kinds.is_null(row)
+            || relations.is_null(row)
+        {
+            return Err(CandidateClosureError::Invalid(format!(
+                "bootstrap row {row} is not canonical"
+            )));
+        }
+        let family_id = families.value(row).to_owned();
+        if family_id.is_empty() || !seen.insert(family_id.clone()) {
+            return Err(CandidateClosureError::Invalid(format!(
+                "bootstrap family {family_id:?} is empty or duplicated"
+            )));
+        }
+        let depends_on = (!dependencies.is_null(row)).then(|| dependencies.value(row).to_owned());
+        if depends_on
+            .as_ref()
+            .is_some_and(|value| !seen.contains(value))
+        {
+            return Err(CandidateClosureError::Invalid(format!(
+                "bootstrap family {family_id} has a forward or missing dependency"
+            )));
+        }
+        requirements.push(BootstrapRequirement {
+            ordinal,
+            family_id,
+            binding_kind: kinds.value(row).to_owned(),
+            relation_id: relations.value(row).to_owned(),
+            depends_on,
+        });
+    }
+    if requirements.is_empty() {
+        return Err(CandidateClosureError::Invalid(
+            "bootstrap closure is empty".into(),
+        ));
+    }
+    Ok(requirements)
+}
+
+fn column<'a, T: 'static>(
+    batch: &'a RecordBatch,
+    name: &str,
+) -> Result<&'a T, CandidateClosureError> {
+    batch
+        .column_by_name(name)
+        .and_then(|value| value.as_any().downcast_ref::<T>())
+        .ok_or_else(|| CandidateClosureError::Invalid(format!("bootstrap.{name} has wrong type")))
+}
+
+fn expected_binding_identity(
+    requirement: &BootstrapRequirement,
+    package: &OntologyProgramPackage,
+    publication: &PublicationOutcome,
+    session: &GovernedSession,
+    exact_tables: &ExactTableSet,
+) -> Result<String, CandidateClosureError> {
+    match requirement.binding_kind.as_str() {
+        "authored" => Ok(framed([
+            b"ontology-authored-closure-family.v1".as_slice(),
+            requirement.family_id.as_bytes(),
+            requirement.relation_id.as_bytes(),
+            crate::ontology_plane::ontology_input_digest().as_bytes(),
+            crate::schema_registry::schema_contract_digest().as_bytes(),
+        ])),
+        "program_member" => package
+            .manifest
+            .member_identities
+            .get(&requirement.relation_id)
+            .cloned()
+            .ok_or_else(|| {
+                CandidateClosureError::Invalid(format!(
+                    "{} names absent program member {}",
+                    requirement.family_id, requirement.relation_id
+                ))
+            }),
+        "candidate" => candidate_binding_identity(
+            &requirement.relation_id,
+            package,
+            publication,
+            session,
+            exact_tables,
+        ),
+        other => Err(CandidateClosureError::Invalid(format!(
+            "{} has unsupported binding kind {other}",
+            requirement.family_id
+        ))),
+    }
+}
+
+fn candidate_binding_identity(
+    relation_id: &str,
+    package: &OntologyProgramPackage,
+    publication: &PublicationOutcome,
+    session: &GovernedSession,
+    exact_tables: &ExactTableSet,
+) -> Result<String, CandidateClosureError> {
+    let value = match relation_id {
+        "candidate.snapshot" => framed([
+            b"candidate-snapshot.v1".as_slice(),
+            publication.scope.workspace_id.as_slice(),
+            publication.scope.source_generation.to_be_bytes().as_slice(),
+            publication.scope.analysis_context_set_id.as_slice(),
+        ]),
+        "candidate.publication" => framed([
+            b"candidate-publication.v1".as_slice(),
+            publication.publication_id.as_slice(),
+            publication
+                .pointer
+                .pointer_generation
+                .to_be_bytes()
+                .as_slice(),
+        ]),
+        "candidate.plan" => framed([
+            b"candidate-plan.v1".as_slice(),
+            package.manifest.logical_program_identity.as_bytes(),
+            session.session_identity().as_bytes(),
+            session.config_identity().as_bytes(),
+        ]),
+        "candidate.package" => package.manifest.package_identity.clone(),
+        "candidate.policy" => framed([
+            b"candidate-policy.v1".as_slice(),
+            session.policy_identity().as_bytes(),
+        ]),
+        "candidate.exact_tables" => exact_tables.identity().to_owned(),
+        other => {
+            return Err(CandidateClosureError::Invalid(format!(
+                "unknown candidate bootstrap relation {other}"
+            )));
+        }
+    };
+    Ok(value)
+}
+
+fn closure_plan(
+    family_id: &str,
+    observed_identity: &str,
+    expected_identity: &str,
+) -> Result<LogicalPlan, CandidateClosureError> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("family_id", DataType::Utf8, false),
+        Field::new("observed_identity", DataType::Utf8, false),
+        Field::new("expected_identity", DataType::Utf8, false),
+    ]));
+    let batch = RecordBatch::try_new(
+        Arc::clone(&schema),
+        vec![
+            Arc::new(StringArray::from(vec![family_id])),
+            Arc::new(StringArray::from(vec![observed_identity])),
+            Arc::new(StringArray::from(vec![expected_identity])),
+        ],
+    )?;
+    let provider = Arc::new(MemTable::try_new(schema, vec![vec![batch]])?);
+    Ok(LogicalPlanBuilder::scan(
+        format!("closure_{}", family_id.replace('-', "_")),
+        provider_as_source(provider),
+        None,
+    )?
+    .filter(col("observed_identity").not_eq(col("expected_identity")))?
+    .project(vec![
+        col("family_id"),
+        col("observed_identity"),
+        col("expected_identity"),
+    ])?
+    .build()?)
+}
+
+fn candidate_identity(
+    package: &OntologyProgramPackage,
+    publication: &PublicationOutcome,
+    session: &GovernedSession,
+    exact_tables: &ExactTableSet,
+    expected_bindings: &BTreeMap<String, String>,
+) -> String {
+    framed(
+        [
+            b"ontology-candidate.v1".to_vec(),
+            publication.publication_id.to_vec(),
+            package
+                .manifest
+                .logical_program_identity
+                .as_bytes()
+                .to_vec(),
+            package.manifest.package_identity.as_bytes().to_vec(),
+            session.session_identity().as_bytes().to_vec(),
+            session.config_identity().as_bytes().to_vec(),
+            session.policy_identity().as_bytes().to_vec(),
+            exact_tables.identity().as_bytes().to_vec(),
+        ]
+        .into_iter()
+        .chain(
+            expected_bindings
+                .iter()
+                .map(|(family, identity)| format!("{family}:{identity}").into_bytes()),
+        ),
+    )
+}
+
+fn make_receipt(
+    operation_id: &str,
+    candidate_identity: &str,
+    package: &OntologyProgramPackage,
+    session: &GovernedSession,
+    exact_tables: &ExactTableSet,
+    outcome: &OntologyGateOutcome,
+) -> CandidateGateReceipt {
+    let semantic_checksum = outcome.receipt.gate_checksum.checksum.clone();
+    let artifact_identity = outcome.artifact.artifact_identity.clone();
+    let mut receipt = CandidateGateReceipt {
+        operation_id: operation_id.to_owned(),
+        candidate_identity: candidate_identity.to_owned(),
+        program_identity: package.manifest.logical_program_identity.clone(),
+        package_identity: package.manifest.package_identity.clone(),
+        session_identity: session.session_identity().to_owned(),
+        config_identity: session.config_identity().to_owned(),
+        policy_identity: session.policy_identity().to_owned(),
+        exact_table_set_identity: exact_tables.identity().to_owned(),
+        semantic_checksum,
+        expected_result_contract: EXPECTED_RESULT_CONTRACT.into(),
+        artifact_identity,
+        receipt_identity: String::new(),
+    };
+    receipt.receipt_identity = framed([
+        b"ontology-candidate-gate-receipt.v1".as_slice(),
+        receipt.operation_id.as_bytes(),
+        receipt.candidate_identity.as_bytes(),
+        receipt.program_identity.as_bytes(),
+        receipt.package_identity.as_bytes(),
+        receipt.session_identity.as_bytes(),
+        receipt.config_identity.as_bytes(),
+        receipt.policy_identity.as_bytes(),
+        receipt.exact_table_set_identity.as_bytes(),
+        receipt.semantic_checksum.as_bytes(),
+        receipt.expected_result_contract.as_bytes(),
+        receipt.artifact_identity.as_bytes(),
+    ]);
+    receipt
+}
+
+/// Trusted gate orchestrator. It computes all bindings itself and issues receipts only after the
+/// sealed session returns zero violation rows.
+pub struct CandidateClosureRunner {
+    package: OntologyProgramPackage,
+    publication: PublicationOutcome,
+    session: GovernedSession,
+    exact_tables: ExactTableSet,
+    requirements: Vec<BootstrapRequirement>,
+    expected_bindings: BTreeMap<String, String>,
+    observed_bindings: BTreeMap<String, String>,
+    candidate_identity: String,
+}
+
+impl CandidateClosureRunner {
+    /// Build a closure runner from a digest-checked package and exact candidate manifest.
+    pub fn new(
+        package: OntologyProgramPackage,
+        publication: PublicationOutcome,
+        session: GovernedSession,
+    ) -> Result<Self, CandidateClosureError> {
+        Self::new_with_observed(package, publication, session, None)
+    }
+
+    fn new_with_observed(
+        package: OntologyProgramPackage,
+        publication: PublicationOutcome,
+        session: GovernedSession,
+        observed_overrides: Option<BTreeMap<String, String>>,
+    ) -> Result<Self, CandidateClosureError> {
+        let requirements = decode_bootstrap(&package)?;
+        let exact_tables = ExactTableSet::from_publication(&publication)?;
+        let expected_bindings = requirements
+            .iter()
+            .map(|requirement| {
+                Ok((
+                    requirement.family_id.clone(),
+                    expected_binding_identity(
+                        requirement,
+                        &package,
+                        &publication,
+                        &session,
+                        &exact_tables,
+                    )?,
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, CandidateClosureError>>()?;
+        if expected_bindings
+            .values()
+            .any(|value| !digest_is_valid(value))
+        {
+            return Err(CandidateClosureError::Invalid(
+                "closure contains a malformed expected identity".into(),
+            ));
+        }
+        let mut observed_bindings = expected_bindings.clone();
+        if let Some(overrides) = observed_overrides {
+            for (family, identity) in overrides {
+                let slot = observed_bindings.get_mut(&family).ok_or_else(|| {
+                    CandidateClosureError::Invalid(format!(
+                        "observed binding names undiscovered family {family}"
+                    ))
+                })?;
+                *slot = identity;
+            }
+        }
+        let candidate_identity = candidate_identity(
+            &package,
+            &publication,
+            &session,
+            &exact_tables,
+            &expected_bindings,
+        );
+        Ok(Self {
+            package,
+            publication,
+            session,
+            exact_tables,
+            requirements,
+            expected_bindings,
+            observed_bindings,
+            candidate_identity,
+        })
+    }
+
+    /// Open and freeze the exact Delta provider graph from the candidate manifest.
+    pub async fn open_frozen_catalog(
+        &self,
+    ) -> Result<crate::fabric::SnapshotProviderCatalog, CandidateClosureError> {
+        Ok(crate::fabric::SnapshotProviderCatalog::build(
+            &self.publication,
+            &crate::fabric::EmptySnapshotOverlay,
+        )
+        .await
+        .map_err(|error| CandidateClosureError::Invalid(error.to_string()))?)
+    }
+
+    /// Execute every bootstrap-discovered closure gate once and issue one opaque receipt each.
+    pub async fn execute(
+        &self,
+        limits: &GateResourceEnvelope,
+    ) -> Result<CandidateClosureReport, CandidateClosureError> {
+        let mut receipts = BTreeMap::new();
+        for requirement in &self.requirements {
+            let expected = &self.expected_bindings[&requirement.family_id];
+            let observed = &self.observed_bindings[&requirement.family_id];
+            let plan = closure_plan(&requirement.family_id, observed, expected)?;
+            let governed = self.session.seal_plan(plan)?;
+            let execution_id = framed([
+                b"ontology-closure-execution.v1".as_slice(),
+                self.candidate_identity.as_bytes(),
+                requirement.ordinal.to_be_bytes().as_slice(),
+                requirement.family_id.as_bytes(),
+            ]);
+            let outcome = self
+                .session
+                .execute_gate(
+                    &governed,
+                    &execution_id,
+                    &self.candidate_identity,
+                    &requirement.family_id,
+                    limits,
+                )
+                .await?;
+            if outcome
+                .batches
+                .iter()
+                .map(RecordBatch::num_rows)
+                .sum::<usize>()
+                != 0
+            {
+                return Err(CandidateClosureError::Invalid(format!(
+                    "semantic closure rejected family {}",
+                    requirement.family_id
+                )));
+            }
+            let receipt = make_receipt(
+                &requirement.family_id,
+                &self.candidate_identity,
+                &self.package,
+                &self.session,
+                &self.exact_tables,
+                &outcome,
+            );
+            if receipts
+                .insert(requirement.family_id.clone(), receipt)
+                .is_some()
+            {
+                return Err(CandidateClosureError::Invalid(
+                    "one operation produced multiple receipts".into(),
+                ));
+            }
+        }
+        if receipts.len() != self.requirements.len()
+            || receipts
+                .values()
+                .map(CandidateGateReceipt::identity)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != receipts.len()
+        {
+            return Err(CandidateClosureError::Invalid(
+                "program/execution/checksum/artifact/receipt mapping is not bijective".into(),
+            ));
+        }
+        Ok(CandidateClosureReport {
+            candidate_identity: self.candidate_identity.clone(),
+            requirements: self.requirements.clone(),
+            receipts,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use arrow_array::{ArrayRef, RecordBatch, StringArray, UInt16Array};
+    use arrow_ipc::writer::StreamWriter;
+    use arrow_schema::{DataType, Field, Schema};
+    use datafusion::prelude::SessionConfig;
+
+    use super::{CandidateClosureRunner, ExactTableSet, decode_bootstrap, framed};
+    use crate::fabric::{
+        CurrentPublicationRecord, PublicationOutcome, PublicationScope, PublicationTableRecord,
+    };
+    use crate::governed_session::GovernedSession;
+    use crate::ontology_gate::GateResourceEnvelope;
+    use crate::ontology_program::{
+        OntologyPackagingProfile, OntologyProgramPackage, build_ontology_program_package,
+        reseal_ontology_program_package,
+    };
+
+    fn publication() -> PublicationOutcome {
+        let publication_id = [0x31; 16];
+        PublicationOutcome {
+            publication_id,
+            scope: PublicationScope {
+                workspace_id: [0x32; 16],
+                source_generation: 7,
+                analysis_context_set_id: [0x33; 16],
+                analysis_context_ids: vec![[0x34; 16]],
+            },
+            pointer: CurrentPublicationRecord {
+                workspace_id: [0x32; 16],
+                publication_id,
+                pointer_generation: 5,
+                updated_at_micros: 1_000,
+            },
+            tables: BTreeMap::from([(
+                1,
+                PublicationTableRecord {
+                    publication_id,
+                    workspace_id: [0x32; 16],
+                    table_code: 1,
+                    table_uri: "file:///candidate/workspace".into(),
+                    delta_version: 9,
+                    schema_fingerprint: [0x35; 32],
+                    row_count: 1,
+                    owner_count: 1,
+                    table_checksum: [0x36; 32],
+                    primary_key_digest: [0x37; 32],
+                    required: true,
+                    validated: true,
+                },
+            )]),
+        }
+    }
+
+    fn runner() -> CandidateClosureRunner {
+        CandidateClosureRunner::new(
+            build_ontology_program_package(&OntologyPackagingProfile::default())
+                .expect("program package"),
+            publication(),
+            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
+                .expect("governed session"),
+        )
+        .expect("candidate runner")
+    }
+
+    #[tokio::test]
+    async fn ontology_bootstrap_program_package_closure() {
+        let runner = runner();
+        let requirements = decode_bootstrap(&runner.package).expect("bootstrap closure");
+        assert_eq!(requirements.len(), 16);
+        assert!(
+            requirements
+                .iter()
+                .any(|value| value.family_id == "exact_table_identities")
+        );
+        let report = runner
+            .execute(&GateResourceEnvelope::default())
+            .await
+            .expect("complete closure");
+        assert_eq!(report.operation_count(), 16);
+        assert_eq!(report.receipt_count(), 16);
+    }
+
+    #[tokio::test]
+    async fn ontology_semantic_closure_corruption_matrix() {
+        let base = runner();
+        let families = base
+            .requirements
+            .iter()
+            .map(|value| value.family_id.clone())
+            .collect::<Vec<_>>();
+        drop(base);
+        for family in families {
+            let corrupted = CandidateClosureRunner::new_with_observed(
+                build_ontology_program_package(&OntologyPackagingProfile::default())
+                    .expect("program package"),
+                publication(),
+                GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
+                    .expect("governed session"),
+                Some(BTreeMap::from([(
+                    family.clone(),
+                    "b3:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),
+                )])),
+            )
+            .expect("corruption fixture");
+            let error = corrupted
+                .execute(&GateResourceEnvelope::default())
+                .await
+                .expect_err("every corrupted authority family must reject");
+            assert!(error.to_string().contains(&family), "{family}: {error}");
+        }
+    }
+
+    fn append_additive_family(package: &mut OntologyProgramPackage) {
+        let requirements = decode_bootstrap(package).expect("bootstrap");
+        let row_count = requirements.len() + 1;
+        let mut ordinals = requirements
+            .iter()
+            .map(|value| value.ordinal)
+            .collect::<Vec<_>>();
+        ordinals.push(u16::try_from(requirements.len()).expect("ordinal"));
+        let mut families = requirements
+            .iter()
+            .map(|value| value.family_id.as_str())
+            .collect::<Vec<_>>();
+        families.push("additive_domain");
+        let mut kinds = requirements
+            .iter()
+            .map(|value| value.binding_kind.as_str())
+            .collect::<Vec<_>>();
+        kinds.push("authored");
+        let mut relations = requirements
+            .iter()
+            .map(|value| value.relation_id.as_str())
+            .collect::<Vec<_>>();
+        relations.push("authority.additive_domain");
+        let mut dependencies = requirements
+            .iter()
+            .map(|value| value.depends_on.as_deref())
+            .collect::<Vec<_>>();
+        dependencies.push(Some("codes"));
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("ordinal", DataType::UInt16, false),
+            Field::new("family_id", DataType::Utf8, false),
+            Field::new("binding_kind", DataType::Utf8, false),
+            Field::new("relation_id", DataType::Utf8, false),
+            Field::new("depends_on", DataType::Utf8, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(UInt16Array::from(ordinals)) as ArrayRef,
+                Arc::new(StringArray::from(families)),
+                Arc::new(StringArray::from(kinds)),
+                Arc::new(StringArray::from(relations)),
+                Arc::new(StringArray::from(dependencies)),
+            ],
+        )
+        .expect("additive bootstrap batch");
+        assert_eq!(batch.num_rows(), row_count);
+        let member = package
+            .members
+            .get_mut("program.bootstrap")
+            .expect("bootstrap member");
+        let mut ipc_bytes = Vec::new();
+        {
+            let mut writer =
+                StreamWriter::try_new(&mut ipc_bytes, schema.as_ref()).expect("IPC writer");
+            writer.write(&batch).expect("write bootstrap");
+            writer.finish().expect("finish bootstrap");
+        }
+        member.schema = schema;
+        member.batches = vec![batch];
+        member.ipc_bytes = ipc_bytes;
+        member.member_identity =
+            framed([member.relation_id.as_bytes(), member.ipc_bytes.as_slice()]);
+        reseal_ontology_program_package(package).expect("reseal additive package");
+    }
+
+    #[tokio::test]
+    async fn ontology_self_description_additive_relation() {
+        let mut package =
+            build_ontology_program_package(&OntologyPackagingProfile::default()).expect("package");
+        append_additive_family(&mut package);
+        let runner = CandidateClosureRunner::new(
+            package,
+            publication(),
+            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
+                .expect("governed session"),
+        )
+        .expect("additive runner");
+        let report = runner
+            .execute(&GateResourceEnvelope::default())
+            .await
+            .expect("additive closure");
+        assert_eq!(report.operation_count(), 17);
+        assert_eq!(report.receipt_count(), 17);
+    }
+
+    #[tokio::test]
+    async fn ontology_program_execution_receipt_bijection() {
+        let report = runner()
+            .execute(&GateResourceEnvelope::default())
+            .await
+            .expect("closure report");
+        assert_eq!(report.operation_count(), report.receipt_count());
+        assert_eq!(report.receipt_identities().len(), report.receipt_count());
+        assert!(super::digest_is_valid(report.candidate_identity()));
+    }
+
+    #[test]
+    fn ontology_candidate_delta_binding_exact_version() {
+        let publication = publication();
+        let tables = ExactTableSet::from_publication(&publication).expect("exact table set");
+        let binding = tables.bindings().next().expect("table binding");
+        assert_eq!(binding.table_code(), 1);
+        assert_eq!(binding.table_uri(), "file:///candidate/workspace");
+        assert_eq!(binding.delta_version(), 9);
+        let mut invalid = publication;
+        invalid.tables.get_mut(&1).expect("table").validated = false;
+        assert!(ExactTableSet::from_publication(&invalid).is_err());
+    }
+
+    #[tokio::test]
+    async fn ontology_plan_artifact_receipt_boundary() {
+        let report = runner()
+            .execute(&GateResourceEnvelope::default())
+            .await
+            .expect("closure report");
+        assert!(report.receipts.values().all(|receipt| {
+            receipt.artifact_identity != receipt.receipt_identity
+                && receipt.semantic_checksum != receipt.artifact_identity
+                && receipt.expected_result_contract == super::EXPECTED_RESULT_CONTRACT
+        }));
+    }
+}
