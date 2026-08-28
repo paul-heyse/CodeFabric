@@ -45,7 +45,9 @@ class OracleDefinition:
 
 def _active(root: Path = ROOT) -> tuple[Path, Mapping[str, Any], Mapping[str, Any]]:
     path = artifact_contracts.active_plan_path(root)
-    artifact_contracts.validate_artifacts(root, path)
+    # Packet/DAG assurance must remain runnable while an implementation is changing a
+    # declared input. Input freshness and trusted completion are independently enforced
+    # by artifact_contracts plan-status/artifacts-check.
     plan = artifact_contracts.validate_plan(
         root,
         path,
@@ -120,14 +122,19 @@ def _ancestors(dependencies: Mapping[str, set[str]], packet: str) -> set[str]:
 
 def _known_touch_resources(block: str) -> set[str]:
     match = re.search(
-        r"\*\*Change surface\.\*\*(.*?)(?=\n\n\*\*Required changes\.\*\*)",
+        r"\*\*Change surface(?: / Preflight / Known Touch)?\.\*\*"
+        r"(.*?)(?=\n\n\*\*Required changes\.\*\*)",
         block,
         re.DOTALL,
     )
     if match is None:
         return set()
+    known_touch = match.group(1)
+    marker = "Known touch:"
+    if marker in known_touch:
+        known_touch = known_touch.split(marker, 1)[1]
     resources: set[str] = set()
-    for literal in re.findall(r"`([^`]+)`", match.group(1)):
+    for literal in re.findall(r"`([^`]+)`", known_touch):
         candidate = re.sub(r":\d+(?:-\d+)?$", "", literal.strip())
         candidates = [candidate]
         brace = re.fullmatch(r"([^{}]+)\{([^{}]+)\}([^{}]*)", candidate, re.DOTALL)
@@ -147,8 +154,55 @@ def _known_touch_resources(block: str) -> set[str]:
                 )
             ):
                 resources.add(path)
-    resources.update(re.findall(r"\bAC-G-\d+\b", match.group(1)))
+    resources.update(re.findall(r"\bAC-G-\d+\b", known_touch))
     return resources
+
+
+ONTOLOGY_FABRIC_REQUIRED_ANCESTORS: dict[str, frozenset[str]] = {
+    "WP05": frozenset(("WP03",)),
+    "WP06": frozenset(("WP03",)),
+    "WP09": frozenset(("WP08",)),
+    "WP17": frozenset(("WP09", "WP10", "WP11", "WP12", "WP16")),
+    "WP14": frozenset(("WP17",)),
+    "WP15": frozenset(("WP17",)),
+}
+
+
+def _validate_ontology_fabric_readiness_states(
+    dependencies: Mapping[str, set[str]],
+) -> int:
+    """Exhaust legal completion states and enforce the plan's release barriers."""
+    if set(dependencies) != {f"WP{index:02d}" for index in range(1, 18)}:
+        return 0
+    ancestors = {packet: _ancestors(dependencies, packet) for packet in dependencies}
+    for packet, required in ONTOLOGY_FABRIC_REQUIRED_ANCESTORS.items():
+        missing = required - ancestors[packet]
+        if missing:
+            raise PlanAssuranceError(
+                f"{packet} lacks required release-barrier ancestors {sorted(missing)}"
+            )
+
+    initial = frozenset()
+    pending = [initial]
+    visited = {initial}
+    while pending:
+        complete = pending.pop()
+        ready = {
+            packet
+            for packet, required in dependencies.items()
+            if packet not in complete and required <= complete
+        }
+        for packet in ready:
+            required = ONTOLOGY_FABRIC_REQUIRED_ANCESTORS.get(packet, frozenset())
+            if not required <= complete:
+                raise PlanAssuranceError(
+                    f"legal readiness state exposes {packet} before {sorted(required)}"
+                )
+            successor = frozenset((*complete, packet))
+            if successor not in visited:
+                visited.add(successor)
+                pending.append(successor)
+    return len(visited)
 
 
 def _load_overlap_dispositions(
@@ -207,6 +261,7 @@ def validate_dependencies(root: Path = ROOT) -> tuple[int, int]:
     plan_path, _, _ = _active(root)
     dependencies = _dependency_map(plan_path)
     _topological_order(dependencies)
+    _validate_ontology_fabric_readiness_states(dependencies)
     blocks = artifact_contracts._packet_blocks(plan_path)
     resources = {
         packet: _known_touch_resources(block) for packet, block in blocks.items()

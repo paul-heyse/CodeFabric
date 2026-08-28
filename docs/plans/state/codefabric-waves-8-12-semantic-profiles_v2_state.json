@@ -459,6 +459,10 @@
     {
       "kind": "successor_plan_interruption",
       "summary": "The owner directed execution of the accepted ontology-compiled data-fabric plan on 2026-08-28 before remaining Wave 9-12 work. Completed packet history stays authoritative; WP09 and later remain not started. The successor's WP16 must audit and disposition every remaining packet before this plan may resume."
+    },
+    {
+      "kind": "post_ontology_fabric_remaining_packet_reconciliation",
+      "summary": "WP16 reconciliation is recorded in docs/reviews/plan_audit_codefabric_waves_8-12_remaining_scope_post_ontology_fabric_v2_2026-08-28_v1.md: 5 remaining provider-boundary packets are unaffected, 24 fact/control/result/integration packets need execution-time adaptation to the compiled ontology seam, and none are superseded. Resumption additionally requires accepted Stage 2b activation."
     }
   ],
   "next_action": "When execution resumes, run WP09 preflight over source leases, immutable ProviderWorkspaceView construction, dependency bundles, encoding maps, and sidecar source resolution; do not begin WP38 until WP09 is complete.",

@@ -489,7 +489,7 @@ daemon-side Arrow artifact detail). `ResultChecksumV1` is version-superseded by
 `ResultChecksumV2` over the richer canonical schema. Selection is result-schema-version
 gated so old leases keep V1/current shapes while new Stage-3 leases use V2/target shapes;
 the result-authority transaction advances ontology rows and runtime selection together. V1 remains
-verifiable for the released arrow-58/59 KATs until those retire with the next upgrade
+verifiable for the released predecessor-upgrade KATs until those retire with the next upgrade
 plan — versioned coexistence by contract, never silent re-baselining.
 
 **Principles:** Advances `P12` at the last boundary; `MOD-08`, `EXP-11`.

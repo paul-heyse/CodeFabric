@@ -7,6 +7,7 @@ files:
   - src/provider_runtime.rs
   - src/tree_sitter_adapter.rs
   - src/ruff_adapter.rs
+  - src/ruff_adapter/**/*.rs
   - src/rustc_service.rs
   - src/source_syntax.rs
   - rustc-extractor/src/**/*.rs

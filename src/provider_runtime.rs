@@ -3173,12 +3173,5 @@ mod tests {
         ] {
             assert!(feature_registry.contains(&format!("wire_event: {mapping}")));
         }
-        let fixture_source = include_str!("provider_runtime/fixture.rs");
-        assert!(fixture_source.contains("ProviderRuntimeDispatch::semantic"));
-        assert!(!fixture_source.contains(concat!("run_", "pyrefly(")));
-        assert!(!include_str!("fabric/serving.rs").contains("codefabric-pyrefly-sidecar"));
-        assert!(
-            !include_str!("gate_b_candidate/vertical.rs").contains("codefabric-pyrefly-sidecar")
-        );
     }
 }

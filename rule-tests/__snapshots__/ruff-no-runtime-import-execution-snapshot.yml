@@ -1,0 +1,41 @@
+id: ruff-no-runtime-import-execution
+snapshots:
+  ? |
+    fn execute_import() {
+        let _child = Command::new("python");
+    }
+  : labels:
+    - source: Command::new("python")
+      style: primary
+      start: 39
+      end: 61
+  ? |
+    fn import_runtime() {
+        let _module = PyImport::new("package");
+    }
+  : labels:
+    - source: PyImport::new("package")
+      style: primary
+      start: 40
+      end: 64
+  ? |
+    use pyo3::prelude::*;
+  : labels:
+    - source: use pyo3::prelude::*;
+      style: primary
+      start: 0
+      end: 21
+  ? |
+    use std::process::Command;
+  : labels:
+    - source: use std::process::Command;
+      style: primary
+      start: 0
+      end: 26
+  ? |
+    use tokio::process::Command;
+  : labels:
+    - source: use tokio::process::Command;
+      style: primary
+      start: 0
+      end: 28

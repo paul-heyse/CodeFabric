@@ -49,6 +49,42 @@ records:
     production_exposable: false
     expected_invariants: [effective-content-validated, active-snapshot-unchanged]
     scenarios: [overlay-three-snapshot-rebase]
+  - code: ONTOLOGY_BEFORE_CANDIDATE_VALIDATION
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [candidate-not-accepted, active-pointer-unchanged]
+    scenarios: [ontology-stage2b-atomic-activation]
+  - code: ONTOLOGY_AFTER_CANDIDATE_VALIDATION
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [validated-candidate-not-active, active-pointer-unchanged]
+    scenarios: [ontology-stage2b-atomic-activation]
+  - code: ONTOLOGY_BEFORE_ACCEPTANCE_RECORD
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [owner-acceptance-absent, active-pointer-unchanged]
+    scenarios: [ontology-stage2b-atomic-activation]
+  - code: ONTOLOGY_AFTER_ACCEPTANCE_RECORD
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [acceptance-and-pointer-atomic, active-pointer-unchanged]
+    scenarios: [ontology-stage2b-atomic-activation]
+  - code: ONTOLOGY_BEFORE_POINTER_ADVANCE
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [accepted-candidate-not-partially-active, active-pointer-unchanged]
+    scenarios: [ontology-stage2b-atomic-activation]
+  - code: ONTOLOGY_AFTER_POINTER_ADVANCE
+    owner: data-fabric
+    allowed_actions: [return_error, terminate_process]
+    production_exposable: false
+    expected_invariants: [pointer-transaction-rollback, active-leases-preserved]
+    scenarios: [ontology-stage2b-atomic-activation]
   - code: MUTATION_AFTER_DELETE_COMMIT
     owner: data-fabric
     allowed_actions: [return_error, terminate_process]
@@ -184,5 +220,5 @@ records:
 owner_acceptance:
   approver: lifecycle-owner
   accepted_at: "2026-08-21"
-  construction_rule: Append-only deterministic source, provider, mutation, publication, overlay, and query-terminal durability seams
+  construction_rule: Append-only deterministic source, provider, mutation, publication, overlay, ontology activation, and query-terminal durability seams
   source_digest: "b3:2e17092b92aa3d34e76229820af9482e66c10163c59aee5a667164e493f3e951"

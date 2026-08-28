@@ -44,6 +44,7 @@ DIRTY_DISPOSITIONS = {
 }
 REVIEW_EXCLUSIONS = ("docs/reviews/**", "docs/library_ref/**", ".git/**", "target/**")
 REQUIRED_TRANSFORMATION_PASSES = {
+    "PASS_SCHEMA_CONTRACT_COMPILATION_V1",
     "PASS_CANONICAL_TYPE_INTERNING_V1",
     "PASS_RUFF_SEMANTIC_TRAVERSAL_V1",
     "PASS_PYTHON_IMPORT_EXPORT_V1",
@@ -274,6 +275,36 @@ def _nonempty_string_list(
     return list(value)
 
 
+def _transformation_pass_plan_paths(
+    root: Path,
+    active_path: Path,
+    active_text: str,
+    packet: str,
+    oracles: Sequence[str],
+) -> tuple[Path, ...]:
+    """Resolve immutable plan provenance without coupling every pass to the active plan."""
+
+    def supports(text: str) -> bool:
+        return bool(
+            re.search(rf"^### {re.escape(packet)}\s+—", text, re.MULTILINE)
+        ) and all(f"Executable oracle: `{oracle}`" in text for oracle in oracles)
+
+    if supports(active_text):
+        return (active_path,)
+    matches = []
+    for candidate in sorted((root / "docs/plans").glob("*implementation_plan*.md")):
+        relative = candidate.relative_to(root)
+        if relative == active_path:
+            continue
+        try:
+            text = candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if supports(text):
+            matches.append(relative)
+    return tuple(matches)
+
+
 def validate_transformation_passes(
     root: Path = ROOT,
     plan_path: Path | None = None,
@@ -301,10 +332,6 @@ def validate_transformation_passes(
         packet = record.get("owner_packet")
         if not isinstance(packet, str) or not re.fullmatch(r"WP\d+", packet):
             raise AlignmentContractError(f"{pass_id} has an invalid owner packet")
-        if not re.search(rf"^### {re.escape(packet)}\s+—", plan_text, re.MULTILINE):
-            raise AlignmentContractError(
-                f"{pass_id} packet {packet} is absent from active plan {plan_path}"
-            )
         principles = _nonempty_string_list(record, "principles", pass_id)
         if principles != ["H-P14", "H-P16"] or any(
             re.fullmatch(r"P\d+", principle) for principle in principles
@@ -346,11 +373,13 @@ def validate_transformation_passes(
                         f"{pass_id} has an invalid {key} contract"
                     )
         oracles = _nonempty_string_list(record, "oracles", pass_id)
-        for oracle in oracles:
-            if f"Executable oracle: `{oracle}`" not in plan_text:
-                raise AlignmentContractError(
-                    f"{pass_id} oracle {oracle} is absent from active plan {plan_path}"
-                )
+        if not _transformation_pass_plan_paths(
+            root, plan_path, plan_text, packet, oracles
+        ):
+            raise AlignmentContractError(
+                f"{pass_id} packet {packet} and its oracle quartet are absent from "
+                f"the active plan and immutable implementation-plan corpus"
+            )
         if record.get("contract_digest") != _detached_digest(record, "contract_digest"):
             raise AlignmentContractError(f"{pass_id} contract digest is stale")
         projection_records.append(
@@ -370,10 +399,12 @@ def validate_transformation_passes(
     )
     for derivation in derivations:
         derivation_id = str(derivation.get("derivation_id"))
-        expected_pass = f"PASS_{derivation_id.removesuffix('_V1')}_DERIVATION_V1"
+        expected_pass = derivation.get("pass_contract_id")
+        if expected_pass is None:
+            expected_pass = f"PASS_{derivation_id.removesuffix('_V1')}_DERIVATION_V1"
         if expected_pass not in REQUIRED_TRANSFORMATION_PASSES:
             raise AlignmentContractError(
-                f"materialized derivation {derivation_id} has no pass contract"
+                f"materialized derivation {derivation_id} has no registered pass contract"
             )
 
     expected_projection = {

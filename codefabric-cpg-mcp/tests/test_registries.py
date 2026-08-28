@@ -32,7 +32,7 @@ def test_wp08_structural_acceptance() -> None:
     assert len(registries.ENUM_TRIPLES["RESOURCE_KIND"]) == 10
     assert len(registries.REGISTRY_IDS["projections"]) == 13
     assert len(registries.REGISTRY_IDS["capabilities"]) == 22
-    assert len(registries.REGISTRY_IDS["public_errors"]) == 62
+    assert len(registries.REGISTRY_IDS["public_errors"]) == 65
 
 
 def test_wp08_negative_zero_state() -> None:

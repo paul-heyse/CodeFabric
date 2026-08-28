@@ -6,7 +6,7 @@ use arrow_schema::{ArrowError, DataType, Schema};
 use thiserror::Error;
 
 /// Exact persisted result-checksum contract version.
-pub const RESULT_CHECKSUM_VERSION: &str = "ResultChecksumV1";
+pub const RESULT_CHECKSUM_VERSION: &str = "ResultChecksumV2";
 
 /// Result checksum plus the canonical schema and row census it commits to.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -14,6 +14,21 @@ pub struct ResultChecksumV1 {
     pub checksum: String,
     pub canonical_schema: Vec<u8>,
     pub row_count: u64,
+}
+
+/// Extension-aware successor over the generated logical result schema.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResultChecksumV2 {
+    pub checksum: String,
+    pub canonical_schema: Vec<u8>,
+    pub row_count: u64,
+}
+
+/// Version-directed replay result for historical and current delivered artifacts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VersionedResultChecksum {
+    V1(ResultChecksumV1),
+    V2(ResultChecksumV2),
 }
 
 /// Stable failures at the canonical Arrow result-checksum boundary.
@@ -90,10 +105,11 @@ fn validate_data_type(data_type: &DataType) -> Result<(), ResultChecksumError> {
 ///
 /// Rejects schema drift, unsupported Arrow row encodings, non-canonical maps, counter overflow,
 /// or canonical schema/row bytes beyond `maximum_encoding_bytes`.
-pub fn result_checksum_v1(
+fn result_checksum(
     schema: &Schema,
     batches: &[RecordBatch],
     maximum_encoding_bytes: usize,
+    domain: crate::integrity::IntegrityDomain,
 ) -> Result<ResultChecksumV1, ResultChecksumError> {
     for field in schema.fields() {
         validate_data_type(field.data_type())?;
@@ -139,9 +155,7 @@ pub fn result_checksum_v1(
         }
     }
     rows.sort_unstable();
-    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
-        crate::integrity::IntegrityDomain::QueryResultChecksumV1,
-    );
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(domain);
     hasher.update(&(canonical_schema.len() as u64).to_be_bytes());
     hasher.update(&canonical_schema);
     hasher.update(&row_count.to_be_bytes());
@@ -154,6 +168,76 @@ pub fn result_checksum_v1(
         canonical_schema,
         row_count,
     })
+}
+
+/// Verify or reproduce the released V1 checksum contract.
+///
+/// # Errors
+///
+/// Returns a schema-drift or resource-limit error when canonical encoding cannot be completed
+/// within the supplied bound.
+pub fn result_checksum_v1(
+    schema: &Schema,
+    batches: &[RecordBatch],
+    maximum_encoding_bytes: usize,
+) -> Result<ResultChecksumV1, ResultChecksumError> {
+    result_checksum(
+        schema,
+        batches,
+        maximum_encoding_bytes,
+        crate::integrity::IntegrityDomain::QueryResultChecksumV1,
+    )
+}
+
+/// Compute `ResultChecksumV2` over generated extension-typed and nested-list result schemas.
+///
+/// V2 deliberately preserves V1's order-independent row-multiset semantics while using a new
+/// frozen integrity domain. V1 remains available for already-released artifacts.
+///
+/// # Errors
+///
+/// Returns a schema-drift or resource-limit error when extension-aware canonical encoding cannot
+/// be completed within the supplied bound.
+pub fn result_checksum_v2(
+    schema: &Schema,
+    batches: &[RecordBatch],
+    maximum_encoding_bytes: usize,
+) -> Result<ResultChecksumV2, ResultChecksumError> {
+    let result = result_checksum(
+        schema,
+        batches,
+        maximum_encoding_bytes,
+        crate::integrity::IntegrityDomain::QueryResultChecksumV2,
+    )?;
+    Ok(ResultChecksumV2 {
+        checksum: result.checksum,
+        canonical_schema: result.canonical_schema,
+        row_count: result.row_count,
+    })
+}
+
+/// Reproduce the checksum contract declared by a persisted result artifact.
+///
+/// New artifacts are always emitted as V2; V1 remains a verifier-only branch for artifacts that
+/// were accepted before the generated extension-aware result schemas became active.
+///
+/// # Errors
+///
+/// Returns a schema-drift error for an unsupported version or propagates the selected version's
+/// canonical-encoding failure.
+pub fn result_checksum_for_version(
+    version: &str,
+    schema: &Schema,
+    batches: &[RecordBatch],
+    maximum_encoding_bytes: usize,
+) -> Result<VersionedResultChecksum, ResultChecksumError> {
+    match version {
+        "ResultChecksumV1" => result_checksum_v1(schema, batches, maximum_encoding_bytes)
+            .map(VersionedResultChecksum::V1),
+        "ResultChecksumV2" => result_checksum_v2(schema, batches, maximum_encoding_bytes)
+            .map(VersionedResultChecksum::V2),
+        _ => Err(ResultChecksumError::SchemaDrift),
+    }
 }
 
 #[cfg(test)]
@@ -176,6 +260,61 @@ mod tests {
     fn int_batch(values: Vec<i64>) -> RecordBatch {
         RecordBatch::try_from_iter([("value", Arc::new(Int64Array::from(values)) as ArrayRef)])
             .unwrap()
+    }
+
+    #[test]
+    fn odf_result_checksum_v2_continuity() {
+        let ordered = int_batch(vec![9, 4, 7, 4]);
+        let repartitioned = int_batch(vec![4, 9, 4, 7]);
+        let v1 = result_checksum_v1(
+            ordered.schema().as_ref(),
+            std::slice::from_ref(&ordered),
+            LIMIT,
+        )
+        .unwrap();
+        let v1_replay = result_checksum_for_version(
+            "ResultChecksumV1",
+            repartitioned.schema().as_ref(),
+            &[repartitioned.slice(0, 1), repartitioned.slice(1, 3)],
+            LIMIT,
+        )
+        .unwrap();
+        assert_eq!(v1_replay, VersionedResultChecksum::V1(v1.clone()));
+
+        let v2 = result_checksum_v2(
+            ordered.schema().as_ref(),
+            std::slice::from_ref(&ordered),
+            LIMIT,
+        )
+        .unwrap();
+        let v2_replay = result_checksum_for_version(
+            RESULT_CHECKSUM_VERSION,
+            repartitioned.schema().as_ref(),
+            &[repartitioned.slice(0, 2), repartitioned.slice(2, 2)],
+            LIMIT,
+        )
+        .unwrap();
+        assert_eq!(v2_replay, VersionedResultChecksum::V2(v2.clone()));
+        assert_ne!(v1.checksum, v2.checksum);
+        assert_eq!(v1.canonical_schema, v2.canonical_schema);
+        assert_eq!(v1.row_count, v2.row_count);
+        assert_eq!(
+            v1.checksum,
+            "b3:51aafc2a031f8581631c49268b8bb117c2bf2f38d4feaba1f986af969a00f5e9"
+        );
+        assert_eq!(
+            v2.checksum,
+            "b3:e5febaf4048ed5adc3995d37fd1d23d3955273acea29645240c1aa42deb5e3e9"
+        );
+        assert!(
+            result_checksum_for_version(
+                "ResultChecksumV3",
+                ordered.schema().as_ref(),
+                &[ordered],
+                LIMIT,
+            )
+            .is_err()
+        );
     }
 
     fn unordered_map_type() -> DataType {
@@ -213,7 +352,7 @@ mod tests {
 
     #[test]
     fn wp64_structural_acceptance() {
-        assert_eq!(RESULT_CHECKSUM_VERSION, "ResultChecksumV1");
+        assert_eq!(RESULT_CHECKSUM_VERSION, "ResultChecksumV2");
         assert_eq!(
             crate::integrity::IntegrityDomain::QueryResultChecksumV1.bytes(),
             b"codefabric.query-result-checksum.v1\0"

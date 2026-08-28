@@ -1,0 +1,27 @@
+id: ruff-no-runtime-import-execution
+valid:
+  - |
+      use ruff_python_ast::StmtImport;
+
+      fn describe_import(statement: &StmtImport) -> usize {
+          statement.names.len()
+      }
+  - |
+      fn record_import(module: &str) -> ImportFact {
+          ImportFact::new(module)
+      }
+invalid:
+  - |
+      use std::process::Command;
+  - |
+      use tokio::process::Command;
+  - |
+      use pyo3::prelude::*;
+  - |
+      fn execute_import() {
+          let _child = Command::new("python");
+      }
+  - |
+      fn import_runtime() {
+          let _module = PyImport::new("package");
+      }

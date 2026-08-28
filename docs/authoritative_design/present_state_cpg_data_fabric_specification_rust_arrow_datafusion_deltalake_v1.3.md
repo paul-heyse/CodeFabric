@@ -499,8 +499,8 @@ DataFusion owns:
 - schema binding and type coercion;
 - projection, predicate, and limit pushdown;
 - joins, aggregations, windows, sorting, and union;
-- custom UDFs, UDAFs, UDTFs, logical nodes, and `ExecutionPlan`s;
-- graph and dataflow calculations implemented as custom Rust operators;
+- accepted deterministic UDFs and UDAFs whose semantics are scalar or aggregate;
+- relational graph/dataflow calculations expressible with built-in logical plans;
 - validation queries and publication integrity checks;
 - streaming query results as `SendableRecordBatchStream`.
 
@@ -629,6 +629,8 @@ A shared corpus uses the same schemas and keeps `workspace_id` as the leading id
 The DataFusion catalog exposes:
 
 ```text
+cpg_ontology  bundle-pinned governed vocabularies, raw provider kinds, ID domains,
+              and recursively queryable table/column/result/identity/phrase/rule contracts
 cpg_control   workspace, repository/worktree, contexts, publications,
               active ServingSnapshot metadata, capabilities, diagnostics,
               and read-only operational-state views
@@ -636,8 +638,24 @@ cpg_base      canonical entities, relation facts, property facts, evidence
 cpg_python    Python-specific extensions
 cpg_rust      Rust/MIR-specific extensions
 cpg_derived   registered materialized derived facts and summaries
-cpg_serving   stable overlay-aware views and table functions
+cpg_serving   stable overlay-aware views and typed semantic entry points
 ```
+
+`cpg_ontology` is a normalized twenty-relation plane. Its nine vocabulary dimensions are
+`enum_domain`, `entity_kind`, `entity_family`, `relation_kind`, `relation_family`,
+`property_kind`, `fact_kind`, `provider_raw_kind`, and `id_domain`; its eleven
+self-description relations are `ontology_term`, `ontology_edge`, `registry_authority`,
+`semantic_type_binding`, `table_contract`, `column_contract`, `result_schema`,
+`result_field`, `identity_recipe`, `phrase_binding`, and `rule_contract`. N:M membership
+is always represented by `ontology_edge` rows. `provider_raw_kind` retains the raw catalog
+and raw namespace in its key because raw numeric codes are only local to those scopes.
+
+Every relation is a `BundleDimension`, `BaseImmutable` Delta table pinned by the publication
+manifest. A workspace bootstrap, or a changed compiled authority digest, creates candidate
+versions; ordinary fact publications reuse the exact active versions. Candidate relations
+are invisible to active leases until one complete Stage-2b dossier is validated, accepted
+by the owner, and advanced through the atomic manifest-pointer transaction. No individual
+dimension may activate independently.
 
 ### 6.4 Daemon and coordinator topology
 
@@ -651,8 +669,8 @@ The schema registry SHALL define the following reusable logical types.
 
 | Logical type | Arrow type | Delta type | Invariant |
 |---|---|---|---|
-| `id16` | `Binary` | `BINARY` | exactly 16 bytes |
-| `hash32` | `Binary` | `BINARY` | exactly 32 bytes |
+| domain ID | `FixedSizeBinary(16)` + `codefabric.<domain>_id` extension | `BINARY` | exactly 16 bytes; domain is registered |
+| `hash32` | `FixedSizeBinary(32)` | `BINARY` | exactly 32 bytes |
 | `code16` | `Int16` | `SHORT` | registered enum code |
 | `code32` | `Int32` | `INTEGER` | registered enum code |
 | `flags64` | `Int64` | `LONG` | registered bitset |
@@ -663,7 +681,7 @@ The schema registry SHALL define the following reusable logical types.
 | `text` | `Utf8` | `STRING` | losslessly decoded/display text only |
 | `bytes` | `Binary` | `BINARY` | authoritative bytes |
 | `timestamp_utc` | `Timestamp(Microsecond, UTC)` | `TIMESTAMP` | operational time only |
-| `id_list` | `List<Binary>` | `ARRAY<BINARY>` | sorted/deduplicated where specified |
+| domain ID list | `List<FixedSizeBinary(16)>` with the registered child extension | `ARRAY<BINARY>` | element domain is registered; sorted/deduplicated where specified |
 | `string_map` | `Map<Utf8,Utf8>` | `MAP<STRING,STRING>` | cold diagnostic metadata only |
 
 ### 7.1 ID derivation
@@ -677,7 +695,17 @@ owner_id  = BLAKE3_128(domain/owner  || workspace || context || owner key)
 type_id   = BLAKE3_128(domain/type   || workspace || context || canonical type algebra)
 ```
 
-The full 256-bit digest SHOULD be retained in collision-diagnostic storage. A detected unequal-preimage collision fails activation with `ID_COLLISION`.
+The ID-domain registry owns the extension name, preimage recipe ID, and preimage version for
+each durable ID concept. A generic catch-all ID extension is forbidden: equal physical bytes
+from different domains are not interchangeable logical values. The full 256-bit digest
+SHOULD be retained in collision-diagnostic storage. A detected unequal-preimage collision
+fails activation with `ID_COLLISION`.
+
+Delta persists these fields as `BINARY`. The application-owned exact-provider seam validates
+the stored Binary contract and reattaches the generated Arrow fixed-width/extension type for
+DataFusion. A width mismatch, missing domain, or incompatible cast fails snapshot construction;
+it never falls back to untyped Binary. The session registers every generated domain extension
+through its `SessionStateBuilder` before providers or plans are installed.
 
 ### 7.2 Public ID encoding
 
@@ -708,7 +736,15 @@ source_trust_state
 event_stream_health
 ```
 
-All shared state, owner-capability, completeness, certainty, resolution, and directness codes are exactly those in ontology §§62.1–62.10. DataFusion registers immutable dimension batches for code-to-name lookup; an `enum_catalog` Delta table MAY mirror them for external introspection.
+All shared state, owner-capability, completeness, certainty, resolution, and directness codes
+are exactly those in ontology §§62.1–62.10. Their only served lookup authority is
+`cpg_ontology.enum_domain`; it is generated from the same compiled ontology as every other
+vocabulary dimension. Entity, relation, property, fact, provider-raw-kind, and ID-domain
+lookups use their corresponding normalized relations. `cpg_serving` projections derive
+code-to-name decoration from compiled semantic-type bindings and join only the dimensions
+needed by that projection. Raw provider codes remain in their catalog/namespace scope and
+may have a nullable owner-authored normalized-kind mapping; absence of a mapping is never
+interpreted as absence of the raw kind.
 
 ---
 
@@ -733,6 +769,14 @@ fact_hash64
 ```
 
 The workspace namespace does not justify omitting `workspace_id` from rows. `analysis_context_id` is required and uses `context:source` for context-independent source/syntax facts.
+
+Every multi-column concept is classified in the Contract IR as independently filterable,
+relational, or structurally owned and cohesive. Source-span fields use the recorded flat
+fallback: `start_byte` and `end_byte` remain ordinary columns for pruning, while the named
+`ontology.source-span.v1` relational rule enforces all-or-none presence, non-negative bounds,
+and `start_byte <= end_byte`. Fact evidence remains its own relation. Property values remain
+flat, independently filterable tagged columns with the `ontology.property-one-of.v1` rule;
+neither is collapsed into a nested payload.
 
 One entity row MAY denormalize selected canonical properties for scan efficiency. Independently sourced properties remain first-class rows in `property_fact`; `fact_evidence` supports relation and property facts without ambiguity.
 
@@ -2514,13 +2558,24 @@ Repeated strings MAY be dictionary-encoded in transient Arrow batches, but durab
 
 ### 65.4 Nested-type policy
 
-`Struct`, `List`, and `Map` SHALL be used for bounded, cohesive payloads such as:
+Every candidate column group SHALL record one of these Contract-IR classifications before a
+physical shape is chosen:
+
+- **structurally owned and cohesive** — one object with joint presence and lifecycle;
+- **independently filterable** — scalar/tagged columns whose independent predicates matter;
+- **relational** — repeated, evidentiary, or independently governed members.
+
+`Struct`, `List`, and `Map` SHALL be used only for bounded, structurally owned and cohesive
+payloads such as:
 
 - line offsets;
 - cold diagnostics metadata;
 - optional cached summary sets.
 
-Core graph adjacency, type components, arguments, access-path components, and provider evidence SHALL remain row-oriented relations for pushdown and joins.
+Core graph adjacency, type components, arguments, access-path components, fact evidence, and
+provider evidence SHALL remain row-oriented relations for pushdown and joins. Property values
+remain independently filterable flat tagged columns. Source spans retain flat start/end columns
+under the recorded pruning fallback and are governed by the named source-span validation rule.
 
 ---
 
@@ -2855,13 +2910,13 @@ Use the highest-level DataFusion surface that preserves optimizer visibility.
 
 ```text
 built-in Expr / aggregate
-  before custom UDF
+  before accepted custom UDF / UDAF
 
-UDF / UDAF / UDTF
-  before custom logical/physical operator
+built-in DataFusion LogicalPlan
+  for relational calculations and validation
 
-custom physical operator
-  only for graph/fixed-point algorithms not naturally relational
+application-owned GraphOperatorPlan in the derived lane
+  for graph/fixed-point algorithms not naturally relational
 ```
 
 ---
@@ -2996,9 +3051,11 @@ where `E` is CFG edge count, `N` is CFG node count, and `P` is connected-compone
 
 ---
 
-## 81. Custom logical operators
+## 81. Application graph-operator plans
 
-The fabric SHALL define application-owned logical nodes for nontrivial graph computations.
+The semantic compiler SHALL define application-owned `GraphOperatorPlan` variants for
+nontrivial graph computations. They are inspectable typed application plans, not custom
+DataFusion logical-extension nodes.
 
 ```text
 CpgGraphTraverse
@@ -3013,7 +3070,7 @@ CpgPointsTo
 CpgSummaryFixpoint
 ```
 
-Each logical node SHALL expose:
+Each graph node SHALL expose:
 
 - input plans;
 - input expressions;
@@ -3026,7 +3083,7 @@ Each logical node SHALL expose:
 
 ---
 
-## 82. Custom physical graph representation
+## 82. Derived-lane graph execution representation
 
 Inside graph execution operators, global `id16` values SHALL be mapped to dense local `u32` indexes per graph scope.
 
@@ -3042,7 +3099,11 @@ edge_fact_ids:     BinaryArray, length E
 
 This representation SHALL be built directly from sorted Arrow edge batches.
 
-Petgraph is not required inside the data fabric. The operator may implement algorithms directly over Arrow-owned CSR buffers while still conforming to DataFusion `ExecutionPlan` contracts.
+Petgraph is not required inside the data fabric. The application graph runtime may implement
+algorithms directly over Arrow-owned CSR buffers and returns typed Arrow batches at the
+relational boundary. It SHALL NOT present these algorithms as custom DataFusion
+`LogicalPlan::Extension`, `ExecutionPlan`, planner-hook, or UDTF implementations without an
+accepted `ExtensionDecisionRecord` reopening this boundary.
 
 ---
 
@@ -3351,38 +3412,41 @@ Views SHALL:
 
 ---
 
-## 93. Table functions
+## 93. Typed semantic entry points
 
-Recommended UDTFs:
+These semantic operations are query-language forms compiled through `PlanSpec`,
+`BoundPlanSpec`, and, where needed, `GraphOperatorPlan`. They are not DataFusion table
+functions or UDTFs; relational portions lower to built-in DataFusion plans and typed Arrow
+batches cross the graph boundary.
 
-### 93.1 `cpg_neighbors`
+### 93.1 Neighbors
 
 ```text
-cpg_neighbors(node_id, relation_family, direction)
+follow_relationships(node_id, relation_family, direction)
 ```
 
 Returns direct relation rows and endpoint metadata.
 
-### 93.2 `cpg_reachable`
+### 93.2 Reachability and paths
 
 ```text
-cpg_reachable(seed_id, relation_set, direction, max_depth, include_may)
+find_paths(seed_id, relation_set, direction, max_depth, include_may)
 ```
 
 Backed by `CpgGraphTraverseExec`.
 
-### 93.3 `cpg_source_context`
+### 93.3 Source context
 
 ```text
-cpg_source_context(entity_id, before_lines, after_lines)
+fetch_source_context(entity_id, before_lines, after_lines)
 ```
 
 Returns source bytes/text and enclosing syntax/semantic owners.
 
-### 93.4 `cpg_owner_facts`
+### 93.4 Owner facts
 
 ```text
-cpg_owner_facts(owner_id, fact_family_mask)
+retrieve_facts(owner_id, fact_family_mask)
 ```
 
 Returns all fact IDs owned by the selected owner without scanning unrelated buckets.
@@ -3705,6 +3769,8 @@ DataFusion validation plans SHALL enforce these before publication.
 Published `TableProvider`s MAY expose primary/unique constraints to DataFusion only after the publication has passed uniqueness validation.
 
 Incorrect constraint metadata is prohibited because optimizer behavior may rely on it.
+These declarations are advisory and not DataFusion-enforced integrity checks;
+application validation remains authoritative for uniqueness and foreign keys.
 
 ---
 
@@ -4085,10 +4151,10 @@ cpg-plans
   reconciliation plans, serving PlanSpec compiler, integrity plans
 
 cpg-functions
-  DataFusion UDFs, UDAFs, and UDTFs
+  accepted deterministic DataFusion UDFs and UDAFs
 
 cpg-graph-exec
-  custom logical nodes and ExecutionPlans for graph/dataflow algorithms
+  application-owned GraphOperatorPlan execution over Arrow-owned graph projections
 
 cpg-publisher
   dependency scheduling, multi-table publication, recovery
@@ -4329,8 +4395,12 @@ Every metadata field SHALL be classified as exactly one of `enforced`,
 Every non-advisory field names its authoritative consumer and enforcement or
 validation point. Metadata presence alone never implies planner, cast,
 constraint, security, or runtime behavior. The application enforces Arrow
-extension metadata such as `codefabric.id16`; DataFusion extension registration
+extension metadata such as the generated `codefabric.<domain>_id` names from the ID-domain registry; DataFusion extension registration
 may be used only for behavior its pinned implementation actually supplies.
+Every serving `SessionState` installs the generated domains through a
+`MemoryExtensionTypeRegistry` as its DataFusion `ExtensionTypeRegistry`.
+Application publication validation remains authoritative for ID width and domain
+conformance; registry presence is not cited as cast or optimizer enforcement.
 
 ### Contract
 

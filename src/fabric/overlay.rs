@@ -6,8 +6,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use arrow_array::{
-    Array as _, ArrayRef, BinaryArray, FixedSizeBinaryArray, Int16Array, Int64Array, RecordBatch,
-    UInt32Array,
+    Array as _, ArrayRef, FixedSizeBinaryArray, Int16Array, Int64Array, RecordBatch, UInt32Array,
 };
 use arrow_row::{RowConverter, SortField};
 use arrow_schema::{Field, Schema, SchemaRef};
@@ -15,7 +14,8 @@ use arrow_select::concat::concat_batches;
 use arrow_select::take::take;
 use async_trait::async_trait;
 use datafusion::catalog::{ScanArgs, ScanResult, Session, TableProvider};
-use datafusion::common::{Column, Constraints, Statistics};
+use datafusion::common::stats::Precision;
+use datafusion::common::{Column, ColumnStatistics, Constraints, Statistics};
 use datafusion::datasource::{MemTable, provider_as_source};
 use datafusion::execution::memory_pool::{GreedyMemoryPool, MemoryConsumer, MemoryReservation};
 use datafusion::logical_expr::{
@@ -684,11 +684,15 @@ impl SnapshotOverlayProviderFactory for ConsolidatedOverlay {
         if base.schema().fields() != spec.arrow_schema.fields() {
             return Err(policy_error(spec.table_code, "base provider schema drift"));
         }
-        let plan = effective_plan(&base, spec, self.tables.get(&spec.table_code))?;
+        let overlay = self.tables.get(&spec.table_code);
+        let statistics =
+            compose_overlay_statistics(spec, base.statistics(), overlay.map(AsRef::as_ref))?;
+        let plan = effective_plan(&base, spec, overlay)?;
         Ok(Arc::new(OverlayEffectiveProvider {
             base,
             table_code: spec.table_code,
             plan,
+            statistics,
         }))
     }
 }
@@ -697,6 +701,7 @@ struct OverlayEffectiveProvider {
     base: Arc<dyn TableProvider>,
     table_code: i16,
     plan: LogicalPlan,
+    statistics: Statistics,
 }
 
 impl fmt::Debug for OverlayEffectiveProvider {
@@ -778,8 +783,70 @@ impl TableProvider for OverlayEffectiveProvider {
     }
 
     fn statistics(&self) -> Option<Statistics> {
-        Some(Statistics::new_unknown(self.schema().as_ref()))
+        Some(self.statistics.clone())
     }
+}
+
+fn compose_overlay_statistics(
+    spec: &TableSpec,
+    base: Option<Statistics>,
+    overlay: Option<&OverlayTable>,
+) -> Result<Statistics, FabricError> {
+    let overlay_rows = overlay
+        .map(|table| {
+            table
+                .replacement_batches
+                .iter()
+                .try_fold(0_usize, |total, batch| total.checked_add(batch.num_rows()))
+                .ok_or_else(|| policy_error(spec.table_code, "overlay row count overflow"))
+        })
+        .transpose()?
+        .unwrap_or(0);
+    compose_statistics_for_policy(
+        spec,
+        base,
+        overlay.map(|table| table.mutation_policy),
+        overlay_rows,
+    )
+}
+
+fn compose_statistics_for_policy(
+    spec: &TableSpec,
+    base: Option<Statistics>,
+    mutation_policy: Option<OverlayMutationPolicy>,
+    overlay_rows: usize,
+) -> Result<Statistics, FabricError> {
+    let base_rows = base
+        .as_ref()
+        .and_then(|statistics| match statistics.num_rows {
+            Precision::Exact(value) | Precision::Inexact(value) => Some(value),
+            Precision::Absent => None,
+        });
+    let num_rows = match mutation_policy {
+        None
+        | Some(OverlayMutationPolicy::BaseImmutable | OverlayMutationPolicy::NotApplicable) => {
+            base.map_or(Precision::Absent, |statistics| statistics.num_rows)
+        }
+        Some(OverlayMutationPolicy::FullTableReplace) => Precision::Exact(overlay_rows),
+        Some(OverlayMutationPolicy::OwnerReplace | OverlayMutationPolicy::PrimaryKeyUpsert) => {
+            Precision::Inexact(
+                base_rows
+                    .unwrap_or(0)
+                    .checked_add(overlay_rows)
+                    .ok_or_else(|| policy_error(spec.table_code, "effective row count overflow"))?,
+            )
+        }
+    };
+    Ok(Statistics {
+        num_rows,
+        total_byte_size: Precision::Absent,
+        column_statistics: spec
+            .arrow_schema
+            .fields()
+            .iter()
+            .map(|_| ColumnStatistics::default())
+            .collect(),
+    })
 }
 
 fn validate_consolidation_request(
@@ -1169,12 +1236,11 @@ fn owner_tombstone_batch(
                 .map(|(_, _, _, reason)| *reason)
                 .collect::<Vec<_>>(),
         )),
-        Arc::new(BinaryArray::from(
+        super::hash32_array(
             records
                 .iter()
-                .map(|(mutation, ..)| Some(mutation.payload_digest.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
+                .map(|(mutation, ..)| Some(&mutation.payload_digest)),
+        ),
     ];
     sort_and_dedup(
         &RecordBatch::try_new(Arc::clone(&spec.arrow_schema), columns)?,
@@ -1217,24 +1283,18 @@ fn key_tombstone_batch(
         )),
         Arc::new(Int64Array::from(vec![overlay_generation; records.len()])),
         Arc::new(Int16Array::from(vec![table_code; records.len()])),
-        Arc::new(BinaryArray::from(
-            records
-                .iter()
-                .map(|(_, digest, _)| Some(digest.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
+        super::hash32_array(records.iter().map(|(_, digest, _)| Some(digest))),
         Arc::new(Int16Array::from(
             records
                 .iter()
                 .map(|(_, _, reason)| *reason)
                 .collect::<Vec<_>>(),
         )),
-        Arc::new(BinaryArray::from(
+        super::hash32_array(
             records
                 .iter()
-                .map(|(mutation, ..)| Some(mutation.payload_digest.as_slice()))
-                .collect::<Vec<_>>(),
-        )),
+                .map(|(mutation, ..)| Some(&mutation.payload_digest)),
+        ),
     ];
     sort_and_dedup(
         &RecordBatch::try_new(Arc::clone(&spec.arrow_schema), columns)?,
@@ -1789,12 +1849,27 @@ mod tests {
     use super::*;
 
     use crate::fabric::id16_array;
-    use arrow_array::{StringArray, TimestampMicrosecondArray};
+    use arrow_array::builder::FixedSizeBinaryBuilder;
+    use arrow_array::{BinaryArray, StringArray, TimestampMicrosecondArray};
     use datafusion::prelude::SessionContext;
 
     const WORKSPACE: [u8; 16] = [1; 16];
     const CONTEXT: [u8; 16] = [2; 16];
-    const MEMORY_LIMIT: usize = 1 << 20;
+    const MEMORY_LIMIT: usize = 2 << 20;
+
+    fn hash32_array<'a>(values: impl IntoIterator<Item = Option<&'a [u8; 32]>>) -> ArrayRef {
+        let mut builder = FixedSizeBinaryBuilder::new(32);
+        for value in values {
+            if let Some(value) = value {
+                builder
+                    .append_value(value)
+                    .expect("typed hash always has the governed storage width");
+            } else {
+                builder.append_null();
+            }
+        }
+        Arc::new(builder.finish())
+    }
 
     fn owner_batch(rows: &[(u8, i64, i64)]) -> Arc<RecordBatch> {
         let spec = table_spec(8).unwrap();
@@ -1824,8 +1899,8 @@ mod tests {
             id16_array(vec![None; count]),
             Arc::new(Int64Array::from(vec![None::<i64>; count])),
             Arc::new(Int64Array::from(vec![None::<i64>; count])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>; count])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>; count])),
+            hash32_array(vec![None; count]),
+            hash32_array(vec![None; count]),
             Arc::new(Int64Array::from(
                 rows.iter()
                     .map(|(_, _, payload)| *payload)
@@ -1848,7 +1923,7 @@ mod tests {
             Arc::new(BinaryArray::from(vec![Some(b"/workspace".as_slice())])),
             Arc::new(StringArray::from(vec!["/workspace"])),
             Arc::new(Int16Array::from(vec![1])),
-            Arc::new(BinaryArray::from(vec![Some(authorization.as_slice())])),
+            hash32_array([Some(&authorization)]),
             Arc::new(Int16Array::from(vec![1])),
             Arc::new(Int64Array::from(vec![revision])),
             Arc::new(TimestampMicrosecondArray::from(vec![revision]).with_timezone("UTC")),
@@ -1924,7 +1999,7 @@ mod tests {
             .expect("provider reports honest unknowns");
         assert_eq!(
             statistics.num_rows,
-            datafusion::common::stats::Precision::Absent
+            datafusion::common::stats::Precision::Inexact(1)
         );
         assert_eq!(
             statistics.column_statistics.len(),
@@ -1965,6 +2040,139 @@ mod tests {
             batches
                 .iter()
                 .all(|batch| batch.num_columns() == projection.len())
+        );
+    }
+
+    #[test]
+    fn odf_overlay_statistics_composition() {
+        let base = Statistics {
+            num_rows: Precision::Exact(3),
+            total_byte_size: Precision::Exact(300),
+            column_statistics: table_spec(1)
+                .unwrap()
+                .arrow_schema
+                .fields()
+                .iter()
+                .map(|_| ColumnStatistics::default())
+                .collect(),
+        };
+        assert_eq!(
+            compose_overlay_statistics(table_spec(1).unwrap(), Some(base.clone()), None)
+                .unwrap()
+                .num_rows,
+            Precision::Exact(3)
+        );
+
+        assert_eq!(
+            compose_statistics_for_policy(
+                table_spec(1).unwrap(),
+                Some(base.clone()),
+                Some(OverlayMutationPolicy::FullTableReplace),
+                1,
+            )
+            .unwrap()
+            .num_rows,
+            Precision::Exact(1)
+        );
+
+        let upsert = consolidate(
+            2,
+            None,
+            &[
+                OverlayMutation::primary_key_upsert(WORKSPACE, CONTEXT, 1, 2, workspace_row(1, 2))
+                    .unwrap(),
+            ],
+        );
+        assert_eq!(
+            compose_overlay_statistics(
+                table_spec(1).unwrap(),
+                Some(base),
+                upsert.table(1).as_deref(),
+            )
+            .unwrap()
+            .num_rows,
+            Precision::Inexact(4)
+        );
+
+        let owner = consolidate(
+            3,
+            None,
+            &[OverlayMutation::owner_replacement(
+                WORKSPACE,
+                CONTEXT,
+                8,
+                3,
+                owner_batch(&[(2, 3, 22)]),
+            )
+            .unwrap()],
+        );
+        let without_base =
+            compose_overlay_statistics(table_spec(8).unwrap(), None, owner.table(8).as_deref())
+                .unwrap();
+        assert_eq!(without_base.num_rows, Precision::Inexact(1));
+        assert!(without_base.column_statistics.iter().all(|column| {
+            column.null_count == Precision::Absent
+                && column.min_value == Precision::Absent
+                && column.max_value == Precision::Absent
+        }));
+    }
+
+    #[tokio::test]
+    async fn odf_pushdown_truth_falsification() {
+        let base = owner_batch(&[(1, 0, 10), (2, 0, 20), (3, 0, 30)]);
+        let overlay = consolidate(
+            1,
+            None,
+            &[OverlayMutation::owner_replacement(
+                WORKSPACE,
+                CONTEXT,
+                8,
+                1,
+                owner_batch(&[(2, 1, 22)]),
+            )
+            .unwrap()],
+        );
+        let spec = table_spec(8).unwrap();
+        let base_provider: Arc<dyn TableProvider> = Arc::new(
+            MemTable::try_new(
+                Arc::clone(&spec.arrow_schema),
+                vec![vec![base.as_ref().clone()]],
+            )
+            .unwrap(),
+        );
+        let provider = overlay.wrap(spec, base_provider).unwrap();
+        let filter = datafusion::prelude::col("owner_bucket").eq(datafusion::prelude::lit(2_i16));
+        assert_eq!(
+            provider.supports_filters_pushdown(&[&filter]).unwrap(),
+            [TableProviderFilterPushDown::Exact]
+        );
+        let pushed = SessionContext::new()
+            .read_table(Arc::clone(&provider))
+            .unwrap()
+            .filter(filter.clone())
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        let effective = effective_batch(base, &overlay).await;
+        let reference_provider: Arc<dyn TableProvider> = Arc::new(
+            MemTable::try_new(Arc::clone(&spec.arrow_schema), vec![vec![effective]]).unwrap(),
+        );
+        let reference = SessionContext::new()
+            .read_table(reference_provider)
+            .unwrap()
+            .filter(filter)
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let pushed = concat_batches(&spec.arrow_schema, &pushed).unwrap();
+        let reference = concat_batches(&spec.arrow_schema, &reference).unwrap();
+        assert_eq!(pushed.num_rows(), 1);
+        assert_eq!(
+            batch_checksum(&pushed).unwrap(),
+            batch_checksum(&reference).unwrap()
         );
     }
 

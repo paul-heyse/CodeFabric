@@ -15,6 +15,8 @@ pub mod analysis_context;
 pub mod cancellation;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
+#[cfg(feature = "data-fabric")]
+pub mod compiled_ontology;
 #[cfg(feature = "daemon")]
 pub mod continuous;
 #[cfg(any(feature = "canonical-json", feature = "contract-models"))]
@@ -27,6 +29,8 @@ pub mod core_facts;
 pub mod daemon;
 #[cfg(feature = "daemon")]
 pub mod derivation;
+#[cfg(feature = "data-fabric")]
+pub mod domain_conformance;
 #[cfg(any(
     all(feature = "canonical-json", not(feature = "model-compiler")),
     all(feature = "contract-models", not(feature = "model-compiler")),
@@ -75,6 +79,12 @@ pub mod lifecycle;
 ))]
 #[path = "generated/model.rs"]
 pub(crate) mod model_generated;
+#[cfg(feature = "data-fabric")]
+pub mod ontology_activation;
+#[cfg(feature = "data-fabric")]
+pub mod ontology_plane;
+#[cfg(feature = "data-fabric")]
+pub mod ontology_rules;
 #[cfg(feature = "data-fabric")]
 pub mod operational_store;
 #[cfg(feature = "fact-generation")]

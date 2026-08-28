@@ -868,6 +868,7 @@ pub enum IntegrityDomain {
     EmptyOverlay,
     PublicationPhase,
     QueryResultChecksumV1,
+    QueryResultChecksumV2,
     GoldenProfile,
     GateBExecution,
     GateBReviewCandidate,
@@ -922,6 +923,10 @@ impl IntegrityDomain {
             Self::QueryResultChecksumV1 => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 113, 117, 101, 114, 121, 45, 114,
                 101, 115, 117, 108, 116, 45, 99, 104, 101, 99, 107, 115, 117, 109, 46, 118, 49, 0,
+            ],
+            Self::QueryResultChecksumV2 => &[
+                99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 46, 113, 117, 101, 114, 121, 45, 114,
+                101, 115, 117, 108, 116, 45, 99, 104, 101, 99, 107, 115, 117, 109, 46, 118, 50, 0,
             ],
             Self::GoldenProfile => &[
                 99, 111, 100, 101, 102, 97, 98, 114, 105, 99, 45, 103, 111, 108, 100, 101, 110, 45,

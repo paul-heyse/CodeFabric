@@ -654,6 +654,48 @@ oracle-substance-check:
 plan-dependency-check:
     @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py dependency-check
 
+[doc("Validate committed name-coupled nextest selectors and zero-selection failure semantics")]
+[group('gate')]
+gate-filter-census:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python scripts/gate_filter_census.py check
+
+[doc("Run the pinned ontology-fabric capability probes and emit target-only reports")]
+[group('test')]
+probe-suite:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python scripts/ontology_fabric_probe_suite.py run
+
+[doc("Prove per-domain ID extensions, lowering, analyzer coverage, and retired generic typing")]
+[group('gate')]
+id-domain-extension-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP07
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP08
+
+[doc("Execute compiled ontology FK, membership, conformance, cardinality, and one-of gates")]
+[group('gate')]
+ontology-relational-closure-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP11
+
+[doc("Validate normalized ontology parity, relational closure, and serving decoration")]
+[group('gate')]
+ontology-dimension-check: ontology-relational-closure-check
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP09
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP10
+
+[doc("Validate logical structure classification and the selected flat source-span lowering")]
+[group('gate')]
+structure-classification-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP12
+
+[doc("Resolve the complete ontology plane dynamically from a leased catalog")]
+[group('gate')]
+ontology-self-description-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP17
+
+[doc("Prove atomic Stage-2b acceptance, fault rollback, and idempotent pointer advance")]
+[group('gate')]
+ontology-stage2b-activation-check:
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP17
+
 [doc("Execute every released negative fixture and cited assurance registry")]
 [group('gate')]
 released-fixture-check:

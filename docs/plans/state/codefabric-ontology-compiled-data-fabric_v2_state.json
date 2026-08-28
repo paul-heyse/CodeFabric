@@ -3,153 +3,198 @@
   "plan_path": "docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md",
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_design_v3_2026-08-27.md",
   "baseline_commit": "eb7a738fa55037b19706fd842737cecad65ffe16",
-  "status": "not_started",
-  "current_packet": null,
+  "status": "executing",
+  "current_packet": "WP17",
   "packets": {
     "WP01": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "deviations": [
+        "The serving-equivalence, catalog-freeze, and overlay-composition fixtures depend on private in-module helpers. Under WP01's named replan branch, their original tests remain mechanically selected and protected until WP06, WP10/WP17, and WP15 respectively expose and prove their replacements; the checksum KATs already live in the integration target.",
+        "Per explicit owner direction on 2026-08-28, performance baselining and later performance comparisons are unnecessary and omitted from this implementation. The immutable plan's odf_perf_baseline_anchor_captured selector name is retained for contract compatibility, but its executable check proves the owner waiver and absence of a new committed anchor rather than claiming a measurement."
+      ],
+      "failed_approaches": [
+        "The first protective-selector census expected seven library tests, but the exact set is six: one serving-equivalence, one catalog-freeze, and four overlay-composition tests. The assertion was corrected to the discovered nonzero exact count."
+      ],
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP05": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP06": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP07": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP08": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP09": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP10": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP11": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP12": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP13": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP14": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP15": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP16": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "deviations": [
+        "The historical design-principle assurance layer was reconciled with the ontology consolidation: DP-029 now proves the generated CapabilityStatusRow field plus its source/syntax consumer, and DP-071 accounts for the added Ruff runtime-import rule, fixture, and snapshot."
+      ],
+      "failed_approaches": [
+        "The released-fixture structural acceptance test resolved WP70 through the mutable active-plan pointer, which fails once a later plan is active. It now anchors the immutable plan that owns WP70 while retaining the original four oracle/criterion assertions."
+      ],
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     },
     "WP17": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "failed_approaches": [
+        "One model sync immediately after adding governed assurance evidence left aggregate identity manifests nonzero. The live model plan showed four real dependency-closure replacements; applying that closure pass produced zero planned actions."
+      ],
+      "blockers": [
+        "No proving commit exists; repository commits were not authorized."
+      ]
     }
   },
   "milestones": {
     "M01": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -158,42 +203,42 @@
   },
   "decommission_batches": {
     "DB01": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB05": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB06": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -201,8 +246,79 @@
     }
   },
   "baseline_failures": [],
-  "discovered_obligations": [],
-  "plan_deviations": [],
-  "next_action": "Reconcile dependency readiness before the first packet edit.",
-  "updated_at": "2026-08-28T04:04:40.669397+00:00"
+  "discovered_obligations": [
+    {
+      "kind": "proving_commit_authorization",
+      "summary": "Every packet, milestone, and decommission batch requires an owner-authorized proving commit before execution state can advance to complete."
+    },
+    {
+      "kind": "declared_input_reconciliation",
+      "summary": "Intentional governed input evolution remains uncommitted; the immutable plan digests must not be silently rewritten, and trust must be re-established from proving commits."
+    },
+    {
+      "kind": "stack_compatibility_two_ref_proof",
+      "summary": "The final data-fabric-stack-compat proof requires committed baseline and target Git refs; an uncommitted working tree cannot supply the target ref."
+    },
+    {
+      "kind": "clean_commit_alignment_proof",
+      "summary": "The historical design-principle dirty-tree attribution oracle cannot certify a large uncommitted implementation without falsely reclassifying user-owned work; rerun it after the proving commits establish a clean target HEAD."
+    }
+  ],
+  "plan_deviations": [
+    {
+      "kind": "user_directed_validation_cadence",
+      "summary": "Implement every packet with edit-local and packet-local proof, while deferring repository-wide validation and quality aggregates until the complete plan scope is implemented."
+    },
+    {
+      "kind": "owner_waived_performance_proof",
+      "summary": "Per explicit owner direction, PR-7 performance baselining and performance comparison are omitted; correctness-only library capability probes and functional gates remain in scope."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP05",
+      "paths": [
+        "contracts/registry/phrase-registry.yaml"
+      ],
+      "summary": "WP05 extends the governed phrase registry for compiled semantic-operation bindings; the immutable planning-time digest remains historical until the WP05 proving commit is trusted."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP11",
+      "paths": [
+        "contracts/registry/ontology-relation-registry.yaml"
+      ],
+      "summary": "WP11 reconciles relation-family membership with normative emitted fact shapes; the immutable planning-time digest remains historical until the WP11 proving commit is trusted."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP13",
+      "paths": [
+        "contracts/query/query-form-contract.json"
+      ],
+      "summary": "WP13 adds generated result-schema and checksum-v2 authority to the query-form contract; the immutable planning-time digest remains historical until the WP13 proving commit is trusted."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP17",
+      "paths": [
+        "docs/designs/codefabric_ontology_compiled_data_fabric_design_v3_2026-08-27.md",
+        "contracts/schema/schema-contract-ir.json"
+      ],
+      "summary": "WP17 closes the accepted design and compiled schema through atomic Stage 2b activation; the immutable planning-time digests remain historical until the WP17 proving commit is trusted."
+    },
+    {
+      "kind": "historical_assurance_reconciliation",
+      "packet": "WP16",
+      "paths": [
+        "contracts/registry/design-principle-detector-registry.yaml",
+        "tooling/ci/test_released_fixture_verifier.py",
+        "rules/ruff-no-runtime-import-execution.yml",
+        "rule-tests/ruff-no-runtime-import-execution-test.yml",
+        "rule-tests/__snapshots__/ruff-no-runtime-import-execution-snapshot.yml"
+      ],
+      "summary": "The existing assurance authorities now follow the generated common representation, the expanded structural-rule census, and the immutable plan that owns the retained WP70 acceptance contract."
+    }
+  ],
+  "next_action": "Obtain authorization to create proving commits, record those commits for WP01-WP17, M01-M04, and DB01-DB06, then run data-fabric-stack-compat between the committed baseline and target refs and rerun design-principle dirty-tree attribution plus final artifact/PR certification at committed HEAD.",
+  "updated_at": "2026-08-28T12:53:14Z"
 }

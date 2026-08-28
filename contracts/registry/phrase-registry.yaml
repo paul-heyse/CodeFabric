@@ -50,6 +50,37 @@ records:
   - {phrase_id: Q92_RUST_COROUTINE_LOWERING, owner_section: 92, canonical_text: Rust coroutine lowering, accepted_aliases: [Rust async lowering], ast_node_kind: relationship-phrase, slot_type: projection-id, contract_reference: {family: projection, code: CFG_FULL_V1}, allowed_request_forms: [follow-relationships], allowed_subject_roles: [source], allowed_object_roles: [target], required_modifiers: [rust], incompatible_modifiers: [python], planspec_mapping: {node_kind: follow-relationships, typed_slot_bindings: [{slot: coroutine, value_type: entity-selector, target_field: subject-selector, required: false}], constant_fields: [{target_field: projection-id, value: {value_kind: text, text: CFG_FULL_V1}}, {target_field: language-profile, value: {value_kind: text, text: rust}}], output_role: fact-set}, introduced: "1.3", examples: [follow Rust coroutine lowering], negative_fixtures: [lowered state omitted is invalid]}
   - {phrase_id: Q93_RUST_UNSAFE_FFI, owner_section: 93, canonical_text: Rust unsafe FFI, accepted_aliases: [Rust foreign operations], ast_node_kind: fact-phrase, slot_type: projection-id, contract_reference: {family: projection, code: EFFECT_V1}, allowed_request_forms: [retrieve-facts], allowed_subject_roles: [subject], allowed_object_roles: [], required_modifiers: [rust], incompatible_modifiers: [python], planspec_mapping: {node_kind: retrieve-facts, typed_slot_bindings: [{slot: unsafe-owner, value_type: entity-selector, target_field: subject-selector, required: false}], constant_fields: [{target_field: projection-id, value: {value_kind: text, text: EFFECT_V1}}, {target_field: language-profile, value: {value_kind: text, text: rust}}], output_role: fact-set}, introduced: "1.3", examples: [retrieve Rust unsafe FFI], negative_fixtures: [unsafe conclusion without exact fact is invalid]}
   - {phrase_id: Q94_RUST_COMPILE_TIME_VALUES, owner_section: 94, canonical_text: Rust compile time values, accepted_aliases: [Rust constants and statics], ast_node_kind: fact-phrase, slot_type: projection-id, contract_reference: {family: projection, code: DATAFLOW_V1}, allowed_request_forms: [retrieve-facts], allowed_subject_roles: [subject], allowed_object_roles: [], required_modifiers: [rust], incompatible_modifiers: [python], planspec_mapping: {node_kind: retrieve-facts, typed_slot_bindings: [{slot: constant, value_type: entity-selector, target_field: subject-selector, required: false}], constant_fields: [{target_field: projection-id, value: {value_kind: text, text: DATAFLOW_V1}}, {target_field: language-profile, value: {value_kind: text, text: rust}}], output_role: fact-set}, introduced: "1.3", examples: [retrieve Rust compile time values], negative_fixtures: [runtime value as compile time fact is invalid]}
+semantic_operation_bindings:
+  - phrase_id: CONDITION_CERTAINTY_EXACT
+    canonical_text: certainty is exact
+    column_role: certainty_code
+    operator: in_set
+    operand_domain: EVIDENCE_CERTAINTY
+    operand_names: [SOURCE_EXACT, COMPILER_EXACT, STATIC_SEMANTIC, MODELLED]
+    null_policy: unknown_is_false
+    output_role: predicate
+    ingresses: [relational, graph]
+    diagnostic_code: QUERY_PREDICATE_DOMAIN_MISMATCH
+  - phrase_id: CONDITION_CERTAINTY_SOUND_MAY
+    canonical_text: certainty is sound may
+    column_role: certainty_code
+    operator: equals
+    operand_domain: EVIDENCE_CERTAINTY
+    operand_names: [SOUND_MAY]
+    null_policy: unknown_is_false
+    output_role: predicate
+    ingresses: [relational, graph]
+    diagnostic_code: QUERY_PREDICATE_DOMAIN_MISMATCH
+  - phrase_id: CONDITION_CERTAINTY_UNRESOLVED
+    canonical_text: certainty is unresolved
+    column_role: certainty_code
+    operator: equals
+    operand_domain: EVIDENCE_CERTAINTY
+    operand_names: [UNRESOLVED]
+    null_policy: unknown_is_false
+    output_role: predicate
+    ingresses: [relational, graph]
+    diagnostic_code: QUERY_PREDICATE_DOMAIN_MISMATCH
 owner_acceptance:
   approver: semantic-query-owner
   accepted_at: "2026-08-21"

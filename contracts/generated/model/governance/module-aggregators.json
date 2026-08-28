@@ -23,14 +23,17 @@
     "src/generated/codefabric.provider.v1.rs",
     "src/generated/codefabric.pyrefly.v1.rs",
     "src/generated/codefabric.rustc.v1.rs",
+    "src/generated/compiled_ontology.rs",
     "src/generated/digest_frames.rs",
     "src/generated/fact_row_encoders.rs",
+    "src/generated/id_domains.rs",
     "src/generated/model_identity_recipes.rs",
     "src/generated/model_query_forms.rs",
     "src/generated/model_schema_tables.rs",
     "src/generated/model_semantic_lane_fragments.rs",
     "src/generated/provider_raw_kinds.rs",
     "src/generated/registries.rs",
+    "src/generated/result_schemas.rs",
     "src/generated/table_specs.rs"
   ],
   "schema_version": 1

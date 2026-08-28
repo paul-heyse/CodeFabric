@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder};
 use arrow_array::{
-    Array as _, ArrayRef, BinaryArray, BooleanArray, Int16Array, Int32Array, Int64Array,
-    RecordBatch, StringArray, TimestampMicrosecondArray,
+    Array as _, ArrayRef, BinaryArray, BooleanArray, Int16Array, Int64Array, RecordBatch,
+    StringArray, TimestampMicrosecondArray,
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
@@ -60,7 +60,8 @@ pub use publication::{
     PublicationTableRecord,
 };
 pub use result_checksum::{
-    RESULT_CHECKSUM_VERSION, ResultChecksumError, ResultChecksumV1, result_checksum_v1,
+    RESULT_CHECKSUM_VERSION, ResultChecksumError, ResultChecksumV1, ResultChecksumV2,
+    VersionedResultChecksum, result_checksum_for_version, result_checksum_v1, result_checksum_v2,
 };
 #[cfg(feature = "daemon")]
 pub(crate) use serving::logical_plan_template_serialization;
@@ -110,6 +111,43 @@ pub(crate) fn id16_array<'a>(values: impl IntoIterator<Item = Option<&'a [u8; 16
         }
     }
     Arc::new(builder.finish())
+}
+
+pub(crate) fn hash32_array<'a>(values: impl IntoIterator<Item = Option<&'a [u8; 32]>>) -> ArrayRef {
+    let mut builder = FixedSizeBinaryBuilder::new(32);
+    for value in values {
+        if let Some(value) = value {
+            builder
+                .append_value(value)
+                .expect("typed hash always has the governed storage width");
+        } else {
+            builder.append_null();
+        }
+    }
+    Arc::new(builder.finish())
+}
+
+/// Build a logical list of domain-typed IDs using the generated list-child field metadata.
+#[cfg(feature = "daemon")]
+pub(crate) fn id16_list_array<'a>(
+    field: &Field,
+    values: impl IntoIterator<Item = &'a [[u8; 16]]>,
+) -> Result<ArrayRef, FabricError> {
+    let DataType::List(element) = field.data_type() else {
+        return Err(FabricError::TableInvariant {
+            table: "query_result".into(),
+            detail: format!("{} is not a generated ID list", field.name()),
+        });
+    };
+    let mut builder =
+        ListBuilder::new(FixedSizeBinaryBuilder::new(16)).with_field(Arc::clone(element));
+    for row in values {
+        for value in row {
+            builder.values().append_value(value)?;
+        }
+        builder.append(true);
+    }
+    Ok(Arc::new(builder.finish()))
 }
 
 /// Stable failures at the generated-schema/Delta boundary.
@@ -262,7 +300,7 @@ impl WorkspaceNamespace {
 
     fn table_path(&self, spec: &TableSpec) -> Result<PathBuf, FabricError> {
         let parent = match spec.family {
-            "control" | "bundle" => &self.control,
+            "control" | "bundle" | "ontology" => &self.control,
             "universal-fact" | "source" | "lexical" | "syntax" | "semantic-type"
             | "semantic-binding" | "module-import" | "callable" | "call" | "control-flow"
             | "dataflow-value" | "dataflow-operation" | "dataflow-event" | "memory-location"
@@ -416,8 +454,11 @@ impl WorkspaceFabric {
         if self.table_is_empty(4)? {
             self.replace(4, source_context_set_batch(record)?).await?;
         }
-        if self.table_is_empty(11)? {
-            self.replace(11, enum_catalog_batch()?).await?;
+        let ontology_batches = crate::ontology_plane::ontology_dimension_batches()?;
+        if !self.ontology_dimensions_match(&ontology_batches).await? {
+            for (table_code, batch) in ontology_batches {
+                self.replace(table_code, batch).await?;
+            }
         }
         if let Some(repository) = repository
             && self.table_is_empty(2)?
@@ -426,6 +467,37 @@ impl WorkspaceFabric {
                 .await?;
         }
         Ok(())
+    }
+
+    async fn ontology_dimensions_match(
+        &self,
+        desired: &BTreeMap<i16, RecordBatch>,
+    ) -> Result<bool, FabricError> {
+        for (&table_code, desired_batch) in desired {
+            let table = self
+                .table(table_code)
+                .ok_or_else(|| FabricError::TableInvariant {
+                    table: table_code.to_string(),
+                    detail: "compiled ontology table is absent".into(),
+                })?;
+            let context = SessionContext::new();
+            let current_batches = context
+                .read_table(Arc::clone(&table.provider))?
+                .collect()
+                .await?;
+            let current = if current_batches.is_empty() {
+                RecordBatch::new_empty(Arc::clone(&desired_batch.schema()))
+            } else {
+                arrow_select::concat::concat_batches(
+                    &desired_batch.schema(),
+                    current_batches.iter(),
+                )?
+            };
+            if mutation::batch_checksum(&current)? != mutation::batch_checksum(desired_batch)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn table_is_empty(&self, table_code: i16) -> Result<bool, FabricError> {
@@ -1005,9 +1077,7 @@ fn workspace_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricError>
         )])),
         Arc::new(StringArray::from(vec![record.root_path_display.as_str()])),
         Arc::new(Int16Array::from(vec![platform_path_encoding()])),
-        Arc::new(BinaryArray::from(vec![Some(
-            record.authorization_fingerprint.as_slice(),
-        )])),
+        hash32_array([Some(&record.authorization_fingerprint)]),
         Arc::new(Int16Array::from(vec![0_i16])),
         Arc::new(Int64Array::from(vec![revision])),
         Arc::new(TimestampMicrosecondArray::from(vec![created_at]).with_timezone("UTC")),
@@ -1046,9 +1116,7 @@ fn common_repository_batch(record: &CommonRepositoryRecord) -> Result<RecordBatc
             record.common_dir_path_display.as_str(),
         ])),
         Arc::new(Int16Array::from(vec![record.object_format_code])),
-        Arc::new(BinaryArray::from(vec![Some(
-            record.trust_policy_fingerprint.as_slice(),
-        )])),
+        hash32_array([Some(&record.trust_policy_fingerprint)]),
         Arc::new(TimestampMicrosecondArray::from(vec![updated_at]).with_timezone("UTC")),
     ];
     Ok(RecordBatch::try_new(
@@ -1065,9 +1133,7 @@ fn source_context_batch(record: &WorkspaceRecord) -> Result<RecordBatch, FabricE
         Arc::new(Int16Array::from(vec![
             AnalysisContextKindCode::Source as i16,
         ])),
-        Arc::new(BinaryArray::from(vec![Some(
-            record.context_fingerprint.as_slice(),
-        )])),
+        hash32_array([Some(&record.context_fingerprint)]),
         Arc::new(StringArray::from(vec!["1.0"])),
         Arc::new(StringArray::from(vec!["source"])),
         Arc::new(StringArray::from(vec![None::<&str>])),
@@ -1088,7 +1154,7 @@ fn source_context_set_batch(record: &WorkspaceRecord) -> Result<RecordBatch, Fab
         .expect("generated context list")
         .data_type()
     else {
-        unreachable!("generated context ids use List<codefabric.id16>")
+        unreachable!("generated context ids use a domain-typed fixed-width ID list")
     };
     let mut contexts =
         ListBuilder::new(FixedSizeBinaryBuilder::new(16)).with_field(Arc::clone(element));
@@ -1102,68 +1168,8 @@ fn source_context_set_batch(record: &WorkspaceRecord) -> Result<RecordBatch, Fab
         id16_array([Some(&identity.id)]),
         id16_array([Some(&record.workspace_id)]),
         Arc::new(contexts.finish()),
-        Arc::new(BinaryArray::from(vec![Some(
-            identity.full_digest.as_slice(),
-        )])),
+        hash32_array([Some(&identity.full_digest)]),
         Arc::new(TimestampMicrosecondArray::from(vec![created_at]).with_timezone("UTC")),
-    ];
-    Ok(RecordBatch::try_new(
-        Arc::clone(&spec.arrow_schema),
-        columns,
-    )?)
-}
-
-fn parse_digest_bytes(value: &str) -> Result<[u8; 32], FabricError> {
-    let payload = value
-        .strip_prefix("b3:")
-        .filter(|payload| payload.len() == 64)
-        .ok_or_else(|| FabricError::TableInvariant {
-            table: "enum_catalog".into(),
-            detail: "generated registry digest framing is invalid".into(),
-        })?;
-    let mut digest = [0_u8; 32];
-    for (index, byte) in digest.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&payload[index * 2..index * 2 + 2], 16).map_err(|_| {
-            FabricError::TableInvariant {
-                table: "enum_catalog".into(),
-                detail: "generated registry digest hex is invalid".into(),
-            }
-        })?;
-    }
-    Ok(digest)
-}
-
-fn enum_catalog_batch() -> Result<RecordBatch, FabricError> {
-    let spec = table_spec(11).expect("generated enum_catalog table");
-    let row_count = crate::registries::REGISTRY_DOMAINS
-        .iter()
-        .map(|domain| domain.values.len())
-        .sum::<usize>();
-    let mut domains = Vec::with_capacity(row_count);
-    let mut codes = Vec::with_capacity(row_count);
-    let mut names = Vec::with_capacity(row_count);
-    let mut versions = Vec::with_capacity(row_count);
-    let mut digests = Vec::with_capacity(row_count);
-    for domain in crate::registries::REGISTRY_DOMAINS {
-        let digest = parse_digest_bytes(domain.canonical_digest)?;
-        for entry in domain.values {
-            domains.push(domain.domain);
-            codes.push(i32::from(entry.code));
-            names.push(entry.name);
-            versions.push(domain.version);
-            digests.push(digest);
-        }
-    }
-    let digest_refs = digests
-        .iter()
-        .map(|digest| Some(digest.as_slice()))
-        .collect::<Vec<_>>();
-    let columns: Vec<ArrayRef> = vec![
-        Arc::new(StringArray::from(domains)),
-        Arc::new(Int32Array::from(codes)),
-        Arc::new(StringArray::from(names)),
-        Arc::new(StringArray::from(versions)),
-        Arc::new(BinaryArray::from(digest_refs)),
     ];
     Ok(RecordBatch::try_new(
         Arc::clone(&spec.arrow_schema),
@@ -1205,8 +1211,8 @@ fn delta_field_storage_compatible(expected: &Field, actual: &Field) -> bool {
         return false;
     }
     match (expected.data_type(), actual.data_type()) {
-        (DataType::FixedSizeBinary(16), DataType::Binary) => {
-            expected.has_valid_extension_type::<crate::schema_registry::Id16Extension>()
+        (DataType::FixedSizeBinary(16 | 32), DataType::Binary) => {
+            crate::schema_registry::validate_logical_extension_field(expected).is_ok()
                 && (actual.metadata().is_empty() || expected.metadata() == actual.metadata())
         }
         _ if expected.metadata() != actual.metadata() => false,

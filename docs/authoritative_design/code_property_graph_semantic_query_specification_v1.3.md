@@ -6075,6 +6075,10 @@ custom DataFusion `LogicalPlan::Extension` nodes, custom physical nodes, UDFs,
 or planner hooks are not permitted on this path without an accepted
 `ExtensionDecisionRecord` and a reopened design decision.
 
+DataFusion table functions are likewise not a parallel semantic entry path. Neighbors,
+reachability, paths, patterns, and source context enter only through the typed request forms
+above; the fabric's `cpg_serving` namespace supplies stable views, not a second query language.
+
 Lowering SHALL preserve query-node identity, typed role, source JSON pointer, and cost attribution so errors and progress can refer to the originating block.
 
 A plan node cannot read a result not declared by a typed input edge. Cycles are rejected before snapshot work. Every physical operator must declare output schema, ordering, boundedness, memory estimate, cancellation behavior, and coverage effect.

@@ -605,7 +605,14 @@ fn header_matches(header: &AnalyzeEventHeader, request: &PyreflyRunRequest, sequ
         && header.source_manifest_digest == request.source_manifest_digest
 }
 
-fn read_immutable_blob(input: &PyreflyModuleInput) -> Result<BlobReference, PyreflyServiceError> {
+struct AdmittedImmutableBlob {
+    reference: BlobReference,
+    bytes: Arc<[u8]>,
+}
+
+fn read_immutable_blob(
+    input: &PyreflyModuleInput,
+) -> Result<AdmittedImmutableBlob, PyreflyServiceError> {
     if !input.source_blob_path.is_absolute() || !input.source_blob_path.is_file() {
         return Err(PyreflyServiceError::Invalid(
             "module source blob path must be an existing absolute file".to_owned(),
@@ -621,11 +628,14 @@ fn read_immutable_blob(input: &PyreflyModuleInput) -> Result<BlobReference, Pyre
             "immutable source blob digest differs".to_owned(),
         ));
     }
-    Ok(BlobReference {
-        blob_id: format!("blob:{}", &b3(&bytes)[3..35]),
-        content_digest: b3(&bytes),
-        byte_length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-        read_only_uri: format!("file://{}", input.source_blob_path.display()),
+    Ok(AdmittedImmutableBlob {
+        reference: BlobReference {
+            blob_id: format!("blob:{}", &b3(&bytes)[3..35]),
+            content_digest: b3(&bytes),
+            byte_length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+            read_only_uri: format!("file://{}", input.source_blob_path.display()),
+        },
+        bytes: Arc::from(bytes),
     })
 }
 
@@ -673,11 +683,21 @@ async fn analyze_pyrefly_uds_inner(
     let observation_contract = pyrefly_observation_contract()?;
     let observation_family_code = u32::from(observation_contract.observation_family_code);
     let observation_schema_digest = observation_contract.schema_digest.to_owned();
-    let blobs = request
+    let admitted_blobs = request
         .modules
         .iter()
         .map(read_immutable_blob)
         .collect::<Result<Vec<_>, _>>()?;
+    let blobs = admitted_blobs
+        .iter()
+        .map(|blob| blob.reference.clone())
+        .collect::<Vec<_>>();
+    let admitted_source_bytes = request
+        .modules
+        .iter()
+        .zip(&admitted_blobs)
+        .map(|(module, blob)| (module.module_id.clone(), Arc::clone(&blob.bytes)))
+        .collect::<BTreeMap<_, _>>();
     let context_digest = b3(&request.context_manifest);
     let lease = SourceSnapshotLease {
         lease_id: request.source_snapshot_lease_id.clone(),
@@ -941,18 +961,15 @@ async fn analyze_pyrefly_uds_inner(
                         "module file_id is not a canonical file identity".to_owned(),
                     )
                 })?;
-                let source_bytes =
-                    std::fs::read(&requested_module.source_blob_path).map_err(|source| {
-                        PyreflyServiceError::Io {
-                            path: requested_module.source_blob_path.clone(),
-                            source,
-                        }
-                    })?;
-                if b3(&source_bytes) != requested_module.content_digest {
-                    return Err(PyreflyServiceError::Invalid(
-                        "module source changed after lease admission".to_owned(),
-                    ));
-                }
+                let source_bytes = admitted_source_bytes
+                    .get(&event.module_id)
+                    .ok_or_else(|| {
+                        PyreflyServiceError::Protocol(
+                            "provider returned a module without admitted source bytes".to_owned(),
+                        )
+                    })?
+                    .as_ref()
+                    .to_vec();
                 let accepted_bytes = u64::try_from(event.arrow_ipc.len()).unwrap_or(u64::MAX);
                 pending = Some(AcceptedPyreflyModule {
                     module_id: event.module_id,

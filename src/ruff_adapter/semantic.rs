@@ -1871,25 +1871,6 @@ mod tests {
         )
     }
 
-    fn inspect_non_adapter_rust(path: &Path, violations: &mut Vec<String>) {
-        for entry in std::fs::read_dir(path).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_dir() {
-                if path.file_name().and_then(|name| name.to_str()) != Some("ruff_adapter") {
-                    inspect_non_adapter_rust(&path, violations);
-                }
-            } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
-                && path.file_name().and_then(|name| name.to_str()) != Some("ruff_adapter.rs")
-            {
-                let source = std::fs::read_to_string(&path).unwrap();
-                if source.contains("ruff_python_semantic") {
-                    violations.push(path.display().to_string());
-                }
-            }
-        }
-    }
-
     #[test]
     #[allow(clippy::too_many_lines)] // One fixture asserts the scope, binding, reference, and edge contract together.
     fn py_scope_binding_fixture_conformance() {
@@ -2361,20 +2342,6 @@ __all__ = ["alias"] + ("osp",)
             dynamic.unknown_reason_code.as_deref(),
             Some("DYNAMIC_IMPORT_TARGET")
         );
-        let implementation = include_str!("imports.rs");
-        for prohibited in [
-            "std::process",
-            "tokio::process",
-            "Command::new",
-            "pyo3",
-            "PyImport",
-        ] {
-            assert!(
-                !implementation.contains(prohibited),
-                "runtime import machinery escaped into the adapter: {prohibited}"
-            );
-        }
-
         #[cfg(feature = "daemon")]
         {
             use arrow_array::{Array as _, Int16Array};
@@ -2418,8 +2385,7 @@ __all__ = ["alias"] + ("osp",)
         {
             use arrow_array::{Array as _, Int32Array};
 
-            use crate::fabric::batch_checksum;
-            use crate::fact_ingest::FactScope;
+            use crate::fact_ingest::{FactScope, canonical_batch_checksum as batch_checksum};
             use crate::python_semantic::project_ruff_semantic_batch;
 
             let owner = FactScope {
@@ -2759,8 +2725,7 @@ result = target(1, 3, *[4, *[5]], c=6, **{"extra": 0, "extra": 7})
     fn py_callable_contract_replacement_gate() {
         #[cfg(feature = "daemon")]
         {
-            use crate::fabric::batch_checksum;
-            use crate::fact_ingest::FactScope;
+            use crate::fact_ingest::{FactScope, canonical_batch_checksum as batch_checksum};
             use crate::python_semantic::project_ruff_semantic_batch;
 
             let owner = FactScope {
@@ -2822,22 +2787,11 @@ result = target(1, 3, *[4, *[5]], c=6, **{"extra": 0, "extra": 7})
         assert!(error.to_string().contains("terminal_state=failed"));
         assert!(error.to_string().contains("failure_code=cleanup-failure"));
 
-        let mut violations = Vec::new();
-        inspect_non_adapter_rust(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("src").as_path(),
-            &mut violations,
-        );
-        assert!(
-            violations.is_empty(),
-            "Ruff semantic types escaped: {violations:?}"
-        );
-
         #[cfg(feature = "daemon")]
         {
             use std::io::Cursor;
 
-            use crate::fabric::batch_checksum;
-            use crate::fact_ingest::FactScope;
+            use crate::fact_ingest::{FactScope, canonical_batch_checksum as batch_checksum};
             use crate::python_semantic::project_ruff_semantic_batch;
             use arrow::ipc::reader::StreamReader;
             use arrow::ipc::writer::StreamWriter;

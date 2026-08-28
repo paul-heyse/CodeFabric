@@ -834,7 +834,7 @@ async fn run_query_vertical(
             &mut source_images,
             Arc::clone(&candidate),
             SnapshotLeaseKind::Query,
-            Some(b"gate-b-query-agent"),
+            Some(&[0x7d; 16]),
             10_001,
             Duration::from_secs(600),
             None,

@@ -733,6 +733,66 @@ pub struct PhraseRecord {
     pub lifecycle: VersionLifecycle,
 }
 
+/// Closed operators admitted by phrase-driven relational predicate compilation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhrasePredicateOperator {
+    Equals,
+    InSet,
+}
+
+/// Null/unknown behavior is part of the compiled predicate contract, never an implicit
+/// DataFusion default selected at a call site.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhraseNullPolicy {
+    UnknownIsFalse,
+    RejectUnknown,
+}
+
+/// Logical compiler paths that must consume the same phrase operation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhraseOperationIngress {
+    Relational,
+    Graph,
+}
+
+/// One strongly typed phrase-to-predicate binding owned by the phrase registry.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhraseOperationBinding {
+    pub phrase_id: String,
+    pub canonical_text: String,
+    pub column_role: String,
+    pub operator: PhrasePredicateOperator,
+    pub operand_domain: String,
+    pub operand_names: Vec<String>,
+    pub null_policy: PhraseNullPolicy,
+    pub output_role: String,
+    pub ingresses: BTreeSet<PhraseOperationIngress>,
+    pub diagnostic_code: String,
+}
+
+/// Phrase authority envelope extended with compiled semantic operations.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhraseRegistry {
+    pub artifact_id: String,
+    pub artifact_kind: ArtifactKind,
+    pub version: String,
+    pub compatible_suite_major: u16,
+    pub status: ArtifactStatus,
+    pub canonical_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest_projection: Option<DigestProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generator_revision: Option<String>,
+    pub records: Vec<PhraseRecord>,
+    pub semantic_operation_bindings: Vec<PhraseOperationBinding>,
+    pub owner_acceptance: OwnerAcceptance,
+}
+
 pub trait RegistryRecord {
     fn code(&self) -> Option<u16>;
     fn name(&self) -> &str;
@@ -1732,6 +1792,9 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
             "SOURCE_SNAPSHOT_MISMATCH",
             "PROVIDER_PROTOCOL_ERROR",
             "SANDBOX_UNAVAILABLE",
+            "RUFF_SEMANTIC_UNAVAILABLE_PARSE",
+            "RUFF_SEMANTIC_CLEANUP_FAILED",
+            "SEMANTIC_LANE_FAILED",
             "QUERY_HARD_LIMIT_EXCEEDED",
             "ENTITY_AMBIGUOUS",
             "SEMANTIC_PHRASE_AMBIGUOUS",
@@ -1983,6 +2046,46 @@ pub fn validate_phrase_records(records: &[PhraseRecord]) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_phrase_operation_bindings(
+    bindings: &[PhraseOperationBinding],
+) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    let mut texts = BTreeSet::new();
+    let required_ingresses = BTreeSet::from([
+        PhraseOperationIngress::Relational,
+        PhraseOperationIngress::Graph,
+    ]);
+    for binding in bindings {
+        if !upper_snake(&binding.phrase_id)
+            || !ids.insert(binding.phrase_id.as_str())
+            || binding.canonical_text.trim().is_empty()
+            || !texts.insert(binding.canonical_text.as_str())
+            || binding.column_role.trim().is_empty()
+            || !upper_snake(&binding.operand_domain)
+            || binding.operand_names.is_empty()
+            || binding.operand_names.iter().any(|name| !upper_snake(name))
+            || binding.output_role != "predicate"
+            || binding.ingresses != required_ingresses
+            || !upper_snake(&binding.diagnostic_code)
+        {
+            return Err(format!(
+                "phrase operation {} is incomplete or not closed over both compiler paths",
+                binding.phrase_id
+            ));
+        }
+        if binding.operator == PhrasePredicateOperator::Equals && binding.operand_names.len() != 1 {
+            return Err(format!(
+                "phrase operation {} uses equals with a non-scalar operand",
+                binding.phrase_id
+            ));
+        }
+    }
+    if bindings.is_empty() {
+        return Err("phrase registry must define compiled semantic operations".into());
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)] // One pass keeps every cross-machine registry invariant adjacent.
 pub fn validate_state_machines(records: &[StateMachine]) -> Result<(), String> {
     const REQUIRED: [&str; 13] = [
@@ -2143,10 +2246,9 @@ pub fn replay_bounded_registry_ingress(selector: u8, source: &[u8]) {
             }
         }
         _ => {
-            if let Ok(document) =
-                serde_yaml_ng::from_slice::<AcceptedRegistry<PhraseRecord>>(source)
-            {
+            if let Ok(document) = serde_yaml_ng::from_slice::<PhraseRegistry>(source) {
                 let _ = validate_phrase_records(&document.records);
+                let _ = validate_phrase_operation_bindings(&document.semantic_operation_bindings);
             }
         }
     }
@@ -2174,7 +2276,7 @@ where
 mod tests {
     use super::*;
 
-    fn phrases() -> AcceptedRegistry<PhraseRecord> {
+    fn phrases() -> PhraseRegistry {
         serde_yaml_ng::from_str(include_str!(
             "../../contracts/registry/phrase-registry.yaml"
         ))
@@ -2185,6 +2287,7 @@ mod tests {
     fn wp08b_structural_acceptance() {
         let phrases = phrases();
         validate_phrase_records(&phrases.records).unwrap();
+        validate_phrase_operation_bindings(&phrases.semantic_operation_bindings).unwrap();
         assert_eq!(phrases.records.len(), 45);
         assert_eq!(
             phrases
@@ -2375,6 +2478,11 @@ mod tests {
             crate::fabric::OverlayRebaseFaultPoint::ALL
                 .into_iter()
                 .map(crate::fabric::OverlayRebaseFaultPoint::code),
+        );
+        executable.extend(
+            crate::ontology_activation::OntologyActivationFaultPoint::ALL
+                .into_iter()
+                .map(crate::ontology_activation::OntologyActivationFaultPoint::code),
         );
         executable.extend(
             crate::query_service::QueryArtifactFaultPoint::ALL

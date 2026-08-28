@@ -1186,7 +1186,7 @@ Implement the deterministic semantic compiler foundation against stable facts an
 
 7. **Core DataFusion lowering**
    - entity lookup, fact retrieval, direct relationship following, source-context retrieval, and bounded point queries;
-   - use stable serving views/table functions rather than storage-aware public syntax.
+   - use stable serving views and typed semantic entry points rather than storage-aware public syntax.
 
 8. **Cost estimation foundation**
    - row, traversal, path, pattern, source-byte, and intermediate-state estimates;

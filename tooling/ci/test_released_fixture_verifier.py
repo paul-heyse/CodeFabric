@@ -10,6 +10,11 @@ from tooling.ci import artifact_contracts
 from tooling.ci import plan_assurance as assurance
 from tooling.ci import released_fixture_verifier as verifier
 
+WP70_PLAN = (
+    verifier.ROOT
+    / "docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v3_2026-08-25.md"
+)
+
 
 def _dependency_names(recipe: dict[str, object]) -> set[str]:
     dependencies = recipe.get("dependencies")
@@ -25,7 +30,7 @@ def test_released_assurance_contracts_execute() -> None:
     report = verifier.verify_released_assurance()
     assert report["fixtures"]["negative_fixture_count"] == 5
     assert report["security"]["case_count"] == 5
-    assert report["faults"]["fault_point_count"] == 14
+    assert report["faults"]["fault_point_count"] == 35
     assert report["comparison"]["semantic_difference_detected"] is True
 
 
@@ -49,14 +54,17 @@ def test_wp70_behavioral_acceptance() -> None:
 
 
 def test_wp70_structural_acceptance() -> None:
-    plan_path = artifact_contracts.active_plan_path()
-    mappings = dict(assurance._oracle_contracts(plan_path)["WP70"])
-    assert mappings == {
+    block = artifact_contracts._packet_blocks(WP70_PLAN)["WP70"]
+    mappings = {
         "wp70_behavioral_acceptance": "PC-WP70-BEH",
         "wp70_structural_acceptance": "PC-WP70-STR",
         "wp70_negative_zero_state": "PC-WP70-NEG",
         "wp70_operational_acceptance": "PC-WP70-OPS",
     }
+    assert block.count("Executable oracle:") == len(mappings)
+    for oracle, criterion in mappings.items():
+        assert f"Executable oracle: `{oracle}`" in block
+        assert f"Governed criterion: `{criterion}`" in block
     rule_stems = {path.stem for path in (verifier.ROOT / "rules").glob("*.yml")}
     test_stems = {
         path.stem.removesuffix("-test")

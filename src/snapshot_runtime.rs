@@ -1,6 +1,6 @@
 //! Durable serving-snapshot activation, leases, retention, and restart recovery.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,6 +12,10 @@ use crate::error::ErrorEnvelope;
 use crate::fabric::SnapshotProviderCatalog;
 use crate::identity::{
     IdentityDomain, decode_public_id, encode_public_id, random_registration_nonce,
+};
+use crate::ontology_activation::{
+    OntologyActivationFaultPoint, OntologyActivationState, OntologyCandidateDossier,
+    OntologyOwnerAcceptance,
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::registries::{
@@ -52,6 +56,8 @@ pub enum SnapshotRuntimeError {
     Lease(String),
     #[error("INTERNAL_INVARIANT_VIOLATION:SNAPSHOT_ACTIVATION_FAULT:{0:?}")]
     InjectedFault(SnapshotActivationFaultPoint),
+    #[error("INTERNAL_INVARIANT_VIOLATION:ONTOLOGY_ACTIVATION_FAULT:{0:?}")]
+    OntologyFault(OntologyActivationFaultPoint),
 }
 
 /// Deterministic activation crash seams.
@@ -75,6 +81,35 @@ pub enum SnapshotActivationStage {
 
 /// Phase-carrying activation failure with every stage attempted before the failure.
 pub type SnapshotActivationError = ErrorEnvelope<SnapshotRuntimeError, SnapshotActivationStage>;
+
+/// Exact governed inputs for the one Stage-2b snapshot activation transaction.
+pub struct Stage2bActivationRequest<'a> {
+    pub dossier: &'a OntologyCandidateDossier,
+    pub acceptance: OntologyOwnerAcceptance,
+    pub discovered_relations: &'a BTreeSet<i16>,
+    pub expected_predecessor: Option<[u8; 16]>,
+    pub expected_active_pointer_generation: u64,
+    pub observed_durable_pointer_generation: u64,
+    pub now: u64,
+    pub ontology_fault: Option<OntologyActivationFaultPoint>,
+    pub snapshot_fault: Option<SnapshotActivationFaultPoint>,
+}
+
+/// Result of the governed Stage-2b transaction; an identical retry is a no-op.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Stage2bActivationOutcome {
+    pub activated: bool,
+    pub stages: Vec<SnapshotActivationStage>,
+}
+
+struct OntologySqlAcceptance {
+    acceptance: OntologyOwnerAcceptance,
+    acceptance_digest: [u8; 32],
+    dossier_digest: [u8; 32],
+    fault: Option<OntologyActivationFaultPoint>,
+}
+
+const ONTOLOGY_STAGE2B_ACCEPTANCE_EVENT_CODE: i64 = 900;
 
 fn snapshot_runtime_public_code(error: &SnapshotRuntimeError) -> &'static str {
     match error {
@@ -281,6 +316,7 @@ impl ServingSnapshotRuntime {
             observed_durable_pointer_generation,
             now,
             fault,
+            None,
             &mut trace,
         )
         .map_err(|source| {
@@ -290,6 +326,133 @@ impl ServingSnapshotRuntime {
                 trace,
                 source,
             )
+        })
+    }
+
+    /// Validate, accept, and activate the complete Stage-2b ontology candidate with the existing
+    /// serving-snapshot CAS. The owner acceptance audit row and active pointer are committed by one
+    /// `SQLite` transaction; every ontology fault through `AfterPointerAdvance` rolls both back.
+    ///
+    /// # Errors
+    ///
+    /// Returns a phase-carrying activation error when ontology validation, manifest-version
+    /// closure, acceptance decoding, or the atomic serving-pointer transaction fails.
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::needless_pass_by_value)] // The request is the transaction input envelope.
+    pub fn activate_stage2b(
+        &self,
+        store: &mut OperationalStore,
+        candidate: Arc<ServingSnapshotCandidate>,
+        ontology_state: &mut OntologyActivationState,
+        request: Stage2bActivationRequest<'_>,
+    ) -> Result<Stage2bActivationOutcome, SnapshotActivationError> {
+        let mut next_ontology_state = ontology_state.clone();
+        let changed = next_ontology_state
+            .activate(
+                request.dossier,
+                request.acceptance.clone(),
+                request.discovered_relations,
+                None,
+            )
+            .map_err(|error| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotActivation,
+                    "INTERNAL_INVARIANT_VIOLATION",
+                    vec![SnapshotActivationStage::CandidateValidated],
+                    SnapshotRuntimeError::Candidate(error.to_string()),
+                )
+            })?;
+        if !changed {
+            return Ok(Stage2bActivationOutcome {
+                activated: false,
+                stages: vec![SnapshotActivationStage::CandidateValidated],
+            });
+        }
+        let manifest_versions = candidate
+            .manifest
+            .body
+            .base_publication
+            .tables
+            .iter()
+            .filter_map(|table| {
+                let code = i16::try_from(table.table_code).ok()?;
+                request
+                    .dossier
+                    .table_versions
+                    .contains_key(&code)
+                    .then_some((code, table.delta_version))
+            })
+            .collect::<BTreeMap<_, _>>();
+        if manifest_versions != request.dossier.table_versions {
+            return Err(ErrorEnvelope::new(
+                Phase::SnapshotActivation,
+                "INTERNAL_INVARIANT_VIOLATION",
+                vec![SnapshotActivationStage::CandidateValidated],
+                SnapshotRuntimeError::Candidate(
+                    "snapshot manifest does not pin the accepted ontology dossier".into(),
+                ),
+            ));
+        }
+        let acceptance = next_ontology_state.acceptance.clone().ok_or_else(|| {
+            ErrorEnvelope::new(
+                Phase::SnapshotActivation,
+                "INTERNAL_INVARIANT_VIOLATION",
+                vec![SnapshotActivationStage::CandidateValidated],
+                SnapshotRuntimeError::Candidate(
+                    "changed ontology state omitted owner acceptance".into(),
+                ),
+            )
+        })?;
+        let sql_acceptance = OntologySqlAcceptance {
+            acceptance_digest: parse_framed_digest(&acceptance.acceptance_digest).map_err(
+                |source| {
+                    ErrorEnvelope::new(
+                        Phase::SnapshotActivation,
+                        snapshot_runtime_public_code(&source),
+                        vec![SnapshotActivationStage::CandidateValidated],
+                        source,
+                    )
+                },
+            )?,
+            acceptance,
+            dossier_digest: parse_framed_digest(&request.dossier.dossier_digest).map_err(
+                |source| {
+                    ErrorEnvelope::new(
+                        Phase::SnapshotActivation,
+                        snapshot_runtime_public_code(&source),
+                        vec![SnapshotActivationStage::CandidateValidated],
+                        source,
+                    )
+                },
+            )?,
+            fault: request.ontology_fault,
+        };
+        let mut trace = vec![SnapshotActivationStage::CandidateValidated];
+        let stages = self
+            .activate_unphased(
+                store,
+                candidate,
+                request.expected_predecessor,
+                request.expected_active_pointer_generation,
+                request.observed_durable_pointer_generation,
+                request.now,
+                request.snapshot_fault,
+                Some(&sql_acceptance),
+                &mut trace,
+            )
+            .map_err(|source| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotActivation,
+                    snapshot_runtime_public_code(&source),
+                    trace,
+                    source,
+                )
+            })?;
+        *ontology_state = next_ontology_state;
+        Ok(Stage2bActivationOutcome {
+            activated: true,
+            stages,
         })
     }
 
@@ -304,8 +467,16 @@ impl ServingSnapshotRuntime {
         observed_durable_pointer_generation: u64,
         now: u64,
         fault: Option<SnapshotActivationFaultPoint>,
+        ontology: Option<&OntologySqlAcceptance>,
         trace: &mut Vec<SnapshotActivationStage>,
     ) -> Result<Vec<SnapshotActivationStage>, SnapshotRuntimeError> {
+        if ontology.is_some_and(|value| {
+            value.fault == Some(OntologyActivationFaultPoint::BeforeCandidateValidation)
+        }) {
+            return Err(SnapshotRuntimeError::OntologyFault(
+                OntologyActivationFaultPoint::BeforeCandidateValidation,
+            ));
+        }
         candidate.manifest.validate()?;
         let snapshot_id = candidate.manifest.raw_snapshot_id()?;
         let workspace_id = candidate.manifest.raw_workspace_id()?;
@@ -320,6 +491,13 @@ impl ServingSnapshotRuntime {
         })?;
         let observed_generation = sql_u64(observed_durable_pointer_generation)?;
         let now_sql = sql_u64(now)?;
+        if ontology.is_some_and(|value| {
+            value.fault == Some(OntologyActivationFaultPoint::AfterCandidateValidation)
+        }) {
+            return Err(SnapshotRuntimeError::OntologyFault(
+                OntologyActivationFaultPoint::AfterCandidateValidation,
+            ));
+        }
         store.write_transaction(|transaction| {
             trace.push(SnapshotActivationStage::ReadyInserted);
             transaction.execute(
@@ -357,6 +535,31 @@ impl ServingSnapshotRuntime {
                     ));
                 }
             }
+            if let Some(ontology) = ontology {
+                if ontology.fault == Some(OntologyActivationFaultPoint::BeforeAcceptanceRecord) {
+                    return Err(SnapshotRuntimeError::OntologyFault(
+                        OntologyActivationFaultPoint::BeforeAcceptanceRecord,
+                    ));
+                }
+                transaction.execute(
+                    "INSERT INTO audit_event(event_id, workspace_id, event_code, actor_id,
+                     occurred_at, details_digest, diagnostic_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+                    params![
+                        &ontology.acceptance_digest[..16],
+                        workspace_id.as_slice(),
+                        ONTOLOGY_STAGE2B_ACCEPTANCE_EVENT_CODE,
+                        ontology.acceptance.owner_identity,
+                        ontology.acceptance.accepted_at_micros.to_string(),
+                        ontology.dossier_digest.as_slice(),
+                    ],
+                )?;
+                if ontology.fault == Some(OntologyActivationFaultPoint::AfterAcceptanceRecord) {
+                    return Err(SnapshotRuntimeError::OntologyFault(
+                        OntologyActivationFaultPoint::AfterAcceptanceRecord,
+                    ));
+                }
+            }
             trace.push(SnapshotActivationStage::PriorRetired);
             if let Some(predecessor) = expected_predecessor {
                 let retired = transaction.execute(
@@ -391,6 +594,13 @@ impl ServingSnapshotRuntime {
                     "candidate did not transition READY to ACTIVE".into(),
                 ));
             }
+            if ontology.is_some_and(|value| {
+                value.fault == Some(OntologyActivationFaultPoint::BeforePointerAdvance)
+            }) {
+                return Err(SnapshotRuntimeError::OntologyFault(
+                    OntologyActivationFaultPoint::BeforePointerAdvance,
+                ));
+            }
             transaction.execute(
                 "INSERT INTO active_snapshot(workspace_id, snapshot_id, created_at,
                  activated_at, observed_durable_pointer_generation,
@@ -409,6 +619,13 @@ impl ServingSnapshotRuntime {
                     next_generation,
                 ],
             )?;
+            if ontology.is_some_and(|value| {
+                value.fault == Some(OntologyActivationFaultPoint::AfterPointerAdvance)
+            }) {
+                return Err(SnapshotRuntimeError::OntologyFault(
+                    OntologyActivationFaultPoint::AfterPointerAdvance,
+                ));
+            }
             transaction.execute(
                 "UPDATE worktree_state SET active_snapshot_id=?2, updated_at=?3
                  WHERE workspace_id=?1",
@@ -569,7 +786,7 @@ impl SnapshotLeaseManager {
         source_images: &mut SourceImageStore,
         candidate: Arc<ServingSnapshotCandidate>,
         kind: SnapshotLeaseKind,
-        agent_instance_id: Option<&[u8]>,
+        agent_instance_id: Option<&[u8; 16]>,
         now: u64,
         ttl: Duration,
         artifact_expires_at: Option<u64>,
@@ -628,7 +845,7 @@ impl SnapshotLeaseManager {
                     publication_id.as_slice(),
                     version_bytes,
                     i64::from(candidate.manifest.body.overlay.overlay_generation != 0),
-                    agent_instance_id,
+                    agent_instance_id.map(<[u8; 16]>::as_slice),
                     sql_u64(now)?,
                     sql_u64(expires_at)?,
                     i64::from(SnapshotLeaseState::Active as u16),
@@ -1116,6 +1333,19 @@ fn framed_digest(digest: [u8; 32]) -> String {
     encoded
 }
 
+fn parse_framed_digest(value: &str) -> Result<[u8; 32], SnapshotRuntimeError> {
+    let payload = value
+        .strip_prefix("b3:")
+        .filter(|payload| payload.len() == 64)
+        .ok_or_else(|| SnapshotRuntimeError::Candidate("malformed ontology digest".into()))?;
+    let mut digest = [0_u8; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&payload[index * 2..index * 2 + 2], 16)
+            .map_err(|_| SnapshotRuntimeError::Candidate("malformed ontology digest".into()))?;
+    }
+    Ok(digest)
+}
+
 fn sql_u64(value: u64) -> Result<i64, SnapshotRuntimeError> {
     i64::try_from(value).map_err(|_| SnapshotRuntimeError::Lease("value exceeds i64".into()))
 }
@@ -1262,6 +1492,154 @@ mod tests {
             vec![CONTEXT],
         ));
         Arc::new(ServingSnapshotCandidate::build(body(1), catalog, &[]).unwrap())
+    }
+
+    fn stage2b_candidate() -> Arc<ServingSnapshotCandidate> {
+        let batches = crate::ontology_plane::ontology_dimension_batches()
+            .expect("compiled ontology candidate")
+            .into_iter()
+            .collect();
+        let catalog = Arc::new(SnapshotProviderCatalog::from_batches_for_snapshot_tests(
+            PUBLICATION,
+            WORKSPACE,
+            batches,
+            OVERLAY,
+            1,
+            vec![CONTEXT],
+        ));
+        Arc::new(ServingSnapshotCandidate::build(body(1), catalog, &[]).unwrap())
+    }
+
+    fn stage2b_dossier() -> OntologyCandidateDossier {
+        let proving_artifact_digests =
+            crate::ontology_activation::REQUIRED_STAGE2B_PROVING_ARTIFACT_IDS
+                .into_iter()
+                .enumerate()
+                .map(|(index, id)| {
+                    (
+                        id.to_owned(),
+                        digest(u8::try_from(0x80 + index).expect("proof index")),
+                    )
+                })
+                .collect();
+        OntologyCandidateDossier {
+            ontology_input_digest: crate::ontology_plane::ontology_input_digest(),
+            table_versions: (11_i16..=30).map(|code| (code, 1_u64)).collect(),
+            proving_artifact_digests,
+            dossier_digest: digest(0xa1),
+        }
+    }
+
+    fn stage2b_request<'a>(
+        dossier: &'a OntologyCandidateDossier,
+        discovered_relations: &'a BTreeSet<i16>,
+        fault: Option<OntologyActivationFaultPoint>,
+    ) -> Stage2bActivationRequest<'a> {
+        Stage2bActivationRequest {
+            dossier,
+            acceptance: OntologyOwnerAcceptance {
+                owner_identity: "ontology-owner".into(),
+                accepted_at_micros: 1_000,
+                dossier_digest: dossier.dossier_digest.clone(),
+                acceptance_digest: String::new(),
+            },
+            discovered_relations,
+            expected_predecessor: None,
+            expected_active_pointer_generation: 0,
+            observed_durable_pointer_generation: 7,
+            now: 1_000,
+            ontology_fault: fault,
+            snapshot_fault: None,
+        }
+    }
+
+    fn stage2b_sql_counts(store: &OperationalStore) -> (i64, i64, i64) {
+        store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                Ok((
+                    connection.query_row(
+                        "SELECT COUNT(*) FROM audit_event WHERE event_code=?1",
+                        [ONTOLOGY_STAGE2B_ACCEPTANCE_EVENT_CODE],
+                        |row| row.get(0),
+                    )?,
+                    connection
+                        .query_row("SELECT COUNT(*) FROM active_snapshot", [], |row| row.get(0))?,
+                    connection.query_row(
+                        "SELECT COUNT(*) FROM serving_snapshot_manifest",
+                        [],
+                        |row| row.get(0),
+                    )?,
+                ))
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn odf_stage2b_atomic_activation_fault_injection() {
+        let dossier = stage2b_dossier();
+        let discovered = dossier
+            .table_versions
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        for fault in OntologyActivationFaultPoint::ALL {
+            let (_directory, mut store) = store();
+            let runtime = ServingSnapshotRuntime::default();
+            let mut ontology_state = OntologyActivationState::default();
+            let result = runtime.activate_stage2b(
+                &mut store,
+                stage2b_candidate(),
+                &mut ontology_state,
+                stage2b_request(&dossier, &discovered, Some(fault)),
+            );
+            assert!(result.is_err(), "fault {fault:?} must abort activation");
+            assert!(runtime.active().is_none());
+            assert_eq!(ontology_state, OntologyActivationState::default());
+            assert_eq!(stage2b_sql_counts(&store), (0, 0, 0));
+        }
+    }
+
+    #[test]
+    fn odf_dimension_version_stability_across_fact_publications() {
+        let (_directory, mut store) = store();
+        let runtime = ServingSnapshotRuntime::default();
+        let candidate = stage2b_candidate();
+        let dossier = stage2b_dossier();
+        let discovered = dossier
+            .table_versions
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let mut ontology_state = OntologyActivationState::default();
+        let outcome = runtime
+            .activate_stage2b(
+                &mut store,
+                Arc::clone(&candidate),
+                &mut ontology_state,
+                stage2b_request(&dossier, &discovered, None),
+            )
+            .expect("Stage-2b activation");
+        assert!(outcome.activated);
+        assert_eq!(ontology_state.pointer_generation, 1);
+        assert_eq!(ontology_state.active_table_versions, dossier.table_versions);
+        assert_eq!(stage2b_sql_counts(&store), (1, 1, 1));
+
+        for _ in 0..2 {
+            let retry = runtime
+                .activate_stage2b(
+                    &mut store,
+                    Arc::clone(&candidate),
+                    &mut ontology_state,
+                    stage2b_request(&dossier, &discovered, None),
+                )
+                .expect("unchanged ontology publication");
+            assert!(!retry.activated);
+            assert_eq!(ontology_state.active_table_versions, dossier.table_versions);
+        }
+        assert_eq!(stage2b_sql_counts(&store), (1, 1, 1));
     }
 
     fn reject_table_mutation(
@@ -1552,7 +1930,7 @@ mod tests {
                 &mut sources,
                 Arc::clone(&first),
                 SnapshotLeaseKind::Query,
-                Some(b"agent-1"),
+                Some(&[0xa1; 16]),
                 101,
                 SNAPSHOT_LEASE_TTL,
                 None,

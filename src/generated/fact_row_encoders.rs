@@ -1,4 +1,517 @@
-// @generated from codefabric.schema.contract-ir b3:3fcec223a46e71a76c8736405dc911ced2a9a989a5743c9f835844c76821b196; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:c031d6a10f0ce26c45bec2310ce4b079a4465ffc5fe31897c2c330278fe40b0d; schema-contract-driver-v1; do not edit.
+
+/// Generated encoder input for the canonical `owner` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct OwnerRow {
+    pub scope: FactScope,
+    pub parent_owner_id: Option<[u8; 16]>,
+    pub owner_kind_code: i16,
+    pub language: i16,
+    pub file_id: Option<[u8; 16]>,
+    pub semantic_entity_id: Option<[u8; 16]>,
+    pub start_byte: Option<i64>,
+    pub end_byte: Option<i64>,
+    pub source_fingerprint: Option<[u8; 32]>,
+    pub semantic_fingerprint: Option<[u8; 32]>,
+    pub capability_mask: i64,
+}
+
+/// Generated encoder input for the canonical `capability_status` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CapabilityStatusRow {
+    pub scope: FactScope,
+    pub snapshot_id: Option<[u8; 16]>,
+    pub capability_code: i16,
+    pub owner_capability_state_code: i16,
+    pub completeness_state_code: i16,
+    pub provider_run_id: Option<[u8; 16]>,
+    pub producer_code: Option<i16>,
+    pub reason_code: Option<i16>,
+    pub diagnostic_id: Option<[u8; 16]>,
+    pub fallback_source_available: bool,
+    pub coverage_scope_fingerprint: [u8; 32],
+}
+
+/// Generated encoder input for the canonical `diagnostic` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct DiagnosticRow {
+    pub diagnostic_id: [u8; 16],
+    pub workspace_id: [u8; 16],
+    pub analysis_context_id: Option<[u8; 16]>,
+    pub source_generation: i64,
+    pub owner_id: Option<[u8; 16]>,
+    pub diagnostic_code: i32,
+    pub severity_code: i16,
+    pub message: String,
+    pub cold_payload: Option<Vec<u8>>,
+    pub created_at_micros: i64,
+}
+
+/// Generated encoder input for the canonical `entity` relation.
+#[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct EntityRow {
+    pub scope: FactScope,
+    pub entity_id: [u8; 16],
+    pub language: i16,
+    pub entity_family_code: i16,
+    pub entity_kind_code: i32,
+    pub raw_kind_code: Option<i32>,
+    pub file_id: Option<[u8; 16]>,
+    pub start_byte: Option<i64>,
+    pub end_byte: Option<i64>,
+    pub name: Option<String>,
+    pub qualified_name: Option<String>,
+    pub parent_entity_id: Option<[u8; 16]>,
+    pub type_id: Option<[u8; 16]>,
+    pub flags: i64,
+    pub fact_hash64: i64,
+}
+
+/// Generated encoder input for the canonical `relation` relation.
+#[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct RelationRow {
+    pub scope: FactScope,
+    pub fact_id: [u8; 16],
+    pub language: i16,
+    pub relation_family_code: i16,
+    pub relation_kind_code: i32,
+    pub source_id: [u8; 16],
+    pub target_id: [u8; 16],
+    pub ordinal: Option<i32>,
+    pub role_code: Option<i16>,
+    pub distance: Option<i32>,
+    pub directness_code: i16,
+    pub file_id: Option<[u8; 16]>,
+    pub start_byte: Option<i64>,
+    pub end_byte: Option<i64>,
+    pub certainty_code: i16,
+    pub resolution_code: i16,
+    pub producer_code: i16,
+    pub derivation_code: Option<i16>,
+    pub flags: i64,
+    pub fact_hash64: i64,
+}
+
+/// Generated encoder input for the canonical `property_fact` relation.
+#[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct PropertyFactRow {
+    pub scope: FactScope,
+    pub fact_id: [u8; 16],
+    pub subject_entity_id: [u8; 16],
+    pub property_kind_code: i32,
+    pub program_point_entity_id: Option<[u8; 16]>,
+    pub value: PropertyValue,
+    pub directness_code: i16,
+    pub certainty_code: i16,
+    pub resolution_code: i16,
+    pub producer_code: i16,
+    pub derivation_code: Option<i16>,
+    pub file_id: Option<[u8; 16]>,
+    pub start_byte: Option<i64>,
+    pub end_byte: Option<i64>,
+    pub fact_hash64: i64,
+}
+
+/// Generated encoder input for the canonical `fact_evidence` relation.
+#[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct FactEvidenceRow {
+    pub scope: FactScope,
+    pub evidence_id: [u8; 16],
+    pub fact_id: [u8; 16],
+    pub fact_form_code: i16,
+    pub provider_code: i16,
+    pub provider_version: String,
+    pub provider_run_id: [u8; 16],
+    pub observation_id: [u8; 16],
+    pub raw_kind_code: Option<i32>,
+    pub file_id: Option<[u8; 16]>,
+    pub start_byte: Option<i64>,
+    pub end_byte: Option<i64>,
+    pub certainty_code: i16,
+    pub resolution_code: i16,
+    pub conflict_disposition_code: i16,
+    pub cold_payload: Option<Vec<u8>>,
+}
+
+/// Generated encoder input for the canonical `source_file` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct SourceFileRow {
+    pub scope: FactScope,
+    pub file_id: [u8; 16],
+    pub path_bytes: Vec<u8>,
+    pub path_display: String,
+    pub path_encoding_code: i16,
+    pub path_case_key: Option<Vec<u8>>,
+    pub path_display_is_lossy: bool,
+    pub language: i16,
+    pub source_digest: [u8; 32],
+    pub byte_len: i64,
+    pub line_count: i32,
+    pub encoding_name: Option<String>,
+    pub newline_kind_code: i16,
+    pub source_bytes: Vec<u8>,
+    pub decoded_text: Option<String>,
+    pub line_start_offsets: Vec<i64>,
+    pub module_entity_id: Option<[u8; 16]>,
+    pub is_stub: bool,
+    pub flags: i64,
+}
+
+/// Generated encoder input for the canonical `source_token` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct SourceTokenRow {
+    pub scope: FactScope,
+    pub token_id: [u8; 16],
+    pub file_id: [u8; 16],
+    pub ordinal: i32,
+    pub token_kind_code: i32,
+    pub start_byte: i64,
+    pub end_byte: i64,
+    pub normalized_value: Option<String>,
+    pub flags: i64,
+}
+
+/// Generated encoder input for the canonical `source_annotation` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct SourceAnnotationRow {
+    pub scope: FactScope,
+    pub annotation_id: [u8; 16],
+    pub file_id: [u8; 16],
+    pub annotation_kind_code: i32,
+    pub start_byte: i64,
+    pub end_byte: i64,
+    pub target_entity_id: Option<[u8; 16]>,
+    pub text: Option<String>,
+    pub diagnostic_code: Option<i32>,
+    pub flags: i64,
+}
+
+/// Generated encoder input for the canonical `syntax_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct SyntaxDetailRow {
+    pub scope: FactScope,
+    pub entity_id: [u8; 16],
+    pub raw_kind_code: i32,
+    pub occurrence_family_code: i16,
+    pub reconciliation_step_code: i16,
+    pub raw_kind_disposition_code: i16,
+    pub normalized_kind_code: i32,
+    pub parent_syntax_id: Option<[u8; 16]>,
+    pub field_role_code: Option<i16>,
+    pub ordinal: Option<i32>,
+    pub source_ordinal: Option<i32>,
+    pub evaluation_ordinal: Option<i32>,
+    pub line: Option<i32>,
+    pub column: Option<i32>,
+    pub depth: Option<i32>,
+    pub provider_name: Option<String>,
+    pub named: bool,
+    pub extra: bool,
+    pub error: bool,
+    pub missing: bool,
+    pub explicitly_parenthesized: bool,
+    pub provider_node_flags: i64,
+}
+
+/// Generated encoder input for the canonical `type_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct TypeDetailRow {
+    pub scope: FactScope,
+    pub type_id: [u8; 16],
+    pub type_kind_code: i32,
+    pub canonical_key: String,
+    pub display_name: Option<String>,
+    pub primitive_code: Option<i16>,
+    pub nominal_entity_id: Option<[u8; 16]>,
+    pub callable_entity_id: Option<[u8; 16]>,
+    pub raw_shape_hash: Option<[u8; 32]>,
+    pub nullable_semantics_code: Option<i16>,
+    pub flags: i64,
+}
+
+/// Generated encoder input for the canonical `type_fact_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct TypeFactDetailRow {
+    pub scope: FactScope,
+    pub relation_id: [u8; 16],
+    pub subject_id: [u8; 16],
+    pub type_id: [u8; 16],
+    pub type_role_code: i16,
+    pub program_point_id: Option<[u8; 16]>,
+    pub origin_code: i16,
+    pub certainty_code: i16,
+}
+
+/// Generated encoder input for the canonical `scope_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ScopeDetailRow {
+    pub scope: FactScope,
+    pub scope_id: [u8; 16],
+    pub parent_scope_id: Option<[u8; 16]>,
+    pub scope_kind: String,
+    pub name: Option<String>,
+    pub start_byte: i64,
+    pub end_byte: i64,
+}
+
+/// Generated encoder input for the canonical `binding_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct BindingDetailRow {
+    pub scope: FactScope,
+    pub binding_id: [u8; 16],
+    pub scope_id: [u8; 16],
+    pub name: String,
+    pub binding_kind: String,
+    pub target_form: String,
+    pub start_byte: i64,
+    pub end_byte: i64,
+}
+
+/// Generated encoder input for the canonical `reference_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ReferenceDetailRow {
+    pub scope: FactScope,
+    pub reference_id: [u8; 16],
+    pub scope_id: [u8; 16],
+    pub target_id: [u8; 16],
+    pub name: String,
+    pub reference_class: String,
+    pub resolution: String,
+    pub start_byte: i64,
+    pub end_byte: i64,
+    pub unknown_reason_code: Option<String>,
+}
+
+/// Generated encoder input for the canonical `module_import_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ModuleImportDetailRow {
+    pub scope: FactScope,
+    pub import_id: [u8; 16],
+    pub source_module_id: [u8; 16],
+    pub target_module_id: Option<[u8; 16]>,
+    pub imported_entity_id: Option<[u8; 16]>,
+    pub local_binding_id: Option<[u8; 16]>,
+    pub import_kind_code: i16,
+    pub relative_level: Option<i16>,
+    pub source_name: String,
+    pub alias_name: Option<String>,
+    pub star_import: bool,
+    pub unknown_reason_code: Option<i16>,
+}
+
+/// Generated encoder input for the canonical `callable_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CallableDetailRow {
+    pub scope: FactScope,
+    pub callable_id: [u8; 16],
+    pub signature_id: Option<[u8; 16]>,
+    pub return_type_id: Option<[u8; 16]>,
+    pub parameter_count: i32,
+    pub generic_parameter_count: i32,
+    pub calling_convention_code: Option<i16>,
+    pub abi_name: Option<String>,
+    pub callable_flags: i64,
+}
+
+/// Generated encoder input for the canonical `parameter_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ParameterDetailRow {
+    pub scope: FactScope,
+    pub parameter_id: [u8; 16],
+    pub callable_id: [u8; 16],
+    pub ordinal: i32,
+    pub name: Option<String>,
+    pub parameter_kind_code: i16,
+    pub type_id: Option<[u8; 16]>,
+    pub default_syntax_id: Option<[u8; 16]>,
+    pub flags: i64,
+}
+
+/// Generated encoder input for the canonical `call_site_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CallSiteDetailRow {
+    pub scope: FactScope,
+    pub call_site_id: [u8; 16],
+    pub caller_id: [u8; 16],
+    pub syntax_id: Option<[u8; 16]>,
+    pub callee_syntax_id: Option<[u8; 16]>,
+    pub receiver_value_id: Option<[u8; 16]>,
+    pub result_value_id: Option<[u8; 16]>,
+    pub dispatch_kind_code: i16,
+    pub declared_target_id: Option<[u8; 16]>,
+    pub resolved_target_count: i32,
+    pub call_flags: i64,
+}
+
+/// Generated encoder input for the canonical `call_argument_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CallArgumentDetailRow {
+    pub scope: FactScope,
+    pub argument_id: [u8; 16],
+    pub call_site_id: [u8; 16],
+    pub ordinal: i32,
+    pub keyword_name: Option<String>,
+    pub argument_syntax_id: Option<[u8; 16]>,
+    pub argument_value_id: Option<[u8; 16]>,
+    pub parameter_id: Option<[u8; 16]>,
+    pub binding_status_code: i16,
+    pub spread_kind_code: Option<i16>,
+}
+
+/// Generated encoder input for the canonical `cfg_graph` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CfgGraphRow {
+    pub scope: FactScope,
+    pub cfg_id: [u8; 16],
+    pub callable_id: Option<[u8; 16]>,
+    pub cfg_kind_code: i16,
+    pub entry_node_id: [u8; 16],
+    pub exit_node_id: [u8; 16],
+    pub exceptional_exit_node_id: Option<[u8; 16]>,
+    pub node_count: i32,
+    pub edge_count: i32,
+    pub flags: i64,
+}
+
+/// Generated encoder input for the canonical `cfg_node_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CfgNodeDetailRow {
+    pub scope: FactScope,
+    pub cfg_node_id: [u8; 16],
+    pub cfg_id: [u8; 16],
+    pub node_kind_code: i16,
+    pub syntax_id: Option<[u8; 16]>,
+    pub mir_statement_id: Option<[u8; 16]>,
+    pub ordinal: Option<i32>,
+    pub flags: i64,
+}
+
+/// Generated encoder input for the canonical `cfg_edge_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CfgEdgeDetailRow {
+    pub scope: FactScope,
+    pub relation_id: [u8; 16],
+    pub cfg_id: [u8; 16],
+    pub condition_id: Option<[u8; 16]>,
+    pub case_value_text: Option<String>,
+    pub case_value_hash: Option<i64>,
+    pub exception_type_id: Option<[u8; 16]>,
+    pub edge_flags: i64,
+}
+
+/// Generated encoder input for the canonical `value_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ValueDetailRow {
+    pub scope: FactScope,
+    pub value_id: [u8; 16],
+    pub value_kind_code: i16,
+    pub type_id: Option<[u8; 16]>,
+    pub producer_operation_id: Option<[u8; 16]>,
+    pub constant_value_id: Option<[u8; 16]>,
+    pub syntax_id: Option<[u8; 16]>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// Generated encoder input for the canonical `operation_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct OperationDetailRow {
+    pub scope: FactScope,
+    pub operation_id: [u8; 16],
+    pub cfg_node_id: Option<[u8; 16]>,
+    pub operation_kind_code: i32,
+    pub result_value_id: Option<[u8; 16]>,
+    pub type_id: Option<[u8; 16]>,
+    pub syntax_id: Option<[u8; 16]>,
+    pub raw_kind_code: Option<i32>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// Generated encoder input for the canonical `dataflow_event_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct DataflowEventDetailRow {
+    pub scope: FactScope,
+    pub event_id: [u8; 16],
+    pub cfg_node_id: Option<[u8; 16]>,
+    pub event_kind_code: i16,
+    pub binding_id: Option<[u8; 16]>,
+    pub value_id: Option<[u8; 16]>,
+    pub location_id: Option<[u8; 16]>,
+    pub syntax_id: Option<[u8; 16]>,
+    pub ordinal: Option<i32>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// Generated encoder input for the canonical `memory_location_detail` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct MemoryLocationDetailRow {
+    pub scope: FactScope,
+    pub location_id: [u8; 16],
+    pub location_kind_code: i16,
+    pub base_entity_id: Option<[u8; 16]>,
+    pub base_local_id: Option<[u8; 16]>,
+    pub type_id: Option<[u8; 16]>,
+    pub parent_location_id: Option<[u8; 16]>,
+    pub projection_depth: i16,
+    pub canonical_path_hash: [u8; 32],
+    pub display_path: Option<String>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
+
+/// Generated encoder input for the canonical `access_path_component` relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct AccessPathComponentRow {
+    pub scope: FactScope,
+    pub component_id: [u8; 16],
+    pub location_id: [u8; 16],
+    pub ordinal: i16,
+    pub projection_kind_code: i16,
+    pub field_entity_id: Option<[u8; 16]>,
+    pub index_value_id: Option<[u8; 16]>,
+    pub variant_entity_id: Option<[u8; 16]>,
+    pub constant_index: Option<i64>,
+    pub subslice_from: Option<i64>,
+    pub subslice_to: Option<i64>,
+    pub flags: i64,
+    pub precision_profile_id: String,
+    pub derivation_bundle_id: String,
+}
 
 /// Encode `owner` rows in the exact generated schema order.
 ///
@@ -21,12 +534,8 @@ pub fn encode_owners(rows: &[OwnerRow]) -> Result<RecordBatch, FactIngestError> 
             id16s(rows, |row| row.semantic_entity_id.as_ref()),
             i64s(rows, |row| row.start_byte),
             i64s(rows, |row| row.end_byte),
-            binary(rows, |row| {
-                row.source_fingerprint.as_ref().map(<[u8; 32]>::as_slice)
-            }),
-            binary(rows, |row| {
-                row.semantic_fingerprint.as_ref().map(<[u8; 32]>::as_slice)
-            }),
+            hash32s(rows, |row| row.source_fingerprint.as_ref()),
+            hash32s(rows, |row| row.semantic_fingerprint.as_ref()),
             i64s(rows, |row| Some(row.capability_mask)),
         ],
     )
@@ -57,7 +566,7 @@ pub fn encode_capability_statuses(
             i16s(rows, |row| row.reason_code),
             id16s(rows, |row| row.diagnostic_id.as_ref()),
             bools(rows, |row| Some(row.fallback_source_available)),
-            binary(rows, |row| Some(row.coverage_scope_fingerprint.as_slice())),
+            hash32s(rows, |row| Some(&row.coverage_scope_fingerprint)),
         ],
     )
 }
@@ -247,7 +756,7 @@ pub fn encode_source_files(rows: &[SourceFileRow]) -> Result<RecordBatch, FactIn
             binary(rows, |row| row.path_case_key.as_deref()),
             bools(rows, |row| Some(row.path_display_is_lossy)),
             i16s(rows, |row| Some(row.language)),
-            binary(rows, |row| Some(row.source_digest.as_slice())),
+            hash32s(rows, |row| Some(&row.source_digest)),
             i64s(rows, |row| Some(row.byte_len)),
             i32s(rows, |row| Some(row.line_count)),
             utf8(rows, |row| row.encoding_name.as_deref()),
@@ -379,9 +888,7 @@ pub fn encode_type_details(rows: &[TypeDetailRow]) -> Result<RecordBatch, FactIn
             i16s(rows, |row| row.primitive_code),
             id16s(rows, |row| row.nominal_entity_id.as_ref()),
             id16s(rows, |row| row.callable_entity_id.as_ref()),
-            binary(rows, |row| {
-                row.raw_shape_hash.as_ref().map(<[u8; 32]>::as_slice)
-            }),
+            hash32s(rows, |row| row.raw_shape_hash.as_ref()),
             i16s(rows, |row| row.nullable_semantics_code),
             i64s(rows, |row| Some(row.flags)),
         ],
@@ -825,7 +1332,7 @@ pub fn encode_memory_location_details(
             id16s(rows, |row| row.type_id.as_ref()),
             id16s(rows, |row| row.parent_location_id.as_ref()),
             i16s(rows, |row| Some(row.projection_depth)),
-            binary(rows, |row| Some(row.canonical_path_hash.as_slice())),
+            hash32s(rows, |row| Some(&row.canonical_path_hash)),
             utf8(rows, |row| row.display_path.as_deref()),
             i64s(rows, |row| Some(row.flags)),
             utf8(rows, |row| Some(row.precision_profile_id.as_str())),

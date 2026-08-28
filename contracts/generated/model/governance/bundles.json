@@ -120,7 +120,7 @@
         },
         {
           "artifact_id": "codefabric.registry.ontology-relation-registry",
-          "canonical_digest": "b3:2b66853b403b9febccac35f7aa355d4ebf3a97e6d9b1efd5f11b175c63cb0ee5",
+          "canonical_digest": "b3:85bd5c3232c4555276a0e1c997d7bafdd2c64931a2fb5e57aaa2f76284f73ef1",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -133,7 +133,7 @@
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:bd25a40cb523b8d8c7b9a275032541e1deb8f736cff99c0a2e03abf997132b34",
+      "bundle_digest": "b3:bb4f22ed6dd0653cb411d0cba1e9c6740bf03ad0e9d7dea37239a65e9d6e94c7",
       "bundle_kind": "ontology",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -222,14 +222,14 @@
         },
         {
           "artifact_id": "codefabric.query.planspec.schema",
-          "canonical_digest": "b3:90a676426500d8092bf5a760add06b8ae12ad9c2ee85adc2bccbb8f53aca3827",
+          "canonical_digest": "b3:e0bf9cf50a2a1a91ce4ce5d0b877d8638f4f0b071b6586d047d03dc0bb4a3a85",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.registry.phrase-registry",
-          "canonical_digest": "b3:f889d4a52ef079e0b3a372a5e11dae9005c587c0d006aa39eca89107d25d1092",
+          "canonical_digest": "b3:9831f349ab2bc62efff6bf0b500157379eb737a465b555a3d63a935e8f70ba61",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -250,20 +250,20 @@
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
-          "canonical_digest": "b3:419b3df50ec5820800e14286fa33158b5297cc7aa6e349bf194ac7930cd413f1",
+          "canonical_digest": "b3:51da9448a747a9edd5ca2aaffa886f98b878706a12d2844dfc9335c6e6f81949",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
-          "canonical_digest": "b3:5ec07dd7962cf68eb2b97b11cb2d74dfe527ca7a1a636bbfee40fad97b43b2d7",
+          "canonical_digest": "b3:497ca80efa9269a46354d95cf2482534e3e55c61e12a47d055ed388a54b87e0f",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:c6ed73650102b83794a1ea8a0b97f8e65d21e08aee81f5760da6c3da0b42c663",
+      "bundle_digest": "b3:a1ed7d83d3edc15bc1f2051352ed080d97d8355ec8e07907ecd86487835d598e",
       "bundle_kind": "query-language",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -280,62 +280,62 @@
       "artifacts": [
         {
           "artifact_id": "codefabric.schema.analysis-context.schema",
-          "canonical_digest": "b3:9cd72af205052232804e377fe4adfde213f3536fd484aa8054eebe9b28958574",
+          "canonical_digest": "b3:f6b7af4dc340bd88f1fe6e7f10f556b864dad296428e75e3f5074876f0bf3214",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.contract-ir",
-          "canonical_digest": "b3:2d03264fb9e0698e4f691d4206b4874bd932d13aaa22ba253d5e464199f90694",
+          "canonical_digest": "b3:5715ae85b7196bbe17ff3ae9b1df48fc7f6f3288a952f12c6460582f97c19298",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-request.schema",
-          "canonical_digest": "b3:419b3df50ec5820800e14286fa33158b5297cc7aa6e349bf194ac7930cd413f1",
+          "canonical_digest": "b3:51da9448a747a9edd5ca2aaffa886f98b878706a12d2844dfc9335c6e6f81949",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
-          "canonical_digest": "b3:5ec07dd7962cf68eb2b97b11cb2d74dfe527ca7a1a636bbfee40fad97b43b2d7",
+          "canonical_digest": "b3:497ca80efa9269a46354d95cf2482534e3e55c61e12a47d055ed388a54b87e0f",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
-          "canonical_digest": "b3:307313edb8c33db6377fc3599fbd0ca0db01a4d106fb8220e73bdc09e6ed6eb1",
+          "canonical_digest": "b3:3b0ed3f1d02fdd2feeade92d6bcd1b3b3cc4d45c9ba05a2172160dcf846309fa",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.public-status.schema",
-          "canonical_digest": "b3:9ba77e9a3ed7f8d31b7ad7524934a8d6fa3c0559c4999bf5c4c6ca6a9ecc02e5",
+          "canonical_digest": "b3:6525efa7a57099ab3cb6b9f4f01a28beb81a59a4e435276e59ce261e0458ee54",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.serving-snapshot.schema",
-          "canonical_digest": "b3:16153b894c3252e9ec7fc2ec6896da9e261140fae43da4492a2ff5ab22b7c38b",
+          "canonical_digest": "b3:824a02edd7bcee6824e02792ed73b38e147e2efb5d8b1b91658ded0f3d4a362a",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         },
         {
           "artifact_id": "codefabric.schema.source-context.schema",
-          "canonical_digest": "b3:59708340d0e0951a074eb057b9dbcd7ce85aa690189029fd9943b5e45cc8f1b7",
+          "canonical_digest": "b3:7e8a561f01963f831c5744802d0637fe8b07521047cc5a424737bfd89635d1f2",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:31197eddc0b76e582fba23b33e5272c7822a37a48ae9d1f9f019440b0c732fe4",
+      "bundle_digest": "b3:aee8f250322f7a9f0378107d4320e567da5f675c427ee08c100f2a9d8a25d2fb",
       "bundle_kind": "schema",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -387,7 +387,7 @@
         },
         {
           "artifact_id": "codefabric.registry.error-registry",
-          "canonical_digest": "b3:3404f5bd747dddd2e1ed147b3a8b59afd539e720281492041c5f376023890751",
+          "canonical_digest": "b3:d87b5aeaf698d07f5ea033a3cc6a63713c9abaf2fd80d4b83b4c1c077112a2a3",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
@@ -415,13 +415,13 @@
         },
         {
           "artifact_id": "codefabric.schema.public-status.schema",
-          "canonical_digest": "b3:9ba77e9a3ed7f8d31b7ad7524934a8d6fa3c0559c4999bf5c4c6ca6a9ecc02e5",
+          "canonical_digest": "b3:6525efa7a57099ab3cb6b9f4f01a28beb81a59a4e435276e59ce261e0458ee54",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:0f5bd082ef615fad9fb4ec966f23b7181019530d0e51f2d2a1d61f4371902f46",
+      "bundle_digest": "b3:8455383fa30d7480c960a42ebbd7606d3b618fd71d630ea375e80673e67bc7ec",
       "bundle_kind": "tool-contract",
       "bundle_major": 1,
       "bundle_version": "1.0",
@@ -438,13 +438,13 @@
       "artifacts": [
         {
           "artifact_id": "codefabric.toolchain.identity",
-          "canonical_digest": "b3:0c55bb5c7208af5f09441153166c28f652ad62d8e899414af644400a368c979c",
+          "canonical_digest": "b3:3bc9e513bd8e688b5bdfa9add887e47da8c432521a6eeaf32bbc72f791f7e5d3",
           "feature_bits": [],
           "required": true,
           "version": "1.0"
         }
       ],
-      "bundle_digest": "b3:16c5e2edf66000eb32871ca03e4fe9d2d2c327001102651a07ccb3b8301033ba",
+      "bundle_digest": "b3:708bbfcf0a6b969a96a1af965585b35b618d23bce6799a183fdc1d4a260938e6",
       "bundle_kind": "toolchain",
       "bundle_major": 1,
       "bundle_version": "1.0",

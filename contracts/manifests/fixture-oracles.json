@@ -1,7 +1,7 @@
 {
   "artifact_id": "codefabric.manifests.fixture-oracles",
   "artifact_kind": "manifest",
-  "canonical_digest": "b3:ba2ee413801dfdd6cb62e1d0d6998407605b027acc7f5e32067aad3c68a23f66",
+  "canonical_digest": "b3:a566a6733c4a637c2e33c7897cca7483013c57d184188726a80d5ecfadb694a4",
   "compatible_suite_major": 1,
   "digest_projection": "json-jcs-v1",
   "generator_revision": "codefabric-model/1.0",
@@ -339,6 +339,14 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rule-tests/__snapshots__/ruff-no-runtime-import-execution-snapshot.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rule-tests/__snapshots__/semantic-query-graph-authority-snapshot.yml",
       "version": "1.0"
     },
@@ -515,6 +523,14 @@
       "oracle_class": "property",
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
+      "path": "rule-tests/ruff-no-runtime-import-execution-test.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
       "path": "rule-tests/semantic-query-graph-authority-test.yml",
       "version": "1.0"
     },
@@ -684,6 +700,14 @@
       "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
       "owner": "suite",
       "path": "rules/ruff-boundary-only.yml",
+      "version": "1.0"
+    },
+    {
+      "change_record": "contracts/fixtures/CHANGELOG.md#2026-08-23-model-derived-fixture-census",
+      "oracle_class": "property",
+      "origin": "Model-discovered property source bytes; answers remain outside routine renderer authority",
+      "owner": "suite",
+      "path": "rules/ruff-no-runtime-import-execution.yml",
       "version": "1.0"
     },
     {

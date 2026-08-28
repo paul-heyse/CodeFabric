@@ -188,7 +188,12 @@ pub fn detached_registry_identity(
             accepted!(governed::StateMachine, governed::validate_state_machines)
         }
         "codefabric.registry.phrase-registry" => {
-            accepted!(governed::PhraseRecord, governed::validate_phrase_records)
+            let document: governed::PhraseRegistry = decode_yaml(bytes)?;
+            governed::validate_phrase_records(&document.records)
+                .map_err(RegistryCbefError::RegistryModel)?;
+            governed::validate_phrase_operation_bindings(&document.semantic_operation_bindings)
+                .map_err(RegistryCbefError::RegistryModel)?;
+            Some(detached_typed_digest(&document)?)
         }
         "codefabric.comparison.comparison-ignore-registry" => accepted!(
             governed::ComparisonIgnoreRecord,

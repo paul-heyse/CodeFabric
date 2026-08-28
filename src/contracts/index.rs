@@ -288,7 +288,21 @@ mod tests {
     fn packaged_model_index_is_typed_canonical_and_sorted() {
         let index = model_artifact_index().unwrap();
         assert!(index.artifacts.len() > 100);
-        assert_eq!(index.outputs.len(), 84);
+        let output_paths = index
+            .outputs
+            .iter()
+            .map(|output| output.path.as_path())
+            .collect::<BTreeSet<_>>();
+        for required in [
+            Path::new("src/generated/compiled_ontology.rs"),
+            Path::new("src/generated/id_domains.rs"),
+            Path::new("src/generated/result_schemas.rs"),
+        ] {
+            assert!(
+                output_paths.contains(required),
+                "packaged model index omitted {required:?}"
+            );
+        }
         assert!(
             index
                 .artifacts

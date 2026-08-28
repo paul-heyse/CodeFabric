@@ -7,7 +7,6 @@ use arrow_array::{
     Array as _, ArrayRef, BinaryArray, BooleanArray, FixedSizeBinaryArray, Int16Array, Int32Array,
     Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
 };
-use arrow_row::{RowConverter, SortField};
 use arrow_select::concat::concat_batches;
 use datafusion::common::ScalarValue;
 use datafusion::datasource::MemTable;
@@ -33,8 +32,8 @@ use crate::registries::{
     DurablePublicationState, generated_transition, registry_state_name,
 };
 use crate::schema_registry::{
-    PublicationPinRole, TableScopeSpec, TableSpec, foreign_key_contracts, table_scope_spec,
-    table_spec, table_specs,
+    DomainTypedLiteral, PublicationPinRole, TableScopeSpec, TableSpec, foreign_key_contracts,
+    id_domain_for_extension_name, table_scope_spec, table_spec, table_specs,
 };
 
 const PUBLICATION_REFERENTIAL_INTEGRITY: &str = "PUBLICATION_REFERENTIAL_INTEGRITY";
@@ -274,24 +273,12 @@ fn publication_batch(
         super::id16_array([pins.worktree_id.as_ref()]),
         Arc::new(Int16Array::from(vec![state_code(state)])),
         Arc::new(Int64Array::from(vec![pins.source_generation])),
-        Arc::new(BinaryArray::from(vec![Some(
-            pins.source_inventory_digest.as_slice(),
-        )])),
+        super::hash32_array([Some(&pins.source_inventory_digest)]),
         super::id16_array([Some(&pins.analysis_context_set_id)]),
-        Arc::new(BinaryArray::from(vec![
-            pins.git_state_fingerprint
-                .as_ref()
-                .map(<[u8; 32]>::as_slice),
-        ])),
-        Arc::new(BinaryArray::from(vec![Some(
-            pins.inclusion_policy_fingerprint.as_slice(),
-        )])),
-        Arc::new(BinaryArray::from(vec![Some(
-            pins.base_fact_digest.as_slice(),
-        )])),
-        Arc::new(BinaryArray::from(vec![
-            pins.derived_fact_digest.as_ref().map(<[u8; 32]>::as_slice),
-        ])),
+        super::hash32_array([pins.git_state_fingerprint.as_ref()]),
+        super::hash32_array([Some(&pins.inclusion_policy_fingerprint)]),
+        super::hash32_array([Some(&pins.base_fact_digest)]),
+        super::hash32_array([pins.derived_fact_digest.as_ref()]),
         Arc::new(StringArray::from(vec![pins.ontology_version.as_str()])),
         Arc::new(StringArray::from(vec![pins.schema_bundle_version.as_str()])),
         Arc::new(StringArray::from(vec![
@@ -323,18 +310,6 @@ fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordB
         .iter()
         .map(|record| record.table_uri.as_str())
         .collect::<Vec<_>>();
-    let schema_digests = records
-        .iter()
-        .map(|record| Some(record.schema_fingerprint.as_slice()))
-        .collect::<Vec<_>>();
-    let checksums = records
-        .iter()
-        .map(|record| Some(record.table_checksum.as_slice()))
-        .collect::<Vec<_>>();
-    let primary_key_digests = records
-        .iter()
-        .map(|record| Some(record.primary_key_digest.as_slice()))
-        .collect::<Vec<_>>();
     let columns: Vec<ArrayRef> = vec![
         super::id16_array(records.iter().map(|record| Some(&record.publication_id))),
         super::id16_array(records.iter().map(|record| Some(&record.workspace_id))),
@@ -354,7 +329,11 @@ fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordB
                     FabricError::PublicationIntegrity("Delta version exceeds i64".into())
                 })?,
         )),
-        Arc::new(BinaryArray::from(schema_digests)),
+        super::hash32_array(
+            records
+                .iter()
+                .map(|record| Some(&record.schema_fingerprint)),
+        ),
         Arc::new(Int64Array::from(
             records
                 .iter()
@@ -367,8 +346,12 @@ fn publication_table_batch(records: &[PublicationTableRecord]) -> Result<RecordB
                 .map(|record| record.owner_count)
                 .collect::<Vec<_>>(),
         )),
-        Arc::new(BinaryArray::from(checksums)),
-        Arc::new(BinaryArray::from(primary_key_digests)),
+        super::hash32_array(records.iter().map(|record| Some(&record.table_checksum))),
+        super::hash32_array(
+            records
+                .iter()
+                .map(|record| Some(&record.primary_key_digest)),
+        ),
         Arc::new(BooleanArray::from(
             records
                 .iter()
@@ -447,29 +430,24 @@ async fn collect_table(
 pub(super) fn scope_filter(spec: &TableScopeSpec, scope: &PublicationScope) -> Option<Expr> {
     let mut predicates = Vec::new();
     if let Some(column) = spec.workspace_column {
-        predicates.push(col(column).eq(lit(ScalarValue::FixedSizeBinary(
-            16,
-            Some(scope.workspace_id.to_vec()),
-        ))));
+        predicates.push(col(column).eq(scope_id_literal(spec, column, scope.workspace_id)));
     }
     if let Some(column) = spec.source_generation_column {
         predicates.push(col(column).eq(lit(scope.source_generation)));
     }
     if let Some(column) = spec.analysis_context_set_column {
-        predicates.push(col(column).eq(lit(ScalarValue::FixedSizeBinary(
-            16,
-            Some(scope.analysis_context_set_id.to_vec()),
-        ))));
+        predicates.push(col(column).eq(scope_id_literal(
+            spec,
+            column,
+            scope.analysis_context_set_id,
+        )));
     }
     if let Some(column) = spec.analysis_context_column {
         let contexts = scope
             .analysis_context_ids
             .iter()
             .fold(None, |combined, context| {
-                let predicate = col(column).eq(lit(ScalarValue::FixedSizeBinary(
-                    16,
-                    Some(context.to_vec()),
-                )));
+                let predicate = col(column).eq(scope_id_literal(spec, column, *context));
                 Some(combined.map_or(predicate.clone(), |prior: Expr| prior.or(predicate)))
             });
         if let Some(contexts) = contexts {
@@ -477,6 +455,22 @@ pub(super) fn scope_filter(spec: &TableScopeSpec, scope: &PublicationScope) -> O
         }
     }
     predicates.into_iter().reduce(Expr::and)
+}
+
+fn scope_id_literal(spec: &TableScopeSpec, column: &str, value: [u8; 16]) -> Expr {
+    let field = table_spec(spec.table_code)
+        .expect("generated scope table")
+        .arrow_schema
+        .field_with_name(column)
+        .expect("generated scope column");
+    let extension_name = field
+        .extension_type_name()
+        .expect("generated scope ID extension");
+    let domain = id_domain_for_extension_name(extension_name)
+        .expect("generated scope extension has an ID domain");
+    DomainTypedLiteral::new(domain, value)
+        .expect("generated scope domain")
+        .into_expr()
 }
 
 fn distinct_id16(batch: &RecordBatch, column: &str) -> Result<i64, FabricError> {
@@ -556,34 +550,19 @@ async fn manifest_records(
     Ok((records, batches))
 }
 
-fn validate_primary_keys(
+fn validate_manifest_row_counts(
     records: &BTreeMap<i16, PublicationTableRecord>,
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<(), FabricError> {
     for (&table_code, record) in records {
         let spec = table_spec(table_code).expect("generated manifest table");
         let batch = &batches[&table_code];
-        let columns = spec
-            .primary_key
-            .iter()
-            .map(|name| Ok(Arc::clone(batch.column(batch.schema().index_of(name)?))))
-            .collect::<Result<Vec<_>, arrow_schema::ArrowError>>()?;
-        let fields = columns
-            .iter()
-            .map(|column| SortField::new(column.data_type().clone()))
-            .collect();
-        let converter = RowConverter::new(fields)?;
-        let rows = converter.convert_columns(&columns)?;
-        let unique = rows
-            .iter()
-            .map(|row| row.data().to_vec())
-            .collect::<BTreeSet<_>>();
         let observed_count = i64::try_from(batch.num_rows()).map_err(|_| {
             FabricError::PublicationIntegrity("observed row count exceeds i64".into())
         })?;
-        if unique.len() != batch.num_rows() || record.row_count != observed_count {
+        if record.row_count != observed_count {
             return Err(FabricError::PublicationIntegrity(format!(
-                "{} primary keys or row count are invalid",
+                "{} manifest row count is invalid",
                 spec.name
             )));
         }
@@ -591,7 +570,7 @@ fn validate_primary_keys(
     Ok(())
 }
 
-fn validate_identifiers_and_spans(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
+fn validate_identifier_domains(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), FabricError> {
     for (&table_code, batch) in batches {
         let spec = table_spec(table_code).expect("generated manifest table");
         for (index, field) in spec.arrow_schema.fields().iter().enumerate() {
@@ -606,38 +585,12 @@ fn validate_identifiers_and_spans(batches: &BTreeMap<i16, RecordBatch>) -> Resul
                     .as_any()
                     .downcast_ref::<FixedSizeBinaryArray>();
                 if values.is_none()
-                    || !field.has_valid_extension_type::<crate::schema_registry::Id16Extension>()
+                    || crate::schema_registry::validate_logical_extension_field(field).is_err()
                 {
                     return Err(FabricError::PublicationIntegrity(format!(
-                        "{} contains an invalid codefabric.id16 {}",
+                        "{} contains an invalid ID-domain extension on {}",
                         spec.name,
                         field.name()
-                    )));
-                }
-            }
-        }
-        if let (Ok(start_index), Ok(end_index)) = (
-            batch.schema().index_of("start_byte"),
-            batch.schema().index_of("end_byte"),
-        ) {
-            let starts = batch
-                .column(start_index)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .expect("generated start_byte is Int64");
-            let ends = batch
-                .column(end_index)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .expect("generated end_byte is Int64");
-            for row in 0..batch.num_rows() {
-                if starts.is_null(row) != ends.is_null(row)
-                    || (!starts.is_null(row)
-                        && (starts.value(row) < 0 || ends.value(row) < starts.value(row)))
-                {
-                    return Err(FabricError::PublicationIntegrity(format!(
-                        "{} contains an invalid source span",
-                        spec.name
                     )));
                 }
             }
@@ -819,14 +772,11 @@ async fn validate_candidate(
             "publication manifest does not cover the generated pinned-data census".into(),
         ));
     }
-    validate_primary_keys(records, batches)?;
-    validate_identifiers_and_spans(batches)?;
-    validate_references(
-        request,
-        &candidate_effective_batches(request, records, batches)?,
-    )
-    .await
-    .map(|_| ())
+    validate_manifest_row_counts(records, batches)?;
+    validate_identifier_domains(batches)?;
+    let effective = candidate_effective_batches(request, records, batches)?;
+    crate::ontology_rules::validate_compiled_ontology_rules(&effective).await?;
+    validate_references(request, &effective).await.map(|_| ())
 }
 
 struct PublicationTransition<'a> {
@@ -1473,8 +1423,8 @@ mod tests {
             id16_array([None]),
             Arc::new(Int64Array::from(vec![0_i64])),
             Arc::new(Int64Array::from(vec![0_i64])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
+            crate::fabric::hash32_array([None]),
+            crate::fabric::hash32_array([None]),
             Arc::new(Int64Array::from(vec![0_i64])),
         ];
         let batch = RecordBatch::try_new(Arc::clone(&spec.arrow_schema), columns).unwrap();
@@ -1486,8 +1436,8 @@ mod tests {
             scope: scope(),
             entity_id,
             language: 10,
-            entity_family_code: 1,
-            entity_kind_code: 10,
+            entity_family_code: 8,
+            entity_kind_code: 150,
             raw_kind_code: None,
             file_id: None,
             start_byte: Some(0),
@@ -1511,8 +1461,8 @@ mod tests {
             scope: scope(),
             fact_id: [8; 16],
             language: 10,
-            relation_family_code: 2,
-            relation_kind_code: 10,
+            relation_family_code: 8,
+            relation_kind_code: 70,
             source_id,
             target_id,
             ordinal: None,

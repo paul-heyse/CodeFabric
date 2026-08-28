@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::{
     FabricError, LocalProviderFactory, LocalProviderRequest, PublicationOutcome, PublicationScope,
-    exact_provider, validate_open_table,
+    PublicationTableRecord, exact_provider, validate_open_table,
 };
 #[cfg(test)]
 use crate::fabric::batch_checksum;
@@ -26,7 +26,7 @@ use datafusion::catalog::{
     CatalogProvider, ScanArgs, ScanResult, SchemaProvider, Session, TableProvider,
 };
 use datafusion::common::stats::Precision;
-use datafusion::common::{ColumnStatistics, DataFusionError, Statistics};
+use datafusion::common::{ColumnStatistics, Constraint, Constraints, DataFusionError, Statistics};
 use datafusion::datasource::{ViewTable, provider_as_source};
 use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, TrackConsumersPool};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
@@ -41,7 +41,8 @@ use std::num::NonZeroUsize;
 use crate::error::ErrorEnvelope;
 use crate::registries::Phase;
 
-const CATALOG_SCHEMA: &str = "cpg_base";
+const BASE_CATALOG_SCHEMA: &str = "cpg_base";
+const ONTOLOGY_CATALOG_SCHEMA: &str = "cpg_ontology";
 
 /// Closed purpose for every Delta handle constructed by CodeFabric.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -249,6 +250,7 @@ pub const STATISTICS_REQUEST_POSTURE: StatisticsRequestPosture = StatisticsReque
 struct EffectiveStatisticsProvider {
     inner: Arc<dyn TableProvider>,
     statistics: Statistics,
+    constraints: Option<Constraints>,
 }
 
 impl fmt::Debug for EffectiveStatisticsProvider {
@@ -267,7 +269,9 @@ impl TableProvider for EffectiveStatisticsProvider {
     }
 
     fn constraints(&self) -> Option<&datafusion::common::Constraints> {
-        self.inner.constraints()
+        self.constraints
+            .as_ref()
+            .or_else(|| self.inner.constraints())
     }
 
     fn table_type(&self) -> TableType {
@@ -487,16 +491,18 @@ impl SchemaProvider for FrozenSchemaProvider {
 
 #[derive(Debug)]
 struct FrozenCatalogProvider {
-    schema: Arc<FrozenSchemaProvider>,
+    schemas: BTreeMap<String, Arc<FrozenSchemaProvider>>,
 }
 
 impl CatalogProvider for FrozenCatalogProvider {
     fn schema_names(&self) -> Vec<String> {
-        vec![CATALOG_SCHEMA.to_owned()]
+        self.schemas.keys().cloned().collect()
     }
 
     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-        (name == CATALOG_SCHEMA).then(|| Arc::clone(&self.schema) as Arc<dyn SchemaProvider>)
+        self.schemas
+            .get(name)
+            .map(|schema| Arc::clone(schema) as Arc<dyn SchemaProvider>)
     }
 
     fn register_schema(
@@ -546,6 +552,10 @@ impl SnapshotProviderCatalog {
         let schema = Arc::new(FrozenSchemaProvider {
             tables: BTreeMap::new(),
         });
+        let schemas = BTreeMap::from([
+            (BASE_CATALOG_SCHEMA.to_owned(), Arc::clone(&schema)),
+            (ONTOLOGY_CATALOG_SCHEMA.to_owned(), schema),
+        ]);
         Self {
             publication_id,
             scope,
@@ -554,7 +564,7 @@ impl SnapshotProviderCatalog {
             overlay_memory_bytes: 0,
             overlay_tables: Arc::from([]),
             providers: BTreeMap::new(),
-            catalog: Arc::new(FrozenCatalogProvider { schema }),
+            catalog: Arc::new(FrozenCatalogProvider { schemas }),
             trace: vec![
                 SnapshotConstructionStage::ResolveVersions,
                 SnapshotConstructionStage::ConstructProviders,
@@ -602,7 +612,8 @@ impl SnapshotProviderCatalog {
         analysis_context_ids: Vec<[u8; 16]>,
     ) -> Self {
         let mut providers = BTreeMap::new();
-        let mut tables = BTreeMap::new();
+        let mut base_tables = BTreeMap::new();
+        let mut ontology_tables = BTreeMap::new();
         for (table_code, batch) in batches {
             let spec = snapshot_table_spec(table_code).expect("generated test table");
             assert_eq!(batch.schema(), spec.arrow_schema);
@@ -638,10 +649,27 @@ impl SnapshotProviderCatalog {
                 provider: Arc::clone(&provider),
             };
             providers.insert(table_code, record);
-            tables.insert(spec.name.to_owned(), provider);
+            if (11..=30).contains(&table_code) {
+                ontology_tables.insert(spec.name.to_owned(), provider);
+            } else {
+                base_tables.insert(spec.name.to_owned(), provider);
+            }
         }
         let provider_count = providers.len();
-        let schema = Arc::new(FrozenSchemaProvider { tables });
+        let schemas = BTreeMap::from([
+            (
+                BASE_CATALOG_SCHEMA.to_owned(),
+                Arc::new(FrozenSchemaProvider {
+                    tables: base_tables,
+                }),
+            ),
+            (
+                ONTOLOGY_CATALOG_SCHEMA.to_owned(),
+                Arc::new(FrozenSchemaProvider {
+                    tables: ontology_tables,
+                }),
+            ),
+        ]);
         Self {
             publication_id,
             scope: PublicationScope {
@@ -660,7 +688,7 @@ impl SnapshotProviderCatalog {
             overlay_memory_bytes: 0,
             overlay_tables: Arc::from([]),
             providers,
-            catalog: Arc::new(FrozenCatalogProvider { schema }),
+            catalog: Arc::new(FrozenCatalogProvider { schemas }),
             trace: vec![
                 SnapshotConstructionStage::ResolveVersions,
                 SnapshotConstructionStage::ConstructProviders,
@@ -701,6 +729,7 @@ impl SnapshotProviderCatalog {
             })
     }
 
+    #[allow(clippy::too_many_lines)] // One phased constructor preserves the atomic provider graph.
     async fn build_unphased(
         publication: &PublicationOutcome,
         overlay: &dyn SnapshotOverlayProviderFactory,
@@ -737,9 +766,11 @@ impl SnapshotProviderCatalog {
                 || authenticated_statistics(spec, manifest.row_count),
                 |value| Ok(value.statistics.clone()),
             )?;
+            let constraints = publication_validated_constraints(spec, &manifest)?;
             let provider: Arc<dyn TableProvider> = Arc::new(EffectiveStatisticsProvider {
                 inner: provider,
                 statistics,
+                constraints,
             });
             wrapped.insert(
                 table_code,
@@ -769,15 +800,32 @@ impl SnapshotProviderCatalog {
         for record in wrapped.values() {
             validate_provider_record(record, overlay.generation())?;
         }
-        let table_map = wrapped
-            .iter()
-            .map(|(&table_code, record)| {
-                snapshot_table_spec(table_code)
-                    .map(|spec| (spec.name.to_owned(), record.provider()))
-            })
-            .collect::<Result<_, _>>()?;
-        let schema = Arc::new(FrozenSchemaProvider { tables: table_map });
-        let catalog = Arc::new(FrozenCatalogProvider { schema });
+        let mut base_tables = BTreeMap::new();
+        let mut ontology_tables = BTreeMap::new();
+        for (&table_code, record) in &wrapped {
+            let spec = snapshot_table_spec(table_code)?;
+            if (11..=30).contains(&table_code) {
+                ontology_tables.insert(spec.name.to_owned(), record.provider());
+            } else {
+                base_tables.insert(spec.name.to_owned(), record.provider());
+            }
+        }
+        let catalog = Arc::new(FrozenCatalogProvider {
+            schemas: BTreeMap::from([
+                (
+                    BASE_CATALOG_SCHEMA.to_owned(),
+                    Arc::new(FrozenSchemaProvider {
+                        tables: base_tables,
+                    }),
+                ),
+                (
+                    ONTOLOGY_CATALOG_SCHEMA.to_owned(),
+                    Arc::new(FrozenSchemaProvider {
+                        tables: ontology_tables,
+                    }),
+                ),
+            ]),
+        });
         trace.push(SnapshotConstructionStage::Freeze);
         let provider_count = wrapped.len();
         Ok(Self {
@@ -877,6 +925,31 @@ impl SnapshotProviderCatalog {
     pub fn catalog(&self) -> Arc<dyn CatalogProvider> {
         Arc::clone(&self.catalog) as Arc<dyn CatalogProvider>
     }
+}
+
+fn publication_validated_constraints(
+    spec: &TableSpec,
+    manifest: &PublicationTableRecord,
+) -> Result<Option<Constraints>, FabricError> {
+    if !manifest.validated || spec.primary_key.is_empty() {
+        return Ok(None);
+    }
+    let indices = spec
+        .primary_key
+        .iter()
+        .map(|name| {
+            let index = spec.arrow_schema.index_of(name)?;
+            if spec.arrow_schema.field(index).is_nullable() {
+                return Err(arrow_schema::ArrowError::SchemaError(format!(
+                    "validated primary-key field {name} is nullable"
+                )));
+            }
+            Ok(index)
+        })
+        .collect::<Result<Vec<_>, arrow_schema::ArrowError>>()?;
+    Ok(Some(Constraints::new_unverified(vec![
+        Constraint::PrimaryKey(indices),
+    ])))
 }
 
 fn snapshot_table_spec(table_code: i16) -> Result<&'static TableSpec, FabricError> {
@@ -1455,6 +1528,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn odf_constraints_classification_gate() {
+        let root = tempfile::tempdir().unwrap();
+        let (_fabric, publication) = fixture(root.path()).await;
+        let validated = SnapshotProviderCatalog::build(&publication, &EmptySnapshotOverlay)
+            .await
+            .unwrap();
+        let workspace = validated.provider(1).unwrap();
+        let constraints = workspace
+            .constraints()
+            .expect("publication-validated primary key is planner-visible");
+        let expected_indices = table_spec(1)
+            .unwrap()
+            .primary_key
+            .iter()
+            .map(|name| table_spec(1).unwrap().arrow_schema.index_of(name).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            constraints.iter().collect::<Vec<_>>(),
+            vec![&Constraint::PrimaryKey(expected_indices)]
+        );
+
+        let mut unproved = publication.clone();
+        unproved.tables.get_mut(&1).unwrap().validated = false;
+        assert!(
+            publication_validated_constraints(
+                table_spec(1).unwrap(),
+                unproved.tables.get(&1).unwrap(),
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            SnapshotProviderCatalog::build(&unproved, &EmptySnapshotOverlay)
+                .await
+                .is_err(),
+            "an unproved manifest must not enter the serving catalog"
+        );
+    }
+
+    #[tokio::test]
     async fn wp26_structural_acceptance() {
         let root = tempfile::tempdir().unwrap();
         let (_fabric, publication) = fixture(root.path()).await;
@@ -1478,7 +1591,7 @@ mod tests {
         let first = candidate.provider(1).unwrap();
         let second = candidate.provider(1).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
-        let schema = candidate.catalog().schema(CATALOG_SCHEMA).unwrap();
+        let schema = candidate.catalog().schema(BASE_CATALOG_SCHEMA).unwrap();
         let catalog_provider = schema.table("workspace").await.unwrap().unwrap();
         assert!(Arc::ptr_eq(&first, &catalog_provider));
         assert_eq!(
@@ -1600,7 +1713,7 @@ mod tests {
             .await
             .unwrap();
         let catalog = candidate.catalog();
-        let schema = catalog.schema(CATALOG_SCHEMA).unwrap();
+        let schema = catalog.schema(BASE_CATALOG_SCHEMA).unwrap();
         assert!(
             catalog
                 .register_schema("late", Arc::clone(&schema))
@@ -1625,7 +1738,10 @@ mod tests {
         assert_eq!(metrics.exact_version_count, publication.tables.len());
         assert_eq!(metrics.overlay_generation, 0);
         assert_eq!(metrics.validation_scan_count, 0);
-        assert_eq!(candidate.catalog().schema_names(), [CATALOG_SCHEMA]);
+        assert_eq!(
+            candidate.catalog().schema_names(),
+            [BASE_CATALOG_SCHEMA, ONTOLOGY_CATALOG_SCHEMA]
+        );
 
         let changed = SnapshotProviderCatalog::build(&publication, &ChangedIdentityOverlay)
             .await

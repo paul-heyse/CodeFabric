@@ -9,7 +9,9 @@ use std::collections::{BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "daemon")]
 use std::sync::Arc;
+#[cfg(feature = "daemon")]
 use std::sync::atomic::Ordering;
 #[cfg(feature = "daemon")]
 use std::sync::atomic::{AtomicU64, AtomicUsize};

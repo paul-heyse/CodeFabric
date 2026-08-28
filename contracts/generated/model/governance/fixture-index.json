@@ -207,6 +207,11 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/__snapshots__/ruff-no-runtime-import-execution-snapshot.yml",
+      "source_digest": "b3:ec93dedf011a466dbc674bc95e6f22d57f04c91157015ae00a55a9c30f61d769"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/__snapshots__/semantic-query-graph-authority-snapshot.yml",
       "source_digest": "b3:a83e38a8b9adf4b4a6751f813e760d11db90ead9831bdae86b99670d299cd2ef"
     },
@@ -317,6 +322,11 @@
     },
     {
       "class": "property",
+      "path": "rule-tests/ruff-no-runtime-import-execution-test.yml",
+      "source_digest": "b3:ca3cc028a07eeb1dcfaa3a35ce088a47e633c8c50e7e4b2d19693755d6081824"
+    },
+    {
+      "class": "property",
       "path": "rule-tests/semantic-query-graph-authority-test.yml",
       "source_digest": "b3:d462bbd8141f23428f314ce73f7ce4a815998cb90c9e47c94bb233afe2d02342"
     },
@@ -358,7 +368,7 @@
     {
       "class": "property",
       "path": "rules/authoritative-source-read-boundary.yml",
-      "source_digest": "b3:75757ace089c984abe55e3343866e22fbf10b94937f7b4f1d67b8addf63bb391"
+      "source_digest": "b3:d7770af973b9de1016cb1d9e5253bbecf0f56fd2951580edb35db1e42ca0cea3"
     },
     {
       "class": "property",
@@ -418,12 +428,17 @@
     {
       "class": "property",
       "path": "rules/provider-observation-boundary-only.yml",
-      "source_digest": "b3:26f263081ae7a9a5e31555fa7e72cbfe4bb4a7cff15a778f89c186cd28dd73de"
+      "source_digest": "b3:aa1520471480c1f1b9a0235c25dc29c6f6dba923a867181252d6be71b74c0565"
     },
     {
       "class": "property",
       "path": "rules/ruff-boundary-only.yml",
-      "source_digest": "b3:49e835c0efc37fe842022adf535ddf5e435187ccbb3174d73f5ff977b56386cf"
+      "source_digest": "b3:19c2e8ad6906e7fe9b65153d20b5952f110614f578d2a868f77c5a9ca27a6301"
+    },
+    {
+      "class": "property",
+      "path": "rules/ruff-no-runtime-import-execution.yml",
+      "source_digest": "b3:ac621fcbe406f8de9811ec7ad6d9fa4c093b8a4d480b23e56800f458dec5b1a9"
     },
     {
       "class": "property",

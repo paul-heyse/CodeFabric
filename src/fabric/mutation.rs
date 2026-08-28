@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch};
-use arrow_row::{RowConverter, SortField};
 use arrow_schema::Schema;
 use arrow_select::concat::concat_batches;
 use datafusion::common::ScalarValue;
@@ -200,32 +199,7 @@ fn owner_fingerprint(owners: &[[u8; 16]]) -> [u8; 32] {
 /// Returns an Arrow row-encoding error for a generated type unsupported by the
 /// pinned Arrow version.
 pub fn batch_checksum(batch: &RecordBatch) -> Result<[u8; 32], FabricError> {
-    let fields = batch
-        .schema()
-        .fields()
-        .iter()
-        .map(|field| SortField::new(field.data_type().clone()))
-        .collect();
-    let converter = RowConverter::new(fields)?;
-    let rows = converter.convert_columns(batch.columns())?;
-    let mut ordered = rows.iter().map(|row| row.data()).collect::<Vec<_>>();
-    ordered.sort_unstable();
-    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
-        crate::integrity::IntegrityDomain::ArrowBatch,
-    );
-    if let Some(digest) = batch
-        .schema()
-        .metadata()
-        .get("com.codefabric.cpg.schema_digest")
-    {
-        hasher.update(digest.as_bytes());
-    }
-    hasher.update(&(batch.num_rows() as u64).to_be_bytes());
-    for row in ordered {
-        hasher.update(&(row.len() as u64).to_be_bytes());
-        hasher.update(row);
-    }
-    Ok(hasher.finalize())
+    Ok(crate::fact_ingest::canonical_batch_checksum(batch)?)
 }
 
 /// Stable checksum of the generated primary-key projection for one table batch.

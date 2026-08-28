@@ -5,68 +5,312 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_schema::extension::ExtensionType;
 use arrow_schema::{ArrowError, DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
+use datafusion::common::ScalarValue;
+use datafusion::common::metadata::FieldMetadata;
+use datafusion::common::types::DFExtensionType;
+use datafusion::logical_expr::Expr;
+use datafusion::logical_expr::registry::{ExtensionTypeRegistration, ExtensionTypeRegistrationRef};
 
-/// Application-enforced Arrow extension contract for canonical 16-byte identifiers.
+/// Generated descriptor for one application-owned ID logical type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Id16Extension {
-    version: u16,
+pub struct GeneratedIdDomainSpec {
+    pub domain_slug: &'static str,
+    pub extension_name: &'static str,
+    pub rust_type: &'static str,
+    pub preimage_recipe_id: &'static str,
+    pub preimage_version: &'static str,
 }
 
-impl Id16Extension {
-    pub const NAME: &'static str = "codefabric.id16";
-    pub const METADATA_V1: &'static str = "version=1";
-
-    #[must_use]
-    pub const fn v1() -> Self {
-        Self { version: 1 }
-    }
+/// Common generated ID-extension behavior used by DataFusion registration factories.
+pub trait CodeFabricIdExtension:
+    ExtensionType<Metadata = ()> + Copy + std::fmt::Debug + Send + Sync + 'static
+{
+    const DOMAIN_SLUG: &'static str;
+    const PREIMAGE_RECIPE_ID: &'static str;
+    const PREIMAGE_VERSION: &'static str;
+    const METADATA_V1: &'static str;
+    fn v1() -> Self;
 }
 
-impl ExtensionType for Id16Extension {
-    const NAME: &'static str = Self::NAME;
-    type Metadata = u16;
+macro_rules! define_id_domain_extension {
+    ($type:ident, $domain:literal, $name:literal, $recipe:literal, $version:literal) => {
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub struct $type {
+            metadata: (),
+        }
 
-    fn metadata(&self) -> &Self::Metadata {
-        &self.version
+        impl $type {
+            pub const NAME: &'static str = $name;
+            pub const METADATA_V1: &'static str = concat!(
+                "{\"domain\":\"",
+                $domain,
+                "\",\"preimage_recipe_id\":\"",
+                $recipe,
+                "\",\"preimage_version\":\"",
+                $version,
+                "\"}"
+            );
+
+            #[must_use]
+            pub const fn v1() -> Self {
+                Self { metadata: () }
+            }
+        }
+
+        impl ExtensionType for $type {
+            const NAME: &'static str = Self::NAME;
+            type Metadata = ();
+
+            fn metadata(&self) -> &Self::Metadata {
+                &self.metadata
+            }
+
+            fn serialize_metadata(&self) -> Option<String> {
+                Some(Self::METADATA_V1.to_owned())
+            }
+
+            fn deserialize_metadata(metadata: Option<&str>) -> Result<Self::Metadata, ArrowError> {
+                match metadata {
+                    Some(Self::METADATA_V1) => Ok(()),
+                    value => Err(ArrowError::InvalidArgumentError(format!(
+                        "{} requires metadata {}, received {value:?}",
+                        Self::NAME,
+                        Self::METADATA_V1
+                    ))),
+                }
+            }
+
+            fn supports_data_type(&self, data_type: &DataType) -> Result<(), ArrowError> {
+                if data_type == &DataType::FixedSizeBinary(16) {
+                    Ok(())
+                } else {
+                    Err(ArrowError::InvalidArgumentError(format!(
+                        "{} requires FixedSizeBinary(16), received {data_type}",
+                        Self::NAME
+                    )))
+                }
+            }
+
+            fn try_new(data_type: &DataType, metadata: Self::Metadata) -> Result<Self, ArrowError> {
+                let extension = Self { metadata };
+                extension.supports_data_type(data_type)?;
+                Ok(extension)
+            }
+        }
+
+        impl CodeFabricIdExtension for $type {
+            const DOMAIN_SLUG: &'static str = $domain;
+            const PREIMAGE_RECIPE_ID: &'static str = $recipe;
+            const PREIMAGE_VERSION: &'static str = $version;
+            const METADATA_V1: &'static str = Self::METADATA_V1;
+
+            fn v1() -> Self {
+                Self::v1()
+            }
+        }
+    };
+}
+
+macro_rules! define_hash32_extension {
+    () => {
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub struct Hash32Extension {
+            metadata: (),
+        }
+
+        impl Hash32Extension {
+            pub const NAME: &'static str = "codefabric.hash32";
+            pub const METADATA_V1: &'static str = "{\"width\":32,\"version\":1}";
+
+            #[must_use]
+            pub const fn v1() -> Self {
+                Self { metadata: () }
+            }
+        }
+
+        impl ExtensionType for Hash32Extension {
+            const NAME: &'static str = Self::NAME;
+            type Metadata = ();
+
+            fn metadata(&self) -> &Self::Metadata {
+                &self.metadata
+            }
+
+            fn serialize_metadata(&self) -> Option<String> {
+                Some(Self::METADATA_V1.to_owned())
+            }
+
+            fn deserialize_metadata(metadata: Option<&str>) -> Result<Self::Metadata, ArrowError> {
+                match metadata {
+                    Some(Self::METADATA_V1) => Ok(()),
+                    value => Err(ArrowError::InvalidArgumentError(format!(
+                        "{} requires metadata {}, received {value:?}",
+                        Self::NAME,
+                        Self::METADATA_V1
+                    ))),
+                }
+            }
+
+            fn supports_data_type(&self, data_type: &DataType) -> Result<(), ArrowError> {
+                if data_type == &DataType::FixedSizeBinary(32) {
+                    Ok(())
+                } else {
+                    Err(ArrowError::InvalidArgumentError(format!(
+                        "{} requires FixedSizeBinary(32), received {data_type}",
+                        Self::NAME
+                    )))
+                }
+            }
+
+            fn try_new(data_type: &DataType, metadata: Self::Metadata) -> Result<Self, ArrowError> {
+                let extension = Self { metadata };
+                extension.supports_data_type(data_type)?;
+                Ok(extension)
+            }
+        }
+    };
+}
+
+#[derive(Debug)]
+struct DataFusionCodeFabricExtension {
+    storage_type: DataType,
+    metadata: String,
+}
+
+impl DFExtensionType for DataFusionCodeFabricExtension {
+    fn storage_type(&self) -> DataType {
+        self.storage_type.clone()
     }
 
     fn serialize_metadata(&self) -> Option<String> {
-        Some(Self::METADATA_V1.to_owned())
+        Some(self.metadata.clone())
+    }
+}
+
+fn id_domain_registration<T: CodeFabricIdExtension>() -> ExtensionTypeRegistrationRef {
+    ExtensionTypeRegistration::new_arc(T::NAME, |storage_type, metadata| {
+        T::deserialize_metadata(metadata)?;
+        T::try_new(storage_type, ())?;
+        Ok(Arc::new(DataFusionCodeFabricExtension {
+            storage_type: storage_type.clone(),
+            metadata: T::METADATA_V1.to_owned(),
+        }))
+    })
+}
+
+fn hash32_registration() -> ExtensionTypeRegistrationRef {
+    ExtensionTypeRegistration::new_arc(Hash32Extension::NAME, |storage_type, metadata| {
+        Hash32Extension::deserialize_metadata(metadata)?;
+        Hash32Extension::try_new(storage_type, ())?;
+        Ok(Arc::new(DataFusionCodeFabricExtension {
+            storage_type: storage_type.clone(),
+            metadata: Hash32Extension::METADATA_V1.to_owned(),
+        }))
+    })
+}
+
+include!("generated/id_domains.rs");
+
+/// Return the complete generated logical ID-domain registry.
+#[must_use]
+pub const fn id_domains() -> &'static [GeneratedIdDomainSpec] {
+    GENERATED_ID_DOMAINS
+}
+
+/// Create one DataFusion registration factory for every generated logical domain.
+#[must_use]
+pub fn extension_type_registrations() -> Vec<ExtensionTypeRegistrationRef> {
+    generated_id_domain_registrations()
+}
+
+/// Resolve a generated extension name to its application ID domain.
+#[must_use]
+pub fn id_domain_for_extension_name(extension_name: &str) -> Option<&'static str> {
+    GENERATED_ID_DOMAINS
+        .iter()
+        .find(|domain| domain.extension_name == extension_name)
+        .map(|domain| domain.domain_slug)
+}
+
+/// One domain-tagged fixed-size literal for logical-plan construction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DomainTypedLiteral {
+    domain: &'static GeneratedIdDomainSpec,
+    value: [u8; 16],
+}
+
+impl DomainTypedLiteral {
+    /// Bind a canonical value to one generated ID domain.
+    ///
+    /// # Errors
+    ///
+    /// Returns an argument error when `domain_slug` is not present in the generated registry.
+    pub fn new(domain_slug: &str, value: [u8; 16]) -> Result<Self, ArrowError> {
+        let domain = GENERATED_ID_DOMAINS
+            .iter()
+            .find(|domain| domain.domain_slug == domain_slug)
+            .ok_or_else(|| {
+                ArrowError::InvalidArgumentError(format!(
+                    "unknown generated ID domain {domain_slug}"
+                ))
+            })?;
+        Ok(Self { domain, value })
     }
 
-    fn deserialize_metadata(metadata: Option<&str>) -> Result<Self::Metadata, ArrowError> {
-        match metadata {
-            Some(Self::METADATA_V1) => Ok(1),
-            value => Err(ArrowError::InvalidArgumentError(format!(
-                "{} requires metadata {}, received {value:?}",
-                Self::NAME,
-                Self::METADATA_V1
-            ))),
-        }
+    /// Lower the literal with the same Arrow extension metadata as its field authority.
+    #[must_use]
+    pub fn into_expr(self) -> Expr {
+        let metadata = FieldMetadata::from(std::collections::BTreeMap::from([
+            (
+                arrow_schema::extension::EXTENSION_TYPE_NAME_KEY.to_owned(),
+                self.domain.extension_name.to_owned(),
+            ),
+            (
+                arrow_schema::extension::EXTENSION_TYPE_METADATA_KEY.to_owned(),
+                format!(
+                    "{{\"domain\":\"{}\",\"preimage_recipe_id\":\"{}\",\"preimage_version\":\"{}\"}}",
+                    self.domain.domain_slug,
+                    self.domain.preimage_recipe_id,
+                    self.domain.preimage_version,
+                ),
+            ),
+        ]));
+        Expr::Literal(
+            ScalarValue::FixedSizeBinary(16, Some(self.value.to_vec())),
+            Some(metadata),
+        )
     }
+}
 
-    fn supports_data_type(&self, data_type: &DataType) -> Result<(), ArrowError> {
-        if data_type == &DataType::FixedSizeBinary(16) {
-            Ok(())
-        } else {
-            Err(ArrowError::InvalidArgumentError(format!(
-                "{} requires FixedSizeBinary(16), received {data_type}",
-                Self::NAME
-            )))
-        }
+/// Validate any generated ID/hash field without selecting a second policy path.
+///
+/// # Errors
+///
+/// Returns an argument error for an unregistered extension name or a physical width that differs
+/// from the generated logical-type contract.
+pub fn validate_logical_extension_field(field: &Field) -> Result<(), ArrowError> {
+    let Some(name) = field.extension_type_name() else {
+        return Ok(());
+    };
+    let expected_width = if name == Hash32Extension::NAME {
+        32
+    } else if GENERATED_ID_DOMAINS
+        .iter()
+        .any(|domain| domain.extension_name == name)
+    {
+        16
+    } else {
+        return Err(ArrowError::InvalidArgumentError(format!(
+            "unregistered CodeFabric extension type {name}"
+        )));
+    };
+    if field.data_type() != &DataType::FixedSizeBinary(expected_width) {
+        return Err(ArrowError::InvalidArgumentError(format!(
+            "{name} requires FixedSizeBinary({expected_width}), received {}",
+            field.data_type()
+        )));
     }
-
-    fn try_new(data_type: &DataType, version: Self::Metadata) -> Result<Self, ArrowError> {
-        let extension = Self { version };
-        if version != 1 {
-            return Err(ArrowError::InvalidArgumentError(format!(
-                "{} metadata version {version} is unsupported",
-                Self::NAME
-            )));
-        }
-        extension.supports_data_type(data_type)?;
-        Ok(extension)
-    }
+    Ok(())
 }
 
 /// Durable Delta mutation policy.
@@ -152,6 +396,30 @@ pub struct SemanticTypeBindingSpec {
     pub domain: Option<&'static str>,
     pub authority_artifact_id: Option<&'static str>,
     pub authority_digest: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LogicalStructureClass {
+    StructurallyOwnedCohesive,
+    IndependentRelation,
+    IndependentlyFilterable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PhysicalStructureLowering {
+    FlatColumns,
+    RelationTable,
+    TaggedColumns,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StructureGroupSpec {
+    pub group_id: &'static str,
+    pub table_codes: &'static [i16],
+    pub columns: &'static [&'static str],
+    pub logical_class: LogicalStructureClass,
+    pub physical_lowering: PhysicalStructureLowering,
+    pub validation_rule_id: Option<&'static str>,
 }
 
 /// Typed cross-table contract. Enforcement belongs to complete candidate publication state.
@@ -287,6 +555,7 @@ pub enum OperationalSqliteType {
 pub struct OperationalTableSpec {
     pub name: &'static str,
     pub sqlite_ddl: &'static str,
+    pub sqlite_column_types: Vec<OperationalSqliteType>,
     pub arrow_schema: SchemaRef,
     pub primary_key: &'static [&'static str],
     pub workspace_scope: Option<OperationalWorkspaceScope>,
@@ -343,9 +612,9 @@ fn schema_digest(schema: &SchemaRef) -> String {
         .expect("generated TableSpec must have a canonical Delta schema identity")
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)] // The generated IR owns the full reusable §7 logical-type vocabulary.
-enum LogicalType {
+pub enum LogicalType {
     Id16,
     Hash32,
     Code16,
@@ -354,6 +623,7 @@ enum LogicalType {
     Int16,
     Int32,
     Int64,
+    UInt64,
     Float64,
     Boolean,
     Utf8,
@@ -369,6 +639,8 @@ struct GeneratedColumn {
     name: &'static str,
     logical_type: LogicalType,
     nullable: bool,
+    id_domain: Option<&'static str>,
+    element_id_domain: Option<&'static str>,
     semantic_type: Option<&'static str>,
     foreign_key: Option<&'static str>,
     hidden_operational: bool,
@@ -395,9 +667,43 @@ struct GeneratedTableSpec {
 }
 
 #[derive(Clone, Copy)]
+struct GeneratedResultSchemaSpec {
+    result_schema_id: &'static str,
+    query_form_code: u16,
+    result_role: &'static str,
+    version: &'static str,
+    fields: &'static [GeneratedColumn],
+}
+
+/// Read-only compiled view of one table or result column contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ColumnContractSpec {
+    pub name: &'static str,
+    pub logical_type: LogicalType,
+    pub nullable: bool,
+    pub id_domain: Option<&'static str>,
+    pub element_id_domain: Option<&'static str>,
+    pub semantic_type: Option<&'static str>,
+    pub foreign_key: Option<&'static str>,
+    pub hidden_operational: bool,
+}
+
+/// Read-only compiled result contract used by the ontology plane and response shaper.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResultSchemaContractSpec {
+    pub result_schema_id: &'static str,
+    pub query_form_code: u16,
+    pub result_role: &'static str,
+    pub version: &'static str,
+    pub fields: &'static [ColumnContractSpec],
+}
+
+#[derive(Clone, Copy)]
 struct GeneratedOperationalColumn {
     name: &'static str,
     sqlite_type: OperationalSqliteType,
+    logical_type: LogicalType,
+    id_domain: Option<&'static str>,
     nullable: bool,
 }
 
@@ -411,11 +717,149 @@ struct GeneratedOperationalTableSpec {
 }
 
 include!("generated/table_specs.rs");
+include!("generated/result_schemas.rs");
+
+const fn column_contract(column: GeneratedColumn) -> ColumnContractSpec {
+    ColumnContractSpec {
+        name: column.name,
+        logical_type: column.logical_type,
+        nullable: column.nullable,
+        id_domain: column.id_domain,
+        element_id_domain: column.element_id_domain,
+        semantic_type: column.semantic_type,
+        foreign_key: column.foreign_key,
+        hidden_operational: column.hidden_operational,
+    }
+}
+
+/// Return the single generated column authority for one durable table.
+#[must_use]
+pub fn table_column_contracts(table_code: i16) -> Option<&'static [ColumnContractSpec]> {
+    static CONTRACTS: OnceLock<HashMap<i16, Box<[ColumnContractSpec]>>> = OnceLock::new();
+    CONTRACTS
+        .get_or_init(|| {
+            GENERATED_TABLE_SPECS
+                .iter()
+                .map(|table| {
+                    (
+                        table.table_code,
+                        table
+                            .columns
+                            .iter()
+                            .copied()
+                            .map(column_contract)
+                            .collect::<Vec<_>>()
+                            .into_boxed_slice(),
+                    )
+                })
+                .collect()
+        })
+        .get(&table_code)
+        .map(AsRef::as_ref)
+}
+
+/// Return every compiled query-result contract without reparsing its source authority.
+#[must_use]
+pub fn result_schema_contracts() -> &'static [ResultSchemaContractSpec] {
+    static CONTRACTS: OnceLock<Vec<ResultSchemaContractSpec>> = OnceLock::new();
+    CONTRACTS.get_or_init(|| {
+        GENERATED_RESULT_SCHEMAS
+            .iter()
+            .map(|schema| {
+                let fields = schema
+                    .fields
+                    .iter()
+                    .copied()
+                    .map(column_contract)
+                    .collect::<Vec<_>>()
+                    .leak();
+                ResultSchemaContractSpec {
+                    result_schema_id: schema.result_schema_id,
+                    query_form_code: schema.query_form_code,
+                    result_role: schema.result_role,
+                    version: schema.version,
+                    fields,
+                }
+            })
+            .collect()
+    })
+}
+
+/// Resolve one governed query-result Arrow schema through the common field lowering.
+#[must_use]
+pub fn result_schema(result_schema_id: &str) -> Option<SchemaRef> {
+    GENERATED_RESULT_SCHEMAS
+        .iter()
+        .find(|schema| schema.result_schema_id == result_schema_id)
+        .map(|schema| {
+            let metadata = HashMap::from([
+                (
+                    "com.codefabric.cpg.result_schema_id".to_owned(),
+                    schema.result_schema_id.to_owned(),
+                ),
+                (
+                    "com.codefabric.cpg.query_form_code".to_owned(),
+                    schema.query_form_code.to_string(),
+                ),
+                (
+                    "com.codefabric.cpg.result_role".to_owned(),
+                    schema.result_role.to_owned(),
+                ),
+                (
+                    "com.codefabric.cpg.result_schema_version".to_owned(),
+                    schema.version.to_owned(),
+                ),
+            ]);
+            Arc::new(Schema::new_with_metadata(
+                schema
+                    .fields
+                    .iter()
+                    .copied()
+                    .map(|column| field(column, &[]))
+                    .collect::<Vec<_>>(),
+                metadata,
+            ))
+        })
+}
+
+/// Project an internal dependency schema from fields owned by one generated result contract.
+/// This keeps helper plans on the same logical-type and metadata lowering without minting a
+/// second hand-written field authority.
+#[must_use]
+pub fn project_result_schema(result_schema_id: &str, names: &[&str]) -> Option<SchemaRef> {
+    let schema = GENERATED_RESULT_SCHEMAS
+        .iter()
+        .find(|schema| schema.result_schema_id == result_schema_id)?;
+    let fields = names
+        .iter()
+        .map(|name| {
+            schema
+                .fields
+                .iter()
+                .copied()
+                .find(|field| field.name == *name)
+                .map(|field| super::schema_registry::field(field, &[]))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Arc::new(Schema::new_with_metadata(
+        fields,
+        HashMap::from([(
+            "com.codefabric.cpg.projected_result_schema_id".to_owned(),
+            result_schema_id.to_owned(),
+        )]),
+    )))
+}
 
 /// Return the IR-owned ontology version projected into every table schema.
 #[must_use]
 pub const fn ontology_version() -> &'static str {
     GENERATED_ONTOLOGY_VERSION
+}
+
+/// Canonical identity of the compiled Schema Contract IR authority.
+#[must_use]
+pub const fn schema_contract_digest() -> &'static str {
+    GENERATED_SCHEMA_CONTRACT_DIGEST
 }
 
 /// Return the IR-owned compatibility mode projected into every table schema.
@@ -438,6 +882,25 @@ pub fn semantic_type_binding(semantic_type: &str) -> Option<&'static SemanticTyp
         .find(|binding| binding.semantic_type == semantic_type)
 }
 
+/// Return every compiled semantic-type resolver binding.
+#[must_use]
+pub const fn semantic_type_bindings() -> &'static [SemanticTypeBindingSpec] {
+    GENERATED_SEMANTIC_TYPE_BINDINGS
+}
+
+#[must_use]
+pub const fn structure_groups() -> &'static [StructureGroupSpec] {
+    GENERATED_STRUCTURE_GROUPS
+}
+
+#[must_use]
+pub fn structure_class(table_code: i16, column: &str) -> Option<LogicalStructureClass> {
+    GENERATED_STRUCTURE_GROUPS
+        .iter()
+        .find(|group| group.table_codes.contains(&table_code) && group.columns.contains(&column))
+        .map(|group| group.logical_class)
+}
+
 /// Return every generated typed foreign-key contract.
 #[must_use]
 pub const fn foreign_key_contracts() -> &'static [ForeignKeyContract] {
@@ -457,10 +920,12 @@ pub const fn schema_evolution_policy() -> SchemaEvolutionPolicy {
 fn physical_type(logical: LogicalType) -> DataType {
     match logical {
         LogicalType::Id16 => DataType::FixedSizeBinary(16),
-        LogicalType::Hash32 | LogicalType::Binary => DataType::Binary,
+        LogicalType::Hash32 => DataType::FixedSizeBinary(32),
+        LogicalType::Binary => DataType::Binary,
         LogicalType::Code16 | LogicalType::Bucket16 | LogicalType::Int16 => DataType::Int16,
         LogicalType::Code32 | LogicalType::Int32 => DataType::Int32,
         LogicalType::Int64 => DataType::Int64,
+        LogicalType::UInt64 => DataType::UInt64,
         LogicalType::Float64 => DataType::Float64,
         LogicalType::Boolean => DataType::Boolean,
         LogicalType::Utf8 => DataType::Utf8,
@@ -470,10 +935,11 @@ fn physical_type(logical: LogicalType) -> DataType {
         LogicalType::IdList => {
             // Delta's Arrow conversion canonicalizes list children to `element`.
             // Emit that library-native name so the generated schema round-trips exactly.
-            DataType::List(Arc::new(
-                Field::new("element", DataType::FixedSizeBinary(16), false)
-                    .with_extension_type(Id16Extension::v1()),
-            ))
+            DataType::List(Arc::new(Field::new(
+                "element",
+                DataType::FixedSizeBinary(16),
+                false,
+            )))
         }
         LogicalType::Int64List => {
             DataType::List(Arc::new(Field::new("element", DataType::Int64, false)))
@@ -521,64 +987,29 @@ fn field(contract: GeneratedColumn, primary_key: &[&str]) -> Field {
             "true".to_owned(),
         );
     }
-    let field = Field::new(
-        contract.name,
-        physical_type(contract.logical_type),
-        contract.nullable,
-    )
-    .with_metadata(metadata);
-    if matches!(contract.logical_type, LogicalType::Id16) {
-        field.with_extension_type(Id16Extension::v1())
-    } else {
-        field
+    let mut data_type = physical_type(contract.logical_type);
+    if let (LogicalType::IdList, Some(domain)) = (contract.logical_type, contract.element_id_domain)
+    {
+        let DataType::List(element) = data_type else {
+            unreachable!("IdList lowering always yields a List")
+        };
+        data_type = DataType::List(Arc::new(
+            attach_generated_id_domain(element.as_ref().clone(), domain)
+                .expect("validated generated ID-list domain"),
+        ));
     }
-}
-
-fn model_logical_type(
-    logical: crate::model_generated::schema_tables::ModelLogicalType,
-) -> LogicalType {
-    use crate::model_generated::schema_tables::ModelLogicalType as Model;
-    match logical {
-        Model::Id16 => LogicalType::Id16,
-        Model::Hash32 => LogicalType::Hash32,
-        Model::Code16 => LogicalType::Code16,
-        Model::Code32 => LogicalType::Code32,
-        Model::Bucket16 => LogicalType::Bucket16,
-        Model::Int16 => LogicalType::Int16,
-        Model::Int32 => LogicalType::Int32,
-        Model::Int64 => LogicalType::Int64,
-        Model::Float64 => LogicalType::Float64,
-        Model::Boolean => LogicalType::Boolean,
-        Model::Utf8 => LogicalType::Utf8,
-        Model::Binary => LogicalType::Binary,
-        Model::TimestampUtc => LogicalType::TimestampUtc,
-        Model::IdList => LogicalType::IdList,
-        Model::Int64List => LogicalType::Int64List,
-        Model::StringMap => LogicalType::StringMap,
+    let field = Field::new(contract.name, data_type, contract.nullable).with_metadata(metadata);
+    match contract.logical_type {
+        LogicalType::Id16 => attach_generated_id_domain(
+            field,
+            contract
+                .id_domain
+                .expect("validated generated scalar ID domain"),
+        )
+        .expect("validated generated scalar ID extension"),
+        LogicalType::Hash32 => field.with_extension_type(Hash32Extension::v1()),
+        _ => field,
     }
-}
-
-fn model_field(
-    column: crate::model_generated::schema_tables::ModelColumn,
-    primary_key: &[&str],
-    legacy: GeneratedTableSpec,
-) -> Field {
-    let hidden_operational = legacy
-        .columns
-        .iter()
-        .find(|candidate| candidate.name == column.name)
-        .is_some_and(|candidate| candidate.hidden_operational);
-    field(
-        GeneratedColumn {
-            name: column.name,
-            logical_type: model_logical_type(column.logical_type),
-            nullable: column.nullable,
-            semantic_type: column.semantic_type,
-            foreign_key: column.foreign_key,
-            hidden_operational,
-        },
-        primary_key,
-    )
 }
 
 const fn durable_name(value: DurableMutationClass) -> &'static str {
@@ -621,10 +1052,6 @@ const fn publication_pin_name(value: PublicationPinRole) -> &'static str {
 }
 
 fn build(contract: GeneratedTableSpec) -> TableSpec {
-    let model = crate::model_generated::schema_tables::MODEL_TABLES
-        .iter()
-        .find(|candidate| candidate.table_code == contract.table_code)
-        .expect("model-generated table is complete for every runtime table");
     let metadata = HashMap::from([
         (
             "com.codefabric.cpg.table_name".to_owned(),
@@ -648,7 +1075,7 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         ),
         (
             "com.codefabric.cpg.primary_key".to_owned(),
-            model.primary_key.join(","),
+            contract.primary_key.join(","),
         ),
         (
             "com.codefabric.cpg.partition_columns".to_owned(),
@@ -675,11 +1102,11 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
             compatibility_mode().to_owned(),
         ),
     ]);
-    let fields = model
+    let fields = contract
         .columns
         .iter()
         .copied()
-        .map(|column| model_field(column, model.primary_key, contract))
+        .map(|column| field(column, contract.primary_key))
         .collect::<Vec<_>>();
     let arrow_schema = Arc::new(Schema::new_with_metadata(fields, metadata));
     TableSpec {
@@ -690,7 +1117,7 @@ fn build(contract: GeneratedTableSpec) -> TableSpec {
         schema_version: contract.schema_version,
         schema_digest: schema_digest(&arrow_schema),
         arrow_schema,
-        primary_key: model.primary_key,
+        primary_key: contract.primary_key,
         partition_columns: contract.partition_columns,
         zorder_columns: contract.zorder_columns,
         durable_mutation: contract.durable_mutation,
@@ -798,18 +1225,29 @@ fn build_operational(contract: GeneratedOperationalTableSpec) -> OperationalTabl
         .columns
         .iter()
         .map(|column| {
-            let data_type = match column.sqlite_type {
-                OperationalSqliteType::Integer => DataType::Int64,
-                OperationalSqliteType::Real => DataType::Float64,
-                OperationalSqliteType::Text => DataType::Utf8,
-                OperationalSqliteType::Blob => DataType::Binary,
-            };
-            Field::new(column.name, data_type, column.nullable)
+            field(
+                GeneratedColumn {
+                    name: column.name,
+                    logical_type: column.logical_type,
+                    nullable: column.nullable,
+                    id_domain: column.id_domain,
+                    element_id_domain: None,
+                    semantic_type: column.id_domain.map(|_| "id16"),
+                    foreign_key: None,
+                    hidden_operational: false,
+                },
+                contract.primary_key,
+            )
         })
         .collect::<Vec<_>>();
     OperationalTableSpec {
         name: contract.name,
         sqlite_ddl: contract.sqlite_ddl,
+        sqlite_column_types: contract
+            .columns
+            .iter()
+            .map(|column| column.sqlite_type)
+            .collect(),
         arrow_schema: Arc::new(Schema::new(fields)),
         primary_key: contract.primary_key,
         workspace_scope: contract.workspace_scope,
@@ -872,6 +1310,11 @@ mod tests {
                         values.append_value(&BYTES[..16]).unwrap();
                         Arc::new(values.finish())
                     }
+                    DataType::FixedSizeBinary(32) => {
+                        let mut values = FixedSizeBinaryBuilder::with_capacity(1, 32);
+                        values.append_value(BYTES).unwrap();
+                        Arc::new(values.finish())
+                    }
                     DataType::Int16 => Arc::new(Int16Array::from(vec![0])),
                     DataType::Int32 => Arc::new(Int32Array::from(vec![0])),
                     DataType::Int64 => Arc::new(Int64Array::from(vec![0])),
@@ -898,6 +1341,253 @@ mod tests {
             })
             .collect();
         arrow::record_batch::RecordBatch::try_new(table.arrow_schema.clone(), columns).unwrap()
+    }
+
+    fn synthetic_result_batch(schema: &SchemaRef) -> arrow::record_batch::RecordBatch {
+        use arrow::array::{
+            ArrayRef, BinaryArray, FixedSizeBinaryBuilder, Int16Array, Int32Array, Int64Array,
+            ListBuilder, StringArray, UInt64Array,
+        };
+
+        const BYTES: [u8; 32] = [0x5a; 32];
+        let columns = schema
+            .fields()
+            .iter()
+            .map(|field| -> ArrayRef {
+                match field.data_type() {
+                    DataType::Binary => Arc::new(BinaryArray::from(vec![Some(BYTES.as_slice())])),
+                    DataType::FixedSizeBinary(width) => {
+                        let mut values = FixedSizeBinaryBuilder::with_capacity(1, *width);
+                        values
+                            .append_value(
+                                &BYTES[..usize::try_from(*width).expect("positive width")],
+                            )
+                            .unwrap();
+                        Arc::new(values.finish())
+                    }
+                    DataType::Int16 => Arc::new(Int16Array::from(vec![10])),
+                    DataType::Int32 => Arc::new(Int32Array::from(vec![10])),
+                    DataType::Int64 => Arc::new(Int64Array::from(vec![1])),
+                    DataType::UInt64 => Arc::new(UInt64Array::from(vec![1])),
+                    DataType::Utf8 => Arc::new(StringArray::from(vec!["value"])),
+                    DataType::List(element)
+                        if element.data_type() == &DataType::FixedSizeBinary(16) =>
+                    {
+                        let mut values = ListBuilder::new(FixedSizeBinaryBuilder::new(16))
+                            .with_field(Arc::clone(element));
+                        values.values().append_value(&BYTES[..16]).unwrap();
+                        values.append(true);
+                        Arc::new(values.finish())
+                    }
+                    other => panic!("unhandled generated result type {other:?}"),
+                }
+            })
+            .collect();
+        arrow::record_batch::RecordBatch::try_new(Arc::clone(schema), columns).unwrap()
+    }
+
+    #[test]
+    fn generated_result_schema_arrow_roundtrip() {
+        use std::io::Cursor;
+
+        use arrow::ipc::reader::StreamReader;
+        use arrow::ipc::writer::StreamWriter;
+
+        let contracts = result_schema_contracts();
+        assert_eq!(contracts.len(), 8);
+        for contract in contracts {
+            let schema = result_schema(contract.result_schema_id).expect("generated result schema");
+            assert_eq!(schema.fields().len(), contract.fields.len());
+            assert_eq!(
+                schema.metadata()["com.codefabric.cpg.query_form_code"],
+                contract.query_form_code.to_string()
+            );
+            let batch = synthetic_result_batch(&schema);
+            assert_eq!(batch.schema(), schema);
+
+            for field in schema.fields() {
+                match field.data_type() {
+                    DataType::FixedSizeBinary(16) => assert!(
+                        field
+                            .metadata()
+                            .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                            .is_some_and(
+                                |name| name.starts_with("codefabric.") && name.ends_with("_id")
+                            )
+                    ),
+                    DataType::FixedSizeBinary(32) => assert_eq!(
+                        field
+                            .metadata()
+                            .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                            .map(String::as_str),
+                        Some("codefabric.hash32")
+                    ),
+                    DataType::List(element)
+                        if element.data_type() == &DataType::FixedSizeBinary(16) =>
+                    {
+                        assert!(
+                            element
+                                .metadata()
+                                .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                                .is_some_and(
+                                    |name| name.starts_with("codefabric.") && name.ends_with("_id")
+                                )
+                        );
+                    }
+                    _ => {}
+                }
+            }
+
+            let mut ipc = Vec::new();
+            {
+                let mut writer = StreamWriter::try_new(&mut ipc, &schema).unwrap();
+                writer.write(&batch).unwrap();
+                writer.finish().unwrap();
+            }
+            let replay = StreamReader::try_new(Cursor::new(ipc), None)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(replay.schema(), schema);
+            assert_eq!(replay, batch);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Exhaustive generated-domain and consumer census.
+    fn odf_id_domain_lowering_conformance() {
+        use std::io::Cursor;
+
+        use arrow::ipc::reader::StreamReader;
+        use arrow::ipc::writer::StreamWriter;
+
+        assert_eq!(extension_type_registrations().len(), id_domains().len() + 1);
+        let mut observed_domains = std::collections::BTreeSet::new();
+        for table in table_specs() {
+            let contracts = table_column_contracts(table.table_code).unwrap();
+            assert_eq!(contracts.len(), table.arrow_schema.fields().len());
+            for (contract, field) in contracts.iter().zip(table.arrow_schema.fields()) {
+                match contract.logical_type {
+                    LogicalType::Id16 => {
+                        let domain = contract.id_domain.expect("scalar ID domain");
+                        let generated = id_domains()
+                            .iter()
+                            .find(|candidate| candidate.domain_slug == domain)
+                            .expect("registered scalar ID domain");
+                        assert_eq!(field.data_type(), &DataType::FixedSizeBinary(16));
+                        assert_eq!(
+                            field
+                                .metadata()
+                                .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                                .map(String::as_str),
+                            Some(generated.extension_name)
+                        );
+                        assert!(DomainTypedLiteral::new(domain, [0x61; 16]).is_ok());
+                        observed_domains.insert(domain);
+                    }
+                    LogicalType::IdList => {
+                        let domain = contract.element_id_domain.expect("ID-list element domain");
+                        let generated = id_domains()
+                            .iter()
+                            .find(|candidate| candidate.domain_slug == domain)
+                            .expect("registered ID-list domain");
+                        let DataType::List(element) = field.data_type() else {
+                            panic!("{} is not a typed ID list", field.name())
+                        };
+                        assert_eq!(element.data_type(), &DataType::FixedSizeBinary(16));
+                        assert_eq!(
+                            element
+                                .metadata()
+                                .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                                .map(String::as_str),
+                            Some(generated.extension_name)
+                        );
+                        observed_domains.insert(domain);
+                    }
+                    LogicalType::Hash32 => {
+                        assert_eq!(field.data_type(), &DataType::FixedSizeBinary(32));
+                        assert_eq!(
+                            field
+                                .metadata()
+                                .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                                .map(String::as_str),
+                            Some(Hash32Extension::NAME)
+                        );
+                    }
+                    _ => {
+                        assert!(contract.id_domain.is_none());
+                        assert!(contract.element_id_domain.is_none());
+                    }
+                }
+            }
+
+            let batch =
+                arrow::record_batch::RecordBatch::new_empty(Arc::clone(&table.arrow_schema));
+            let mut ipc = Vec::new();
+            {
+                let mut writer = StreamWriter::try_new(&mut ipc, &table.arrow_schema).unwrap();
+                writer.write(&batch).unwrap();
+                writer.finish().unwrap();
+            }
+            let replay = StreamReader::try_new(Cursor::new(ipc), None)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(replay.schema(), table.arrow_schema);
+            assert_eq!(
+                table.datafusion_schema().unwrap().fields().len(),
+                table.arrow_schema.fields().len()
+            );
+        }
+        for contract in result_schema_contracts() {
+            let schema = result_schema(contract.result_schema_id).unwrap();
+            for (field_contract, field) in contract.fields.iter().zip(schema.fields()) {
+                if let Some(domain) = field_contract.id_domain {
+                    let generated = id_domains()
+                        .iter()
+                        .find(|candidate| candidate.domain_slug == domain)
+                        .unwrap();
+                    assert_eq!(
+                        field
+                            .metadata()
+                            .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                            .map(String::as_str),
+                        Some(generated.extension_name)
+                    );
+                    observed_domains.insert(domain);
+                }
+                if let Some(domain) = field_contract.element_id_domain {
+                    let generated = id_domains()
+                        .iter()
+                        .find(|candidate| candidate.domain_slug == domain)
+                        .unwrap();
+                    let DataType::List(element) = field.data_type() else {
+                        panic!("{} is not a typed ID list", field.name())
+                    };
+                    assert_eq!(
+                        element
+                            .metadata()
+                            .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                            .map(String::as_str),
+                        Some(generated.extension_name)
+                    );
+                    observed_domains.insert(domain);
+                }
+            }
+        }
+        for domain in id_domains() {
+            assert!(DomainTypedLiteral::new(domain.domain_slug, [0x62; 16]).is_ok());
+        }
+        assert!(
+            observed_domains.is_subset(
+                &id_domains()
+                    .iter()
+                    .map(|domain| domain.domain_slug)
+                    .collect()
+            )
+        );
     }
 
     #[test]
@@ -976,8 +1666,8 @@ mod tests {
         let index = entity.arrow_schema.index_of("entity_id").unwrap();
         let field = entity.arrow_schema.field(index);
         assert_eq!(
-            field.try_extension_type::<Id16Extension>().unwrap(),
-            Id16Extension::v1()
+            field.try_extension_type::<EntityIdExtension>().unwrap(),
+            EntityIdExtension::v1()
         );
         assert_eq!(field.data_type(), &DataType::FixedSizeBinary(16));
 
@@ -985,9 +1675,9 @@ mod tests {
         assert_eq!(
             projected
                 .field(0)
-                .try_extension_type::<Id16Extension>()
+                .try_extension_type::<EntityIdExtension>()
                 .unwrap(),
-            Id16Extension::v1(),
+            EntityIdExtension::v1(),
             "Arrow schema projection must preserve the application extension contract"
         );
         let batch = one_id16_batch(Arc::clone(&projected));
@@ -1007,9 +1697,9 @@ mod tests {
             ipc_batch
                 .schema()
                 .field(0)
-                .try_extension_type::<Id16Extension>()
+                .try_extension_type::<EntityIdExtension>()
                 .unwrap(),
-            Id16Extension::v1(),
+            EntityIdExtension::v1(),
             "IPC must preserve the extension metadata"
         );
 
@@ -1032,9 +1722,9 @@ mod tests {
             parquet_batch
                 .schema()
                 .field(0)
-                .try_extension_type::<Id16Extension>()
+                .try_extension_type::<EntityIdExtension>()
                 .unwrap(),
-            Id16Extension::v1(),
+            EntityIdExtension::v1(),
             "Parquet Arrow schema metadata must preserve the extension contract"
         );
 
@@ -1046,9 +1736,9 @@ mod tests {
             reattached
                 .schema()
                 .field(0)
-                .try_extension_type::<Id16Extension>()
+                .try_extension_type::<EntityIdExtension>()
                 .unwrap(),
-            Id16Extension::v1(),
+            EntityIdExtension::v1(),
             "application schema reattachment restores metadata after storage casts"
         );
 
@@ -1057,7 +1747,7 @@ mod tests {
         fallback_metadata.remove(arrow_schema::extension::EXTENSION_TYPE_METADATA_KEY);
         let fallback = field.clone().with_metadata(fallback_metadata);
         assert_eq!(fallback.data_type(), &DataType::FixedSizeBinary(16));
-        assert!(fallback.try_extension_type::<Id16Extension>().is_err());
+        assert!(fallback.try_extension_type::<EntityIdExtension>().is_err());
 
         let mut unsupported_metadata = field.metadata().clone();
         unsupported_metadata.insert(
@@ -1065,7 +1755,11 @@ mod tests {
             "version=2".to_owned(),
         );
         let unsupported = field.clone().with_metadata(unsupported_metadata);
-        assert!(unsupported.try_extension_type::<Id16Extension>().is_err());
+        assert!(
+            unsupported
+                .try_extension_type::<EntityIdExtension>()
+                .is_err()
+        );
     }
 
     #[test]

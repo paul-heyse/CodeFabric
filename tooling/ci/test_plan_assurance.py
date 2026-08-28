@@ -22,6 +22,45 @@ def test_cycle_is_rejected() -> None:
         assurance._topological_order({"WP01": {"WP02"}, "WP02": {"WP01"}})
 
 
+def test_known_touch_parser_ignores_fenced_preflight_and_reads_owned_paths() -> None:
+    block = (
+        "**Change surface / Preflight / Known Touch.** Run:\n\n"
+        "```bash\nrg -n 'symbol' src/irrelevant.rs\n```\n\n"
+        "Known touch: `src/owned.rs`, `contracts/example.yaml`.\n\n"
+        "**Required changes.**\n"
+    )
+    assert assurance._known_touch_resources(block) == {
+        "src/owned.rs",
+        "contracts/example.yaml",
+    }
+
+
+def test_ontology_fabric_release_barrier_is_structural() -> None:
+    plan = artifact_contracts.active_plan_path()
+    dependencies = assurance._dependency_map(plan)
+    assert assurance._validate_ontology_fabric_readiness_states(dependencies) == 60
+    dependencies["WP17"].remove("WP16")
+    with pytest.raises(assurance.PlanAssuranceError, match="release-barrier"):
+        assurance._validate_ontology_fabric_readiness_states(dependencies)
+
+
+def test_packet_assurance_remains_runnable_during_declared_input_evolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden_freshness_check(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("packet assurance invoked the completion-freshness gate")
+
+    monkeypatch.setattr(
+        artifact_contracts,
+        "validate_artifacts",
+        forbidden_freshness_check,
+    )
+    plan_path, plan, state = assurance._active()
+    assert plan_path == artifact_contracts.active_plan_path()
+    assert plan["plan_id"] == "codefabric-ontology-compiled-data-fabric"
+    assert state["status"] == "executing"
+
+
 def test_single_call_python_alias_is_rejected(tmp_path: Path) -> None:
     source = tmp_path / "tooling" / "test_alias.py"
     source.parent.mkdir()

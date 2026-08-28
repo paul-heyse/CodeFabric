@@ -60,7 +60,7 @@
     },
     {
       "artifact_id": "codefabric.registry.ontology-relation-registry",
-      "canonical_digest": "b3:2b66853b403b9febccac35f7aa355d4ebf3a97e6d9b1efd5f11b175c63cb0ee5",
+      "canonical_digest": "b3:85bd5c3232c4555276a0e1c997d7bafdd2c64931a2fb5e57aaa2f76284f73ef1",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -73,7 +73,7 @@
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:bd25a40cb523b8d8c7b9a275032541e1deb8f736cff99c0a2e03abf997132b34",
+  "bundle_digest": "b3:bb4f22ed6dd0653cb411d0cba1e9c6740bf03ad0e9d7dea37239a65e9d6e94c7",
   "bundle_kind": "ontology",
   "bundle_major": 1,
   "bundle_version": "1.0",

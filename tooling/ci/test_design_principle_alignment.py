@@ -99,6 +99,27 @@ def test_active_plan_resolution(tmp_path: Path) -> None:
     assert alignment._active_plan(tmp_path) == (plan, "### WP54 — packet\n")
 
 
+def test_transformation_pass_plan_resolution_uses_immutable_plan_provenance(
+    tmp_path: Path,
+) -> None:
+    active = Path("docs/plans/active_implementation_plan.md")
+    prior = Path("docs/plans/prior_implementation_plan_v2.md")
+    (tmp_path / active).parent.mkdir(parents=True)
+    (tmp_path / active).write_text("### WP01 — active packet\n", encoding="utf-8")
+    (tmp_path / prior).write_text(
+        "### WP03 — prior packet\n"
+        "Executable oracle: `behavioral`; Executable oracle: `structural`\n",
+        encoding="utf-8",
+    )
+    assert alignment._transformation_pass_plan_paths(
+        tmp_path,
+        active,
+        (tmp_path / active).read_text(encoding="utf-8"),
+        "WP03",
+        ["behavioral", "structural"],
+    ) == (prior,)
+
+
 def test_wp73_behavioral_acceptance() -> None:
     assert alignment.validate_traceability() == (25, 124)
     observations = alignment.execute_detectors()

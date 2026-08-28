@@ -30,6 +30,46 @@ const MAX_ROWS_PER_STREAM: usize = 65_536;
 const MAX_BATCHES_PER_STREAM: usize = 256;
 const MAX_IPC_BYTES_PER_STREAM: usize = 16 * 1_024 * 1_024;
 
+/// Compute the canonical schema-and-row checksum shared by ingest, mutation, and
+/// provider-equivalence proof. Input row order does not affect the result.
+///
+/// # Errors
+///
+/// Returns an Arrow row-encoding error for a generated type unsupported by the
+/// pinned Arrow version.
+pub fn canonical_batch_checksum(batch: &RecordBatch) -> Result<[u8; 32], ArrowError> {
+    let fields = batch
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| SortField::new(field.data_type().clone()))
+        .collect();
+    let converter = RowConverter::new(fields)?;
+    let rows = converter.convert_columns(batch.columns())?;
+    let mut ordered = rows.iter().map(|row| row.data()).collect::<Vec<_>>();
+    ordered.sort_unstable();
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::ArrowBatch,
+    );
+    if let Some(digest) = batch
+        .schema()
+        .metadata()
+        .get("com.codefabric.cpg.schema_digest")
+    {
+        hasher.update(digest.as_bytes());
+    }
+    hasher.update(
+        &u64::try_from(batch.num_rows())
+            .unwrap_or(u64::MAX)
+            .to_be_bytes(),
+    );
+    for row in ordered {
+        hasher.update(&u64::try_from(row.len()).unwrap_or(u64::MAX).to_be_bytes());
+        hasher.update(row);
+    }
+    Ok(hasher.finalize())
+}
+
 /// Stable failures at the only canonical fact-ingest boundary.
 #[derive(Debug, Error)]
 pub enum FactIngestError {
@@ -60,38 +100,6 @@ pub struct FactScope {
     pub owner_id: [u8; 16],
 }
 
-/// One canonical replacement owner anchoring every owner-scoped fact row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OwnerRow {
-    pub scope: FactScope,
-    pub parent_owner_id: Option<[u8; 16]>,
-    pub owner_kind_code: i16,
-    pub language: i16,
-    pub file_id: Option<[u8; 16]>,
-    pub semantic_entity_id: Option<[u8; 16]>,
-    pub start_byte: Option<i64>,
-    pub end_byte: Option<i64>,
-    pub source_fingerprint: Option<[u8; 32]>,
-    pub semantic_fingerprint: Option<[u8; 32]>,
-    pub capability_mask: i64,
-}
-
-/// One explicit capability/completeness claim for a canonical owner.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CapabilityStatusRow {
-    pub scope: FactScope,
-    pub snapshot_id: Option<[u8; 16]>,
-    pub capability_code: i16,
-    pub owner_capability_state_code: i16,
-    pub completeness_state_code: i16,
-    pub provider_run_id: Option<[u8; 16]>,
-    pub producer_code: Option<i16>,
-    pub reason_code: Option<i16>,
-    pub diagnostic_id: Option<[u8; 16]>,
-    pub fallback_source_available: bool,
-    pub coverage_scope_fingerprint: [u8; 32],
-}
-
 /// Scope shared by every owner batch in one publication selection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FactBatchScope {
@@ -109,51 +117,6 @@ impl FactScope {
             source_generation: self.source_generation,
         }
     }
-}
-
-/// One canonical `entity` row.
-#[derive(Clone, Debug, PartialEq)]
-pub struct EntityRow {
-    pub scope: FactScope,
-    pub entity_id: [u8; 16],
-    pub language: i16,
-    pub entity_family_code: i16,
-    pub entity_kind_code: i32,
-    pub raw_kind_code: Option<i32>,
-    pub file_id: Option<[u8; 16]>,
-    pub start_byte: Option<i64>,
-    pub end_byte: Option<i64>,
-    pub name: Option<String>,
-    pub qualified_name: Option<String>,
-    pub parent_entity_id: Option<[u8; 16]>,
-    pub type_id: Option<[u8; 16]>,
-    pub flags: i64,
-    pub fact_hash64: i64,
-}
-
-/// One canonical `relation` row.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RelationRow {
-    pub scope: FactScope,
-    pub fact_id: [u8; 16],
-    pub language: i16,
-    pub relation_family_code: i16,
-    pub relation_kind_code: i32,
-    pub source_id: [u8; 16],
-    pub target_id: [u8; 16],
-    pub ordinal: Option<i32>,
-    pub role_code: Option<i16>,
-    pub distance: Option<i32>,
-    pub directness_code: i16,
-    pub file_id: Option<[u8; 16]>,
-    pub start_byte: Option<i64>,
-    pub end_byte: Option<i64>,
-    pub certainty_code: i16,
-    pub resolution_code: i16,
-    pub producer_code: i16,
-    pub derivation_code: Option<i16>,
-    pub flags: i64,
-    pub fact_hash64: i64,
 }
 
 /// Closed property representation; its code and populated Arrow column cannot diverge.
@@ -182,416 +145,6 @@ impl PropertyValue {
     }
 }
 
-/// One canonical `property_fact` row.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PropertyFactRow {
-    pub scope: FactScope,
-    pub fact_id: [u8; 16],
-    pub subject_entity_id: [u8; 16],
-    pub property_kind_code: i32,
-    pub program_point_entity_id: Option<[u8; 16]>,
-    pub value: PropertyValue,
-    pub directness_code: i16,
-    pub certainty_code: i16,
-    pub resolution_code: i16,
-    pub producer_code: i16,
-    pub derivation_code: Option<i16>,
-    pub file_id: Option<[u8; 16]>,
-    pub start_byte: Option<i64>,
-    pub end_byte: Option<i64>,
-    pub fact_hash64: i64,
-}
-
-/// One immutable provenance row for an accepted observation.
-#[derive(Clone, Debug, PartialEq)]
-pub struct FactEvidenceRow {
-    pub evidence_id: [u8; 16],
-    pub scope: FactScope,
-    pub fact_id: [u8; 16],
-    pub fact_form_code: i16,
-    pub provider_code: i16,
-    pub provider_version: String,
-    pub provider_run_id: [u8; 16],
-    pub observation_id: [u8; 16],
-    pub raw_kind_code: Option<i32>,
-    pub file_id: Option<[u8; 16]>,
-    pub start_byte: Option<i64>,
-    pub end_byte: Option<i64>,
-    pub certainty_code: i16,
-    pub resolution_code: i16,
-    pub conflict_disposition_code: i16,
-    pub cold_payload: Option<Vec<u8>>,
-}
-
-/// One persisted diagnostic emitted by the common ingest accumulator.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiagnosticRow {
-    pub diagnostic_id: [u8; 16],
-    pub workspace_id: [u8; 16],
-    pub analysis_context_id: Option<[u8; 16]>,
-    pub source_generation: i64,
-    pub owner_id: Option<[u8; 16]>,
-    pub diagnostic_code: i32,
-    pub severity_code: i16,
-    pub message: String,
-    pub cold_payload: Option<Vec<u8>>,
-    pub created_at_micros: i64,
-}
-
-/// One authoritative `source_file` extension row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SourceFileRow {
-    pub scope: FactScope,
-    pub file_id: [u8; 16],
-    pub path_bytes: Vec<u8>,
-    pub path_display: String,
-    pub path_encoding_code: i16,
-    pub path_case_key: Option<Vec<u8>>,
-    pub path_display_is_lossy: bool,
-    pub language: i16,
-    pub source_digest: [u8; 32],
-    pub byte_len: i64,
-    pub line_count: i32,
-    pub encoding_name: Option<String>,
-    pub newline_kind_code: i16,
-    pub source_bytes: Vec<u8>,
-    pub decoded_text: Option<String>,
-    pub line_start_offsets: Vec<i64>,
-    pub module_entity_id: Option<[u8; 16]>,
-    pub is_stub: bool,
-    pub flags: i64,
-}
-
-/// One provider-authenticated lexical token row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SourceTokenRow {
-    pub scope: FactScope,
-    pub token_id: [u8; 16],
-    pub file_id: [u8; 16],
-    pub ordinal: i32,
-    pub token_kind_code: i32,
-    pub start_byte: i64,
-    pub end_byte: i64,
-    pub normalized_value: Option<String>,
-    pub flags: i64,
-}
-
-/// One source comment, documentation, directive, or recovery annotation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SourceAnnotationRow {
-    pub scope: FactScope,
-    pub annotation_id: [u8; 16],
-    pub file_id: [u8; 16],
-    pub annotation_kind_code: i32,
-    pub start_byte: i64,
-    pub end_byte: i64,
-    pub target_entity_id: Option<[u8; 16]>,
-    pub text: Option<String>,
-    pub diagnostic_code: Option<i32>,
-    pub flags: i64,
-}
-
-/// One canonical syntax-entity extension row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::struct_excessive_bools)] // Generated FAB §20 columns are independent facts.
-pub struct SyntaxDetailRow {
-    pub scope: FactScope,
-    pub entity_id: [u8; 16],
-    pub raw_kind_code: i32,
-    pub occurrence_family_code: i16,
-    pub reconciliation_step_code: i16,
-    pub raw_kind_disposition_code: i16,
-    pub normalized_kind_code: i32,
-    pub parent_syntax_id: Option<[u8; 16]>,
-    pub field_role_code: Option<i16>,
-    pub ordinal: Option<i32>,
-    pub source_ordinal: Option<i32>,
-    pub evaluation_ordinal: Option<i32>,
-    pub line: Option<i32>,
-    pub column: Option<i32>,
-    pub depth: Option<i32>,
-    pub provider_name: Option<String>,
-    pub named: bool,
-    pub extra: bool,
-    pub error: bool,
-    pub missing: bool,
-    pub explicitly_parenthesized: bool,
-    pub provider_node_flags: i64,
-}
-
-/// One canonical semantic type entity derived from the application-owned type algebra.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TypeDetailRow {
-    pub scope: FactScope,
-    pub type_id: [u8; 16],
-    pub type_kind_code: i32,
-    pub canonical_key: String,
-    pub display_name: Option<String>,
-    pub primitive_code: Option<i16>,
-    pub nominal_entity_id: Option<[u8; 16]>,
-    pub callable_entity_id: Option<[u8; 16]>,
-    pub raw_shape_hash: Option<[u8; 32]>,
-    pub nullable_semantics_code: Option<i16>,
-    pub flags: i64,
-}
-
-/// One canonical relation extension retaining the precise role and origin of a type fact.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TypeFactDetailRow {
-    pub scope: FactScope,
-    pub relation_id: [u8; 16],
-    pub subject_id: [u8; 16],
-    pub type_id: [u8; 16],
-    pub type_role_code: i16,
-    pub program_point_id: Option<[u8; 16]>,
-    pub origin_code: i16,
-    pub certainty_code: i16,
-}
-
-/// One canonical Python scope extension row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ScopeDetailRow {
-    pub scope: FactScope,
-    pub scope_id: [u8; 16],
-    pub parent_scope_id: Option<[u8; 16]>,
-    pub scope_kind: String,
-    pub name: Option<String>,
-    pub start_byte: i64,
-    pub end_byte: i64,
-}
-
-/// One canonical Python binding extension row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BindingDetailRow {
-    pub scope: FactScope,
-    pub binding_id: [u8; 16],
-    pub scope_id: [u8; 16],
-    pub name: String,
-    pub binding_kind: String,
-    pub target_form: String,
-    pub start_byte: i64,
-    pub end_byte: i64,
-}
-
-/// One canonical Python reference extension row. Unknown resolution must carry
-/// a non-null reason code and a concrete `UNKNOWN_SYMBOL` target entity.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReferenceDetailRow {
-    pub scope: FactScope,
-    pub reference_id: [u8; 16],
-    pub scope_id: [u8; 16],
-    pub target_id: [u8; 16],
-    pub name: String,
-    pub reference_class: String,
-    pub resolution: String,
-    pub start_byte: i64,
-    pub end_byte: i64,
-    pub unknown_reason_code: Option<String>,
-}
-
-/// One canonical module import occurrence. Nullable endpoints remain null only
-/// when the static provider cannot establish that distinct fact.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModuleImportDetailRow {
-    pub scope: FactScope,
-    pub import_id: [u8; 16],
-    pub source_module_id: [u8; 16],
-    pub target_module_id: Option<[u8; 16]>,
-    pub imported_entity_id: Option<[u8; 16]>,
-    pub local_binding_id: Option<[u8; 16]>,
-    pub import_kind_code: i16,
-    pub relative_level: Option<i16>,
-    pub source_name: String,
-    pub alias_name: Option<String>,
-    pub star_import: bool,
-    pub unknown_reason_code: Option<i16>,
-}
-
-/// One canonical callable semantic extension.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CallableDetailRow {
-    pub scope: FactScope,
-    pub callable_id: [u8; 16],
-    pub signature_id: Option<[u8; 16]>,
-    pub return_type_id: Option<[u8; 16]>,
-    pub parameter_count: i32,
-    pub generic_parameter_count: i32,
-    pub calling_convention_code: Option<i16>,
-    pub abi_name: Option<String>,
-    pub callable_flags: i64,
-}
-
-/// One canonical callable parameter extension.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ParameterDetailRow {
-    pub scope: FactScope,
-    pub parameter_id: [u8; 16],
-    pub callable_id: [u8; 16],
-    pub ordinal: i32,
-    pub name: Option<String>,
-    pub parameter_kind_code: i16,
-    pub type_id: Option<[u8; 16]>,
-    pub default_syntax_id: Option<[u8; 16]>,
-    pub flags: i64,
-}
-
-/// One canonical first-class call-site extension.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CallSiteDetailRow {
-    pub scope: FactScope,
-    pub call_site_id: [u8; 16],
-    pub caller_id: [u8; 16],
-    pub syntax_id: Option<[u8; 16]>,
-    pub callee_syntax_id: Option<[u8; 16]>,
-    pub receiver_value_id: Option<[u8; 16]>,
-    pub result_value_id: Option<[u8; 16]>,
-    pub dispatch_kind_code: i16,
-    pub declared_target_id: Option<[u8; 16]>,
-    pub resolved_target_count: i32,
-    pub call_flags: i64,
-}
-
-/// One explicit or binder-synthesized call argument extension.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CallArgumentDetailRow {
-    pub scope: FactScope,
-    pub argument_id: [u8; 16],
-    pub call_site_id: [u8; 16],
-    pub ordinal: i32,
-    pub keyword_name: Option<String>,
-    pub argument_syntax_id: Option<[u8; 16]>,
-    pub argument_value_id: Option<[u8; 16]>,
-    pub parameter_id: Option<[u8; 16]>,
-    pub binding_status_code: i16,
-    pub spread_kind_code: Option<i16>,
-}
-
-/// One control-flow graph header owned by a module or callable.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CfgGraphRow {
-    pub scope: FactScope,
-    pub cfg_id: [u8; 16],
-    pub callable_id: Option<[u8; 16]>,
-    pub cfg_kind_code: i16,
-    pub entry_node_id: [u8; 16],
-    pub exit_node_id: [u8; 16],
-    pub exceptional_exit_node_id: Option<[u8; 16]>,
-    pub node_count: i32,
-    pub edge_count: i32,
-    pub flags: i64,
-}
-
-/// One control-flow node entity extension.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CfgNodeDetailRow {
-    pub scope: FactScope,
-    pub cfg_node_id: [u8; 16],
-    pub cfg_id: [u8; 16],
-    pub node_kind_code: i16,
-    pub syntax_id: Option<[u8; 16]>,
-    pub mir_statement_id: Option<[u8; 16]>,
-    pub ordinal: Option<i32>,
-    pub flags: i64,
-}
-
-/// One control-flow relation extension with columnar branch/exception payloads.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CfgEdgeDetailRow {
-    pub scope: FactScope,
-    pub relation_id: [u8; 16],
-    pub cfg_id: [u8; 16],
-    pub condition_id: Option<[u8; 16]>,
-    pub case_value_text: Option<String>,
-    pub case_value_hash: Option<i64>,
-    pub exception_type_id: Option<[u8; 16]>,
-    pub edge_flags: i64,
-}
-
-/// One application-owned value entity materialized by a registered derivation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ValueDetailRow {
-    pub scope: FactScope,
-    pub value_id: [u8; 16],
-    pub value_kind_code: i16,
-    pub type_id: Option<[u8; 16]>,
-    pub producer_operation_id: Option<[u8; 16]>,
-    pub constant_value_id: Option<[u8; 16]>,
-    pub syntax_id: Option<[u8; 16]>,
-    pub flags: i64,
-    pub precision_profile_id: String,
-    pub derivation_bundle_id: String,
-}
-
-/// One normalized operation and its optional produced value.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OperationDetailRow {
-    pub scope: FactScope,
-    pub operation_id: [u8; 16],
-    pub cfg_node_id: Option<[u8; 16]>,
-    pub operation_kind_code: i32,
-    pub result_value_id: Option<[u8; 16]>,
-    pub type_id: Option<[u8; 16]>,
-    pub syntax_id: Option<[u8; 16]>,
-    pub raw_kind_code: Option<i32>,
-    pub flags: i64,
-    pub precision_profile_id: String,
-    pub derivation_bundle_id: String,
-}
-
-/// One definition, use, argument, return, or dynamic-unknown dataflow event.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DataflowEventDetailRow {
-    pub scope: FactScope,
-    pub event_id: [u8; 16],
-    pub cfg_node_id: Option<[u8; 16]>,
-    pub event_kind_code: i16,
-    pub binding_id: Option<[u8; 16]>,
-    pub value_id: Option<[u8; 16]>,
-    pub location_id: Option<[u8; 16]>,
-    pub syntax_id: Option<[u8; 16]>,
-    pub ordinal: Option<i32>,
-    pub flags: i64,
-    pub precision_profile_id: String,
-    pub derivation_bundle_id: String,
-}
-
-/// One canonical abstract memory or access-path location.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MemoryLocationDetailRow {
-    pub scope: FactScope,
-    pub location_id: [u8; 16],
-    pub location_kind_code: i16,
-    pub base_entity_id: Option<[u8; 16]>,
-    pub base_local_id: Option<[u8; 16]>,
-    pub type_id: Option<[u8; 16]>,
-    pub parent_location_id: Option<[u8; 16]>,
-    pub projection_depth: i16,
-    pub canonical_path_hash: [u8; 32],
-    pub display_path: Option<String>,
-    pub flags: i64,
-    pub precision_profile_id: String,
-    pub derivation_bundle_id: String,
-}
-
-/// One ordered projection component of an abstract memory location.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AccessPathComponentRow {
-    pub scope: FactScope,
-    pub component_id: [u8; 16],
-    pub location_id: [u8; 16],
-    pub ordinal: i16,
-    pub projection_kind_code: i16,
-    pub field_entity_id: Option<[u8; 16]>,
-    pub index_value_id: Option<[u8; 16]>,
-    pub variant_entity_id: Option<[u8; 16]>,
-    pub constant_index: Option<i64>,
-    pub subslice_from: Option<i64>,
-    pub subslice_to: Option<i64>,
-    pub flags: i64,
-    pub precision_profile_id: String,
-    pub derivation_bundle_id: String,
-}
-
 fn binary<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8]>) -> ArrayRef {
     let mut builder = BinaryBuilder::with_capacity(rows.len(), rows.len().saturating_mul(16));
     for row in rows {
@@ -607,6 +160,23 @@ fn id16s<T>(rows: &[T], mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8; 
             builder
                 .append_value(value)
                 .expect("typed Id16 always has the governed storage width");
+        } else {
+            builder.append_null();
+        }
+    }
+    Arc::new(builder.finish())
+}
+
+fn hash32s<T>(
+    rows: &[T],
+    mut value: impl for<'a> FnMut(&'a T) -> Option<&'a [u8; 32]>,
+) -> ArrayRef {
+    let mut builder = FixedSizeBinaryBuilder::with_capacity(rows.len(), 32);
+    for row in rows {
+        if let Some(value) = value(row) {
+            builder
+                .append_value(value)
+                .expect("typed Hash32 always has the governed storage width");
         } else {
             builder.append_null();
         }
@@ -765,6 +335,17 @@ fn id16_column<'a>(
         .expect("generated Id16 column")
 }
 
+fn hash32_column<'a>(
+    batch: &'a RecordBatch,
+    spec: &TableSpec,
+    name: &str,
+) -> &'a FixedSizeBinaryArray {
+    column(batch, spec, name)
+        .as_any()
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .expect("generated Hash32 column")
+}
+
 fn i16_column<'a>(batch: &'a RecordBatch, spec: &TableSpec, name: &str) -> &'a Int16Array {
     column(batch, spec, name)
         .as_any()
@@ -817,9 +398,7 @@ fn validate_id_widths(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactI
             .map(String::as_str)
         {
             Some("id16") => {
-                if field
-                    .try_extension_type::<crate::schema_registry::Id16Extension>()
-                    .is_err()
+                if crate::schema_registry::validate_logical_extension_field(field).is_err()
                     || column(batch, spec, field.name()).data_type()
                         != &DataType::FixedSizeBinary(16)
                 {
@@ -827,21 +406,22 @@ fn validate_id_widths(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactI
                         spec,
                         "id16-extension",
                         format!(
-                            "{} lacks the governed codefabric.id16 contract",
+                            "{} lacks its governed ID-domain extension contract",
                             field.name()
                         ),
                     ));
                 }
             }
-            Some("hash32") => {
-                let array = binary_column(batch, spec, field.name());
-                if array.iter().flatten().any(|value| value.len() != 32) {
-                    return Err(invalid(
-                        spec,
-                        "fixed-width",
-                        format!("{} is not 32 bytes", field.name()),
-                    ));
-                }
+            Some("hash32")
+                if crate::schema_registry::validate_logical_extension_field(field).is_err()
+                    || column(batch, spec, field.name()).data_type()
+                        != &DataType::FixedSizeBinary(32) =>
+            {
+                return Err(invalid(
+                    spec,
+                    "fixed-width",
+                    format!("{} is not 32 bytes", field.name()),
+                ));
             }
             _ => {}
         }
@@ -872,12 +452,25 @@ fn validate_buckets(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIng
     Ok(())
 }
 
-fn validate_spans(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
-    if spec.arrow_schema.index_of("start_byte").is_err() {
+fn validate_structure_groups(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
+    let Some(group) = crate::schema_registry::structure_groups()
+        .iter()
+        .find(|group| {
+            group.table_codes.contains(&spec.table_code)
+                && group.validation_rule_id == Some("ontology.source-span.v1")
+        })
+    else {
         return Ok(());
-    }
-    let starts = i64_column(batch, spec, "start_byte");
-    let ends = i64_column(batch, spec, "end_byte");
+    };
+    let [start_column, end_column] = group.columns else {
+        return Err(invalid(
+            spec,
+            "span",
+            "compiled source-span group does not contain exactly two columns",
+        ));
+    };
+    let starts = i64_column(batch, spec, start_column);
+    let ends = i64_column(batch, spec, end_column);
     for row in 0..batch.num_rows() {
         if starts.is_null(row) != ends.is_null(row)
             || (!starts.is_null(row)
@@ -889,165 +482,6 @@ fn validate_spans(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactInges
     Ok(())
 }
 
-fn enum_domain(name: &str) -> Option<&'static [crate::registries::RegistryEntry]> {
-    crate::registries::REGISTRY_DOMAINS
-        .iter()
-        .find(|domain| domain.domain == name)
-        .map(|domain| domain.values)
-}
-
-fn semantic_code_registered(
-    binding: &crate::schema_registry::SemanticTypeBindingSpec,
-    code: i64,
-) -> bool {
-    use crate::schema_registry::SemanticAuthority;
-
-    match binding.authority {
-        SemanticAuthority::EnumRegistry => u16::try_from(code).is_ok_and(|code| {
-            binding
-                .domain
-                .and_then(enum_domain)
-                .is_some_and(|values| values.iter().any(|entry| entry.code == code))
-        }),
-        SemanticAuthority::TypeAlgebra => {
-            binding.domain == Some("TYPE_CONSTRUCTOR") && (1..=35).contains(&code)
-        }
-        SemanticAuthority::OntologyEntityRegistry => match binding.domain {
-            Some("ENTITY_KIND") => i32::try_from(code).is_ok_and(|code| {
-                crate::registries::ENTITY_KIND_CODES
-                    .iter()
-                    .any(|entry| entry.code == code)
-            }),
-            Some("ENTITY_FAMILY") => i16::try_from(code).is_ok_and(|code| {
-                crate::registries::ENTITY_KIND_CODES
-                    .iter()
-                    .any(|entry| entry.family_code == code)
-            }),
-            _ => false,
-        },
-        SemanticAuthority::OntologyRelationRegistry => match binding.domain {
-            Some("RELATION_KIND") => i32::try_from(code).is_ok_and(|code| {
-                crate::registries::RELATION_KIND_CODES
-                    .iter()
-                    .any(|entry| entry.code == code)
-            }),
-            Some("RELATION_FAMILY") => i16::try_from(code).is_ok_and(|code| {
-                crate::registries::RELATION_KIND_CODES
-                    .iter()
-                    .any(|entry| entry.family_code == code)
-            }),
-            _ => false,
-        },
-        SemanticAuthority::OntologyPropertyRegistry => {
-            binding.domain == Some("PROPERTY_KIND")
-                && i32::try_from(code).is_ok_and(|code| {
-                    crate::registries::PROPERTY_KIND_CODES
-                        .iter()
-                        .any(|entry| entry.code == code)
-                })
-        }
-        SemanticAuthority::OntologyFactRegistry => {
-            binding.domain == Some("FACT_KIND")
-                && i32::try_from(code).is_ok_and(|code| {
-                    crate::registries::FACT_KIND_CODES
-                        .iter()
-                        .any(|entry| entry.code == code)
-                })
-        }
-        SemanticAuthority::CapabilityRegistry => {
-            binding.domain == Some("CAPABILITY")
-                && u16::try_from(code).is_ok_and(|code| {
-                    crate::registries::CAPABILITY_IDS.iter().any(|id| {
-                        crate::registries::capability_code(id).is_some_and(|known| known == code)
-                    })
-                })
-        }
-        SemanticAuthority::SchemaIr => {
-            i16::try_from(code).is_ok_and(|table_code| table_spec(table_code).is_some())
-        }
-        SemanticAuthority::Intrinsic
-        | SemanticAuthority::ProviderCatalog
-        | SemanticAuthority::DiagnosticProtocol => true,
-    }
-}
-
-fn validate_registered_codes(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
-    for field in spec.arrow_schema.fields() {
-        let Some(semantic_type) = field.metadata().get("com.codefabric.cpg.semantic_type") else {
-            continue;
-        };
-        let binding = crate::schema_registry::semantic_type_binding(semantic_type)
-            .expect("schema generator resolves every semantic type");
-        if matches!(
-            binding.authority,
-            crate::schema_registry::SemanticAuthority::Intrinsic
-                | crate::schema_registry::SemanticAuthority::ProviderCatalog
-                | crate::schema_registry::SemanticAuthority::DiagnosticProtocol
-        ) {
-            continue;
-        }
-        let array = column(batch, spec, field.name());
-        for row in 0..batch.num_rows() {
-            if array.is_null(row) {
-                continue;
-            }
-            let code = if let Some(values) = array.as_any().downcast_ref::<Int16Array>() {
-                i64::from(values.value(row))
-            } else if let Some(values) = array.as_any().downcast_ref::<Int32Array>() {
-                i64::from(values.value(row))
-            } else {
-                continue;
-            };
-            if !semantic_code_registered(binding, code) {
-                return Err(invalid(
-                    spec,
-                    "semantic-code",
-                    format!(
-                        "{} value {code} is absent from {}",
-                        field.name(),
-                        semantic_type
-                    ),
-                ));
-            }
-        }
-    }
-    match spec.table_code {
-        100 => {
-            let kinds = i32_column(batch, spec, "entity_kind_code");
-            let families = i16_column(batch, spec, "entity_family_code");
-            for row in 0..batch.num_rows() {
-                let known = crate::registries::ENTITY_KIND_CODES.iter().any(|entry| {
-                    entry.code == kinds.value(row) && entry.family_code == families.value(row)
-                });
-                if !known {
-                    return Err(invalid(
-                        spec,
-                        "ontology-code",
-                        "entity kind/family mismatch",
-                    ));
-                }
-            }
-        }
-        110 => {
-            let kinds = i32_column(batch, spec, "relation_kind_code");
-            let families = i16_column(batch, spec, "relation_family_code");
-            for row in 0..batch.num_rows() {
-                let known = crate::registries::RELATION_KIND_CODES.iter().any(|entry| {
-                    entry.code == kinds.value(row) && entry.family_code == families.value(row)
-                });
-                if !known {
-                    return Err(invalid(
-                        spec,
-                        "ontology-code",
-                        "relation kind/family mismatch",
-                    ));
-                }
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
 fn validate_source_file(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
     if spec.table_code != 140 {
         return Ok(());
@@ -1055,7 +489,7 @@ fn validate_source_file(batch: &RecordBatch, spec: &TableSpec) -> Result<(), Fac
     let byte_lengths = i64_column(batch, spec, "byte_len");
     let line_counts = i32_column(batch, spec, "line_count");
     let source_bytes = binary_column(batch, spec, "source_bytes");
-    let source_digests = binary_column(batch, spec, "source_digest");
+    let source_digests = hash32_column(batch, spec, "source_digest");
     let offsets = column(batch, spec, "line_start_offsets")
         .as_any()
         .downcast_ref::<ListArray>()
@@ -1101,38 +535,6 @@ fn valid_line_starts(values: &Int64Array, expected_length: i64, line_count: i32)
             .zip(values.iter().flatten().skip(1))
             .all(|(left, right)| left < right)
         && i32::try_from(values.len()).unwrap_or(i32::MAX) == line_count
-}
-
-fn validate_property_values(batch: &RecordBatch, spec: &TableSpec) -> Result<(), FactIngestError> {
-    if spec.table_code != 120 {
-        return Ok(());
-    }
-    let kinds = i16_column(batch, spec, "value_kind_code");
-    let representations = [
-        "value_entity_id",
-        "value_bool",
-        "value_int64",
-        "value_float64",
-        "value_text",
-        "value_bytes",
-        "value_type_id",
-    ];
-    for row in 0..batch.num_rows() {
-        let populated = representations
-            .iter()
-            .enumerate()
-            .filter(|(_, name)| !column(batch, spec, name).is_null(row))
-            .map(|(index, _)| 10_i16 * i16::try_from(index + 1).expect("seven representations"))
-            .collect::<Vec<_>>();
-        if populated != [kinds.value(row)] {
-            return Err(invalid(
-                spec,
-                "property-value",
-                "value_kind_code does not select exactly one representation",
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// Execute the complete generated-schema fact-batch validation matrix.
@@ -1194,9 +596,7 @@ pub fn validate_fact_batch(
     validate_primary_key(batch, spec)?;
     validate_id_widths(batch, spec)?;
     validate_buckets(batch, spec)?;
-    validate_spans(batch, spec)?;
-    validate_registered_codes(batch, spec)?;
-    validate_property_values(batch, spec)?;
+    validate_structure_groups(batch, spec)?;
     validate_source_file(batch, spec)?;
     let workspaces = id16_column(batch, spec, "workspace_id");
     let contexts = id16_column(batch, spec, "analysis_context_id");
@@ -2512,6 +1912,64 @@ mod tests {
         assert_eq!(left.conflicts, right.conflicts);
         assert_eq!(left.diagnostics, right.diagnostics);
         assert_eq!(left.metrics, right.metrics);
+    }
+
+    #[test]
+    fn odf_ingest_replay_equivalence() {
+        let (expected_scope, streams, precedence) = conflicting_relation_streams();
+        let engine = CanonicalReconciliationEngine::default();
+        let first = engine
+            .ingest(expected_scope, &streams, &precedence)
+            .expect("generated row-shape ingest");
+        let replay = engine
+            .ingest(expected_scope, &streams, &precedence)
+            .expect("generated row-shape replay");
+        assert_same_output(&first, &replay);
+
+        let publication_bytes = |output: &CanonicalIngestOutput| {
+            output
+                .batches
+                .iter()
+                .flat_map(|(table_code, batch)| {
+                    let mut framed = table_code.to_be_bytes().to_vec();
+                    let bytes = ipc_bytes(batch.batch());
+                    framed.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+                    framed.extend_from_slice(&bytes);
+                    framed
+                })
+                .collect::<Vec<_>>()
+        };
+        let first_bytes = publication_bytes(&first);
+        let replay_bytes = publication_bytes(&replay);
+        assert_eq!(first_bytes, replay_bytes);
+        assert_eq!(
+            crate::integrity::framed_digest(&first_bytes),
+            crate::integrity::framed_digest(&replay_bytes)
+        );
+    }
+
+    #[test]
+    fn odf_generated_row_shape_encoder_parity() {
+        let rows = vec![
+            encode_entities(&[entity([0x31; 16])]).unwrap(),
+            encode_relations(&[relation([0x32; 16], [0x33; 16])]).unwrap(),
+            encode_properties(&[property([0x34; 16], PropertyValue::Entity([0x35; 16]))]).unwrap(),
+        ];
+        for (table_code, batch) in [100_i16, 110, 120].into_iter().zip(rows) {
+            assert_eq!(batch.schema(), table_spec(table_code).unwrap().arrow_schema);
+            validate_fact_batch(&batch, table_code, scope()).unwrap();
+            let first = ipc_bytes(&batch);
+            let replay = match table_code {
+                100 => encode_entities(&[entity([0x31; 16])]).unwrap(),
+                110 => encode_relations(&[relation([0x32; 16], [0x33; 16])]).unwrap(),
+                120 => {
+                    encode_properties(&[property([0x34; 16], PropertyValue::Entity([0x35; 16]))])
+                        .unwrap()
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(first, ipc_bytes(&replay));
+        }
     }
 
     #[test]

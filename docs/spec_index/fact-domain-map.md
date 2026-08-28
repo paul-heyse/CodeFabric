@@ -67,6 +67,22 @@ domain they extend, tagged `Py`/`Rs`.
 | Pattern matching | §40 | §24 | §34–§36 CFG tables | §77 | `ruff` §5 typed AST |
 | Comprehensions | §41 | §24 | §34–§36 CFG tables | §78 | `ruff` §5 typed AST |
 
+### 1.3 Ontology and contract plane
+
+`FAB §6.3` serves the governed vocabulary and recursive contract metadata under
+`cpg_ontology`. These are bundle-pinned dimensions, not present-state source facts, so they
+do not belong to one language lane.
+
+| Plane | FAB relations | Governing source | Primary consumer |
+|---|---|---|---|
+| Vocabulary | `enum_domain`, `entity_kind`, `entity_family`, `relation_kind`, `relation_family`, `property_kind`, `fact_kind`, `provider_raw_kind`, `id_domain` | ontology/enum/provider registries and ID-domain Contract IR | compiled semantic plans, serving decoration, publication validation |
+| Recursive contracts | `ontology_term`, `ontology_edge`, `registry_authority`, `semantic_type_binding`, `table_contract`, `column_contract`, `result_schema`, `result_field`, `identity_recipe`, `phrase_binding`, `rule_contract` | one `SchemaContractCompilation` output | catalog-only discovery, result shaping, relational integrity gates |
+
+Raw-provider-kind identity is scoped by provider, raw catalog, raw namespace, and native
+numeric code. ID columns resolve through `id_domain`; result fields resolve through
+`result_schema`/`result_field`; N:M ontology membership resolves only through
+`ontology_edge`.
+
 ## 2. Lifecycle lanes
 
 `LIFE` Part VI (§93–§99) assigns every domain to one of four update lanes. The lane determines

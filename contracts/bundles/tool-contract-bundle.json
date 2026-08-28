@@ -39,7 +39,7 @@
     },
     {
       "artifact_id": "codefabric.registry.error-registry",
-      "canonical_digest": "b3:3404f5bd747dddd2e1ed147b3a8b59afd539e720281492041c5f376023890751",
+      "canonical_digest": "b3:d87b5aeaf698d07f5ea033a3cc6a63713c9abaf2fd80d4b83b4c1c077112a2a3",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
@@ -67,13 +67,13 @@
     },
     {
       "artifact_id": "codefabric.schema.public-status.schema",
-      "canonical_digest": "b3:9ba77e9a3ed7f8d31b7ad7524934a8d6fa3c0559c4999bf5c4c6ca6a9ecc02e5",
+      "canonical_digest": "b3:6525efa7a57099ab3cb6b9f4f01a28beb81a59a4e435276e59ce261e0458ee54",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:0f5bd082ef615fad9fb4ec966f23b7181019530d0e51f2d2a1d61f4371902f46",
+  "bundle_digest": "b3:8455383fa30d7480c960a42ebbd7606d3b618fd71d630ea375e80673e67bc7ec",
   "bundle_kind": "tool-contract",
   "bundle_major": 1,
   "bundle_version": "1.0",

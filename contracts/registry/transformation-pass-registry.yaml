@@ -3,11 +3,36 @@ artifact_kind: registry
 version: "1.0"
 compatible_suite_major: 1
 status: accepted
-canonical_digest: "b3:c864181e2264f908c0da958ce38a3bb78653747d4c17da3b3ac8f6fad51bac7e"
+canonical_digest: "b3:57e6456b32b324b6c552aba508694acbaf827aa951b8ea536610c4bae2b2cc2c"
 schema_version: 1
 authority: AC-G-05
 accepted_at: "2026-08-27"
 records:
+  - pass_id: PASS_SCHEMA_CONTRACT_COMPILATION_V1
+    owner_packet: WP03
+    principles: [H-P14, H-P16]
+    inputs:
+      - {artifact: schema-contract-ir, schema: codefabric.schema.contract-ir-v1, preconditions: [strict-json-decoded, semantic-fragments-composed]}
+      - {artifact: governed-registry-bundle, schema: owner-specific-typed-registries, preconditions: [canonical-digests-current, references-total]}
+      - {artifact: provider-raw-kind-catalogs, schema: codefabric.provider-raw-kind-catalog-v1, preconditions: [runtime-inventory-fingerprints-current, raw-catalog-scopes-explicit]}
+      - {artifact: semantic-query-form-contract, schema: codefabric.query.form-contract-v1, preconditions: [request-forms-closed, output-roles-ordered]}
+    outputs:
+      - {artifact: compiled-ontology, schema: codefabric.compiled-ontology-v1, postconditions: [all-authorities-cross-linked, one-column-authority, downstream-path-independent]}
+      - {artifact: generated-schema-and-operation-projections, schema: desired-tree-schema-family-v1, postconditions: [deterministic-byte-projection, no-downstream-authority-parsing]}
+    entry_invariants: [authorities-source-fenced, duplicate-identities-rejected, unknown-fields-rejected]
+    exit_invariants: [compiled-object-complete, dependency-order-acyclic, semantic-references-total]
+    preserved_identities: [table_code, field_id, semantic_type, query_form_id, result_role]
+    generated_identities: [compiled_ontology_digest, schema_projection_digest]
+    invalidation_closure: [schema-contract-change, registry-bundle-change, provider-raw-catalog-change, semantic-fragment-change, query-form-contract-change]
+    diagnostics_failure_taxonomy: [authority-decode-failure, cross-reference-failure, duplicate-identity, unsupported-lowering, deterministic-render-failure]
+    determinism_fingerprint_inputs: [schema-contract-digest, registry-bundle-digests, provider-raw-catalog-fingerprints, semantic-fragment-digests, query-form-contract-digest, compiler-rule-version]
+    resource_telemetry_contract: [authority-bytes, compiled-table-count, compiled-operation-count, rendered-output-bytes]
+    behavioral_fixtures: [compiled_ontology_schema_projection_equivalence]
+    negative_fixtures: [cross_authority_reference_rejection]
+    incremental_fixtures: [schema_compilation_affected_closure]
+    oracles: [odf_compiled_ontology_reproducible, odf_schema_contract_pass_closure, odf_dual_list_reconciliation_zero, odf_stage1_schema_fingerprint_equality]
+    implementation_paths: [src/bin/codefabric_model/schema_driver.rs, src/compiled_ontology.rs, src/ontology_plane.rs, src/schema_registry.rs, src/generated/model_schema_tables.rs, src/generated/table_specs.rs]
+    contract_digest: "b3:1a77c7937788d5ced24764135dcd333c0c8e3c295c6fbccdcb7e8915f1efd86c"
   - pass_id: PASS_CANONICAL_TYPE_INTERNING_V1
     owner_packet: WP01
     principles: [H-P14, H-P16]

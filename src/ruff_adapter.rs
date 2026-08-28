@@ -2095,8 +2095,7 @@ mod tests {
     #[test]
     #[allow(clippy::too_many_lines)] // The operational oracle compares retained incremental and clean pipelines end to end.
     fn wave8_integration_operational_gate() {
-        use crate::fabric::batch_checksum;
-        use crate::fact_ingest::FactScope;
+        use crate::fact_ingest::{FactScope, canonical_batch_checksum as batch_checksum};
         use crate::python_semantic::project_ruff_semantic_batch;
 
         let before_source = provider_text(

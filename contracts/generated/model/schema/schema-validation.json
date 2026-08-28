@@ -48,7 +48,7 @@
   "operational_table_count": 27,
   "public_schema_count": 8,
   "schema_version": 1,
-  "source_digest": "b3:3fcec223a46e71a76c8736405dc911ced2a9a989a5743c9f835844c76821b196",
+  "source_digest": "b3:c031d6a10f0ce26c45bec2310ce4b079a4465ffc5fe31897c2c330278fe40b0d",
   "stable_field_id_rule": "<table-name>.<field-name>",
-  "table_count": 39
+  "table_count": 58
 }

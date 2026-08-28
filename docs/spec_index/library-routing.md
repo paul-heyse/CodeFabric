@@ -127,11 +127,11 @@ The heaviest dependency surface in the suite: 199 gix mentions and the whole of 
 |---|---|---|
 | §2 · §2.1 | Source basis, workspace dependency baseline | `delta` §0 version/feature/compatibility baseline · `arrow` §2 Cargo features |
 | §3.1 · §3.2 · §3.3 | Technology responsibility model | `arrow` §0 · `df` §0 · `delta` §0 |
-| §7 | Canonical physical types and identity | `arrow` §3 data model: types, fields, schemas, metadata |
+| §6.3 · §7 · §8 | Ontology catalog, per-domain fixed-width IDs, normalized dimensions | `arrow` §3 fields/schemas/extension metadata · `df` §17 catalogs · `delta` §4 schema mapping · `df-align` SCH/CAT/GOV families · `delta-align` SCH/GOV/QRY families |
 | §10 · §11 | Schema metadata conventions, schema registry | `arrow` §3 metadata · `df-schema` S1–S15 · `delta` §4 schema and Arrow type mapping |
 | §13 | Control-plane schemas and operational-state store | `df` §17 catalogs · *(SQLite — gap)* |
 | §63 | Provider-observation to Arrow contract | `arrow` §6 `RecordBatch` and streaming readers · §10 IPC and streams |
-| §64 · §65 | Batch-size policy, builder policy | `arrow` §5 arrays, builders, scalars · §4 buffers and zero-copy |
+| §64 · §65 | Batch-size policy, builder and structure-classification policy | `arrow` §5 arrays, builders, scalars · §4 buffers and zero-copy · `arrow` §14 nested arrays |
 | §66 | Batch validation | `arrow` §3 schemas · `df` §4 data model |
 | §67 | Delta table creation | `delta` §8 create-table workflows · §4 metadata governance |
 | §68 · §69 | Table mutation classes, owner replacement protocol | `delta` §9 DML delete/update/merge · §5 writing from Arrow |
@@ -144,12 +144,12 @@ The heaviest dependency surface in the suite: 199 gix mentions and the whole of 
 | §79 | DataFusion aggregate UDFs | `df` §24 UDAF · `df-calc` C1–C3 |
 | §79A | Derivation registry and single-authority matrix | `df-calc` C1.7 multi-axis decision matrix · C1.12 calculation manifest |
 | §80 | Relationally expressible derived facts | `df` §22 query optimizer · §23 join algorithms |
-| §81 | Custom logical operators | `df` §19 logical plans · §26 custom logical and physical operators |
-| §82 | Custom physical graph representation | `arrow` §4 buffers and zero-copy — CSR over Arrow buffers, **not** petgraph |
-| §83–§89 | Reachability · SCC · dominators · control dependence · reaching definitions/liveness · points-to · summary fixed point | `df` §20 physical plans and execution operators · §21 streaming execution · `df-plan` §41–§60 |
-| §90 | Custom-operator execution requirements | `df` §20 `ExecutionPlan` · §28 memory management and spilling |
+| §81 | Application graph-operator plans | `df` §19 logical plans for the relational boundary · `df-align` CALC/EXP/GOV families; custom DataFusion extension APIs are intentionally not selected |
+| §82 | Derived-lane graph execution representation | `arrow` §4 buffers and zero-copy — CSR over Arrow buffers, **not** a DataFusion `ExecutionPlan` |
+| §83–§89 | Reachability · SCC · dominators · control dependence · reaching definitions/liveness · points-to · summary fixed point | `df` §19 built-in relational plans · `arrow` §4 buffers · `pg` algorithm chapters where selected by the derivation registry |
+| §90 | Graph-operator execution requirements | `df` §28 memory accounting at the Arrow boundary · `df-align` RUN/OBS/GOV families |
 | §91 | `ServingSnapshot`-pinned overlay-aware catalog provider | `df` §17 catalogs · §18 custom `TableProvider` · `delta` §6 reading through DataFusion · §7.1 `TableProvider` integration |
-| §92 · §93 | Stable serving views, table functions | `df` §17 tables · §24 UDTF · `delta` §7.3 SQL API path |
+| §92 · §93 | Stable serving views, typed semantic entry points | `df` §17 tables · `df` §19 built-in logical plans · QRY `AC-G-46` `GraphOperatorPlan` boundary |
 | §94 | Query-planning policy | `df` §22 optimizer · `df-plan` planning track |
 | §95 · §96 | Partitioning policy, Z-order and clustering | `delta` §12 partitioning, layout, file skipping · §13 Z-order |
 | §97 | Parquet writer policy | `arrow` §11 Parquet core · §12 advanced Parquet |

@@ -40,3 +40,8 @@ records:
     left_phase: WP64 first establishes deterministic result ordering, checksums, and reproducibility records.
     right_phase: WP63 then activates the daemon query vertical using the already deterministic query-service contract.
     rationale: Reproducibility behavior is proved below the daemon activation seam, so activation does not redefine result identity.
+  - resource: src/semantic_query.rs
+    packets: [WP05, WP08]
+    left_phase: WP05 owns registry-compiled phrase predicates and removes literal semantic-code control flow before the ID-domain release.
+    right_phase: WP08 owns early domain diagnostics that delegate to the universal generated analyzer model after WP07 establishes domain types.
+    rationale: The phrase-operation and ID-domain policy sections are distinct; execution serializes WP05 before WP08 edits the shared module, and each has disjoint named oracles.

@@ -1,0 +1,19 @@
+id: ruff-no-runtime-import-execution
+language: Rust
+severity: error
+message: Ruff fact extraction must describe imports without executing Python or launching import helpers.
+note: Keep import analysis inside the Ruff AST and semantic-index adapters.
+files:
+  - src/ruff_adapter.rs
+  - src/ruff_adapter/**/*.rs
+rule:
+  any:
+    - all:
+        - kind: use_declaration
+        - regex: '(std|tokio)::process|pyo3(::|$)'
+    - all:
+        - kind: call_expression
+        - regex: '(^|::)(Command|PyImport)::new\s*\('
+    - all:
+        - kind: scoped_identifier
+        - regex: '(^|::)(Command|PyImport)::new$'

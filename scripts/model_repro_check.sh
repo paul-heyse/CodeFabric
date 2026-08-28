@@ -27,6 +27,9 @@ stage_root="$(jq -er '.stage_root' <<<"$second")"
 env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$repo_root" \
   uv run --frozen --project "$repo_root/codefabric-cpg-mcp" \
   python "$repo_root/tooling/model/validate_aggregate.py" "$stage_root"
+cargo run --locked --quiet --manifest-path "$repo_root/Cargo.toml" \
+  --no-default-features --features data-fabric \
+  --bin codefabric-model-schema-consumer -- "$stage_root"
 
 after_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all | shasum -a 256 | awk '{print $1}')"
 [ "$before_status" = "$after_status" ] || {

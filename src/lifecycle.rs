@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use arrow::util::display::array_value_to_string;
 use arrow_array::RecordBatch;
 use arrow_row::{RowConverter, SortField};
 use arrow_schema::SchemaRef;
@@ -2304,9 +2305,24 @@ fn canonical_table_state_with_normalization(
             *row_multiplicities.entry(full.clone()).or_default() += 1;
             if let Some(key_rows) = key_rows.as_ref() {
                 let key = key_rows.row(row_index).data().to_vec();
-                if governed_rows.insert(key, full).is_some() {
+                if let Some(previous) = governed_rows.insert(key, full.clone()) {
+                    let key_values = key_names
+                        .iter()
+                        .zip(&key_indices)
+                        .map(|(name, index)| {
+                            array_value_to_string(projected.column(*index).as_ref(), row_index)
+                                .map(|value| format!("{name}={value}"))
+                                .map_err(|error| {
+                                    LifecycleError::RebuildExtraction(format!(
+                                        "{table_name}: governed key formatting failed: {error}"
+                                    ))
+                                })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
                     return Err(LifecycleError::RebuildExtraction(format!(
-                        "{table_name}: duplicate projected governed key"
+                        "{table_name}: duplicate projected governed key [{}], identical rows: {}",
+                        key_values.join(", "),
+                        previous == full
                     )));
                 }
             }

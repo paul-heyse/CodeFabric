@@ -30,6 +30,9 @@ const TABLE_MANIFEST_PATH: &str = "contracts/generated/model/schema/table-specs.
 const DDL_PATH: &str = "contracts/generated/model/schema/operational-store.sql";
 const RUST_BINDINGS_PATH: &str = "src/generated/model_schema_tables.rs";
 const RUST_RUNTIME_BINDINGS_PATH: &str = "src/generated/table_specs.rs";
+const RUST_ID_DOMAIN_BINDINGS_PATH: &str = "src/generated/id_domains.rs";
+const RUST_RESULT_SCHEMA_BINDINGS_PATH: &str = "src/generated/result_schemas.rs";
+const RUST_COMPILED_ONTOLOGY_PATH: &str = "src/generated/compiled_ontology.rs";
 const RUST_ROW_ENCODERS_PATH: &str = "src/generated/fact_row_encoders.rs";
 const VALIDATION_PATH: &str = "contracts/generated/model/schema/schema-validation.json";
 const EVOLUTION_POLICY_PATH: &str = "contracts/generated/model/schema/schema-evolution-policy.json";
@@ -44,6 +47,12 @@ const RELATION_REGISTRY_PATH: &str = "contracts/registry/ontology-relation-regis
 const PROPERTY_REGISTRY_PATH: &str = "contracts/registry/ontology-property-registry.yaml";
 const FACT_REGISTRY_PATH: &str = "contracts/registry/ontology-fact-registry.yaml";
 const CAPABILITY_REGISTRY_PATH: &str = "contracts/registry/capability-registry.yaml";
+const PHRASE_REGISTRY_PATH: &str = "contracts/registry/phrase-registry.yaml";
+const PROVIDER_RAW_CATALOG_PATHS: [&str; 3] = [
+    "contracts/generated/provider-raw-kinds/tree-sitter-python-0-25-0.json",
+    "contracts/generated/provider-raw-kinds/tree-sitter-rust-0-24-2.json",
+    "contracts/generated/provider-raw-kinds/ruff-python-0-0-7.json",
+];
 const MAX_AUTHORITY_BYTES: usize = 16 * 1024 * 1024;
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -79,6 +88,7 @@ struct QueryFormContractEntry {
     node_kind: String,
     owner_section: u16,
     output_role: String,
+    result_schema_id: String,
     accepted_input_roles: Vec<String>,
     canonical_order: Vec<String>,
     fields: Vec<QueryFormFieldContract>,
@@ -205,6 +215,7 @@ pub enum LogicalType {
     Int16,
     Int32,
     Int64,
+    UInt64,
     Float64,
     Boolean,
     Utf8,
@@ -452,11 +463,105 @@ struct ColumnContract {
     logical_type: LogicalType,
     nullable: bool,
     #[serde(default)]
+    id_domain: Option<String>,
+    #[serde(default)]
+    element_id_domain: Option<String>,
+    #[serde(default)]
     semantic_type: Option<String>,
     #[serde(default)]
     foreign_key: Option<String>,
     #[serde(default)]
     hidden_operational: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum LogicalStructureClass {
+    StructurallyOwnedCohesive,
+    IndependentRelation,
+    IndependentlyFilterable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum PhysicalStructureLowering {
+    FlatColumns,
+    RelationTable,
+    TaggedColumns,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StructureGroupContract {
+    group_id: String,
+    table_codes: Vec<i16>,
+    columns: Vec<String>,
+    logical_class: LogicalStructureClass,
+    physical_lowering: PhysicalStructureLowering,
+    #[serde(default)]
+    validation_rule_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum OntologyRuleOperationKind {
+    ForeignKeyAntiJoin,
+    GovernedCodeAntiJoin,
+    PrimaryKeyUniquenessAggregate,
+    IdDomainConformance,
+    OntologyMembershipAntiJoin,
+    RelationFamilyConformanceJoin,
+    RelationCardinalityAggregate,
+    RelationOwnerConformanceJoin,
+    RelationSelfEdgeJoin,
+    PropertyValueOneOf,
+    SourceSpanAllOrNone,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OntologyRuleContract {
+    rule_id: String,
+    operation_kind: OntologyRuleOperationKind,
+    input_contract: String,
+    output_contract: String,
+    determinism_class: String,
+    diagnostic_code: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultFieldContract {
+    name: String,
+    logical_type: LogicalType,
+    nullable: bool,
+    #[serde(default)]
+    id_domain: Option<String>,
+    #[serde(default)]
+    element_id_domain: Option<String>,
+    #[serde(default)]
+    semantic_type: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultSchemaContract {
+    result_schema_id: String,
+    query_form_code: u16,
+    result_role: String,
+    version: String,
+    fields: Vec<ResultFieldContract>,
+}
+
+/// One application-owned logical identifier domain over canonical FSB(16) storage.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IdDomainContract {
+    domain_slug: String,
+    extension_name: String,
+    rust_type: String,
+    preimage_recipe_id: String,
+    preimage_version: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -546,7 +651,60 @@ enum SqliteType {
 struct OperationalColumnContract {
     name: String,
     sqlite_type: SqliteType,
+    logical_type: LogicalType,
+    #[serde(default)]
+    id_domain: Option<String>,
     nullable: bool,
+}
+
+fn validate_operational_column(
+    column: &OperationalColumnContract,
+    id_domain_slugs: &BTreeSet<&str>,
+    path: &str,
+) -> Result<(), SchemaDriverError> {
+    let sqlite_compatible = match column.logical_type {
+        LogicalType::Id16 | LogicalType::Hash32 | LogicalType::Binary => {
+            column.sqlite_type == SqliteType::Blob
+        }
+        LogicalType::Int16
+        | LogicalType::Int32
+        | LogicalType::Int64
+        | LogicalType::UInt64
+        | LogicalType::Code16
+        | LogicalType::Code32
+        | LogicalType::Bucket16
+        | LogicalType::Boolean => column.sqlite_type == SqliteType::Integer,
+        LogicalType::Float64 => column.sqlite_type == SqliteType::Real,
+        LogicalType::Utf8 => column.sqlite_type == SqliteType::Text,
+        LogicalType::TimestampUtc => {
+            matches!(column.sqlite_type, SqliteType::Integer | SqliteType::Text)
+        }
+        LogicalType::IdList | LogicalType::Int64List | LogicalType::StringMap => false,
+    };
+    if !sqlite_compatible {
+        return invalid(
+            path,
+            format!(
+                "logical type {:?} is incompatible with SQLite {:?}",
+                column.logical_type, column.sqlite_type
+            ),
+        );
+    }
+    match column.logical_type {
+        LogicalType::Id16
+            if column
+                .id_domain
+                .as_deref()
+                .is_some_and(|domain| id_domain_slugs.contains(domain)) =>
+        {
+            Ok(())
+        }
+        LogicalType::Id16 => invalid(path, "operational ID column has no registered domain"),
+        _ if column.id_domain.is_some() => {
+            invalid(path, "non-ID operational column declares an ID domain")
+        }
+        _ => Ok(()),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -647,6 +805,13 @@ struct SchemaContractIr {
     schema_evolution_policy: SchemaEvolutionPolicyContract,
     sqlite_foreign_key_posture: SqliteForeignKeyPosture,
     owner_bucket_count: u16,
+    #[serde(default)]
+    id_domains: Vec<IdDomainContract>,
+    #[serde(default)]
+    result_schemas: Vec<ResultSchemaContract>,
+    #[serde(default)]
+    structure_groups: Vec<StructureGroupContract>,
+    ontology_rule_contracts: Vec<OntologyRuleContract>,
     tables: Vec<TableContract>,
     table_scopes: Vec<TableScopeContract>,
     operational_tables: Vec<OperationalTableContract>,
@@ -680,7 +845,9 @@ impl SchemaContractIr {
             "foreign_key",
             "grain",
             "hidden_operational",
+            "id_domain",
             "integrity",
+            "element_id_domain",
             "logical_type",
             "materialization_role",
             "name",
@@ -766,6 +933,32 @@ impl SchemaContractIr {
                 "cross-store foreign keys must not claim SQLite enforcement",
             );
         }
+        let mut id_domain_slugs = BTreeSet::new();
+        let mut extension_names = BTreeSet::new();
+        let mut rust_types = BTreeSet::new();
+        for (index, domain) in self.id_domains.iter().enumerate() {
+            if !identifier(&domain.domain_slug)
+                || domain.extension_name != format!("codefabric.{}_id", domain.domain_slug)
+                || !domain.rust_type.ends_with("IdExtension")
+                || !domain
+                    .rust_type
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                || domain.preimage_recipe_id.trim().is_empty()
+                || domain.preimage_version.trim().is_empty()
+                || !id_domain_slugs.insert(domain.domain_slug.as_str())
+                || !extension_names.insert(domain.extension_name.as_str())
+                || !rust_types.insert(domain.rust_type.as_str())
+            {
+                return invalid(
+                    &format!("$.id_domains[{index}]"),
+                    "invalid or duplicate ID-domain contract",
+                );
+            }
+        }
+        if self.id_domains.is_empty() {
+            return invalid("$.id_domains", "ID-domain registry is empty");
+        }
         let expected_authorities = BTreeMap::from([
             (SemanticAuthority::EnumRegistry, ENUM_REGISTRY_PATH),
             (SemanticAuthority::TypeAlgebra, TYPE_ALGEBRA_PATH),
@@ -835,6 +1028,38 @@ impl SchemaContractIr {
                 if let Some(semantic_type) = column.semantic_type.as_deref() {
                     semantic_types.insert(semantic_type);
                 }
+                match column.logical_type {
+                    LogicalType::Id16
+                        if column
+                            .id_domain
+                            .as_deref()
+                            .is_none_or(|domain| !id_domain_slugs.contains(domain)) =>
+                    {
+                        return invalid(
+                            &format!("{path}.columns[{column_index}].id_domain"),
+                            "scalar ID column has no registered domain",
+                        );
+                    }
+                    LogicalType::IdList
+                        if column
+                            .element_id_domain
+                            .as_deref()
+                            .is_none_or(|domain| !id_domain_slugs.contains(domain)) =>
+                    {
+                        return invalid(
+                            &format!("{path}.columns[{column_index}].element_id_domain"),
+                            "ID-list element has no registered domain",
+                        );
+                    }
+                    LogicalType::Id16 | LogicalType::IdList => {}
+                    _ if column.id_domain.is_some() || column.element_id_domain.is_some() => {
+                        return invalid(
+                            &format!("{path}.columns[{column_index}]"),
+                            "non-ID column declares an ID domain",
+                        );
+                    }
+                    _ => {}
+                }
             }
             if let Some(encoder) = table.row_encoder
                 && encoders.insert(encoder, table.table_code).is_some()
@@ -895,6 +1120,169 @@ impl SchemaContractIr {
                 format!(
                     "generated fact-row encoder census differs: actual={encoders:?}, expected={expected_encoders:?}, tail={tail:?}"
                 ),
+            );
+        }
+        let mut result_schema_ids = BTreeSet::new();
+        let mut result_form_codes = BTreeSet::new();
+        for (schema_index, schema) in self.result_schemas.iter().enumerate() {
+            let path = format!("$.result_schemas[{schema_index}]");
+            if schema.result_schema_id.trim().is_empty()
+                || schema.result_role.trim().is_empty()
+                || schema.version.trim().is_empty()
+                || schema.fields.is_empty()
+                || !result_schema_ids.insert(schema.result_schema_id.as_str())
+                || !result_form_codes.insert(schema.query_form_code)
+            {
+                return invalid(&path, "invalid or duplicate result-schema authority");
+            }
+            let mut fields = BTreeSet::new();
+            for (field_index, field) in schema.fields.iter().enumerate() {
+                if !identifier(&field.name) || !fields.insert(field.name.as_str()) {
+                    return invalid(
+                        &format!("{path}.fields[{field_index}].name"),
+                        "duplicate or invalid result field",
+                    );
+                }
+                match field.logical_type {
+                    LogicalType::Id16
+                        if field
+                            .id_domain
+                            .as_deref()
+                            .is_none_or(|domain| !id_domain_slugs.contains(domain)) =>
+                    {
+                        return invalid(
+                            &format!("{path}.fields[{field_index}].id_domain"),
+                            "result ID field has no registered domain",
+                        );
+                    }
+                    LogicalType::IdList
+                        if field
+                            .element_id_domain
+                            .as_deref()
+                            .is_none_or(|domain| !id_domain_slugs.contains(domain)) =>
+                    {
+                        return invalid(
+                            &format!("{path}.fields[{field_index}].element_id_domain"),
+                            "result ID-list field has no registered element domain",
+                        );
+                    }
+                    LogicalType::Id16 | LogicalType::IdList => {}
+                    _ if field.id_domain.is_some() || field.element_id_domain.is_some() => {
+                        return invalid(
+                            &format!("{path}.fields[{field_index}]"),
+                            "non-ID result field declares an ID domain",
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if self.result_schemas.len() != 8 {
+            return invalid("$.result_schemas", "all eight result schemas are required");
+        }
+        let mut structure_group_ids = BTreeSet::new();
+        let mut classified_span_tables = BTreeSet::new();
+        for (group_index, group) in self.structure_groups.iter().enumerate() {
+            let path = format!("$.structure_groups[{group_index}]");
+            if group.group_id.trim().is_empty()
+                || group.table_codes.is_empty()
+                || group.columns.is_empty()
+                || !structure_group_ids.insert(group.group_id.as_str())
+            {
+                return invalid(&path, "invalid or duplicate structure group");
+            }
+            for table_code in &group.table_codes {
+                let table = self
+                    .tables
+                    .iter()
+                    .find(|table| table.table_code == *table_code)
+                    .ok_or_else(|| SchemaDriverError::Invalid {
+                        path: path.clone(),
+                        detail: format!("structure group references table {table_code}"),
+                    })?;
+                if group
+                    .columns
+                    .iter()
+                    .any(|name| !table.columns.iter().any(|column| column.name == *name))
+                {
+                    return invalid(&path, "structure group references an absent column");
+                }
+                if group.group_id == "source_span" {
+                    classified_span_tables.insert(*table_code);
+                }
+            }
+        }
+        let required_rule_ids = BTreeSet::from([
+            "ontology.fk.v1",
+            "ontology.governed-code.v1",
+            "ontology.primary-key.v1",
+            "ontology.id-domain.v1",
+            "ontology.membership.v1",
+            "ontology.relation-family.v1",
+            "ontology.relation-cardinality.v1",
+            "ontology.relation-owner.v1",
+            "ontology.relation-self-edge.v1",
+            "ontology.property-one-of.v1",
+            "ontology.source-span.v1",
+        ]);
+        let mut rule_ids = BTreeSet::new();
+        let mut rule_operations = BTreeSet::new();
+        for (rule_index, rule) in self.ontology_rule_contracts.iter().enumerate() {
+            let path = format!("$.ontology_rule_contracts[{rule_index}]");
+            if rule.rule_id.trim().is_empty()
+                || rule.input_contract.trim().is_empty()
+                || rule.output_contract.trim().is_empty()
+                || rule.determinism_class != "DETERMINISTIC"
+                || rule.diagnostic_code.trim().is_empty()
+                || !rule_ids.insert(rule.rule_id.as_str())
+                || !rule_operations.insert(rule.operation_kind)
+            {
+                return invalid(&path, "invalid or duplicate typed ontology rule");
+            }
+        }
+        if rule_ids != required_rule_ids {
+            return invalid(
+                "$.ontology_rule_contracts",
+                "typed ontology-rule census is incomplete",
+            );
+        }
+        if self.structure_groups.iter().any(|group| {
+            group
+                .validation_rule_id
+                .as_deref()
+                .is_some_and(|rule_id| !rule_ids.contains(rule_id))
+        }) {
+            return invalid(
+                "$.structure_groups",
+                "structure group references an unknown ontology rule",
+            );
+        }
+        let span_tables = self
+            .tables
+            .iter()
+            .filter(|table| {
+                table
+                    .columns
+                    .iter()
+                    .any(|column| column.name == "start_byte")
+                    && table.columns.iter().any(|column| column.name == "end_byte")
+            })
+            .map(|table| table.table_code)
+            .collect::<BTreeSet<_>>();
+        let source_span = self
+            .structure_groups
+            .iter()
+            .find(|group| group.group_id == "source_span");
+        if source_span.is_none_or(|group| {
+            group.logical_class != LogicalStructureClass::StructurallyOwnedCohesive
+                || group.physical_lowering != PhysicalStructureLowering::FlatColumns
+                || group.validation_rule_id.as_deref() != Some("ontology.source-span.v1")
+                || group.columns != ["start_byte", "end_byte"]
+        }) || classified_span_tables != span_tables
+        {
+            return invalid(
+                "$.structure_groups",
+                "SourceSpan must be complete, cohesive, flat, and constraint-backed",
             );
         }
         let mut bindings = BTreeMap::new();
@@ -1063,6 +1451,13 @@ impl SchemaContractIr {
                 if !fields.contains(key.as_str()) {
                     return invalid(&path, format!("unknown SQLite key field {key}"));
                 }
+            }
+            for (column_index, column) in table.columns.iter().enumerate() {
+                validate_operational_column(
+                    column,
+                    &id_domain_slugs,
+                    &format!("{path}.columns[{column_index}]"),
+                )?;
             }
         }
         let operational_tables = self
@@ -1304,12 +1699,67 @@ fn validate_semantic_authorities(
     Ok(())
 }
 
+/// One typed semantic object produced by the governed schema compilation pass.
+///
+/// Every projection in this driver consumes this object. Authority files are decoded and
+/// cross-linked before construction; downstream renderers never reopen an authority path.
+struct CompiledOntology {
+    schema: SchemaContractIr,
+    semantic_fragments: super::semantic_fragment_driver::SemanticFragmentSet,
+    query_forms: QueryFormContract,
+    semantic_operations: Vec<CompiledSemanticOperation>,
+    provider_raw_kinds: Vec<CompiledProviderRawKind>,
+    phrase_authority: CompiledAuthorityRecord,
+    query_form_authority: CompiledAuthorityRecord,
+    vocabulary: CompiledVocabulary,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CompiledAuthorityRecord {
+    authority_id: String,
+    authority_version: String,
+    canonical_digest: String,
+    canonical_source_path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CompiledProviderRawKind {
+    provider_code: i16,
+    raw_catalog_id: String,
+    raw_namespace: String,
+    raw_kind_code: i32,
+    raw_name: String,
+    normalized_kind_code: Option<i32>,
+    authority_version: String,
+    canonical_digest: String,
+    canonical_source_path: String,
+}
+
+struct CompiledVocabulary {
+    enums: super::registry_models::AcceptedRegistry<super::registry_models::EnumDomain>,
+    entities: super::registry_models::AcceptedRegistry<super::registry_models::EntityKind>,
+    relations: super::registry_models::AcceptedRegistry<super::registry_models::RelationKind>,
+    properties: super::registry_models::AcceptedRegistry<super::registry_models::PropertyKind>,
+    facts: super::registry_models::AcceptedRegistry<super::registry_models::FactKind>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CompiledSemanticOperation {
+    phrase_id: String,
+    canonical_text: String,
+    column_role: String,
+    operator: super::registry_models::PhrasePredicateOperator,
+    operand_domain: String,
+    operand_codes: Vec<i16>,
+    null_policy: super::registry_models::PhraseNullPolicy,
+    output_role: String,
+    diagnostic_code: String,
+}
+
 /// Resolved, source-fenced schema plan.
 pub struct SchemaPlan {
     descriptor: DriverDescriptor,
-    ir: SchemaContractIr,
-    semantic_fragments: super::semantic_fragment_driver::SemanticFragmentSet,
-    query_forms: QueryFormContract,
+    compiled: CompiledOntology,
     query_form_bytes: Vec<u8>,
     public_schema_instances: Value,
     source_digest: String,
@@ -1342,15 +1792,42 @@ impl SchemaDriver {
             (safe(DDL_PATH)?, render_ddl(plan)),
             (
                 safe(RUST_BINDINGS_PATH)?,
-                rustfmt_source(&render_rust(&plan.ir))?,
+                rustfmt_source(&render_rust(&plan.compiled))?,
             ),
             (
                 safe(RUST_RUNTIME_BINDINGS_PATH)?,
-                rustfmt_source(&render_runtime_rust(&plan.ir, &plan.source_digest))?,
+                rustfmt_source(&render_runtime_rust(
+                    &plan.compiled.schema,
+                    &plan.source_digest,
+                ))?,
+            ),
+            (
+                safe(RUST_ID_DOMAIN_BINDINGS_PATH)?,
+                rustfmt_source(&render_id_domains(
+                    &plan.compiled.schema,
+                    &plan.source_digest,
+                )?)?,
+            ),
+            (
+                safe(RUST_RESULT_SCHEMA_BINDINGS_PATH)?,
+                rustfmt_source(&render_result_schemas(
+                    &plan.compiled.schema,
+                    &plan.source_digest,
+                )?)?,
+            ),
+            (
+                safe(RUST_COMPILED_ONTOLOGY_PATH)?,
+                rustfmt_source(&render_compiled_ontology(
+                    &plan.compiled,
+                    &plan.source_digest,
+                )?)?,
             ),
             (
                 safe(RUST_ROW_ENCODERS_PATH)?,
-                rustfmt_source(&render_row_encoders(&plan.ir, &plan.source_digest)?)?,
+                rustfmt_source(&render_row_encoders(
+                    &plan.compiled.schema,
+                    &plan.source_digest,
+                )?)?,
             ),
             (safe(VALIDATION_PATH)?, render_validation(plan)?),
             (safe(EVOLUTION_POLICY_PATH)?, render_evolution_policy(plan)?),
@@ -1360,11 +1837,11 @@ impl SchemaDriver {
             ),
             (
                 safe(RUST_QUERY_FORM_BINDINGS_PATH)?,
-                rustfmt_source(render_query_form_rust(&plan.query_forms).as_bytes())?,
+                rustfmt_source(render_query_form_rust(&plan.compiled.query_forms).as_bytes())?,
             ),
             (
                 safe(PYTHON_QUERY_FORM_BINDINGS_PATH)?,
-                render_query_form_python(&plan.query_forms).into_bytes(),
+                render_query_form_python(&plan.compiled.query_forms).into_bytes(),
             ),
             (
                 safe(PYTHON_QUERY_FORM_CONTRACT_PATH)?,
@@ -1372,20 +1849,20 @@ impl SchemaDriver {
             ),
             (
                 safe(super::semantic_fragment_driver::JSON_PROJECTION_PATH)?,
-                plan.semantic_fragments.render_json()?,
+                plan.compiled.semantic_fragments.render_json()?,
             ),
             (
                 safe(super::semantic_fragment_driver::RUST_PROJECTION_PATH)?,
-                rustfmt_source(plan.semantic_fragments.render_rust().as_bytes())?,
+                rustfmt_source(plan.compiled.semantic_fragments.render_rust().as_bytes())?,
             ),
         ];
-        for schema in &plan.ir.public_schemas {
+        for schema in &plan.compiled.schema.public_schemas {
             outputs.push((
                 safe(&schema.path)?,
                 render_public_schema(
                     schema,
                     &plan.source_digest,
-                    &plan.query_forms,
+                    &plan.compiled.query_forms,
                     &plan.query_form_source_digest,
                 )?,
             ));
@@ -1418,6 +1895,21 @@ impl ModelDriver for SchemaDriver {
             Self::output(
                 "output:model-schema-runtime-rust",
                 RUST_RUNTIME_BINDINGS_PATH,
+                DriverOutputRole::RustBinding,
+            )?,
+            Self::output(
+                "output:model-schema-id-domains-rust",
+                RUST_ID_DOMAIN_BINDINGS_PATH,
+                DriverOutputRole::RustBinding,
+            )?,
+            Self::output(
+                "output:model-result-schemas-rust",
+                RUST_RESULT_SCHEMA_BINDINGS_PATH,
+                DriverOutputRole::RustBinding,
+            )?,
+            Self::output(
+                "output:model-compiled-ontology-rust",
+                RUST_COMPILED_ONTOLOGY_PATH,
                 DriverOutputRole::RustBinding,
             )?,
             Self::output(
@@ -1481,10 +1973,14 @@ impl ModelDriver for SchemaDriver {
                 PROPERTY_REGISTRY_PATH,
                 FACT_REGISTRY_PATH,
                 CAPABILITY_REGISTRY_PATH,
+                PHRASE_REGISTRY_PATH,
                 PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH,
                 super::semantic_fragment_driver::FRAGMENT_PATHS[0],
                 super::semantic_fragment_driver::FRAGMENT_PATHS[1],
                 super::semantic_fragment_driver::FRAGMENT_PATHS[2],
+                PROVIDER_RAW_CATALOG_PATHS[0],
+                PROVIDER_RAW_CATALOG_PATHS[1],
+                PROVIDER_RAW_CATALOG_PATHS[2],
             ]
             .into_iter()
             .map(safe_protocol)
@@ -1552,6 +2048,56 @@ impl ModelDriver for SchemaDriver {
         query_forms
             .validate(&query_form_bytes, &enum_registry_bytes)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        validate_query_result_bindings(&ir, &query_forms)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let enum_registry: super::registry_models::AcceptedRegistry<
+            super::registry_models::EnumDomain,
+        > = serde_yaml_ng::from_slice(&enum_registry_bytes)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let entity_registry: super::registry_models::AcceptedRegistry<
+            super::registry_models::EntityKind,
+        > = serde_yaml_ng::from_slice(&read_stable(
+            &repository_root.join(ENTITY_REGISTRY_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?)
+        .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let relation_registry: super::registry_models::AcceptedRegistry<
+            super::registry_models::RelationKind,
+        > = serde_yaml_ng::from_slice(&read_stable(
+            &repository_root.join(RELATION_REGISTRY_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?)
+        .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let property_registry: super::registry_models::AcceptedRegistry<
+            super::registry_models::PropertyKind,
+        > = serde_yaml_ng::from_slice(&property_registry_bytes)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let fact_registry: super::registry_models::AcceptedRegistry<
+            super::registry_models::FactKind,
+        > = serde_yaml_ng::from_slice(&read_stable(
+            &repository_root.join(FACT_REGISTRY_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?)
+        .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let phrase_registry_bytes = read_stable(
+            &repository_root.join(PHRASE_REGISTRY_PATH),
+            MAX_AUTHORITY_BYTES,
+        )?;
+        let phrase_registry: super::registry_models::PhraseRegistry =
+            serde_yaml_ng::from_slice(&phrase_registry_bytes)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        super::registry_models::validate_phrase_records(&phrase_registry.records)
+            .and_then(|()| {
+                super::registry_models::validate_phrase_operation_bindings(
+                    &phrase_registry.semantic_operation_bindings,
+                )
+            })
+            .map_err(DriverProtocolError::InvalidAuthority)?;
+        let semantic_operations = compile_semantic_operations(&phrase_registry, &enum_registry)
+            .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let provider_raw_kinds =
+            compile_provider_raw_kinds(repository_root, &enum_registry, &entity_registry)
+                .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
         let public_schema_instances: Value = serde_json::from_slice(&read_stable(
             &repository_root.join(PUBLIC_SCHEMA_INSTANCES_SOURCE_PATH),
             MAX_AUTHORITY_BYTES,
@@ -1584,11 +2130,36 @@ impl ModelDriver for SchemaDriver {
         let source_digest = semantic_fragments
             .composed_source_digest(&base_source_digest)
             .map_err(|error| DriverProtocolError::InvalidAuthority(error.to_string()))?;
+        let phrase_authority = CompiledAuthorityRecord {
+            authority_id: phrase_registry.artifact_id,
+            authority_version: phrase_registry.version,
+            canonical_digest: phrase_registry.canonical_digest,
+            canonical_source_path: PHRASE_REGISTRY_PATH.to_owned(),
+        };
+        let query_form_authority = CompiledAuthorityRecord {
+            authority_id: query_forms.artifact_id.clone(),
+            authority_version: query_forms.version.clone(),
+            canonical_digest: query_forms.canonical_digest.clone(),
+            canonical_source_path: QUERY_FORM_CONTRACT_PATH.to_owned(),
+        };
         Ok(SchemaPlan {
             descriptor,
-            ir,
-            semantic_fragments,
-            query_forms,
+            compiled: CompiledOntology {
+                schema: ir,
+                semantic_fragments,
+                query_forms,
+                semantic_operations,
+                provider_raw_kinds,
+                phrase_authority,
+                query_form_authority,
+                vocabulary: CompiledVocabulary {
+                    enums: enum_registry,
+                    entities: entity_registry,
+                    relations: relation_registry,
+                    properties: property_registry,
+                    facts: fact_registry,
+                },
+            },
             query_form_source_digest: codefabric::integrity::framed_digest(&query_form_bytes),
             query_form_bytes,
             public_schema_instances,
@@ -1648,14 +2219,15 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
         &stage_path.join(TABLE_MANIFEST_PATH),
         MAX_AUTHORITY_BYTES,
     )?)?;
-    if manifest["tables"].as_array().map(Vec::len) != Some(plan.ir.tables.len())
+    if manifest["tables"].as_array().map(Vec::len) != Some(plan.compiled.schema.tables.len())
         || manifest["operational_tables"].as_array().map(Vec::len)
-            != Some(plan.ir.operational_tables.len())
+            != Some(plan.compiled.schema.operational_tables.len())
     {
         return Err(SchemaDriverError::ProjectionMismatch);
     }
     let syntax_fields = plan
-        .ir
+        .compiled
+        .schema
         .tables
         .iter()
         .find(|table| table.name == "syntax_detail")
@@ -1669,9 +2241,9 @@ pub fn check_family(repository_root: &Path) -> Result<SchemaReport, SchemaDriver
         action_key,
         rule_version: plan.descriptor.rule_version.clone(),
         resource_profile: plan.descriptor.resource_profile.clone(),
-        table_count: plan.ir.tables.len(),
-        operational_table_count: plan.ir.operational_tables.len(),
-        public_schema_count: plan.ir.public_schemas.len(),
+        table_count: plan.compiled.schema.tables.len(),
+        operational_table_count: plan.compiled.schema.operational_tables.len(),
+        public_schema_count: plan.compiled.schema.public_schemas.len(),
         rendered_outputs: rendered.iter().map(SafeOutputPath::display).collect(),
         cache_lookup,
         syntax_detail_fields: syntax_fields,
@@ -1698,7 +2270,8 @@ pub struct SchemaReport {
 
 fn render_table_manifest(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
     let tables = plan
-        .ir
+        .compiled
+        .schema
         .tables
         .iter()
         .map(|table| {
@@ -1706,7 +2279,11 @@ fn render_table_manifest(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError
                 "field_id": format!("{}.{}", table.name, column.name),
                 "name": column.name,
                 "logical_type": column.logical_type,
-                "arrow_type": arrow_type(column.logical_type),
+                "arrow_type": arrow_type(
+                    column.logical_type,
+                    column.id_domain.as_deref(),
+                    column.element_id_domain.as_deref(),
+                ),
                 "nullable": column.nullable,
                 "semantic_type": column.semantic_type,
                 "foreign_key": column.foreign_key,
@@ -1736,23 +2313,23 @@ fn render_table_manifest(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError
         .collect::<Vec<_>>();
     pretty(&json!({
         "model_version": 1,
-        "source": {"artifact_id": plan.ir.header.artifact_id, "source_digest": plan.source_digest},
-        "ontology_version": plan.ir.ontology_version,
-        "compatibility_mode": plan.ir.compatibility_mode,
-        "metadata_dictionary": plan.ir.metadata_dictionary,
-        "semantic_authorities": plan.ir.semantic_authorities,
-        "semantic_type_bindings": plan.ir.semantic_type_bindings,
-        "schema_evolution_policy": plan.ir.schema_evolution_policy,
-        "sqlite_foreign_key_posture": plan.ir.sqlite_foreign_key_posture,
-        "owner_bucket_count": plan.ir.owner_bucket_count,
+        "source": {"artifact_id": plan.compiled.schema.header.artifact_id, "source_digest": plan.source_digest},
+        "ontology_version": plan.compiled.schema.ontology_version,
+        "compatibility_mode": plan.compiled.schema.compatibility_mode,
+        "metadata_dictionary": plan.compiled.schema.metadata_dictionary,
+        "semantic_authorities": plan.compiled.schema.semantic_authorities,
+        "semantic_type_bindings": plan.compiled.schema.semantic_type_bindings,
+        "schema_evolution_policy": plan.compiled.schema.schema_evolution_policy,
+        "sqlite_foreign_key_posture": plan.compiled.schema.sqlite_foreign_key_posture,
+        "owner_bucket_count": plan.compiled.schema.owner_bucket_count,
         "tables": tables,
-        "table_scopes": plan.ir.table_scopes,
-        "operational_tables": plan.ir.operational_tables,
-        "serving_projections": plan.ir.serving_projections,
-        "control_projections": plan.ir.control_projections,
-        "serving_resource_profile": plan.ir.serving_resource_profile,
+        "table_scopes": plan.compiled.schema.table_scopes,
+        "operational_tables": plan.compiled.schema.operational_tables,
+        "serving_projections": plan.compiled.schema.serving_projections,
+        "control_projections": plan.compiled.schema.control_projections,
+        "serving_resource_profile": plan.compiled.schema.serving_resource_profile,
         "public_schema_instances": PUBLIC_SCHEMA_INSTANCES_PATH,
-        "public_schemas": plan.ir.public_schemas.iter().map(|schema| json!({
+        "public_schemas": plan.compiled.schema.public_schemas.iter().map(|schema| json!({
             "schema_kind": schema.schema_kind,
             "artifact_id": schema.artifact_id,
             "path": schema.path,
@@ -2340,11 +2917,11 @@ fn render_ddl(plan: &SchemaPlan) -> Vec<u8> {
         "-- @generated from codefabric.schema.contract-ir semantic={} source={}; schema-contract-driver-v1; do not edit.\n-- Cross-store Arrow/Delta foreign keys are generated as application contracts, not SQLite reference clauses.\n\n",
         plan.semantic_digest, plan.source_digest
     );
-    for table in &plan.ir.operational_tables {
+    for table in &plan.compiled.schema.operational_tables {
         output.push_str(&render_operational_table_ddl(table));
         output.push('\n');
     }
-    for projection in &plan.ir.control_projections {
+    for projection in &plan.compiled.schema.control_projections {
         if projection.projection_role != ControlProjectionRole::DerivedOperational {
             continue;
         }
@@ -2394,44 +2971,57 @@ fn render_operational_table_ddl(table: &OperationalTableContract) -> String {
     output
 }
 
-fn render_rust(ir: &SchemaContractIr) -> Vec<u8> {
+fn compile_semantic_operations(
+    phrases: &super::registry_models::PhraseRegistry,
+    enums: &super::registry_models::AcceptedRegistry<super::registry_models::EnumDomain>,
+) -> Result<Vec<CompiledSemanticOperation>, SchemaDriverError> {
+    let mut operations = Vec::with_capacity(phrases.semantic_operation_bindings.len());
+    for binding in &phrases.semantic_operation_bindings {
+        let domain = enums
+            .records
+            .iter()
+            .find(|domain| domain.domain == binding.operand_domain)
+            .ok_or_else(|| SchemaDriverError::Invalid {
+                path: "$.semantic_operation_bindings[*].operand_domain".to_owned(),
+                detail: format!("unknown enum domain {}", binding.operand_domain),
+            })?;
+        let mut operand_codes = Vec::with_capacity(binding.operand_names.len());
+        for name in &binding.operand_names {
+            let code = domain
+                .values
+                .iter()
+                .find(|value| value.name == *name)
+                .ok_or_else(|| SchemaDriverError::Invalid {
+                    path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
+                    detail: format!("unknown {} value {name}", binding.operand_domain),
+                })?
+                .code;
+            operand_codes.push(i16::try_from(code).map_err(|_| SchemaDriverError::Invalid {
+                path: "$.semantic_operation_bindings[*].operand_names".to_owned(),
+                detail: format!("{} code {code} exceeds Int16", binding.operand_domain),
+            })?);
+        }
+        operations.push(CompiledSemanticOperation {
+            phrase_id: binding.phrase_id.clone(),
+            canonical_text: binding.canonical_text.clone(),
+            column_role: binding.column_role.clone(),
+            operator: binding.operator,
+            operand_domain: binding.operand_domain.clone(),
+            operand_codes,
+            null_policy: binding.null_policy,
+            output_role: binding.output_role.clone(),
+            diagnostic_code: binding.diagnostic_code.clone(),
+        });
+    }
+    operations.sort_by(|left, right| left.phrase_id.cmp(&right.phrase_id));
+    Ok(operations)
+}
+
+fn render_rust(compiled: &CompiledOntology) -> Vec<u8> {
+    let ir = &compiled.schema;
     let mut output = String::from(
         "// generated by schema-contract-driver-v1; do not edit.\n\n\
          #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
-         pub enum ModelLogicalType { Id16, Hash32, Code16, Code32, Bucket16, Int16, Int32, Int64, Float64, Boolean, Utf8, Binary, TimestampUtc, IdList, Int64List, StringMap }\n\
-         #[derive(Clone, Copy, Debug)]\n\
-         pub struct ModelColumn { pub field_id: &'static str, pub name: &'static str, pub logical_type: ModelLogicalType, pub nullable: bool, pub semantic_type: Option<&'static str>, pub foreign_key: Option<&'static str> }\n\
-         #[derive(Clone, Copy, Debug)]\n\
-         pub struct ModelTable { pub table_code: i16, pub table_id: &'static str, pub name: &'static str, pub columns: &'static [ModelColumn], pub primary_key: &'static [&'static str] }\n\n\
-         pub const MODEL_TABLES: &[ModelTable] = &[\n",
-    );
-    for table in &ir.tables {
-        writeln!(
-            output,
-            "    ModelTable {{ table_code: {}, table_id: {:?}, name: {:?}, columns: &[",
-            table.table_code,
-            format!("table:{}", table.name),
-            table.name
-        )
-        .unwrap();
-        for column in &table.columns {
-            writeln!(
-                output,
-                "        ModelColumn {{ field_id: {:?}, name: {:?}, logical_type: ModelLogicalType::{:?}, nullable: {}, semantic_type: {:?}, foreign_key: {:?} }},",
-                format!("{}.{}", table.name, column.name),
-                column.name,
-                column.logical_type,
-                column.nullable,
-                column.semantic_type.as_deref(),
-                column.foreign_key.as_deref(),
-            )
-            .unwrap();
-        }
-        writeln!(output, "    ], primary_key: &{:?} }},", table.primary_key).unwrap();
-    }
-    output.push_str("];\n\n");
-    output.push_str(
-        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub enum ProviderObservationLogicalType { Utf8, Binary, Boolean, UInt64, Utf8List }\n\
          #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct ProviderObservationField { pub name: &'static str, pub logical_type: ProviderObservationLogicalType, pub nullable: bool }\n\
@@ -2462,6 +3052,42 @@ fn render_rust(ir: &SchemaContractIr) -> Vec<u8> {
         }
         output.push_str("    ] },\n");
     }
+    output.push_str("];\n\n");
+    output.push_str(
+        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub enum SemanticPredicateOperator { Equals, InSet }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub enum SemanticNullPolicy { UnknownIsFalse, RejectUnknown }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+         pub struct SemanticOperationSpec {\n\
+             pub phrase_id: &'static str,\n\
+             pub canonical_text: &'static str,\n\
+             pub column_role: &'static str,\n\
+             pub operator: SemanticPredicateOperator,\n\
+             pub operand_domain: &'static str,\n\
+             pub operand_codes: &'static [i16],\n\
+             pub null_policy: SemanticNullPolicy,\n\
+             pub output_role: &'static str,\n\
+             pub diagnostic_code: &'static str,\n\
+         }\n\n\
+         pub const SEMANTIC_OPERATION_SPECS: &[SemanticOperationSpec] = &[\n",
+    );
+    for operation in &compiled.semantic_operations {
+        writeln!(
+            output,
+            "    SemanticOperationSpec {{ phrase_id: {:?}, canonical_text: {:?}, column_role: {:?}, operator: SemanticPredicateOperator::{:?}, operand_domain: {:?}, operand_codes: &{:?}, null_policy: SemanticNullPolicy::{:?}, output_role: {:?}, diagnostic_code: {:?} }},",
+            operation.phrase_id,
+            operation.canonical_text,
+            operation.column_role,
+            operation.operator,
+            operation.operand_domain,
+            operation.operand_codes,
+            operation.null_policy,
+            operation.output_role,
+            operation.diagnostic_code,
+        )
+        .unwrap();
+    }
     output.push_str("];\n");
     output.into_bytes()
 }
@@ -2486,10 +3112,542 @@ fn provider_observation_descriptor(schema: &ProviderObservationSchemaContract) -
     descriptor
 }
 
+fn render_id_domains(
+    ir: &SchemaContractIr,
+    source_digest: &str,
+) -> Result<Vec<u8>, SchemaDriverError> {
+    let mut output = format!(
+        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\n"
+    );
+    for domain in &ir.id_domains {
+        writeln!(
+            output,
+            "define_id_domain_extension!({}, {:?}, {:?}, {:?}, {:?});",
+            domain.rust_type,
+            domain.domain_slug,
+            domain.extension_name,
+            domain.preimage_recipe_id,
+            domain.preimage_version,
+        )
+        .unwrap();
+    }
+    output.push_str("\ndefine_hash32_extension!();\n\n");
+    output.push_str("const GENERATED_ID_DOMAINS: &[GeneratedIdDomainSpec] = &[\n");
+    for domain in &ir.id_domains {
+        writeln!(
+            output,
+            "    GeneratedIdDomainSpec {{ domain_slug: {:?}, extension_name: {:?}, rust_type: {:?}, preimage_recipe_id: {:?}, preimage_version: {:?} }},",
+            domain.domain_slug,
+            domain.extension_name,
+            domain.rust_type,
+            domain.preimage_recipe_id,
+            domain.preimage_version,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\n");
+    output.push_str("fn attach_generated_id_domain(field: Field, domain: &str) -> Result<Field, ArrowError> {\n    match domain {\n");
+    for domain in &ir.id_domains {
+        writeln!(
+            output,
+            "        {:?} => Ok(field.with_extension_type({}::v1())),",
+            domain.domain_slug, domain.rust_type,
+        )
+        .unwrap();
+    }
+    output.push_str("        value => Err(ArrowError::InvalidArgumentError(format!(\"unknown generated ID domain {value}\"))),\n    }\n}\n\n");
+    output.push_str("fn generated_id_domain_registrations() -> Vec<ExtensionTypeRegistrationRef> {\n    vec![\n");
+    for domain in &ir.id_domains {
+        writeln!(
+            output,
+            "        id_domain_registration::<{}>(),",
+            domain.rust_type,
+        )
+        .unwrap();
+    }
+    output.push_str("        hash32_registration(),\n    ]\n}\n");
+    Ok(output.into_bytes())
+}
+
+fn render_result_schemas(
+    ir: &SchemaContractIr,
+    source_digest: &str,
+) -> Result<Vec<u8>, SchemaDriverError> {
+    let mut output = format!(
+        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\nconst GENERATED_RESULT_SCHEMAS: &[GeneratedResultSchemaSpec] = &[\n"
+    );
+    for schema in &ir.result_schemas {
+        writeln!(
+            output,
+            "    GeneratedResultSchemaSpec {{ result_schema_id: {:?}, query_form_code: {}, result_role: {:?}, version: {:?}, fields: &[",
+            schema.result_schema_id, schema.query_form_code, schema.result_role, schema.version,
+        )
+        .unwrap();
+        for field in &schema.fields {
+            writeln!(
+                output,
+                "        GeneratedColumn {{ name: {:?}, logical_type: LogicalType::{:?}, nullable: {}, id_domain: {:?}, element_id_domain: {:?}, semantic_type: {:?}, foreign_key: None, hidden_operational: false }},",
+                field.name,
+                field.logical_type,
+                field.nullable,
+                field.id_domain.as_deref(),
+                field.element_id_domain.as_deref(),
+                field.semantic_type.as_deref(),
+            )
+            .unwrap();
+        }
+        output.push_str("    ] },\n");
+    }
+    output.push_str("];\n");
+    Ok(output.into_bytes())
+}
+
+fn render_compiled_authority(artifact_id: &str, version: &str, digest: &str, path: &str) -> String {
+    format!(
+        "CompiledAuthority {{ authority_id: {artifact_id:?}, authority_version: {version:?}, canonical_digest: {digest:?}, canonical_source_path: {path:?} }}"
+    )
+}
+
+fn compiled_property_value_kind(property: &super::registry_models::PropertyKind) -> i16 {
+    match (
+        property.value_type.kind.as_str(),
+        property.value_type.scalar.as_deref(),
+    ) {
+        ("entity_ref", _) => 10,
+        ("type_ref", _) => 70,
+        (_, Some("boolean")) => 20,
+        (_, Some("float" | "float64")) => 40,
+        (_, Some("utf8" | "string")) => 50,
+        (_, Some("bytes" | "digest")) | ("structured_value", _) => 60,
+        _ => 30,
+    }
+}
+
+fn compile_provider_raw_kinds(
+    repository_root: &Path,
+    enums: &super::registry_models::AcceptedRegistry<super::registry_models::EnumDomain>,
+    entities: &super::registry_models::AcceptedRegistry<super::registry_models::EntityKind>,
+) -> Result<Vec<CompiledProviderRawKind>, SchemaDriverError> {
+    let provider_codes = enums
+        .records
+        .iter()
+        .find(|domain| domain.domain == "PROVIDER_CODE")
+        .ok_or_else(|| SchemaDriverError::Invalid {
+            path: ENUM_REGISTRY_PATH.to_owned(),
+            detail: "PROVIDER_CODE domain is absent".to_owned(),
+        })?
+        .values
+        .iter()
+        .map(|value| (value.slug.as_str(), value.code))
+        .collect::<BTreeMap<_, _>>();
+    let normalized_codes = entities
+        .records
+        .iter()
+        .map(|value| (value.canonical_name.as_str(), value.kind_code))
+        .collect::<BTreeMap<_, _>>();
+    let mut result = Vec::new();
+    let mut keys = BTreeSet::new();
+    for path in PROVIDER_RAW_CATALOG_PATHS {
+        let bytes = read_stable(&repository_root.join(path), MAX_AUTHORITY_BYTES)?;
+        let document = codefabric::contracts::jcs::decode_strict(&bytes).map_err(|error| {
+            SchemaDriverError::Invalid {
+                path: path.to_owned(),
+                detail: error.to_string(),
+            }
+        })?;
+        let required = |name: &str| {
+            document[name]
+                .as_str()
+                .ok_or_else(|| SchemaDriverError::Invalid {
+                    path: path.to_owned(),
+                    detail: format!("provider raw catalog field {name} is absent"),
+                })
+        };
+        let catalog_id = required("catalog_id")?;
+        let provider_id = required("provider_id")?;
+        let provider_code = i16::try_from(*provider_codes.get(provider_id).ok_or_else(|| {
+            SchemaDriverError::Invalid {
+                path: path.to_owned(),
+                detail: format!("provider {provider_id} has no PROVIDER_CODE"),
+            }
+        })?)
+        .map_err(|_| SchemaDriverError::Invalid {
+            path: path.to_owned(),
+            detail: format!("provider {provider_id} code exceeds Int16"),
+        })?;
+        let authority_version = required("provider_version")?.to_owned();
+        let canonical_digest = required("runtime_inventory_fingerprint")?.to_owned();
+        let inventory = document["runtime_inventory"].as_object().ok_or_else(|| {
+            SchemaDriverError::Invalid {
+                path: path.to_owned(),
+                detail: "runtime_inventory is absent".to_owned(),
+            }
+        })?;
+        let namespaces = if inventory.contains_key("raw_kinds") {
+            vec![("grammar_symbol", "raw_kinds")]
+        } else {
+            vec![("ast_node", "node_kinds"), ("token", "token_kinds")]
+        };
+        for (raw_namespace, member) in namespaces {
+            let records =
+                inventory[member]
+                    .as_array()
+                    .ok_or_else(|| SchemaDriverError::Invalid {
+                        path: path.to_owned(),
+                        detail: format!("runtime_inventory.{member} is absent"),
+                    })?;
+            for record in records {
+                let raw_kind_code =
+                    i32::try_from(record["raw_kind_id"].as_u64().ok_or_else(|| {
+                        SchemaDriverError::Invalid {
+                            path: path.to_owned(),
+                            detail: format!("{member}.raw_kind_id is absent"),
+                        }
+                    })?)
+                    .map_err(|_| SchemaDriverError::Invalid {
+                        path: path.to_owned(),
+                        detail: format!("{member}.raw_kind_id exceeds Int32"),
+                    })?;
+                let raw_name = record["raw_name"]
+                    .as_str()
+                    .ok_or_else(|| SchemaDriverError::Invalid {
+                        path: path.to_owned(),
+                        detail: format!("{member}.raw_name is absent"),
+                    })?
+                    .to_owned();
+                let normalized_kind_code = record["canonical_kind_name"]
+                    .as_str()
+                    .map(|name| {
+                        normalized_codes.get(name).copied().ok_or_else(|| {
+                            SchemaDriverError::Invalid {
+                                path: path.to_owned(),
+                                detail: format!("raw kind {raw_name} maps to unknown {name}"),
+                            }
+                        })
+                    })
+                    .transpose()?
+                    .map(i32::from);
+                let key = (
+                    provider_code,
+                    catalog_id.to_owned(),
+                    raw_namespace,
+                    raw_kind_code,
+                );
+                if !keys.insert(key) {
+                    return invalid(
+                        path,
+                        format!(
+                            "duplicate provider raw-kind key {catalog_id}/{raw_namespace}/{raw_kind_code}"
+                        ),
+                    );
+                }
+                result.push(CompiledProviderRawKind {
+                    provider_code,
+                    raw_catalog_id: catalog_id.to_owned(),
+                    raw_namespace: raw_namespace.to_owned(),
+                    raw_kind_code,
+                    raw_name,
+                    normalized_kind_code,
+                    authority_version: authority_version.clone(),
+                    canonical_digest: canonical_digest.clone(),
+                    canonical_source_path: path.to_owned(),
+                });
+            }
+        }
+    }
+    result.sort_by(|left, right| {
+        (
+            left.provider_code,
+            left.raw_catalog_id.as_str(),
+            left.raw_namespace.as_str(),
+            left.raw_kind_code,
+        )
+            .cmp(&(
+                right.provider_code,
+                right.raw_catalog_id.as_str(),
+                right.raw_namespace.as_str(),
+                right.raw_kind_code,
+            ))
+    });
+    Ok(result)
+}
+
+fn render_compiled_ontology(
+    compiled: &CompiledOntology,
+    source_digest: &str,
+) -> Result<Vec<u8>, SchemaDriverError> {
+    let vocabulary = &compiled.vocabulary;
+    let mut output = format!(
+        "// @generated from CompiledOntology {source_digest}; schema-contract-driver-v1; do not edit.\n\nconst COMPILED_ENUM_VALUES: &[CompiledEnumValue] = &[\n"
+    );
+    let enum_authority = render_compiled_authority(
+        &vocabulary.enums.artifact_id,
+        &vocabulary.enums.version,
+        &vocabulary.enums.canonical_digest,
+        ENUM_REGISTRY_PATH,
+    );
+    for domain in &vocabulary.enums.records {
+        for value in &domain.values {
+            writeln!(
+                output,
+                "    CompiledEnumValue {{ domain: {:?}, code: {}, name: {:?}, authority: {} }},",
+                domain.domain, value.code, value.name, enum_authority,
+            )
+            .unwrap();
+        }
+    }
+    output.push_str("];\n\nconst COMPILED_ENTITY_KINDS: &[CompiledEntityKind] = &[\n");
+    let entity_authority = render_compiled_authority(
+        &vocabulary.entities.artifact_id,
+        &vocabulary.entities.version,
+        &vocabulary.entities.canonical_digest,
+        ENTITY_REGISTRY_PATH,
+    );
+    for value in &vocabulary.entities.records {
+        writeln!(
+            output,
+            "    CompiledEntityKind {{ code: {}, name: {:?}, family_code: {}, language_applicability: {:?}, query_visible: {}, authority: {} }},",
+            value.kind_code,
+            value.canonical_name,
+            value.family_code,
+            value.language_profile,
+            value.query_visibility != "HIDDEN",
+            entity_authority,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\nconst COMPILED_RELATION_KINDS: &[CompiledRelationKind] = &[\n");
+    let relation_authority = render_compiled_authority(
+        &vocabulary.relations.artifact_id,
+        &vocabulary.relations.version,
+        &vocabulary.relations.canonical_digest,
+        RELATION_REGISTRY_PATH,
+    );
+    for value in &vocabulary.relations.records {
+        writeln!(
+            output,
+            "    CompiledRelationKind {{ code: {}, name: {:?}, family_code: {}, family_name: {:?}, cardinality: {:?}, symmetric: {}, transitive: {}, self_edge_policy: {:?}, owner_selection_rule: {:?}, query_visible: {}, authority: {} }},",
+            value.relation_code,
+            value.canonical_name,
+            value.family_code,
+            value.family,
+            value.cardinality,
+            value.symmetric,
+            value.transitive,
+            value.self_edge_policy,
+            value.owner_selection_rule,
+            value.query_visibility != "HIDDEN",
+            relation_authority,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\nconst COMPILED_PROPERTY_KINDS: &[CompiledPropertyKind] = &[\n");
+    let property_authority = render_compiled_authority(
+        &vocabulary.properties.artifact_id,
+        &vocabulary.properties.version,
+        &vocabulary.properties.canonical_digest,
+        PROPERTY_REGISTRY_PATH,
+    );
+    for value in &vocabulary.properties.records {
+        let storage_mapping = format!(
+            "{}:{}:{}",
+            value.storage.canonical_table,
+            value
+                .storage
+                .denormalized_entity_column
+                .as_deref()
+                .unwrap_or(""),
+            value
+                .storage
+                .extension_table_column
+                .as_deref()
+                .unwrap_or("")
+        );
+        writeln!(
+            output,
+            "    CompiledPropertyKind {{ code: {}, name: {:?}, value_kind_code: {}, cardinality: {:?}, storage_mapping: {:?}, authority: {} }},",
+            value.property_code,
+            value.canonical_name,
+            compiled_property_value_kind(value),
+            value.cardinality,
+            storage_mapping,
+            property_authority,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\nconst COMPILED_FACT_KINDS: &[CompiledFactKind] = &[\n");
+    let fact_authority = render_compiled_authority(
+        &vocabulary.facts.artifact_id,
+        &vocabulary.facts.version,
+        &vocabulary.facts.canonical_digest,
+        FACT_REGISTRY_PATH,
+    );
+    for value in &vocabulary.facts.records {
+        writeln!(
+            output,
+            "    CompiledFactKind {{ code: {}, name: {:?}, fact_form: {:?}, authority: {} }},",
+            value.fact_code, value.canonical_name, value.shape, fact_authority,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\nconst COMPILED_PROVIDER_RAW_KINDS: &[CompiledProviderRawKind] = &[\n");
+    for value in &compiled.provider_raw_kinds {
+        let authority = render_compiled_authority(
+            &value.raw_catalog_id,
+            &value.authority_version,
+            &value.canonical_digest,
+            &value.canonical_source_path,
+        );
+        writeln!(
+            output,
+            "    CompiledProviderRawKind {{ provider_code: {}, raw_catalog_id: {:?}, raw_namespace: {:?}, raw_kind_code: {}, raw_name: {:?}, normalized_kind_code: {:?}, authority: {} }},",
+            value.provider_code,
+            value.raw_catalog_id,
+            value.raw_namespace,
+            value.raw_kind_code,
+            value.raw_name,
+            value.normalized_kind_code,
+            authority,
+        )
+        .unwrap();
+    }
+    output.push_str("];\n\nconst COMPILED_ONTOLOGY_EDGES: &[CompiledOntologyEdge] = &[\n");
+    for value in &vocabulary.entities.records {
+        let subject = format!("entity_kind:{}", value.kind_code);
+        for (ordinal, owner) in value.allowed_owner_kinds.iter().enumerate() {
+            writeln!(
+                output,
+                "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: \"allows_owner_kind\", object_term_id: {:?}, ordinal: {}, authority: {} }},",
+                subject,
+                format!("entity_kind_name:{owner}"),
+                ordinal,
+                entity_authority,
+            )
+            .unwrap();
+        }
+        for (ordinal, code) in value.required_property_codes.iter().enumerate() {
+            writeln!(
+                output,
+                "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: \"requires_property\", object_term_id: {:?}, ordinal: {}, authority: {} }},",
+                subject,
+                format!("property_kind:{code}"),
+                ordinal,
+                entity_authority,
+            )
+            .unwrap();
+        }
+        for (ordinal, code) in value.optional_property_codes.iter().enumerate() {
+            writeln!(
+                output,
+                "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: \"allows_property\", object_term_id: {:?}, ordinal: {}, authority: {} }},",
+                subject,
+                format!("property_kind:{code}"),
+                ordinal,
+                entity_authority,
+            )
+            .unwrap();
+        }
+    }
+    for value in &vocabulary.relations.records {
+        let subject = format!("relation_kind:{}", value.relation_code);
+        for (predicate, members) in [
+            ("allows_subject_family", &value.allowed_subject_families),
+            ("allows_object_family", &value.allowed_object_families),
+            ("projection_membership", &value.projection_memberships),
+        ] {
+            for (ordinal, member) in members.iter().enumerate() {
+                let object_term_id = if matches!(
+                    predicate,
+                    "allows_subject_family" | "allows_object_family"
+                ) {
+                    let exact_family_codes = vocabulary
+                        .entities
+                        .records
+                        .iter()
+                        .filter(|entity| entity.kind_slug == *member)
+                        .map(|entity| entity.family_code)
+                        .collect::<BTreeSet<_>>();
+                    let family_code = if exact_family_codes.len() == 1 {
+                        *exact_family_codes
+                            .iter()
+                            .next()
+                            .expect("one exact family code was counted")
+                    } else if exact_family_codes.is_empty()
+                        && vocabulary
+                            .entities
+                            .records
+                            .iter()
+                            .any(|entity| entity.family_code == value.family_code)
+                    {
+                        // Some registry members are layer-family aliases (for example
+                        // `definition`, `use`, and `concurrency-event`) rather than entity
+                        // kind slugs. Their relation-family code is the governed ontology
+                        // layer code, so the same compiled family dimension remains the
+                        // single membership authority.
+                        value.family_code
+                    } else {
+                        return Err(SchemaDriverError::Invalid {
+                            path: RELATION_REGISTRY_PATH.to_owned(),
+                            detail: format!(
+                                "relation family member {member} has no unique entity-family mapping"
+                            ),
+                        });
+                    };
+                    format!("entity_family:{family_code}")
+                } else {
+                    format!("term:{member}")
+                };
+                writeln!(
+                    output,
+                    "    CompiledOntologyEdge {{ subject_term_id: {:?}, predicate_term_id: {:?}, object_term_id: {:?}, ordinal: {}, authority: {} }},",
+                    subject,
+                    predicate,
+                    object_term_id,
+                    ordinal,
+                    relation_authority,
+                )
+                .unwrap();
+            }
+        }
+    }
+    output.push_str("];\n\nconst COMPILED_ONTOLOGY_RULES: &[CompiledRuleContract] = &[\n");
+    for rule in &compiled.schema.ontology_rule_contracts {
+        writeln!(
+            output,
+            "    CompiledRuleContract {{ rule_id: {:?}, operation_kind: CompiledRuleOperationKind::{:?}, input_contract: {:?}, output_contract: {:?}, determinism_class: {:?}, diagnostic_code: {:?} }},",
+            rule.rule_id,
+            rule.operation_kind,
+            rule.input_contract,
+            rule.output_contract,
+            rule.determinism_class,
+            rule.diagnostic_code,
+        )
+        .unwrap();
+    }
+    let phrase_authority = render_compiled_authority(
+        &compiled.phrase_authority.authority_id,
+        &compiled.phrase_authority.authority_version,
+        &compiled.phrase_authority.canonical_digest,
+        &compiled.phrase_authority.canonical_source_path,
+    );
+    let query_form_authority = render_compiled_authority(
+        &compiled.query_form_authority.authority_id,
+        &compiled.query_form_authority.authority_version,
+        &compiled.query_form_authority.canonical_digest,
+        &compiled.query_form_authority.canonical_source_path,
+    );
+    writeln!(
+        output,
+        "];\n\nconst COMPILED_ONTOLOGY: RuntimeCompiledOntology = RuntimeCompiledOntology {{\n    enum_values: COMPILED_ENUM_VALUES,\n    entity_kinds: COMPILED_ENTITY_KINDS,\n    relation_kinds: COMPILED_RELATION_KINDS,\n    property_kinds: COMPILED_PROPERTY_KINDS,\n    fact_kinds: COMPILED_FACT_KINDS,\n    provider_raw_kinds: COMPILED_PROVIDER_RAW_KINDS,\n    phrase_authority: {phrase_authority},\n    query_form_authority: {query_form_authority},\n    edges: COMPILED_ONTOLOGY_EDGES,\n    rules: COMPILED_ONTOLOGY_RULES,\n}};"
+    )
+    .unwrap();
+    Ok(output.into_bytes())
+}
+
 #[allow(clippy::too_many_lines)] // One linear pass keeps the complete runtime view tied to one IR.
 fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
     let mut output = format!(
-        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\npub const GENERATED_ONTOLOGY_VERSION: &str = {:?};\npub const GENERATED_COMPATIBILITY_MODE: &str = {:?};\nconst GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY: bool = {};\nconst GENERATED_ALLOW_TYPE_WIDENING: bool = {};\nconst GENERATED_COLUMN_MAPPING_MODE: &str = {:?};\n\nconst GENERATED_METADATA_DICTIONARY: &[MetadataAnnotationSpec] = &[\n",
+        "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\npub const GENERATED_SCHEMA_CONTRACT_DIGEST: &str = {source_digest:?};\npub const GENERATED_ONTOLOGY_VERSION: &str = {:?};\npub const GENERATED_COMPATIBILITY_MODE: &str = {:?};\nconst GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY: bool = {};\nconst GENERATED_ALLOW_TYPE_WIDENING: bool = {};\nconst GENERATED_COLUMN_MAPPING_MODE: &str = {:?};\n\nconst GENERATED_METADATA_DICTIONARY: &[MetadataAnnotationSpec] = &[\n",
         ir.ontology_version,
         ir.compatibility_mode,
         ir.schema_evolution_policy.require_schema_digest_equality,
@@ -2523,6 +3681,20 @@ fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
             binding.domain.as_deref(),
             authority.map(|authority| authority.artifact_id.as_str()),
             authority.map(|authority| authority.canonical_digest.as_str()),
+        )
+        .unwrap();
+    }
+    output.push_str("]\n;\n\nconst GENERATED_STRUCTURE_GROUPS: &[StructureGroupSpec] = &[\n");
+    for group in &ir.structure_groups {
+        writeln!(
+            output,
+            "    StructureGroupSpec {{ group_id: {:?}, table_codes: &{:?}, columns: {}, logical_class: LogicalStructureClass::{:?}, physical_lowering: PhysicalStructureLowering::{:?}, validation_rule_id: {:?} }},",
+            group.group_id,
+            group.table_codes,
+            rust_strings(&group.columns),
+            group.logical_class,
+            group.physical_lowering,
+            group.validation_rule_id.as_deref(),
         )
         .unwrap();
     }
@@ -2572,10 +3744,12 @@ fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
         for column in &table.columns {
             writeln!(
                 output,
-                "            GeneratedColumn {{ name: {:?}, logical_type: LogicalType::{:?}, nullable: {}, semantic_type: {:?}, foreign_key: {:?}, hidden_operational: {} }},",
+                "            GeneratedColumn {{ name: {:?}, logical_type: LogicalType::{:?}, nullable: {}, id_domain: {:?}, element_id_domain: {:?}, semantic_type: {:?}, foreign_key: {:?}, hidden_operational: {} }},",
                 column.name,
                 column.logical_type,
                 column.nullable,
+                column.id_domain.as_deref(),
+                column.element_id_domain.as_deref(),
                 column.semantic_type.as_deref(),
                 column.foreign_key.as_deref(),
                 column.hidden_operational,
@@ -2624,8 +3798,12 @@ fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
         for column in &table.columns {
             writeln!(
                 output,
-                "            GeneratedOperationalColumn {{ name: {:?}, sqlite_type: OperationalSqliteType::{:?}, nullable: {} }},",
-                column.name, column.sqlite_type, column.nullable
+                "            GeneratedOperationalColumn {{ name: {:?}, sqlite_type: OperationalSqliteType::{:?}, logical_type: LogicalType::{:?}, id_domain: {:?}, nullable: {} }},",
+                column.name,
+                column.sqlite_type,
+                column.logical_type,
+                column.id_domain,
+                column.nullable
             )
             .unwrap();
         }
@@ -2713,6 +3891,13 @@ fn render_row_encoders(
     let mut output = format!(
         "// @generated from codefabric.schema.contract-ir {source_digest}; schema-contract-driver-v1; do not edit.\n\n"
     );
+    for table in ir
+        .tables
+        .iter()
+        .filter(|table| table.row_encoder.is_some() || table.table_code == 10)
+    {
+        render_row_shape(&mut output, table)?;
+    }
     for table in ir.tables.iter().filter(|table| table.row_encoder.is_some()) {
         let encoder = table.row_encoder.expect("filtered generated row encoder");
         writeln!(
@@ -2735,6 +3920,95 @@ fn render_row_encoders(
         output.push_str("        ],\n    )\n}\n\n");
     }
     Ok(output.into_bytes())
+}
+
+fn render_row_shape(output: &mut String, table: &TableContract) -> Result<(), SchemaDriverError> {
+    let row_type = if table.table_code == 10 {
+        "DiagnosticRow"
+    } else {
+        table
+            .row_encoder
+            .ok_or_else(|| SchemaDriverError::Invalid {
+                path: "$.tables[*].row_encoder".to_owned(),
+                detail: format!("table {} has no generated row-shape identity", table.name),
+            })?
+            .rust_row_type()
+    };
+    let derive = if matches!(table.table_code, 100 | 110 | 120 | 130) {
+        "#[derive(Clone, Debug, PartialEq)]"
+    } else {
+        "#[derive(Clone, Debug, Eq, PartialEq)]"
+    };
+    writeln!(
+        output,
+        "/// Generated encoder input for the canonical `{}` relation.\n{derive}\n#[allow(clippy::struct_excessive_bools)]\npub struct {row_type} {{",
+        table.name
+    )
+    .unwrap();
+
+    let fact_scoped = table.row_encoder.is_some();
+    if fact_scoped {
+        output.push_str("    pub scope: FactScope,\n");
+    }
+    let mut property_value_emitted = false;
+    for column in &table.columns {
+        if fact_scoped
+            && matches!(
+                column.name.as_str(),
+                "workspace_id" | "analysis_context_id" | "source_generation" | "owner_id"
+            )
+        {
+            continue;
+        }
+        if matches!(
+            column.name.as_str(),
+            "owner_bucket" | "source_bucket" | "target_bucket"
+        ) {
+            continue;
+        }
+        if table.table_code == 120 && column.name.starts_with("value_") {
+            if !property_value_emitted {
+                output.push_str("    pub value: PropertyValue,\n");
+                property_value_emitted = true;
+            }
+            continue;
+        }
+        let field_name = if table.table_code == 10 && column.name == "created_at" {
+            "created_at_micros"
+        } else {
+            column.name.as_str()
+        };
+        let field_type = rust_row_field_type(column.logical_type, column.nullable)?;
+        writeln!(output, "    pub {field_name}: {field_type},").unwrap();
+    }
+    output.push_str("}\n\n");
+    Ok(())
+}
+
+fn rust_row_field_type(
+    logical_type: LogicalType,
+    nullable: bool,
+) -> Result<String, SchemaDriverError> {
+    let value = match logical_type {
+        LogicalType::Id16 => "[u8; 16]",
+        LogicalType::Hash32 => "[u8; 32]",
+        LogicalType::Code16 | LogicalType::Bucket16 | LogicalType::Int16 => "i16",
+        LogicalType::Code32 | LogicalType::Int32 => "i32",
+        LogicalType::Int64 | LogicalType::TimestampUtc => "i64",
+        LogicalType::UInt64 => "u64",
+        LogicalType::Float64 => "f64",
+        LogicalType::Boolean => "bool",
+        LogicalType::Utf8 => "String",
+        LogicalType::Binary => "Vec<u8>",
+        LogicalType::IdList => "Vec<[u8; 16]>",
+        LogicalType::Int64List => "Vec<i64>",
+        LogicalType::StringMap => "BTreeMap<String, String>",
+    };
+    if nullable {
+        Ok(format!("Option<{value}>"))
+    } else {
+        Ok(value.to_owned())
+    }
 }
 
 fn render_encoder_column(
@@ -2772,9 +4046,9 @@ fn render_encoder_column(
             }
             LogicalType::Hash32 => {
                 if column.nullable {
-                    format!("binary(rows, |row| {direct}.as_ref().map(<[u8; 32]>::as_slice))")
+                    format!("hash32s(rows, |row| {direct}.as_ref())")
                 } else {
-                    format!("binary(rows, |row| Some({direct}.as_slice()))")
+                    format!("hash32s(rows, |row| Some(&{direct}))")
                 }
             }
             LogicalType::Binary => {
@@ -2811,6 +4085,12 @@ fn render_encoder_column(
                 } else {
                     format!("i64s(rows, |row| Some({direct}))")
                 }
+            }
+            LogicalType::UInt64 => {
+                return invalid(
+                    "$.tables[*].row_encoder",
+                    format!("unsupported generated UInt64 encoder field {table_code}.{name}"),
+                );
             }
             LogicalType::Float64 => {
                 if column.nullable {
@@ -2902,12 +4182,12 @@ fn render_validation(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
         "schema_version": 1,
         "family": "schemas",
         "source_digest": plan.source_digest,
-        "table_count": plan.ir.tables.len(),
-        "operational_table_count": plan.ir.operational_tables.len(),
-        "public_schema_count": plan.ir.public_schemas.len(),
+        "table_count": plan.compiled.schema.tables.len(),
+        "operational_table_count": plan.compiled.schema.operational_tables.len(),
+        "public_schema_count": plan.compiled.schema.public_schemas.len(),
         "stable_field_id_rule": "<table-name>.<field-name>",
         "compatibility_acceptance_generated": true,
-        "compatibility_class": plan.ir.schema_evolution_policy.compatibility_class,
+        "compatibility_class": plan.compiled.schema.schema_evolution_policy.compatibility_class,
         "compatibility_cases": compatibility_cases,
         "native_validators": ["arrow-schema-59.2.0", "datafusion-55.0.0", "sqlite-strict", "jsonschema-draft-2020-12"],
     }))
@@ -2915,29 +4195,43 @@ fn render_validation(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
 
 fn render_evolution_policy(plan: &SchemaPlan) -> Result<Vec<u8>, SchemaDriverError> {
     pretty(&json!({
-        "artifact_id": plan.ir.schema_evolution_policy.policy_id,
+        "artifact_id": plan.compiled.schema.schema_evolution_policy.policy_id,
         "artifact_kind": "schema-evolution-policy",
-        "version": plan.ir.schema_evolution_policy.version,
-        "source_artifact_id": plan.ir.header.artifact_id,
+        "version": plan.compiled.schema.schema_evolution_policy.version,
+        "source_artifact_id": plan.compiled.schema.header.artifact_id,
         "source_digest": plan.source_digest,
-        "compatibility_class": plan.ir.schema_evolution_policy.compatibility_class,
-        "require_schema_digest_equality": plan.ir.schema_evolution_policy.require_schema_digest_equality,
-        "allow_type_widening": plan.ir.schema_evolution_policy.allow_type_widening,
-        "column_mapping_mode": plan.ir.schema_evolution_policy.column_mapping_mode,
-        "migration_route": plan.ir.schema_evolution_policy.migration_route,
+        "compatibility_class": plan.compiled.schema.schema_evolution_policy.compatibility_class,
+        "require_schema_digest_equality": plan.compiled.schema.schema_evolution_policy.require_schema_digest_equality,
+        "allow_type_widening": plan.compiled.schema.schema_evolution_policy.allow_type_widening,
+        "column_mapping_mode": plan.compiled.schema.schema_evolution_policy.column_mapping_mode,
+        "migration_route": plan.compiled.schema.schema_evolution_policy.migration_route,
         "acceptance_suite": VALIDATION_PATH,
     }))
 }
 
-fn arrow_type(logical_type: LogicalType) -> Value {
+fn arrow_type(
+    logical_type: LogicalType,
+    id_domain: Option<&str>,
+    element_id_domain: Option<&str>,
+) -> Value {
     match logical_type {
-        LogicalType::Id16 => {
-            json!({"name":"fixed_size_binary","byte_width":16,"extension":{"name":"codefabric.id16","metadata":"version=1"}})
-        }
-        LogicalType::Hash32 => json!({"name":"binary","byte_width":32}),
+        LogicalType::Id16 => json!({
+            "name":"fixed_size_binary",
+            "byte_width":16,
+            "extension":{
+                "name":format!("codefabric.{}_id", id_domain.expect("validated ID domain")),
+                "metadata":"version=1"
+            }
+        }),
+        LogicalType::Hash32 => json!({
+            "name":"fixed_size_binary",
+            "byte_width":32,
+            "extension":{"name":"codefabric.hash32","metadata":"version=1"}
+        }),
         LogicalType::Code16 | LogicalType::Bucket16 | LogicalType::Int16 => json!({"name":"int16"}),
         LogicalType::Code32 | LogicalType::Int32 => json!({"name":"int32"}),
         LogicalType::Int64 => json!({"name":"int64"}),
+        LogicalType::UInt64 => json!({"name":"uint64"}),
         LogicalType::Float64 => json!({"name":"float64"}),
         LogicalType::Boolean => json!({"name":"boolean"}),
         LogicalType::Utf8 => json!({"name":"utf8"}),
@@ -2945,9 +4239,18 @@ fn arrow_type(logical_type: LogicalType) -> Value {
         LogicalType::TimestampUtc => {
             json!({"name":"timestamp","unit":"microsecond","timezone":"UTC"})
         }
-        LogicalType::IdList => {
-            json!({"name":"list","element":{"name":"fixed_size_binary","byte_width":16,"nullable":false,"extension":{"name":"codefabric.id16","metadata":"version=1"}}})
-        }
+        LogicalType::IdList => json!({
+            "name":"list",
+            "element":{
+                "name":"fixed_size_binary",
+                "byte_width":16,
+                "nullable":false,
+                "extension":{
+                    "name":format!("codefabric.{}_id", element_id_domain.expect("validated list ID domain")),
+                    "metadata":"version=1"
+                }
+            }
+        }),
         LogicalType::Int64List => {
             json!({"name":"list","element":{"name":"int64","nullable":false}})
         }
@@ -2998,6 +4301,43 @@ fn decode_ir(bytes: &[u8]) -> Result<SchemaContractIr, SchemaDriverError> {
 fn decode_query_form_contract(bytes: &[u8]) -> Result<QueryFormContract, SchemaDriverError> {
     let value = codefabric::contracts::jcs::decode_strict(bytes)?;
     serde_json::from_value(value).map_err(SchemaDriverError::Json)
+}
+
+fn validate_query_result_bindings(
+    ir: &SchemaContractIr,
+    query_forms: &QueryFormContract,
+) -> Result<(), SchemaDriverError> {
+    let schemas = ir
+        .result_schemas
+        .iter()
+        .map(|schema| (schema.result_schema_id.as_str(), schema))
+        .collect::<BTreeMap<_, _>>();
+    let mut referenced = BTreeSet::new();
+    for form in &query_forms.forms {
+        let schema = schemas.get(form.result_schema_id.as_str()).ok_or_else(|| {
+            SchemaDriverError::Invalid {
+                path: "$.forms[*].result_schema_id".to_owned(),
+                detail: format!(
+                    "query form {} references unknown result schema {}",
+                    form.code, form.result_schema_id
+                ),
+            }
+        })?;
+        if schema.query_form_code != form.code || schema.result_role != form.output_role {
+            return invalid(
+                "$.forms[*].result_schema_id",
+                format!("query form {} result schema code/role differs", form.code),
+            );
+        }
+        referenced.insert(form.result_schema_id.as_str());
+    }
+    if referenced.len() != schemas.len() {
+        return invalid(
+            "$.result_schemas",
+            "result-schema authority is not referenced exactly once",
+        );
+    }
+    Ok(())
 }
 
 fn detached_query_form_identity(bytes: &[u8]) -> Result<String, SchemaDriverError> {
@@ -3177,7 +4517,14 @@ mod tests {
                 .collect::<BTreeSet<_>>();
             assert_eq!(ids.len(), table.columns.len());
             for column in &table.columns {
-                assert!(arrow_type(column.logical_type).is_object());
+                assert!(
+                    arrow_type(
+                        column.logical_type,
+                        column.id_domain.as_deref(),
+                        column.element_id_domain.as_deref(),
+                    )
+                    .is_object()
+                );
             }
         }
         let plan = SchemaDriver.plan(Path::new(".")).unwrap();
@@ -3207,6 +4554,7 @@ mod tests {
             LogicalType::Int16,
             LogicalType::Int32,
             LogicalType::Int64,
+            LogicalType::UInt64,
             LogicalType::Float64,
             LogicalType::Boolean,
             LogicalType::Utf8,
@@ -3220,7 +4568,9 @@ mod tests {
             let encoded = serde_json::to_vec(&logical_type).unwrap();
             let decoded: LogicalType = serde_json::from_slice(&encoded).unwrap();
             assert_eq!(decoded, logical_type);
-            assert!(arrow_type(decoded).is_object());
+            if !matches!(decoded, LogicalType::Id16 | LogicalType::IdList) {
+                assert!(arrow_type(decoded, None, None).is_object());
+            }
         }
     }
 
@@ -3376,8 +4726,8 @@ mod tests {
         assert!(paths.contains(EVOLUTION_POLICY_PATH));
         assert!(paths.contains(VALIDATION_PATH));
 
-        let first = render_row_encoders(&plan.ir, &plan.source_digest).unwrap();
-        let second = render_row_encoders(&plan.ir, &plan.source_digest).unwrap();
+        let first = render_row_encoders(&plan.compiled.schema, &plan.source_digest).unwrap();
+        let second = render_row_encoders(&plan.compiled.schema, &plan.source_digest).unwrap();
         assert_eq!(first, second);
         let rendered = String::from_utf8(first).unwrap();
         for function in [
@@ -3468,7 +4818,8 @@ mod tests {
     #[test]
     fn provider_observation_schema_projection_parity() {
         let ir = authority();
-        let rendered = String::from_utf8(render_rust(&ir)).unwrap();
+        let plan = SchemaDriver.plan(Path::new(".")).unwrap();
+        let rendered = String::from_utf8(render_rust(&plan.compiled)).unwrap();
         for schema in &ir.provider_observation_schemas {
             let descriptor = provider_observation_descriptor(schema);
             let digest = codefabric::integrity::framed_digest(descriptor.as_bytes());
@@ -3498,11 +4849,11 @@ mod tests {
                 "{path}"
             );
         }
-        let ir = authority();
-        let baseline = render_rust(&ir);
-        let mut drifted = ir;
-        drifted.provider_observation_schemas[0].fields[0].name = "drifted_module_id".to_owned();
-        assert_ne!(baseline, render_rust(&drifted));
+        let mut plan = SchemaDriver.plan(Path::new(".")).unwrap();
+        let baseline = render_rust(&plan.compiled);
+        plan.compiled.schema.provider_observation_schemas[0].fields[0].name =
+            "drifted_module_id".to_owned();
+        assert_ne!(baseline, render_rust(&plan.compiled));
     }
 
     #[test]

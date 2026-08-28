@@ -4,11 +4,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
 use std::sync::Arc;
 
+#[cfg(test)]
+use arrow_array::ListArray;
 use arrow_array::{
-    Array as _, BinaryArray, FixedSizeBinaryArray, Int16Array, Int32Array, RecordBatch,
-    StringArray, UInt64Array,
+    Array as _, FixedSizeBinaryArray, Int16Array, Int32Array, RecordBatch, StringArray, UInt64Array,
 };
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use arrow_schema::{DataType, SchemaRef};
 use datafusion::common::ScalarValue;
 use datafusion::datasource::{MemTable, provider_as_source};
 use datafusion::functions_aggregate::expr_fn::count;
@@ -1135,11 +1136,14 @@ fn id16_bytes(value: &str, expected_prefix: &str) -> Result<[u8; 16], SemanticQu
     Ok(bytes)
 }
 
-fn id16_scalar(value: &str, expected_prefix: &str) -> Result<ScalarValue, SemanticQueryError> {
-    Ok(ScalarValue::FixedSizeBinary(
-        16,
-        Some(id16_bytes(value, expected_prefix)?.to_vec()),
-    ))
+fn id16_literal(
+    value: &str,
+    expected_prefix: &str,
+    domain: &str,
+) -> Result<Expr, SemanticQueryError> {
+    crate::schema_registry::DomainTypedLiteral::new(domain, id16_bytes(value, expected_prefix)?)
+        .map(crate::schema_registry::DomainTypedLiteral::into_expr)
+        .map_err(|error| SemanticQueryError::Invalid(error.to_string()))
 }
 
 fn any_of(column: &'static str, values: Vec<ScalarValue>) -> Option<Expr> {
@@ -1147,15 +1151,44 @@ fn any_of(column: &'static str, values: Vec<ScalarValue>) -> Option<Expr> {
         .then(|| col(column).in_list(values.into_iter().map(lit).collect::<Vec<_>>(), false))
 }
 
+fn any_of_expr(column: &'static str, values: Vec<Expr>) -> Option<Expr> {
+    (!values.is_empty()).then(|| col(column).in_list(values, false))
+}
+
 fn all_of(expressions: Vec<Expr>) -> Option<Expr> {
     expressions.into_iter().reduce(Expr::and)
 }
 
-fn ontology_code(ids: &[&str], codes: &[crate::registries::OntologyCodeEntry], name: &str) -> i32 {
-    ids.iter()
-        .position(|candidate| *candidate == name)
-        .and_then(|index| codes.get(index))
-        .map_or(0, |entry| entry.code)
+fn ontology_code(family: &str, name: &str) -> i32 {
+    let ontology = crate::compiled_ontology::compiled_ontology();
+    match family {
+        "entity" => ontology
+            .entity_kinds
+            .iter()
+            .find(|value| value.name == name)
+            .map(|value| value.code),
+        "relation" => ontology
+            .relation_kinds
+            .iter()
+            .find(|value| value.name == name)
+            .map(|value| value.code),
+        "property" => ontology
+            .property_kinds
+            .iter()
+            .find(|value| value.name == name)
+            .map(|value| value.code),
+        _ => None,
+    }
+    .unwrap_or_else(|| panic!("compiled ontology value {family}.{name} is absent"))
+}
+
+fn compiled_enum_code(domain: &str, name: &str) -> i16 {
+    crate::compiled_ontology::compiled_ontology()
+        .enum_values
+        .iter()
+        .find(|value| value.domain == domain && value.name == name)
+        .and_then(|value| i16::try_from(value.code).ok())
+        .unwrap_or_else(|| panic!("compiled enum value {domain}.{name} is absent or not code16"))
 }
 
 fn entity_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
@@ -1225,13 +1258,7 @@ fn entity_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
     }
     names
         .into_iter()
-        .map(|name| {
-            ScalarValue::Int32(Some(ontology_code(
-                crate::registries::ENTITY_KIND_IDS,
-                crate::registries::ENTITY_KIND_CODES,
-                name,
-            )))
-        })
+        .map(|name| ScalarValue::Int32(Some(ontology_code("entity", name))))
         .collect()
 }
 
@@ -1268,13 +1295,7 @@ fn relation_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
     }
     names
         .into_iter()
-        .map(|name| {
-            ScalarValue::Int32(Some(ontology_code(
-                crate::registries::RELATION_KIND_IDS,
-                crate::registries::RELATION_KIND_CODES,
-                name,
-            )))
-        })
+        .map(|name| ScalarValue::Int32(Some(ontology_code("relation", name))))
         .collect()
 }
 
@@ -1296,13 +1317,7 @@ fn property_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<ScalarValue> {
     }
     names
         .into_iter()
-        .map(|name| {
-            ScalarValue::Int32(Some(ontology_code(
-                crate::registries::PROPERTY_KIND_IDS,
-                crate::registries::PROPERTY_KIND_CODES,
-                name,
-            )))
-        })
+        .map(|name| ScalarValue::Int32(Some(ontology_code("property", name))))
         .collect()
 }
 
@@ -1317,39 +1332,47 @@ fn language_predicate(column: &'static str, phrases: &[ResolvedPhrase]) -> Optio
     any_of(column, values)
 }
 
+fn compiled_condition_predicate(condition: &str, qualifier: &str) -> Option<Expr> {
+    let operation = crate::model_generated::schema_tables::SEMANTIC_OPERATION_SPECS
+        .iter()
+        .find(|operation| operation.canonical_text == condition)?;
+    let column = col(format!("{qualifier}.{}", operation.column_role));
+    let values = operation
+        .operand_codes
+        .iter()
+        .map(|code| lit(ScalarValue::Int16(Some(*code))))
+        .collect::<Vec<_>>();
+    match operation.operator {
+        crate::model_generated::schema_tables::SemanticPredicateOperator::Equals => {
+            values.into_iter().next().map(|value| column.eq(value))
+        }
+        crate::model_generated::schema_tables::SemanticPredicateOperator::InSet => {
+            Some(column.in_list(values, false))
+        }
+    }
+}
+
 fn condition_predicates(query: &SemanticQueryClause, qualifier: &str) -> Vec<Expr> {
     query_where_conditions(query)
         .iter()
-        .filter_map(|condition| match condition.as_str() {
-            "entities whose semantic kind is function" => Some(
-                col(format!("{qualifier}.entity_kind_code")).eq(lit(ScalarValue::Int32(Some(
-                    ontology_code(
-                        crate::registries::ENTITY_KIND_IDS,
-                        crate::registries::ENTITY_KIND_CODES,
-                        "CALLABLE",
-                    ),
-                )))),
-            ),
-            "language is Python" => Some(col(format!("{qualifier}.language")).eq(lit(
-                ScalarValue::Int16(Some(crate::registries::Language::Python as i16)),
-            ))),
-            "language is Rust" => Some(col(format!("{qualifier}.language")).eq(lit(
-                ScalarValue::Int16(Some(crate::registries::Language::Rust as i16)),
-            ))),
-            "certainty is exact" => Some(col(format!("{qualifier}.certainty_code")).in_list(
-                vec![
-                    lit(ScalarValue::Int16(Some(10))),
-                    lit(ScalarValue::Int16(Some(20))),
-                ],
-                false,
-            )),
-            "certainty is sound may" => Some(
-                col(format!("{qualifier}.certainty_code")).eq(lit(ScalarValue::Int16(Some(40)))),
-            ),
-            "certainty is unresolved" => Some(
-                col(format!("{qualifier}.certainty_code")).eq(lit(ScalarValue::Int16(Some(70)))),
-            ),
-            _ => None,
+        .filter_map(|condition| {
+            if let Some(predicate) = compiled_condition_predicate(condition, qualifier) {
+                return Some(predicate);
+            }
+            match condition.as_str() {
+                "entities whose semantic kind is function" => Some(
+                    col(format!("{qualifier}.entity_kind_code")).eq(lit(ScalarValue::Int32(Some(
+                        ontology_code("entity", "CALLABLE"),
+                    )))),
+                ),
+                "language is Python" => Some(col(format!("{qualifier}.language")).eq(lit(
+                    ScalarValue::Int16(Some(crate::registries::Language::Python as i16)),
+                ))),
+                "language is Rust" => Some(col(format!("{qualifier}.language")).eq(lit(
+                    ScalarValue::Int16(Some(crate::registries::Language::Rust as i16)),
+                ))),
+                _ => None,
+            }
         })
         .collect()
 }
@@ -1387,9 +1410,9 @@ async fn compile_find_entities(
     let identities = query
         .direct_entity_ids()
         .into_iter()
-        .map(|value| id16_scalar(value, "entity:"))
+        .map(|value| id16_literal(value, "entity:", "entity"))
         .collect::<Result<Vec<_>, _>>()?;
-    if let Some(predicate) = any_of("entity.entity_id", identities) {
+    if let Some(predicate) = any_of_expr("entity.entity_id", identities) {
         predicates.push(predicate);
     }
     let kinds = entity_kind_codes(&typed.resolved_phrases);
@@ -1420,7 +1443,11 @@ async fn compile_find_entities(
             col("entity.qualified_name"),
             col("entity.entity_id"),
             lit(query.query_id()).alias("origin_query_id"),
-            lit(ScalarValue::Int16(Some(10))).alias("certainty_code"),
+            lit(ScalarValue::Int16(Some(compiled_enum_code(
+                "EVIDENCE_CERTAINTY",
+                "SOURCE_EXACT",
+            ))))
+            .alias("certainty_code"),
         ])?;
     bounded_plan(builder, &typed.canonical_order, typed.limit)
 }
@@ -1433,14 +1460,14 @@ fn fact_about_predicates(
     let entities = query
         .direct_entity_ids()
         .into_iter()
-        .map(|value| id16_scalar(value, "entity:"))
+        .map(|value| id16_literal(value, "entity:", "entity"))
         .collect::<Result<Vec<_>, _>>()?;
     if entities.is_empty() {
         return Ok(None);
     }
-    let subject = any_of(subject_column, entities.clone()).expect("non-empty identities");
+    let subject = any_of_expr(subject_column, entities.clone()).expect("non-empty identities");
     Ok(Some(object_column.map_or(subject.clone(), |object| {
-        subject.or(any_of(object, entities).expect("non-empty identities"))
+        subject.or(any_of_expr(object, entities).expect("non-empty identities"))
     })))
 }
 
@@ -1452,11 +1479,11 @@ async fn compile_retrieve_facts(
     let direct_facts = query
         .direct_fact_ids()
         .into_iter()
-        .map(|value| id16_scalar(value, "fact:"))
+        .map(|value| id16_literal(value, "fact:", "fact"))
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut property_predicates = condition_predicates(query, "property");
-    if let Some(predicate) = any_of("property.fact_id", direct_facts.clone()) {
+    if let Some(predicate) = any_of_expr("property.fact_id", direct_facts.clone()) {
         property_predicates.push(predicate);
     }
     if let Some(predicate) = fact_about_predicates(query, "property.subject_entity_id", None)? {
@@ -1492,7 +1519,7 @@ async fn compile_retrieve_facts(
         .build()?;
 
     let mut relation_predicates = condition_predicates(query, "relation");
-    if let Some(predicate) = any_of("relation.fact_id", direct_facts) {
+    if let Some(predicate) = any_of_expr("relation.fact_id", direct_facts) {
         relation_predicates.push(predicate);
     }
     if let Some(predicate) =
@@ -1548,15 +1575,38 @@ fn dependency_identity(role: ResultRole) -> Result<&'static str, SemanticQueryEr
 }
 
 fn dependency_schema(role: ResultRole) -> Result<SchemaRef, SemanticQueryError> {
-    Ok(Arc::new(Schema::new(vec![
-        Field::new(
+    let result_schema_id = match role {
+        ResultRole::Entities => "result.find_entities.v2",
+        ResultRole::Facts => "result.retrieve_facts.v2",
+        ResultRole::Paths => "result.find_paths.v2",
+        ResultRole::PatternBindings => "result.match_pattern.v2",
+        ResultRole::Groups => "result.combine_results.v2",
+        ResultRole::SourceContexts => "result.retrieve_source_context.v2",
+        ResultRole::Summary => {
+            return Err(phase_error(
+                "QUERY_ROLE_INCOMPATIBLE",
+                "logical_compile",
+                "",
+                "summary output has no dependency identity schema",
+            ));
+        }
+    };
+    crate::schema_registry::project_result_schema(
+        result_schema_id,
+        &[
             dependency_identity(role)?,
-            DataType::FixedSizeBinary(16),
-            false,
-        ),
-        Field::new("origin_query_id", DataType::Utf8, false),
-        Field::new("certainty_code", DataType::Int16, false),
-    ])))
+            "origin_query_id",
+            "certainty_code",
+        ],
+    )
+    .ok_or_else(|| {
+        phase_error(
+            "QUERY_RESULT_SCHEMA_MISSING",
+            "logical_compile",
+            "",
+            format!("compiled dependency projection {result_schema_id} is absent"),
+        )
+    })
 }
 
 fn empty_dependency_plan(name: &str, role: ResultRole) -> Result<LogicalPlan, SemanticQueryError> {
@@ -1800,16 +1850,15 @@ fn compile_source_context_template(
             ));
         }
     };
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("source_file_id", DataType::FixedSizeBinary(16), false),
-        Field::new("source_file_path", DataType::Utf8, false),
-        Field::new("span_start", DataType::Int64, false),
-        Field::new("span_end", DataType::Int64, false),
-        Field::new("source_digest", DataType::Binary, false),
-        Field::new("source_bytes", DataType::Binary, true),
-        Field::new("decoded_text", DataType::Utf8, true),
-        Field::new("origin_query_id", DataType::Utf8, false),
-    ]));
+    let schema = crate::schema_registry::result_schema("result.retrieve_source_context.v2")
+        .ok_or_else(|| {
+            phase_error(
+                "QUERY_RESULT_SCHEMA_MISSING",
+                "logical_compile",
+                &typed.source_pointer,
+                "compiled source-context result schema is absent",
+            )
+        })?;
     let empty = RecordBatch::new_empty(Arc::clone(&schema));
     let provider = Arc::new(MemTable::try_new(schema, vec![vec![empty]])?);
     let plan = bounded_plan(
@@ -1961,53 +2010,21 @@ fn resolved_relation_kind_codes(phrases: &[ResolvedPhrase]) -> Vec<i32> {
 fn graph_certainty_codes(query: &SemanticQueryClause) -> Vec<i16> {
     let mut codes = BTreeSet::new();
     for condition in query_where_conditions(query) {
-        match condition.as_str() {
-            "certainty is exact" => codes.extend([10, 20, 30, 50]),
-            "certainty is sound may" => {
-                codes.insert(40);
-            }
-            "certainty is unresolved" => {
-                codes.insert(70);
-            }
-            _ => {}
+        if let Some(operation) = crate::model_generated::schema_tables::SEMANTIC_OPERATION_SPECS
+            .iter()
+            .find(|operation| operation.canonical_text == condition)
+        {
+            codes.extend(operation.operand_codes.iter().copied());
         }
     }
     codes.into_iter().collect()
 }
 
 fn graph_output_schema(form: QueryForm) -> Result<SchemaRef, SemanticQueryError> {
-    let fields = match form {
-        QueryForm::FollowRelationships => vec![
-            Field::new("fact_id", DataType::FixedSizeBinary(16), false),
-            Field::new("source_id", DataType::FixedSizeBinary(16), false),
-            Field::new("target_id", DataType::FixedSizeBinary(16), false),
-            Field::new("relationship_kind_code", DataType::Int32, false),
-            Field::new("directness_code", DataType::Int16, false),
-            Field::new("certainty_code", DataType::Int16, false),
-            Field::new("resolution_code", DataType::Int16, false),
-            Field::new("distance", DataType::UInt64, false),
-            Field::new("witness_fact_id", DataType::FixedSizeBinary(16), false),
-            Field::new("origin_query_id", DataType::Utf8, false),
-        ],
-        QueryForm::FindPaths => vec![
-            Field::new("path_id", DataType::FixedSizeBinary(16), false),
-            Field::new("fact_id", DataType::FixedSizeBinary(16), true),
-            Field::new("start_id", DataType::FixedSizeBinary(16), false),
-            Field::new("end_id", DataType::FixedSizeBinary(16), false),
-            Field::new("ordered_entity_ids", DataType::Binary, false),
-            Field::new("ordered_fact_ids", DataType::Binary, false),
-            Field::new("path_length", DataType::UInt64, false),
-            Field::new("certainty_summary", DataType::Utf8, false),
-            Field::new("origin_query_id", DataType::Utf8, false),
-        ],
-        QueryForm::MatchPattern => vec![
-            Field::new("binding_id", DataType::FixedSizeBinary(16), false),
-            Field::new("fact_id", DataType::FixedSizeBinary(16), true),
-            Field::new("binding_names", DataType::Utf8, false),
-            Field::new("binding_entity_ids", DataType::Binary, false),
-            Field::new("witness_fact_ids", DataType::Binary, false),
-            Field::new("origin_query_id", DataType::Utf8, false),
-        ],
+    let result_schema_id = match form {
+        QueryForm::FollowRelationships => "result.follow_relationships.v2",
+        QueryForm::FindPaths => "result.find_paths.v2",
+        QueryForm::MatchPattern => "result.match_pattern.v2",
         _ => {
             return Err(phase_error(
                 "QUERY_FORM_COMPILER_MISMATCH",
@@ -2017,7 +2034,14 @@ fn graph_output_schema(form: QueryForm) -> Result<SchemaRef, SemanticQueryError>
             ));
         }
     };
-    Ok(Arc::new(Schema::new(fields)))
+    crate::schema_registry::result_schema(result_schema_id).ok_or_else(|| {
+        phase_error(
+            "QUERY_RESULT_SCHEMA_MISSING",
+            "logical_compile",
+            "",
+            format!("compiled graph result schema {result_schema_id} is absent"),
+        )
+    })
 }
 
 #[allow(clippy::too_many_lines)] // The semantic IR construction exhaustively covers three governed graph variants.
@@ -2411,7 +2435,10 @@ fn normalized_dependency_plan(
     let certainty = if completed.schema.field_with_name("certainty_code").is_ok() {
         col("certainty_code")
     } else {
-        lit(ScalarValue::Int16(Some(70)))
+        lit(ScalarValue::Int16(Some(compiled_enum_code(
+            "EVIDENCE_CERTAINTY",
+            "UNRESOLVED",
+        ))))
     };
     Ok(LogicalPlanBuilder::from(input)
         .project(vec![
@@ -3063,20 +3090,14 @@ fn graph_batch(
                     .first()
                     .map(|payload| &graph.edges[*payload].fact_id)
             });
-            let entity_bytes = paths
-                .iter()
-                .map(|(_, witness)| packed_ids(&witness.node_ids))
-                .collect::<Vec<_>>();
-            let fact_bytes = paths
+            let fact_ids = paths
                 .iter()
                 .map(|(_, witness)| {
-                    packed_ids(
-                        &witness
-                            .edge_payloads
-                            .iter()
-                            .map(|payload| graph.edges[*payload].fact_id)
-                            .collect::<Vec<_>>(),
-                    )
+                    witness
+                        .edge_payloads
+                        .iter()
+                        .map(|payload| graph.edges[*payload].fact_id)
+                        .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
             let certainty = paths
@@ -3097,12 +3118,20 @@ fn graph_batch(
                     paths.iter().map(|(_, witness)| witness.node_ids.first()),
                 ),
                 crate::fabric::id16_array(paths.iter().map(|(_, witness)| witness.node_ids.last())),
-                Arc::new(BinaryArray::from_iter_values(
-                    entity_bytes.iter().map(Vec::as_slice),
-                )),
-                Arc::new(BinaryArray::from_iter_values(
-                    fact_bytes.iter().map(Vec::as_slice),
-                )),
+                crate::fabric::id16_list_array(
+                    plan.output_schema
+                        .field_with_name("ordered_entity_ids")
+                        .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                    paths.iter().map(|(_, witness)| witness.node_ids.as_slice()),
+                )
+                .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                crate::fabric::id16_list_array(
+                    plan.output_schema
+                        .field_with_name("ordered_fact_ids")
+                        .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                    fact_ids.iter().map(Vec::as_slice),
+                )
+                .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
                 Arc::new(UInt64Array::from_iter_values(paths.iter().map(
                     |(_, witness)| u64::try_from(witness.edge_payloads.len()).unwrap_or(u64::MAX),
                 ))),
@@ -3126,19 +3155,13 @@ fn graph_batch(
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            let entity_bytes = matches
-                .iter()
-                .map(|(_, _, ids, _)| packed_ids(ids))
-                .collect::<Vec<_>>();
-            let fact_bytes = matches
+            let fact_ids = matches
                 .iter()
                 .map(|(_, _, _, payloads)| {
-                    packed_ids(
-                        &payloads
-                            .iter()
-                            .map(|payload| graph.edges[*payload].fact_id)
-                            .collect::<Vec<_>>(),
-                    )
+                    payloads
+                        .iter()
+                        .map(|payload| graph.edges[*payload].fact_id)
+                        .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
             vec![
@@ -3155,12 +3178,20 @@ fn graph_batch(
                 Arc::new(StringArray::from_iter_values(
                     matches.iter().map(|(_, names, _, _)| names.join(",")),
                 )),
-                Arc::new(BinaryArray::from_iter_values(
-                    entity_bytes.iter().map(Vec::as_slice),
-                )),
-                Arc::new(BinaryArray::from_iter_values(
-                    fact_bytes.iter().map(Vec::as_slice),
-                )),
+                crate::fabric::id16_list_array(
+                    plan.output_schema
+                        .field_with_name("binding_entity_ids")
+                        .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                    matches.iter().map(|(_, _, ids, _)| ids.as_slice()),
+                )
+                .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                crate::fabric::id16_list_array(
+                    plan.output_schema
+                        .field_with_name("witness_fact_ids")
+                        .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
+                    fact_ids.iter().map(Vec::as_slice),
+                )
+                .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
                 Arc::new(StringArray::from_iter_values(std::iter::repeat_n(
                     plan.block_id.as_str(),
                     matches.len(),
@@ -5449,6 +5480,50 @@ mod tests {
     }
 
     #[test]
+    fn odf_phrase_binding_dual_path_parity() {
+        let operation = crate::model_generated::schema_tables::SEMANTIC_OPERATION_SPECS
+            .iter()
+            .find(|operation| operation.canonical_text == "certainty is exact")
+            .expect("compiled phrase operation");
+        let expected = operation
+            .operand_codes
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(expected, BTreeSet::from([10, 20, 30, 50]));
+
+        let mut value: serde_json::Value = serde_json::from_slice(&request()).unwrap();
+        value["queries"][0]["where"] = serde_json::json!([operation.canonical_text]);
+        value["queries"][2]["where"] = serde_json::json!([operation.canonical_text]);
+        let typed = validate_request(&canonicalize_value(&value).unwrap()).unwrap();
+        let relational = typed
+            .request
+            .queries
+            .iter()
+            .find(|query| query.form() == QueryForm::FindEntities)
+            .unwrap();
+        let predicates = condition_predicates(relational, "entity");
+        assert_eq!(predicates.len(), 1);
+        let rendered = predicates[0].to_string();
+        for code in &expected {
+            assert!(rendered.contains(&code.to_string()), "{rendered}");
+        }
+
+        let graph = typed
+            .request
+            .queries
+            .iter()
+            .find(|query| query.form() == QueryForm::FollowRelationships)
+            .unwrap();
+        assert_eq!(
+            graph_certainty_codes(graph)
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
+            expected
+        );
+    }
+
+    #[test]
     fn wp38_operational_acceptance() {
         let first = validate_request(&request()).unwrap();
         let second = validate_request(&first.canonical_bytes).unwrap();
@@ -5689,9 +5764,10 @@ mod tests {
             .column_by_name("ordered_fact_ids")
             .unwrap()
             .as_any()
-            .downcast_ref::<BinaryArray>()
+            .downcast_ref::<ListArray>()
             .unwrap();
-        assert!((0..fact_witnesses.len()).all(|row| fact_witnesses.value(row).len() == 32));
+        assert!((0..fact_witnesses.len()).all(|row| fact_witnesses.value_length(row) == 2));
+        assert_eq!(fact_witnesses.value_type(), DataType::FixedSizeBinary(16));
 
         let mut conjunctive = pattern_plan;
         conjunctive.semantics = GraphSemantics::Pattern {

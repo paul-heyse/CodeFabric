@@ -5,13 +5,17 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use arrow_array::builder::{BinaryBuilder, Float64Builder, Int64Builder, StringBuilder};
-use arrow_array::{ArrayRef, BinaryArray, Int64Array, RecordBatch, StringArray};
+use arrow_array::builder::{
+    BinaryBuilder, FixedSizeBinaryBuilder, Float64Builder, Int64Builder, StringBuilder,
+    TimestampMicrosecondBuilder,
+};
+use arrow_array::{ArrayRef, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray};
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
 use datafusion::datasource::{MemTable, ViewTable, provider_as_source};
+use datafusion::execution::SessionStateBuilder;
 use datafusion::execution::memory_pool::{
     FairSpillPool, MemoryConsumer, MemoryReservation, TrackConsumersPool,
 };
@@ -20,6 +24,7 @@ use datafusion::execution::memory_pool::{MemoryPool, UnboundedMemoryPool};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::expr::Placeholder;
 use datafusion::logical_expr::expr_fn::cast;
+use datafusion::logical_expr::registry::MemoryExtensionTypeRegistry;
 use datafusion::logical_expr::{Expr, JoinType, LogicalPlan, LogicalPlanBuilder, col, lit};
 #[cfg(test)]
 use datafusion::physical_plan::SendableRecordBatchStream;
@@ -47,6 +52,7 @@ use crate::snapshot_runtime::SnapshotLeaseGuard;
 
 const CATALOG_NAME: &str = "codefabric";
 const BASE_SCHEMA: &str = "cpg_base";
+const ONTOLOGY_SCHEMA: &str = "cpg_ontology";
 const CONTROL_SCHEMA: &str = "cpg_control";
 const SERVING_SCHEMA: &str = "cpg_serving";
 const TRACKED_CONSUMER_COUNT: NonZeroUsize = NonZeroUsize::new(5).unwrap();
@@ -493,7 +499,19 @@ impl ServingQuerySession {
             .set_bool("datafusion.execution.parquet.reorder_filters", false)
             .with_repartition_joins(true)
             .with_repartition_aggregations(true);
-        let context = SessionContext::new_with_config_rt(session_config, Arc::clone(&runtime));
+        let extension_types = MemoryExtensionTypeRegistry::new_with_types(
+            crate::schema_registry::extension_type_registrations(),
+        )?;
+        let state = SessionStateBuilder::new()
+            .with_default_features()
+            .with_config(session_config)
+            .with_runtime_env(Arc::clone(&runtime))
+            .with_extension_type_registry(Arc::new(extension_types))
+            .with_analyzer_rule(Arc::new(
+                crate::domain_conformance::DomainConformanceRule::new(),
+            ))
+            .build();
+        let context = SessionContext::new_with_state(state);
         let snapshot = lease.snapshot();
         let workspace_id = snapshot
             .manifest()
@@ -512,9 +530,13 @@ impl ServingQuerySession {
         let base = source_catalog.schema(BASE_SCHEMA).ok_or_else(|| {
             ServingQueryError::Configuration("snapshot has no cpg_base schema".into())
         })?;
+        let ontology = source_catalog.schema(ONTOLOGY_SCHEMA).ok_or_else(|| {
+            ServingQueryError::Configuration("snapshot has no cpg_ontology schema".into())
+        })?;
         let serving = build_serving_schema(&providers)?;
         let mut schemas = BTreeMap::from([
             (BASE_SCHEMA.to_owned(), base),
+            (ONTOLOGY_SCHEMA.to_owned(), ontology),
             (CONTROL_SCHEMA.to_owned(), control),
             (SERVING_SCHEMA.to_owned(), serving),
         ]);
@@ -603,6 +625,26 @@ impl ServingQuerySession {
     /// Returns an error when the table is absent from the snapshot-bound catalog.
     pub async fn table_plan(&self, table: &str) -> Result<LogicalPlan, ServingQueryError> {
         Ok(self.context.table(table).await?.into_unoptimized_plan())
+    }
+
+    /// Resolve the complete ontology contract plane using only this leased catalog and one
+    /// delivered result artifact. Relation discovery is driven by `table_contract`, not generated
+    /// Rust table constants.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the delivered result identities or snapshot-bound ontology catalog
+    /// fail recursive resolution.
+    pub async fn resolve_ontology_self_description(
+        &self,
+        delivered: &QueryPlanArtifact,
+    ) -> Result<crate::ontology_activation::OntologyCatalogResolution, ServingQueryError> {
+        Ok(crate::ontology_activation::resolve_ontology_catalog(
+            &self.context,
+            &delivered.canonical_output_schema_digest,
+            &delivered.result_checksum_version,
+        )
+        .await?)
     }
 
     /// Validate and execute a native DataFusion logical plan produced by the semantic compiler.
@@ -832,7 +874,7 @@ impl ServingQuerySession {
                     "query output exhausts checksum working memory".to_owned(),
                 )
             })?;
-        let result = super::result_checksum::result_checksum_v1(
+        let result = super::result_checksum::result_checksum_v2(
             physical.schema().as_ref(),
             &batches,
             checksum_encoding_budget,
@@ -1197,9 +1239,6 @@ impl CatalogProvider for ImmutableCatalogProvider {
 fn build_serving_schema(
     providers: &SnapshotProviderCatalog,
 ) -> Result<Arc<dyn SchemaProvider>, ServingQueryError> {
-    let enum_provider = providers.provider(11).ok_or_else(|| {
-        ServingQueryError::Configuration("snapshot lacks enum_catalog dimension".into())
-    })?;
     let mut tables = BTreeMap::new();
     for projection in serving_projection_specs() {
         let table_code = projection.source_table_code;
@@ -1212,7 +1251,7 @@ fn build_serving_schema(
             ServingQueryError::Configuration(format!("unknown serving table {table_code}"))
         })?;
         validate_serving_spec(spec)?;
-        let plan = serving_view_plan(spec, provider, &enum_provider)?;
+        let plan = serving_view_plan(spec, provider, providers)?;
         tables.insert(
             projection.view_name.to_owned(),
             Arc::new(ViewTable::new(plan, None)) as Arc<dyn TableProvider>,
@@ -1237,10 +1276,33 @@ fn validate_serving_spec(spec: &TableSpec) -> Result<(), ServingQueryError> {
     Ok(())
 }
 
+fn provider_catalog_decoration_keys(
+    source: &TableSpec,
+    raw_kind_field: &str,
+) -> Option<Vec<(String, &'static str)>> {
+    let dimension = table_spec(18)?;
+    dimension
+        .primary_key
+        .iter()
+        .map(|dimension_key| {
+            let source_key = if *dimension_key == "raw_kind_code" {
+                raw_kind_field
+            } else {
+                source
+                    .arrow_schema
+                    .field_with_name(dimension_key)
+                    .ok()
+                    .map(|field| field.name().as_str())?
+            };
+            Some((source_key.to_owned(), *dimension_key))
+        })
+        .collect()
+}
+
 fn serving_view_plan(
     spec: &crate::schema_registry::TableSpec,
     provider: Arc<dyn TableProvider>,
-    enum_provider: &Arc<dyn TableProvider>,
+    providers: &SnapshotProviderCatalog,
 ) -> Result<LogicalPlan, ServingQueryError> {
     let source = format!("{}_source", spec.name);
     let mut builder = LogicalPlanBuilder::scan(source.clone(), provider_as_source(provider), None)?;
@@ -1257,25 +1319,63 @@ fn serving_view_plan(
         .map(|field| col(format!("{source}.{}", field.name())))
         .collect::<Vec<_>>();
     for field in spec.arrow_schema.fields() {
-        let Some(domain) = field
-            .metadata()
-            .get("com.codefabric.cpg.semantic_type")
-            .and_then(|value| value.strip_prefix("enum:"))
-        else {
+        let Some(semantic_type) = field.metadata().get("com.codefabric.cpg.semantic_type") else {
             continue;
         };
-        let alias = format!("enum_{}", field.name());
-        let right = LogicalPlanBuilder::scan(
-            alias.clone(),
-            provider_as_source(Arc::clone(enum_provider)),
-            None,
-        )?
-        .build()?;
-        let code = cast(col(format!("{source}.{}", field.name())), DataType::Int32)
-            .eq(col(format!("{alias}.code")));
-        let domain_match = col(format!("{alias}.domain")).eq(lit(domain.to_owned()));
-        builder = builder.join_on(right, JoinType::Left, [code.and(domain_match)])?;
-        projection.push(col(format!("{alias}.name")).alias(format!("{}_name", field.name())));
+        let Some(binding) = crate::schema_registry::semantic_type_binding(semantic_type) else {
+            continue;
+        };
+        let (dimension_code, code_column, domain) = match binding.authority {
+            crate::schema_registry::SemanticAuthority::EnumRegistry => (11, "code", binding.domain),
+            crate::schema_registry::SemanticAuthority::OntologyEntityRegistry => (12, "code", None),
+            crate::schema_registry::SemanticAuthority::OntologyRelationRegistry => {
+                (14, "code", None)
+            }
+            crate::schema_registry::SemanticAuthority::OntologyPropertyRegistry => {
+                (16, "code", None)
+            }
+            crate::schema_registry::SemanticAuthority::OntologyFactRegistry => (17, "code", None),
+            crate::schema_registry::SemanticAuthority::ProviderCatalog => {
+                (18, "raw_kind_code", None)
+            }
+            _ => continue,
+        };
+        let dimension_provider = providers.provider(dimension_code).ok_or_else(|| {
+            ServingQueryError::Configuration(format!(
+                "snapshot lacks ontology decoration dimension {dimension_code}"
+            ))
+        })?;
+        let alias = format!("ontology_{}", field.name());
+        let right =
+            LogicalPlanBuilder::scan(alias.clone(), provider_as_source(dimension_provider), None)?
+                .build()?;
+        let predicate =
+            if binding.authority == crate::schema_registry::SemanticAuthority::ProviderCatalog {
+                let Some(keys) = provider_catalog_decoration_keys(spec, field.name()) else {
+                    continue;
+                };
+                keys.into_iter()
+                    .map(|(source_key, dimension_key)| {
+                        col(format!("{source}.{source_key}"))
+                            .eq(col(format!("{alias}.{dimension_key}")))
+                    })
+                    .reduce(Expr::and)
+                    .expect("provider raw-kind primary key is nonempty")
+            } else {
+                let code = cast(col(format!("{source}.{}", field.name())), DataType::Int32)
+                    .eq(cast(col(format!("{alias}.{code_column}")), DataType::Int32));
+                domain.map_or(code.clone(), |domain| {
+                    code.and(col(format!("{alias}.domain")).eq(lit(domain.to_owned())))
+                })
+            };
+        builder = builder.join_on(right, JoinType::Left, [predicate])?;
+        let name_column = if dimension_code == 18 {
+            "raw_name"
+        } else {
+            "name"
+        };
+        projection
+            .push(col(format!("{alias}.{name_column}")).alias(format!("{}_name", field.name())));
     }
     Ok(builder.project(projection)?.build()?)
 }
@@ -1500,6 +1600,9 @@ enum OperationalBuilder {
     Float64(Float64Builder),
     Utf8(StringBuilder),
     Binary(BinaryBuilder),
+    Fixed16(FixedSizeBinaryBuilder),
+    Fixed32(FixedSizeBinaryBuilder),
+    Timestamp(TimestampMicrosecondBuilder),
 }
 
 impl OperationalBuilder {
@@ -1512,12 +1615,37 @@ impl OperationalBuilder {
                     .map_err(|error| ServingQueryError::OperationalCapture(error.to_string()))?,
             ),
             (Self::Binary(builder), ValueRef::Blob(value)) => builder.append_value(value),
+            (Self::Fixed16(builder), ValueRef::Blob(value)) if value.len() == 16 => {
+                builder.append_value(value)?;
+            }
+            (Self::Fixed32(builder), ValueRef::Blob(value)) if value.len() == 32 => {
+                builder.append_value(value)?;
+            }
+            (Self::Timestamp(builder), ValueRef::Integer(value)) => builder.append_value(value),
+            (Self::Timestamp(builder), ValueRef::Text(value)) => {
+                let millis = std::str::from_utf8(value)
+                    .map_err(|error| ServingQueryError::OperationalCapture(error.to_string()))?
+                    .parse::<i64>()
+                    .map_err(|error| ServingQueryError::OperationalCapture(error.to_string()))?;
+                builder.append_value(millis.checked_mul(1_000).ok_or_else(|| {
+                    ServingQueryError::OperationalCapture("timestamp conversion overflow".into())
+                })?);
+            }
             (Self::Int64(builder), ValueRef::Null) if field.is_nullable() => builder.append_null(),
             (Self::Float64(builder), ValueRef::Null) if field.is_nullable() => {
                 builder.append_null();
             }
             (Self::Utf8(builder), ValueRef::Null) if field.is_nullable() => builder.append_null(),
             (Self::Binary(builder), ValueRef::Null) if field.is_nullable() => {
+                builder.append_null();
+            }
+            (Self::Fixed16(builder), ValueRef::Null) if field.is_nullable() => {
+                builder.append_null();
+            }
+            (Self::Fixed32(builder), ValueRef::Null) if field.is_nullable() => {
+                builder.append_null();
+            }
+            (Self::Timestamp(builder), ValueRef::Null) if field.is_nullable() => {
                 builder.append_null();
             }
             _ => return Err(operational_type_error(field)),
@@ -1531,6 +1659,8 @@ impl OperationalBuilder {
             Self::Float64(builder) => Arc::new(builder.finish()),
             Self::Utf8(builder) => Arc::new(builder.finish()),
             Self::Binary(builder) => Arc::new(builder.finish()),
+            Self::Fixed16(builder) | Self::Fixed32(builder) => Arc::new(builder.finish()),
+            Self::Timestamp(builder) => Arc::new(builder.finish()),
         }
     }
 }
@@ -1546,6 +1676,19 @@ fn operational_builders(
             DataType::Float64 => Ok(OperationalBuilder::Float64(Float64Builder::new())),
             DataType::Utf8 => Ok(OperationalBuilder::Utf8(StringBuilder::new())),
             DataType::Binary => Ok(OperationalBuilder::Binary(BinaryBuilder::new())),
+            DataType::FixedSizeBinary(16) => {
+                Ok(OperationalBuilder::Fixed16(FixedSizeBinaryBuilder::new(16)))
+            }
+            DataType::FixedSizeBinary(32) => {
+                Ok(OperationalBuilder::Fixed32(FixedSizeBinaryBuilder::new(32)))
+            }
+            DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, timezone)
+                if timezone.as_deref() == Some("UTC") =>
+            {
+                Ok(OperationalBuilder::Timestamp(
+                    TimestampMicrosecondBuilder::new().with_timezone("UTC"),
+                ))
+            }
             data_type => Err(ServingQueryError::OperationalCapture(format!(
                 "generated operational type {data_type:?} is unsupported"
             ))),
@@ -1691,13 +1834,33 @@ fn active_snapshot_batch(lease: &SnapshotLeaseGuard) -> Result<RecordBatch, Serv
     let publication_id = manifest
         .raw_publication_id()
         .map_err(|error| ServingQueryError::Configuration(error.to_string()))?;
+    let active = operational_table_spec("active_snapshot").ok_or_else(|| {
+        ServingQueryError::Configuration("generated active_snapshot contract is absent".into())
+    })?;
+    let projected = |source: &Field, name: &str| {
+        Field::new(name, source.data_type().clone(), false).with_metadata(source.metadata().clone())
+    };
+    let publication_field = table_spec(5)
+        .and_then(|spec| spec.arrow_schema.field_with_name("publication_id").ok())
+        .ok_or_else(|| {
+            ServingQueryError::Configuration("generated publication ID contract is absent".into())
+        })?;
     let schema = Arc::new(Schema::new(vec![
-        Field::new("snapshot_id", DataType::Binary, false),
-        Field::new("workspace_id", DataType::Binary, false),
-        Field::new("publication_id", DataType::Binary, false),
+        projected(
+            active.arrow_schema.field_with_name("snapshot_id")?,
+            "snapshot_id",
+        ),
+        projected(
+            active.arrow_schema.field_with_name("workspace_id")?,
+            "workspace_id",
+        ),
+        projected(publication_field, "publication_id"),
         Field::new("source_generation", DataType::Int64, false),
         Field::new("overlay_generation", DataType::Int64, false),
-        Field::new("captured_at", DataType::Int64, false),
+        projected(
+            active.arrow_schema.field_with_name("created_at")?,
+            "captured_at",
+        ),
         Field::new("consistency", DataType::Utf8, false),
     ]));
     let overlay_generation = i64::try_from(manifest.body.overlay.overlay_generation)
@@ -1705,24 +1868,23 @@ fn active_snapshot_batch(lease: &SnapshotLeaseGuard) -> Result<RecordBatch, Serv
     Ok(RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(BinaryArray::from(vec![Some(
-                lease.record().snapshot_id.as_slice(),
-            )])),
-            Arc::new(BinaryArray::from(vec![Some(
-                lease.record().workspace_id.as_slice(),
-            )])),
-            Arc::new(BinaryArray::from(vec![Some(publication_id.as_slice())])),
+            crate::fabric::id16_array([Some(&lease.record().snapshot_id)]),
+            crate::fabric::id16_array([Some(&lease.record().workspace_id)]),
+            crate::fabric::id16_array([Some(&publication_id)]),
             Arc::new(Int64Array::from(vec![
                 i64::try_from(manifest.body.source.source_generation).map_err(|_| {
                     ServingQueryError::Configuration("source generation exceeds i64".into())
                 })?,
             ])),
             Arc::new(Int64Array::from(vec![overlay_generation])),
-            Arc::new(Int64Array::from(vec![
-                i64::try_from(lease.record().created_at).map_err(|_| {
-                    ServingQueryError::Configuration("lease time exceeds i64".into())
-                })?,
-            ])),
+            Arc::new(
+                TimestampMicrosecondArray::from(vec![
+                    i64::try_from(lease.record().created_at).map_err(|_| {
+                        ServingQueryError::Configuration("lease time exceeds i64".into())
+                    })?,
+                ])
+                .with_timezone("UTC"),
+            ),
             Arc::new(StringArray::from(vec![
                 "operationally-current-not-snapshot-pinned",
             ])),
@@ -1799,6 +1961,7 @@ fn allowed_table_reference(reference: &str) -> bool {
             part.trim_matches('"'),
             CONTROL_SCHEMA
                 | BASE_SCHEMA
+                | ONTOLOGY_SCHEMA
                 | SERVING_SCHEMA
                 | "cpg_python"
                 | "cpg_rust"
@@ -1808,6 +1971,7 @@ fn allowed_table_reference(reference: &str) -> bool {
         && (table_spec_by_name(reference).is_some()
             || reference.ends_with("_source")
             || reference.starts_with("enum_")
+            || reference.starts_with("ontology_")
             || control_projection_specs().iter().any(|projection| {
                 projection
                     .source_table
@@ -2210,6 +2374,19 @@ mod tests {
                     .collect::<Vec<_>>();
                 crate::fabric::id16_array(values.iter().map(Some))
             }
+            DataType::FixedSizeBinary(32) => {
+                let values = (0..rows)
+                    .map(|row| {
+                        let mut bytes = [u8::try_from(table_code).unwrap_or_default(); 32];
+                        bytes[31] = u8::try_from(row + 1).unwrap();
+                        bytes
+                    })
+                    .collect::<Vec<_>>();
+                crate::fabric::hash32_array(values.iter().map(Some))
+            }
+            DataType::Int16 if table_code == 100 && field.name() == "language" => {
+                Arc::new(Int16Array::from(vec![30_i16; rows]))
+            }
             DataType::Int16 => Arc::new(Int16Array::from(vec![1_i16; rows])),
             DataType::Int32 => Arc::new(Int32Array::from(vec![1_i32; rows])),
             DataType::Int64 if field.name() == "source_generation" => {
@@ -2267,26 +2444,23 @@ mod tests {
         source_trust_state: &str,
     ) -> Arc<ServingSnapshotCandidate> {
         let row_generation = i64::try_from(source_generation).unwrap();
-        let batches = std::iter::once(11)
-            .chain(
-                serving_projection_specs()
-                    .iter()
-                    .map(|projection| projection.source_table_code),
-            )
+        let mut batches = crate::ontology_plane::ontology_dimension_batches()
+            .expect("compiled ontology fixture plane");
+        for table_code in serving_projection_specs()
+            .iter()
+            .map(|projection| projection.source_table_code)
             .collect::<BTreeSet<_>>()
-            .into_iter()
-            .map(|table_code| {
-                let rows = if table_code == 100 { entity_rows } else { 1 };
-                (
-                    table_code,
-                    generated_batch_at_generation(table_code, rows, row_generation),
-                )
-            })
-            .collect();
+        {
+            let rows = if table_code == 100 { entity_rows } else { 1 };
+            batches.insert(
+                table_code,
+                generated_batch_at_generation(table_code, rows, row_generation),
+            );
+        }
         let catalog = Arc::new(SnapshotProviderCatalog::from_batches_for_snapshot_tests(
             publication,
             WORKSPACE,
-            batches,
+            batches.into_iter().collect(),
             OVERLAY,
             row_generation,
             vec![CONTEXT],
@@ -3427,8 +3601,8 @@ mod tests {
             crate::fabric::id16_array([None]),
             Arc::new(Int64Array::from(vec![0_i64])),
             Arc::new(Int64Array::from(vec![0_i64])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
-            Arc::new(BinaryArray::from(vec![None::<&[u8]>])),
+            crate::fabric::hash32_array([None]),
+            crate::fabric::hash32_array([None]),
             Arc::new(Int64Array::from(vec![0_i64])),
         ];
         ValidatedFactBatch::validate(
@@ -3668,7 +3842,7 @@ mod tests {
         config_root: &std::path::Path,
     ) -> ServingQuerySession {
         let config = ServingRuntimeConfig::new(
-            16 * 1024 * 1024,
+            32 * 1024 * 1024,
             64 * 1024 * 1024,
             config_root.join("query-spill"),
             2,
@@ -3811,6 +3985,246 @@ mod tests {
         let mut valid_null = make_builder();
         assert!(valid_null.append(&optional, ValueRef::Null).is_ok());
         assert_eq!(valid_null.finish().null_count(), 1);
+    }
+
+    #[test]
+    fn odf_control_capture_equivalence() {
+        let workspace = operational_table_spec("worktree_state").unwrap();
+        let field = workspace
+            .arrow_schema
+            .field_with_name("workspace_id")
+            .unwrap();
+        assert_eq!(field.data_type(), &DataType::FixedSizeBinary(16));
+        assert_eq!(
+            field
+                .metadata()
+                .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                .map(String::as_str),
+            Some("codefabric.workspace_id")
+        );
+
+        let mut fixed = OperationalBuilder::Fixed16(FixedSizeBinaryBuilder::new(16));
+        fixed.append(field, ValueRef::Blob(&WORKSPACE)).unwrap();
+        let fixed = fixed.finish();
+        assert_eq!(fixed.data_type(), field.data_type());
+        assert_eq!(
+            fixed
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap()
+                .value(0),
+            WORKSPACE
+        );
+        let mut wrong_width = OperationalBuilder::Fixed16(FixedSizeBinaryBuilder::new(16));
+        assert!(
+            wrong_width
+                .append(field, ValueRef::Blob(&WORKSPACE[..15]))
+                .is_err()
+        );
+
+        let timestamp = crate::schema_registry::operational_table_specs()
+            .iter()
+            .flat_map(|table| table.arrow_schema.fields())
+            .find(|field| {
+                matches!(
+                    field.data_type(),
+                    DataType::Timestamp(TimeUnit::Microsecond, _)
+                )
+            })
+            .expect("generated control timestamp");
+        let mut builder = OperationalBuilder::Timestamp(
+            arrow_array::builder::TimestampMicrosecondBuilder::new().with_timezone("UTC"),
+        );
+        builder.append(timestamp, ValueRef::Text(b"7")).unwrap();
+        assert_eq!(
+            builder
+                .finish()
+                .as_any()
+                .downcast_ref::<TimestampMicrosecondArray>()
+                .unwrap()
+                .value(0),
+            7_000
+        );
+    }
+
+    #[tokio::test]
+    async fn odf_control_plane_typed_capture() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate([0x4a; 16], 1, 1),
+            directory.path(),
+        );
+        let control = session
+            .query("SELECT workspace_id, source_generation FROM cpg_control.worktree_state")
+            .await
+            .unwrap();
+        let workspace_field = control.batches[0].schema().field(0).clone();
+        assert_eq!(workspace_field.data_type(), &DataType::FixedSizeBinary(16));
+        assert_eq!(
+            workspace_field
+                .metadata()
+                .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                .map(String::as_str),
+            Some("codefabric.workspace_id")
+        );
+        assert_eq!(
+            id16_value(&control.batches[0], "workspace_id", 0),
+            WORKSPACE
+        );
+        assert_eq!(
+            control.batches[0]
+                .column(1)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(0),
+            1
+        );
+
+        let joined = session
+            .query(
+                "SELECT c.workspace_id FROM cpg_control.worktree_state AS c \
+                 JOIN cpg_base.entity AS b ON c.workspace_id = b.workspace_id",
+            )
+            .await
+            .unwrap();
+        assert_eq!(joined.artifact.output_row_count, 1);
+        assert_eq!(id16_value(&joined.batches[0], "workspace_id", 0), WORKSPACE);
+
+        let active = session
+            .query(
+                "SELECT snapshot_id, workspace_id, publication_id, captured_at \
+                 FROM cpg_control.active_serving_snapshot",
+            )
+            .await
+            .unwrap();
+        for (index, extension) in [
+            "codefabric.serving_snapshot_id",
+            "codefabric.workspace_id",
+            "codefabric.publication_id",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let field = active.batches[0].schema().field(index).clone();
+            assert_eq!(field.data_type(), &DataType::FixedSizeBinary(16));
+            assert_eq!(
+                field
+                    .metadata()
+                    .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+                    .map(String::as_str),
+                Some(extension)
+            );
+        }
+        assert!(matches!(
+            active.batches[0].schema().field(3).data_type(),
+            DataType::Timestamp(TimeUnit::Microsecond, timezone)
+                if timezone.as_deref() == Some("UTC")
+        ));
+    }
+
+    #[tokio::test]
+    async fn odf_ontology_namespace_resolution() {
+        let candidate = candidate([0x4b; 16], 1, 1);
+        let catalog = candidate.providers().catalog();
+        assert_eq!(
+            catalog.schema_names().into_iter().collect::<BTreeSet<_>>(),
+            BTreeSet::from([BASE_SCHEMA.to_owned(), ONTOLOGY_SCHEMA.to_owned(),])
+        );
+        let ontology = catalog.schema(ONTOLOGY_SCHEMA).expect("ontology namespace");
+        assert_eq!(ontology.table_names().len(), 20);
+        let enum_domain = ontology.table("enum_domain").await.unwrap().unwrap();
+        assert!(Arc::ptr_eq(
+            &enum_domain,
+            &candidate.providers().provider(11).unwrap()
+        ));
+    }
+
+    #[tokio::test]
+    async fn odf_decoration_projection_census() {
+        let candidate = candidate([0x4c; 16], 1, 1);
+        let providers = candidate.providers();
+        let serving = build_serving_schema(&providers).unwrap();
+        for projection in serving_projection_specs() {
+            let source = table_spec(projection.source_table_code).unwrap();
+            let view = serving.table(projection.view_name).await.unwrap().unwrap();
+            for field in source.arrow_schema.fields().iter().filter(|field| {
+                field
+                    .metadata()
+                    .get("com.codefabric.cpg.semantic_type")
+                    .and_then(|semantic| crate::schema_registry::semantic_type_binding(semantic))
+                    .is_some_and(|binding| {
+                        matches!(
+                            binding.authority,
+                            crate::schema_registry::SemanticAuthority::EnumRegistry
+                                | crate::schema_registry::SemanticAuthority::OntologyEntityRegistry
+                                | crate::schema_registry::SemanticAuthority::OntologyRelationRegistry
+                                | crate::schema_registry::SemanticAuthority::OntologyPropertyRegistry
+                                | crate::schema_registry::SemanticAuthority::OntologyFactRegistry
+                                | crate::schema_registry::SemanticAuthority::ProviderCatalog
+                        )
+                    })
+            }) {
+                let binding = field
+                    .metadata()
+                    .get("com.codefabric.cpg.semantic_type")
+                    .and_then(|semantic| crate::schema_registry::semantic_type_binding(semantic))
+                    .expect("filtered semantic field has a generated binding");
+                let decorated = view
+                    .schema()
+                    .field_with_name(&format!("{}_name", field.name()))
+                    .is_ok();
+                let expected = binding.authority
+                    != crate::schema_registry::SemanticAuthority::ProviderCatalog
+                    || provider_catalog_decoration_keys(source, field.name()).is_some();
+                assert_eq!(
+                    decorated, expected,
+                    "{} decoration scope differs for {}",
+                    projection.view_name, field.name()
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn odf_ontology_catalog_frozen_rejection() {
+        let candidate = candidate([0x4d; 16], 1, 1);
+        let catalog = candidate.providers().catalog();
+        let ontology = catalog.schema(ONTOLOGY_SCHEMA).unwrap();
+        assert!(
+            catalog
+                .register_schema("late", Arc::new(ImmutableSchemaProvider::default()))
+                .is_err()
+        );
+        assert!(catalog.deregister_schema(ONTOLOGY_SCHEMA, false).is_err());
+        assert!(
+            ontology
+                .register_table("late".into(), candidate.providers().provider(11).unwrap())
+                .is_err()
+        );
+        assert!(ontology.deregister_table("enum_domain").is_err());
+        assert!(ontology.table_exist("enum_domain"));
+    }
+
+    #[test]
+    fn odf_decoration_plan_shape() {
+        let candidate = candidate([0x4e; 16], 1, 1);
+        let spec = table_spec(100).unwrap();
+        let providers = candidate.providers();
+        let plan = serving_view_plan(spec, providers.provider(100).unwrap(), &providers).unwrap();
+        let display = plan.display_indent().to_string();
+        assert!(display.contains("Left Join"), "{display}");
+        assert!(display.contains("ontology_"), "{display}");
+        assert!(plan.schema().field_with_name(None, "language_name").is_ok());
+        assert!(
+            plan.schema()
+                .field_with_name(None, "entity_kind_code_name")
+                .is_ok()
+        );
     }
 
     fn relational_semantic_request(workspace_id: &str, request_id: &str) -> String {
@@ -4368,7 +4782,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn production_eight_form_semantic_query_conformance() {
+    async fn odf_generated_result_schema_conformance() {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();
         let candidate = candidate([0x75; 16], 1, 3);
@@ -4459,7 +4873,7 @@ mod tests {
                 .downcast_ref::<StringArray>()
                 .unwrap()
                 .value(0),
-            "Rust"
+            "RUST"
         );
         assert!(result.artifact.logical_plan.contains("Filter"));
         assert!(result.artifact.physical_plan.contains("Projection"));
@@ -4696,6 +5110,7 @@ mod tests {
                 "cpg_python".into(),
                 "cpg_rust".into(),
                 "cpg_derived".into(),
+                ONTOLOGY_SCHEMA.into(),
             ])
         );
         let base_provider = catalog
@@ -4862,7 +5277,7 @@ mod tests {
         );
         let evidence = session.runtime_evidence();
         assert_eq!(evidence.memory_pool, "track_consumers");
-        assert_eq!(evidence.memory_limit_bytes, 16 * 1024 * 1024);
+        assert_eq!(evidence.memory_limit_bytes, 32 * 1024 * 1024);
         assert_eq!(evidence.max_spill_bytes, 64 * 1024 * 1024);
         assert_eq!(evidence.batch_size, 65_536);
         assert_eq!(evidence.target_partitions, 2);
@@ -5124,7 +5539,7 @@ mod tests {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();
         let low_memory = ServingRuntimeConfig::new(
-            256 * 1024,
+            512 * 1024,
             4 * 1024 * 1024,
             directory.path().join("low-memory-spill"),
             1,
@@ -5242,8 +5657,8 @@ mod tests {
         insta::assert_snapshot!(normalized, @r###"
 UNOPTIMIZED
 Projection: cpg_base.workspace.workspace_id [workspace_id:FixedSizeBinary(16)]
-  Filter: cpg_base.workspace.workspace_id IS NOT NULL [workspace_id:FixedSizeBinary(16), repository_id:FixedSizeBinary(16);N, worktree_id:FixedSizeBinary(16);N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
-    TableScan: cpg_base.workspace [workspace_id:FixedSizeBinary(16), repository_id:FixedSizeBinary(16);N, worktree_id:FixedSizeBinary(16);N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:Binary, language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
+  Filter: cpg_base.workspace.workspace_id IS NOT NULL [workspace_id:FixedSizeBinary(16), repository_id:FixedSizeBinary(16);N, worktree_id:FixedSizeBinary(16);N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:FixedSizeBinary(32), language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
+    TableScan: cpg_base.workspace [workspace_id:FixedSizeBinary(16), repository_id:FixedSizeBinary(16);N, worktree_id:FixedSizeBinary(16);N, workspace_kind_code:Int16, canonical_name:Utf8, root_path_bytes:Binary, root_path_display:Utf8, root_path_encoding_code:Int16, authorization_fingerprint:FixedSizeBinary(32), language_mask:Int16, registration_revision:Int64, created_at:Timestamp(µs, "UTC"), updated_at:Timestamp(µs, "UTC")]
 OPTIMIZED
 TableScan: cpg_base.workspace projection=[workspace_id] [workspace_id:FixedSizeBinary(16)]
 PHYSICAL
@@ -5255,8 +5670,7 @@ FilterExec: workspace_id@0 = 11111111111111111111...
 "###);
     }
 
-    #[tokio::test]
-    async fn datafusion_55_serving_equivalence() {
+    async fn assert_datafusion_55_serving_equivalence() {
         let (directory, mut store, mut images) = operational_store();
         let (_, candidate) = published_delta_candidate(directory.path(), &mut store).await;
         let runtime = ServingSnapshotRuntime::default();
@@ -5311,6 +5725,102 @@ FilterExec: workspace_id@0 = 11111111111111111111...
     }
 
     #[tokio::test]
+    async fn datafusion_55_serving_equivalence() {
+        assert_datafusion_55_serving_equivalence().await;
+    }
+
+    #[tokio::test]
+    async fn odf_session_builder_equivalence() {
+        assert_datafusion_55_serving_equivalence().await;
+    }
+
+    #[tokio::test]
+    async fn odf_serving_equivalence_post_reshape() {
+        assert_datafusion_55_serving_equivalence().await;
+    }
+
+    #[tokio::test]
+    async fn odf_id_domain_republish_migration() {
+        let (directory, mut store, mut images) = operational_store();
+        let (_, candidate) = published_delta_candidate(directory.path(), &mut store).await;
+        assert!(
+            !candidate
+                .manifest()
+                .body
+                .bundles
+                .schema_bundle_id
+                .is_empty()
+        );
+        assert!(crate::schema_registry::schema_evolution_policy().require_schema_digest_equality);
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate,
+            directory.path(),
+        );
+        let result = session
+            .query("SELECT workspace_id FROM cpg_base.workspace")
+            .await
+            .unwrap();
+        assert_eq!(result.artifact.output_row_count, 1);
+        assert_eq!(
+            result.batches[0]
+                .schema()
+                .field(0)
+                .try_extension_type::<crate::schema_registry::WorkspaceIdExtension>()
+                .unwrap(),
+            crate::schema_registry::WorkspaceIdExtension::v1()
+        );
+        assert_eq!(
+            result.batches[0]
+                .column(0)
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap()
+                .value(0),
+            WORKSPACE
+        );
+    }
+
+    #[tokio::test]
+    async fn odf_span_pruning_parity() {
+        let (directory, mut store, mut images) = operational_store();
+        let (_, candidate) = published_delta_candidate(directory.path(), &mut store).await;
+        let runtime = ServingSnapshotRuntime::default();
+        let session = activate_and_lease(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate,
+            directory.path(),
+        );
+        let predicate = "start_byte IS NOT NULL AND end_byte IS NOT NULL \
+                         AND start_byte <= end_byte AND start_byte BETWEEN 0 AND 8";
+        let base = session
+            .query(&format!(
+                "SELECT entity_id, start_byte, end_byte FROM cpg_base.entity WHERE {predicate}"
+            ))
+            .await
+            .unwrap();
+        let decorated = session
+            .query(&format!(
+                "SELECT entity_id, start_byte, end_byte FROM cpg_serving.entities WHERE {predicate}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(base.artifact.output_row_count, 1);
+        assert_eq!(decorated.artifact.output_row_count, 1);
+        assert_eq!(
+            batch_checksum(&base.batches[0]).unwrap(),
+            batch_checksum(&decorated.batches[0]).unwrap()
+        );
+        assert!(base.artifact.physical_plan.contains("DeltaScanExec"));
+        assert!(base.artifact.physical_plan.contains("pruning_predicate="));
+    }
+
+    #[tokio::test]
     async fn wp58_operational_acceptance() {
         let (directory, mut store, mut images) = operational_store();
         let (_, candidate) = published_delta_candidate(directory.path(), &mut store).await;
@@ -5346,9 +5856,9 @@ FilterExec: workspace_id@0 = 11111111111111111111...
             result.batches[0]
                 .schema()
                 .field(0)
-                .try_extension_type::<crate::schema_registry::Id16Extension>()
+                .try_extension_type::<crate::schema_registry::WorkspaceIdExtension>()
                 .unwrap(),
-            crate::schema_registry::Id16Extension::v1()
+            crate::schema_registry::WorkspaceIdExtension::v1()
         );
 
         let observed = session.runtime_evidence();

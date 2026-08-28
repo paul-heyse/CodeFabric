@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use arrow_schema::DataType;
 use rusqlite::backup::Backup;
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior, params,
@@ -1550,26 +1549,21 @@ fn generated_column_shapes() -> Result<GeneratedColumnShapes, OperationalStoreEr
             .arrow_schema
             .fields()
             .iter()
-            .map(|field| {
-                let sqlite_type = match field.data_type() {
-                    DataType::Int64 => "INTEGER",
-                    DataType::Float64 => "REAL",
-                    DataType::Utf8 => "TEXT",
-                    DataType::Binary => "BLOB",
-                    other => {
-                        return Err(OperationalStoreError::DdlLineage(format!(
-                            "generated operational table {} has unsupported Arrow type {other}",
-                            table.name
-                        )));
-                    }
+            .zip(&table.sqlite_column_types)
+            .map(|(field, sqlite_type)| {
+                let sqlite_type = match sqlite_type {
+                    crate::schema_registry::OperationalSqliteType::Integer => "INTEGER",
+                    crate::schema_registry::OperationalSqliteType::Real => "REAL",
+                    crate::schema_registry::OperationalSqliteType::Text => "TEXT",
+                    crate::schema_registry::OperationalSqliteType::Blob => "BLOB",
                 };
-                Ok((
+                (
                     field.name().to_owned(),
                     sqlite_type.to_owned(),
                     !field.is_nullable(),
-                ))
+                )
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
         if columns.is_empty() {
             return Err(OperationalStoreError::DdlLineage(format!(
                 "generated table spec {} has no columns",

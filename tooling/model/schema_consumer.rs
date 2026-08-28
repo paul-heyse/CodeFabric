@@ -96,10 +96,50 @@ struct TableManifest {
     public_schemas: Vec<serde_json::Value>,
 }
 
-fn physical_type(logical: ModelLogicalType) -> DataType {
-    match logical {
+fn descriptor_extension(
+    descriptor: &serde_json::Value,
+) -> Result<Option<(&str, &str)>, Box<dyn std::error::Error>> {
+    let Some(extension) = descriptor.get("extension") else {
+        return Ok(None);
+    };
+    let name = extension
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("extension descriptor lacks name")?;
+    let metadata = extension
+        .get("metadata")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("extension descriptor lacks metadata")?;
+    Ok(Some((name, metadata)))
+}
+
+fn descriptor_field(
+    name: &str,
+    data_type: DataType,
+    nullable: bool,
+    descriptor: &serde_json::Value,
+) -> Result<Field, Box<dyn std::error::Error>> {
+    let mut field = Field::new(name, data_type, nullable);
+    if let Some((extension_name, extension_metadata)) = descriptor_extension(descriptor)? {
+        field = field.with_metadata(HashMap::from([
+            (
+                EXTENSION_TYPE_NAME_KEY.to_owned(),
+                extension_name.to_owned(),
+            ),
+            (
+                EXTENSION_TYPE_METADATA_KEY.to_owned(),
+                extension_metadata.to_owned(),
+            ),
+        ]));
+    }
+    Ok(field)
+}
+
+fn physical_type(column: &ModelColumn) -> Result<DataType, Box<dyn std::error::Error>> {
+    Ok(match column.logical_type {
         ModelLogicalType::Id16 => DataType::FixedSizeBinary(16),
-        ModelLogicalType::Hash32 | ModelLogicalType::Binary => DataType::Binary,
+        ModelLogicalType::Hash32 => DataType::FixedSizeBinary(32),
+        ModelLogicalType::Binary => DataType::Binary,
         ModelLogicalType::Code16 | ModelLogicalType::Bucket16 | ModelLogicalType::Int16 => {
             DataType::Int16
         }
@@ -111,7 +151,21 @@ fn physical_type(logical: ModelLogicalType) -> DataType {
         ModelLogicalType::TimestampUtc => {
             DataType::Timestamp(TimeUnit::Microsecond, Some(Arc::from("UTC")))
         }
-        ModelLogicalType::IdList => DataType::List(Arc::new(id16_field("element", false))),
+        ModelLogicalType::IdList => {
+            let element = column
+                .arrow_type
+                .get("element")
+                .ok_or("ID-list descriptor lacks element")?;
+            DataType::List(Arc::new(descriptor_field(
+                "element",
+                DataType::FixedSizeBinary(16),
+                element
+                    .get("nullable")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                element,
+            )?))
+        }
         ModelLogicalType::Int64List => {
             DataType::List(Arc::new(Field::new("element", DataType::Int64, false)))
         }
@@ -126,20 +180,7 @@ fn physical_type(logical: ModelLogicalType) -> DataType {
             )),
             false,
         ),
-    }
-}
-
-fn id16_field(name: &str, nullable: bool) -> Field {
-    Field::new(name, DataType::FixedSizeBinary(16), nullable).with_metadata(HashMap::from([
-        (
-            EXTENSION_TYPE_NAME_KEY.to_owned(),
-            "codefabric.id16".to_owned(),
-        ),
-        (
-            EXTENSION_TYPE_METADATA_KEY.to_owned(),
-            "version=1".to_owned(),
-        ),
-    ]))
+    })
 }
 
 fn sample_id16(value: &[u8; 16]) -> ArrayRef {
@@ -148,12 +189,16 @@ fn sample_id16(value: &[u8; 16]) -> ArrayRef {
     Arc::new(builder.finish())
 }
 
-fn sample_array(logical: ModelLogicalType) -> ArrayRef {
+fn sample_array(logical: ModelLogicalType, data_type: &DataType) -> ArrayRef {
     const ID: [u8; 16] = [7; 16];
     const HASH: [u8; 32] = [9; 32];
     match logical {
         ModelLogicalType::Id16 => sample_id16(&ID),
-        ModelLogicalType::Hash32 => Arc::new(BinaryArray::from(vec![Some(HASH.as_slice())])),
+        ModelLogicalType::Hash32 => {
+            let mut builder = FixedSizeBinaryBuilder::with_capacity(1, 32);
+            builder.append_value(HASH).expect("typed Hash32 width");
+            Arc::new(builder.finish())
+        }
         ModelLogicalType::Binary => Arc::new(BinaryArray::from(vec![Some(b"bytes".as_slice())])),
         ModelLogicalType::Code16 | ModelLogicalType::Bucket16 | ModelLogicalType::Int16 => {
             Arc::new(Int16Array::from(vec![1]))
@@ -167,8 +212,11 @@ fn sample_array(logical: ModelLogicalType) -> ArrayRef {
             Arc::new(TimestampMicrosecondArray::from(vec![1_i64]).with_timezone("UTC"))
         }
         ModelLogicalType::IdList => {
-            let mut builder = ListBuilder::new(FixedSizeBinaryBuilder::new(16))
-                .with_field(Arc::new(id16_field("element", false)));
+            let DataType::List(element) = data_type else {
+                unreachable!("generated ID-list type")
+            };
+            let mut builder =
+                ListBuilder::new(FixedSizeBinaryBuilder::new(16)).with_field(Arc::clone(element));
             builder.values().append_value(ID).expect("typed Id16 width");
             builder.append(true);
             Arc::new(builder.finish())
@@ -249,7 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let fields = table
             .columns
             .iter()
-            .map(|column| {
+            .map(|column| -> Result<Field, Box<dyn std::error::Error>> {
                 let mut metadata = HashMap::from([(
                     "com.codefabric.cpg.field_id".to_owned(),
                     column.field_id.clone(),
@@ -266,27 +314,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         foreign_key.to_owned(),
                     );
                 }
-                let mut field = Field::new(
+                let mut field = descriptor_field(
                     &column.name,
-                    physical_type(column.logical_type),
+                    physical_type(column)?,
                     column.nullable,
-                )
-                .with_metadata(metadata);
-                if column.logical_type == ModelLogicalType::Id16 {
-                    let mut extension_metadata = field.metadata().clone();
-                    extension_metadata.insert(
-                        EXTENSION_TYPE_NAME_KEY.to_owned(),
-                        "codefabric.id16".to_owned(),
-                    );
-                    extension_metadata.insert(
-                        EXTENSION_TYPE_METADATA_KEY.to_owned(),
-                        "version=1".to_owned(),
-                    );
-                    field = field.with_metadata(extension_metadata);
-                }
-                field
+                    &column.arrow_type,
+                )?;
+                metadata.extend(field.metadata().clone());
+                field = field.with_metadata(metadata);
+                Ok(field)
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         let schema = Arc::new(Schema::new_with_metadata(
             fields,
             HashMap::from([
@@ -307,8 +345,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let arrays = table
             .columns
             .iter()
-            .map(|column| sample_array(column.logical_type))
-            .collect::<Vec<_>>();
+            .map(|column| {
+                let data_type = physical_type(column)?;
+                Ok(sample_array(column.logical_type, &data_type))
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
         let batch = RecordBatch::try_new(Arc::clone(&schema), arrays)?;
         for (index, column) in table.columns.iter().enumerate() {
             let field = schema.field(index);
@@ -339,7 +380,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .columns()
                 .iter()
                 .cloned()
-                .chain(std::iter::once(sample_array(ModelLogicalType::Boolean)))
+                .chain(std::iter::once(sample_array(
+                    ModelLogicalType::Boolean,
+                    &DataType::Boolean,
+                )))
                 .collect(),
         )
         .is_ok()
@@ -351,8 +395,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for logical_type in [
-        ModelLogicalType::Id16,
-        ModelLogicalType::Hash32,
         ModelLogicalType::Code16,
         ModelLogicalType::Code32,
         ModelLogicalType::Bucket16,
@@ -364,12 +406,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ModelLogicalType::Utf8,
         ModelLogicalType::Binary,
         ModelLogicalType::TimestampUtc,
-        ModelLogicalType::IdList,
         ModelLogicalType::Int64List,
         ModelLogicalType::StringMap,
     ] {
-        let array = sample_array(logical_type);
-        let expected = physical_type(logical_type);
+        let column = ModelColumn {
+            field_id: "probe".into(),
+            name: "probe".into(),
+            logical_type,
+            arrow_type: serde_json::json!({"name": "probe"}),
+            nullable: false,
+            semantic_type: None,
+            foreign_key: None,
+            hidden_operational: false,
+            key_role: "none".into(),
+        };
+        let expected = physical_type(&column)?;
+        let array = sample_array(logical_type, &expected);
         if array.data_type() != &expected || array.len() != 1 {
             return Err(format!(
                 "logical type {logical_type:?} did not round-trip: expected={expected:?} actual={:?}",

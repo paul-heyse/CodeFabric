@@ -130,7 +130,7 @@ def test_packaged_model_index_has_the_exact_compiled_census_and_bytes() -> None:
     assert [output.path for output in index.outputs] == [
         output["path"] for output in compiled_manifest["outputs"]
     ]
-    assert len(index.outputs) == 81
+    assert len(index.outputs) == 87
     assert model_artifact_index_digest() == checksum(repository_resource)
     validate_checksum(model_artifact_index_digest())
     for artifact in index.artifacts:

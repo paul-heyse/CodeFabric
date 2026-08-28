@@ -23,7 +23,7 @@
   },
   "families": [
     {
-      "action_key": "b3:feff5f4b81d4d4e263993c2aa636ba9ea4371678ee14af230d7878661ab7b850",
+      "action_key": "b3:a85e81c734e697f3da4d016bde1315bbc81e24131ef0c57f7f5ccc15523214c6",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -59,7 +59,7 @@
       }
     },
     {
-      "action_key": "b3:953141fe3a196eaea81177787a261ca651e04d69dedfd2bcc70852a683b9e15b",
+      "action_key": "b3:6e353b9908763acb9430a95d5ab7463ee9825977b995f742d4df53bfaf7fde6b",
       "family": "schemas",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",
@@ -78,10 +78,13 @@
         "contracts/schema/public-status.schema.json",
         "contracts/schema/serving-snapshot.schema.json",
         "contracts/schema/source-context.schema.json",
+        "src/generated/compiled_ontology.rs",
         "src/generated/fact_row_encoders.rs",
+        "src/generated/id_domains.rs",
         "src/generated/model_query_forms.rs",
         "src/generated/model_schema_tables.rs",
         "src/generated/model_semantic_lane_fragments.rs",
+        "src/generated/result_schemas.rs",
         "src/generated/table_specs.rs"
       ],
       "resource_profile": {
@@ -96,7 +99,7 @@
       }
     },
     {
-      "action_key": "b3:717a4a86f900f581982f2b1b37b4134f5539a1330b99535a9ab964500038c941",
+      "action_key": "b3:5de28c108d01c714d9e3f5b6a3ecb6b8753bbab8f0733f4ad76260016b2f41c7",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -129,7 +132,7 @@
       }
     },
     {
-      "action_key": "b3:3a4b9e3df99f5f34aa839c8a655478e7548c3436d7e6bcc2208f751d242b2c36",
+      "action_key": "b3:4e1fe14a4934b7700b241fe2ec5722d8e0da6a9f039a079bfbba11ee2960231a",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
