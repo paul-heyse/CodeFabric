@@ -1,17 +1,12 @@
 //! Generic DataFusion decoder and lowerer for a digest-checked ontology program package.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
-use arrow_array::{Array as _, Int16Array, RecordBatch, StringArray, UInt64Array};
-use arrow_schema::{DataType, Field, Schema};
-use datafusion::error::DataFusionError;
-use datafusion::logical_expr::{Expr, LogicalPlan, col, lit};
-use datafusion::prelude::SessionContext;
+use arrow_array::{Array as _, Int16Array, RecordBatch, StringArray};
+use datafusion::logical_expr::{Expr, col, lit};
 use datafusion::scalar::ScalarValue;
 use thiserror::Error;
 
-use crate::fabric::{ResultChecksumError, result_checksum_v2};
 use crate::ontology_program::{
     OntologyProgramError, OntologyProgramPackage, validate_ontology_program_package,
 };
@@ -60,25 +55,11 @@ pub struct DecodedCalculation {
     pub return_contract: String,
 }
 
-/// Comparison output. Plan text is diagnostic and intentionally outside checksum identity.
-#[derive(Clone, Debug)]
-pub struct ProgramExecutionComparison {
-    pub unoptimized_batches: Vec<RecordBatch>,
-    pub optimized_batches: Vec<RecordBatch>,
-    pub semantic_checksum: String,
-    pub unoptimized_plan_diagnostic: String,
-    pub optimized_plan_diagnostic: String,
-}
-
 /// Typed decoder/lowering failures.
 #[derive(Debug, Error)]
 pub enum OntologyProgramCompileError {
     #[error(transparent)]
     Package(#[from] OntologyProgramError),
-    #[error(transparent)]
-    DataFusion(#[from] DataFusionError),
-    #[error(transparent)]
-    Checksum(#[from] ResultChecksumError),
     #[error("ONTOLOGY_PROGRAM_DECODE_INVALID:{0}")]
     Decode(String),
     #[error("ONTOLOGY_PROGRAM_UNSUPPORTED:{0}")]
@@ -384,14 +365,34 @@ impl OntologyProgramCompiler {
             .ok_or_else(|| OntologyProgramCompileError::Phrase(text.into()))?;
         self.lower_phrase(&phrase.phrase_id)
     }
+}
 
-    /// Execute one bounded phrase fixture from the same unoptimized plan before and after the
-    /// DataFusion optimizer and compare schema, metadata, rows, and semantic checksum.
-    pub async fn execute_phrase_probe(
-        &self,
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow_array::{Int16Array, RecordBatch, UInt64Array};
+    use arrow_schema::{DataType, Field, Schema};
+    use datafusion::datasource::{MemTable, provider_as_source};
+    use datafusion::logical_expr::LogicalPlanBuilder;
+    use datafusion::prelude::SessionConfig;
+
+    use super::OntologyProgramCompiler;
+    use crate::governed_session::GovernedSession;
+    use crate::ontology_gate::{GateResourceEnvelope, OntologyGateOutcome};
+    use crate::ontology_program::{OntologyPackagingProfile, build_ontology_program_package};
+
+    fn compiler() -> OntologyProgramCompiler {
+        let package = build_ontology_program_package(&OntologyPackagingProfile::default())
+            .expect("program package");
+        OntologyProgramCompiler::decode(&package).expect("program compiler")
+    }
+
+    async fn execute_phrase_once(
+        compiler: &OntologyProgramCompiler,
         phrase_id: &str,
         codes: Vec<Option<i16>>,
-    ) -> Result<ProgramExecutionComparison, OntologyProgramCompileError> {
+    ) -> OntologyGateOutcome {
         let mut metadata = std::collections::HashMap::new();
         metadata.insert(
             "com.codefabric.cpg.semantic_type".into(),
@@ -405,62 +406,33 @@ impl OntologyProgramCompiler {
             .map(|value| u64::try_from(value).expect("fixture row index"))
             .collect::<Vec<_>>();
         let batch = RecordBatch::try_new(
-            schema,
+            Arc::clone(&schema),
             vec![
                 Arc::new(UInt64Array::from(row_ids)),
                 Arc::new(Int16Array::from(codes)),
             ],
         )
-        .map_err(OntologyProgramError::from)?;
-        let context = SessionContext::new();
-        let plan = context
-            .read_batch(batch)?
-            .filter(self.lower_phrase(phrase_id)?)?
-            .into_unoptimized_plan();
-        let optimized = context.state().optimize(&plan)?;
-        let unoptimized_batches = execute_plan(&context, &plan).await?;
-        let optimized_batches = execute_plan(&context, &optimized).await?;
-        if unoptimized_batches != optimized_batches
-            || unoptimized_batches.first().map(RecordBatch::schema)
-                != optimized_batches.first().map(RecordBatch::schema)
-        {
-            return Err(OntologyProgramCompileError::Decode(
-                "optimized execution changed governed semantics".into(),
-            ));
-        }
-        let output_schema = unoptimized_batches
-            .first()
-            .map(RecordBatch::schema)
-            .ok_or_else(|| OntologyProgramCompileError::Decode("empty execution".into()))?;
-        let semantic_checksum =
-            result_checksum_v2(output_schema.as_ref(), &unoptimized_batches, 1_048_576)?.checksum;
-        Ok(ProgramExecutionComparison {
-            unoptimized_batches,
-            optimized_batches,
-            semantic_checksum,
-            unoptimized_plan_diagnostic: plan.display_indent_schema().to_string(),
-            optimized_plan_diagnostic: optimized.display_indent_schema().to_string(),
-        })
-    }
-}
-
-async fn execute_plan(
-    context: &SessionContext,
-    plan: &LogicalPlan,
-) -> Result<Vec<RecordBatch>, DataFusionError> {
-    let physical = context.state().create_physical_plan(plan).await?;
-    datafusion::physical_plan::collect(physical, context.task_ctx()).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::OntologyProgramCompiler;
-    use crate::ontology_program::{OntologyPackagingProfile, build_ontology_program_package};
-
-    fn compiler() -> OntologyProgramCompiler {
-        let package = build_ontology_program_package(&OntologyPackagingProfile::default())
-            .expect("program package");
-        OntologyProgramCompiler::decode(&package).expect("program compiler")
+        .expect("phrase fixture batch");
+        let provider = Arc::new(MemTable::try_new(schema, vec![vec![batch]]).expect("fixture"));
+        let plan = LogicalPlanBuilder::scan("phrase_fixture", provider_as_source(provider), None)
+            .expect("fixture scan")
+            .filter(compiler.lower_phrase(phrase_id).expect("lower phrase"))
+            .expect("phrase filter")
+            .build()
+            .expect("phrase plan");
+        let session = GovernedSession::new(SessionConfig::new(), "policy.ontology.test.v1")
+            .expect("governed phrase session");
+        let sealed = session.seal_plan(plan).expect("seal phrase plan");
+        session
+            .execute_gate(
+                &sealed,
+                &format!("execution:{phrase_id}"),
+                "candidate:ontology-program",
+                phrase_id,
+                &GateResourceEnvelope::default(),
+            )
+            .await
+            .expect("execute phrase once")
     }
 
     #[tokio::test]
@@ -471,16 +443,14 @@ mod tests {
         assert!(compiler.calculations.values().all(|calculation| {
             calculation.engine == "datafusion-native" && !calculation.native_operation.is_empty()
         }));
-        let comparison = compiler
-            .execute_phrase_probe(
-                "CONDITION_CERTAINTY_EXACT",
-                vec![Some(10), Some(40), Some(50), None],
-            )
-            .await
-            .expect("native phrase execution");
-        assert_eq!(comparison.unoptimized_batches, comparison.optimized_batches);
-        assert_eq!(comparison.unoptimized_batches[0].num_rows(), 2);
-        assert!(comparison.semantic_checksum.starts_with("b3:"));
+        let execution = execute_phrase_once(
+            &compiler,
+            "CONDITION_CERTAINTY_EXACT",
+            vec![Some(10), Some(40), Some(50), None],
+        )
+        .await;
+        assert_eq!(execution.batches[0].num_rows(), 2);
+        assert!(execution.receipt.gate_checksum.checksum.starts_with("b3:"));
     }
 
     #[tokio::test]
@@ -491,11 +461,13 @@ mod tests {
             let rejected = (i16::MIN..=i16::MAX)
                 .find(|candidate| !phrase.operand_codes.contains(candidate))
                 .expect("unregistered operand");
-            let selected = compiler
-                .execute_phrase_probe(&phrase.phrase_id, vec![Some(accepted), Some(rejected)])
-                .await
-                .expect("causal phrase execution");
-            assert_eq!(selected.optimized_batches[0].num_rows(), 1);
+            let selected = execute_phrase_once(
+                &compiler,
+                &phrase.phrase_id,
+                vec![Some(accepted), Some(rejected)],
+            )
+            .await;
+            assert_eq!(selected.batches[0].num_rows(), 1);
         }
         assert!(compiler.operations.values().all(|operation| {
             !operation.operation_kind.is_empty()

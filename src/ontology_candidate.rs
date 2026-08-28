@@ -120,6 +120,12 @@ impl CandidateClosureReport {
             .collect()
     }
 
+    /// Accountable policy identity that an authenticated owner decision must bind.
+    #[must_use]
+    pub fn policy_identity(&self) -> &str {
+        &self.durable.policy_identity
+    }
+
     pub(crate) const fn durable_evidence(&self) -> &DurableCandidateEvidence {
         &self.durable
     }

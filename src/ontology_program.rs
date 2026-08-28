@@ -5,7 +5,10 @@
 //! activation state never enter the logical or package identity domains.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{self, OpenOptions};
 use std::io::Cursor;
+use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Int16Array, RecordBatch, StringArray, UInt16Array};
@@ -65,6 +68,37 @@ pub struct OntologyProgramManifest {
 pub struct OntologyProgramPackage {
     pub manifest: OntologyProgramManifest,
     pub members: BTreeMap<String, OntologyProgramMember>,
+}
+
+/// Durable content-addressed installation of one validated ontology program package.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InstalledOntologyProgramPackage {
+    root: PathBuf,
+    manifest_path: PathBuf,
+    package_identity: String,
+}
+
+impl InstalledOntologyProgramPackage {
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    #[must_use]
+    pub fn manifest_path(&self) -> &Path {
+        &self.manifest_path
+    }
+
+    #[must_use]
+    pub fn package_identity(&self) -> &str {
+        &self.package_identity
+    }
+
+    /// Resolve one validated relation member without accepting caller-chosen paths.
+    #[must_use]
+    pub fn member_path(&self, relation_id: &str) -> PathBuf {
+        self.root.join(format!("{relation_id}.arrow"))
+    }
 }
 
 /// Publication-neutral seam copied into an external candidate manifest after publication.
@@ -152,6 +186,196 @@ pub enum OntologyProgramError {
     Digest(String),
     #[error("ONTOLOGY_PROGRAM_RESOURCE_LIMIT:{0}")]
     Resource(String),
+    #[error("ONTOLOGY_PROGRAM_ARTIFACT_INVALID:{0}")]
+    Artifact(String),
+    #[error("ontology program artifact I/O failed for {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+fn artifact_io(path: &Path, source: std::io::Error) -> OntologyProgramError {
+    OntologyProgramError::Io {
+        path: path.to_owned(),
+        source,
+    }
+}
+
+fn package_artifact_manifest(
+    package: &OntologyProgramPackage,
+) -> Result<Vec<u8>, OntologyProgramError> {
+    let members = package
+        .members
+        .values()
+        .map(|member| {
+            serde_json::json!({
+                "relation_id": member.relation_id,
+                "file": format!("{}.arrow", member.relation_id),
+                "member_identity": member.member_identity,
+                "byte_length": member.ipc_bytes.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+        "package_version": package.manifest.package_version,
+        "bootstrap_schema_identity": package.manifest.bootstrap_schema_identity,
+        "authored_content_identity": package.manifest.authored_content_identity,
+        "logical_program_identity": package.manifest.logical_program_identity,
+        "packaging_profile_id": package.manifest.packaging_profile_id,
+        "member_identities": package.manifest.member_identities,
+        "package_identity": package.manifest.package_identity,
+        "members": members,
+    }))
+    .map_err(|error| OntologyProgramError::Artifact(error.to_string()))
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), OntologyProgramError> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|source| artifact_io(path, source))?;
+    std::io::Write::write_all(&mut file, bytes).map_err(|source| artifact_io(path, source))?;
+    file.sync_all().map_err(|source| artifact_io(path, source))
+}
+
+fn sync_artifact_directory(path: &Path) -> Result<(), OntologyProgramError> {
+    fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| artifact_io(path, source))
+}
+
+/// Verify a durable package installation against the typed, digest-checked in-memory package.
+///
+/// # Errors
+///
+/// Rejects a path/identity mismatch, missing or changed manifest/member bytes, an unsafe relation
+/// identifier, or an invalid in-memory package.
+pub fn verify_installed_ontology_program_package(
+    installation: &InstalledOntologyProgramPackage,
+    package: &OntologyProgramPackage,
+) -> Result<(), OntologyProgramError> {
+    validate_ontology_program_package(package)?;
+    if installation.package_identity != package.manifest.package_identity
+        || installation.manifest_path != installation.root.join("manifest.json")
+    {
+        return Err(OntologyProgramError::Artifact(
+            "installation identity or manifest address differs".into(),
+        ));
+    }
+    let expected_manifest = package_artifact_manifest(package)?;
+    let actual_manifest = fs::read(&installation.manifest_path)
+        .map_err(|source| artifact_io(&installation.manifest_path, source))?;
+    if actual_manifest != expected_manifest {
+        return Err(OntologyProgramError::Artifact(
+            "installed package manifest bytes differ".into(),
+        ));
+    }
+    for (relation_id, member) in &package.members {
+        if relation_id.is_empty()
+            || !relation_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(OntologyProgramError::Artifact(format!(
+                "unsafe relation identifier {relation_id:?}"
+            )));
+        }
+        let path = installation.member_path(relation_id);
+        let bytes = fs::read(&path).map_err(|source| artifact_io(&path, source))?;
+        if bytes != member.ipc_bytes
+            || framed([relation_id.as_bytes(), bytes.as_slice()]) != member.member_identity
+        {
+            return Err(OntologyProgramError::Artifact(format!(
+                "installed member {relation_id} differs"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Atomically install one package at a content-addressed durable directory and verify readback.
+///
+/// Identical retries are read-only no-ops. The address is derived exclusively from the validated
+/// package identity; callers cannot choose member filenames or overwrite another package.
+///
+/// # Errors
+///
+/// Rejects an invalid package, unsafe package identity, conflicting existing bytes, or I/O error.
+pub fn install_ontology_program_package(
+    state_root: &Path,
+    package: &OntologyProgramPackage,
+) -> Result<InstalledOntologyProgramPackage, OntologyProgramError> {
+    validate_ontology_program_package(package)?;
+    let Some(identity) = package.manifest.package_identity.strip_prefix("b3:") else {
+        return Err(OntologyProgramError::Artifact(
+            "package identity is not a b3 digest".into(),
+        ));
+    };
+    if identity.len() != 64 || !identity.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(OntologyProgramError::Artifact(
+            "package identity has invalid digest bytes".into(),
+        ));
+    }
+    let packages_root = state_root.join("ontology-programs");
+    fs::create_dir_all(&packages_root).map_err(|source| artifact_io(&packages_root, source))?;
+    fs::set_permissions(&packages_root, fs::Permissions::from_mode(0o700))
+        .map_err(|source| artifact_io(&packages_root, source))?;
+    let final_root = packages_root.join(identity);
+    let installation = InstalledOntologyProgramPackage {
+        manifest_path: final_root.join("manifest.json"),
+        root: final_root.clone(),
+        package_identity: package.manifest.package_identity.clone(),
+    };
+    if final_root.exists() {
+        verify_installed_ontology_program_package(&installation, package)?;
+        return Ok(installation);
+    }
+
+    let stage = (0_u8..32)
+        .map(|attempt| {
+            packages_root.join(format!(
+                ".{identity}.{}.{}.tmp",
+                std::process::id(),
+                attempt
+            ))
+        })
+        .find(|path| fs::create_dir(path).is_ok())
+        .ok_or_else(|| OntologyProgramError::Artifact("cannot allocate package stage".into()))?;
+    fs::set_permissions(&stage, fs::Permissions::from_mode(0o700))
+        .map_err(|source| artifact_io(&stage, source))?;
+    let staged = InstalledOntologyProgramPackage {
+        manifest_path: stage.join("manifest.json"),
+        root: stage.clone(),
+        package_identity: package.manifest.package_identity.clone(),
+    };
+    let result = (|| {
+        for (relation_id, member) in &package.members {
+            if relation_id.is_empty()
+                || !relation_id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            {
+                return Err(OntologyProgramError::Artifact(format!(
+                    "unsafe relation identifier {relation_id:?}"
+                )));
+            }
+            write_private_file(&staged.member_path(relation_id), &member.ipc_bytes)?;
+        }
+        write_private_file(&staged.manifest_path, &package_artifact_manifest(package)?)?;
+        sync_artifact_directory(&stage)?;
+        fs::rename(&stage, &final_root).map_err(|source| artifact_io(&final_root, source))?;
+        sync_artifact_directory(&packages_root)?;
+        verify_installed_ontology_program_package(&installation, package)
+    })();
+    if result.is_err() && stage.exists() {
+        let _ = fs::remove_dir_all(&stage);
+    }
+    result?;
+    Ok(installation)
 }
 
 fn framed(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {

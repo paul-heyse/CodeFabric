@@ -1503,7 +1503,8 @@ impl OperationalStore {
                    result_authority_identity, workspace_id, program_identity,
                    function_catalog_identity, policy_identity, query_form_identity,
                    checksum_version, exact_table_set_identity, created_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+                 ON CONFLICT(result_authority_identity) DO NOTHING",
                 params![
                     evidence.result_authority_identity,
                     evidence.workspace_id.as_slice(),
@@ -1516,6 +1517,39 @@ impl OperationalStore {
                     persisted_at,
                 ],
             )?;
+            let persisted_authority = transaction.query_row(
+                "SELECT workspace_id, program_identity, function_catalog_identity,
+                   policy_identity, query_form_identity, checksum_version,
+                   exact_table_set_identity
+                 FROM ontology_result_authority WHERE result_authority_identity=?1",
+                [&evidence.result_authority_identity],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            )?;
+            if persisted_authority
+                != (
+                    evidence.workspace_id.to_vec(),
+                    evidence.program_identity.clone(),
+                    evidence.function_catalog_identity.clone(),
+                    evidence.result_policy_identity.clone(),
+                    evidence.query_form_identity.clone(),
+                    evidence.checksum_version.clone(),
+                    evidence.exact_table_set_identity.clone(),
+                )
+            {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "result authority identity collision".into(),
+                ));
+            }
             let changed = transaction.execute(
                 "UPDATE ontology_candidate SET state='PROVED', updated_at=?2
                  WHERE candidate_identity=?1 AND state='SEALED'",
@@ -1627,6 +1661,51 @@ impl OperationalStore {
         request_key: &str,
         requested_at: i64,
     ) -> Result<OntologyActivationRequest, OperationalStoreError> {
+        let replay = self
+            .connection
+            .query_row(
+                "SELECT workspace_id, candidate_identity, decision_identity,
+                   expected_predecessor_identity, expected_pointer_generation, created_at
+                 FROM ontology_activation_request WHERE request_key=?1",
+                [request_key],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((
+            recorded_workspace,
+            recorded_candidate,
+            recorded_decision,
+            expected_predecessor_identity,
+            expected_pointer_generation,
+            recorded_at,
+        )) = replay
+        {
+            if recorded_workspace != workspace_id
+                || recorded_candidate != candidate_identity
+                || recorded_decision != decision_identity
+            {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "activation request key is already bound to different identities".into(),
+                ));
+            }
+            return Ok(OntologyActivationRequest {
+                request_key: request_key.into(),
+                candidate_identity: recorded_candidate,
+                decision_identity: recorded_decision,
+                expected_predecessor_identity,
+                expected_pointer_generation,
+                requested_at: recorded_at,
+            });
+        }
         let candidate = self
             .ontology_candidate(candidate_identity)?
             .ok_or_else(|| {
@@ -1690,12 +1769,20 @@ impl OperationalStore {
                 "candidate predecessor binding differs from the request".into(),
             ));
         }
-        let (owner_candidate, decision_policy) = transaction.query_row(
-            "SELECT candidate_identity, policy_identity FROM ontology_owner_decision
-             WHERE decision_identity=?1",
-            [&request.decision_identity],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )?;
+        let (owner_candidate, decision_policy) = transaction
+            .query_row(
+                "SELECT candidate_identity, policy_identity FROM ontology_owner_decision
+                 WHERE decision_identity=?1",
+                [&request.decision_identity],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                OperationalStoreError::OntologyActivation(format!(
+                    "owner decision {} is absent",
+                    request.decision_identity
+                ))
+            })?;
         if owner_candidate != request.candidate_identity
             || decision_policy != candidate.policy_identity
         {
@@ -3769,6 +3856,18 @@ mod tests {
         assert!(resolved.expected_predecessor_identity.is_none());
         let outcome = store.activate_ontology_candidate(&resolved).unwrap();
         assert_eq!(outcome.pointer_generation, 1);
+        let replay = store
+            .resolve_ontology_activation_request(
+                workspace,
+                report.candidate_identity(),
+                decision.identity(),
+                "admin-owner-route",
+                9_999,
+            )
+            .unwrap();
+        let replay_outcome = store.activate_ontology_candidate(&replay).unwrap();
+        assert!(replay_outcome.idempotent_replay);
+        assert_eq!(replay.requested_at, 2_500);
         assert_eq!(
             store
                 .active_ontology_authority(workspace)

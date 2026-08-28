@@ -13,6 +13,8 @@ mod integration {
     mod fact_generation_build;
     #[cfg(feature = "daemon")]
     mod git_state;
+    #[cfg(feature = "daemon")]
+    mod ontology_datafabric_cutover;
     #[cfg(feature = "rpc")]
     mod rpc;
 }

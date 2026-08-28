@@ -141,6 +141,12 @@ ontology-activation-route-check:
 result-authority-lease-check:
     cargo nextest run --locked --lib -E 'test(/ontology_result_authority_lease_matrix|odf_result_checksum_v2_continuity/)' --no-tests=fail
 
+[doc("Prove real Delta/SQLite/admin cutover, restart leases, publication continuity, and forward rollback")]
+[group('gate')]
+ontology-datafabric-integration-check:
+    cargo nextest run --locked --test integration -E 'test(/ontology_datafabric_(end_to_end_cutover|predecessor_failure_atomicity|old_new_lease_restart|post_cutover_fact_publication)/)' --no-tests=fail
+    @if rg -n 'ProgramExecutionComparison|execute_phrase_probe|unoptimized_batches|optimized_batches' src tests; then echo 'temporary ontology dual-execution comparison authority remains' >&2; exit 1; fi
+
 [doc("Prove diagnostic artifacts, checksums, and opaque receipts remain separate 1:1 identities")]
 [group('gate')]
 ontology-plan-artifact-boundary-check:
