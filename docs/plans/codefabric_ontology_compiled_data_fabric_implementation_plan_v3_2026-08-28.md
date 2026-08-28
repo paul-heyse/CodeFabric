@@ -3,7 +3,7 @@ artifact: implementation-plan
 plan_id: codefabric-ontology-compiled-data-fabric
 version: v3
 date: 2026-08-28
-status: draft
+status: approved
 design_path: docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md
 design_version: v5
 baseline_commit: 71a888fed8aae660f97a8bc420f04a039f5aacae

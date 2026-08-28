@@ -1,0 +1,184 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v3_2026-08-28.md",
+  "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
+  "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
+  "status": "executing",
+  "current_packet": "WP18",
+  "packets": {
+    "WP18": {
+      "status": "in_progress",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP19": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP20": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP21": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP22": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP23": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP24": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP25": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP26": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP27": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M06": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M07": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M08": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB07": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB08": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB09": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB10": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB11": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB12": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [],
+  "discovered_obligations": [],
+  "plan_deviations": [
+    {
+      "kind": "owner_authorized_execution_and_proving_commits",
+      "summary": "The owner approved implementing the full v3 scope; packet proving commits and the plan's activation transaction are therefore authorized as required execution mechanics."
+    },
+    {
+      "kind": "planned_design_input_evolution",
+      "packet": "WP18",
+      "paths": [
+        "docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
+        "docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
+        "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+        "docs/authoritative_design/code_property_graph_semantic_query_specification_v1.3.md",
+        "docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
+        "docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v1.3.md",
+        "docs/authoritative_design/codefabric_1.3_implementation_roadmap_v1.0.md"
+      ],
+      "summary": "WP18 synchronously releases the eight master designs and their generated projections; the approved plan's planning-time hashes remain immutable until WP18 has a trusted proving commit."
+    },
+    {
+      "kind": "committed_predecessor_candidate_adopted",
+      "packet": "WP18",
+      "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
+    }
+  ],
+  "next_action": "Run WP18 authority-suite preflight, reconcile all live authority-root consumers, update the eight masters, regenerate owned projections, and add the authoritative-design conformance gate.",
+  "updated_at": "2026-08-28T15:30:29Z"
+}
