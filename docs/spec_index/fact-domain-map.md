@@ -206,3 +206,12 @@ the contract:
 
 Conflicting evidence is retained in `fact_evidence` (`FAB §16`) and diagnostics
 (`FAB §13.11`); it is never silently dropped.
+
+## 5. Compiled-program path
+
+For every row above, authored ontology/contract data is projected into a normalized Arrow
+program member, lowered through the single DataFusion compiler, and evaluated against exact-
+version factual tables. This does not change fact meaning or provider authority. `ONT`'s
+*Compiled ontology-program projection*, `GEN`'s *Provider boundary for compiled ontology
+programs*, and `FAB`'s *Arrow/DataFusion ontology-program and activation authority* are the
+normative amendment anchors.

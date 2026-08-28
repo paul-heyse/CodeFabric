@@ -115,7 +115,7 @@ def worktree_fingerprint() -> str:
 def stack_identity() -> dict[str, str]:
     cargo_bytes = (ROOT / "Cargo.lock").read_bytes()
     cargo = tomllib.loads(cargo_bytes.decode())
-    fabric = (ROOT / "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md").read_text(encoding="utf-8")
+    fabric = (ROOT / "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md").read_text(encoding="utf-8")
     packages = {package["name"]: package for package in cargo["package"]}
     delta_source = packages["deltalake"]["source"]
     delta_revision = delta_source.rsplit("#", maxsplit=1)[-1]

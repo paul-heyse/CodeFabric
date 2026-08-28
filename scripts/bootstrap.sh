@@ -301,16 +301,16 @@ EOF
 
 _cf_ctx_corpus() {
   local specs parts refs idx plans skills absent
-  specs="$(ls "${CF_ROOT}"/docs/upfront_design/*.md 2>/dev/null | wc -l | tr -d ' ')"
+  specs="$(ls "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null | wc -l | tr -d ' ')"
   parts="$(awk '/^```/{f=!f;next} !f && /^# (Part|Appendix)/{p++} END{print p+0}' \
-    "${CF_ROOT}"/docs/upfront_design/*.md 2>/dev/null)"
+    "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null)"
   refs="$(ls "${CF_ROOT}"/docs/library_ref/*.md 2>/dev/null | wc -l | tr -d ' ')"
   idx="$(ls "${CF_ROOT}"/docs/spec_index/*.md 2>/dev/null | wc -l | tr -d ' ')"
   plans="$(ls "${CF_ROOT}"/docs/plans/*.md 2>/dev/null | wc -l | tr -d ' ')"
   skills="$(find "${CF_ROOT}/.claude/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
 
   printf 'CORPUS  do not read these whole -- navigate them\n'
-  printf '  docs/upfront_design/  %s artifacts, %s `# Part`/`# Appendix` headings that\n' "$specs" "$parts"
+  printf '  docs/authoritative_design/  %s artifacts, %s `# Part`/`# Appendix` headings that\n' "$specs" "$parts"
   printf '        spec-outline structurally cannot emit (docs/spec_index/README.md §3.1)\n'
   printf '  docs/library_ref/  %s refs   docs/spec_index/  %s   docs/plans/  %s   skills  %s\n' \
     "$refs" "$idx" "$plans" "$skills"
@@ -335,7 +335,7 @@ EOF
 
 _cf_ctx_pins() {
   local f blk
-  f="$(ls "${CF_ROOT}"/docs/upfront_design/*data_fabric*.md 2>/dev/null | head -1)"
+  f="$(ls "${CF_ROOT}"/docs/authoritative_design/*data_fabric*.md 2>/dev/null | head -1)"
   if [ -z "$f" ]; then
     printf 'PINS  read them from the data-fabric spec §2.1 (that spec was not found here)\n'
     return 0

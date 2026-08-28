@@ -246,9 +246,9 @@ pub struct FamilyRule {
 /// Fixed family registry. It names representation roots and suffixes, never members.
 pub const FAMILY_RULES: &[FamilyRule] = &[
     FamilyRule {
-        family_id: "upfront-design",
-        root: "docs/upfront_design",
-        suffixes: &[".DS_Store", ".md"],
+        family_id: "authoritative-design",
+        root: "docs/authoritative_design",
+        suffixes: &[".md"],
         parser: NativeParser::MarkdownHeader,
         claim_policy: ClaimPolicy::DesignSources,
         output_convention: OutputConvention::None,
@@ -1122,7 +1122,7 @@ fn text_header(
             _ => {}
         }
     }
-    if path.raw_bytes.starts_with(b"docs/upfront_design/") {
+    if path.raw_bytes.starts_with(b"docs/authoritative_design/") {
         fields
             .entry("compatible_suite_major".to_owned())
             .or_insert_with(|| serde_json::Value::from(1_u64));

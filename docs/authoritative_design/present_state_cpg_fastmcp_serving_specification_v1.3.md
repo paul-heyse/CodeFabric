@@ -4245,3 +4245,23 @@ Rule 16: Keep Python free of fact generation, graph traversal, and DataFusion pl
 Rule 17: Generate and fingerprint validation and serialization schemas separately.
 Rule 18: Version and test every contract independently.
 ```
+
+---
+
+## Administrative activation and presentation-only serving boundary
+
+FastMCP remains a presentation adapter. It validates and transports the eight-form semantic
+request, status, cancellation, result-resource, and lease-token contracts; it does not import or
+execute Arrow, DataFusion, Delta, ontology programs, candidate gates, closure, or activation logic.
+It holds no mutable CPG, candidate, decision, pointer, or serving-epoch state.
+
+`ActivateCandidate` is available only on the daemon's authenticated administrative boundary and
+is not a query operation, MCP tool, MCP resource, prompt, query parameter, or generic snapshot
+method. The adapter cannot supply program, policy, receipt, dossier, permit, result-version, or
+pointer fields to that command.
+
+Query/result delivery carries the opaque lease identity issued by the daemon. The daemon selects
+the lease's exact `ResultAuthorityPin` and returns typed compatibility/expiry errors when retained
+program, function, policy, result-contract, checksum, artifact, or table authority is unavailable.
+The adapter translates those errors through generated public models without fallback, local
+schema selection, or unrestricted dictionary forwarding.

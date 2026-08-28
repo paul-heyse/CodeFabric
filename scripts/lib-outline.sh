@@ -12,7 +12,7 @@
 # flags are forwarded, so --view/--items/--match/--type/--json work as documented
 # in docs/library_ref/ast-grep_0.45.1_advanced_reference.md section 5.
 #
-# Sibling of spec-outline.sh, which maps the h2-rooted specs in docs/upfront_design.
+# Sibling of spec-outline.sh, which maps the h2-rooted specs in docs/authoritative_design.
 # The two corpora are rooted differently and are not interchangeable; each script
 # refuses the other's tree rather than emitting a misleading outline.
 #

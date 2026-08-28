@@ -340,7 +340,7 @@ suite.** Three independent facts:
   resolutions (`rich` 15.0.0, `typer` 0.27.1 — note the lockfile's Typer differs from the
   0.25.0 version anchor above), and `pyproject.toml` declares neither.
 * **The design suite never mentions them.** `typer` and `rich` occur zero times across the
-  seven artifacts in `docs/upfront_design/`.
+  seven artifacts in `docs/authoritative_design/`.
 
 The nearest real requirement is `RM W2` work package 8, *"Internal administration and
 diagnostics"* — a non-MCP administrative CLI or test client for bootstrap testing. That is a

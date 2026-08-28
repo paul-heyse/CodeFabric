@@ -6358,3 +6358,30 @@ pub struct GitRenameCandidate {
 ```
 
 All DTOs are application-owned. No attached gix handle, reference, object, index, or repository value is persisted or shared through these types.
+
+---
+
+## Durable candidate activation and serving-epoch lifecycle
+
+Ontology/data-fabric candidates use one durable state machine. A candidate is built from immutable
+Delta commits and an installed ontology-program package, then sealed with the canonical manifest,
+exact table URI/version/schema/content identities, predecessor serving epoch, active trusted
+policy, configuration, and rollback-retention set. Only the sealed governed runner may persist
+successful gate and semantic-closure receipts. Observations do not create decisions, and a
+candidate cannot supply the policy that authorizes itself.
+
+One daemon administrative `ActivateCandidate` command resolves durable candidate, receipt, owner,
+and policy records by identity. Query RPCs, FastMCP, generic snapshot activation, direct pointer
+writes, and caller-constructed proof bags cannot activate. The short file-backed SQLite
+transaction validates the accepted request, enforces same-key/same-bytes idempotence and
+same-key/different-bytes collision, records owner acceptance, and performs one predecessor/
+generation CAS. Delta writes, DataFusion gates, artifact persistence, and metric collection occur
+outside that transaction.
+
+Recovery runs before new query or activation work. Pre-commit faults leave the predecessor active;
+post-commit/lost-response recovery reopens durable state and returns the committed result for an
+identical retry. Concurrent activation has exactly one winner. Every active and retained
+predecessor `ServingEpoch` protects its program package, exact Delta versions, result/function/
+policy/query contracts, receipts, and artifacts from collection or vacuum while a lease or
+rollback record can name them. Rollback is a governed forward activation of the retained
+predecessor, never an in-place history rewrite.

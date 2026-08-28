@@ -1632,3 +1632,29 @@ to certify an incomplete predecessor gate.
 ## 30. Roadmap completion criterion
 
 This roadmap is complete when it can be used to create detailed implementation plans without changing wave boundaries or inventing cross-wave architecture. The implementation program is complete only when Wave 19 closes all master gates and the released implementation advertises only the exact conformance profiles it demonstrably satisfies.
+
+---
+
+## Ontology-compiled data-fabric transition sequence
+
+The ontology/data-fabric remediation supersedes the earlier special Stage-2b implementation
+sequence while preserving completed factual substrate work. Its dependency order is:
+
+1. release all eight master designs under `docs/authoritative_design/` and reconcile generated
+   manifests/indexes before candidate identity is sealed;
+2. compile the authored model into a reproducible, non-authoritative Arrow ontology-program
+   package;
+3. land the generic native-DataFusion compiler, calculation catalog, once-executed gate checksum/
+   artifact path, sealed ingress, exhaustive analyzer, and compiled semantic closure;
+4. persist opaque candidate receipts, accountable decisions, exact Delta bindings, activation
+   idempotence/recovery, and lease-scoped result authority without moving the target pointer;
+5. build and prove a real non-active target plus restart-reconstructible rollback predecessor,
+   then activate through the sole daemon admin command and one SQLite pointer CAS;
+6. delete duplicate semantic, execution, activation, result-selection, self-authorizing probe,
+   and obsolete authority-root surfaces; certify the successor at committed HEAD.
+
+No earlier stage advances the target pointer or treats comparison execution as production
+authority. Failure before activation leaves the predecessor serving; rollback afterward is a
+governed forward activation. This remediation establishes semantic, integrity, recovery, and
+resource-failure correctness only. It creates no performance baseline or benchmark obligation;
+the suite's independent Gate F/Wave 19 performance program remains separately owned.

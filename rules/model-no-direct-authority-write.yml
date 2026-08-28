@@ -10,7 +10,7 @@ rule:
   any:
     - all:
         - kind: call_expression
-        - regex: '(fs::write|std::fs::write|File::create|OpenOptions::open).*"(contracts/(acceptance|fixtures)|docs/upfront_design)/'
+        - regex: '(fs::write|std::fs::write|File::create|OpenOptions::open).*"(contracts/(acceptance|fixtures)|docs/authoritative_design)/'
     - all:
         - kind: macro_invocation
-        - regex: '(write|writeln)!.*"(contracts/(acceptance|fixtures)|docs/upfront_design)/'
+        - regex: '(write|writeln)!.*"(contracts/(acceptance|fixtures)|docs/authoritative_design)/'

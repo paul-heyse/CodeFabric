@@ -204,7 +204,7 @@ def test_odf_id16_zero_state() -> None:
 
 def test_odf_extension_consumer_classification() -> None:
     spec = _text(
-        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
+        "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
     )
     assert "application publication validation" in spec.lower()
     assert "ExtensionTypeRegistry" in spec
@@ -312,10 +312,10 @@ def test_odf_statistics_precision_census() -> None:
 
 def test_odf_spec_amendment_census() -> None:
     fab = _text(
-        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
+        "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
     )
     qry = _text(
-        "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md"
+        "docs/authoritative_design/code_property_graph_semantic_query_specification_v1.3.md"
     )
     assert "cpg_ontology" in fab and "GraphOperatorPlan" in fab
     assert "table-function" in qry.lower() or "table function" in qry.lower()
@@ -331,12 +331,12 @@ def test_odf_spec_index_navigation_current() -> None:
 def test_odf_retired_name_reference_zero() -> None:
     _assert_absent(
         r"codefabric\.id16|cpg_base\.enum_catalog",
-        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
-        "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md",
+        "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+        "docs/authoritative_design/code_property_graph_semantic_query_specification_v1.3.md",
         "docs/spec_index/library-routing.md",
     )
     assert "enum_domain" in _text(
-        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
+        "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md"
     )
 
 

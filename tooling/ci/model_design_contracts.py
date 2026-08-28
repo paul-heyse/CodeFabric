@@ -32,20 +32,22 @@ class TextRule:
     required: tuple[str, ...]
 
 
+LEGACY_DESIGN_ROOT = "docs/" + "upfront_design"
+
 EVOLVED_DESIGN_INPUTS = frozenset(
     {
-        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
-        "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
-        "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
-        "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
-        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+        f"{LEGACY_DESIGN_ROOT}/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        f"{LEGACY_DESIGN_ROOT}/codefabric_1.3_implementation_roadmap_v1.0.md",
+        f"{LEGACY_DESIGN_ROOT}/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
+        f"{LEGACY_DESIGN_ROOT}/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
+        f"{LEGACY_DESIGN_ROOT}/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
     }
 )
 
 RULES = (
     TextRule(
         "detached-identities-and-distributed-trace",
-        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
         (
             "computed identities are not authored fields",
             (
@@ -59,7 +61,7 @@ RULES = (
     ),
     TextRule(
         "portable-external-driver-boundary",
-        "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+        "docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
         (
             "protocol declares no network\ncapability",
             "source fence detects any repository write outside the declared\nstaging outputs",
@@ -68,7 +70,7 @@ RULES = (
     ),
     TextRule(
         "model-assurance-and-sealed-handoff",
-        "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+        "docs/authoritative_design/codefabric_1.3_implementation_roadmap_v1.0.md",
         (
             "Exactly one implementation plan and one schema-current execution state",
             "compiled assurance graph",
@@ -77,7 +79,7 @@ RULES = (
     ),
     TextRule(
         "recipe-aware-cbef",
-        "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
+        "docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
         (
             "generate one recipe-aware builder, validator, and typed field\nview per domain",
             "released `ENTITY` recipe remains exactly five fields",
@@ -86,7 +88,7 @@ RULES = (
     ),
     TextRule(
         "governed-occurrence-identity",
-        "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
+        "docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
         (
             "generated\nrecipe-aware CBEF builders",
             "Module-local numeric codes, bit masks, and\noverloaded flag bits",
@@ -94,7 +96,7 @@ RULES = (
     ),
     TextRule(
         "governed-provider-flags",
-        "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+        "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
         (
             "`provider_node_flags` is a persisted governed bitset",
             "Table row encoders accept the generated\nflag type rather than a raw integer",

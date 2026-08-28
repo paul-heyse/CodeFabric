@@ -17,7 +17,7 @@ scopes=(
   contracts
   scripts
   tooling
-  docs/upfront_design
+  docs/authoritative_design
   docs/spec_index
   docs/designs
   .claude/skills

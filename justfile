@@ -61,10 +61,15 @@ cache-stats:
 cache-zero-stats:
     sccache --zero-stats
 
-[doc("Navigate docs/upfront_design by section without reading whole specs")]
+[doc("Navigate docs/authoritative_design by section without reading whole specs")]
 [group('environment')]
 spec-outline *args:
     ./scripts/spec-outline.sh "$@"
+
+[doc("Prove the exact eight-master design suite, generated identities, navigation, and sole live authority root")]
+[group('contracts')]
+authoritative-design-conformance-check:
+    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_authoritative_design_conformance.py
 
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]

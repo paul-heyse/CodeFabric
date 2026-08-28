@@ -140,3 +140,12 @@ to violate.
 | W15–W16 | `QRY §4` in full · `QRY AC-G-48` completeness algebra |
 | W17–W18 | `SRV §6` in full — the 20 hard invariants are the adapter's whole contract |
 | W19 | all of them; Gates D–G are the mechanized form |
+
+## 5. Ontology-program amendment invariant map
+
+The synchronized amendment strengthens the existing lists without creating a parallel doctrine:
+one authored authority maps to `SUITE`/`ONT`; causal native relational execution and fail-closed
+planning map to `FAB`/`QRY`; semantic self-description and candidate-bound receipts map to
+`ONT`/`FAB`; one durable activation command, recovery, and lease compatibility map to
+`LIFE`/`SRV`; observation-versus-decision separation maps to `SUITE`/`LIFE`. The complete
+wording remains in the master documents, not this map.

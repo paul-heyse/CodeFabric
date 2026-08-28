@@ -4732,3 +4732,25 @@ change prioritization
 ```
 
 These may be produced by downstream systems using the facts specified here, but are not part of this ontology.
+
+---
+
+## Compiled ontology-program projection
+
+This ontology remains the sole authority for fact meaning. The authored registries and Schema
+Contract IR define normalized vocabulary, relation membership, semantic types, identity domains,
+identity recipes, phrase bindings, calculation bindings, and mechanically relational rule
+contracts. A generated `OntologyProgramBundle` is an executable projection of those authorities,
+not a new fact vocabulary and not a second place to author semantics.
+
+Program relations SHALL preserve typed relation and column references, ordered operands,
+operation kinds, expected result contracts, and provenance back to their authored rows. Stable
+bootstrap relations discover the remaining program relations without hard-coded per-domain
+resolver branches. Adding a correctly modeled domain or relation therefore requires authored
+ontology data and regenerated projections, not runtime conditionals.
+
+The compiled projection may validate factual closure, foreign keys, memberships, phrases, and
+result contracts. It SHALL NOT create evaluative facts, recommendations, safety judgments, test
+impact, risk scores, or any other excluded analytical output. Missing program/provider material
+remains explicit unknown or capability-gap data; an empty result is never silently reinterpreted
+as proof of absence.

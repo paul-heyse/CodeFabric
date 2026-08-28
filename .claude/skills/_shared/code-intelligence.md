@@ -284,7 +284,7 @@ external merely because it is structured (`§22.6`).
 
 ### Navigating the design specs
 
-`docs/upfront_design/` holds six normative specs, ~650 KB. Do not read them to
+`docs/authoritative_design/` holds six normative specs, ~650 KB. Do not read them to
 find a section — outline them:
 
 ```bash

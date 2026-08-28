@@ -10,7 +10,9 @@
       "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "A first bulk path-rewrite loop used zsh's reserved path array as its loop variable, temporarily destroying command lookup. The failed loop made no bulk edits; it was replaced with an explicitly named source_file variable and bounded live-file selection."
+      ],
       "blockers": []
     },
     "WP19": {
@@ -179,6 +181,6 @@
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
     }
   ],
-  "next_action": "Run WP18 authority-suite preflight, reconcile all live authority-root consumers, update the eight masters, regenerate owned projections, and add the authoritative-design conformance gate.",
-  "updated_at": "2026-08-28T15:30:29Z"
+  "next_action": "Create the WP18 proving commit for the synchronized authoritative suite, then accept the planned input evolution in state and rerun the packet gates at HEAD.",
+  "updated_at": "2026-08-28T16:08:00Z"
 }

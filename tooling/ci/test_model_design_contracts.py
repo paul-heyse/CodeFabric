@@ -22,6 +22,7 @@ from tooling.ci.model_design_contracts import (
     CONTROL_PLAN,
     EVOLVED_DESIGN_INPUTS,
     FORBIDDEN_DESIGN_PHRASES,
+    RULES,
     validate_model_design_contract,
 )
 
@@ -57,12 +58,12 @@ def test_model_design_rejects_routine_acceptance_writes() -> None:
     validate_model_design_contract()
     suite = (
         ROOT
-        / "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md"
+        / "docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md"
     ).read_text(encoding="utf-8")
     assert "Routine synchronization SHALL NOT edit bundle" in suite
     combined = "\n".join(
         (ROOT / path).read_text(encoding="utf-8")
-        for path in sorted(EVOLVED_DESIGN_INPUTS)
+        for path in sorted({rule.path for rule in RULES})
     )
     assert not [phrase for phrase in FORBIDDEN_DESIGN_PHRASES if phrase in combined]
 
@@ -100,7 +101,8 @@ def test_model_wp01_state_transition_enables_post_judgment_artifact_freshness() 
     drifted = {
         declared.path
         for declared in declared_inputs(plan_path)
-        if _sha256(ROOT / declared.path) != declared.digest
+        if not (ROOT / declared.path).is_file()
+        or _sha256(ROOT / declared.path) != declared.digest
     }
     assert set(EVOLVED_DESIGN_INPUTS) <= drifted
     assert drifted <= accepted

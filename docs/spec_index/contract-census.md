@@ -282,3 +282,11 @@ cross-referencing.
 
 Everything else is single-document vocabulary. Do not expect a suite-wide glossary to exist —
 use `rg -w` against the owning spec, or the relation inventory at `ONT` Part VII.
+
+## 4. Ontology-program amendment ownership
+
+The 2026-08-28 amendment mints no new `AC-G` number. Existing owners remain authoritative:
+`SUITE` owns release identity and gate separation; `ONT` owns fact/program vocabulary; `GEN` owns
+provider isolation; `FAB` owns program execution, receipts, Delta bindings, and result authority;
+`QRY` owns sealed eight-form planning; `LIFE` owns durable activation/recovery; and `SRV` owns the
+admin-versus-query boundary. The roadmap records sequence but is subordinate to those owners.

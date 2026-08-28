@@ -11,5 +11,5 @@ invalid:
       }
   - |
       fn overwrite() {
-          fs::write("docs/upfront_design/spec.md", b"generated").unwrap();
+          fs::write("docs/authoritative_design/spec.md", b"generated").unwrap();
       }

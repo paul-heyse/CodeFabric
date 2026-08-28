@@ -993,7 +993,7 @@ invocation.
 
 | Extractor | Item | Member | Corpus |
 |---|---|---|---|
-| `specs.yml` | `## N. Section` | `### N.N Subsection` | `docs/upfront_design/` (h2-rooted) |
+| `specs.yml` | `## N. Section` | `### N.N Subsection` | `docs/authoritative_design/` (h2-rooted) |
 | `library-ref.yml` | `# Chapter` | `## Subsection` | `docs/library_ref/` (h1-rooted) |
 
 Each script refuses the other's tree rather than emit a misleading flat outline.

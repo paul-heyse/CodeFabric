@@ -1,7 +1,7 @@
 # CodeFabric 1.3 specification index
 
 A navigation and traceability layer over the **seven** design artifacts in
-`docs/upfront_design/` — the suite governance and release manifest plus the six domain
+`docs/authoritative_design/` — the suite governance and release manifest plus the six domain
 specifications — together with the implementation roadmap and the pinned library references in
 `docs/library_ref/`.
 
@@ -31,7 +31,7 @@ about to call an unfamiliar library API.
 Seven design-artifact tags, plus `RM` for the roadmap. The form follows the `repo-spec §N` /
 `tooling-ref §N` precedent already used in `AGENTS.md`.
 
-| Tag | File (all under `docs/upfront_design/`) |
+| Tag | File (all under `docs/authoritative_design/`) |
 |---|---|
 | `SUITE` | `codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md` |
 | `ONT` | `code_property_graph_present_state_fact_ontology_specification_v1.3.md` |
@@ -449,3 +449,12 @@ section numbers move and this index will drift silently. Re-verification is manu
 accepted tradeoff. Titles are carried alongside every citation precisely so a drifted section can
 be re-found. If drift becomes a recurring problem, a `scripts/spec-index-check` plus a `just`
 recipe, in the style of `tooling/ast-grep/outline/specs.test.sh`, is the cheap fix.
+
+## 8. Ontology-compiled data-fabric amendment navigation
+
+This non-normative index was refreshed for the 2026-08-28 synchronized amendment. The seven
+normative suite members and subordinate roadmap are exactly the eight Markdown masters under
+`docs/authoritative_design/`. Each now closes with an ontology-program amendment covering its
+owned part of the Arrow program, DataFusion execution, candidate receipt, durable activation, or
+lease contract. `just authoritative-design-conformance-check` is the executable census and
+cross-document drift check; this index remains navigation only.

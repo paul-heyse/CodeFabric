@@ -4858,3 +4858,52 @@ change prioritization
 ```
 
 Such products may be built later as downstream analyses over this factual fabric, but they are outside this specification.
+
+---
+
+## Arrow/DataFusion ontology-program and activation authority
+
+The authored Schema Contract IR and registries compile reproducibly into one logical
+`OntologyProgramBundle`. The physical package is a canonical manifest over ordered,
+schema-homogeneous Arrow IPC members. Row order, schema and field metadata, dictionary policy,
+batch boundaries, writer options, and package profile are fixed. Bootstrap, authored-content,
+logical-program, member-IPC, and package identities are distinct and acyclic. Compiler output is
+publication-neutral: it names logical tables, schemas, and content; the external sealed candidate
+manifest later binds exact Delta table URIs and versions.
+
+One application-owned decoder and compiler lowers every supported rule, foreign key, semantic-
+closure operation, phrase binding, and calculation to ordinary DataFusion 55 expressions and
+logical plans. The generated calculation catalog is bijective with its authored contracts.
+Unsupported operations fail closed. The current profile uses DataFusion built-ins and ordinary
+relational operators; custom UDFs, custom logical nodes, custom physical nodes, raw SQL/DataFrame
+entry, UDTFs, and table functions are not parallel semantic authorities.
+
+All execution crosses a sealed `GovernedPlan` boundary. The application analyzer is appended to
+DataFusion's default analyzer stack and exhaustively evaluates the concrete ID-domain state and
+effect of every admitted `Expr` and `LogicalPlan` variant. Statements, DDL, DML, `COPY`,
+`ANALYZE`, raw optimizer/planner access, and direct physical execution are rejected. Extension
+type identity and metadata are revalidated across casts, functions, joins, IPC, Parquet, exact-
+version Delta providers, result encoding, and delivery.
+
+Each candidate gate performs one terminal execution under explicit memory, row/byte, batch,
+deadline, cancellation, and spill limits. Complete results produce a versioned
+`GateResultChecksum`; only after exhaustion may recursive physical metrics populate a separate
+`GateExecutionArtifact`. Actual Arrow map entries are checked for canonical ordering, unique
+non-null keys, and recursively canonical values. Plan text, metrics, and artifacts are diagnostic
+and cannot change receipt acceptance.
+
+The stable bootstrap discovers and executes compiled semantic closure against a frozen catalog of
+exact-version `DeltaTableProvider` instances. Every provider is reopened with its named version,
+validated after load, preserves Delta schema adaptation/statistics, and never falls back to raw
+Parquet or latest-table refresh. Opaque receipts bind workspace, canonical candidate manifest,
+program/package/config/policy, exact URI/version/schema/content tuples, expected result contracts,
+semantic checksums, and diagnostic artifacts.
+
+Immutable Delta commits precede activation. Application transaction IDs, zero internal retries,
+and lost-response reconciliation make writes idempotent; a table commit alone cannot advance
+serving authority. File-backed SQLite owns durable candidate, gate, receipt, decision,
+request-key, pointer-generation, and recovery state. Its short transaction validates trusted
+receipts and owner decision, writes acceptance, and performs one pointer CAS without running
+DataFusion or Delta work. Every lease pins a `ResultAuthorityPin` containing program, function,
+policy, query-form, checksum-version, result-contract, and exact-table authority. Old and new
+serving epochs remain reconstructible across restart and governed forward rollback.

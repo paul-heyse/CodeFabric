@@ -107,7 +107,7 @@ never dependencies of a gate. Note that `cargo nextest` does not execute doctest
 | `tooling/proto/` | hermetic Protobuf generation and version identity |
 | `scripts/` | operational scripts too substantial for a `just` recipe |
 | `rules/`, `sgconfig.yml` | structural governance rules and scan configuration |
-| `docs/upfront_design/` | authoritative system design suite |
+| `docs/authoritative_design/` | authoritative system design suite |
 | `docs/library_ref/` | version-pinned dependency references |
 | `docs/spec_index/` | derived navigation and traceability; never normative |
 | `docs/plans/`, `docs/reviews/` | implementation plans, execution state, and audits |
@@ -117,7 +117,7 @@ never dependencies of a gate. Note that `cargo nextest` does not execute doctest
 
 ## Governing documents
 
-The authoritative system design is the v1.3 suite under `docs/upfront_design/`; the
+The authoritative system design is the v1.3 suite under `docs/authoritative_design/`; the
 roadmap composes its implementation waves. `AGENTS.md` documents the repository’s
 tooling, assurance model, design map, and operating rules. The older
 `docs/rust_core_python_interface_repository_specification_2026-08-20.md` remains the

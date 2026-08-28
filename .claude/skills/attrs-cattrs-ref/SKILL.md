@@ -18,7 +18,7 @@ Two deep-dive reference documents back this skill.
 > this skill is currently **inactive for implemented CodeFabric code**: neither library is
 > a direct dependency. Treat the section numbers as a specification of what those two
 > documents should contain, and fall back to the upstream docs (<https://www.attrs.org>,
-> <https://catt.rs>) until they exist. The design suite in `docs/upfront_design/` never mentions
+> <https://catt.rs>) until they exist. The design suite in `docs/authoritative_design/` never mentions
 > either library, so nothing here is spec-anchored.
 
 | Library | Path | Lines | Sections | Scope |

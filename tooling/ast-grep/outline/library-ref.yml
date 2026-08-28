@@ -4,7 +4,7 @@
 # `--outline-rules` must be passed on every invocation -- see scripts/lib-outline.sh),
 # but a different level mapping, because the two corpora are rooted differently:
 #
-#   docs/upfront_design/*.md   h2-rooted: `## 5. Authority and precedence`  -> specs.yml
+#   docs/authoritative_design/*.md   h2-rooted: `## 5. Authority and precedence`  -> specs.yml
 #   docs/library_ref/*.md      h1-rooted: `# Rust MIR Advanced — 25) ...`   -> this file
 #
 # Level mapping:

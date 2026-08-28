@@ -28,11 +28,11 @@
     {
       "artifact_id": "codefabric-composable-semantic-cpg-query",
       "artifact_kind": "normative-document",
-      "authority_path": "docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md",
-      "canonical_digest": "b3:002d06ae3fc021b3cec28e8226198aa480b28acfb2941a9763c6df8024b5c2db",
+      "authority_path": "docs/authoritative_design/code_property_graph_semantic_query_specification_v1.3.md",
+      "canonical_digest": "b3:90eb2d8c088b9cb9b146e770db34eb19854a444b1e45f36dad4287d0d09a1e9f",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -43,7 +43,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:002d06ae3fc021b3cec28e8226198aa480b28acfb2941a9763c6df8024b5c2db",
+      "source_digest": "b3:90eb2d8c088b9cb9b146e770db34eb19854a444b1e45f36dad4287d0d09a1e9f",
       "source_role": "authority",
       "status": "released",
       "version": "1.3"
@@ -51,11 +51,11 @@
     {
       "artifact_id": "codefabric-continuous-cpg-lifecycle",
       "artifact_kind": "normative-document",
-      "authority_path": "docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
-      "canonical_digest": "b3:72025f58d64db3411dc807657cc3896a40336c9579f9cd2c40fceab6ca45b5f3",
+      "authority_path": "docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md",
+      "canonical_digest": "b3:2ccf41512c28e1b75ab1c6cc220f8421795e09f381d3353f8feda94a1953aa8b",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -66,7 +66,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:72025f58d64db3411dc807657cc3896a40336c9579f9cd2c40fceab6ca45b5f3",
+      "source_digest": "b3:2ccf41512c28e1b75ab1c6cc220f8421795e09f381d3353f8feda94a1953aa8b",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -74,11 +74,11 @@
     {
       "artifact_id": "codefabric-implementation-roadmap",
       "artifact_kind": "implementation-planning-document",
-      "authority_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
-      "canonical_digest": "b3:f530e9f2da1a2802ed0003c9fe3d5e42e6b8753de6169772d95af53da945b5ec",
+      "authority_path": "docs/authoritative_design/codefabric_1.3_implementation_roadmap_v1.0.md",
+      "canonical_digest": "b3:26e75e182e66f287f5ba742eb8ebf486898c13ecd0a284b5d0f5284f99e1063f",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -89,7 +89,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:f530e9f2da1a2802ed0003c9fe3d5e42e6b8753de6169772d95af53da945b5ec",
+      "source_digest": "b3:26e75e182e66f287f5ba742eb8ebf486898c13ecd0a284b5d0f5284f99e1063f",
       "source_role": "authority",
       "status": "planning-baseline",
       "version": "1.0"
@@ -97,11 +97,11 @@
     {
       "artifact_id": "codefabric-present-state-cpg-data-fabric",
       "artifact_kind": "normative-document",
-      "authority_path": "docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
-      "canonical_digest": "b3:026f7ab017d62b5b466dfa1a15068db8c66c0a6a97cadc0715a1748eb2be95aa",
+      "authority_path": "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md",
+      "canonical_digest": "b3:b41668e5a33339c70624551bf47c1e24a6429f6858dcfd8f6f3777bae86bc531",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -112,7 +112,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:026f7ab017d62b5b466dfa1a15068db8c66c0a6a97cadc0715a1748eb2be95aa",
+      "source_digest": "b3:b41668e5a33339c70624551bf47c1e24a6429f6858dcfd8f6f3777bae86bc531",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -120,11 +120,11 @@
     {
       "artifact_id": "codefabric-present-state-cpg-fact-generation",
       "artifact_kind": "normative-document",
-      "authority_path": "docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
-      "canonical_digest": "b3:640ab2e14f39a53633999a8962adc896c4b75007cec6fa80ba07d56f28ac1a68",
+      "authority_path": "docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md",
+      "canonical_digest": "b3:61c714a6d452db2f83bd7a24b7d7ff95d8ce4c820670fbe64cf8bd1a6bcdf041",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -135,7 +135,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:640ab2e14f39a53633999a8962adc896c4b75007cec6fa80ba07d56f28ac1a68",
+      "source_digest": "b3:61c714a6d452db2f83bd7a24b7d7ff95d8ce4c820670fbe64cf8bd1a6bcdf041",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -143,11 +143,11 @@
     {
       "artifact_id": "codefabric-present-state-cpg-fastmcp-serving",
       "artifact_kind": "normative-document",
-      "authority_path": "docs/upfront_design/present_state_cpg_fastmcp_serving_specification_v1.3.md",
-      "canonical_digest": "b3:de120ae29b04a5d3524f602ddc0553da02d57421f423ae4f494c6fb2ae3f5bd0",
+      "authority_path": "docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v1.3.md",
+      "canonical_digest": "b3:7f8b3bdc5adb5c41076b2a20dfc318ba674dd8d3ea1e07572401fedfdc03fbfc",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -158,7 +158,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:de120ae29b04a5d3524f602ddc0553da02d57421f423ae4f494c6fb2ae3f5bd0",
+      "source_digest": "b3:7f8b3bdc5adb5c41076b2a20dfc318ba674dd8d3ea1e07572401fedfdc03fbfc",
       "source_role": "authority",
       "status": "released-normative-implementation-specification",
       "version": "1.3"
@@ -166,11 +166,11 @@
     {
       "artifact_id": "codefabric-present-state-cpg-ontology",
       "artifact_kind": "normative-document",
-      "authority_path": "docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
-      "canonical_digest": "b3:a72194ebe6404d0e96b7d78b8187342c8b780cf83603260114ca1a1788fcb14d",
+      "authority_path": "docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md",
+      "canonical_digest": "b3:ab04221086ac1c1200bdfcfc720c3603e192a93812d3b86e280c2c9cce694c70",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -181,7 +181,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:a72194ebe6404d0e96b7d78b8187342c8b780cf83603260114ca1a1788fcb14d",
+      "source_digest": "b3:ab04221086ac1c1200bdfcfc720c3603e192a93812d3b86e280c2c9cce694c70",
       "source_role": "authority",
       "status": "released",
       "version": "1.3"
@@ -189,11 +189,11 @@
     {
       "artifact_id": "codefabric-present-state-cpg-suite-manifest",
       "artifact_kind": "normative-document",
-      "authority_path": "docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
-      "canonical_digest": "b3:f4ed1d41b50f3a75607b790bfaffb82ee5fbefa81cb699e3171e13c0d9c3f043",
+      "authority_path": "docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md",
+      "canonical_digest": "b3:002dda2a23dba874a415c20af4a984bf252be7101259969423d7d7a1510f6418",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
-      "owner": "upfront-design",
+      "owner": "authoritative-design",
       "projection_profile": "prose-utf8-v1",
       "provenance": [
         "accepted-release-census",
@@ -204,7 +204,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:f4ed1d41b50f3a75607b790bfaffb82ee5fbefa81cb699e3171e13c0d9c3f043",
+      "source_digest": "b3:002dda2a23dba874a415c20af4a984bf252be7101259969423d7d7a1510f6418",
       "source_role": "authority",
       "status": "released",
       "version": "1.3"
@@ -497,7 +497,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:f33defbd019903ead5e5958e29c90c90006377f86b63196ba7f748ebf12faa41",
+      "canonical_digest": "b3:4c84fb3d467554427d6f487b972e132b235bf20949dc697f6b644a45d7aceeb2",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -511,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:b9e68d129a25d8bcd291ee841c9a6087bd4a09f19f87fcc83f5791ef1ec9f35d",
+      "source_digest": "b3:78972abf573345b481a7a453b1b9c39abf74692c942ad273ba5dfd037e4fd5cf",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -593,7 +593,7 @@
       "artifact_id": "codefabric.governance.design-principle-baseline",
       "artifact_kind": "governance-ledger",
       "authority_path": "contracts/governance/design-principle-baseline.yaml",
-      "canonical_digest": "b3:ead4b5247fd79c3450655cf8b5acc19b127bd59a753997fb3d5a6475b97d3e29",
+      "canonical_digest": "b3:23905ea5238ffbe314d79b77d9dfcf89a0f7b38c44095998e4ad359741f5247e",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -607,7 +607,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:38131dca895bd32a8c94347e1a7d7e1ba23dab41ec0a7c4129cba0c490923fe1",
+      "source_digest": "b3:af3715f59a16cf8bc86df8606baf3317335da23958267f054f12b8df9b28b245",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -616,7 +616,7 @@
       "artifact_id": "codefabric.governance.design-principle-detector-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/design-principle-detector-registry.yaml",
-      "canonical_digest": "b3:b747930b0245930bac670fbacaee465fad8fa80a08034b40ff28669918eec8c3",
+      "canonical_digest": "b3:741951e0c9ef54fb538b7e1b7152a7300318425eca06103ff20aa399b445b680",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "owner": "contracts",
@@ -632,7 +632,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:86caa967b200b55577077c0d0ba9751e22c7d3275a217cef082104b7f18963f1",
+      "source_digest": "b3:e3f94dbefd6263cf655972feb2ff6bc2dfd2fd2aad9170096f117c788720a077",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -641,7 +641,7 @@
       "artifact_id": "codefabric.governance.design-principle-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/design-principle-registry.yaml",
-      "canonical_digest": "b3:4deb5e6b9a94f1fefa9436c031e929ef0c915aca99788418f58bf198a5c41c29",
+      "canonical_digest": "b3:79b0a162bf277928d016863a5e8acc6e9523a713310677cab112c656c1903eae",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "owner": "contracts",
@@ -657,7 +657,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:fa02af5108ed942ee6e378ecc9b0860e8cc8a646294ab6a87370d742458f104a",
+      "source_digest": "b3:710f80304478ab1f45802325f3e1030b6fc48d9fd90096586e8f6bde8071a922",
       "source_role": "authority",
       "status": "accepted",
       "version": "1.0"
@@ -1873,7 +1873,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:3bc9e513bd8e688b5bdfa9add887e47da8c432521a6eeaf32bbc72f791f7e5d3",
+      "canonical_digest": "b3:381f5cbc550d5289e1022670f03e5f141025a8e0639ddd7a0a172391dfbf4c2e",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -1887,7 +1887,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:2152c4a50d8ce84940e781de984bf7c539374d0def3369dc18e9c6bb6f43a1ba",
+      "source_digest": "b3:de3b6f8024c3b066d822704cca735d14f4b5eeb1a80adfa2aae80f29a8ccc202",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -2632,7 +2632,7 @@
       "artifact_id": "evidence:rule-tests---snapshots---model-no-direct-authority-write-snapshot",
       "artifact_kind": "evidence",
       "authority_path": "rule-tests/__snapshots__/model-no-direct-authority-write-snapshot.yml",
-      "canonical_digest": "b3:1caa8f0e74a0ae6080822064f4020f52de08a2d01c9693a9f0399dc0a5853206",
+      "canonical_digest": "b3:4a87a5b68b26596a52a5f94c0508d61e9b57066b37fe2a21c189975ccd0bec0b",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rule-tests",
@@ -2646,7 +2646,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:98521ddacafc489fe87e1b5fd8faa5f62e14507c8a942d3b862970beef32a637",
+      "source_digest": "b3:08afdcd845c1bc7fdfba7409c16d50acab5832ddff321b41706a41dc83824773",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -3161,7 +3161,7 @@
       "artifact_id": "evidence:rule-tests-model-no-direct-authority-write-test",
       "artifact_kind": "evidence",
       "authority_path": "rule-tests/model-no-direct-authority-write-test.yml",
-      "canonical_digest": "b3:c4a825a5b3c51a7836bd743556bd38325edf81cdaacc99e0383f3e47e6df4e67",
+      "canonical_digest": "b3:56169f0c17dc0dc996bbe13ae4c45170c6b0cb316f4bf2c0a054324cc1178665",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rule-tests",
@@ -3175,7 +3175,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:ed84cfaf41d6c94c07e23ffdd1075d3e130ca9c6478375eb62d7707a3338825c",
+      "source_digest": "b3:50fb4e286010f8828afac2ae25c2d5f5897abd97510b93ddcca3ce4306f18cdf",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -3690,7 +3690,7 @@
       "artifact_id": "evidence:rules-model-no-direct-authority-write",
       "artifact_kind": "evidence",
       "authority_path": "rules/model-no-direct-authority-write.yml",
-      "canonical_digest": "b3:69e7004a0d5ee2ac14c769279ba7995758525d649f3c3e0a35dc06ac56c7202a",
+      "canonical_digest": "b3:633388a55cd4dfefc1ad96026c660c3bab36111ce7462e85dd32093d0d6cde46",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rules",
@@ -3704,7 +3704,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:af558b633405e856d37fd29832ecafca6c9320b289ad64421f1c6b1ab9580688",
+      "source_digest": "b3:0adab79c6fa46685781d1314157ecb6e934bbb2acdcf26bf946e00387fae6b56",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -4012,7 +4012,7 @@
   "compatible_suite_major": 1,
   "families": [
     {
-      "action_key": "b3:a85e81c734e697f3da4d016bde1315bbc81e24131ef0c57f7f5ccc15523214c6",
+      "action_key": "b3:e73d61f30b1d6175dc242f8d53761115eb01f7ba268a514a0f2e3b51270ae8b3",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -4048,7 +4048,7 @@
       }
     },
     {
-      "action_key": "b3:6e353b9908763acb9430a95d5ab7463ee9825977b995f742d4df53bfaf7fde6b",
+      "action_key": "b3:7ad8a4cba071f9f5029c81bc27f5002b6eaac822309652202f16b9a40063b2c8",
       "family": "schemas",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",
@@ -4088,7 +4088,7 @@
       }
     },
     {
-      "action_key": "b3:5de28c108d01c714d9e3f5b6a3ecb6b8753bbab8f0733f4ad76260016b2f41c7",
+      "action_key": "b3:c73231fc22653d79ead6b5929bffe03033daa0e94fc2a00d592cd61fd4ae0c18",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -4121,7 +4121,7 @@
       }
     },
     {
-      "action_key": "b3:4e1fe14a4934b7700b241fe2ec5722d8e0da6a9f039a079bfbba11ee2960231a",
+      "action_key": "b3:8a2274a636fe1a9ce9051bd9102fb60db875ad9b62de07877efbb04950308347",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",

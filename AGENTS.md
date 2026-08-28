@@ -11,7 +11,7 @@ nothing about how production code should be organized — see *Scope boundary* b
 | **AGENTS.md** (this file) | **the canonical agent instructions.** Infrastructure decisions, the design corpus, doctrine, evidence model, tooling. Codex loads it directly; Claude Code loads it through a `@AGENTS.md` import in `CLAUDE.md`, so both agents read exactly this. |
 | `README.md` | human onboarding: what CodeFabric is, how to install it, supported platforms |
 | `CLAUDE.md` | a thin shim — the import above, plus Claude-specific harness notes |
-| `docs/upfront_design/` | the design corpus: governance manifest, six domain specs, implementation roadmap — see *Design corpus map* below |
+| `docs/authoritative_design/` | the design corpus: governance manifest, six domain specs, implementation roadmap — see *Design corpus map* below |
 | `docs/spec_index/` | navigation and traceability over that corpus; derived, never normative |
 | `docs/rust_core_python_interface_repository_specification_2026-08-20.md` | **the governing spec.** Authoritative for everything here |
 | `docs/library_ref/rust_development_environment_tooling_agent_reference_2026-08-19.md` | per-tool capability reference |
@@ -37,7 +37,7 @@ infrastructure**: deliberately not an input to any package/repository/tooling de
 (see *Scope boundary*), revised in place while in flux, and navigated with
 `just spec-outline` rather than read whole.
 
-`docs/upfront_design/` — the authoritative suite: a governance manifest, six domain
+`docs/authoritative_design/` — the authoritative suite: a governance manifest, six domain
 specifications, and the implementation roadmap.
 
 | Tag | File | What it holds |
@@ -625,7 +625,7 @@ the tool version — the session context prints both.
 
 Three navigators, none interchangeable:
 
-- `just spec-outline` — `docs/upfront_design/` by section. h2-rooted (`## N.` items,
+- `just spec-outline` — `docs/authoritative_design/` by section. h2-rooted (`## N.` items,
   `### N.N` members).
 - `just lib-outline` — `docs/library_ref/` by chapter. h1-rooted, because those files are
   rooted a level higher; `spec-outline`'s mapping would find no chapters and silently

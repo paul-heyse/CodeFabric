@@ -163,7 +163,7 @@
     {
       "class": "property",
       "path": "rule-tests/__snapshots__/model-no-direct-authority-write-snapshot.yml",
-      "source_digest": "b3:98521ddacafc489fe87e1b5fd8faa5f62e14507c8a942d3b862970beef32a637"
+      "source_digest": "b3:08afdcd845c1bc7fdfba7409c16d50acab5832ddff321b41706a41dc83824773"
     },
     {
       "class": "property",
@@ -278,7 +278,7 @@
     {
       "class": "property",
       "path": "rule-tests/model-no-direct-authority-write-test.yml",
-      "source_digest": "b3:ed84cfaf41d6c94c07e23ffdd1075d3e130ca9c6478375eb62d7707a3338825c"
+      "source_digest": "b3:50fb4e286010f8828afac2ae25c2d5f5897abd97510b93ddcca3ce4306f18cdf"
     },
     {
       "class": "property",
@@ -393,7 +393,7 @@
     {
       "class": "property",
       "path": "rules/model-no-direct-authority-write.yml",
-      "source_digest": "b3:af558b633405e856d37fd29832ecafca6c9320b289ad64421f1c6b1ab9580688"
+      "source_digest": "b3:0adab79c6fa46685781d1314157ecb6e934bbb2acdcf26bf946e00387fae6b56"
     },
     {
       "class": "property",

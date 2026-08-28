@@ -6,7 +6,7 @@
   "forbidden_write_roots": [
     "contracts/acceptance",
     "contracts/fixtures",
-    "docs/upfront_design"
+    "docs/authoritative_design"
   ],
   "output_count": 87,
   "released_requirement_count": 84,
@@ -21,5 +21,5 @@
     "tooling/proto"
   ],
   "schema_version": 1,
-  "tree_digest": "b3:e8f650aa7da76f6e06b499a2bca936bdafc31acfae0b1ff08faf1c68b9cd0ed1"
+  "tree_digest": "b3:983b96df91948f214a08e96e1f6cf9a2846f9efcbaed97eeacbaadf9b4f0421d"
 }

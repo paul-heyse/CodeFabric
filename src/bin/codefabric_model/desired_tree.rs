@@ -41,7 +41,7 @@ impl SafeOutputPath {
                 || matches!(component, Component::ParentDir | Component::RootDir)
         }) || bytes.starts_with(b"contracts/acceptance/")
             || bytes.starts_with(b"contracts/fixtures/")
-            || bytes.starts_with(b"docs/upfront_design/")
+            || bytes.starts_with(b"docs/authoritative_design/")
         {
             return Err(DesiredTreeError::UnsafeOutputPath(display_bytes(&bytes)));
         }

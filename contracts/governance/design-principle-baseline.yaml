@@ -51,27 +51,27 @@ records:
     disposition: plan_owned
     owner: suite-governance-owner
     current_packet: WP73
-  - path: docs/upfront_design/code_property_graph_semantic_query_specification_v1.3.md
+  - path: docs/authoritative_design/code_property_graph_semantic_query_specification_v1.3.md
     status_at_wp73: " M"
     disposition: plan_owned
     owner: semantic-query-owner
     current_packet: WP73
-  - path: docs/upfront_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md
+  - path: docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md
     status_at_wp73: " M"
     disposition: plan_owned
     owner: lifecycle-owner
     current_packet: WP73
-  - path: docs/upfront_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md
+  - path: docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md
     status_at_wp73: " M"
     disposition: plan_owned
     owner: suite-governance-owner
     current_packet: WP73
-  - path: docs/upfront_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md
+  - path: docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md
     status_at_wp73: " M"
     disposition: plan_owned
     owner: data-fabric-owner
     current_packet: WP73
-  - path: docs/upfront_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md
+  - path: docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v1.3.md
     status_at_wp73: " M"
     disposition: plan_owned
     owner: fact-generation-owner

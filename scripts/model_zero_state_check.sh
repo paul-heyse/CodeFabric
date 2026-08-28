@@ -56,7 +56,7 @@ done
 
 scan_roots=(
   Cargo.toml justfile README.md AGENTS.md .github scripts src tooling/model tooling/proto tooling/ci
-  codefabric-cpg-mcp/src codefabric-cpg-mcp/pyproject.toml docs/upfront_design docs/spec_index
+  codefabric-cpg-mcp/src codefabric-cpg-mcp/pyproject.toml docs/authoritative_design docs/spec_index
 )
 if rg -n \
   'contracts-tooling|target/debug/codefabric-contracts|tooling/(contracts/generate_adapter_models|proto/generate)\.py|artifact-index\.json|PUBLIC_SCHEMA_ARTIFACTS|sync_(toolchain_identity|requirements|traceability|bundle_members)|embed_semantic_digests' \

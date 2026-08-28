@@ -356,3 +356,12 @@ Summarized here, detailed in [`README.md §7.4`](./README.md#74-library-coverage
   (`rust_development_environment_tooling_agent_reference_2026-08-19.md`). Between them they
   carry `LIFE §70`–`§71`, `§109`–`§116`, `§151`–`§153`, `GEN AC-G-32`, `GEN §44.3`, and all of
   `RM W0` — a substantial surface reachable only by opening the files directly.
+
+## 11. Ontology-program amendment routing
+
+The Arrow program/package and canonical row/checksum surfaces route through `arrow` plus
+`df-schema`; expression/calculation lowering and the sealed analyzer route through `df`,
+`df-plan`, and `df-calc`; governed execution/resource/metric evidence routes through `df` and the
+DataFusion alignment manual. Exact candidate versions, `DeltaTableProvider`, application
+transaction identity, zero retry, recovery, retention, and rollback route through `delta` and
+`delta-align`. SQLite remains application-owned and has no pinned library reference here.

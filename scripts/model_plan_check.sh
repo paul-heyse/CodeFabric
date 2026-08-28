@@ -24,7 +24,7 @@ jq -e '
 
 changed_json="$(
   "$repo_root/scripts/model_exec.sh" plan \
-    docs/upfront_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md \
+    docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v1.3.md \
     --root "$repo_root"
 )"
 jq -e '

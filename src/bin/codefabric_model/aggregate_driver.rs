@@ -161,7 +161,7 @@ impl AggregateTree {
         bytes: Vec<u8>,
         family_output: bool,
     ) -> Result<(), AggregateError> {
-        if path.starts_with("docs/upfront_design/")
+        if path.starts_with("docs/authoritative_design/")
             || path.starts_with("contracts/acceptance/")
             || path.starts_with("contracts/fixtures/")
             || path.starts_with("tooling/model-transition/")
@@ -1142,7 +1142,7 @@ fn requirements(
 ) -> Result<Vec<RequirementRecord>, AggregateError> {
     let mut records = BTreeMap::new();
     for claim in model.claims.values().filter(|claim| {
-        claim.path.display().starts_with("docs/upfront_design/")
+        claim.path.display().starts_with("docs/authoritative_design/")
             && claim.path.display().ends_with(".md")
     }) {
         let Some(header) = &claim.header else {
@@ -1619,7 +1619,7 @@ fn aggregate_validation(
         "forbidden_write_roots": [
             "contracts/acceptance",
             "contracts/fixtures",
-            "docs/upfront_design",
+            "docs/authoritative_design",
         ],
     }))
 }
@@ -1893,7 +1893,7 @@ mod tests {
     fn model_routine_tree_excludes_authority_evidence_acceptance_and_signature_paths() {
         let mut tree = AggregateTree::new();
         for path in [
-            "docs/upfront_design/design.md",
+            "docs/authoritative_design/design.md",
             "contracts/acceptance/accepted.json",
             "contracts/fixtures/kat.json",
         ] {

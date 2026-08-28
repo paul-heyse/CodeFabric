@@ -3941,7 +3941,7 @@ mod tests {
         for path in [
             "contracts/acceptance/owner.json",
             "contracts/fixtures/kat.json",
-            "docs/upfront_design/spec.md",
+            "docs/authoritative_design/spec.md",
         ] {
             assert!(SafeOutputPath::parse(path.as_bytes().to_vec()).is_err());
         }
@@ -3950,7 +3950,7 @@ mod tests {
             let path = output.path.display();
             !path.starts_with("contracts/acceptance/")
                 && !path.starts_with("contracts/fixtures/")
-                && !path.starts_with("docs/upfront_design/")
+                && !path.starts_with("docs/authoritative_design/")
         }));
     }
 

@@ -5035,3 +5035,24 @@ prioritization
 ```
 
 These remain downstream agent reasoning tasks.
+
+---
+
+## Provider boundary for compiled ontology programs
+
+Tree-sitter, Ruff, Pyrefly, `rustc_public`, MIR, and derived-analysis providers continue to run
+behind application-owned adapters and emit application-owned factual DTOs. They do not construct
+Arrow ontology-program members, DataFusion expressions or plans, candidate receipts, activation
+permits, or serving epochs. Provider-native values remain evidence inputs subject to the existing
+authority and reconciliation rules.
+
+Normalization and publication consume the exact generated ontology-program identity selected by
+the serving/candidate manifest. Generated row encoders and typed adapters may project authored
+contracts into provider ingestion, but no provider may duplicate rule, phrase, identity,
+calculation, or result-schema meaning. A compile/provider failure produces explicit capability
+gaps and invalidates current semantic output; it never reuses stale compiler facts or authorizes a
+candidate through an empty relation.
+
+Fact-generation receipts identify provider/config/source inputs and emitted factual artifacts.
+They are not `GateResultChecksum`, semantic-closure receipt, owner decision, or activation
+authority; those belong to FAB and LIFE.

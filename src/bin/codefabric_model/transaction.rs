@@ -852,7 +852,7 @@ fn validate_relative(relative: &str) -> Result<(), TransactionError> {
             .any(|component| !matches!(component, Component::Normal(_)))
         || relative.starts_with("contracts/acceptance/")
         || relative.starts_with("contracts/fixtures/")
-        || relative.starts_with("docs/upfront_design/")
+        || relative.starts_with("docs/authoritative_design/")
         || relative.starts_with("tooling/model-transition/")
     {
         return Err(TransactionError::UnsafeOutputPath(relative.to_owned()));

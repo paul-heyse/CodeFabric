@@ -158,3 +158,12 @@ belong to a different wave.
   wave is named after.
 - **Two rows have off-by-one section boundaries** between W10 and W11.
 - **All 84 `AC-G` contracts are covered** once ranges are expanded, and every gate resolves.
+
+## 6. Ontology-compiled remediation sequence
+
+The roadmap's *Ontology-compiled data-fabric transition sequence* is a dependency correction
+inside the existing program, not Wave 20 and not a new normative owner. It releases the eight
+masters before candidate sealing, then orders Arrow program generation, native DataFusion
+compilation, sealed analysis/closure, durable activation and lease compatibility, atomic cutover,
+and decommission. The owning plan uses WP18–WP27 and M05–M08; those packet IDs are execution
+history, while the master-document anchors remain the durable design authority.

@@ -17,7 +17,7 @@ extend-exclude = [
   "rustc-extractor/src/generated/",
   "pyrefly-sidecar/src/generated/",
   # ~9 MB of third-party-derived library reference prose. Not our vocabulary to correct,
-  # and large enough to bury real findings. docs/upfront_design/ is ours and stays in.
+  # and large enough to bury real findings. docs/authoritative_design/ is ours and stays in.
   "docs/library_ref/",
   # Immutable v1 planning history contains deliberately quoted citation placeholders and a
   # mixed-case SQL-nullability mnemonic. WP73's superseding detector-backed v2 review replaces

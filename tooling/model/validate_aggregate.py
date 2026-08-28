@@ -292,7 +292,7 @@ def main() -> int:
             (
                 "contracts/acceptance/",
                 "contracts/fixtures/",
-                "docs/upfront_design/",
+                "docs/authoritative_design/",
                 "tooling/model-transition/",
             )
         )

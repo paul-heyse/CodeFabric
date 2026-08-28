@@ -6685,3 +6685,25 @@ historical change summaries
 runtime behavior not represented by present-state static facts
 live external environment state
 ```
+
+---
+
+## Sealed semantic planning and lease-scoped result authority
+
+The eight request forms remain the complete public semantic language. Each phrase, operand,
+relationship, calculation, selector, and result role resolves through the generated ontology
+program and calculation catalog. An unknown or unbound phrase, operation, type, or result contract
+returns a typed fail-closed error; it never becomes a false predicate, empty result, literal
+fallback, unrestricted SQL, DataFrame, UDF, UDTF, or DataFusion table-function entry.
+
+Successful binding yields an application-owned `GovernedPlan`. Callers cannot obtain the raw
+session, optimizer, query planner, physical plan, or execution method. The complete ID-domain
+analyzer runs after ordinary resolution/coercion and before optimization/execution. Serialized or
+displayed plan text is diagnostic/cache material only and is not request, result, or proof
+identity.
+
+Every query lease pins one immutable serving epoch and its `ResultAuthorityPin`: exact Delta table
+versions, ontology program/package, function catalog, policy, query-form contract, result-contract
+set, and checksum version. Result schema and checksum dispatch are selected from that lease, not a
+process-global version. Concurrent old and new leases may therefore return their own versioned
+contracts across activation and restart without mixing authorities.
