@@ -4,7 +4,7 @@
   "design_path": "docs/upfront_design/codefabric_1.3_implementation_roadmap_v1.0.md",
   "baseline_commit": "ea13ca41617dce93ea76349f34bfbd5739f7a5a2",
   "status": "executing",
-  "current_packet": "WP08",
+  "current_packet": "WP09",
   "packets": {
     "WP01": {
       "status": "complete",
@@ -104,10 +104,17 @@
       "blockers": []
     },
     "WP08": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "74cd3bd318f29aa9c4bc4dd97f748a118d8d96b6",
+      "deviations": [
+        "The governed UNTRUSTED_SANDBOXED profile is certified on the advertised macOS Darwin Seatbelt host by the complete escape matrix. Linux remains fail-closed and does not advertise that profile until the planned exact bubblewrap/seccomp capability is present; M02 is therefore not advanced by this packet transaction.",
+        "WP08 closed with exactly four packet oracles, sidecar-ci-fast, provider-protocol, current-host semantic sandbox, all-scope legacy zero-state, model reproducibility, artifact validation, full-tree Typos, dependency hygiene, stable-graph proof, and the 420-test stable-root suite plus doctests. The first root-ci-fast invocation reached 420/420 tests and doctests before a user-authored untracked review filename failed Typos; after the filename was corrected, Typos and the two remaining aggregate tail gates passed in place."
+      ],
+      "failed_approaches": [
+        "The first supervised sidecar private-root identity used only process, semantic context, and restart attempt, so identical Gate B fixtures racing in parallel shared lifecycle paths. A process-local instance nonce now makes every supervisor and sandbox probe transaction unique.",
+        "The initial two-second readiness loop was too narrow for several concurrent cold Pyrefly Query initializations. Startup remains bounded at fifteen seconds and still detects child exit immediately; the four formerly failing consumers pass concurrently.",
+        "The first immutable provider-view fixture cleanup attempted to delete read-only staged directories directly, causing PermissionDenied in concurrent Gate B review tests. Cleanup now restores permissions only within the exact fixture-owned root before removal."
+      ],
       "blockers": []
     },
     "WP09": {
@@ -450,6 +457,6 @@
       "summary": "The user/design owner's execution direction moved the previously inactive draft v2 artifact to approved before the atomic activation transaction."
     }
   ],
-  "next_action": "Run WP08 preflight over the Pyrefly sidecar protocol, ProviderRuntime dispatch, sandbox integration, and DB01 candidates; then implement the four named WP08 oracles without editing the shared serving consumer.",
-  "updated_at": "2026-08-27T21:40:15Z"
+  "next_action": "When execution resumes, run WP09 preflight over source leases, immutable ProviderWorkspaceView construction, dependency bundles, encoding maps, and sidecar source resolution; do not begin WP38 until WP09 is complete.",
+  "updated_at": "2026-08-28T02:53:23Z"
 }
