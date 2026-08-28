@@ -4,19 +4,20 @@
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
   "status": "executing",
-  "current_packet": "WP18",
+  "current_packet": "WP19",
   "packets": {
     "WP18": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "7a0763de31ff07778b43e4d2d9342c735da73756",
       "deviations": [],
       "failed_approaches": [
-        "A first bulk path-rewrite loop used zsh's reserved path array as its loop variable, temporarily destroying command lookup. The failed loop made no bulk edits; it was replaced with an explicitly named source_file variable and bounded live-file selection."
+        "A first bulk path-rewrite loop used zsh's reserved path array as its loop variable, temporarily destroying command lookup. The failed loop made no bulk edits; it was replaced with an explicitly named source_file variable and bounded live-file selection.",
+        "The first completion-state edit copied an unverified full hash behind the correct c36dbe0 prefix; commit trust rejected it. The state now records the exact git rev-parse result."
       ],
       "blockers": []
     },
     "WP19": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -30,7 +31,7 @@
       "blockers": []
     },
     "WP21": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -81,7 +82,7 @@
   },
   "milestones": {
     "M05": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -146,7 +147,7 @@
       "blockers": []
     },
     "DB12": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -181,6 +182,6 @@
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
     }
   ],
-  "next_action": "Create the WP18 proving commit for the synchronized authoritative suite, then accept the planned input evolution in state and rerun the packet gates at HEAD.",
-  "updated_at": "2026-08-28T16:08:00Z"
+  "next_action": "Implement WP19's authored semantic contracts and reproducible Arrow ontology-program package without changing production authority.",
+  "updated_at": "2026-08-28T16:12:00Z"
 }
