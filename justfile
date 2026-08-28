@@ -91,6 +91,21 @@ ontology-calculation-catalog-check:
 ontology-program-causality-check:
     cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_causality_matrix|phrase_binding_fail_closed)/)' --no-tests=fail
 
+[doc("Prove the separate gate checksum recursively rejects noncanonical Arrow maps")]
+[group('test')]
+ontology-gate-checksum-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_gate_checksum_map_value_canonicalization/)' --no-tests=fail
+
+[doc("Prove one terminal gate action and post-exhaustion diagnostic collection")]
+[group('test')]
+ontology-gate-single-execution-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_gate_(single_terminal_action|execution_artifact_separation)/)' --no-tests=fail
+
+[doc("Prove deterministic bounded gate failures leave authority unchanged")]
+[group('test')]
+ontology-gate-resource-contract-check:
+    cargo nextest run --locked --lib -E 'test(/ontology_gate_resource_limit_determinism/)' --no-tests=fail
+
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]
 lib-outline *args:

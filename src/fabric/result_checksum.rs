@@ -1,6 +1,8 @@
 //! Versioned, order-independent checksums for delivered Arrow result multisets.
 
-use arrow_array::RecordBatch;
+use arrow_array::{
+    Array, FixedSizeListArray, LargeListArray, ListArray, MapArray, RecordBatch, StructArray,
+};
 use arrow_row::{RowConverter, SortField};
 use arrow_schema::{ArrowError, DataType, Schema};
 use thiserror::Error;
@@ -22,6 +24,27 @@ pub struct ResultChecksumV2 {
     pub checksum: String,
     pub canonical_schema: Vec<u8>,
     pub row_count: u64,
+}
+
+/// Gate-only checksum domain. It is never used as a delivered query-result digest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GateResultChecksumV1 {
+    pub checksum: String,
+    pub canonical_schema: Vec<u8>,
+    pub row_count: u64,
+}
+
+/// Exact gate-result checksum contract version.
+pub const GATE_RESULT_CHECKSUM_VERSION: &str = "GateResultChecksumV1";
+
+fn gate_framed(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
+    let mut bytes = Vec::new();
+    for part in parts {
+        let part = part.as_ref();
+        bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(part);
+    }
+    crate::integrity::framed_digest(&bytes)
 }
 
 /// Version-directed replay result for historical and current delivered artifacts.
@@ -93,6 +116,88 @@ fn validate_data_type(data_type: &DataType) -> Result<(), ResultChecksumError> {
     Ok(())
 }
 
+fn validate_array(array: &dyn Array) -> Result<(), ResultChecksumError> {
+    match array.data_type() {
+        DataType::Map(_, _) => {
+            let map = array.as_any().downcast_ref::<MapArray>().ok_or_else(|| {
+                ResultChecksumError::Arrow(ArrowError::CastError(
+                    "Map datatype did not contain MapArray".into(),
+                ))
+            })?;
+            if map.keys().null_count() != 0 {
+                return Err(ResultChecksumError::NullableMapKey);
+            }
+            validate_array(map.keys().as_ref())?;
+            validate_array(map.values().as_ref())?;
+            let converter =
+                RowConverter::new(vec![SortField::new(map.keys().data_type().clone())])?;
+            let encoded = converter.convert_columns(&[map.keys().clone()])?;
+            for offsets in map.value_offsets().windows(2) {
+                let start =
+                    usize::try_from(offsets[0]).map_err(|_| ResultChecksumError::ResourceLimit)?;
+                let end =
+                    usize::try_from(offsets[1]).map_err(|_| ResultChecksumError::ResourceLimit)?;
+                for index in start.saturating_add(1)..end {
+                    if encoded.row(index - 1).data() >= encoded.row(index).data() {
+                        return Err(ResultChecksumError::UnorderedMap);
+                    }
+                }
+            }
+        }
+        DataType::Struct(_) => {
+            let values = array
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .ok_or_else(|| {
+                    ResultChecksumError::Arrow(ArrowError::CastError(
+                        "Struct datatype did not contain StructArray".into(),
+                    ))
+                })?;
+            for column in values.columns() {
+                validate_array(column.as_ref())?;
+            }
+        }
+        DataType::List(_) => validate_array(
+            array
+                .as_any()
+                .downcast_ref::<ListArray>()
+                .ok_or_else(|| {
+                    ResultChecksumError::Arrow(ArrowError::CastError(
+                        "List datatype did not contain ListArray".into(),
+                    ))
+                })?
+                .values()
+                .as_ref(),
+        )?,
+        DataType::LargeList(_) => validate_array(
+            array
+                .as_any()
+                .downcast_ref::<LargeListArray>()
+                .ok_or_else(|| {
+                    ResultChecksumError::Arrow(ArrowError::CastError(
+                        "LargeList datatype did not contain LargeListArray".into(),
+                    ))
+                })?
+                .values()
+                .as_ref(),
+        )?,
+        DataType::FixedSizeList(_, _) => validate_array(
+            array
+                .as_any()
+                .downcast_ref::<FixedSizeListArray>()
+                .ok_or_else(|| {
+                    ResultChecksumError::Arrow(ArrowError::CastError(
+                        "FixedSizeList datatype did not contain FixedSizeListArray".into(),
+                    ))
+                })?
+                .values()
+                .as_ref(),
+        )?,
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Compute `ResultChecksumV1` over one exact schema and a bounded multiset of logical Arrow rows.
 ///
 /// Arrow's row converter supplies stable total-order encodings, including logical dictionary
@@ -134,6 +239,9 @@ fn result_checksum(
     for batch in batches {
         if batch.schema().as_ref() != schema {
             return Err(ResultChecksumError::SchemaDrift);
+        }
+        for column in batch.columns() {
+            validate_array(column.as_ref())?;
         }
         row_count = row_count
             .checked_add(
@@ -216,6 +324,33 @@ pub fn result_checksum_v2(
     })
 }
 
+/// Compute the separate gate checksum after recursively validating admitted arrays.
+///
+/// The query-result V2 checksum remains immutable and replayable. Gate identity is derived in a
+/// distinct versioned domain so a gate receipt can never be substituted for a delivered result.
+///
+/// # Errors
+///
+/// Returns the same schema, canonical-map, Arrow, and resource failures as V2.
+pub fn gate_result_checksum_v1(
+    schema: &Schema,
+    batches: &[RecordBatch],
+    maximum_encoding_bytes: usize,
+) -> Result<GateResultChecksumV1, ResultChecksumError> {
+    let result = result_checksum_v2(schema, batches, maximum_encoding_bytes)?;
+    let checksum = gate_framed([
+        GATE_RESULT_CHECKSUM_VERSION.as_bytes(),
+        result.checksum.as_bytes(),
+        result.canonical_schema.as_slice(),
+        &result.row_count.to_be_bytes(),
+    ]);
+    Ok(GateResultChecksumV1 {
+        checksum,
+        canonical_schema: result.canonical_schema,
+        row_count: result.row_count,
+    })
+}
+
 /// Reproduce the checksum contract declared by a persisted result artifact.
 ///
 /// New artifacts are always emitted as V2; V1 remains a verifier-only branch for artifacts that
@@ -247,8 +382,8 @@ mod tests {
 
     use arrow_array::types::Int8Type;
     use arrow_array::{
-        Array as _, ArrayRef, DictionaryArray, Float64Array, Int8Array, Int64Array, ListArray,
-        MapArray, RecordBatchOptions, StringArray, StructArray,
+        ArrayRef, DictionaryArray, Float64Array, Int8Array, Int64Array, ListArray, MapArray,
+        RecordBatchOptions, StringArray, StructArray,
     };
     use arrow_buffer::OffsetBuffer;
     use arrow_schema::{Field, UnionFields, UnionMode};

@@ -60,8 +60,9 @@ pub use publication::{
     PublicationTableRecord,
 };
 pub use result_checksum::{
-    RESULT_CHECKSUM_VERSION, ResultChecksumError, ResultChecksumV1, ResultChecksumV2,
-    VersionedResultChecksum, result_checksum_for_version, result_checksum_v1, result_checksum_v2,
+    GATE_RESULT_CHECKSUM_VERSION, GateResultChecksumV1, RESULT_CHECKSUM_VERSION,
+    ResultChecksumError, ResultChecksumV1, ResultChecksumV2, VersionedResultChecksum,
+    gate_result_checksum_v1, result_checksum_for_version, result_checksum_v1, result_checksum_v2,
 };
 #[cfg(feature = "daemon")]
 pub(crate) use serving::logical_plan_template_serialization;
