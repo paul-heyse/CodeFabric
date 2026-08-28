@@ -1,0 +1,208 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md",
+  "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_design_v3_2026-08-27.md",
+  "baseline_commit": "eb7a738fa55037b19706fd842737cecad65ffe16",
+  "status": "not_started",
+  "current_packet": null,
+  "packets": {
+    "WP01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP06": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP07": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP08": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP09": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP10": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP11": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP12": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP13": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP14": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP15": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP16": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP17": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB06": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [],
+  "discovered_obligations": [],
+  "plan_deviations": [],
+  "next_action": "Reconcile dependency readiness before the first packet edit.",
+  "updated_at": "2026-08-28T04:04:40.669397+00:00"
+}
