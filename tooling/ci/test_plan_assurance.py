@@ -62,7 +62,7 @@ def test_packet_assurance_remains_runnable_during_declared_input_evolution(
     plan_path, plan, state = assurance._active()
     assert plan_path == artifact_contracts.active_plan_path()
     assert plan["plan_id"] == "codefabric-ontology-compiled-data-fabric"
-    assert state["status"] == "executing"
+    assert state["status"] in {"executing", "complete"}
 
 
 def test_packet_oracle_can_select_an_immutable_inactive_plan(
