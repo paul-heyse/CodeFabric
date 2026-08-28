@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
   "status": "executing",
-  "current_packet": "WP20",
+  "current_packet": "WP21",
   "packets": {
     "WP18": {
       "status": "complete",
@@ -24,14 +24,16 @@
       "blockers": []
     },
     "WP20": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "6211d72ffe0e5badde51aaeebb45d5295f20bed4",
       "deviations": [],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "A model-repro-check invocation was made while the WP20 justfile recipe additions were still uncommitted. The checker correctly rejected the dirty worktree; the generated model itself was byte-reproducible and the check is rerun at committed milestone boundaries."
+      ],
       "blockers": []
     },
     "WP21": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -182,6 +184,6 @@
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
     }
   ],
-  "next_action": "Implement WP20's generic DataFusion decoder/lowerer, native calculation catalog, phrase closure, and causal mutation matrix in a bounded non-authoritative session.",
-  "updated_at": "2026-08-28T16:42:00Z"
+  "next_action": "Implement WP21's separate gate checksum, one-terminal-action runner, post-exhaustion diagnostic artifact, recursive map validation, and typed resource envelope.",
+  "updated_at": "2026-08-28T17:02:00Z"
 }
