@@ -65,6 +65,50 @@ def test_packet_assurance_remains_runnable_during_declared_input_evolution(
     assert state["status"] == "executing"
 
 
+def test_packet_oracle_can_select_an_immutable_inactive_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = tmp_path / "docs" / "plans" / "inactive.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("inactive plan\n", encoding="utf-8")
+    observed: list[Path] = []
+
+    def contracts(
+        selected: Path,
+        **options: object,
+    ) -> dict[str, list[tuple[str, str]]]:
+        observed.append(selected)
+        assert options == {
+            "selected_packets": {"WP05"},
+            "allow_legacy_mapping": True,
+        }
+        return {
+            "WP05": [
+                ("one", "PC-WP05-BEH"),
+                ("two", "PC-WP05-STR"),
+                ("three", "PC-WP05-NEG"),
+                ("four", "PC-WP05-OPS"),
+            ]
+        }
+
+    monkeypatch.setattr(assurance, "_oracle_contracts", contracts)
+    monkeypatch.setattr(assurance, "oracle_definitions", lambda *_args: [])
+    monkeypatch.setattr(
+        assurance,
+        "_require_exact_definitions",
+        lambda *_args, **_kwargs: {},
+    )
+
+    assurance.run_packet_oracles(
+        "WP05",
+        root=tmp_path,
+        plan_path=Path("docs/plans/inactive.md"),
+    )
+
+    assert observed == [plan.resolve()]
+
+
 def test_single_call_python_alias_is_rejected(tmp_path: Path) -> None:
     source = tmp_path / "tooling" / "test_alias.py"
     source.parent.mkdir()

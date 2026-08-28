@@ -299,16 +299,29 @@ def validate_dependencies(root: Path = ROOT) -> tuple[int, int]:
     return len(dependencies), len(required)
 
 
-def _oracle_contracts(plan_path: Path) -> dict[str, list[tuple[str, str]]]:
+def _oracle_contracts(
+    plan_path: Path,
+    *,
+    selected_packets: set[str] | None = None,
+    allow_legacy_mapping: bool = False,
+) -> dict[str, list[tuple[str, str]]]:
     result: dict[str, list[tuple[str, str]]] = {}
     seen_oracles: set[str] = set()
     seen_criteria: set[str] = set()
     for packet, block in artifact_contracts._packet_blocks(plan_path).items():
-        if not re.search(
+        if selected_packets is not None and packet not in selected_packets:
+            continue
+        current_mapping = re.search(
             r"\*\*Target invariants\.\*\*.+?\*\*Design(?: and library)? references\.\*\*",
             block,
             re.DOTALL,
-        ):
+        )
+        legacy_mapping = allow_legacy_mapping and re.search(
+            r"\*\*Target invariants\.\*\*.+?Design references:",
+            block,
+            re.DOTALL,
+        )
+        if current_mapping is None and legacy_mapping is None:
             raise PlanAssuranceError(f"{packet} lacks target/design mapping")
         pairs = re.findall(
             r"Executable oracle:\s*`([^`]+)`[^\n]*\n\s*"
@@ -641,9 +654,30 @@ def _rust_selector_command(domain: str, oracles: Sequence[str]) -> list[str]:
     return command
 
 
-def run_packet_oracles(packet: str, root: Path = ROOT) -> None:
-    plan_path, _, _ = _active(root)
-    contracts = _oracle_contracts(plan_path)
+def run_packet_oracles(
+    packet: str,
+    root: Path = ROOT,
+    plan_path: Path | None = None,
+) -> None:
+    explicit_plan = plan_path is not None
+    if plan_path is None:
+        plan_path = _active(root)[0]
+    elif not plan_path.is_absolute():
+        plan_path = root / plan_path
+    plan_path = plan_path.resolve()
+    try:
+        plan_path.relative_to(root.resolve())
+    except ValueError as error:
+        raise PlanAssuranceError(
+            f"packet oracle plan escapes the repository: {plan_path}"
+        ) from error
+    if not plan_path.is_file():
+        raise PlanAssuranceError(f"packet oracle plan does not exist: {plan_path}")
+    contracts = _oracle_contracts(
+        plan_path,
+        selected_packets={packet} if explicit_plan else None,
+        allow_legacy_mapping=explicit_plan,
+    )
     if packet not in contracts:
         raise PlanAssuranceError(f"unknown packet {packet}")
     wanted = {oracle for oracle, _ in contracts[packet]}
@@ -705,6 +739,11 @@ def _parser() -> argparse.ArgumentParser:
     subparsers.add_parser("current-packet-oracle-check")
     packet = subparsers.add_parser("packet-oracle-check")
     packet.add_argument("packet")
+    packet.add_argument(
+        "--plan",
+        type=Path,
+        help="select an immutable inactive plan instead of the active plan",
+    )
     return parser
 
 
@@ -722,7 +761,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"plan dependency closure: {packets} packets, {overlaps} disjoint-phase overlaps"
             )
         elif args.command == "packet-oracle-check":
-            run_packet_oracles(args.packet)
+            run_packet_oracles(args.packet, plan_path=args.plan)
             print(f"packet oracle selector: {args.packet} passed exactly four oracles")
         else:
             current = _active()[2]["current_packet"]

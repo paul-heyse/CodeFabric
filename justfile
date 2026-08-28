@@ -318,7 +318,7 @@ gate-b-check: gate-b-owner-acceptance-check wave5-integration-check wave6-integr
 [group('test')]
 gate-b-owner-acceptance-check:
     cargo run --locked --bin codefabric-gate-b-candidate -- verify-release .
-    @just packet-oracle-check WP76
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP76 --plan docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v3_2026-08-25.md
 
 [doc("Execute the production Gate B vertical and verify functional-candidate isolation")]
 [group('test')]
@@ -329,7 +329,7 @@ gate-b-candidate-check:
     env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest -q codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_adapter_contracts.py
     @if rg -n 'fn run_scenario|async fn run_(pyrefly|rustc)|functional_candidate_projection|normalize_gate_b_planes' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local scenario, provider, or comparison authority remains' >&2; exit 1; fi
     @if test -d tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; fi
-    @just packet-oracle-check WP06
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP06 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
 
 [doc("Validate strict, human-authored Gate B semantic claims, anchors, scenarios, and proof universes")]
 [group('test')]
@@ -427,7 +427,7 @@ git-parity-check:
 [doc("Run the complete WP72 true-rebuild, comparator, Git parity, and process-closure oracle set")]
 [group('test')]
 wp72-acceptance-check:
-    @just packet-oracle-check WP05
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP05 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
     cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
     CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
     CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance|wp72_operational_acceptance)/)' --no-tests=fail
@@ -761,13 +761,13 @@ ontology-relational-closure-check:
 [doc("Validate normalized ontology parity, relational closure, and serving decoration")]
 [group('gate')]
 ontology-dimension-check: ontology-relational-closure-check
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP09
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP10
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP09 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP10 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
 
 [doc("Validate logical structure classification and the selected flat source-span lowering")]
 [group('gate')]
 structure-classification-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP12
+    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP12 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
 
 [doc("Resolve the complete ontology plane dynamically from a leased catalog")]
 [group('gate')]
