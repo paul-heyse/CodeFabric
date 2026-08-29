@@ -18,14 +18,14 @@
     },
     "WP19": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP20": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [
         "A model-repro-check invocation was made while the WP20 justfile recipe additions were still uncommitted. The checker correctly rejected the dirty worktree; the generated model itself was byte-reproducible and the check is rerun at committed milestone boundaries."
@@ -34,49 +34,49 @@
     },
     "WP21": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP22": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP23": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP24": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP25": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP26": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP27": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -85,28 +85,28 @@
   "milestones": {
     "M05": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M06": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M07": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M08": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -115,28 +115,28 @@
   "decommission_batches": {
     "DB07": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB08": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB09": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB10": {
       "status": "complete",
-      "proving_commit": "817928a43726da548597dd921246b666b970783b",
+      "proving_commit": "62eb994dcaf26d5ae3c1b8edffce268cf2d635b7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -234,5 +234,5 @@
     }
   ],
   "next_action": "The v3 implementation and IR-001, IR-003 through IR-011 remediation are complete; request a separate read-only implementation review for independent acceptance.",
-  "updated_at": "2026-08-29T17:45:14Z"
+  "updated_at": "2026-08-29T17:49:02Z"
 }
