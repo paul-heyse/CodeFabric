@@ -835,10 +835,12 @@ async fn validate_candidate(
         ),
     )
     .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
-    crate::ontology_rules::execute_ontology_program(&effective, &package, &session).await?;
-    validate_references(request, &effective, &session)
-        .await
-        .map(|_| ())
+    // Materialize the generated foreign-key contract through its designated public
+    // diagnostic before the broader ontology closure reports the same invalid row.
+    // Both paths consume the generated contract/program package; this ordering preserves
+    // one semantic authority while keeping the public publication error stable.
+    validate_references(request, &effective, &session).await?;
+    crate::ontology_rules::execute_ontology_program(&effective, &package, &session).await
 }
 
 struct PublicationTransition<'a> {
@@ -2088,12 +2090,14 @@ mod tests {
             owner_write(&missing, 81, 8, owner_batch()),
             owner_write(&missing, 81, 110, dangling_relation_batch()),
         ];
-        assert!(matches!(
-            missing
-                .publish(&mut missing_journal, &missing_request, &missing_writes)
-                .await,
-            Err(FabricError::PublicationReference(_))
-        ));
+        let missing_error = missing
+            .publish(&mut missing_journal, &missing_request, &missing_writes)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(missing_error, FabricError::PublicationReference(_)),
+            "unexpected missing-target error: {missing_error:?}"
+        );
         assert_eq!(missing.current_publication().await.unwrap(), None);
     }
 
@@ -2113,12 +2117,14 @@ mod tests {
             owner_write(&fabric, 83, 100, empty_entity_batch()),
             owner_write(&fabric, 83, 110, relation_batch([4; 16], [4; 16])),
         ];
-        assert!(matches!(
-            fabric
-                .publish(&mut journal, &failed_request, &failed_writes)
-                .await,
-            Err(FabricError::PublicationReference(_))
-        ));
+        let failed_error = fabric
+            .publish(&mut journal, &failed_request, &failed_writes)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(failed_error, FabricError::PublicationReference(_)),
+            "unexpected publication failure: {failed_error:?}"
+        );
         assert_eq!(
             fabric.current_publication().await.unwrap(),
             Some(base.pointer.clone())

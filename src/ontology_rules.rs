@@ -41,10 +41,18 @@ pub async fn execute_ontology_program(
         let plan = compiler
             .relational_program
             .compile(&program.program_id, &providers)
-            .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
-        let governed = session
-            .seal_plan(plan)
-            .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+            .map_err(|error| {
+                FabricError::PublicationIntegrity(format!(
+                    "{}:{}:planning failed: {error}",
+                    program.diagnostic_code, program.program_id
+                ))
+            })?;
+        let governed = session.seal_plan(plan).map_err(|error| {
+            FabricError::PublicationIntegrity(format!(
+                "{}:{}:governed analysis failed: {error}",
+                program.diagnostic_code, program.program_id
+            ))
+        })?;
         let outcome = session
             .execute_gate(
                 &governed,
@@ -54,7 +62,12 @@ pub async fn execute_ontology_program(
                 &crate::ontology_gate::GateResourceEnvelope::default(),
             )
             .await
-            .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+            .map_err(|error| {
+                FabricError::PublicationIntegrity(format!(
+                    "{}:{}:execution failed: {error}",
+                    program.diagnostic_code, program.program_id
+                ))
+            })?;
         if outcome.receipt.gate_checksum.row_count != 0 {
             return Err(FabricError::PublicationIntegrity(format!(
                 "{}:{}:compiled ontology program rejected {} violation rows",

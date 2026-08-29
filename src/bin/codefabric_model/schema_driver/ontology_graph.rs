@@ -667,14 +667,14 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         graph.column("family_relation", "relation_kind_code"),
         graph.column("family_kind", "code"),
     );
-    let joined = graph.join(relations, kinds, "inner", kind_match);
-    let mismatch = graph_binary!(
+    let family_match = graph_binary!(
         graph,
-        "neq",
+        "eq",
         graph.column("family_relation", "relation_family_code"),
         graph.column("family_kind", "family_code"),
     );
-    let invalid = graph.filter(joined, mismatch);
+    let valid_kind_and_family = graph_binary!(graph, "and", kind_match, family_match);
+    let invalid = graph.join(relations, kinds, "left_anti", valid_kind_and_family);
     roots.push(graph.register_program(family_rule, "relation", invalid, "relation"));
 
     let cardinality_rule = rule(ir, "ontology.relation-cardinality.v1");

@@ -233,7 +233,7 @@
     {
       "class": "property",
       "path": "rule-tests/__snapshots__/ontology-operation-dispatch-generic-snapshot.yml",
-      "source_digest": "b3:67e6408587f6cdcfde2f481911f29054aba1eb37f1bc7b8f750170a03ad1bca5"
+      "source_digest": "b3:f19dc09b541a6a86c84bdb1104670f07b576703a6fa48c571c78f36bead85d82"
     },
     {
       "class": "property",
@@ -413,7 +413,7 @@
     {
       "class": "property",
       "path": "rule-tests/ontology-operation-dispatch-generic-test.yml",
-      "source_digest": "b3:073c1ec5dc451702ca90c16fb957349cd7aedb213813c3ec55ff5e56288f8bd6"
+      "source_digest": "b3:f4504d69586e754f0ac006a2a93cabf3c10b95532a221b39ecf134b91c7e5193"
     },
     {
       "class": "property",
