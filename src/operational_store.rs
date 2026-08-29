@@ -2984,7 +2984,7 @@ impl OperationalStore {
                 migrate_v11_to_v12(&transaction)?;
             }
             11 => migrate_v11_to_v12(&transaction)?,
-            12 | 13 | 14 => {}
+            12..=14 => {}
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"

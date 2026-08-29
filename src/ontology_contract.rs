@@ -45,6 +45,11 @@ pub const DATAFUSION_EXPR_VARIANT_CENSUS: &[&str] = &[
 ///
 /// The encoding is explicitly length-framed so concatenation cannot create an ambiguous
 /// preimage. Operand order remains semantic and is therefore included verbatim.
+///
+/// # Panics
+///
+/// Panics only if a component length cannot be represented as `u64`, which is impossible on the
+/// supported 64-bit targets.
 pub fn rule_semantics_identity<'a>(
     operation_kind: &str,
     operands: impl IntoIterator<Item = (u16, &'a str, &'a str, &'a str)>,

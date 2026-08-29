@@ -1232,8 +1232,8 @@ fn query_projection_codes(
     compiler: &OntologyProgramCompiler,
     phrases: &[ResolvedPhrase],
     target_kind: &str,
-) -> Result<Vec<ScalarValue>, SemanticQueryError> {
-    Ok(phrases
+) -> Vec<ScalarValue> {
+    phrases
         .iter()
         .flat_map(|phrase| {
             compiler
@@ -1246,27 +1246,27 @@ fn query_projection_codes(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(|code| ScalarValue::Int32(Some(code)))
-        .collect())
+        .collect()
 }
 
 fn entity_kind_codes(
     compiler: &OntologyProgramCompiler,
     phrases: &[ResolvedPhrase],
-) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+) -> Vec<ScalarValue> {
     query_projection_codes(compiler, phrases, "entity_kind")
 }
 
 fn relation_kind_codes(
     compiler: &OntologyProgramCompiler,
     phrases: &[ResolvedPhrase],
-) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+) -> Vec<ScalarValue> {
     query_projection_codes(compiler, phrases, "relation_kind")
 }
 
 fn property_kind_codes(
     compiler: &OntologyProgramCompiler,
     phrases: &[ResolvedPhrase],
-) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+) -> Vec<ScalarValue> {
     query_projection_codes(compiler, phrases, "property_kind")
 }
 
@@ -1348,7 +1348,7 @@ async fn compile_find_entities(
     if let Some(predicate) = any_of_expr("entity.entity_id", identities) {
         predicates.push(predicate);
     }
-    let kinds = entity_kind_codes(compiler, &typed.resolved_phrases)?;
+    let kinds = entity_kind_codes(compiler, &typed.resolved_phrases);
     if let Some(predicate) = any_of("entity.entity_kind_code", kinds) {
         predicates.push(predicate);
     }
@@ -1424,8 +1424,8 @@ async fn compile_retrieve_facts(
     if let Some(predicate) = fact_about_predicates(query, "property.subject_entity_id", None)? {
         property_predicates.push(predicate);
     }
-    let property_kinds = property_kind_codes(compiler, &typed.resolved_phrases)?;
-    let relation_kinds = relation_kind_codes(compiler, &typed.resolved_phrases)?;
+    let property_kinds = property_kind_codes(compiler, &typed.resolved_phrases);
+    let relation_kinds = relation_kind_codes(compiler, &typed.resolved_phrases);
     if let Some(predicate) = any_of("property.property_kind_code", property_kinds.clone()) {
         property_predicates.push(predicate);
     } else if !relation_kinds.is_empty() {
@@ -1933,8 +1933,8 @@ fn path_policy(value: &str, pointer: &str) -> Result<PathPolicy, SemanticQueryEr
 fn resolved_relation_kind_codes(
     compiler: &OntologyProgramCompiler,
     phrases: &[ResolvedPhrase],
-) -> Result<Vec<i32>, SemanticQueryError> {
-    let mut codes = relation_kind_codes(compiler, phrases)?
+) -> Vec<i32> {
+    let mut codes = relation_kind_codes(compiler, phrases)
         .into_iter()
         .filter_map(|value| match value {
             ScalarValue::Int32(Some(code)) => Some(code),
@@ -1943,7 +1943,7 @@ fn resolved_relation_kind_codes(
         .collect::<Vec<_>>();
     codes.sort_unstable();
     codes.dedup();
-    Ok(codes)
+    codes
 }
 
 fn graph_certainty_codes(
@@ -2011,7 +2011,7 @@ fn graph_operator_plan(
             "relational form reached graph lowering".to_owned(),
         ));
     }
-    let relationship_kind_codes = resolved_relation_kind_codes(compiler, &typed.resolved_phrases)?;
+    let relationship_kind_codes = resolved_relation_kind_codes(compiler, &typed.resolved_phrases);
     let (semantics, maximum_depth) = match query {
         SemanticQueryClause::FollowRelationships {
             direction,
@@ -2066,7 +2066,7 @@ fn graph_operator_plan(
                             })
                             .cloned()
                             .collect::<Vec<_>>(),
-                    )?,
+                    ),
                 },
                 maximum_length.unwrap_or(64),
             )

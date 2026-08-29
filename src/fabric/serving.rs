@@ -477,6 +477,7 @@ impl ServingQuerySession {
     ///
     /// Rejects invalid runtime bounds, missing snapshot providers/dimensions, malformed
     /// generated view metadata, operational capture drift, or DataFusion catalog failures.
+    #[allow(clippy::too_many_lines)] // One constructor establishes the complete sealed session.
     pub fn from_lease(
         lease: SnapshotLeaseGuard,
         operational: &OperationalReaderFactory,
@@ -817,6 +818,11 @@ impl ServingQuerySession {
     }
 
     /// Execute a native plan with the request-owned cancellation handle and session deadline.
+    ///
+    /// # Errors
+    ///
+    /// Rejects unauthorized plan structure, cancellation, deadline, resource, execution, or
+    /// result-artifact failures.
     pub async fn query_plan_in_execution_observed_with_cancellation(
         &self,
         plan_identity: &str,
@@ -5931,6 +5937,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One causal test covers cancellation, deadline, and release.
     async fn ontology_serving_inflight_termination_and_release() {
         let (directory, mut store, mut images) = operational_store();
         let runtime = ServingSnapshotRuntime::default();

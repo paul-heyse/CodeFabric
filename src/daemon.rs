@@ -610,6 +610,7 @@ fn workspace_readiness(health: &[WorkspaceHealthStatus]) -> String {
     .to_owned()
 }
 
+#[allow(clippy::too_many_lines)] // One exhaustive admin dispatcher keeps command authority visible.
 async fn execute_workspace_command(
     store: &Arc<Mutex<OperationalStore>>,
     coordinators: &mut WorkspaceCoordinatorManager,

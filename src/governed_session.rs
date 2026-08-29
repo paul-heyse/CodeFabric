@@ -1,5 +1,6 @@
 //! Sealed DataFusion ingress for candidate gates and serving execution.
 
+use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::path::PathBuf;
@@ -72,10 +73,13 @@ impl PrivateSpillDirectory {
         reconcile_orphaned_spill_directories(parent, family)?;
         let nonce = crate::identity::random_registration_nonce()
             .map_err(|error| std::io::Error::other(error.to_string()))?;
-        let suffix = nonce
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
+        let suffix = nonce.iter().fold(
+            String::with_capacity(nonce.len() * 2),
+            |mut output, byte| {
+                write!(output, "{byte:02x}").expect("writing to a String cannot fail");
+                output
+            },
+        );
         let path = parent.join(format!("{family}-{}-{suffix}", std::process::id()));
         let mut builder = std::fs::DirBuilder::new();
         builder.mode(0o700).create(&path)?;
@@ -99,8 +103,8 @@ fn reconcile_orphaned_spill_directories(
     family: &str,
 ) -> Result<usize, std::io::Error> {
     let prefix = format!("{family}-");
-    let current_pid = std::process::id();
-    let current_uid = rustix::process::getuid().as_raw();
+    let process_id = std::process::id();
+    let owner_uid = rustix::process::getuid().as_raw();
     let mut removed = 0;
     for entry in std::fs::read_dir(parent)? {
         let entry = entry?;
@@ -117,7 +121,7 @@ fn reconcile_orphaned_spill_directories(
         let Ok(pid) = pid.parse::<u32>() else {
             continue;
         };
-        if pid == current_pid
+        if pid == process_id
             || nonce.len() != 32
             || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
         {
@@ -125,12 +129,15 @@ fn reconcile_orphaned_spill_directories(
         }
         let metadata = std::fs::symlink_metadata(entry.path())?;
         if !metadata.file_type().is_dir()
-            || metadata.uid() != current_uid
+            || metadata.uid() != owner_uid
             || metadata.mode() & 0o777 != 0o700
         {
             continue;
         }
-        let Some(pid) = rustix::process::Pid::from_raw(pid as i32) else {
+        let Ok(raw_pid) = i32::try_from(pid) else {
+            continue;
+        };
+        let Some(pid) = rustix::process::Pid::from_raw(raw_pid) else {
             continue;
         };
         if matches!(

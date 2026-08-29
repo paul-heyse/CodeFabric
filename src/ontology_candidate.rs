@@ -669,6 +669,11 @@ impl CandidateClosureRunner {
     }
 
     /// Execute the candidate closure under a control-boundary cancellation handle.
+    ///
+    /// # Errors
+    ///
+    /// Rejects catalog, planning, execution, cancellation, resource, checksum, receipt, or
+    /// exact-binding failures without mutating activation authority.
     pub async fn execute_with_cancellation(
         &self,
         limits: &GateResourceEnvelope,

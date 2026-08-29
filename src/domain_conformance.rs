@@ -62,6 +62,12 @@ pub struct DomainOperationPolicy {
 
 impl DomainOperationPolicy {
     /// Decode and validate the complete policy artifact selected by one package.
+    ///
+    /// # Errors
+    ///
+    /// Rejects missing or malformed policy members, duplicate or incomplete expression and
+    /// transition coverage, inconsistent versions, or invalid comparison-domain pairs.
+    #[allow(clippy::too_many_lines)] // Validation is intentionally one auditable package boundary.
     pub fn from_package(package: &crate::ontology_program::OntologyProgramPackage) -> Result<Self> {
         let operation_member = package
             .members
@@ -163,6 +169,9 @@ impl DomainOperationPolicy {
         if versions.len() != 1 {
             return domain_error("domain policy members select different versions");
         }
+        let version = versions
+            .pop_first()
+            .ok_or_else(|| DataFusionError::Plan("domain policy has no version".into()))?;
         let identity = crate::integrity::framed_digest(
             [
                 b"domain-operation-policy.v1".as_slice(),
@@ -175,7 +184,7 @@ impl DomainOperationPolicy {
         );
         Ok(Self {
             identity,
-            version: versions.pop_first().expect("one policy version"),
+            version,
             operations,
             transitions,
             comparison_domain_pairs,

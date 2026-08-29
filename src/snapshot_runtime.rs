@@ -961,10 +961,9 @@ impl SnapshotLeaseManager {
             .map_err(|error| SnapshotRuntimeError::Lease(error.to_string()))?;
             let policy = crate::domain_conformance::DomainOperationPolicy::from_package(&package)
                 .map_err(|error| SnapshotRuntimeError::Lease(error.to_string()))?;
-            let authority = record
-                .result_authority
-                .as_ref()
-                .expect("checked governed pin");
+            let authority = record.result_authority.as_ref().ok_or_else(|| {
+                SnapshotRuntimeError::Lease("governed lease has no result authority".into())
+            })?;
             if authority.program_identity != package.manifest.logical_program_identity
                 || authority.policy_identity != policy.result_policy_identity()
                 || authority.function_catalog_identity
