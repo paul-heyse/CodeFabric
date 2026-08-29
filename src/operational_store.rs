@@ -4512,6 +4512,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ontology_activation_restart_idempotency() {
+        let (_directory, path) = database();
+        let report = proved_candidate([0x75; 16], 0x76, 19, None).await;
+        let decision = owner_decision(&report, 2_150);
+        let request = activation_request(&report, &decision, "activate-restart", None, 0);
+        let mut store = OperationalStore::open(&path).unwrap();
+        store
+            .persist_proved_ontology_candidate(&report, 1_150)
+            .unwrap();
+        store.record_ontology_owner_decision(&decision).unwrap();
+        assert!(matches!(
+            store.activate_ontology_candidate_with_fault(
+                &request,
+                Some(StoreFaultPoint::OntologyActivationAfterCommitResponseLost),
+            ),
+            Err(OperationalStoreError::OntologyActivationOutcomeUnknown { .. })
+        ));
+        drop(store);
+
+        let mut reopened = OperationalStore::open(&path).unwrap();
+        let recovered = reopened.reconcile_ontology_activation(&request).unwrap();
+        assert!(recovered.idempotent_replay);
+        assert_eq!(recovered.pointer_generation, 1);
+        let replay = reopened.activate_ontology_candidate(&request).unwrap();
+        assert!(replay.idempotent_replay);
+        assert_eq!(replay.epoch_identity, recovered.epoch_identity);
+        drop(reopened);
+
+        let mut restarted = OperationalStore::open(&path).unwrap();
+        let second_recovery = restarted.reconcile_ontology_activation(&request).unwrap();
+        assert!(second_recovery.idempotent_replay);
+        assert_eq!(second_recovery, recovered);
+        let durable_census = restarted
+            .connection
+            .query_row(
+                "SELECT
+                   (SELECT count(*) FROM ontology_activation_request),
+                   (SELECT count(*) FROM ontology_acceptance),
+                   (SELECT count(*) FROM ontology_active_pointer),
+                   (SELECT count(*) FROM ontology_serving_epoch),
+                   (SELECT count(*) FROM ontology_recovery)",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(durable_census, (1, 1, 1, 1, 1));
+    }
+
+    #[tokio::test]
     async fn ontology_candidate_delta_exact_version_binding() {
         let (_directory, path) = database();
         let report = proved_candidate([0x75; 16], 0x76, 23, None).await;

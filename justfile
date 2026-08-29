@@ -129,7 +129,7 @@ ontology-decision-integrity-check:
 [doc("Prove ontology activation rollback, lost-response reconciliation, and restart idempotency")]
 [group('gate')]
 ontology-activation-recovery-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail
     cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail
 
 [doc("Prove the sole authenticated workspace admin route compiles, proves, stages, decides, and atomically activates a submission")]
