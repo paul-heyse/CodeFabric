@@ -1332,9 +1332,11 @@ mod tests {
 
     use super::*;
     use crate::fabric::{
-        CurrentPublicationRecord, PublicationTableRecord, WorkspaceFabric, bootstrap_workspace,
+        CurrentPublicationRecord, Id16ContractProvider, PublicationTableRecord, WorkspaceFabric,
+        bootstrap_workspace,
     };
     use crate::registries::WorkspaceRegistryLifecycle;
+    use crate::schema_registry::DomainTypedLiteral;
     use crate::workspace_registry::WorkspaceRecord;
     use datafusion::logical_expr::statistics::StatisticsRequest;
     use datafusion::physical_plan::empty::EmptyExec;
@@ -1392,7 +1394,16 @@ mod tests {
                 limit: args.limit(),
                 statistics_requests: args.statistics_requests().to_vec(),
             });
-            let plan: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(self.schema()));
+            let plan_schema = args.projection().map_or_else(
+                || Ok(self.schema()),
+                |projection| {
+                    self.schema()
+                        .project(projection)
+                        .map(Arc::new)
+                        .map_err(datafusion::error::DataFusionError::from)
+                },
+            )?;
+            let plan: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(plan_schema));
             Ok(plan.into())
         }
     }
@@ -1748,26 +1759,78 @@ mod tests {
         };
         let authenticated = authenticate_exact_statistics(spec, 7, Some(exact.clone())).unwrap();
         assert_eq!(authenticated, exact);
+        let storage_schema = Arc::new(arrow_schema::Schema::new_with_metadata(
+            spec.arrow_schema
+                .fields()
+                .iter()
+                .map(|field| {
+                    Arc::new(
+                        if field.data_type() == &arrow_schema::DataType::FixedSizeBinary(16) {
+                            field
+                                .as_ref()
+                                .clone()
+                                .with_data_type(arrow_schema::DataType::Binary)
+                        } else {
+                            field.as_ref().clone()
+                        },
+                    )
+                })
+                .collect::<Vec<_>>(),
+            spec.arrow_schema.metadata().clone(),
+        ));
         let spy = Arc::new(StructuredScanSpy {
-            schema: Arc::clone(&spec.arrow_schema),
+            schema: storage_schema,
             statistics: Some(exact.clone()),
             default_scan_calls: AtomicUsize::new(0),
             structured: Mutex::new(None),
         });
-        let provider = EffectiveStatisticsProvider {
+        let id16_provider = Arc::new(Id16ContractProvider {
             inner: Arc::clone(&spy) as Arc<dyn TableProvider>,
+            schema: Arc::clone(&spec.arrow_schema),
+        });
+        let overlay_provider = Arc::new(OverlayIdentityProvider {
+            inner: id16_provider,
+            table_code: spec.table_code,
+            generation: 7,
+            checksum: [8; 32],
+        });
+        let provider = EffectiveStatisticsProvider {
+            inner: overlay_provider,
             statistics: authenticated,
             constraints: None,
         };
-        assert_eq!(provider.statistics(), Some(exact));
-        let projection = [0, 1];
-        let filters = [col("workspace_kind").eq(lit(1_i16))];
+        assert_eq!(provider.statistics(), Some(exact.clone()));
+        let projection = [0, 3];
+        let domain_literal = DomainTypedLiteral::new("workspace", [9; 16])
+            .unwrap()
+            .into_expr();
+        let storage_literal = match domain_literal.clone() {
+            Expr::Literal(
+                datafusion::common::ScalarValue::FixedSizeBinary(16, value),
+                metadata,
+            ) => Expr::Literal(datafusion::common::ScalarValue::Binary(value), metadata),
+            _ => unreachable!("generated Id16 literal has the governed physical type"),
+        };
+        let scalar_filter = col("workspace_kind_code").eq(lit(1_i16));
+        let filters = [
+            col("workspace_id").eq(domain_literal),
+            scalar_filter.clone(),
+        ];
+        let expected_storage_filters = [col("workspace_id").eq(storage_literal), scalar_filter];
+        let workspace_id = Arc::new(datafusion::common::Column::from_name("workspace_id"));
+        let workspace_kind = Arc::new(datafusion::common::Column::from_name("workspace_kind_code"));
         let requests = [
+            StatisticsRequest::Min(Arc::clone(&workspace_id)),
+            StatisticsRequest::Max(Arc::clone(&workspace_id)),
+            StatisticsRequest::NullCount(Arc::clone(&workspace_id)),
+            StatisticsRequest::DistinctCount(Arc::clone(&workspace_id)),
+            StatisticsRequest::Sum(workspace_kind),
+            StatisticsRequest::ByteSize(workspace_id),
             StatisticsRequest::RowCount,
             StatisticsRequest::TotalByteSize,
         ];
         let state = provider_session_state(SessionConfig::new());
-        provider
+        let result = provider
             .scan_with_args(
                 state.as_ref(),
                 ScanArgs::default()
@@ -1778,12 +1841,15 @@ mod tests {
             )
             .await
             .unwrap();
+        let expected_schema = Arc::new(spec.arrow_schema.project(&projection).unwrap());
+        assert_eq!(result.plan().schema(), expected_schema);
+        assert_eq!(provider.statistics(), Some(exact));
         assert_eq!(spy.default_scan_calls.load(Ordering::SeqCst), 0);
         assert_eq!(
             spy.structured.lock().unwrap().as_ref(),
             Some(&CapturedStructuredScan {
                 projection: Some(projection.to_vec()),
-                filters: filters.to_vec(),
+                filters: expected_storage_filters.to_vec(),
                 limit: Some(3),
                 statistics_requests: requests.to_vec(),
             })

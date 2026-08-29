@@ -11,8 +11,7 @@ use arrow_array::{
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
-use datafusion::catalog::Session;
-use datafusion::catalog::TableProvider;
+use datafusion::catalog::{ScanArgs, ScanResult, Session, TableProvider};
 use datafusion::common::ScalarValue;
 use datafusion::common::tree_node::{Transformed, TreeNode};
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
@@ -933,7 +932,7 @@ impl std::fmt::Debug for Id16ContractProvider {
 }
 
 impl Id16ContractProvider {
-    fn projected_schema(&self, projection: Option<&Vec<usize>>) -> SchemaRef {
+    fn projected_schema(&self, projection: Option<&[usize]>) -> SchemaRef {
         projection.map_or_else(
             || Arc::clone(&self.schema),
             |indices| {
@@ -951,7 +950,7 @@ impl Id16ContractProvider {
     fn reattach_plan(
         &self,
         plan: Arc<dyn ExecutionPlan>,
-        projection: Option<&Vec<usize>>,
+        projection: Option<&[usize]>,
     ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
         let target = self.projected_schema(projection);
         let input_schema = plan.schema();
@@ -1021,7 +1020,32 @@ impl TableProvider for Id16ContractProvider {
             .inner
             .scan(state, projection, &storage_filters, limit)
             .await?;
-        self.reattach_plan(plan, projection)
+        self.reattach_plan(plan, projection.map(Vec::as_slice))
+    }
+
+    async fn scan_with_args<'a>(
+        &self,
+        state: &dyn Session,
+        args: ScanArgs<'a>,
+    ) -> datafusion::error::Result<ScanResult> {
+        let storage_filters = args
+            .filters()
+            .map(|filters| {
+                filters
+                    .iter()
+                    .map(Self::storage_filter)
+                    .collect::<datafusion::error::Result<Vec<_>>>()
+            })
+            .transpose()?;
+        let storage_args = ScanArgs::default()
+            .with_projection(args.projection())
+            .with_filters(storage_filters.as_deref())
+            .with_limit(args.limit())
+            .with_statistics_requests(args.statistics_requests());
+        let result = self.inner.scan_with_args(state, storage_args).await?;
+        Ok(self
+            .reattach_plan(result.into_inner(), args.projection())?
+            .into())
     }
 
     fn supports_filters_pushdown(
