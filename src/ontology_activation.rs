@@ -81,11 +81,13 @@ pub struct ProvedOntologyCandidate {
     serving_snapshot_id: [u8; 16],
 }
 
+#[cfg(feature = "daemon")]
 pub(crate) enum OntologyActivationPreparation {
     Replay(crate::operational_store::OntologyActivationOutcome),
     Pending(Box<PreparedOntologyActivation>),
 }
 
+#[cfg(feature = "daemon")]
 pub(crate) struct PreparedOntologyActivation {
     runner: CandidateClosureRunner,
     workspace_id: [u8; 16],
@@ -97,6 +99,7 @@ pub(crate) struct PreparedOntologyActivation {
     requested_at: i64,
 }
 
+#[cfg(feature = "daemon")]
 pub(crate) struct ProvedOntologyActivation {
     report: CandidateClosureReport,
     staged: crate::snapshot::StagedServingSnapshot,
