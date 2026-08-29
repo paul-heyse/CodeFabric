@@ -2,7 +2,6 @@
   "valid": [
     {"scope": "daemon", "request": {"command": "status"}},
     {"scope": "workspace", "request": {"command": "list"}},
-    {"scope": "workspace", "request": {"command": "activate_candidate", "workspace_id": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], "candidate_identity": "b3:1111111111111111111111111111111111111111111111111111111111111111", "decision_identity": "b3:2222222222222222222222222222222222222222222222222222222222222222", "request_key": "owner-activation-1"}},
     {
       "accepted": true,
       "daemon_liveness": "LIVE",
@@ -16,7 +15,7 @@
   "invalid": [
     {"scope": "daemon", "request": {"command": "status", "extra": true}},
     {"scope": "query", "request": {"command": "status"}},
-    {"scope": "workspace", "request": {"command": "activate_candidate", "workspace_id": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], "candidate_identity": "b3:1111111111111111111111111111111111111111111111111111111111111111", "decision_identity": "b3:2222222222222222222222222222222222222222222222222222222222222222", "request_key": "owner-activation-1", "policy_identity": "caller-forbidden"}},
+    {"scope": "workspace", "request": {"command": "activate_candidate", "workspace_id": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], "candidate_identity": "b3:1111111111111111111111111111111111111111111111111111111111111111", "decision_identity": "b3:2222222222222222222222222222222222222222222222222222222222222222", "request_key": "owner-activation-1"}},
     {"daemon_liveness": "LIVE", "workspace_readiness": "UNKNOWN"}
   ]
 }

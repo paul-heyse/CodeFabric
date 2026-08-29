@@ -710,7 +710,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
             graph.column(&relation_alias, "relation_kind_code"),
             graph.column(&kind_alias, "code"),
         );
-        let joined = graph.join(relations, kinds, "inner", condition);
+        let joined = graph.join(relations, kinds, "left_semi", condition);
         let groups = vec![
             (
                 graph.column(&relation_alias, "relation_kind_code"),
@@ -736,21 +736,38 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
 
     let owner_rule = rule(ir, "ontology.relation-owner.v1");
     let relations = graph.scan(relation_code, "owner_relation");
-    let entities = graph.scan(entity_code, "owner_source_entity");
+    let source_entities = graph.scan(entity_code, "owner_source_exists");
+    let source_exists = graph_binary!(
+        graph,
+        "eq",
+        graph.column("owner_relation", "source_id"),
+        graph.column("owner_source_exists", "entity_id"),
+    );
+    // Keep the relation schema on both sides of the ownership decision. DataFusion 55's
+    // projection pushdown rejects an inner-join/filter plan when two inputs carry distinct
+    // table-level Arrow metadata. Semi/anti joins also express the intended set semantics
+    // directly: the source must exist, but no source row may match the relation owner.
+    let relations_with_source = graph.join(relations, source_entities, "left_semi", source_exists);
+    let owner_entities = graph.scan(entity_code, "owner_source_match");
     let source_match = graph_binary!(
         graph,
         "eq",
         graph.column("owner_relation", "source_id"),
-        graph.column("owner_source_entity", "entity_id"),
+        graph.column("owner_source_match", "entity_id"),
     );
-    let joined = graph.join(relations, entities, "inner", source_match);
-    let mismatch = graph_binary!(
+    let owner_match = graph_binary!(
         graph,
-        "neq",
+        "eq",
         graph.column("owner_relation", "owner_id"),
-        graph.column("owner_source_entity", "owner_id"),
+        graph.column("owner_source_match", "owner_id"),
     );
-    let invalid = graph.filter(joined, mismatch);
+    let valid_source_owner = graph_binary!(graph, "and", source_match, owner_match);
+    let invalid = graph.join(
+        relations_with_source,
+        owner_entities,
+        "left_anti",
+        valid_source_owner,
+    );
     roots.push(graph.register_program(owner_rule, "source-owner", invalid, "relation"));
 
     let self_edge_rule = rule(ir, "ontology.relation-self-edge.v1");
@@ -776,7 +793,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         graph.column("self_edge_relation", "relation_kind_code"),
         graph.column("self_edge_kind", "code"),
     );
-    let invalid = graph.join(relations, kinds, "inner", condition);
+    let invalid = graph.join(relations, kinds, "left_semi", condition);
     roots.push(graph.register_program(self_edge_rule, "relation", invalid, "relation"));
 
     let property_rule = rule(ir, "ontology.property-one-of.v1");

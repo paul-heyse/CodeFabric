@@ -135,12 +135,29 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["command", "workspace_id", "candidate_identity", "decision_identity", "request_key"],
+          "required": ["command", "workspace_id", "submission", "administrative_key", "request_key"],
           "properties": {
             "command": {"const": "activate_candidate"},
             "workspace_id": {"$ref": "#/$defs/Id16"},
-            "candidate_identity": {"$ref": "#/$defs/B3Identity"},
-            "decision_identity": {"$ref": "#/$defs/B3Identity"},
+            "submission": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["publication", "manifest_body", "rollback_retain_until"],
+              "properties": {
+                "publication": {"type": "object"},
+                "manifest_body": {"type": "object"},
+                "source_blob_digests": {
+                  "type": "array",
+                  "items": {"$ref": "#/$defs/Digest32"}
+                },
+                "rollback_retain_until": {"type": "integer"}
+              },
+              "x-codefabric-nested-authority": [
+                "PublicationOutcome",
+                "ServingSnapshotManifestBody"
+              ]
+            },
+            "administrative_key": {"$ref": "#/$defs/ByteArray"},
             "request_key": {"type": "string", "minLength": 1, "maxLength": 256}
           }
         },

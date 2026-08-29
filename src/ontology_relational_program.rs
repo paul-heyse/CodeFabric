@@ -823,17 +823,60 @@ impl OntologyRelationalProgram {
 }
 
 /// Bind candidate Arrow batches behind ordinary DataFusion `TableProvider`s.
+///
+/// Candidate binding already fixes table identity through the generated `table:<code>` provider
+/// key. Schema-level metadata describes the durable source table, and combining distinct source
+/// maps in an ordinary DataFusion join can make the DataFusion 55 projection-pushdown rule reject
+/// an otherwise type-correct plan. The semantic execution plane therefore retains every Arrow
+/// field (including field metadata and extension types) while normalizing table-level metadata at
+/// this one boundary. Durable/Delta schema validation remains against the unmodified source schema.
 pub fn candidate_batch_providers(
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<BTreeMap<String, Arc<dyn TableProvider>>, OntologyProgramCompileError> {
     batches
         .iter()
         .map(|(table_code, batch)| {
+            let execution_schema =
+                Arc::new(arrow_schema::Schema::new(batch.schema().fields().clone()));
+            let execution_batch =
+                RecordBatch::try_new(execution_schema.clone(), batch.columns().to_vec())
+                    .map_err(|error| OntologyProgramCompileError::Decode(error.to_string()))?;
             let provider: Arc<dyn TableProvider> = Arc::new(
-                MemTable::try_new(batch.schema(), vec![vec![batch.clone()]])
+                MemTable::try_new(execution_schema, vec![vec![execution_batch]])
                     .map_err(|error| OntologyProgramCompileError::Decode(error.to_string()))?,
             );
             Ok((format!("table:{table_code}"), provider))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, HashMap};
+    use std::sync::Arc;
+
+    use arrow_array::{Int64Array, RecordBatch};
+    use arrow_schema::{DataType, Field, Schema};
+
+    use super::candidate_batch_providers;
+
+    #[test]
+    fn semantic_provider_normalizes_only_table_metadata() {
+        let field = Field::new("value", DataType::Int64, false)
+            .with_metadata(HashMap::from([("id-domain".into(), "entity".into())]));
+        let schema = Arc::new(Schema::new_with_metadata(
+            vec![field],
+            HashMap::from([("table-name".into(), "entity".into())]),
+        ));
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1]))])
+            .expect("metadata-bearing batch");
+        let providers =
+            candidate_batch_providers(&BTreeMap::from([(100, batch)])).expect("semantic providers");
+        let execution_schema = providers["table:100"].schema();
+        assert!(execution_schema.metadata().is_empty());
+        assert_eq!(
+            execution_schema.field(0).metadata().get("id-domain"),
+            Some(&"entity".to_owned())
+        );
+    }
 }

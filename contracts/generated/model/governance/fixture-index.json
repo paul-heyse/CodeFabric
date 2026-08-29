@@ -3,7 +3,7 @@
     {
       "class": "property",
       "path": "contracts/fixtures/admin-line-protocol-examples.json",
-      "source_digest": "b3:f2df67eb0e865945e23b3304d252d731c78c6b4c039fa399d1a5031356d246ac"
+      "source_digest": "b3:11b8e0e7e74358228ee19aa798f191551eac75db48199ad2afcb583aef845ff8"
     },
     {
       "class": "normative-kat",
