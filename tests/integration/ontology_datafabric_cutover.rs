@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 use std::process::{Child, Command, Output, Stdio};
@@ -160,10 +161,13 @@ fn activation_command(
     request_key: &str,
 ) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_codefabric"));
-    let administrative_key_hex = administrative_key
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let administrative_key_hex = administrative_key.iter().fold(
+        String::with_capacity(administrative_key.len() * 2),
+        |mut encoded, byte| {
+            write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+            encoded
+        },
+    );
     command
         .args(["workspace", "activate-candidate", workspace_id])
         .arg(submission_path)

@@ -138,11 +138,11 @@ fn uint16<'a>(
 
 fn insert_unique<T>(
     values: &mut BTreeMap<String, T>,
-    id: String,
+    id: &str,
     value: T,
     family: &str,
 ) -> Result<(), OntologyProgramCompileError> {
-    if id.is_empty() || values.insert(id.clone(), value).is_some() {
+    if id.is_empty() || values.insert(id.to_owned(), value).is_some() {
         return Err(OntologyProgramCompileError::Decode(format!(
             "duplicate or empty {family} id {id:?}"
         )));
@@ -152,6 +152,11 @@ fn insert_unique<T>(
 
 impl OntologyRelationalProgram {
     /// Decode and structurally validate all typed plan and expression relations.
+    ///
+    /// # Errors
+    ///
+    /// Rejects missing, duplicate, malformed, or cross-relation-inconsistent program rows.
+    #[allow(clippy::too_many_lines)] // Complete normalized relation decoding stays one closed census.
     pub fn decode(package: &OntologyProgramPackage) -> Result<Self, OntologyProgramCompileError> {
         let contract = one_batch(package, "program.program_contract")?;
         let program_ids = utf8(contract, "program_id")?;
@@ -187,12 +192,8 @@ impl OntologyRelationalProgram {
                     program.program_id
                 )));
             }
-            insert_unique(
-                &mut programs,
-                program.program_id.clone(),
-                program,
-                "program",
-            )?;
+            let program_id = program.program_id.clone();
+            insert_unique(&mut programs, &program_id, program, "program")?;
         }
 
         let mut nodes = BTreeMap::new();
@@ -203,7 +204,7 @@ impl OntologyRelationalProgram {
         for row in 0..scans.num_rows() {
             insert_unique(
                 &mut nodes,
-                ids.value(row).to_owned(),
+                ids.value(row),
                 PlanNode::Scan(ScanNode {
                     relation_ref: relations.value(row).to_owned(),
                     relation_alias: aliases.value(row).to_owned(),
@@ -217,7 +218,7 @@ impl OntologyRelationalProgram {
         for row in 0..filters.num_rows() {
             insert_unique(
                 &mut nodes,
-                ids.value(row).to_owned(),
+                ids.value(row),
                 PlanNode::Filter {
                     predicate_expr_id: predicates.value(row).to_owned(),
                 },
@@ -231,12 +232,7 @@ impl OntologyRelationalProgram {
             let batch = one_batch(package, relation)?;
             let ids = utf8(batch, "node_id")?;
             for row in 0..batch.num_rows() {
-                insert_unique(
-                    &mut nodes,
-                    ids.value(row).to_owned(),
-                    node.clone(),
-                    "plan node",
-                )?;
+                insert_unique(&mut nodes, ids.value(row), node.clone(), "plan node")?;
             }
         }
         let joins = one_batch(package, "program.join_node")?;
@@ -246,7 +242,7 @@ impl OntologyRelationalProgram {
         for row in 0..joins.num_rows() {
             insert_unique(
                 &mut nodes,
-                ids.value(row).to_owned(),
+                ids.value(row),
                 PlanNode::Join {
                     join_type: types.value(row).to_owned(),
                     condition_expr_id: conditions.value(row).to_owned(),
@@ -260,7 +256,7 @@ impl OntologyRelationalProgram {
         for row in 0..sets.num_rows() {
             insert_unique(
                 &mut nodes,
-                ids.value(row).to_owned(),
+                ids.value(row),
                 PlanNode::Set {
                     set_operation: operations.value(row).to_owned(),
                 },
@@ -276,7 +272,7 @@ impl OntologyRelationalProgram {
         for row in 0..columns.num_rows() {
             insert_unique(
                 &mut expressions,
-                ids.value(row).to_owned(),
+                ids.value(row),
                 ExpressionNode::Column {
                     relation_alias: aliases.value(row).to_owned(),
                     column_name: names.value(row).to_owned(),
@@ -302,7 +298,7 @@ impl OntologyRelationalProgram {
             }
             insert_unique(
                 &mut expressions,
-                ids.value(row).to_owned(),
+                ids.value(row),
                 ExpressionNode::Literal {
                     logical_type: types.value(row).to_owned(),
                     value: (!is_null).then(|| values.value(row).to_owned()),
@@ -347,12 +343,7 @@ impl OntologyRelationalProgram {
                     ExpressionNode::Cast { .. } => ExpressionNode::Cast { target_type: value },
                     _ => unreachable!("closed constructor census"),
                 };
-                insert_unique(
-                    &mut expressions,
-                    ids.value(row).to_owned(),
-                    expression,
-                    "expression",
-                )?;
+                insert_unique(&mut expressions, ids.value(row), expression, "expression")?;
             }
         }
         let cases = one_batch(package, "program.case_expr")?;
@@ -360,7 +351,7 @@ impl OntologyRelationalProgram {
         for row in 0..cases.num_rows() {
             insert_unique(
                 &mut expressions,
-                ids.value(row).to_owned(),
+                ids.value(row),
                 ExpressionNode::Case,
                 "expression",
             )?;
@@ -520,6 +511,7 @@ impl OntologyRelationalProgram {
         edges
     }
 
+    #[allow(clippy::too_many_lines)] // Exhaustive generated expression lowering mirrors the closed operator census.
     fn compile_expression(&self, expr_id: &str) -> Result<Expr, OntologyProgramCompileError> {
         let expression = self.expressions.get(expr_id).ok_or_else(|| {
             OntologyProgramCompileError::Decode(format!("unknown expression {expr_id}"))
@@ -641,6 +633,7 @@ impl OntologyRelationalProgram {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // Exhaustive generated plan lowering mirrors the closed node census.
     fn compile_node(
         &self,
         node_id: &str,
@@ -804,6 +797,11 @@ impl OntologyRelationalProgram {
     }
 
     /// Compile one named program solely from normalized graph rows and bound providers.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an unknown or analyzer-owned program and reports malformed generated nodes,
+    /// expressions, provider bindings, or DataFusion logical-plan construction.
     pub fn compile(
         &self,
         program_id: &str,
@@ -830,6 +828,11 @@ impl OntologyRelationalProgram {
 /// an otherwise type-correct plan. The semantic execution plane therefore retains every Arrow
 /// field (including field metadata and extension types) while normalizing table-level metadata at
 /// this one boundary. Durable/Delta schema validation remains against the unmodified source schema.
+///
+/// # Errors
+///
+/// Returns a decode error when a normalized Arrow batch or DataFusion memory provider cannot be
+/// constructed from the candidate arrays.
 pub fn candidate_batch_providers(
     batches: &BTreeMap<i16, RecordBatch>,
 ) -> Result<BTreeMap<String, Arc<dyn TableProvider>>, OntologyProgramCompileError> {

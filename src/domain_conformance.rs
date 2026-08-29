@@ -391,6 +391,7 @@ const fn domain_effect(expression: &Expr) -> DomainEffect {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // Callers produce a fresh lattice value for this terminal check.
 fn ensure_not_opaque(state: DomainState, operation: &str) -> Result<()> {
     if state == DomainState::Opaque {
         return domain_error(format!(
@@ -412,12 +413,12 @@ fn join_states(left: DomainState, right: DomainState) -> DomainState {
         (DomainState::Domain(left), DomainState::Domain(right)) if left == right => {
             DomainState::Domain(left)
         }
-        (DomainState::Neutral, DomainState::Domain(_))
-        | (DomainState::Domain(_), DomainState::Neutral)
-        | (DomainState::Domain(_), DomainState::Domain(_)) => DomainState::Opaque,
+        (DomainState::Neutral | DomainState::Domain(_), DomainState::Domain(_))
+        | (DomainState::Domain(_), DomainState::Neutral) => DomainState::Opaque,
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // Owned states keep diagnostics available after the join.
 fn require_compatible_states(left: DomainState, right: DomainState, operation: &str) -> Result<()> {
     if let (DomainState::Domain(left_domain), DomainState::Domain(right_domain)) = (&left, &right)
         && governed_comparison_domains(left_domain, right_domain)

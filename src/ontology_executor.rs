@@ -760,6 +760,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One causality matrix mutates every normalized program operand family.
     async fn ontology_compiled_program_causality_matrix() {
         let compiler = compiler();
         for phrase in compiler.phrases.values() {

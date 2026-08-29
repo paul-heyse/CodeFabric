@@ -1042,14 +1042,13 @@ mod tests {
             let mut package = build_ontology_program_package(&OntologyPackagingProfile::default())
                 .expect("program package");
             package.members.remove(&family).expect("named member");
-            let error = match CandidateClosureRunner::new(
+            let Err(error) = CandidateClosureRunner::new(
                 package,
                 publication(),
                 GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
                     .expect("governed session"),
-            ) {
-                Ok(_) => panic!("corrupted authority family {family} was accepted"),
-                Err(error) => error,
+            ) else {
+                panic!("corrupted authority family {family} was accepted");
             };
             assert!(!error.to_string().is_empty(), "{family}: empty failure");
         }

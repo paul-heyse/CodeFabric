@@ -100,6 +100,11 @@ impl OntologyActivationCoordinator {
     /// Authenticate, compile, prove, stage, decide, and atomically activate one submission.
     /// The caller supplies no candidate identity, predecessor, policy, receipts, decision, epoch,
     /// result authority, or pointer generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a staging error when authentication, package compilation, candidate proof,
+    /// snapshot staging, owner decision, or the atomic activation transaction fails.
     pub async fn submit_and_activate(
         store: &mut OperationalStore,
         workspace_id: [u8; 16],

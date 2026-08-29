@@ -385,6 +385,7 @@ fn current_ontology_pointer(
         .map_err(Into::into)
 }
 
+#[allow(clippy::too_many_lines)] // The snapshot and authority pointer transition is one SQLite transaction.
 fn activate_staged_serving_snapshot(
     transaction: &Transaction<'_>,
     candidate: &OntologyCandidateProjection,
@@ -1305,6 +1306,7 @@ impl OperationalStore {
     ///
     /// Returns [`OperationalStoreError::OntologyActivation`] when the persisted activation
     /// closure is not self-consistent, or a `SQLite` error when validation cannot be completed.
+    #[allow(clippy::too_many_lines)] // Recovery validation deliberately audits the complete durable closure.
     pub fn validate_ontology_activation_recovery(&self) -> Result<(), OperationalStoreError> {
         let non_terminal_requests = self.connection.query_row(
             "SELECT COUNT(*) FROM ontology_activation_request WHERE state <> 'COMPLETED'",
@@ -1406,13 +1408,11 @@ impl OperationalStore {
                     checksum_version,
                     exact_table_set_identity,
                 ) = row?;
-                let manifest: ServingSnapshotManifest = match serde_json::from_slice(&manifest_json)
-                {
-                    Ok(manifest) => manifest,
-                    Err(_) => {
-                        invalid_snapshot_authorities += 1;
-                        continue;
-                    }
+                let Ok(manifest): Result<ServingSnapshotManifest, _> =
+                    serde_json::from_slice(&manifest_json)
+                else {
+                    invalid_snapshot_authorities += 1;
+                    continue;
                 };
                 let workspace_matches = manifest
                     .raw_workspace_id()
@@ -1707,6 +1707,7 @@ impl OperationalStore {
         self.persist_proved_ontology_candidate_inner(report, Some(snapshot), persisted_at)
     }
 
+    #[allow(clippy::too_many_lines)] // Candidate evidence and optional snapshot persist atomically.
     fn persist_proved_ontology_candidate_inner(
         &mut self,
         report: &crate::ontology_candidate::CandidateClosureReport,

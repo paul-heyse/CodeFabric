@@ -238,6 +238,11 @@ impl GovernedSession {
 
     /// Construct a session with an explicit versioned memory, spill, batch, partition, and
     /// deadline profile.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an invalid runtime profile or empty policy identity, or returns a DataFusion/
+    /// Arrow construction error when the governed runtime cannot be built.
     pub fn new_with_runtime(
         config: SessionConfig,
         policy_identity: impl Into<String>,
@@ -432,6 +437,11 @@ impl GovernedSession {
 
     /// Execute one sealed gate with cooperative cancellation. Cancellation or timeout drops the
     /// sole DataFusion stream future, which is the pinned engine's task-cancellation boundary.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a plan from another governed session or policy and reports cancellation,
+    /// deadline, planning, execution, resource, spill, and checksum failures.
     pub async fn execute_gate_with_cancellation(
         &self,
         governed: &GovernedPlan,

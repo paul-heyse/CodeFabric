@@ -151,7 +151,7 @@ fn workspace_command(arguments: &[String]) -> Result<WorkspaceAdminCommand, Stri
                 .map_err(|error| format!("invalid candidate submission JSON: {error}"))?;
             Ok(WorkspaceAdminCommand::ActivateCandidate {
                 workspace_id: workspace_id_value(workspace_id)?,
-                submission,
+                submission: Box::new(submission),
                 administrative_key: decode_hex_bytes(administrative_key_hex)?,
                 request_key: request_key.clone(),
             })
@@ -194,7 +194,9 @@ fn decode_hex_bytes(value: &str) -> Result<Vec<u8>, String> {
     }
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let high = (pair[0] as char)
                 .to_digit(16)

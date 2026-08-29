@@ -3,6 +3,7 @@
 #[cfg(test)]
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -626,6 +627,14 @@ fn result_authority_pin(authority: ActiveOntologyAuthority) -> ResultAuthorityPi
     }
 }
 
+fn byte_hex(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    encoded
+}
+
 fn legacy_result_authority_pin(candidate: &ServingSnapshotCandidate) -> ResultAuthorityPin {
     let manifest = candidate.manifest();
     let body = &manifest.body;
@@ -746,17 +755,15 @@ impl SnapshotLeaseManager {
         let mut ontology_epoch_identity = active_authority
             .as_ref()
             .map(|authority| authority.epoch_identity.clone());
-        let result_authority = active_authority
-            .map(result_authority_pin)
-            .unwrap_or_else(|| legacy_result_authority_pin(candidate.as_ref()));
+        let result_authority = active_authority.map_or_else(
+            || legacy_result_authority_pin(candidate.as_ref()),
+            result_authority_pin,
+        );
         if ontology_epoch_identity.is_none() {
             ontology_epoch_identity = Some(crate::integrity::framed_digest(
                 format!(
                     "legacy-ontology-epoch.v1\0{}\0{}",
-                    workspace_id
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>(),
+                    byte_hex(&workspace_id),
                     result_authority.result_authority_identity
                 )
                 .as_bytes(),

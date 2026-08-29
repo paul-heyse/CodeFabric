@@ -276,7 +276,7 @@ pub enum WorkspaceAdminCommand {
     },
     ActivateCandidate {
         workspace_id: [u8; 16],
-        submission: OntologyCandidateSubmission,
+        submission: Box<OntologyCandidateSubmission>,
         administrative_key: Vec<u8>,
         request_key: String,
     },
@@ -642,7 +642,7 @@ async fn execute_workspace_command(
                 OntologyActivationCoordinator::submit_and_activate(
                     &mut store,
                     workspace_id,
-                    submission,
+                    *submission,
                     &administrative_key,
                     &request_key,
                     requested_at,
