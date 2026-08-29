@@ -1146,6 +1146,29 @@ mod tests {
                 }
             }
 
+            if allowed.value(row) {
+                let alternate_output = alternate_output_state(input_kind, output_kind);
+                let mut output_mutant = package.clone();
+                crate::ontology_program::replace_program_utf8_cell(
+                    &mut output_mutant,
+                    "program.domain_transition_policy",
+                    "output_state",
+                    row,
+                    state_name(alternate_output),
+                )
+                .expect("resealed output mutation");
+                let output_mutant = DomainOperationPolicy::from_package(&output_mutant)
+                    .expect("output mutant remains typed and total");
+                let output = output_mutant
+                    .apply_transition(input.clone(), effect, "MutatedOutputProbe")
+                    .expect("allowed output mutation");
+                assert_eq!(
+                    super::state_kind(&output),
+                    alternate_output,
+                    "resealed output mutation did not control row {row}"
+                );
+            }
+
             let mut mutated_package = package.clone();
             crate::ontology_program::replace_program_bool_cell(
                 &mut mutated_package,
@@ -1175,6 +1198,36 @@ mod tests {
             DomainStateKind::Neutral => DomainState::Neutral,
             DomainStateKind::Bottom => DomainState::Bottom,
             DomainStateKind::Opaque => DomainState::Opaque,
+        }
+    }
+
+    const fn alternate_output_state(
+        input: DomainStateKind,
+        output: DomainStateKind,
+    ) -> DomainStateKind {
+        match input {
+            DomainStateKind::Domain if matches!(output, DomainStateKind::Domain) => {
+                DomainStateKind::Neutral
+            }
+            DomainStateKind::Domain => DomainStateKind::Domain,
+            DomainStateKind::Neutral if matches!(output, DomainStateKind::Bottom) => {
+                DomainStateKind::Neutral
+            }
+            DomainStateKind::Neutral => DomainStateKind::Bottom,
+            DomainStateKind::Bottom if matches!(output, DomainStateKind::Neutral) => {
+                DomainStateKind::Bottom
+            }
+            DomainStateKind::Bottom => DomainStateKind::Neutral,
+            DomainStateKind::Opaque => DomainStateKind::Opaque,
+        }
+    }
+
+    const fn state_name(state: DomainStateKind) -> &'static str {
+        match state {
+            DomainStateKind::Domain => "DOMAIN",
+            DomainStateKind::Neutral => "NEUTRAL",
+            DomainStateKind::Bottom => "BOTTOM",
+            DomainStateKind::Opaque => "OPAQUE",
         }
     }
 

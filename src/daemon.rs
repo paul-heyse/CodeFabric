@@ -770,7 +770,10 @@ async fn execute_activation_command(
                             .map(|_| ())
                     }
                 }
-                Err(error) => Err(error),
+                Err(error) => {
+                    cancellation.cancel();
+                    Err(error)
+                }
             }
         }
         Err(error) => Err(error),

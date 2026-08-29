@@ -424,7 +424,7 @@ mod tests {
     #[tokio::test]
     async fn ontology_candidate_resource_failure_no_mutation() {
         let root = tempfile::tempdir().expect("operational store root");
-        let mut store = crate::operational_store::OperationalStore::open(
+        let store = crate::operational_store::OperationalStore::open(
             &root.path().join("operational.sqlite"),
         )
         .expect("operational store");

@@ -109,7 +109,7 @@ ontology-runtime-resource-check:
 [doc("Prove sealed DataFusion ingress, exhaustive pinned variants, and Arrow ID-domain boundaries")]
 [group('gate')]
 id-domain-plan-enforcement-check:
-    cargo nextest run --locked --lib -E 'test(/(ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)|odf_embedded_subquery_plan_is_domain_checked|serving_allowlist_rejects_provider_inside_scalar_subquery)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)|odf_(embedded_subquery_plan_is_domain_checked|generated_domain_policy_total_truth_table)|serving_allowlist_rejects_provider_inside_scalar_subquery)/)' --no-tests=fail
 
 [doc("Execute the bootstrap-discovered semantic closure and prove additive self-description")]
 [group('gate')]
