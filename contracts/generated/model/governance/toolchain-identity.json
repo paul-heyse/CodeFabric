@@ -23,7 +23,7 @@
   },
   "families": [
     {
-      "action_key": "b3:8a4c39cc46acceb72cb7e4a08e4cf907d66c8ff640d658caf0d723bfd9084185",
+      "action_key": "b3:1dd713eca60b2f132f2fc11842c2cce0abd573799e25a3c36b523ae05957b958",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -59,7 +59,7 @@
       }
     },
     {
-      "action_key": "b3:62ef0bed71c64eb14b1cab3f6dbd0bfab084598854e7194bb758aaf87c9027c5",
+      "action_key": "b3:dbc209e80d31d3cea56a4ad5e9f5f4768687edb07ac9b88159005162d452a420",
       "family": "schemas",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",
@@ -100,7 +100,7 @@
       }
     },
     {
-      "action_key": "b3:6926b0282142eda604856712558578d04833a20268507946589d11531c8ab47c",
+      "action_key": "b3:b3d3e6dde42f27afdc84cea71c2be2df86ffeff4e177d77637801bbfe9b74187",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -125,7 +125,7 @@
         "mcp_version": "1.29.0",
         "project_digest": "b3:3fbe2752b43abf1ce5ddd2f145cfa804ad3df2a40fc6b72e228a28ee775e9b2f",
         "pydantic_version": "2.13.4",
-        "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
+        "python_digest": "b3:82b0739ba87fba232d130d7099c1debd9005b6ed71ba7c2aa08e1623421e0400",
         "python_version": "3.14.7",
         "ruff_digest": "b3:ed298c066aa3bc5cf37ad821e2265f628fb74cfc5504eab4bf62401e344b08e4",
         "ruff_version": "ruff 0.16.3",
@@ -133,7 +133,7 @@
       }
     },
     {
-      "action_key": "b3:572cfe1d16ed06baadcf79ecfd572b5c1e02e1f9e3eb98275a720d23e1ffb926",
+      "action_key": "b3:a2b7b101f5d78ecd13ca9b051fb47e8b0f9b50bab3012834de6556f3a4bee4e8",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",
@@ -172,7 +172,7 @@
           "project_digest": "b3:3fbe2752b43abf1ce5ddd2f145cfa804ad3df2a40fc6b72e228a28ee775e9b2f",
           "protobuf": "7.36.0",
           "protoc": "libprotoc 35.1",
-          "python_digest": "b3:51a604281e3489e576761f7539d350f6494f13197877f60bb5f4a6c6b55af7cf",
+          "python_digest": "b3:82b0739ba87fba232d130d7099c1debd9005b6ed71ba7c2aa08e1623421e0400",
           "python_version": "3.14.7",
           "script_digest": "b3:7304585e5f9a044259627968bb2b42e1f1c4342596fb128c41a430e28ff1bfea"
         },

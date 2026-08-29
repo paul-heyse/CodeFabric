@@ -1029,6 +1029,57 @@ pub(crate) fn replace_program_utf8_cell(
 }
 
 #[cfg(test)]
+pub(crate) fn replace_program_bool_cell(
+    package: &mut OntologyProgramPackage,
+    relation: &str,
+    column: &str,
+    row: usize,
+    replacement: bool,
+) -> Result<(), OntologyProgramError> {
+    let member = package
+        .members
+        .get_mut(relation)
+        .ok_or_else(|| OntologyProgramError::Contract(format!("missing {relation}")))?;
+    if member.batches.len() != 1 {
+        return Err(OntologyProgramError::Contract(format!(
+            "{relation} is not a canonical single-batch member"
+        )));
+    }
+    let batch = &member.batches[0];
+    let column_index = batch
+        .schema()
+        .index_of(column)
+        .map_err(OntologyProgramError::Arrow)?;
+    let source = batch.columns()[column_index]
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .ok_or_else(|| {
+            OntologyProgramError::Contract(format!("{relation}.{column} is not Boolean"))
+        })?;
+    if row >= source.len() {
+        return Err(OntologyProgramError::Contract(format!(
+            "{relation}.{column}[{row}] is outside the member"
+        )));
+    }
+    let values = (0..source.len())
+        .map(|index| {
+            if index == row {
+                Some(replacement)
+            } else if source.is_null(index) {
+                None
+            } else {
+                Some(source.value(index))
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut columns = batch.columns().to_vec();
+    columns[column_index] = std::sync::Arc::new(BooleanArray::from(values));
+    let replacement_batch = RecordBatch::try_new(std::sync::Arc::clone(&member.schema), columns)?;
+    replace_member_batch(member, replacement_batch)?;
+    reseal_ontology_program_package(package)
+}
+
+#[cfg(test)]
 fn refresh_bootstrap_member(
     package: &mut OntologyProgramPackage,
 ) -> Result<(), OntologyProgramError> {

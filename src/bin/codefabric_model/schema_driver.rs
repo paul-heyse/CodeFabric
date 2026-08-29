@@ -833,11 +833,18 @@ struct ProviderObservationSchemaContract {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct DomainFunctionPolicyContract {
+    name: String,
+    effect: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DomainOperationPolicyContract {
     expression_variant: String,
     effect: String,
     #[serde(default)]
-    domain_functions: Vec<String>,
+    domain_functions: Vec<DomainFunctionPolicyContract>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -948,14 +955,13 @@ impl SchemaContractIr {
             .iter()
             .any(|operation| {
                 !effects.contains(operation.effect.as_str())
-                    || operation
-                        .domain_functions
-                        .iter()
-                        .any(|name| name.is_empty())
+                    || operation.domain_functions.iter().any(|function| {
+                        function.name.is_empty() || !effects.contains(function.effect.as_str())
+                    })
                     || !operation
                         .domain_functions
                         .windows(2)
-                        .all(|pair| pair[0] < pair[1])
+                        .all(|pair| pair[0].name < pair[1].name)
             })
         {
             return invalid(
@@ -4258,7 +4264,26 @@ fn ontology_program_members(
     let function_lists = domain_policy
         .operations
         .iter()
-        .map(|operation| operation.domain_functions.join(","))
+        .map(|operation| {
+            operation
+                .domain_functions
+                .iter()
+                .map(|function| function.name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>();
+    let function_effect_lists = domain_policy
+        .operations
+        .iter()
+        .map(|operation| {
+            operation
+                .domain_functions
+                .iter()
+                .map(|function| function.effect.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
         .collect::<Vec<_>>();
     let batch = RecordBatch::try_new(
         std::sync::Arc::new(Schema::new(vec![
@@ -4266,6 +4291,7 @@ fn ontology_program_members(
             Field::new("expression_variant", DataType::Utf8, false),
             Field::new("effect", DataType::Utf8, false),
             Field::new("domain_functions", DataType::Utf8, false),
+            Field::new("domain_function_effects", DataType::Utf8, false),
         ])),
         vec![
             std::sync::Arc::new(StringArray::from_iter_values(
@@ -4288,6 +4314,9 @@ fn ontology_program_members(
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
                 function_lists.iter().map(String::as_str),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                function_effect_lists.iter().map(String::as_str),
             )),
         ],
     )
