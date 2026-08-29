@@ -629,7 +629,8 @@ impl GovernedSession {
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
-    use std::io::{Seek as _, SeekFrom};
+    use std::io::{Seek as _, SeekFrom, Write as _};
+    use std::os::unix::ffi::OsStringExt as _;
     use std::sync::Arc;
 
     use arrow_array::{ArrayRef, FixedSizeBinaryArray, RecordBatch};
@@ -710,6 +711,93 @@ mod tests {
                 & 0o777,
             0o700
         );
+    }
+
+    #[test]
+    fn ontology_governed_real_spill_child() {
+        let Some(ready_path) = std::env::var_os("CODEFABRIC_SPILL_CHILD_READY") else {
+            return;
+        };
+        let package = crate::ontology_program::build_ontology_program_package(
+            &crate::ontology_program::OntologyPackagingProfile::default(),
+        )
+        .expect("generated ontology package");
+        let session = GovernedSession::new_with_runtime(
+            SessionConfig::new(),
+            &package,
+            GovernedRuntimeProfile {
+                profile_version: "governed-runtime.spill-child.v1",
+                memory_limit_bytes: 1_024,
+                max_spill_bytes: 4_096,
+                batch_size: 64,
+                target_partitions: 1,
+                max_execution_millis: 30_000,
+                tracked_consumer_count: std::num::NonZeroUsize::new(2).expect("non-zero"),
+            },
+        )
+        .expect("spill child session");
+        let spill = session
+            .context
+            .runtime_env()
+            .disk_manager
+            .create_tmp_file("CodeFabric crash-spill oracle")
+            .expect("DataFusion spill file");
+        let mut writer = spill.open_writer().expect("spill writer");
+        writer
+            .write_all(b"real DataFusion SpillFile bytes")
+            .expect("write spill bytes");
+        writer.flush().expect("flush spill bytes");
+        let spill_path = spill.path().expect("filesystem spill path");
+        assert!(spill_path.exists());
+        std::fs::write(
+            ready_path,
+            session.spill_directory().as_os_str().as_encoded_bytes(),
+        )
+        .expect("publish spill child readiness");
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn ontology_governed_real_spill_process_death_reconciliation() {
+        let parent = tempfile::tempdir().expect("private spill parent");
+        let ready = parent.path().join("ready");
+        let current_exe = std::env::current_exe().expect("current test executable");
+        let mut child = std::process::Command::new(current_exe)
+            .args([
+                "--exact",
+                "governed_session::tests::ontology_governed_real_spill_child",
+                "--nocapture",
+            ])
+            .env("TMPDIR", parent.path())
+            .env("CODEFABRIC_SPILL_CHILD_READY", &ready)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn real spill child");
+        for _ in 0..1_000 {
+            if ready.exists() {
+                break;
+            }
+            if child.try_wait().expect("poll spill child").is_some() {
+                panic!("spill child exited before publishing readiness");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(ready.exists(), "spill child readiness deadline");
+        let spill_directory = std::path::PathBuf::from(std::ffi::OsString::from_vec(
+            std::fs::read(&ready).expect("read spill path"),
+        ));
+        assert!(spill_directory.exists());
+        child.kill().expect("force spill child death");
+        child.wait().expect("reap spill child");
+        assert_eq!(
+            super::reconcile_orphaned_spill_directories(parent.path(), "codefabric-governed")
+                .expect("reconcile killed spiller"),
+            1
+        );
+        assert!(!spill_directory.exists());
     }
 
     #[test]

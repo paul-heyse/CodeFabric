@@ -104,7 +104,7 @@ ontology-gate-execution-artifact-check:
 [doc("Prove memory, output, deadline, cancellation, spill cleanup, and checksum bounds leave durable authority unchanged")]
 [group('test')]
 ontology-runtime-resource-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(candidate_resource_failure_no_mutation|governed_runtime_deadline_cancellation_memory_cleanup|governed_spill_orphan_reconciliation|serving_inflight_termination_and_release)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/ontology_(activation_owner_disconnect_cancels_before_response|activation_task_drop_cancels_owned_proof|candidate_resource_failure_no_mutation|governed_real_spill_process_death_reconciliation|governed_runtime_deadline_cancellation_memory_cleanup|governed_spill_orphan_reconciliation|serving_inflight_termination_and_release)/)' --no-tests=fail
 
 [doc("Prove sealed DataFusion ingress, exhaustive pinned variants, and Arrow ID-domain boundaries")]
 [group('gate')]

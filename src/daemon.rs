@@ -617,78 +617,6 @@ async fn execute_workspace_command(
     state_root: &Path,
     command: WorkspaceAdminCommand,
 ) -> AdminResponse {
-    if let WorkspaceAdminCommand::ActivateCandidate {
-        workspace_id,
-        submission,
-        administrative_key,
-        request_key,
-    } = command
-    {
-        let requested_at = now_millis()
-            .ok()
-            .and_then(|value| i64::try_from(value).ok())
-            .unwrap_or(i64::MAX);
-        let prepared = {
-            let mut store = store.lock().await;
-            OntologyActivationCoordinator::prepare_submission(
-                &mut store,
-                workspace_id,
-                *submission,
-                &administrative_key,
-                &request_key,
-                requested_at,
-            )
-        };
-        let result = match prepared {
-            Ok(crate::ontology_activation::OntologyActivationPreparation::Replay(_)) => Ok(()),
-            Ok(crate::ontology_activation::OntologyActivationPreparation::Pending(prepared)) => {
-                let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
-                match OntologyActivationCoordinator::prove_prepared(
-                    *prepared,
-                    &crate::ontology_gate::GateResourceEnvelope::default(),
-                    &cancellation,
-                )
-                .await
-                {
-                    Ok(proved) => {
-                        let mut store = store.lock().await;
-                        OntologyActivationCoordinator::commit_prepared(&mut store, &proved)
-                            .map(|_| ())
-                    }
-                    Err(error) => Err(error),
-                }
-            }
-            Err(error) => Err(error),
-        };
-        if let Err(error) = result {
-            tracing::warn!(
-                error = %error,
-                error_code = ontology_submission_error_code(&error),
-                "ontology candidate submission rejected"
-            );
-            return AdminResponse {
-                accepted: false,
-                daemon_liveness: "LIVE".to_owned(),
-                workspace_readiness: "UNCHANGED".to_owned(),
-                shutdown_mode: None,
-                workspaces: Vec::new(),
-                workspace_health: Vec::new(),
-                error_code: Some(ontology_submission_error_code(&error).to_owned()),
-            };
-        }
-        return match health_response(store).await {
-            Ok((workspace_readiness, workspace_health)) => AdminResponse {
-                accepted: true,
-                daemon_liveness: "LIVE".to_owned(),
-                workspace_readiness,
-                shutdown_mode: None,
-                workspaces: Vec::new(),
-                workspace_health,
-                error_code: None,
-            },
-            Err(_) => internal_admin_response(),
-        };
-    }
     let coordinator_bootstrap = match &command {
         WorkspaceAdminCommand::Enable { workspace_id }
         | WorkspaceAdminCommand::Reconcile { workspace_id } => Some(*workspace_id),
@@ -702,7 +630,9 @@ async fn execute_workspace_command(
     let result: Result<Vec<WorkspaceRecord>, String> = {
         let mut store = store.lock().await;
         match command {
-            WorkspaceAdminCommand::ActivateCandidate { .. } => unreachable!("handled above"),
+            WorkspaceAdminCommand::ActivateCandidate { .. } => {
+                unreachable!("activation is owned by the cancellable request task")
+            }
             other => execute_workspace_command_inner(&mut store, other)
                 .map_err(|error| workspace_error_code(&error).to_owned()),
         }
@@ -755,6 +685,185 @@ async fn execute_workspace_command(
             error_code: Some(error),
         },
     }
+}
+
+/// Drop guard that couples task lifetime to cooperative activation cancellation.
+struct ActivationCancellationGuard {
+    cancellation: crate::cancellation::Cancellation,
+    armed: bool,
+}
+
+impl ActivationCancellationGuard {
+    fn new(cancellation: crate::cancellation::Cancellation) -> Self {
+        Self {
+            cancellation,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ActivationCancellationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.cancellation.cancel();
+        }
+    }
+}
+
+fn activation_cancelled_error() -> OntologyCandidateStageError {
+    OntologyCandidateStageError::Candidate(
+        crate::ontology_candidate::CandidateClosureError::Session(
+            crate::governed_session::GovernedSessionError::Gate(
+                crate::ontology_gate::OntologyGateError::Resource(
+                    crate::ontology_gate::GateResourceFailure::Cancelled,
+                ),
+            ),
+        ),
+    )
+}
+
+/// Run one activation from prepare through the short durable commit under a caller-owned token.
+async fn execute_activation_command(
+    store: &Arc<Mutex<OperationalStore>>,
+    workspace_id: [u8; 16],
+    submission: OntologyCandidateSubmission,
+    administrative_key: &[u8],
+    request_key: &str,
+    cancellation: &crate::cancellation::Cancellation,
+) -> AdminResponse {
+    let requested_at = now_millis()
+        .ok()
+        .and_then(|value| i64::try_from(value).ok())
+        .unwrap_or(i64::MAX);
+    let prepared = {
+        let mut store = store.lock().await;
+        OntologyActivationCoordinator::prepare_submission(
+            &mut store,
+            workspace_id,
+            submission,
+            administrative_key,
+            request_key,
+            requested_at,
+        )
+    };
+    let result = match prepared {
+        Ok(crate::ontology_activation::OntologyActivationPreparation::Replay(_)) => Ok(()),
+        Ok(crate::ontology_activation::OntologyActivationPreparation::Pending(prepared)) => {
+            match OntologyActivationCoordinator::prove_prepared(
+                *prepared,
+                &crate::ontology_gate::GateResourceEnvelope::default(),
+                cancellation,
+            )
+            .await
+            {
+                Ok(_) if cancellation.is_cancelled() => Err(activation_cancelled_error()),
+                Ok(proved) => {
+                    let mut store = store.lock().await;
+                    if cancellation.is_cancelled() {
+                        Err(activation_cancelled_error())
+                    } else {
+                        OntologyActivationCoordinator::commit_prepared(&mut store, &proved)
+                            .map(|_| ())
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    };
+    if let Err(error) = result {
+        tracing::warn!(
+            error = %error,
+            error_code = ontology_submission_error_code(&error),
+            "ontology candidate submission rejected"
+        );
+        return AdminResponse {
+            accepted: false,
+            daemon_liveness: "LIVE".to_owned(),
+            workspace_readiness: "UNCHANGED".to_owned(),
+            shutdown_mode: None,
+            workspaces: Vec::new(),
+            workspace_health: Vec::new(),
+            error_code: Some(ontology_submission_error_code(&error).to_owned()),
+        };
+    }
+    match health_response(store).await {
+        Ok((workspace_readiness, workspace_health)) => AdminResponse {
+            accepted: true,
+            daemon_liveness: "LIVE".to_owned(),
+            workspace_readiness,
+            shutdown_mode: None,
+            workspaces: Vec::new(),
+            workspace_health,
+            error_code: None,
+        },
+        Err(_) => internal_admin_response(),
+    }
+}
+
+/// Own one activation request until response, disconnect, shutdown cancellation, or task drop.
+async fn serve_activation_request(
+    mut stream: UnixStream,
+    store: Arc<Mutex<OperationalStore>>,
+    workspace_id: [u8; 16],
+    submission: OntologyCandidateSubmission,
+    administrative_key: Vec<u8>,
+    request_key: String,
+    cancellation: crate::cancellation::Cancellation,
+) {
+    let activation = execute_activation_command(
+        &store,
+        workspace_id,
+        submission,
+        &administrative_key,
+        &request_key,
+        &cancellation,
+    );
+    let Some(response) = await_owned_activation(&mut stream, &cancellation, activation).await
+    else {
+        tracing::info!(
+            request_key,
+            "activation owner disconnected; proof cancelled"
+        );
+        return;
+    };
+    if let Err(error) = write_response(&mut stream, &response).await {
+        tracing::warn!(request_key, error = %error, "activation response could not be delivered");
+    }
+}
+
+/// Couple a request stream and task lifetime to one activation future.
+async fn await_owned_activation<F>(
+    stream: &mut UnixStream,
+    cancellation: &crate::cancellation::Cancellation,
+    activation: F,
+) -> Option<AdminResponse>
+where
+    F: std::future::Future<Output = AdminResponse>,
+{
+    let mut guard = ActivationCancellationGuard::new(cancellation.clone());
+    tokio::pin!(activation);
+    let mut unexpected_input = [0_u8; 1];
+    let response = tokio::select! {
+        biased;
+        observed = stream.read(&mut unexpected_input) => {
+            cancellation.cancel();
+            let _ = (&mut activation).await;
+            match observed {
+                Ok(0) => tracing::debug!("activation owner disconnected"),
+                Ok(_) => tracing::warn!("activation owner sent trailing protocol bytes"),
+                Err(error) => tracing::warn!(error = %error, "activation owner stream failed"),
+            }
+            return None;
+        }
+        response = &mut activation => response,
+    };
+    guard.disarm();
+    Some(response)
 }
 
 fn common_repository_record(
@@ -1150,7 +1259,14 @@ pub(crate) async fn serve_with_query_backend(
     lease.publish(&discovery(&config)?)?;
     tracing::info!(lifecycle = "serve", "daemon administrative ingress opened");
 
+    let mut activation_tasks = tokio::task::JoinSet::new();
+    let mut activation_cancellations = Vec::new();
     let drained = loop {
+        while let Some(completed) = activation_tasks.try_join_next() {
+            if let Err(error) = completed {
+                tracing::warn!(error = %error, "activation request task failed");
+            }
+        }
         let (mut stream, _) = listener
             .accept()
             .await
@@ -1184,6 +1300,25 @@ pub(crate) async fn serve_with_query_backend(
                     shutdown_mode,
                 )
             }
+            AdminEnvelope::Workspace(WorkspaceAdminCommand::ActivateCandidate {
+                workspace_id,
+                submission,
+                administrative_key,
+                request_key,
+            }) => {
+                let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+                activation_cancellations.push(cancellation.clone());
+                activation_tasks.spawn(serve_activation_request(
+                    stream,
+                    Arc::clone(&operational_store),
+                    workspace_id,
+                    *submission,
+                    administrative_key,
+                    request_key,
+                    cancellation,
+                ));
+                continue;
+            }
             AdminEnvelope::Workspace(command) => (
                 execute_workspace_command(
                     &operational_store,
@@ -1197,6 +1332,9 @@ pub(crate) async fn serve_with_query_backend(
         };
         write_response(&mut stream, &response).await?;
         if let Some(mode) = shutdown_mode {
+            for cancellation in &activation_cancellations {
+                cancellation.cancel();
+            }
             break mode == "drain";
         }
     };
@@ -1208,6 +1346,9 @@ pub(crate) async fn serve_with_query_backend(
         Ok::<(), std::convert::Infallible>(()),
     )?;
     drop(listener);
+    for cancellation in &activation_cancellations {
+        cancellation.cancel();
+    }
     let _ = query_shutdown.send(());
     record_shutdown_step(
         &mut steps,
@@ -1222,10 +1363,16 @@ pub(crate) async fn serve_with_query_backend(
         .shutdown_all()
         .await
         .map_err(|error| error.to_string());
+    let mut activation_result = Ok(());
+    while let Some(result) = activation_tasks.join_next().await {
+        if let Err(error) = result {
+            activation_result = Err(error.to_string());
+        }
+    }
     record_shutdown_step(
         &mut steps,
         "await-workers",
-        query_result.and(coordinator_result),
+        query_result.and(coordinator_result).and(activation_result),
     )?;
     let durable_close = operational_store
         .lock()
@@ -1338,6 +1485,45 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[tokio::test]
+    async fn ontology_activation_owner_disconnect_cancels_before_response() {
+        let (mut server, client) = UnixStream::pair().expect("admin stream pair");
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let observed = cancellation.clone();
+        let activation = async move {
+            while !observed.is_cancelled() {
+                tokio::task::yield_now().await;
+            }
+            internal_admin_response()
+        };
+        drop(client);
+        assert!(
+            await_owned_activation(&mut server, &cancellation, activation)
+                .await
+                .is_none()
+        );
+        assert!(cancellation.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn ontology_activation_task_drop_cancels_owned_proof() {
+        let (mut server, _client) = UnixStream::pair().expect("admin stream pair");
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            await_owned_activation(
+                &mut server,
+                &task_cancellation,
+                std::future::pending::<AdminResponse>(),
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        task.abort();
+        let _ = task.await;
+        assert!(cancellation.is_cancelled());
+    }
 
     #[test]
     fn wp61_operational_acceptance() {

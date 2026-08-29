@@ -423,6 +423,24 @@ mod tests {
 
     #[tokio::test]
     async fn ontology_candidate_resource_failure_no_mutation() {
+        let root = tempfile::tempdir().expect("operational store root");
+        let mut store = crate::operational_store::OperationalStore::open(
+            &root.path().join("operational.sqlite"),
+        )
+        .expect("operational store");
+        let workspace_id = [0x91; 16];
+        assert!(
+            store
+                .ontology_candidate("candidate-1")
+                .expect("initial candidate read")
+                .is_none()
+        );
+        assert!(
+            store
+                .active_ontology_authority(workspace_id)
+                .expect("initial authority read")
+                .is_none()
+        );
         let limits = GateResourceEnvelope {
             max_output_rows: 1,
             ..GateResourceEnvelope::default()
@@ -452,6 +470,18 @@ mod tests {
                 limit: 1,
                 observed: 2
             }
+        );
+        assert!(
+            store
+                .ontology_candidate("candidate-1")
+                .expect("candidate read after resource failure")
+                .is_none()
+        );
+        assert!(
+            store
+                .active_ontology_authority(workspace_id)
+                .expect("authority read after resource failure")
+                .is_none()
         );
     }
 }
