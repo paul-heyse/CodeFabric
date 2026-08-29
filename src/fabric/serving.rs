@@ -5352,7 +5352,10 @@ mod tests {
         assert_eq!(control.artifact.arrow_version, arrow::ARROW_VERSION);
         assert!(control.artifact.plan_template_id.starts_with("b3:"));
         assert!(control.artifact.bound_query_id.starts_with("b3:"));
-        assert_eq!(control.artifact.result_checksum_version, "ResultChecksumV2");
+        // This fixture deliberately commits a fact snapshot without an ontology epoch, so its
+        // lease is the explicit legacy authority. V2 is asserted by the activated-ontology lease
+        // matrix; an unversioned/global default is no longer permitted.
+        assert_eq!(control.artifact.result_checksum_version, "ResultChecksumV1");
         assert!(control.artifact.reproducibility.deterministic);
         assert!(control.artifact.result_checksum.starts_with("b3:"));
         assert_eq!(
