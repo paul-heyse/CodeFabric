@@ -5234,7 +5234,16 @@ mod tests {
 
         let mut unknown: serde_json::Value = serde_json::from_slice(&relational_request()).unwrap();
         unknown["queries"][0]["looking_for"] = serde_json::json!("guessed entities");
-        let error = validate_request(&canonicalize_value(&unknown).unwrap()).unwrap_err();
+        let unknown = validate_request(&canonicalize_value(&unknown).unwrap()).unwrap();
+        let block = &unknown.blocks[0];
+        let query = unknown
+            .request
+            .queries
+            .iter()
+            .find(|query| query.query_id() == block.block_id)
+            .unwrap();
+        let compiler = ontology_compiler().unwrap();
+        let error = resolve_query_phrases(&compiler, query, &block.source_pointer).unwrap_err();
         assert!(error.to_string().contains("semantic_binding"));
         assert!(error.to_string().contains("/queries/0/looking_for"));
 
