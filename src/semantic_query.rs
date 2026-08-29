@@ -5444,7 +5444,18 @@ mod tests {
             "\"looking_for\":\"syntax nodes\"",
             "\"looking_for\":\"call targets\"",
         );
-        assert!(validate_request(incompatible_phrase.as_bytes()).is_err());
+        let incompatible = validate_request(incompatible_phrase.as_bytes()).unwrap();
+        let block = &incompatible.blocks[0];
+        let query = incompatible
+            .request
+            .queries
+            .iter()
+            .find(|query| query.query_id() == block.block_id)
+            .unwrap();
+        assert!(
+            resolve_query_phrases(&ontology_compiler().unwrap(), query, &block.source_pointer)
+                .is_err()
+        );
     }
 
     #[test]
