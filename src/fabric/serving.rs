@@ -57,20 +57,6 @@ const CONTROL_SCHEMA: &str = "cpg_control";
 const SERVING_SCHEMA: &str = "cpg_serving";
 const TRACKED_CONSUMER_COUNT: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const EMPTY_SCHEMAS: [&str; 3] = ["cpg_python", "cpg_rust", "cpg_derived"];
-const ALLOWED_SCALAR_FUNCTIONS: [&str; 9] = [
-    "abs",
-    "coalesce",
-    "lower",
-    "nullif",
-    "octet_length",
-    "substr",
-    "substring",
-    "trim",
-    "upper",
-];
-const ALLOWED_AGGREGATE_FUNCTIONS: [&str; 7] =
-    ["avg", "count", "max", "min", "sum", "bool_and", "bool_or"];
-
 /// Stable failures at the leased serving-query boundary.
 #[derive(Debug, Error)]
 pub enum ServingQueryError {
@@ -82,6 +68,10 @@ pub enum ServingQueryError {
     OperationalCapture(String),
     #[error("QUERY_HARD_LIMIT_EXCEEDED:SERVING_RESOURCE_LIMIT:{0}")]
     ResourceLimit(String),
+    #[error("CANCELLED:SERVING_EXECUTION_CANCELLED")]
+    Cancelled,
+    #[error("QUERY_HARD_LIMIT_EXCEEDED:SERVING_EXECUTION_DEADLINE:{limit_millis}")]
+    Deadline { limit_millis: u64 },
     #[error("serving I/O at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -127,6 +117,7 @@ pub struct ServingRuntimeConfig {
     spill_directory: PathBuf,
     batch_size: usize,
     target_partitions: usize,
+    max_execution_millis: u64,
     max_output_rows: usize,
     max_output_bytes: usize,
     max_output_batches: usize,
@@ -164,6 +155,7 @@ impl ServingRuntimeConfig {
             spill_directory,
             batch_size: limits.batch_size,
             target_partitions,
+            max_execution_millis: limits.max_execution_millis,
             max_output_rows: limits.max_output_rows,
             max_output_bytes: limits.max_output_bytes,
             max_output_batches: limits.max_output_batches,
@@ -195,6 +187,16 @@ impl ServingRuntimeConfig {
         self.batch_size = batch_size;
         self
     }
+
+    #[cfg(test)]
+    fn with_execution_millis(mut self, max_execution_millis: u64) -> Self {
+        assert!(
+            max_execution_millis > 0,
+            "test execution deadline must be positive"
+        );
+        self.max_execution_millis = max_execution_millis;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -205,6 +207,8 @@ pub struct ServingRuntimeEvidence {
     pub spill_directory: PathBuf,
     pub batch_size: usize,
     pub target_partitions: usize,
+    pub max_execution_millis: u64,
+    pub last_termination: Option<String>,
     pub observed_query_count: u64,
     pub observed_pruning_metric_count: u64,
     pub observed_pruned_row_groups: u64,
@@ -447,8 +451,11 @@ pub struct ServingQueryResult {
 pub struct ServingQuerySession {
     lease: SnapshotLeaseGuard,
     context: SessionContext,
+    ontology_compiler: Arc<crate::ontology_executor::OntologyProgramCompiler>,
+    domain_policy: Arc<crate::domain_conformance::DomainOperationPolicy>,
     evidence: RwLock<ServingRuntimeEvidence>,
     _control_reservation: Arc<MemoryReservation>,
+    _spill_directory: crate::governed_session::PrivateSpillDirectory,
     control_schema_generation_fingerprint: String,
     limits: ServingRuntimeConfig,
 }
@@ -481,6 +488,26 @@ impl ServingQuerySession {
                 source,
             }
         })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(
+                &config.spill_directory,
+                std::fs::Permissions::from_mode(0o700),
+            )
+            .map_err(|source| ServingQueryError::Io {
+                path: config.spill_directory.clone(),
+                source,
+            })?;
+        }
+        let spill_directory = crate::governed_session::PrivateSpillDirectory::create(
+            &config.spill_directory,
+            "codefabric-serving",
+        )
+        .map_err(|source| ServingQueryError::Io {
+            path: config.spill_directory.clone(),
+            source,
+        })?;
         let memory_pool = Arc::new(TrackConsumersPool::new(
             FairSpillPool::new(config.memory_limit_bytes),
             TRACKED_CONSUMER_COUNT,
@@ -488,7 +515,7 @@ impl ServingQuerySession {
         let runtime = Arc::new(
             RuntimeEnvBuilder::new()
                 .with_memory_pool(memory_pool)
-                .with_temp_file_path(&config.spill_directory)
+                .with_temp_file_path(spill_directory.path())
                 .with_max_temp_directory_size(config.max_spill_bytes)
                 .build()?,
         );
@@ -504,13 +531,68 @@ impl ServingQuerySession {
         let extension_types = MemoryExtensionTypeRegistry::new_with_types(
             crate::schema_registry::extension_type_registrations(),
         )?;
+        let epoch_identity = lease
+            .record()
+            .ontology_epoch_identity
+            .as_deref()
+            .ok_or_else(|| {
+                ServingQueryError::Configuration("snapshot lease has no ontology epoch".into())
+            })?;
+        let package_identity = operational
+            .ontology_epoch_package_identity(epoch_identity)
+            .map_err(|error| ServingQueryError::Configuration(error.to_string()))?;
+        let package = if let Some(package_identity) = package_identity {
+            crate::ontology_program::load_installed_ontology_program_package(
+                &operational.artifact_root(),
+                &package_identity,
+            )
+            .map_err(|error| ServingQueryError::Configuration(error.to_string()))?
+        } else if lease.snapshot().manifest().body.result_authority.is_none() {
+            // Explicit legacy snapshots predate ontology epochs. They retain the compatibility
+            // package compiled into the same binary; governed epochs never use this fallback.
+            crate::ontology_program::build_ontology_program_package(
+                &crate::ontology_program::OntologyPackagingProfile::default(),
+            )
+            .map_err(|error| ServingQueryError::Configuration(error.to_string()))?
+        } else {
+            return Err(ServingQueryError::Configuration(
+                "ontology epoch has no retained executable package artifact".into(),
+            ));
+        };
+        let policy = Arc::new(
+            crate::domain_conformance::DomainOperationPolicy::from_package(&package)
+                .map_err(ServingQueryError::from)?,
+        );
+        let ontology_compiler = Arc::new(
+            crate::ontology_executor::OntologyProgramCompiler::decode(&package)
+                .map_err(|error| ServingQueryError::Configuration(error.to_string()))?,
+        );
+        let pinned_policy = lease.result_authority().ok_or_else(|| {
+            ServingQueryError::Configuration("snapshot lease has no result authority".into())
+        })?;
+        let governed_epoch = lease.snapshot().manifest().body.result_authority.is_some();
+        if governed_epoch
+            && (pinned_policy.policy_identity != policy.result_policy_identity()
+                || pinned_policy.program_identity != package.manifest.logical_program_identity
+                || pinned_policy.function_catalog_identity
+                    != package.manifest.member_identities["program.calculation_contract"]
+                || pinned_policy.query_form_identity
+                    != package.manifest.member_identities["program.phrase_binding"]
+                || pinned_policy.checksum_version
+                    != crate::ontology_program::result_checksum_version(&package)
+                        .map_err(|error| ServingQueryError::Configuration(error.to_string()))?)
+        {
+            return Err(ServingQueryError::Configuration(
+                "lease authority cannot be reconstructed from the resolved ontology package".into(),
+            ));
+        }
         let state = SessionStateBuilder::new()
             .with_default_features()
             .with_config(session_config)
             .with_runtime_env(Arc::clone(&runtime))
             .with_extension_type_registry(Arc::new(extension_types))
             .with_analyzer_rule(Arc::new(
-                crate::domain_conformance::DomainConformanceRule::new(),
+                crate::domain_conformance::DomainConformanceRule::new(Arc::clone(&policy)),
             ))
             .build();
         let context = SessionContext::new_with_state(state);
@@ -558,9 +640,11 @@ impl ServingQuerySession {
             memory_pool: runtime.memory_pool.name().to_owned(),
             memory_limit_bytes: config.memory_limit_bytes,
             max_spill_bytes: config.max_spill_bytes,
-            spill_directory: config.spill_directory.clone(),
+            spill_directory: spill_directory.path().to_path_buf(),
             batch_size: actual.batch_size(),
             target_partitions: actual.target_partitions(),
+            max_execution_millis: config.max_execution_millis,
+            last_termination: None,
             observed_query_count: 0,
             observed_pruning_metric_count: 0,
             observed_pruned_row_groups: 0,
@@ -570,8 +654,11 @@ impl ServingQuerySession {
         Ok(Self {
             lease,
             context,
+            ontology_compiler,
+            domain_policy: policy,
             evidence: RwLock::new(evidence),
             _control_reservation: Arc::new(control_reservation),
+            _spill_directory: spill_directory,
             control_schema_generation_fingerprint,
             limits: config,
         })
@@ -585,6 +672,13 @@ impl ServingQuerySession {
             .clone()
     }
 
+    fn record_termination(&self, code: &str) {
+        self.evidence
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last_termination = Some(code.to_owned());
+    }
+
     #[must_use]
     pub fn snapshot_id(&self) -> [u8; 16] {
         self.lease.record().snapshot_id
@@ -594,6 +688,14 @@ impl ServingQuerySession {
     #[must_use]
     pub fn snapshot_manifest(&self) -> crate::snapshot::ServingSnapshotManifest {
         self.lease.snapshot().manifest().clone()
+    }
+
+    /// Compiler decoded from the exact retained ontology package selected by this lease.
+    #[must_use]
+    pub(crate) fn ontology_compiler(
+        &self,
+    ) -> Arc<crate::ontology_executor::OntologyProgramCompiler> {
+        Arc::clone(&self.ontology_compiler)
     }
 
     /// Stable digest of every execution setting that may affect physical realization.
@@ -610,14 +712,21 @@ impl ServingQuerySession {
     pub async fn query(&self, sql: &str) -> Result<ServingQueryResult, ServingQueryError> {
         let plan = self.context.state().create_logical_plan(sql).await?;
         read_only_options().verify_plan(&plan)?;
-        validate_plan_allowlist(&plan)?;
+        validate_plan_allowlist(&plan, &self.domain_policy)?;
         let execution = QueryExecutionContext {
             execution_id: format!("direct:{}", crate::integrity::framed_digest(sql.as_bytes())),
             semantic_request_id: "direct-sql".to_owned(),
             mcp_call_id: "not-applicable".to_owned(),
         };
         let artifacts = QueryExecutionArtifactAccumulator::new(execution.clone());
-        self.execute_plan(sql, plan, &execution, &artifacts).await
+        self.execute_plan(
+            sql,
+            plan,
+            &execution,
+            &artifacts,
+            &crate::cancellation::Cancellation::default(),
+        )
+        .await
     }
 
     /// Resolve one immutable serving table into an application-owned logical-plan input.
@@ -697,8 +806,27 @@ impl ServingQuerySession {
         execution: &QueryExecutionContext,
         artifacts: &QueryExecutionArtifactAccumulator,
     ) -> Result<ServingQueryResult, ServingQueryError> {
-        validate_plan_allowlist(&plan)?;
-        self.execute_plan(plan_identity, plan, execution, artifacts)
+        self.query_plan_in_execution_observed_with_cancellation(
+            plan_identity,
+            plan,
+            execution,
+            artifacts,
+            &crate::cancellation::Cancellation::default(),
+        )
+        .await
+    }
+
+    /// Execute a native plan with the request-owned cancellation handle and session deadline.
+    pub async fn query_plan_in_execution_observed_with_cancellation(
+        &self,
+        plan_identity: &str,
+        plan: LogicalPlan,
+        execution: &QueryExecutionContext,
+        artifacts: &QueryExecutionArtifactAccumulator,
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> Result<ServingQueryResult, ServingQueryError> {
+        validate_plan_allowlist(&plan, &self.domain_policy)?;
+        self.execute_plan(plan_identity, plan, execution, artifacts, cancellation)
             .await
     }
 
@@ -708,7 +836,7 @@ impl ServingQuerySession {
     ///
     /// Rejects unapproved tables, functions, or mutable/external plan families.
     pub fn validate_query_plan(&self, plan: &LogicalPlan) -> Result<(), ServingQueryError> {
-        validate_plan_allowlist(plan)
+        validate_plan_allowlist(plan, &self.domain_policy)
     }
 
     #[allow(clippy::too_many_lines)] // Keeps one execution, metric capture, and result-accounting lifetime explicit.
@@ -718,6 +846,7 @@ impl ServingQuerySession {
         plan: LogicalPlan,
         execution: &QueryExecutionContext,
         artifacts: &QueryExecutionArtifactAccumulator,
+        cancellation: &crate::cancellation::Cancellation,
     ) -> Result<ServingQueryResult, ServingQueryError> {
         let state = self.context.state();
         let logical_plan = format!("{}", plan.display_indent_schema());
@@ -751,7 +880,7 @@ impl ServingQuerySession {
             unavailable_reason: None,
             metrics: BTreeMap::new(),
         });
-        validate_plan_allowlist(&optimized)?;
+        validate_plan_allowlist(&optimized, &self.domain_policy)?;
         let physical = state
             .create_physical_plan(&optimized)
             .await
@@ -797,10 +926,70 @@ impl ServingQuerySession {
                 });
                 ServingQueryError::from(error)
             })?;
+        artifacts.record_stage(QueryArtifactStage {
+            block_id: request_label.to_owned(),
+            stage: "physical_execution".to_owned(),
+            state: QueryArtifactStageState::Available,
+            artifact: Some(physical_plan.clone()),
+            unavailable_reason: None,
+            metrics: BTreeMap::new(),
+        });
+        #[cfg(test)]
+        tokio::task::yield_now().await;
         let mut batches = Vec::new();
         let mut output_row_count = 0_usize;
         let mut output_bytes = 0_usize;
-        while let Some(next) = stream.next().await {
+        let deadline = tokio::time::sleep(std::time::Duration::from_millis(
+            self.limits.max_execution_millis,
+        ));
+        tokio::pin!(deadline);
+        let cancel = async {
+            loop {
+                if cancellation.is_cancelled() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        };
+        tokio::pin!(cancel);
+        loop {
+            let next = tokio::select! {
+                biased;
+                () = &mut cancel => {
+                    drop(stream);
+                    self.record_termination("CANCELLED");
+                    artifacts.set_failure("physical_execution");
+                    artifacts.record_stage(QueryArtifactStage {
+                        block_id: request_label.to_owned(),
+                        stage: "physical_execution".to_owned(),
+                        state: QueryArtifactStageState::Partial,
+                        artifact: Some(physical_plan.clone()),
+                        unavailable_reason: Some("typed termination: CANCELLED".to_owned()),
+                        metrics: physical_metric_map(physical.as_ref()),
+                    });
+                    return Err(ServingQueryError::Cancelled);
+                }
+                () = &mut deadline => {
+                    drop(stream);
+                    self.record_termination("DEADLINE_EXCEEDED");
+                    artifacts.set_failure("physical_execution");
+                    artifacts.record_stage(QueryArtifactStage {
+                        block_id: request_label.to_owned(),
+                        stage: "physical_execution".to_owned(),
+                        state: QueryArtifactStageState::Partial,
+                        artifact: Some(physical_plan.clone()),
+                        unavailable_reason: Some("typed termination: DEADLINE_EXCEEDED".to_owned()),
+                        metrics: physical_metric_map(physical.as_ref()),
+                    });
+                    return Err(ServingQueryError::Deadline {
+                        limit_millis: self.limits.max_execution_millis,
+                    });
+                }
+                next = stream.next() => next,
+            };
+            let Some(next) = next else {
+                break;
+            };
             let batch = match next {
                 Ok(batch) => batch,
                 Err(error) => {
@@ -821,6 +1010,7 @@ impl ServingQuerySession {
                         unavailable_reason: Some(error.to_string()),
                         metrics,
                     });
+                    self.record_termination("EXECUTION_FAILED");
                     return Err(ServingQueryError::from(error));
                 }
             };
@@ -856,6 +1046,7 @@ impl ServingQuerySession {
                     unavailable_reason: Some("query output exceeded the generated budget".to_owned()),
                     metrics: physical_metric_map(physical.as_ref()),
                 });
+                self.record_termination("RESOURCE_LIMIT");
                 return Err(ServingQueryError::ResourceLimit(format!(
                     "query output exceeds generated rows/bytes/batches budget: \
                      {output_row_count}/{output_bytes}/{batch_count}"
@@ -933,6 +1124,7 @@ impl ServingQuerySession {
                 .write()
                 .expect("serving runtime evidence lock is not poisoned");
             evidence.observed_query_count = evidence.observed_query_count.saturating_add(1);
+            evidence.last_termination = Some("COMPLETED".to_owned());
             evidence.observed_pruning_metric_count = evidence
                 .observed_pruning_metric_count
                 .saturating_add(operator_metrics.pruning_metric_count);
@@ -1042,7 +1234,7 @@ impl ServingQuerySession {
     ) -> Result<ServingQueryResult, ServingQueryError> {
         let plan = self.context.state().create_logical_plan(sql).await?;
         read_only_options().verify_plan(&plan)?;
-        validate_plan_allowlist(&plan)?;
+        validate_plan_allowlist(&plan, &self.domain_policy)?;
         planned.wait().await;
         resume.wait().await;
         let execution = QueryExecutionContext {
@@ -1051,7 +1243,14 @@ impl ServingQuerySession {
             mcp_call_id: "not-applicable".to_owned(),
         };
         let artifacts = QueryExecutionArtifactAccumulator::new(execution.clone());
-        self.execute_plan(sql, plan, &execution, &artifacts).await
+        self.execute_plan(
+            sql,
+            plan,
+            &execution,
+            &artifacts,
+            &crate::cancellation::Cancellation::default(),
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -1061,7 +1260,7 @@ impl ServingQuerySession {
     ) -> Result<SendableRecordBatchStream, ServingQueryError> {
         let plan = self.context.state().create_logical_plan(sql).await?;
         read_only_options().verify_plan(&plan)?;
-        validate_plan_allowlist(&plan)?;
+        validate_plan_allowlist(&plan, &self.domain_policy)?;
         let optimized = self.context.state().optimize(&plan)?;
         let physical = self
             .context
@@ -1906,8 +2105,11 @@ fn active_snapshot_batch(lease: &SnapshotLeaseGuard) -> Result<RecordBatch, Serv
     )?)
 }
 
-fn validate_plan_allowlist(plan: &LogicalPlan) -> Result<(), ServingQueryError> {
-    plan.apply(|node| {
+fn validate_plan_allowlist(
+    plan: &LogicalPlan,
+    policy: &crate::domain_conformance::DomainOperationPolicy,
+) -> Result<(), ServingQueryError> {
+    plan.apply_with_subqueries(|node| {
         if let LogicalPlan::TableScan(scan) = node
             && !allowed_table_reference(&scan.table_name.to_string())
         {
@@ -1930,7 +2132,11 @@ fn validate_plan_allowlist(plan: &LogicalPlan) -> Result<(), ServingQueryError> 
                         ));
                     }
                     Expr::ScalarFunction(function)
-                        if !ALLOWED_SCALAR_FUNCTIONS.contains(&function.name()) =>
+                        if !policy
+                            .function_allowed("ScalarFunction", function.name())
+                            .map_err(|error| {
+                                datafusion::error::DataFusionError::Plan(error.to_string())
+                            })? =>
                     {
                         return Err(datafusion::error::DataFusionError::Plan(format!(
                             "SERVING_PLAN_REJECTED:scalar function {}",
@@ -1938,17 +2144,28 @@ fn validate_plan_allowlist(plan: &LogicalPlan) -> Result<(), ServingQueryError> 
                         )));
                     }
                     Expr::AggregateFunction(function)
-                        if !ALLOWED_AGGREGATE_FUNCTIONS.contains(&function.func.name()) =>
+                        if !policy
+                            .function_allowed("AggregateFunction", function.func.name())
+                            .map_err(|error| {
+                                datafusion::error::DataFusionError::Plan(error.to_string())
+                            })? =>
                     {
                         return Err(datafusion::error::DataFusionError::Plan(format!(
                             "SERVING_PLAN_REJECTED:aggregate function {}",
                             function.func.name()
                         )));
                     }
-                    Expr::WindowFunction(_) => {
-                        return Err(datafusion::error::DataFusionError::Plan(
-                            "SERVING_PLAN_REJECTED:window functions are not allowlisted".into(),
-                        ));
+                    Expr::WindowFunction(function)
+                        if !policy
+                            .function_allowed("WindowFunction", function.fun.name())
+                            .map_err(|error| {
+                                datafusion::error::DataFusionError::Plan(error.to_string())
+                            })? =>
+                    {
+                        return Err(datafusion::error::DataFusionError::Plan(format!(
+                            "SERVING_PLAN_REJECTED:window function {}",
+                            function.fun.name()
+                        )));
                     }
                     _ => {}
                 }
@@ -2072,6 +2289,7 @@ fn execution_config_digest(config: &ServingRuntimeConfig) -> Result<String, Serv
         "max_spill_bytes": config.max_spill_bytes,
         "batch_size": config.batch_size,
         "target_partitions": config.target_partitions,
+        "max_execution_millis": config.max_execution_millis,
         "max_output_rows": config.max_output_rows,
         "max_output_bytes": config.max_output_bytes,
         "max_output_batches": config.max_output_batches,
@@ -2117,7 +2335,11 @@ mod tests {
         new_null_array,
     };
     use arrow_buffer::OffsetBuffer;
-    use arrow_schema::TimeUnit;
+    use arrow_schema::{SchemaRef, TimeUnit};
+    use datafusion::catalog::streaming::StreamingTable;
+    use datafusion::execution::TaskContext;
+    use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+    use datafusion::physical_plan::streaming::PartitionStream;
     use hyper_util::rt::TokioIo;
     use rusqlite::params;
     use tempfile::{TempDir, tempdir};
@@ -2127,6 +2349,41 @@ mod tests {
     use tower::service_fn;
 
     use super::*;
+
+    fn domain_policy() -> crate::domain_conformance::DomainOperationPolicy {
+        let package = crate::ontology_program::build_ontology_program_package(
+            &crate::ontology_program::OntologyPackagingProfile::default(),
+        )
+        .expect("generated ontology package");
+        crate::domain_conformance::DomainOperationPolicy::from_package(&package)
+            .expect("generated domain policy")
+    }
+
+    #[derive(Debug)]
+    struct DelayedPartition {
+        schema: SchemaRef,
+        batch: RecordBatch,
+        delay: Duration,
+    }
+
+    impl PartitionStream for DelayedPartition {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _context: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let schema = Arc::clone(&self.schema);
+            let batch = self.batch.clone();
+            let delay = self.delay;
+            Box::pin(RecordBatchStreamAdapter::new(
+                schema,
+                futures::stream::once(async move {
+                    tokio::time::sleep(delay).await;
+                    Ok(batch)
+                }),
+            ))
+        }
+    }
     use crate::continuous::{ContinuousWorkspaceConfig, ContinuousWorkspaceEngine};
     use crate::core_facts::CoreFactEngine;
     use crate::daemon::{
@@ -3874,7 +4131,7 @@ mod tests {
         config: ServingRuntimeConfig,
     ) -> Result<ServingQuerySession, ServingQueryError> {
         runtime
-            .commit_fact_snapshot(store, Arc::clone(&candidate), None, 0, 7, 100, None)
+            .commit_ordinary_fact_snapshot(store, Arc::clone(&candidate), None, 0, 7, 100, None)
             .unwrap();
         let lease = SnapshotLeaseManager::new([0x66; 16])
             .acquire(
@@ -4922,7 +5179,7 @@ mod tests {
         let predecessor = first.manifest().raw_snapshot_id().unwrap();
         let second = candidate([0x23; 16], 2, 2);
         runtime
-            .commit_fact_snapshot(&mut store, second, Some(predecessor), 1, 8, 102, None)
+            .commit_ordinary_fact_snapshot(&mut store, second, Some(predecessor), 1, 8, 102, None)
             .unwrap();
         resume.wait().await;
         let pinned = query_task.await.unwrap().unwrap();
@@ -5244,7 +5501,7 @@ mod tests {
             .unwrap()
             .build()
             .unwrap();
-        assert!(validate_plan_allowlist(&scalar_variable).is_err());
+        assert!(validate_plan_allowlist(&scalar_variable, &domain_policy()).is_err());
         let approved_scalar = session
             .query("SELECT lower(name) FROM entities")
             .await
@@ -5497,6 +5754,94 @@ mod tests {
         }
     }
 
+    #[test]
+    fn serving_allowlist_rejects_provider_inside_scalar_subquery() {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let provider: Arc<dyn TableProvider> = Arc::new(
+            MemTable::try_new(
+                Arc::clone(&schema),
+                vec![vec![RecordBatch::new_empty(Arc::clone(&schema))]],
+            )
+            .expect("subquery provider"),
+        );
+        let forbidden = LogicalPlanBuilder::scan(
+            "forbidden_table",
+            provider_as_source(Arc::clone(&provider)),
+            None,
+        )
+        .expect("forbidden scan")
+        .project(vec![col("value")])
+        .expect("forbidden projection")
+        .build()
+        .expect("forbidden subquery");
+        let allowed_outer = || {
+            LogicalPlanBuilder::scan(
+                "cpg_serving.entities",
+                provider_as_source(Arc::clone(&provider)),
+                None,
+            )
+            .expect("allowed outer scan")
+        };
+        let outer = allowed_outer()
+            .project(vec![
+                datafusion::logical_expr::expr_fn::scalar_subquery(Arc::new(forbidden))
+                    .alias("nested_value"),
+            ])
+            .expect("outer subquery projection")
+            .build()
+            .expect("outer subquery plan");
+        assert!(matches!(
+            validate_plan_allowlist(&outer, &domain_policy()),
+            Err(ServingQueryError::PlanRejected(detail))
+                if detail.contains("forbidden_table")
+        ));
+
+        for nested in [
+            datafusion::logical_expr::expr_fn::exists(Arc::new(
+                LogicalPlanBuilder::scan(
+                    "forbidden_table",
+                    provider_as_source(Arc::clone(&provider)),
+                    None,
+                )
+                .unwrap()
+                .project(vec![col("value")])
+                .unwrap()
+                .build()
+                .unwrap(),
+            )),
+            datafusion::logical_expr::expr_fn::in_subquery(
+                lit(1_i64),
+                Arc::new(
+                    LogicalPlanBuilder::scan(
+                        "forbidden_table",
+                        provider_as_source(Arc::clone(&provider)),
+                        None,
+                    )
+                    .unwrap()
+                    .project(vec![col("value")])
+                    .unwrap()
+                    .build()
+                    .unwrap(),
+                ),
+            ),
+        ] {
+            let nested_plan = allowed_outer()
+                .filter(nested)
+                .expect("outer subquery filter")
+                .build()
+                .expect("outer subquery plan");
+            assert!(matches!(
+                validate_plan_allowlist(&nested_plan, &domain_policy()),
+                Err(ServingQueryError::PlanRejected(detail))
+                    if detail.contains("forbidden_table")
+            ));
+        }
+    }
+
     #[tokio::test]
     async fn wp25_resource_and_cancellation_acceptance() {
         assert_result_limit(0, usize::MAX, usize::MAX, 0x31).await;
@@ -5583,6 +5928,134 @@ mod tests {
             }
             Err(error) => panic!("unexpected low-memory outcome: {error}"),
         }
+    }
+
+    #[tokio::test]
+    async fn ontology_serving_inflight_termination_and_release() {
+        let (directory, mut store, mut images) = operational_store();
+        let runtime = ServingSnapshotRuntime::default();
+        let config = ServingRuntimeConfig::new(
+            16 * 1024 * 1024,
+            64 * 1024 * 1024,
+            directory.path().join("inflight-spill"),
+            1,
+        )
+        .unwrap()
+        .with_execution_millis(2);
+        let session = activate_and_lease_with_config(
+            &mut store,
+            &mut images,
+            &runtime,
+            candidate([0x39; 16], 1, 200),
+            config,
+        )
+        .unwrap();
+        let delayed_schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let delayed_batch = RecordBatch::try_new(
+            Arc::clone(&delayed_schema),
+            vec![Arc::new(Int64Array::from(vec![1_i64]))],
+        )
+        .unwrap();
+        let delayed: Arc<dyn TableProvider> = Arc::new(
+            StreamingTable::try_new(
+                Arc::clone(&delayed_schema),
+                vec![Arc::new(DelayedPartition {
+                    schema: delayed_schema,
+                    batch: delayed_batch,
+                    delay: Duration::from_millis(100),
+                })],
+            )
+            .expect("delayed DataFusion provider"),
+        );
+        let plan =
+            LogicalPlanBuilder::scan("cpg_serving.delayed", provider_as_source(delayed), None)
+                .unwrap()
+                .build()
+                .unwrap();
+        let execution = QueryExecutionContext {
+            execution_id: "inflight-cancel".into(),
+            semantic_request_id: "inflight-cancel".into(),
+            mcp_call_id: "test".into(),
+        };
+        let artifacts = QueryExecutionArtifactAccumulator::new(execution.clone());
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let reserved_before = session.context.runtime_env().memory_pool.reserved();
+        let execute = session.query_plan_in_execution_observed_with_cancellation(
+            "inflight-cancel",
+            plan.clone(),
+            &execution,
+            &artifacts,
+            &cancellation,
+        );
+        let cancel_after_execution_starts = async {
+            loop {
+                if artifacts.snapshot().stages.iter().any(|stage| {
+                    stage.stage == "physical_execution"
+                        && stage.state == QueryArtifactStageState::Available
+                }) {
+                    cancellation.cancel();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let (outcome, ()) = tokio::join!(execute, cancel_after_execution_starts);
+        assert!(
+            matches!(outcome, Err(ServingQueryError::Cancelled)),
+            "unexpected in-flight cancellation outcome: {outcome:?}"
+        );
+        assert_eq!(
+            session.runtime_evidence().last_termination.as_deref(),
+            Some("CANCELLED")
+        );
+        assert_eq!(
+            session.context.runtime_env().memory_pool.reserved(),
+            reserved_before,
+            "stream cancellation must release every query-owned reservation"
+        );
+        assert!(artifacts.snapshot().stages.iter().any(|stage| {
+            stage.stage == "physical_execution"
+                && stage.state == QueryArtifactStageState::Partial
+                && stage
+                    .unavailable_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("CANCELLED"))
+        }));
+
+        let deadline_execution = QueryExecutionContext {
+            execution_id: "inflight-deadline".into(),
+            semantic_request_id: "inflight-deadline".into(),
+            mcp_call_id: "test".into(),
+        };
+        let deadline_artifacts = QueryExecutionArtifactAccumulator::new(deadline_execution.clone());
+        let deadline = session
+            .query_plan_in_execution_observed_with_cancellation(
+                "inflight-deadline",
+                plan,
+                &deadline_execution,
+                &deadline_artifacts,
+                &crate::cancellation::Cancellation::default(),
+            )
+            .await;
+        assert!(
+            matches!(
+                deadline,
+                Err(ServingQueryError::Deadline { limit_millis: 2 })
+            ),
+            "unexpected in-flight deadline outcome: {deadline:?}"
+        );
+        assert_eq!(
+            session.runtime_evidence().last_termination.as_deref(),
+            Some("DEADLINE_EXCEEDED")
+        );
+        assert_eq!(
+            session.context.runtime_env().memory_pool.reserved(),
+            reserved_before
+        );
     }
 
     #[tokio::test]

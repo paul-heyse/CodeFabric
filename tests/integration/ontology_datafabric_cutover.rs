@@ -466,6 +466,16 @@ async fn run_scenario() -> IntegrationEvidence {
         initial_publication.clone(),
         workspace.registration_revision,
     );
+    let competitor_submission = root.path().join("target-competitor.candidate.json");
+    let mut competitor: OntologyCandidateSubmission =
+        serde_json::from_slice(&fs::read(&target_submission).expect("read target candidate"))
+            .expect("decode target candidate");
+    competitor.rollback_retain_until += 1;
+    fs::write(
+        &competitor_submission,
+        serde_json::to_vec(&competitor).expect("encode competing candidate bytes"),
+    )
+    .expect("write competing candidate bytes");
     drop(fabric);
     drop(store);
 
@@ -495,7 +505,7 @@ async fn run_scenario() -> IntegrationEvidence {
     let second = activation_command(
         &discovery,
         &workspace_text,
-        &target_submission,
+        &competitor_submission,
         &workspace.administrative_key,
         "cutover-race-b",
     )
@@ -513,6 +523,11 @@ async fn run_scenario() -> IntegrationEvidence {
         "cutover-race-a"
     } else {
         "cutover-race-b"
+    };
+    let winning_submission = if first_won {
+        &target_submission
+    } else {
+        &competitor_submission
     };
     daemon.stop();
 
@@ -593,7 +608,7 @@ async fn run_scenario() -> IntegrationEvidence {
         activation_command(
             &discovery,
             &workspace_text,
-            &target_submission,
+            winning_submission,
             &workspace.administrative_key,
             winning_request,
         )
@@ -601,6 +616,67 @@ async fn run_scenario() -> IntegrationEvidence {
         .expect("restart activation replay"),
     );
     assert_eq!(replay["accepted"], true);
+
+    let original_submission: OntologyCandidateSubmission = serde_json::from_slice(
+        &fs::read(winning_submission).expect("read accepted candidate submission"),
+    )
+    .expect("decode accepted candidate submission");
+    let equivalent_submission = root.path().join("target-equivalent.candidate.json");
+    fs::write(
+        &equivalent_submission,
+        serde_json::to_vec_pretty(&original_submission)
+            .expect("encode canonically equivalent candidate"),
+    )
+    .expect("write canonically equivalent candidate");
+    let equivalent_replay = response(
+        activation_command(
+            &discovery,
+            &workspace_text,
+            &equivalent_submission,
+            &workspace.administrative_key,
+            winning_request,
+        )
+        .output()
+        .expect("canonical-equivalent activation replay"),
+    );
+    assert_eq!(equivalent_replay["accepted"], true);
+
+    let mut mutations = Vec::new();
+    let mut rollback = original_submission.clone();
+    rollback.rollback_retain_until += 1;
+    mutations.push(("rollback-retention", rollback));
+    let mut blobs = original_submission.clone();
+    blobs.source_blob_digests.push([0xa1; 32]);
+    mutations.push(("source-blob", blobs));
+    let mut manifest = original_submission.clone();
+    manifest.manifest_body.limits_profile_digest = digest(0xa2);
+    mutations.push(("manifest", manifest));
+    let mut publication = original_submission;
+    publication.publication.pointer.pointer_generation += 1;
+    mutations.push(("publication", publication));
+    for (name, mutation) in mutations {
+        let path = root.path().join(format!("target-{name}.candidate.json"));
+        fs::write(
+            &path,
+            serde_json::to_vec(&mutation).expect("encode candidate mutation"),
+        )
+        .expect("write candidate mutation");
+        let collision = response(
+            activation_command(
+                &discovery,
+                &workspace_text,
+                &path,
+                &workspace.administrative_key,
+                winning_request,
+            )
+            .output()
+            .expect("same-key different-submission replay"),
+        );
+        assert_eq!(
+            collision["accepted"], false,
+            "same request key accepted changed {name} bytes: {collision}"
+        );
+    }
     restarted.stop();
 
     let mut store = OperationalStore::open(&database_path).expect("reopen after target cutover");

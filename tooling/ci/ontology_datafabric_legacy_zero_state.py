@@ -175,11 +175,74 @@ def _structural_scan() -> subprocess.CompletedProcess[str]:
     )
 
 
+def _semantic_authority_findings() -> list[dict[str, object]]:
+    findings: list[dict[str, object]] = []
+    raw_commit = ".commit_" + "fact_snapshot("
+    for path in sorted((ROOT / "src").rglob("*.rs")):
+        relative = path.relative_to(ROOT).as_posix()
+        if relative == "src/snapshot_runtime.rs":
+            continue
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        ):
+            if raw_commit in line:
+                findings.append(
+                    {
+                        "path": relative,
+                        "line": line_number,
+                        "authority": "raw-serving-pointer-call-outside-private-kernel",
+                    }
+                )
+
+    for relative in (
+        "src/domain_conformance.rs",
+        "src/fabric/serving.rs",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        if "apply_with_" + "subqueries" not in text:
+            findings.append(
+                {
+                    "path": relative,
+                    "line": 0,
+                    "authority": "subquery-aware-governance-traversal-absent",
+                }
+            )
+
+    compiler_root = ROOT / "src" / "bin" / "codefabric_model" / "schema_driver"
+    hard_coded_rule = re.compile(r'"ontology\.[a-z0-9_]+"')
+    for path in sorted(compiler_root.rglob("*.rs")):
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        ):
+            if hard_coded_rule.search(line):
+                findings.append(
+                    {
+                        "path": path.relative_to(ROOT).as_posix(),
+                        "line": line_number,
+                        "authority": "hard-coded-ontology-rule-dispatch",
+                    }
+                )
+    governed_session = (ROOT / "src" / "governed_session.rs").read_text(
+        encoding="utf-8"
+    )
+    public_sealer = re.compile(r"\bpub\s+(?:async\s+)?fn\s+(?:seal_plan|seal_sql)\b")
+    for match in public_sealer.finditer(governed_session):
+        findings.append(
+            {
+                "path": "src/governed_session.rs",
+                "line": governed_session.count("\n", 0, match.start()) + 1,
+                "authority": "public-governed-plan-sealer",
+            }
+        )
+    return findings
+
+
 def main() -> int:
     candidates = _files(LIVE_ROOTS)
     findings, skipped = _scan_text(candidates)
     retired, missing = _command_contract()
     structural = _structural_scan()
+    authority_findings = _semantic_authority_findings()
     report = {
         "oracle": "ontology_datafabric_legacy_zero_state",
         "live_roots": list(LIVE_ROOTS),
@@ -194,6 +257,7 @@ def main() -> int:
         "structural_scan_returncode": structural.returncode,
         "structural_scan_stdout": structural.stdout,
         "structural_scan_stderr": structural.stderr,
+        "semantic_authority_findings": authority_findings,
         "obsolete_master_root_present": (
             ROOT / "docs" / ("upfront_" + "design")
         ).exists(),
@@ -204,6 +268,7 @@ def main() -> int:
         or retired
         or missing
         or structural.returncode != 0
+        or authority_findings
         or report["obsolete_master_root_present"]
     ):
         return 1

@@ -15,6 +15,7 @@ use arrow_array::{
 };
 use arrow_ipc::reader::StreamReader;
 use arrow_schema::{ArrowError, SchemaRef};
+use serde::Deserialize;
 use thiserror::Error;
 
 mod generated_bundle {
@@ -77,6 +78,28 @@ pub struct InstalledOntologyProgramPackage {
     root: PathBuf,
     manifest_path: PathBuf,
     package_identity: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageArtifactMember {
+    relation_id: String,
+    file: String,
+    member_identity: String,
+    byte_length: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageArtifactManifest {
+    package_version: String,
+    bootstrap_schema_identity: String,
+    authored_content_identity: String,
+    logical_program_identity: String,
+    packaging_profile_id: String,
+    member_identities: BTreeMap<String, String>,
+    package_identity: String,
+    members: Vec<PackageArtifactMember>,
 }
 
 impl InstalledOntologyProgramPackage {
@@ -467,6 +490,89 @@ pub fn install_ontology_program_package(
     Ok(installation)
 }
 
+/// Resolve and authenticate a previously installed content-addressed package without consulting
+/// the current generated bundle.
+///
+/// # Errors
+///
+/// Rejects an unsafe identity, missing or malformed artifact, non-canonical member address,
+/// length/digest mismatch, or invalid reconstructed package.
+pub fn load_installed_ontology_program_package(
+    state_root: &Path,
+    package_identity: &str,
+) -> Result<OntologyProgramPackage, OntologyProgramError> {
+    let Some(identity) = package_identity.strip_prefix("b3:") else {
+        return Err(OntologyProgramError::Artifact(
+            "package identity is not a b3 digest".into(),
+        ));
+    };
+    if identity.len() != 64 || !identity.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(OntologyProgramError::Artifact(
+            "package identity has invalid digest bytes".into(),
+        ));
+    }
+    let root = state_root.join("ontology-programs").join(identity);
+    let manifest_path = root.join("manifest.json");
+    let manifest_bytes =
+        fs::read(&manifest_path).map_err(|source| artifact_io(&manifest_path, source))?;
+    let artifact: PackageArtifactManifest =
+        serde_json::from_slice(&manifest_bytes).map_err(|error| {
+            OntologyProgramError::Artifact(format!("invalid package manifest: {error}"))
+        })?;
+    if artifact.package_identity != package_identity
+        || artifact.package_version != ONTOLOGY_PROGRAM_PACKAGE_VERSION
+    {
+        return Err(OntologyProgramError::Artifact(
+            "installed package manifest identity or version differs".into(),
+        ));
+    }
+    let mut members = BTreeMap::new();
+    for member in artifact.members {
+        if member.relation_id.is_empty()
+            || !member
+                .relation_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            || member.file != format!("{}.arrow", member.relation_id)
+        {
+            return Err(OntologyProgramError::Artifact(
+                "installed package contains an unsafe member address".into(),
+            ));
+        }
+        let path = root.join(&member.file);
+        let bytes = fs::read(&path).map_err(|source| artifact_io(&path, source))?;
+        if bytes.len() != member.byte_length
+            || framed([member.relation_id.as_bytes(), bytes.as_slice()]) != member.member_identity
+            || artifact.member_identities.get(&member.relation_id) != Some(&member.member_identity)
+        {
+            return Err(OntologyProgramError::Artifact(format!(
+                "installed member {} differs from its manifest",
+                member.relation_id
+            )));
+        }
+        let decoded = decode_member(&member.relation_id, &bytes)?;
+        if members.insert(member.relation_id, decoded).is_some() {
+            return Err(OntologyProgramError::Artifact(
+                "installed package repeats a relation".into(),
+            ));
+        }
+    }
+    let package = OntologyProgramPackage {
+        manifest: OntologyProgramManifest {
+            package_version: artifact.package_version,
+            bootstrap_schema_identity: artifact.bootstrap_schema_identity,
+            authored_content_identity: artifact.authored_content_identity,
+            logical_program_identity: artifact.logical_program_identity,
+            packaging_profile_id: artifact.packaging_profile_id,
+            member_identities: artifact.member_identities,
+            package_identity: artifact.package_identity,
+        },
+        members,
+    };
+    validate_ontology_program_package(&package)?;
+    Ok(package)
+}
+
 fn framed(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
     let mut bytes = Vec::new();
     for part in parts {
@@ -545,7 +651,7 @@ fn generated_program_members(
     Ok(members)
 }
 
-fn program_batch<'a>(
+pub(crate) fn program_batch<'a>(
     package: &'a OntologyProgramPackage,
     relation_id: &str,
 ) -> Result<&'a RecordBatch, OntologyProgramError> {
@@ -1003,9 +1109,12 @@ fn replace_member_batch(
 
 #[cfg(test)]
 mod tests {
+    use arrow_array::{Array as _, StringArray};
+
     use super::{
         CandidateProgramBinding, OntologyPackagingProfile, build_ontology_program_package,
-        validate_ontology_program_package,
+        install_ontology_program_package, load_installed_ontology_program_package,
+        replace_program_utf8_cell, validate_ontology_program_package,
     };
     use crate::ontology_executor::OntologyProgramCompiler;
 
@@ -1102,6 +1211,85 @@ mod tests {
                 .manifest
                 .authored_content_identity
                 .starts_with("b3:")
+        );
+    }
+
+    #[test]
+    fn ontology_retained_epoch_package_reconstruction() {
+        let root = tempfile::tempdir().expect("retained package root");
+        let first = build_ontology_program_package(&OntologyPackagingProfile::default())
+            .expect("first retained package");
+        let mut second = first.clone();
+        let phrase_batch = &second.members["program.phrase_binding"].batches[0];
+        let phrase_ids = phrase_batch
+            .column_by_name("phrase_id")
+            .and_then(|column| column.as_any().downcast_ref::<StringArray>())
+            .expect("phrase IDs");
+        let phrase_rows = (0..phrase_ids.len())
+            .filter(|&row| phrase_ids.value(row) == "CONDITION_CERTAINTY_EXACT")
+            .collect::<Vec<_>>();
+        assert!(!phrase_rows.is_empty());
+        for row in phrase_rows {
+            replace_program_utf8_cell(
+                &mut second,
+                "program.phrase_binding",
+                "canonical_text",
+                row,
+                "certainty is retained-exact",
+            )
+            .expect("resealed retained package");
+        }
+        assert_ne!(
+            first.manifest.package_identity,
+            second.manifest.package_identity
+        );
+
+        install_ontology_program_package(root.path(), &first).expect("install first package");
+        install_ontology_program_package(root.path(), &second).expect("install second package");
+        let loaded_first =
+            load_installed_ontology_program_package(root.path(), &first.manifest.package_identity)
+                .expect("reconstruct first package");
+        let loaded_second =
+            load_installed_ontology_program_package(root.path(), &second.manifest.package_identity)
+                .expect("reconstruct second package");
+        let first_compiler =
+            OntologyProgramCompiler::decode(&loaded_first).expect("first compiler");
+        let second_compiler =
+            OntologyProgramCompiler::decode(&loaded_second).expect("second compiler");
+        assert!(
+            first_compiler
+                .lower_phrase_text("certainty is exact")
+                .is_ok()
+        );
+        assert!(
+            second_compiler
+                .lower_phrase_text("certainty is retained-exact")
+                .is_ok()
+        );
+        assert!(
+            second_compiler
+                .lower_phrase_text("certainty is exact")
+                .is_err()
+        );
+
+        let second_root = root
+            .path()
+            .join("ontology-programs")
+            .join(second.manifest.package_identity.trim_start_matches("b3:"));
+        let manifest_path = second_root.join("manifest.json");
+        std::fs::write(&manifest_path, b"{}\n").expect("corrupt retained manifest");
+        assert!(
+            load_installed_ontology_program_package(root.path(), &second.manifest.package_identity)
+                .is_err(),
+            "corrupt retained package must not fall back to current binary state"
+        );
+        assert!(
+            load_installed_ontology_program_package(
+                root.path(),
+                "b3:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            )
+            .is_err(),
+            "missing retained package must fail closed"
         );
     }
 }

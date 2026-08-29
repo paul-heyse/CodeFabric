@@ -827,14 +827,8 @@ async fn validate_candidate(
         &crate::ontology_program::OntologyPackagingProfile::default(),
     )
     .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
-    let session = GovernedSession::new(
-        SessionConfig::new(),
-        format!(
-            "policy:publication-candidate:{}",
-            package.manifest.logical_program_identity
-        ),
-    )
-    .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
+    let session = GovernedSession::new_for_package(SessionConfig::new(), &package)
+        .map_err(|error| FabricError::PublicationIntegrity(error.to_string()))?;
     // Materialize the generated foreign-key contract through its designated public
     // diagnostic before the broader ontology closure reports the same invalid row.
     // Both paths consume the generated contract/program package; this ordering preserves
@@ -2029,8 +2023,8 @@ mod tests {
                     })
             })
             .collect::<BTreeSet<_>>();
-        let session = GovernedSession::new(SessionConfig::new(), "policy:test:references")
-            .expect("governed reference session");
+        let session =
+            GovernedSession::new(SessionConfig::new()).expect("governed reference session");
         assert_eq!(
             validate_references(&request, &candidate, &session)
                 .await

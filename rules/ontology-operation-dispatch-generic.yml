@@ -7,10 +7,13 @@ files:
 rule:
   any:
     - pattern: match $OP.operation_kind.as_str() { $$$ARMS }
+    - pattern: match $OP.rule_id.as_str() { $$$ARMS }
     - pattern: match $OP.calculation_id.as_str() { $$$ARMS }
     - pattern: match $OP.native { $$$ARMS }
     - pattern: match $OP.native_operation { $$$ARMS }
     - pattern: pub fn commit_fact_snapshot($$$ARGS) { $$$BODY }
+    - pattern: pub(crate) fn commit_fact_snapshot($$$ARGS) { $$$BODY }
+    - pattern: pub(super) fn commit_fact_snapshot($$$ARGS) { $$$BODY }
     - all:
         - kind: identifier
         - regex: '^(?:NativeValidationOperation|DecodedProgramOperation|LoweredValidationOperation)$'

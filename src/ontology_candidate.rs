@@ -664,6 +664,16 @@ impl CandidateClosureRunner {
         &self,
         limits: &GateResourceEnvelope,
     ) -> Result<CandidateClosureReport, CandidateClosureError> {
+        self.execute_with_cancellation(limits, &crate::cancellation::Cancellation::default())
+            .await
+    }
+
+    /// Execute the candidate closure under a control-boundary cancellation handle.
+    pub async fn execute_with_cancellation(
+        &self,
+        limits: &GateResourceEnvelope,
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> Result<CandidateClosureReport, CandidateClosureError> {
         let catalog = self.open_frozen_catalog().await?;
         let mut providers: BTreeMap<String, Arc<dyn TableProvider>> = BTreeMap::new();
         for binding in self.exact_tables.bindings() {
@@ -690,7 +700,8 @@ impl CandidateClosureRunner {
                 "frozen exact provider census is incomplete".into(),
             ));
         }
-        self.execute_with_providers(limits, &providers).await
+        self.execute_with_providers(limits, &providers, cancellation)
+            .await
     }
 
     #[cfg(test)]
@@ -699,7 +710,12 @@ impl CandidateClosureRunner {
         limits: &GateResourceEnvelope,
         providers: &BTreeMap<String, Arc<dyn TableProvider>>,
     ) -> Result<CandidateClosureReport, CandidateClosureError> {
-        self.execute_with_providers(limits, providers).await
+        self.execute_with_providers(
+            limits,
+            providers,
+            &crate::cancellation::Cancellation::default(),
+        )
+        .await
     }
 
     #[allow(clippy::too_many_lines)] // One pass preserves auditable gate-to-receipt causality.
@@ -707,6 +723,7 @@ impl CandidateClosureRunner {
         &self,
         limits: &GateResourceEnvelope,
         providers: &BTreeMap<String, Arc<dyn TableProvider>>,
+        cancellation: &crate::cancellation::Cancellation,
     ) -> Result<CandidateClosureReport, CandidateClosureError> {
         let compiler = crate::ontology_executor::OntologyProgramCompiler::decode(&self.package)
             .map_err(|error| CandidateClosureError::Invalid(error.to_string()))?;
@@ -743,12 +760,13 @@ impl CandidateClosureRunner {
             ]);
             let outcome = self
                 .session
-                .execute_gate(
+                .execute_gate_with_cancellation(
                     &governed,
                     &execution_id,
                     &self.candidate_identity,
                     &program.program_id,
                     limits,
+                    cancellation,
                 )
                 .await?;
             if outcome
@@ -852,7 +870,7 @@ impl CandidateClosureRunner {
             "session_identity": self.session.session_identity(),
             "config_identity": self.session.config_identity(),
             "policy_identity": self.session.policy_identity(),
-            "result_policy_identity": framed([b"candidate-policy.v1".as_slice(), self.session.policy_identity().as_bytes()]),
+            "result_policy_identity": self.session.result_policy_identity(),
             "exact_table_set_identity": self.exact_tables.identity(),
             "function_catalog_identity": self.package.manifest.member_identities["program.calculation_contract"],
             "query_form_identity": self.package.manifest.member_identities["program.phrase_binding"],
@@ -868,10 +886,7 @@ impl CandidateClosureRunner {
         let query_form_identity =
             self.package.manifest.member_identities["program.phrase_binding"].clone();
         let checksum_version = crate::ontology_program::result_checksum_version(&self.package)?;
-        let result_policy_identity = framed([
-            b"candidate-policy.v1".as_slice(),
-            self.session.policy_identity().as_bytes(),
-        ]);
+        let result_policy_identity = self.session.result_policy_identity();
         let result_authority_identity = framed([
             b"ontology-result-authority.v1".as_slice(),
             self.package.manifest.logical_program_identity.as_bytes(),
@@ -987,8 +1002,7 @@ mod tests {
             build_ontology_program_package(&OntologyPackagingProfile::default())
                 .expect("program package"),
             publication(),
-            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
-                .expect("governed session"),
+            GovernedSession::new(SessionConfig::new()).expect("governed session"),
         )
         .expect("candidate runner")
     }
@@ -1009,7 +1023,11 @@ mod tests {
 
     async fn execute_runner(runner: &CandidateClosureRunner) -> CandidateClosureReport {
         runner
-            .execute_with_providers(&GateResourceEnvelope::default(), &test_providers())
+            .execute_with_providers(
+                &GateResourceEnvelope::default(),
+                &test_providers(),
+                &crate::cancellation::Cancellation::default(),
+            )
             .await
             .expect("complete semantic closure")
     }
@@ -1045,8 +1063,7 @@ mod tests {
             let Err(error) = CandidateClosureRunner::new(
                 package,
                 publication(),
-                GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
-                    .expect("governed session"),
+                GovernedSession::new(SessionConfig::new()).expect("governed session"),
             ) else {
                 panic!("corrupted authority family {family} was accepted");
             };
@@ -1153,8 +1170,7 @@ mod tests {
         let runner = CandidateClosureRunner::new(
             package,
             publication(),
-            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
-                .expect("governed session"),
+            GovernedSession::new(SessionConfig::new()).expect("governed session"),
         )
         .expect("additive runner");
         let report = execute_runner(&runner).await;

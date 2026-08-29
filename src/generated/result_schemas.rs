@@ -1,4 +1,4 @@
-// @generated from codefabric.schema.contract-ir b3:25a6ea39378b583dd2cc566cfa66f7c0a5d1d6ab02b59d8fd3af7aa67e1dc66b; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:133bc5a886584b79fa96f5b8ab5e6062ad41c5b08314745e7da88a803d3355f3; schema-contract-driver-v1; do not edit.
 
 const GENERATED_RESULT_SCHEMAS: &[GeneratedResultSchemaSpec] = &[
     GeneratedResultSchemaSpec {

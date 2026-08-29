@@ -18,6 +18,7 @@ struct ProgramRow {
     policy_id: String,
     expected_result_contract: String,
     diagnostic_code: String,
+    rule_semantics_identity: String,
 }
 
 #[derive(Clone, Debug)]
@@ -255,6 +256,7 @@ impl Graph {
         program_id: &str,
         rule_id: &str,
         diagnostic_code: &str,
+        rule_semantics_identity: &str,
         subject_table_id: &str,
     ) -> String {
         let node_id = self.id("plan.project");
@@ -264,6 +266,7 @@ impl Graph {
             ("program_id", program_id),
             ("rule_id", rule_id),
             ("diagnostic_code", diagnostic_code),
+            ("rule_semantics_identity", rule_semantics_identity),
             ("subject_table_id", subject_table_id),
             ("detail_code", "relation-row"),
         ]
@@ -315,11 +318,13 @@ impl Graph {
         subject_table: &str,
     ) -> String {
         let program_id = format!("{}:{suffix}", rule.rule_id);
+        let rule_semantics_identity = rule_semantics_identity(rule);
         let projected = self.violation_projection(
             root,
             &program_id,
             &rule.rule_id,
             &rule.diagnostic_code,
+            &rule_semantics_identity,
             subject_table,
         );
         self.programs.push(ProgramRow {
@@ -331,6 +336,7 @@ impl Graph {
             policy_id: rule.policy_id.clone(),
             expected_result_contract: rule.output_contract.clone(),
             diagnostic_code: rule.diagnostic_code.clone(),
+            rule_semantics_identity,
         });
         projected
     }
@@ -372,11 +378,28 @@ fn or_all(graph: &mut Graph, mut expressions: Vec<String>) -> String {
         .fold(first, |left, right| graph_binary!(graph, "or", left, right))
 }
 
-fn rule<'a>(ir: &'a SchemaContractIr, id: &str) -> &'a super::OntologyRuleContract {
+fn rule<'a>(
+    ir: &'a SchemaContractIr,
+    operation_kind: super::OntologyRuleOperationKind,
+) -> &'a super::OntologyRuleContract {
     ir.ontology_rule_contracts
         .iter()
-        .find(|rule| rule.rule_id == id)
+        .find(|rule| rule.operation_kind == operation_kind)
         .expect("validated ontology rule census")
+}
+
+fn rule_semantics_identity(rule: &super::OntologyRuleContract) -> String {
+    codefabric::ontology_contract::rule_semantics_identity(
+        rule.operation_kind.as_str(),
+        rule.ordered_operands.iter().map(|operand| {
+            (
+                operand.ordinal,
+                operand.relation_ref.as_str(),
+                operand.column_ref.as_str(),
+                operand.logical_type.as_str(),
+            )
+        }),
+    )
 }
 
 fn table_code(ir: &SchemaContractIr, name: &str) -> i16 {
@@ -511,7 +534,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
     let mut graph = Graph::default();
     let mut roots = Vec::new();
 
-    let foreign_key_rule = rule(ir, "ontology.fk.v1");
+    let foreign_key_rule = rule(ir, super::OntologyRuleOperationKind::ForeignKeyAntiJoin);
     for source in &ir.tables {
         if source.publication_pin_role != super::PublicationPinRole::PinnedData {
             continue;
@@ -546,7 +569,10 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         }
     }
 
-    let primary_key_rule = rule(ir, "ontology.primary-key.v1");
+    let primary_key_rule = rule(
+        ir,
+        super::OntologyRuleOperationKind::PrimaryKeyUniquenessAggregate,
+    );
     for table in ir
         .tables
         .iter()
@@ -577,7 +603,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         ));
     }
 
-    let governed_code_rule = rule(ir, "ontology.governed-code.v1");
+    let governed_code_rule = rule(ir, super::OntologyRuleOperationKind::GovernedCodeAntiJoin);
     for source in &ir.tables {
         if source.publication_pin_role != super::PublicationPinRole::PinnedData {
             continue;
@@ -619,7 +645,10 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         }
     }
 
-    let membership_rule = rule(ir, "ontology.membership.v1");
+    let membership_rule = rule(
+        ir,
+        super::OntologyRuleOperationKind::OntologyMembershipAntiJoin,
+    );
     let edge_code = table_code(ir, "ontology_edge");
     let term_code = table_code(ir, "ontology_term");
     for endpoint in ["subject_term_id", "predicate_term_id", "object_term_id"] {
@@ -658,7 +687,10 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
     let relation_kind_code = table_code(ir, "relation_kind");
     let entity_code = table_code(ir, "entity");
 
-    let family_rule = rule(ir, "ontology.relation-family.v1");
+    let family_rule = rule(
+        ir,
+        super::OntologyRuleOperationKind::RelationFamilyConformanceJoin,
+    );
     let relations = graph.scan(relation_code, "family_relation");
     let kinds = graph.scan(relation_kind_code, "family_kind");
     let kind_match = graph_binary!(
@@ -677,7 +709,10 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
     let invalid = graph.join(relations, kinds, "left_anti", valid_kind_and_family);
     roots.push(graph.register_program(family_rule, "relation", invalid, "relation"));
 
-    let cardinality_rule = rule(ir, "ontology.relation-cardinality.v1");
+    let cardinality_rule = rule(
+        ir,
+        super::OntologyRuleOperationKind::RelationCardinalityAggregate,
+    );
     for (suffix, cardinalities, group_column) in [
         ("source", vec!["many-to-one", "one-to-one"], "source_id"),
         (
@@ -734,7 +769,10 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         roots.push(graph.register_program(cardinality_rule, suffix, invalid, "relation"));
     }
 
-    let owner_rule = rule(ir, "ontology.relation-owner.v1");
+    let owner_rule = rule(
+        ir,
+        super::OntologyRuleOperationKind::RelationOwnerConformanceJoin,
+    );
     let relations = graph.scan(relation_code, "owner_relation");
     let source_entities = graph.scan(entity_code, "owner_source_exists");
     let source_exists = graph_binary!(
@@ -770,7 +808,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
     );
     roots.push(graph.register_program(owner_rule, "source-owner", invalid, "relation"));
 
-    let self_edge_rule = rule(ir, "ontology.relation-self-edge.v1");
+    let self_edge_rule = rule(ir, super::OntologyRuleOperationKind::RelationSelfEdgeJoin);
     let relations = graph.scan(relation_code, "self_edge_relation");
     let is_self = graph_binary!(
         graph,
@@ -796,7 +834,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
     let invalid = graph.join(relations, kinds, "left_semi", condition);
     roots.push(graph.register_program(self_edge_rule, "relation", invalid, "relation"));
 
-    let property_rule = rule(ir, "ontology.property-one-of.v1");
+    let property_rule = rule(ir, super::OntologyRuleOperationKind::PropertyValueOneOf);
     let property_code = table_code(ir, "property_fact");
     let properties = graph.scan(property_code, "property_one_of");
     let value_columns = [
@@ -871,7 +909,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
     let invalid = graph.filter(properties, malformed);
     roots.push(graph.register_program(property_rule, "property-fact", invalid, "property_fact"));
 
-    let span_rule = rule(ir, "ontology.source-span.v1");
+    let span_rule = rule(ir, super::OntologyRuleOperationKind::SourceSpanAllOrNone);
     for table in ir
         .tables
         .iter()
@@ -913,9 +951,10 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         ));
     }
 
-    let id_rule = rule(ir, "ontology.id-domain.v1");
+    let id_rule = rule(ir, super::OntologyRuleOperationKind::IdDomainConformance);
+    let id_rule_semantics_identity = rule_semantics_identity(id_rule);
     graph.programs.push(ProgramRow {
-        program_id: "ontology.id-domain.v1:analyzer".into(),
+        program_id: format!("{}:analyzer", id_rule.rule_id),
         rule_id: id_rule.rule_id.clone(),
         root_node_id: String::new(),
         execution_phase: "semantic_analysis",
@@ -923,6 +962,7 @@ fn build_graph(ir: &SchemaContractIr) -> Graph {
         policy_id: id_rule.policy_id.clone(),
         expected_result_contract: id_rule.output_contract.clone(),
         diagnostic_code: id_rule.diagnostic_code.clone(),
+        rule_semantics_identity: id_rule_semantics_identity,
     });
 
     graph
@@ -965,6 +1005,7 @@ pub(super) fn program_graph_batches(
                 Field::new("policy_id", DataType::Utf8, false),
                 Field::new("expected_result_contract", DataType::Utf8, false),
                 Field::new("diagnostic_code", DataType::Utf8, false),
+                Field::new("rule_semantics_identity", DataType::Utf8, false),
             ],
             vec![
                 strings(graph.programs.iter().map(|row| row.program_id.clone())),
@@ -980,6 +1021,12 @@ pub(super) fn program_graph_batches(
                         .map(|row| row.expected_result_contract.clone()),
                 ),
                 strings(graph.programs.iter().map(|row| row.diagnostic_code.clone())),
+                strings(
+                    graph
+                        .programs
+                        .iter()
+                        .map(|row| row.rule_semantics_identity.clone()),
+                ),
             ],
         )?,
     );

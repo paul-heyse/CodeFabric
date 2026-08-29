@@ -616,6 +616,78 @@ async fn execute_workspace_command(
     state_root: &Path,
     command: WorkspaceAdminCommand,
 ) -> AdminResponse {
+    if let WorkspaceAdminCommand::ActivateCandidate {
+        workspace_id,
+        submission,
+        administrative_key,
+        request_key,
+    } = command
+    {
+        let requested_at = now_millis()
+            .ok()
+            .and_then(|value| i64::try_from(value).ok())
+            .unwrap_or(i64::MAX);
+        let prepared = {
+            let mut store = store.lock().await;
+            OntologyActivationCoordinator::prepare_submission(
+                &mut store,
+                workspace_id,
+                *submission,
+                &administrative_key,
+                &request_key,
+                requested_at,
+            )
+        };
+        let result = match prepared {
+            Ok(crate::ontology_activation::OntologyActivationPreparation::Replay(_)) => Ok(()),
+            Ok(crate::ontology_activation::OntologyActivationPreparation::Pending(prepared)) => {
+                let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+                match OntologyActivationCoordinator::prove_prepared(
+                    *prepared,
+                    &crate::ontology_gate::GateResourceEnvelope::default(),
+                    &cancellation,
+                )
+                .await
+                {
+                    Ok(proved) => {
+                        let mut store = store.lock().await;
+                        OntologyActivationCoordinator::commit_prepared(&mut store, &proved)
+                            .map(|_| ())
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            tracing::warn!(
+                error = %error,
+                error_code = ontology_submission_error_code(&error),
+                "ontology candidate submission rejected"
+            );
+            return AdminResponse {
+                accepted: false,
+                daemon_liveness: "LIVE".to_owned(),
+                workspace_readiness: "UNCHANGED".to_owned(),
+                shutdown_mode: None,
+                workspaces: Vec::new(),
+                workspace_health: Vec::new(),
+                error_code: Some(ontology_submission_error_code(&error).to_owned()),
+            };
+        }
+        return match health_response(store).await {
+            Ok((workspace_readiness, workspace_health)) => AdminResponse {
+                accepted: true,
+                daemon_liveness: "LIVE".to_owned(),
+                workspace_readiness,
+                shutdown_mode: None,
+                workspaces: Vec::new(),
+                workspace_health,
+                error_code: None,
+            },
+            Err(_) => internal_admin_response(),
+        };
+    }
     let coordinator_bootstrap = match &command {
         WorkspaceAdminCommand::Enable { workspace_id }
         | WorkspaceAdminCommand::Reconcile { workspace_id } => Some(*workspace_id),
@@ -629,35 +701,7 @@ async fn execute_workspace_command(
     let result: Result<Vec<WorkspaceRecord>, String> = {
         let mut store = store.lock().await;
         match command {
-            WorkspaceAdminCommand::ActivateCandidate {
-                workspace_id,
-                submission,
-                administrative_key,
-                request_key,
-            } => {
-                let requested_at = now_millis()
-                    .ok()
-                    .and_then(|value| i64::try_from(value).ok())
-                    .unwrap_or(i64::MAX);
-                OntologyActivationCoordinator::submit_and_activate(
-                    &mut store,
-                    workspace_id,
-                    *submission,
-                    &administrative_key,
-                    &request_key,
-                    requested_at,
-                )
-                .await
-                .map(|_| Vec::new())
-                .map_err(|error| {
-                    tracing::warn!(
-                        error = %error,
-                        error_code = ontology_submission_error_code(&error),
-                        "ontology candidate submission rejected"
-                    );
-                    ontology_submission_error_code(&error).to_owned()
-                })
-            }
+            WorkspaceAdminCommand::ActivateCandidate { .. } => unreachable!("handled above"),
             other => execute_workspace_command_inner(&mut store, other)
                 .map_err(|error| workspace_error_code(&error).to_owned()),
         }

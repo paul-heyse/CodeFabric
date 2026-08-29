@@ -17,6 +17,10 @@ use datafusion::scalar::ScalarValue;
 use crate::ontology_executor::OntologyProgramCompileError;
 use crate::ontology_program::OntologyProgramPackage;
 
+const MAX_PROGRAM_NODES: usize = 65_536;
+const MAX_PROGRAM_EXPRESSIONS: usize = 262_144;
+const MAX_PROGRAM_GRAPH_DEPTH: usize = 256;
+
 /// One executable program root and its acceptance contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramContract {
@@ -28,6 +32,7 @@ pub struct ProgramContract {
     pub policy_id: String,
     pub expected_result_contract: String,
     pub diagnostic_code: String,
+    pub rule_semantics_identity: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -167,6 +172,7 @@ impl OntologyRelationalProgram {
         let policies = utf8(contract, "policy_id")?;
         let expected = utf8(contract, "expected_result_contract")?;
         let diagnostics = utf8(contract, "diagnostic_code")?;
+        let rule_semantics_identities = utf8(contract, "rule_semantics_identity")?;
         let mut programs = BTreeMap::new();
         for row in 0..contract.num_rows() {
             let program = ProgramContract {
@@ -178,19 +184,35 @@ impl OntologyRelationalProgram {
                 policy_id: policies.value(row).to_owned(),
                 expected_result_contract: expected.value(row).to_owned(),
                 diagnostic_code: diagnostics.value(row).to_owned(),
+                rule_semantics_identity: rule_semantics_identities.value(row).to_owned(),
             };
             if program.rule_id.is_empty()
                 || program.calculation_id.is_empty()
                 || program.policy_id.is_empty()
                 || program.expected_result_contract.is_empty()
                 || program.diagnostic_code.is_empty()
-                || (program.execution_phase != "semantic_analysis"
-                    && program.root_node_id.is_empty())
+                || program.rule_semantics_identity.is_empty()
             {
                 return Err(OntologyProgramCompileError::Decode(format!(
                     "{} has an incomplete program contract",
                     program.program_id
                 )));
+            }
+            match program.execution_phase.as_str() {
+                "candidate_validation" if !program.root_node_id.is_empty() => {}
+                "semantic_analysis" if program.root_node_id.is_empty() => {}
+                "candidate_validation" | "semantic_analysis" => {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "{} has a root incompatible with execution phase {}",
+                        program.program_id, program.execution_phase
+                    )));
+                }
+                phase => {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "{} has unknown execution phase {phase}",
+                        program.program_id
+                    )));
+                }
             }
             let program_id = program.program_id.clone();
             insert_unique(&mut programs, &program_id, program, "program")?;
@@ -414,6 +436,12 @@ impl OntologyRelationalProgram {
     }
 
     fn validate_graph(&self) -> Result<(), OntologyProgramCompileError> {
+        if self.nodes.len() > MAX_PROGRAM_NODES || self.expressions.len() > MAX_PROGRAM_EXPRESSIONS
+        {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "program graph exceeds node/expression bounds {MAX_PROGRAM_NODES}/{MAX_PROGRAM_EXPRESSIONS}"
+            )));
+        }
         for (parent, edges) in &self.plan_edges {
             if !self.nodes.contains_key(parent)
                 || edges
@@ -441,7 +469,7 @@ impl OntologyRelationalProgram {
             }
         }
         for program in self.programs.values() {
-            if program.execution_phase != "semantic_analysis"
+            if program.execution_phase == "candidate_validation"
                 && !self.nodes.contains_key(&program.root_node_id)
             {
                 return Err(OntologyProgramCompileError::Decode(format!(
@@ -450,14 +478,138 @@ impl OntologyRelationalProgram {
                 )));
             }
         }
-        let mut visited = BTreeSet::new();
-        let mut active = BTreeSet::new();
+        let mut visited_nodes = BTreeSet::new();
+        let mut active_nodes = BTreeSet::new();
         for program in self
             .programs
             .values()
             .filter(|program| !program.root_node_id.is_empty())
         {
-            self.validate_plan_acyclic(&program.root_node_id, &mut visited, &mut active)?;
+            self.validate_plan_acyclic(
+                &program.root_node_id,
+                &mut visited_nodes,
+                &mut active_nodes,
+                0,
+            )?;
+        }
+        let all_nodes = self.nodes.keys().cloned().collect::<BTreeSet<_>>();
+        if visited_nodes != all_nodes {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "unreachable plan nodes: {:?}",
+                all_nodes.difference(&visited_nodes).collect::<Vec<_>>()
+            )));
+        }
+
+        let mut expression_roots = BTreeSet::new();
+        for (node_id, node) in &self.nodes {
+            self.validate_plan_node_shape(node_id, node, &mut expression_roots)?;
+        }
+        let mut visited_expressions = BTreeSet::new();
+        let mut active_expressions = BTreeSet::new();
+        for expr_id in expression_roots {
+            self.validate_expression_acyclic(
+                &expr_id,
+                &mut visited_expressions,
+                &mut active_expressions,
+                0,
+            )?;
+        }
+        let all_expressions = self.expressions.keys().cloned().collect::<BTreeSet<_>>();
+        if visited_expressions != all_expressions {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "unreachable expressions: {:?}",
+                all_expressions
+                    .difference(&visited_expressions)
+                    .collect::<Vec<_>>()
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_plan_node_shape(
+        &self,
+        node_id: &str,
+        node: &PlanNode,
+        expression_roots: &mut BTreeSet<String>,
+    ) -> Result<(), OntologyProgramCompileError> {
+        let plan_child_count = self.plan_edges.get(node_id).map_or(0, Vec::len);
+        let expression_edges = self
+            .expression_edges
+            .get(node_id)
+            .map_or(&[][..], Vec::as_slice);
+        let allowed_roles: &[&str] = match node {
+            PlanNode::Scan(_) => {
+                if plan_child_count != 0 {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "scan {node_id} has plan children"
+                    )));
+                }
+                &[]
+            }
+            PlanNode::Filter { predicate_expr_id } => {
+                if plan_child_count != 1 {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "filter {node_id} does not have one input"
+                    )));
+                }
+                expression_roots.insert(predicate_expr_id.clone());
+                &[]
+            }
+            PlanNode::Project => {
+                if plan_child_count != 1
+                    || !expression_edges
+                        .iter()
+                        .any(|edge| edge.role == "projection")
+                {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "project {node_id} lacks its input or projections"
+                    )));
+                }
+                &["projection"]
+            }
+            PlanNode::Join {
+                condition_expr_id, ..
+            } => {
+                if plan_child_count != 2 {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "join {node_id} does not have two inputs"
+                    )));
+                }
+                expression_roots.insert(condition_expr_id.clone());
+                &[]
+            }
+            PlanNode::Aggregate => {
+                if plan_child_count != 1
+                    || !expression_edges.iter().any(|edge| edge.role == "aggregate")
+                {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "aggregate {node_id} lacks its input or aggregate expressions"
+                    )));
+                }
+                &["group", "aggregate"]
+            }
+            PlanNode::Set { .. } => {
+                if plan_child_count < 2 {
+                    return Err(OntologyProgramCompileError::Decode(format!(
+                        "set {node_id} has fewer than two inputs"
+                    )));
+                }
+                &[]
+            }
+        };
+        for edge in expression_edges {
+            if !allowed_roles.contains(&edge.role.as_str()) {
+                return Err(OntologyProgramCompileError::Decode(format!(
+                    "plan node {node_id} has unsupported expression role {}",
+                    edge.role
+                )));
+            }
+            if edge.output_alias.as_deref().is_some_and(str::is_empty) {
+                return Err(OntologyProgramCompileError::Decode(format!(
+                    "plan node {node_id} has an empty output alias"
+                )));
+            }
+            expression_roots.insert(edge.child_expr_id.clone());
         }
         Ok(())
     }
@@ -467,7 +619,13 @@ impl OntologyRelationalProgram {
         node_id: &str,
         visited: &mut BTreeSet<String>,
         active: &mut BTreeSet<String>,
+        depth: usize,
     ) -> Result<(), OntologyProgramCompileError> {
+        if depth > MAX_PROGRAM_GRAPH_DEPTH {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "plan graph exceeds depth bound at {node_id}"
+            )));
+        }
         if visited.contains(node_id) {
             return Ok(());
         }
@@ -478,11 +636,83 @@ impl OntologyRelationalProgram {
         }
         if let Some(edges) = self.plan_edges.get(node_id) {
             for edge in edges {
-                self.validate_plan_acyclic(&edge.child_node_id, visited, active)?;
+                self.validate_plan_acyclic(&edge.child_node_id, visited, active, depth + 1)?;
             }
         }
         active.remove(node_id);
         visited.insert(node_id.to_owned());
+        Ok(())
+    }
+
+    fn validate_expression_acyclic(
+        &self,
+        expr_id: &str,
+        visited: &mut BTreeSet<String>,
+        active: &mut BTreeSet<String>,
+        depth: usize,
+    ) -> Result<(), OntologyProgramCompileError> {
+        if depth > MAX_PROGRAM_GRAPH_DEPTH {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "expression graph exceeds depth bound at {expr_id}"
+            )));
+        }
+        if visited.contains(expr_id) {
+            return Ok(());
+        }
+        if !active.insert(expr_id.to_owned()) {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "cycle at expression {expr_id}"
+            )));
+        }
+        let expression = self.expressions.get(expr_id).ok_or_else(|| {
+            OntologyProgramCompileError::Decode(format!("unknown expression {expr_id}"))
+        })?;
+        let edges = self
+            .expression_edges
+            .get(expr_id)
+            .map_or(&[][..], Vec::as_slice);
+        let expected_roles: &[(&str, usize)] = match expression {
+            ExpressionNode::Column { .. } | ExpressionNode::Literal { .. } => &[],
+            ExpressionNode::Binary { .. } => &[("left", 1), ("right", 1)],
+            ExpressionNode::Call { function_name } => match function_name.as_str() {
+                "is_null" | "is_not_null" | "not" | "is_true" | "count" => &[("argument", 1)],
+                function => {
+                    return Err(OntologyProgramCompileError::Unsupported(format!(
+                        "built-in call {function}"
+                    )));
+                }
+            },
+            ExpressionNode::Cast { .. } => &[("argument", 1)],
+            ExpressionNode::Case => {
+                return Err(OntologyProgramCompileError::Unsupported(
+                    "case expression lacks a released current-profile contract".into(),
+                ));
+            }
+        };
+        for (role, expected_count) in expected_roles {
+            let count = edges.iter().filter(|edge| edge.role == *role).count();
+            if count != *expected_count {
+                return Err(OntologyProgramCompileError::Decode(format!(
+                    "expression {expr_id} requires {expected_count} {role} edge(s), found {count}"
+                )));
+            }
+        }
+        for edge in edges {
+            if !expected_roles.iter().any(|(role, _)| *role == edge.role) {
+                return Err(OntologyProgramCompileError::Decode(format!(
+                    "expression {expr_id} has unsupported role {}",
+                    edge.role
+                )));
+            }
+            if edge.output_alias.is_some() {
+                return Err(OntologyProgramCompileError::Decode(format!(
+                    "expression {expr_id} has an illegal child output alias"
+                )));
+            }
+            self.validate_expression_acyclic(&edge.child_expr_id, visited, active, depth + 1)?;
+        }
+        active.remove(expr_id);
+        visited.insert(expr_id.to_owned());
         Ok(())
     }
 

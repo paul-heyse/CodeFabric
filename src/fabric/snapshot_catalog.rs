@@ -241,14 +241,15 @@ struct OverlayIdentityProvider {
     checksum: [u8; 32],
 }
 
-/// Closed WP58 posture: query-aware `StatisticsRequest` is not advertised or consumed.
+/// DataFusion 55 structured scan requests are preserved through governance wrappers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatisticsRequestPosture {
-    Declined,
+    Forwarded,
 }
 
-/// Current posture until an optimizer producer, cache, and consumer are designed together.
-pub const STATISTICS_REQUEST_POSTURE: StatisticsRequestPosture = StatisticsRequestPosture::Declined;
+/// Governance wrappers do not reinterpret provider-specific planning requests.
+pub const STATISTICS_REQUEST_POSTURE: StatisticsRequestPosture =
+    StatisticsRequestPosture::Forwarded;
 
 struct EffectiveStatisticsProvider {
     inner: Arc<dyn TableProvider>,
@@ -298,17 +299,9 @@ impl TableProvider for EffectiveStatisticsProvider {
     ) -> datafusion::error::Result<ScanResult> {
         debug_assert_eq!(
             STATISTICS_REQUEST_POSTURE,
-            StatisticsRequestPosture::Declined
+            StatisticsRequestPosture::Forwarded
         );
-        let projection = args.projection().map(<[usize]>::to_vec);
-        self.scan(
-            state,
-            projection.as_ref(),
-            args.filters().unwrap_or(&[]),
-            args.limit(),
-        )
-        .await
-        .map(Into::into)
+        self.inner.scan_with_args(state, args).await
     }
 
     fn supports_filters_pushdown(
@@ -751,12 +744,13 @@ impl SnapshotProviderCatalog {
             .await?;
             validate_open_table(&handle.table, spec)?;
             let provider = exact_provider(&handle.table, spec, handle.profile()).await?;
-            opened.insert(table_code, (record.clone(), provider));
+            let exact_statistics = provider.statistics();
+            opened.insert(table_code, (record.clone(), provider, exact_statistics));
         }
 
         trace.push(SnapshotConstructionStage::WrapOverlay);
         let mut wrapped = BTreeMap::new();
-        for (table_code, (manifest, provider)) in opened {
+        for (table_code, (manifest, provider, exact_statistics)) in opened {
             let spec = snapshot_table_spec(table_code)?;
             let provider = overlay.wrap(spec, provider)?;
             let provider = scoped_provider(spec, &publication.scope, provider)?;
@@ -766,7 +760,7 @@ impl SnapshotProviderCatalog {
                 Some(stream_provider_evidence(Arc::clone(&provider), spec).await?)
             };
             let statistics = evidence.as_ref().map_or_else(
-                || authenticated_statistics(spec, manifest.row_count),
+                || authenticate_exact_statistics(spec, manifest.row_count, exact_statistics),
                 |value| Ok(value.statistics.clone()),
             )?;
             let constraints = publication_validated_constraints(spec, &manifest)?;
@@ -1053,30 +1047,63 @@ struct ProviderEvidence {
     statistics: Statistics,
 }
 
-fn authenticated_statistics(spec: &TableSpec, row_count: i64) -> Result<Statistics, FabricError> {
+fn authenticate_exact_statistics(
+    spec: &TableSpec,
+    row_count: i64,
+    exact: Option<Statistics>,
+) -> Result<Statistics, FabricError> {
     let row_count = usize::try_from(row_count).map_err(|_| {
         FabricError::SnapshotProviderIntegrity(format!(
             "{} authenticated row count is negative or exceeds usize",
             spec.name
         ))
     })?;
-    Ok(Statistics {
-        num_rows: Precision::Exact(row_count),
-        total_byte_size: Precision::Absent,
-        column_statistics: spec
-            .arrow_schema
-            .fields()
-            .iter()
-            .map(|field| ColumnStatistics {
-                null_count: if field.is_nullable() {
-                    Precision::Absent
-                } else {
-                    Precision::Exact(0)
-                },
-                ..ColumnStatistics::default()
-            })
-            .collect(),
-    })
+    let Some(mut exact) = exact else {
+        return Ok(Statistics {
+            num_rows: Precision::Exact(row_count),
+            total_byte_size: Precision::Absent,
+            column_statistics: spec
+                .arrow_schema
+                .fields()
+                .iter()
+                .map(|field| ColumnStatistics {
+                    null_count: if field.is_nullable() {
+                        Precision::Absent
+                    } else {
+                        Precision::Exact(0)
+                    },
+                    ..ColumnStatistics::default()
+                })
+                .collect(),
+        });
+    };
+    match exact.num_rows {
+        Precision::Exact(value) | Precision::Inexact(value) if value == row_count => {}
+        Precision::Absent => exact.num_rows = Precision::Exact(row_count),
+        _ => {
+            return Err(FabricError::SnapshotProviderIntegrity(format!(
+                "{} Delta statistics row count differs from the authenticated publication manifest",
+                spec.name
+            )));
+        }
+    }
+    if exact.column_statistics.len() != spec.arrow_schema.fields().len() {
+        return Err(FabricError::SnapshotProviderIntegrity(format!(
+            "{} Delta statistics column census differs from the generated schema",
+            spec.name
+        )));
+    }
+    for (field, column) in spec
+        .arrow_schema
+        .fields()
+        .iter()
+        .zip(&mut exact.column_statistics)
+    {
+        if !field.is_nullable() && column.null_count == Precision::Absent {
+            column.null_count = Precision::Exact(0);
+        }
+    }
+    Ok(exact)
 }
 
 #[allow(clippy::too_many_lines)] // One scan owns the observed metrics and checksum accounting lifecycle.
@@ -1324,6 +1351,7 @@ mod tests {
     #[derive(Debug)]
     struct StructuredScanSpy {
         schema: arrow_schema::SchemaRef,
+        statistics: Option<Statistics>,
         default_scan_calls: AtomicUsize,
         structured: Mutex<Option<CapturedStructuredScan>>,
     }
@@ -1336,6 +1364,10 @@ mod tests {
 
         fn table_type(&self) -> TableType {
             TableType::Base
+        }
+
+        fn statistics(&self) -> Option<Statistics> {
+            self.statistics.clone()
         }
 
         async fn scan(
@@ -1630,7 +1662,7 @@ mod tests {
         assert!(!DeltaAccessProfile::QueryServing.skip_stats());
         assert_eq!(
             STATISTICS_REQUEST_POSTURE,
-            StatisticsRequestPosture::Declined
+            StatisticsRequestPosture::Forwarded
         );
         let first = candidate.provider(1).unwrap();
         let second = candidate.provider(1).unwrap();
@@ -1649,6 +1681,7 @@ mod tests {
         let schema = Arc::clone(&table_spec(1).unwrap().arrow_schema);
         let spy = Arc::new(StructuredScanSpy {
             schema,
+            statistics: None,
             default_scan_calls: AtomicUsize::new(0),
             structured: Mutex::new(None),
         });
@@ -1687,6 +1720,72 @@ mod tests {
                 filters: filters.to_vec(),
                 limit: Some(11),
                 statistics_requests: statistics_requests.to_vec(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn exact_statistics_and_structured_scan_survive_governance_wrapper() {
+        let spec = table_spec(1).unwrap();
+        let mut columns = spec
+            .arrow_schema
+            .fields()
+            .iter()
+            .map(|field| ColumnStatistics {
+                null_count: if field.is_nullable() {
+                    Precision::Absent
+                } else {
+                    Precision::Exact(0)
+                },
+                ..ColumnStatistics::default()
+            })
+            .collect::<Vec<_>>();
+        columns[1].byte_size = Precision::Exact(41);
+        let exact = Statistics {
+            num_rows: Precision::Exact(7),
+            total_byte_size: Precision::Exact(777),
+            column_statistics: columns,
+        };
+        let authenticated = authenticate_exact_statistics(spec, 7, Some(exact.clone())).unwrap();
+        assert_eq!(authenticated, exact);
+        let spy = Arc::new(StructuredScanSpy {
+            schema: Arc::clone(&spec.arrow_schema),
+            statistics: Some(exact.clone()),
+            default_scan_calls: AtomicUsize::new(0),
+            structured: Mutex::new(None),
+        });
+        let provider = EffectiveStatisticsProvider {
+            inner: Arc::clone(&spy) as Arc<dyn TableProvider>,
+            statistics: authenticated,
+            constraints: None,
+        };
+        assert_eq!(provider.statistics(), Some(exact));
+        let projection = [0, 1];
+        let filters = [col("workspace_kind").eq(lit(1_i16))];
+        let requests = [
+            StatisticsRequest::RowCount,
+            StatisticsRequest::TotalByteSize,
+        ];
+        let state = provider_session_state(SessionConfig::new());
+        provider
+            .scan_with_args(
+                state.as_ref(),
+                ScanArgs::default()
+                    .with_projection(Some(&projection))
+                    .with_filters(Some(&filters))
+                    .with_limit(Some(3))
+                    .with_statistics_requests(&requests),
+            )
+            .await
+            .unwrap();
+        assert_eq!(spy.default_scan_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            spy.structured.lock().unwrap().as_ref(),
+            Some(&CapturedStructuredScan {
+                projection: Some(projection.to_vec()),
+                filters: filters.to_vec(),
+                limit: Some(3),
+                statistics_requests: requests.to_vec(),
             })
         );
     }
@@ -1873,7 +1972,7 @@ mod tests {
         }
         assert_eq!(
             STATISTICS_REQUEST_POSTURE,
-            StatisticsRequestPosture::Declined,
+            StatisticsRequestPosture::Forwarded,
             "query-aware requested statistics have no advertised capability"
         );
     }

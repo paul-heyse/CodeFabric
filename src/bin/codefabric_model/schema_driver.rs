@@ -528,6 +528,24 @@ enum OntologyRuleOperationKind {
     SourceSpanAllOrNone,
 }
 
+impl OntologyRuleOperationKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::ForeignKeyAntiJoin => "FOREIGN_KEY_ANTI_JOIN",
+            Self::GovernedCodeAntiJoin => "GOVERNED_CODE_ANTI_JOIN",
+            Self::PrimaryKeyUniquenessAggregate => "PRIMARY_KEY_UNIQUENESS_AGGREGATE",
+            Self::IdDomainConformance => "ID_DOMAIN_CONFORMANCE",
+            Self::OntologyMembershipAntiJoin => "ONTOLOGY_MEMBERSHIP_ANTI_JOIN",
+            Self::RelationFamilyConformanceJoin => "RELATION_FAMILY_CONFORMANCE_JOIN",
+            Self::RelationCardinalityAggregate => "RELATION_CARDINALITY_AGGREGATE",
+            Self::RelationOwnerConformanceJoin => "RELATION_OWNER_CONFORMANCE_JOIN",
+            Self::RelationSelfEdgeJoin => "RELATION_SELF_EDGE_JOIN",
+            Self::PropertyValueOneOf => "PROPERTY_VALUE_ONE_OF",
+            Self::SourceSpanAllOrNone => "SOURCE_SPAN_ALL_OR_NONE",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OntologyRuleContract {
@@ -759,6 +777,7 @@ struct OperationalTableContract {
 #[serde(deny_unknown_fields)]
 struct ServingResourceProfileContract {
     batch_size: usize,
+    max_execution_millis: u64,
     max_output_rows: usize,
     max_output_bytes: usize,
     max_output_batches: usize,
@@ -812,6 +831,33 @@ struct ProviderObservationSchemaContract {
     fields: Vec<ProviderObservationFieldContract>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DomainOperationPolicyContract {
+    expression_variant: String,
+    effect: String,
+    #[serde(default)]
+    domain_functions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DomainTransitionPolicyContract {
+    input_state: String,
+    effect: String,
+    output_state: String,
+    allowed: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DomainOperationPolicyAuthority {
+    policy_version: String,
+    operations: Vec<DomainOperationPolicyContract>,
+    transitions: Vec<DomainTransitionPolicyContract>,
+    comparison_domain_pairs: Vec<[String; 2]>,
+}
+
 /// Single typed source for every schema-family projection.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -833,6 +879,7 @@ struct SchemaContractIr {
     result_schemas: Vec<ResultSchemaContract>,
     #[serde(default)]
     structure_groups: Vec<StructureGroupContract>,
+    domain_operation_policy: DomainOperationPolicyAuthority,
     ontology_rule_contracts: Vec<OntologyRuleContract>,
     tables: Vec<TableContract>,
     table_scopes: Vec<TableScopeContract>,
@@ -858,6 +905,98 @@ impl SchemaContractIr {
         }
         if self.tables.is_empty() {
             return invalid("$.tables", "at least one TableSpec is required");
+        }
+        if self
+            .domain_operation_policy
+            .policy_version
+            .trim()
+            .is_empty()
+        {
+            return invalid(
+                "$.domain_operation_policy.policy_version",
+                "domain policy version is empty",
+            );
+        }
+        let operation_variants = self
+            .domain_operation_policy
+            .operations
+            .iter()
+            .map(|operation| operation.expression_variant.as_str())
+            .collect::<BTreeSet<_>>();
+        if operation_variants
+            != codefabric::ontology_contract::DATAFUSION_EXPR_VARIANT_CENSUS
+                .iter()
+                .copied()
+                .collect()
+            || operation_variants.len() != self.domain_operation_policy.operations.len()
+        {
+            return invalid(
+                "$.domain_operation_policy.operations",
+                "domain policy must exactly cover the pinned DataFusion expression census",
+            );
+        }
+        let effects = BTreeSet::from([
+            "NONE",
+            "PRESERVE",
+            "CONSUME_SAME_DOMAIN",
+            "PRODUCE",
+            "EXPLICIT_ERASE",
+        ]);
+        if self
+            .domain_operation_policy
+            .operations
+            .iter()
+            .any(|operation| {
+                !effects.contains(operation.effect.as_str())
+                    || operation
+                        .domain_functions
+                        .iter()
+                        .any(|name| name.is_empty())
+                    || !operation
+                        .domain_functions
+                        .windows(2)
+                        .all(|pair| pair[0] < pair[1])
+            })
+        {
+            return invalid(
+                "$.domain_operation_policy.operations",
+                "domain operation has an invalid effect or function census",
+            );
+        }
+        let states = BTreeSet::from(["DOMAIN", "NEUTRAL", "BOTTOM", "OPAQUE"]);
+        let transitions = self
+            .domain_operation_policy
+            .transitions
+            .iter()
+            .map(|transition| (transition.input_state.as_str(), transition.effect.as_str()))
+            .collect::<BTreeSet<_>>();
+        let expected_transitions = states
+            .iter()
+            .flat_map(|state| effects.iter().map(move |effect| (*state, *effect)))
+            .collect::<BTreeSet<_>>();
+        if transitions != expected_transitions
+            || transitions.len() != self.domain_operation_policy.transitions.len()
+            || self
+                .domain_operation_policy
+                .transitions
+                .iter()
+                .any(|transition| !states.contains(transition.output_state.as_str()))
+        {
+            return invalid(
+                "$.domain_operation_policy.transitions",
+                "domain transition lattice must be total and unique",
+            );
+        }
+        if self
+            .domain_operation_policy
+            .comparison_domain_pairs
+            .iter()
+            .any(|pair| pair[0].is_empty() || pair[1].is_empty() || pair[0] >= pair[1])
+        {
+            return invalid(
+                "$.domain_operation_policy.comparison_domain_pairs",
+                "comparison-domain pairs must be canonical and non-reflexive",
+            );
         }
         let expected_annotations = BTreeSet::from([
             "compatibility_mode",
@@ -1234,18 +1373,18 @@ impl SchemaContractIr {
                 }
             }
         }
-        let required_rule_ids = BTreeSet::from([
-            "ontology.fk.v1",
-            "ontology.governed-code.v1",
-            "ontology.primary-key.v1",
-            "ontology.id-domain.v1",
-            "ontology.membership.v1",
-            "ontology.relation-family.v1",
-            "ontology.relation-cardinality.v1",
-            "ontology.relation-owner.v1",
-            "ontology.relation-self-edge.v1",
-            "ontology.property-one-of.v1",
-            "ontology.source-span.v1",
+        let required_rule_operations = BTreeSet::from([
+            OntologyRuleOperationKind::ForeignKeyAntiJoin,
+            OntologyRuleOperationKind::GovernedCodeAntiJoin,
+            OntologyRuleOperationKind::PrimaryKeyUniquenessAggregate,
+            OntologyRuleOperationKind::IdDomainConformance,
+            OntologyRuleOperationKind::OntologyMembershipAntiJoin,
+            OntologyRuleOperationKind::RelationFamilyConformanceJoin,
+            OntologyRuleOperationKind::RelationCardinalityAggregate,
+            OntologyRuleOperationKind::RelationOwnerConformanceJoin,
+            OntologyRuleOperationKind::RelationSelfEdgeJoin,
+            OntologyRuleOperationKind::PropertyValueOneOf,
+            OntologyRuleOperationKind::SourceSpanAllOrNone,
         ]);
         let mut rule_ids = BTreeSet::new();
         let mut rule_operations = BTreeSet::new();
@@ -1281,10 +1420,10 @@ impl SchemaContractIr {
                 }
             }
         }
-        if rule_ids != required_rule_ids {
+        if rule_operations != required_rule_operations {
             return invalid(
                 "$.ontology_rule_contracts",
-                "typed ontology-rule census is incomplete",
+                "typed ontology-rule operation census is incomplete",
             );
         }
         if self.structure_groups.iter().any(|group| {
@@ -4020,6 +4159,8 @@ fn ontology_program_members(
     let batch = RecordBatch::try_new(
         std::sync::Arc::new(Schema::new(vec![
             Field::new("rule_id", DataType::Utf8, false),
+            Field::new("operation_kind", DataType::Utf8, false),
+            Field::new("rule_semantics_identity", DataType::Utf8, false),
             Field::new("calculation_id", DataType::Utf8, false),
             Field::new("policy_id", DataType::Utf8, false),
             Field::new("input_contract", DataType::Utf8, false),
@@ -4031,6 +4172,22 @@ fn ontology_program_members(
             std::sync::Arc::new(StringArray::from_iter_values(
                 rules.iter().map(|rule| rule.rule_id.as_str()),
             )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rules.iter().map(|rule| rule.operation_kind.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(rules.iter().map(|rule| {
+                codefabric::ontology_contract::rule_semantics_identity(
+                    rule.operation_kind.as_str(),
+                    rule.ordered_operands.iter().map(|operand| {
+                        (
+                            operand.ordinal,
+                            operand.relation_ref.as_str(),
+                            operand.column_ref.as_str(),
+                            operand.logical_type.as_str(),
+                        )
+                    }),
+                )
+            }))),
             std::sync::Arc::new(StringArray::from_iter_values(
                 rules.iter().map(|rule| rule.calculation_id.as_str()),
             )),
@@ -4054,6 +4211,160 @@ fn ontology_program_members(
     .map_err(|error| ontology_artifact_error(error.to_string()))?;
     members.insert(
         "program.rule_binding".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let rule_operands = rules
+        .iter()
+        .flat_map(|rule| {
+            rule.ordered_operands
+                .iter()
+                .map(move |operand| (rule.rule_id.as_str(), operand))
+        })
+        .collect::<Vec<_>>();
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("rule_id", DataType::Utf8, false),
+            Field::new("ordinal", DataType::UInt16, false),
+            Field::new("relation_ref", DataType::Utf8, false),
+            Field::new("column_ref", DataType::Utf8, false),
+            Field::new("logical_type", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_operands.iter().map(|row| row.0),
+            )),
+            std::sync::Arc::new(UInt16Array::from_iter_values(
+                rule_operands.iter().map(|row| row.1.ordinal),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_operands.iter().map(|row| row.1.relation_ref.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_operands.iter().map(|row| row.1.column_ref.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_operands.iter().map(|row| row.1.logical_type.as_str()),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.rule_operand".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let domain_policy = &compiled.schema.domain_operation_policy;
+    let function_lists = domain_policy
+        .operations
+        .iter()
+        .map(|operation| operation.domain_functions.join(","))
+        .collect::<Vec<_>>();
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("policy_version", DataType::Utf8, false),
+            Field::new("expression_variant", DataType::Utf8, false),
+            Field::new("effect", DataType::Utf8, false),
+            Field::new("domain_functions", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                domain_policy
+                    .operations
+                    .iter()
+                    .map(|_| domain_policy.policy_version.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                domain_policy
+                    .operations
+                    .iter()
+                    .map(|operation| operation.expression_variant.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                domain_policy
+                    .operations
+                    .iter()
+                    .map(|operation| operation.effect.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                function_lists.iter().map(String::as_str),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.domain_operation_policy".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let transitions = &domain_policy.transitions;
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("policy_version", DataType::Utf8, false),
+            Field::new("input_state", DataType::Utf8, false),
+            Field::new("effect", DataType::Utf8, false),
+            Field::new("output_state", DataType::Utf8, false),
+            Field::new("allowed", DataType::Boolean, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                transitions
+                    .iter()
+                    .map(|_| domain_policy.policy_version.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                transitions
+                    .iter()
+                    .map(|transition| transition.input_state.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                transitions
+                    .iter()
+                    .map(|transition| transition.effect.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                transitions
+                    .iter()
+                    .map(|transition| transition.output_state.as_str()),
+            )),
+            std::sync::Arc::new(BooleanArray::from(
+                transitions
+                    .iter()
+                    .map(|transition| transition.allowed)
+                    .collect::<Vec<_>>(),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.domain_transition_policy".to_owned(),
+        encode_ontology_member(&batch)?,
+    );
+
+    let comparisons = &domain_policy.comparison_domain_pairs;
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::new(Schema::new(vec![
+            Field::new("policy_version", DataType::Utf8, false),
+            Field::new("left_domain", DataType::Utf8, false),
+            Field::new("right_domain", DataType::Utf8, false),
+        ])),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                comparisons
+                    .iter()
+                    .map(|_| domain_policy.policy_version.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                comparisons.iter().map(|pair| pair[0].as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                comparisons.iter().map(|pair| pair[1].as_str()),
+            )),
+        ],
+    )
+    .map_err(|error| ontology_artifact_error(error.to_string()))?;
+    members.insert(
+        "program.domain_comparison_policy".to_owned(),
         encode_ontology_member(&batch)?,
     );
 
@@ -4753,8 +5064,9 @@ fn render_runtime_rust(ir: &SchemaContractIr, source_digest: &str) -> Vec<u8> {
     let resources = ir.serving_resource_profile;
     writeln!(
         output,
-        "];\n\nconst GENERATED_SERVING_RESOURCE_PROFILE: ServingResourceProfile = ServingResourceProfile {{ batch_size: {}, max_output_rows: {}, max_output_bytes: {}, max_output_batches: {}, max_control_rows: {}, max_control_bytes: {}, max_control_batches: {}, max_snapshot_validation_rows: {}, max_snapshot_validation_bytes: {}, max_snapshot_validation_batches: {} }};",
+        "];\n\nconst GENERATED_SERVING_RESOURCE_PROFILE: ServingResourceProfile = ServingResourceProfile {{ batch_size: {}, max_execution_millis: {}, max_output_rows: {}, max_output_bytes: {}, max_output_batches: {}, max_control_rows: {}, max_control_bytes: {}, max_control_batches: {}, max_snapshot_validation_rows: {}, max_snapshot_validation_bytes: {}, max_snapshot_validation_batches: {} }};",
         rust_usize_literal(resources.batch_size),
+        resources.max_execution_millis,
         rust_usize_literal(resources.max_output_rows),
         rust_usize_literal(resources.max_output_bytes),
         rust_usize_literal(resources.max_output_batches),

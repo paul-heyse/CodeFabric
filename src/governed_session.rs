@@ -1,9 +1,9 @@
 //! Sealed DataFusion ingress for candidate gates and serving execution.
 
 use std::num::NonZeroUsize;
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrow_array::RecordBatch;
 use arrow_schema::ArrowError;
@@ -55,11 +55,94 @@ pub struct GovernedSession {
     session_identity: String,
     config_identity: String,
     policy_identity: String,
+    policy: Arc<crate::domain_conformance::DomainOperationPolicy>,
     runtime_profile: GovernedRuntimeProfile,
-    spill_directory: PathBuf,
+    spill_directory: PrivateSpillDirectory,
 }
 
-static SESSION_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+/// Private process-owned spill directory with bounded orphan reconciliation.
+#[derive(Debug)]
+pub(crate) struct PrivateSpillDirectory {
+    path: PathBuf,
+}
+
+impl PrivateSpillDirectory {
+    pub(crate) fn create(parent: &std::path::Path, family: &str) -> Result<Self, std::io::Error> {
+        std::fs::create_dir_all(parent)?;
+        reconcile_orphaned_spill_directories(parent, family)?;
+        let nonce = crate::identity::random_registration_nonce()
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let suffix = nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let path = parent.join(format!("{family}-{}-{suffix}", std::process::id()));
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700).create(&path)?;
+        Ok(Self { path })
+    }
+
+    #[must_use]
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for PrivateSpillDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn reconcile_orphaned_spill_directories(
+    parent: &std::path::Path,
+    family: &str,
+) -> Result<usize, std::io::Error> {
+    let prefix = format!("{family}-");
+    let current_pid = std::process::id();
+    let current_uid = rustix::process::getuid().as_raw();
+    let mut removed = 0;
+    for entry in std::fs::read_dir(parent)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(remainder) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some((pid, nonce)) = remainder.split_once('-') else {
+            continue;
+        };
+        let Ok(pid) = pid.parse::<u32>() else {
+            continue;
+        };
+        if pid == current_pid
+            || nonce.len() != 32
+            || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        if !metadata.file_type().is_dir()
+            || metadata.uid() != current_uid
+            || metadata.mode() & 0o777 != 0o700
+        {
+            continue;
+        }
+        let Some(pid) = rustix::process::Pid::from_raw(pid as i32) else {
+            continue;
+        };
+        if matches!(
+            rustix::process::test_kill_process(pid),
+            Err(rustix::io::Errno::SRCH)
+        ) {
+            std::fs::remove_dir_all(entry.path())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
 
 /// Versioned bounded runtime profile shared by candidate program execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -180,6 +263,8 @@ pub enum GovernedSessionError {
     DataFusion(#[from] DataFusionError),
     #[error(transparent)]
     Gate(#[from] OntologyGateError),
+    #[error(transparent)]
+    Program(#[from] crate::ontology_program::OntologyProgramError),
     #[error("GOVERNED_PLAN_INGRESS_REJECTED:{0}")]
     Ingress(String),
 }
@@ -194,6 +279,7 @@ fn framed(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
     crate::integrity::framed_digest(&bytes)
 }
 
+#[cfg(test)]
 fn reject_sql_surface(sql: &str) -> Result<(), GovernedSessionError> {
     let normalized = sql.trim_start().to_ascii_uppercase();
     let forbidden = [
@@ -229,11 +315,20 @@ impl GovernedSession {
     /// # Errors
     ///
     /// Returns an Arrow error if the generated extension registry is internally inconsistent.
-    pub fn new(
+    #[cfg(test)]
+    pub(crate) fn new(config: SessionConfig) -> Result<Self, GovernedSessionError> {
+        let package = crate::ontology_program::build_ontology_program_package(
+            &crate::ontology_program::OntologyPackagingProfile::default(),
+        )?;
+        Self::new_for_package(config, &package)
+    }
+
+    /// Construct a session from the exact ontology package that selects its analyzer policy.
+    pub(crate) fn new_for_package(
         config: SessionConfig,
-        policy_identity: impl Into<String>,
+        package: &crate::ontology_program::OntologyProgramPackage,
     ) -> Result<Self, GovernedSessionError> {
-        Self::new_with_runtime(config, policy_identity, GovernedRuntimeProfile::default())
+        Self::new_with_runtime(config, package, GovernedRuntimeProfile::default())
     }
 
     /// Construct a session with an explicit versioned memory, spill, batch, partition, and
@@ -243,18 +338,16 @@ impl GovernedSession {
     ///
     /// Rejects an invalid runtime profile or empty policy identity, or returns a DataFusion/
     /// Arrow construction error when the governed runtime cannot be built.
-    pub fn new_with_runtime(
+    pub(crate) fn new_with_runtime(
         config: SessionConfig,
-        policy_identity: impl Into<String>,
+        package: &crate::ontology_program::OntologyProgramPackage,
         runtime_profile: GovernedRuntimeProfile,
     ) -> Result<Self, GovernedSessionError> {
         runtime_profile.validate()?;
-        let policy_identity = policy_identity.into();
-        if policy_identity.trim().is_empty() {
-            return Err(GovernedSessionError::Ingress(
-                "policy identity is empty".into(),
-            ));
-        }
+        crate::ontology_program::validate_ontology_program_package(package)?;
+        let policy =
+            Arc::new(crate::domain_conformance::DomainOperationPolicy::from_package(package)?);
+        let policy_identity = policy.identity().to_owned();
         let config = config
             .with_batch_size(runtime_profile.batch_size)
             .with_target_partitions(runtime_profile.target_partitions);
@@ -263,23 +356,20 @@ impl GovernedSession {
             format!("{config:?}").as_bytes(),
             runtime_profile.identity().as_bytes(),
         ]);
-        let spill_directory = std::env::temp_dir().join(format!(
-            "codefabric-governed-{}-{}",
-            std::process::id(),
-            SESSION_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&spill_directory).map_err(|error| {
-            GovernedSessionError::Ingress(format!(
-                "cannot create governed spill directory {}: {error}",
-                spill_directory.display()
-            ))
-        })?;
+        let spill_directory =
+            PrivateSpillDirectory::create(&std::env::temp_dir(), "codefabric-governed").map_err(
+                |error| {
+                    GovernedSessionError::Ingress(format!(
+                        "cannot create governed spill directory: {error}"
+                    ))
+                },
+            )?;
         let runtime = RuntimeEnvBuilder::new()
             .with_memory_pool(Arc::new(TrackConsumersPool::new(
                 FairSpillPool::new(runtime_profile.memory_limit_bytes),
                 runtime_profile.tracked_consumer_count,
             )))
-            .with_temp_file_path(&spill_directory)
+            .with_temp_file_path(spill_directory.path())
             .with_max_temp_directory_size(runtime_profile.max_spill_bytes)
             .build()
             .map_err(GovernedSessionError::DataFusion)?;
@@ -292,7 +382,7 @@ impl GovernedSession {
             .with_runtime_env(Arc::new(runtime))
             .with_extension_type_registry(Arc::new(extension_types))
             .with_analyzer_rule(Arc::new(
-                crate::domain_conformance::DomainConformanceRule::new(),
+                crate::domain_conformance::DomainConformanceRule::new(Arc::clone(&policy)),
             ))
             .build();
         let context = SessionContext::new_with_state(state);
@@ -307,6 +397,7 @@ impl GovernedSession {
             session_identity,
             config_identity,
             policy_identity,
+            policy,
             runtime_profile,
             spill_directory,
         })
@@ -328,13 +419,18 @@ impl GovernedSession {
     }
 
     #[must_use]
+    pub fn result_policy_identity(&self) -> String {
+        self.policy.result_policy_identity()
+    }
+
+    #[must_use]
     pub fn runtime_profile(&self) -> &GovernedRuntimeProfile {
         &self.runtime_profile
     }
 
     #[must_use]
     pub fn spill_directory(&self) -> &std::path::Path {
-        &self.spill_directory
+        self.spill_directory.path()
     }
 
     /// Construct an in-memory relational input inside this sealed session.
@@ -371,7 +467,10 @@ impl GovernedSession {
     /// # Errors
     ///
     /// Rejects statements, custom nodes, unresolved forms, or ID-domain violations.
-    pub fn seal_plan(&self, plan: LogicalPlan) -> Result<GovernedPlan, GovernedSessionError> {
+    pub(crate) fn seal_plan(
+        &self,
+        plan: LogicalPlan,
+    ) -> Result<GovernedPlan, GovernedSessionError> {
         let state = self.context.state();
         let analyzed = state.analyzer().execute_and_check(
             plan,
@@ -379,7 +478,10 @@ impl GovernedSession {
             |_plan, _rule| {},
         )?;
         // The application analyzer is idempotent and must remain last after built-in resolution.
-        let twice = crate::domain_conformance::analyze_governed_plan(analyzed.clone())?;
+        let twice = crate::domain_conformance::analyze_governed_plan(
+            analyzed.clone(),
+            Arc::clone(&self.policy),
+        )?;
         if analyzed != twice {
             return Err(GovernedSessionError::Ingress(
                 "application analyzer is not idempotent".into(),
@@ -404,7 +506,8 @@ impl GovernedSession {
     /// # Errors
     ///
     /// Rejects every non-query command before planning and all invalid plans after analysis.
-    pub async fn seal_sql(&self, sql: &str) -> Result<GovernedPlan, GovernedSessionError> {
+    #[cfg(test)]
+    pub(crate) async fn seal_sql(&self, sql: &str) -> Result<GovernedPlan, GovernedSessionError> {
         reject_sql_surface(sql)?;
         let plan = self.context.state().create_logical_plan(sql).await?;
         self.seal_plan(plan)
@@ -492,6 +595,16 @@ impl GovernedSession {
         };
         tokio::pin!(cancel);
         tokio::select! {
+            biased;
+            () = &mut cancel => Err(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Cancelled,
+            ).into()),
+            () = tokio::time::sleep(std::time::Duration::from_millis(deadline)) => Err(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Deadline {
+                    limit_millis: deadline,
+                },
+            )
+            .into()),
             outcome = &mut execution => match outcome {
                 Err(crate::ontology_gate::OntologyGateError::DataFusion(
                     DataFusionError::ResourcesExhausted(_),
@@ -502,22 +615,7 @@ impl GovernedSession {
                 ).into()),
                 outcome => Ok(outcome?),
             },
-            () = &mut cancel => Err(crate::ontology_gate::OntologyGateError::Resource(
-                crate::ontology_gate::GateResourceFailure::Cancelled,
-            ).into()),
-            () = tokio::time::sleep(std::time::Duration::from_millis(deadline)) => Err(crate::ontology_gate::OntologyGateError::Resource(
-                crate::ontology_gate::GateResourceFailure::Deadline {
-                    limit_millis: deadline,
-                },
-            )
-            .into()),
         }
-    }
-}
-
-impl Drop for GovernedSession {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.spill_directory);
     }
 }
 
@@ -545,7 +643,7 @@ mod tests {
     use crate::schema_registry::{DomainTypedLiteral, table_spec};
 
     fn session() -> GovernedSession {
-        GovernedSession::new(SessionConfig::new(), "policy.test.v1").expect("governed session")
+        GovernedSession::new(SessionConfig::new()).expect("governed session")
     }
 
     fn workspace_plan() -> datafusion::logical_expr::LogicalPlan {
@@ -561,6 +659,50 @@ mod tests {
             .expect("scan")
             .build()
             .expect("plan")
+    }
+
+    #[test]
+    fn ontology_governed_spill_orphan_reconciliation() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let parent = tempfile::tempdir().expect("private spill parent");
+        let nonce = "00000000000000000000000000000000";
+        let orphan = parent
+            .path()
+            .join(format!("codefabric-candidate-2147483647-{nonce}"));
+        std::fs::create_dir(&orphan).expect("orphan spill directory");
+        std::fs::set_permissions(&orphan, std::fs::Permissions::from_mode(0o700))
+            .expect("private orphan permissions");
+        std::fs::write(orphan.join("spill"), b"orphaned bytes").expect("orphan spill bytes");
+
+        let foreign_mode = parent
+            .path()
+            .join(format!("codefabric-candidate-2147483646-{nonce}"));
+        std::fs::create_dir(&foreign_mode).expect("non-private spill directory");
+        std::fs::set_permissions(&foreign_mode, std::fs::Permissions::from_mode(0o755))
+            .expect("non-private permissions");
+
+        assert_eq!(
+            super::reconcile_orphaned_spill_directories(parent.path(), "codefabric-candidate")
+                .expect("bounded orphan reconciliation"),
+            1
+        );
+        assert!(!orphan.exists());
+        assert!(
+            foreign_mode.exists(),
+            "unsafe ownership/mode must fail closed"
+        );
+
+        let live = super::PrivateSpillDirectory::create(parent.path(), "codefabric-candidate")
+            .expect("new private spill directory");
+        assert_eq!(
+            std::fs::symlink_metadata(live.path())
+                .expect("live spill metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
     }
 
     #[test]
@@ -688,12 +830,13 @@ mod tests {
             max_execution_millis: 1_000,
             tracked_consumer_count: std::num::NonZeroUsize::new(4).expect("non-zero"),
         };
-        let session = GovernedSession::new_with_runtime(
-            SessionConfig::new(),
-            "policy.runtime.test.v1",
-            profile.clone(),
+        let package = crate::ontology_program::build_ontology_program_package(
+            &crate::ontology_program::OntologyPackagingProfile::default(),
         )
-        .expect("bounded governed session");
+        .expect("generated ontology package");
+        let session =
+            GovernedSession::new_with_runtime(SessionConfig::new(), &package, profile.clone())
+                .expect("bounded governed session");
         assert_eq!(session.runtime_profile(), &profile);
 
         let task_context = session.context.task_ctx();

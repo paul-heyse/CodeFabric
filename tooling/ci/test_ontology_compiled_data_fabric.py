@@ -313,7 +313,8 @@ def test_ontology_datafabric_successor_authority() -> None:
         candidate,
     )
     assert "submit_and_activate" in activation
-    assert "OntologyActivationCoordinator::submit_and_activate" in daemon
+    for phase in ("prepare_submission", "prove_prepared", "commit_prepared"):
+        assert f"OntologyActivationCoordinator::{phase}" in daemon
     assert "legacy_result_authority_pin" in _text("src/snapshot_runtime.rs")
     assert "SEMANTIC_OPERATION_" + "SPECS" not in semantic
     assert not (ROOT / "src/compiled_ontology.rs").exists()

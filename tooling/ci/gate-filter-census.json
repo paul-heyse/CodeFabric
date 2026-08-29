@@ -28,11 +28,11 @@
     },
     {
       "recipe": "ontology-runtime-resource-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(candidate_resource_failure_no_mutation|governed_runtime_deadline_cancellation_memory_cleanup)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(candidate_resource_failure_no_mutation|governed_runtime_deadline_cancellation_memory_cleanup|governed_spill_orphan_reconciliation|serving_inflight_termination_and_release)/)' --no-tests=fail"
     },
     {
       "recipe": "id-domain-plan-enforcement-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)|odf_embedded_subquery_plan_is_domain_checked|serving_allowlist_rejects_provider_inside_scalar_subquery)/)' --no-tests=fail"
     },
     {
       "recipe": "ontology-candidate-receipt-check",
@@ -48,7 +48,7 @@
     },
     {
       "recipe": "ontology-activation-recovery-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail"
     },
     {
       "recipe": "ontology-activation-recovery-check",
@@ -60,7 +60,7 @@
     },
     {
       "recipe": "result-authority-lease-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/ontology_result_authority_lease_matrix|odf_result_checksum_v2_continuity/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(result_authority_lease_matrix|retained_epoch_package_reconstruction)|odf_result_checksum_v2_continuity/)' --no-tests=fail"
     },
     {
       "recipe": "ontology-datafabric-integration-check",
@@ -92,7 +92,7 @@
     },
     {
       "recipe": "provider-statistics-contract-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract|exact_statistics_and_structured_scan_survive_governance_wrapper)/)' --no-tests=fail"
     },
     {
       "recipe": "provider-protocol-check",

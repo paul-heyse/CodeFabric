@@ -14,3 +14,12 @@ invalid:
               _ => unsupported(),
           }
       }
+  - |
+      fn execute(operation: DecodedProgramOperation) {
+          match operation.rule_id.as_str() {
+              "ontology.property_value_one_of" => property(),
+              _ => unsupported(),
+          }
+      }
+  - |
+      pub(crate) fn commit_fact_snapshot() {}

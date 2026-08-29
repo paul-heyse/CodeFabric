@@ -530,6 +530,7 @@ pub struct ControlProjectionSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ServingResourceProfile {
     pub batch_size: usize,
+    pub max_execution_millis: u64,
     pub max_output_rows: usize,
     pub max_output_bytes: usize,
     pub max_output_batches: usize,

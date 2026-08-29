@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use arrow_array::{Array as _, Int16Array, RecordBatch, StringArray};
+use arrow_array::{Array as _, Int16Array, Int32Array, RecordBatch, StringArray};
 use datafusion::logical_expr::{Expr, col, lit};
 use datafusion::scalar::ScalarValue;
 use thiserror::Error;
@@ -15,12 +15,24 @@ use crate::ontology_program::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecodedRuleBinding {
     pub rule_id: String,
+    pub operation_kind: String,
+    pub ordered_operands: Vec<DecodedRuleOperand>,
+    pub semantics_identity: String,
     pub calculation_id: String,
     pub policy_id: String,
     pub input_contract: String,
     pub expected_result_contract: String,
     pub determinism_class: String,
     pub diagnostic_code: String,
+}
+
+/// One ordered authored operand that contributes to rule semantics and package identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecodedRuleOperand {
+    pub ordinal: u16,
+    pub relation_ref: String,
+    pub column_ref: String,
+    pub logical_type: String,
 }
 
 /// One fail-closed semantic phrase binding compiled through the same calculation catalog.
@@ -104,6 +116,16 @@ fn int16<'a>(
         .ok_or_else(|| OntologyProgramCompileError::Decode(format!("{name} is not Int16")))
 }
 
+fn int32<'a>(
+    batch: &'a RecordBatch,
+    name: &str,
+) -> Result<&'a Int32Array, OntologyProgramCompileError> {
+    batch
+        .column_by_name(name)
+        .and_then(|column| column.as_any().downcast_ref::<Int32Array>())
+        .ok_or_else(|| OntologyProgramCompileError::Decode(format!("{name} is not Int32")))
+}
+
 fn one_batch<'a>(
     package: &'a OntologyProgramPackage,
     relation: &str,
@@ -125,6 +147,8 @@ fn decode_rules(
 ) -> Result<BTreeMap<String, DecodedRuleBinding>, OntologyProgramCompileError> {
     let batch = one_batch(package, "program.rule_binding")?;
     let rule_ids = utf8(batch, "rule_id")?;
+    let operation_kinds = utf8(batch, "operation_kind")?;
+    let semantics_identities = utf8(batch, "rule_semantics_identity")?;
     let calculations = utf8(batch, "calculation_id")?;
     let policies = utf8(batch, "policy_id")?;
     let inputs = utf8(batch, "input_contract")?;
@@ -135,6 +159,9 @@ fn decode_rules(
     for row in 0..batch.num_rows() {
         let rule = DecodedRuleBinding {
             rule_id: rule_ids.value(row).into(),
+            operation_kind: operation_kinds.value(row).into(),
+            ordered_operands: Vec::new(),
+            semantics_identity: semantics_identities.value(row).into(),
             calculation_id: calculations.value(row).into(),
             policy_id: policies.value(row).into(),
             input_contract: inputs.value(row).into(),
@@ -143,6 +170,8 @@ fn decode_rules(
             diagnostic_code: diagnostics.value(row).into(),
         };
         if rule.rule_id.is_empty()
+            || rule.operation_kind.is_empty()
+            || rule.semantics_identity.is_empty()
             || rule.calculation_id.is_empty()
             || rule.policy_id.is_empty()
             || rule.input_contract.is_empty()
@@ -153,6 +182,63 @@ fn decode_rules(
         {
             return Err(OntologyProgramCompileError::Decode(format!(
                 "rule binding row {row} is empty or duplicated"
+            )));
+        }
+    }
+    let operands = one_batch(package, "program.rule_operand")?;
+    let operand_rule_ids = utf8(operands, "rule_id")?;
+    let ordinals = uint16(operands, "ordinal")?;
+    let relation_refs = utf8(operands, "relation_ref")?;
+    let column_refs = utf8(operands, "column_ref")?;
+    let logical_types = utf8(operands, "logical_type")?;
+    for row in 0..operands.num_rows() {
+        let rule_id = operand_rule_ids.value(row);
+        let rule = rules.get_mut(rule_id).ok_or_else(|| {
+            OntologyProgramCompileError::Decode(format!(
+                "rule operand row {row} references unknown rule {rule_id}"
+            ))
+        })?;
+        if usize::from(ordinals.value(row)) != rule.ordered_operands.len()
+            || relation_refs.value(row).is_empty()
+            || column_refs.value(row).is_empty()
+            || !matches!(
+                logical_types.value(row),
+                "relation" | "column" | "scalar" | "contract"
+            )
+        {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "rule operand row {row} is empty, out of order, or unsupported"
+            )));
+        }
+        rule.ordered_operands.push(DecodedRuleOperand {
+            ordinal: ordinals.value(row),
+            relation_ref: relation_refs.value(row).into(),
+            column_ref: column_refs.value(row).into(),
+            logical_type: logical_types.value(row).into(),
+        });
+    }
+    for rule in rules.values() {
+        if rule.ordered_operands.is_empty() {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "rule {} has no authored operands",
+                rule.rule_id
+            )));
+        }
+        let expected_identity = crate::ontology_contract::rule_semantics_identity(
+            &rule.operation_kind,
+            rule.ordered_operands.iter().map(|operand| {
+                (
+                    operand.ordinal,
+                    operand.relation_ref.as_str(),
+                    operand.column_ref.as_str(),
+                    operand.logical_type.as_str(),
+                )
+            }),
+        );
+        if rule.semantics_identity != expected_identity {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "rule {} semantics identity differs from its operation and operands",
+                rule.rule_id
             )));
         }
     }
@@ -359,6 +445,25 @@ fn decode_calculations(
     Ok(calculations)
 }
 
+fn decode_enum_values(
+    package: &OntologyProgramPackage,
+) -> Result<BTreeMap<(String, String), i32>, OntologyProgramCompileError> {
+    let batch = one_batch(package, "program.enum_value")?;
+    let domains = utf8(batch, "domain")?;
+    let names = utf8(batch, "name")?;
+    let codes = int32(batch, "code")?;
+    let mut values = BTreeMap::new();
+    for row in 0..batch.num_rows() {
+        let key = (domains.value(row).to_owned(), names.value(row).to_owned());
+        if key.0.is_empty() || key.1.is_empty() || values.insert(key, codes.value(row)).is_some() {
+            return Err(OntologyProgramCompileError::Decode(format!(
+                "enum value row {row} is empty or duplicated"
+            )));
+        }
+    }
+    Ok(values)
+}
+
 /// Digest-checked generic compiler for the current native DataFusion profile.
 #[derive(Clone, Debug)]
 pub struct OntologyProgramCompiler {
@@ -368,6 +473,7 @@ pub struct OntologyProgramCompiler {
     pub phrases: BTreeMap<String, DecodedPhraseBinding>,
     pub query_phrases: BTreeMap<String, DecodedQueryPhrase>,
     pub query_projection_codes: BTreeMap<(String, String), Vec<i32>>,
+    pub enum_values: BTreeMap<(String, String), i32>,
     pub calculations: BTreeMap<String, DecodedCalculation>,
 }
 
@@ -435,6 +541,7 @@ impl OntologyProgramCompiler {
         let phrases = decode_phrases(package)?;
         let query_phrases = decode_query_phrases(package)?;
         let query_projection_codes = decode_query_projections(package)?;
+        let enum_values = decode_enum_values(package)?;
         let calculations = decode_calculations(package)?;
         let referenced = rules
             .values()
@@ -455,10 +562,11 @@ impl OntologyProgramCompiler {
             .keys()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        if !referenced.is_subset(&available) {
+        if referenced != available {
             return Err(OntologyProgramCompileError::Decode(format!(
-                "dangling calculations: {:?}",
-                referenced.difference(&available).collect::<Vec<_>>()
+                "calculation catalog is not bijective; dangling={:?}, unused={:?}",
+                referenced.difference(&available).collect::<Vec<_>>(),
+                available.difference(&referenced).collect::<Vec<_>>()
             )));
         }
         let supported = BTreeSet::from(["eq", "in_list", "relational_program"]);
@@ -492,10 +600,11 @@ impl OntologyProgramCompiler {
                 || rule.policy_id != program.policy_id
                 || rule.expected_result_contract != program.expected_result_contract
                 || rule.diagnostic_code != program.diagnostic_code
+                || rule.semantics_identity != program.rule_semantics_identity
                 || calculation.native_operation != "relational_program"
             {
                 return Err(OntologyProgramCompileError::Decode(format!(
-                    "program {} drifts from its rule/calculation authority: calculation={:?}/{:?}, policy={:?}/{:?}, result={:?}/{:?}, diagnostic={:?}/{:?}, native={:?}",
+                    "program {} drifts from its rule/calculation authority: calculation={:?}/{:?}, policy={:?}/{:?}, result={:?}/{:?}, diagnostic={:?}/{:?}, semantics={:?}/{:?}, native={:?}",
                     program.program_id,
                     program.calculation_id,
                     rule.calculation_id,
@@ -505,6 +614,8 @@ impl OntologyProgramCompiler {
                     rule.expected_result_contract,
                     program.diagnostic_code,
                     rule.diagnostic_code,
+                    program.rule_semantics_identity,
+                    rule.semantics_identity,
                     calculation.native_operation,
                 )));
             }
@@ -516,6 +627,7 @@ impl OntologyProgramCompiler {
             phrases,
             query_phrases,
             query_projection_codes,
+            enum_values,
             calculations,
         })
     }
@@ -720,8 +832,7 @@ mod tests {
             .expect("phrase filter")
             .build()
             .expect("phrase plan");
-        let session = GovernedSession::new(SessionConfig::new(), "policy.ontology.test.v1")
-            .expect("governed phrase session");
+        let session = GovernedSession::new(SessionConfig::new()).expect("governed phrase session");
         let sealed = session.seal_plan(plan).expect("seal phrase plan");
         session
             .execute_gate(
@@ -814,6 +925,7 @@ mod tests {
             |value| value == "candidate_validation",
         );
         for (column, replacement) in [
+            ("execution_phase", "disabled"),
             ("rule_id", "ontology.unknown.v1"),
             ("root_node_id", "plan.unknown"),
             ("calculation_id", "calculation.unknown.v1"),
@@ -829,6 +941,37 @@ mod tests {
                 program_row,
                 replacement,
             );
+        }
+
+        let rule_row = utf8_row(&base, "program.rule_binding", "operation_kind", |_| true);
+        for (relation, column, row, replacement) in [
+            (
+                "program.rule_binding",
+                "operation_kind",
+                rule_row,
+                "unsupported_operation",
+            ),
+            (
+                "program.rule_binding",
+                "rule_semantics_identity",
+                rule_row,
+                "b3:authored-semantics-mutant",
+            ),
+            ("program.rule_operand", "relation_ref", 0, "table:32767"),
+            (
+                "program.rule_operand",
+                "column_ref",
+                0,
+                "missing_authored_column",
+            ),
+            (
+                "program.rule_operand",
+                "logical_type",
+                0,
+                "unsupported_logical_type",
+            ),
+        ] {
+            assert_resealed_mutation_causal(&base, &base_plans, relation, column, row, replacement);
         }
 
         for (relation, column, replacement) in [
@@ -867,6 +1010,44 @@ mod tests {
         assert!(
             literal_result.is_err() || literal_result.expect("literal result") != base_plans,
             "literal mutation did not affect planning"
+        );
+
+        let edge_batch = &base.members["program.expression_edge"].batches[0];
+        let parents = edge_batch
+            .column_by_name("parent_id")
+            .and_then(|value| value.as_any().downcast_ref::<StringArray>())
+            .expect("expression parent ids");
+        let expression_edge_row = (0..parents.len())
+            .find(|&row| parents.value(row).starts_with("expr."))
+            .expect("expression-to-expression edge");
+        let expression_parent = parents.value(expression_edge_row).to_owned();
+
+        let mut cycle = base.clone();
+        replace_program_utf8_cell(
+            &mut cycle,
+            "program.expression_edge",
+            "child_expr_id",
+            expression_edge_row,
+            &expression_parent,
+        )
+        .expect("resealed expression cycle");
+        assert!(
+            OntologyProgramCompiler::decode(&cycle).is_err(),
+            "resealed expression cycle was accepted"
+        );
+
+        let mut illegal_alias = base.clone();
+        replace_program_utf8_cell(
+            &mut illegal_alias,
+            "program.expression_edge",
+            "output_alias",
+            expression_edge_row,
+            "illegal_child_alias",
+        )
+        .expect("resealed illegal alias");
+        assert!(
+            OntologyProgramCompiler::decode(&illegal_alias).is_err(),
+            "expression-child output alias was accepted"
         );
     }
 

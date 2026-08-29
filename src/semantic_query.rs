@@ -32,6 +32,7 @@ pub use crate::model_generated::query_forms::{
     QUERY_FORM_CONTRACT_ID, QUERY_FORM_CONTRACT_VERSION, QUERY_FORM_CONTRACTS, QueryFormDescriptor,
     ResultRole, ReturnLimit, ReturnSpec, SemanticQueryClause, SemanticReference,
 };
+use crate::ontology_executor::OntologyProgramCompiler;
 pub use crate::registries::QueryForm;
 use crate::registries::{
     COMPLETENESS_STATE_VALUES, CompletenessState, DEPENDENCY_STATE_VALUES, DependencyState,
@@ -556,6 +557,7 @@ fn valid_id(value: &str, maximum: usize) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.'))
 }
 
+#[cfg(test)]
 fn ontology_compiler()
 -> Result<crate::ontology_executor::OntologyProgramCompiler, SemanticQueryError> {
     let package = crate::ontology_program::build_ontology_program_package(
@@ -664,16 +666,16 @@ fn resolved_phrase_in(
 }
 
 fn resolve_query_phrases(
+    compiler: &crate::ontology_executor::OntologyProgramCompiler,
     query: &SemanticQueryClause,
     query_pointer: &str,
 ) -> Result<Vec<ResolvedPhrase>, SemanticQueryError> {
-    let compiler = ontology_compiler()?;
     let form = query.form();
     let mut phrases = Vec::new();
     match query {
         SemanticQueryClause::FindEntities { looking_for, .. } => {
             phrases.push(resolved_phrase_in(
-                &compiler,
+                compiler,
                 form,
                 looking_for,
                 format!("{query_pointer}/looking_for"),
@@ -682,7 +684,7 @@ fn resolve_query_phrases(
         SemanticQueryClause::RetrieveFacts { facts, .. } => {
             for (index, phrase) in facts.iter().enumerate() {
                 phrases.push(resolved_phrase_in(
-                    &compiler,
+                    compiler,
                     form,
                     phrase,
                     format!("{query_pointer}/facts/{index}"),
@@ -691,7 +693,7 @@ fn resolve_query_phrases(
         }
         SemanticQueryClause::FollowRelationships { relationship, .. } => {
             phrases.push(resolved_phrase_in(
-                &compiler,
+                compiler,
                 form,
                 relationship,
                 format!("{query_pointer}/relationship"),
@@ -700,7 +702,7 @@ fn resolve_query_phrases(
         SemanticQueryClause::FindPaths { through, .. } => {
             for (index, phrase) in through.iter().enumerate() {
                 phrases.push(resolved_phrase_in(
-                    &compiler,
+                    compiler,
                     form,
                     phrase,
                     format!("{query_pointer}/through/{index}"),
@@ -716,7 +718,7 @@ fn resolve_query_phrases(
                 // Binding selectors use the find-entities phrase vocabulary even though the
                 // enclosing operator is the pattern matcher.
                 phrases.push(resolved_phrase_in(
-                    &compiler,
+                    compiler,
                     QueryForm::FindEntities,
                     &binding.looking_for,
                     format!("{query_pointer}/bindings/{index}/looking_for"),
@@ -724,7 +726,7 @@ fn resolve_query_phrases(
             }
             for (index, relationship) in relationships.iter().enumerate() {
                 phrases.push(resolved_phrase_in(
-                    &compiler,
+                    compiler,
                     QueryForm::FollowRelationships,
                     &relationship.relationship,
                     format!("{query_pointer}/relationships/{index}/relationship"),
@@ -734,7 +736,7 @@ fn resolve_query_phrases(
         SemanticQueryClause::SummarizeFacts { summaries, .. } => {
             for (index, phrase) in summaries.iter().enumerate() {
                 phrases.push(resolved_phrase_in(
-                    &compiler,
+                    compiler,
                     form,
                     phrase,
                     format!("{query_pointer}/summaries/{index}"),
@@ -1076,7 +1078,6 @@ pub fn type_request(
             let query_id = query.query_id();
             let form = query.form();
             let source_pointer = format!("/queries/{index}");
-            let resolved_phrases = resolve_query_phrases(query, &source_pointer)?;
             validate_structural_conditions(query, &source_pointer)?;
             let references = query.result_references();
             let limit = QueryLimit {
@@ -1093,7 +1094,9 @@ pub fn type_request(
                 form,
                 input_roles,
                 output_role: form.output_role(),
-                resolved_phrases,
+                // Phrase resolution is package-dependent and therefore occurs only after a
+                // retained ontology package is selected by a serving lease.
+                resolved_phrases: Vec::new(),
                 dependencies: dependencies.get(query_id).cloned().unwrap_or_default(),
                 fan_in: references.len(),
                 fan_out: fan_out.get(query_id).copied().unwrap_or_default(),
@@ -1205,21 +1208,31 @@ fn all_of(expressions: Vec<Expr>) -> Option<Expr> {
     expressions.into_iter().reduce(Expr::and)
 }
 
-fn compiled_enum_code(domain: &str, name: &str) -> i16 {
-    crate::ontology_program::ontology_program_vocabulary()
-        .expect("generated ontology program was model-validated")
+fn compiled_enum_code(
+    compiler: &OntologyProgramCompiler,
+    domain: &str,
+    name: &str,
+) -> Result<i16, SemanticQueryError> {
+    compiler
         .enum_values
-        .iter()
-        .find(|value| value.domain == domain && value.name == name)
-        .and_then(|value| i16::try_from(value.code).ok())
-        .unwrap_or_else(|| panic!("compiled enum value {domain}.{name} is absent or not code16"))
+        .get(&(domain.to_owned(), name.to_owned()))
+        .copied()
+        .and_then(|value| i16::try_from(value).ok())
+        .ok_or_else(|| {
+            phase_error(
+                "ONTOLOGY_ENUM_VALUE_MISSING",
+                "semantic_binding",
+                "",
+                format!("retained ontology package has no code16 value {domain}.{name}"),
+            )
+        })
 }
 
 fn query_projection_codes(
+    compiler: &OntologyProgramCompiler,
     phrases: &[ResolvedPhrase],
     target_kind: &str,
 ) -> Result<Vec<ScalarValue>, SemanticQueryError> {
-    let compiler = ontology_compiler()?;
     Ok(phrases
         .iter()
         .flat_map(|phrase| {
@@ -1236,16 +1249,25 @@ fn query_projection_codes(
         .collect())
 }
 
-fn entity_kind_codes(phrases: &[ResolvedPhrase]) -> Result<Vec<ScalarValue>, SemanticQueryError> {
-    query_projection_codes(phrases, "entity_kind")
+fn entity_kind_codes(
+    compiler: &OntologyProgramCompiler,
+    phrases: &[ResolvedPhrase],
+) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+    query_projection_codes(compiler, phrases, "entity_kind")
 }
 
-fn relation_kind_codes(phrases: &[ResolvedPhrase]) -> Result<Vec<ScalarValue>, SemanticQueryError> {
-    query_projection_codes(phrases, "relation_kind")
+fn relation_kind_codes(
+    compiler: &OntologyProgramCompiler,
+    phrases: &[ResolvedPhrase],
+) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+    query_projection_codes(compiler, phrases, "relation_kind")
 }
 
-fn property_kind_codes(phrases: &[ResolvedPhrase]) -> Result<Vec<ScalarValue>, SemanticQueryError> {
-    query_projection_codes(phrases, "property_kind")
+fn property_kind_codes(
+    compiler: &OntologyProgramCompiler,
+    phrases: &[ResolvedPhrase],
+) -> Result<Vec<ScalarValue>, SemanticQueryError> {
+    query_projection_codes(compiler, phrases, "property_kind")
 }
 
 fn language_predicate(column: &'static str, phrases: &[ResolvedPhrase]) -> Option<Expr> {
@@ -1260,10 +1282,11 @@ fn language_predicate(column: &'static str, phrases: &[ResolvedPhrase]) -> Optio
 }
 
 fn compiled_condition_predicate(
+    compiler: &OntologyProgramCompiler,
     condition: &str,
     qualifier: &str,
 ) -> Result<Expr, SemanticQueryError> {
-    ontology_compiler()?
+    compiler
         .lower_phrase_text_for_qualifier(condition, qualifier)
         .map_err(|error| {
             phase_error(
@@ -1276,12 +1299,13 @@ fn compiled_condition_predicate(
 }
 
 fn condition_predicates(
+    compiler: &OntologyProgramCompiler,
     query: &SemanticQueryClause,
     qualifier: &str,
 ) -> Result<Vec<Expr>, SemanticQueryError> {
     query_where_conditions(query)
         .iter()
-        .map(|condition| compiled_condition_predicate(condition, qualifier))
+        .map(|condition| compiled_condition_predicate(compiler, condition, qualifier))
         .collect()
 }
 
@@ -1311,10 +1335,11 @@ fn bounded_plan(
 
 async fn compile_find_entities(
     session: &ServingQuerySession,
+    compiler: &OntologyProgramCompiler,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<LogicalPlan, SemanticQueryError> {
-    let mut predicates = condition_predicates(query, "entity")?;
+    let mut predicates = condition_predicates(compiler, query, "entity")?;
     let identities = query
         .direct_entity_ids()
         .into_iter()
@@ -1323,7 +1348,7 @@ async fn compile_find_entities(
     if let Some(predicate) = any_of_expr("entity.entity_id", identities) {
         predicates.push(predicate);
     }
-    let kinds = entity_kind_codes(&typed.resolved_phrases)?;
+    let kinds = entity_kind_codes(compiler, &typed.resolved_phrases)?;
     if let Some(predicate) = any_of("entity.entity_kind_code", kinds) {
         predicates.push(predicate);
     }
@@ -1352,9 +1377,10 @@ async fn compile_find_entities(
             col("entity.entity_id"),
             lit(query.query_id()).alias("origin_query_id"),
             lit(ScalarValue::Int16(Some(compiled_enum_code(
+                compiler,
                 "EVIDENCE_CERTAINTY",
                 "SOURCE_EXACT",
-            ))))
+            )?)))
             .alias("certainty_code"),
         ])?;
     bounded_plan(builder, &typed.canonical_order, typed.limit)
@@ -1381,6 +1407,7 @@ fn fact_about_predicates(
 
 async fn compile_retrieve_facts(
     session: &ServingQuerySession,
+    compiler: &OntologyProgramCompiler,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<LogicalPlan, SemanticQueryError> {
@@ -1390,15 +1417,15 @@ async fn compile_retrieve_facts(
         .map(|value| id16_literal(value, "fact:", "fact"))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut property_predicates = condition_predicates(query, "property")?;
+    let mut property_predicates = condition_predicates(compiler, query, "property")?;
     if let Some(predicate) = any_of_expr("property.fact_id", direct_facts.clone()) {
         property_predicates.push(predicate);
     }
     if let Some(predicate) = fact_about_predicates(query, "property.subject_entity_id", None)? {
         property_predicates.push(predicate);
     }
-    let property_kinds = property_kind_codes(&typed.resolved_phrases)?;
-    let relation_kinds = relation_kind_codes(&typed.resolved_phrases)?;
+    let property_kinds = property_kind_codes(compiler, &typed.resolved_phrases)?;
+    let relation_kinds = relation_kind_codes(compiler, &typed.resolved_phrases)?;
     if let Some(predicate) = any_of("property.property_kind_code", property_kinds.clone()) {
         property_predicates.push(predicate);
     } else if !relation_kinds.is_empty() {
@@ -1426,7 +1453,7 @@ async fn compile_retrieve_facts(
         ])?
         .build()?;
 
-    let mut relation_predicates = condition_predicates(query, "relation")?;
+    let mut relation_predicates = condition_predicates(compiler, query, "relation")?;
     if let Some(predicate) = any_of_expr("relation.fact_id", direct_facts) {
         relation_predicates.push(predicate);
     }
@@ -1790,18 +1817,19 @@ fn compile_source_context_template(
 #[allow(clippy::too_many_lines)] // All relational forms share one policy-enforced DataFusion lowering fence.
 async fn lower_relational_block(
     session: &ServingQuerySession,
+    compiler: &OntologyProgramCompiler,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<BoundQueryBlock, SemanticQueryError> {
     let (plan, source_tables, identity_column, runtime) = match typed.form {
         QueryForm::FindEntities => (
-            compile_find_entities(session, typed, query).await?,
+            compile_find_entities(session, compiler, typed, query).await?,
             vec!["entities", "files"],
             "entity_id",
             RelationalRuntime::Snapshot,
         ),
         QueryForm::RetrieveFacts => (
-            compile_retrieve_facts(session, typed, query).await?,
+            compile_retrieve_facts(session, compiler, typed, query).await?,
             vec!["properties", "relations"],
             "fact_id",
             RelationalRuntime::Snapshot,
@@ -1903,9 +1931,10 @@ fn path_policy(value: &str, pointer: &str) -> Result<PathPolicy, SemanticQueryEr
 }
 
 fn resolved_relation_kind_codes(
+    compiler: &OntologyProgramCompiler,
     phrases: &[ResolvedPhrase],
 ) -> Result<Vec<i32>, SemanticQueryError> {
-    let mut codes = relation_kind_codes(phrases)?
+    let mut codes = relation_kind_codes(compiler, phrases)?
         .into_iter()
         .filter_map(|value| match value {
             ScalarValue::Int32(Some(code)) => Some(code),
@@ -1917,8 +1946,10 @@ fn resolved_relation_kind_codes(
     Ok(codes)
 }
 
-fn graph_certainty_codes(query: &SemanticQueryClause) -> Result<Vec<i16>, SemanticQueryError> {
-    let compiler = ontology_compiler()?;
+fn graph_certainty_codes(
+    compiler: &OntologyProgramCompiler,
+    query: &SemanticQueryClause,
+) -> Result<Vec<i16>, SemanticQueryError> {
     let mut codes = BTreeSet::new();
     for condition in query_where_conditions(query) {
         let operation = compiler
@@ -1964,6 +1995,7 @@ fn graph_output_schema(form: QueryForm) -> Result<SchemaRef, SemanticQueryError>
 
 #[allow(clippy::too_many_lines)] // The semantic IR construction exhaustively covers three governed graph variants.
 fn graph_operator_plan(
+    compiler: &OntologyProgramCompiler,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<GraphOperatorPlan, SemanticQueryError> {
@@ -1979,7 +2011,7 @@ fn graph_operator_plan(
             "relational form reached graph lowering".to_owned(),
         ));
     }
-    let relationship_kind_codes = resolved_relation_kind_codes(&typed.resolved_phrases)?;
+    let relationship_kind_codes = resolved_relation_kind_codes(compiler, &typed.resolved_phrases)?;
     let (semantics, maximum_depth) = match query {
         SemanticQueryClause::FollowRelationships {
             direction,
@@ -2022,6 +2054,7 @@ fn graph_operator_plan(
                     direction: graph_direction(direction.as_deref()),
                     path_policy: selected_policy,
                     through_codes: resolved_relation_kind_codes(
+                        compiler,
                         &typed
                             .resolved_phrases
                             .iter()
@@ -2071,7 +2104,7 @@ fn graph_operator_plan(
         block_id: typed.block_id.clone(),
         semantics,
         relationship_kind_codes,
-        certainty_codes: graph_certainty_codes(query)?,
+        certainty_codes: graph_certainty_codes(compiler, query)?,
         input_roles: typed.input_roles.clone(),
         output_role: typed.output_role,
         output_schema: graph_output_schema(typed.form)?,
@@ -2204,6 +2237,7 @@ pub async fn bind_request(
     session: &ServingQuerySession,
     typed: &TypedSemanticRequest,
 ) -> Result<BoundPlanSpec, SemanticQueryError> {
+    let compiler = session.ontology_compiler();
     let mut blocks = Vec::with_capacity(typed.blocks.len());
     for block in &typed.blocks {
         let query = typed
@@ -2216,19 +2250,26 @@ pub async fn bind_request(
                     "typed block does not retain its parsed query".to_owned(),
                 )
             })?;
+        let mut bound_block = block.clone();
+        bound_block.resolved_phrases =
+            resolve_query_phrases(&compiler, query, &bound_block.source_pointer)?;
         if matches!(
-            block.form,
+            bound_block.form,
             QueryForm::FindEntities
                 | QueryForm::RetrieveFacts
                 | QueryForm::CombineResults
                 | QueryForm::SummarizeFacts
                 | QueryForm::RetrieveSourceContext
         ) {
-            blocks.push(lower_relational_block(session, block, query).await?);
+            blocks.push(lower_relational_block(session, &compiler, &bound_block, query).await?);
         } else {
             blocks.push(BoundQueryBlock {
-                typed: block.clone(),
-                operator: BoundOperator::Graph(graph_operator_plan(block, query)?),
+                operator: BoundOperator::Graph(graph_operator_plan(
+                    &compiler,
+                    &bound_block,
+                    query,
+                )?),
+                typed: bound_block,
             });
         }
     }
@@ -2340,6 +2381,7 @@ fn dependency_identity_in_schema(completed: &CompletedBlock) -> Result<&str, Sem
 }
 
 fn normalized_dependency_plan(
+    compiler: &OntologyProgramCompiler,
     dependency_id: &str,
     completed: &CompletedBlock,
 ) -> Result<LogicalPlan, SemanticQueryError> {
@@ -2354,9 +2396,10 @@ fn normalized_dependency_plan(
         col("certainty_code")
     } else {
         lit(ScalarValue::Int16(Some(compiled_enum_code(
+            compiler,
             "EVIDENCE_CERTAINTY",
             "UNRESOLVED",
-        ))))
+        )?)))
     };
     Ok(LogicalPlanBuilder::from(input)
         .project(vec![
@@ -2368,6 +2411,7 @@ fn normalized_dependency_plan(
 }
 
 fn compile_runtime_combine(
+    compiler: &OntologyProgramCompiler,
     block: &BoundQueryBlock,
     operation: SetOperation,
     identity_role: ResultRole,
@@ -2394,7 +2438,7 @@ fn compile_runtime_combine(
                     "runtime dependency role differs from the bound identity domain",
                 ));
             }
-            normalized_dependency_plan(dependency, result)
+            normalized_dependency_plan(compiler, dependency, result)
         })
         .collect::<Result<Vec<_>, _>>()?;
     let identity = dependency_identity(identity_role)?;
@@ -2428,6 +2472,7 @@ fn summary_group_expressions(group_by: &[String]) -> Result<Vec<Expr>, SemanticQ
 }
 
 fn compile_runtime_summary(
+    compiler: &OntologyProgramCompiler,
     block: &BoundQueryBlock,
     query: &SemanticQueryClause,
     summary_names: &[String],
@@ -2449,7 +2494,7 @@ fn compile_runtime_summary(
                         format!("dependency {dependency} has no completed Arrow result"),
                     )
                 })
-                .and_then(|result| normalized_dependency_plan(dependency, result))
+                .and_then(|result| normalized_dependency_plan(compiler, dependency, result))
         })
         .collect::<Result<Vec<_>, _>>()?
         .into_iter();
@@ -2695,16 +2740,17 @@ async fn runtime_relational_plan(
     plan: &RelationalOperatorPlan,
     completed: &BTreeMap<String, CompletedBlock>,
 ) -> Result<LogicalPlan, SemanticQueryError> {
+    let compiler = session.ontology_compiler();
     let runtime_plan = match &plan.runtime {
         RelationalRuntime::Snapshot => plan.template_plan.clone(),
         RelationalRuntime::Combine {
             operation,
             identity_role,
-        } => compile_runtime_combine(block, *operation, *identity_role, completed)?,
+        } => compile_runtime_combine(&compiler, block, *operation, *identity_role, completed)?,
         RelationalRuntime::Summarize {
             summary_names,
             group_by,
-        } => compile_runtime_summary(block, query, summary_names, group_by, completed)?,
+        } => compile_runtime_summary(&compiler, block, query, summary_names, group_by, completed)?,
         RelationalRuntime::SourceContext { text_handling, .. } => {
             compile_runtime_source_context(session, block, *text_handling, completed).await?
         }
@@ -3136,6 +3182,7 @@ async fn load_graph_projection(
     execution: &QueryExecutionContext,
     graph_plan: &GraphOperatorPlan,
     artifacts: &QueryExecutionArtifactAccumulator,
+    cancellation: &crate::cancellation::Cancellation,
 ) -> Result<(QueryGraph, QueryPlanArtifact), SemanticQueryError> {
     let mut builder = LogicalPlanBuilder::from(session.table_plan("relations").await?);
     if !graph_plan.relationship_kind_codes.is_empty() {
@@ -3180,11 +3227,12 @@ async fn load_graph_projection(
         .build()?;
     session.validate_query_plan(&plan)?;
     let result = session
-        .query_plan_in_execution_observed(
+        .query_plan_in_execution_observed_with_cancellation(
             &format!("{}-graph-input", graph_plan.block_id),
             plan,
             execution,
             artifacts,
+            cancellation,
         )
         .await?;
     let mut edges = Vec::new();
@@ -4302,11 +4350,12 @@ async fn execute_request_in_context_inner(
                     runtime_relational_plan(session, block, query, plan_spec, &completed).await?;
                 let output_schema = Arc::new(plan.schema().as_arrow().clone());
                 let result = session
-                    .query_plan_in_execution_observed(
+                    .query_plan_in_execution_observed_with_cancellation(
                         &block.typed.block_id,
                         plan,
                         &execution,
                         artifacts,
+                        &cancellation,
                     )
                     .await?;
                 plan_artifacts.push(result.artifact.clone());
@@ -4389,7 +4438,8 @@ async fn execute_request_in_context_inner(
             BoundOperator::Graph(plan) => {
                 let input = graph_inputs(query, &completed)?;
                 let (graph, mut artifact) =
-                    load_graph_projection(session, &execution, plan, artifacts).await?;
+                    load_graph_projection(session, &execution, plan, artifacts, &cancellation)
+                        .await?;
                 let executed = execute_graph_operator(plan, &input, &graph, &cancellation)?;
                 let output_row_count = executed.batches.iter().map(RecordBatch::num_rows).sum();
                 let mut checksums = Vec::with_capacity(executed.batches.len() * 32);
@@ -5027,18 +5077,22 @@ mod tests {
     }
 
     fn graph_plan(typed: &TypedSemanticRequest, form: QueryForm) -> GraphOperatorPlan {
-        let block = typed
+        let mut block = typed
             .blocks
             .iter()
             .find(|block| block.form == form)
-            .unwrap();
+            .unwrap()
+            .clone();
         let query = typed
             .request
             .queries
             .iter()
             .find(|query| query.form() == form)
             .unwrap();
-        graph_operator_plan(block, query).unwrap()
+        let compiler = ontology_compiler().unwrap();
+        block.resolved_phrases =
+            resolve_query_phrases(&compiler, query, &block.source_pointer).unwrap();
+        graph_operator_plan(&compiler, &block, query).unwrap()
     }
 
     fn graph_edges() -> Vec<GraphEdge> {
@@ -5423,7 +5477,7 @@ mod tests {
             .iter()
             .find(|query| query.form() == QueryForm::FindEntities)
             .unwrap();
-        let predicates = condition_predicates(relational, "entity").unwrap();
+        let predicates = condition_predicates(&compiler, relational, "entity").unwrap();
         assert_eq!(predicates.len(), 1);
         let rendered = predicates[0].to_string();
         for code in &expected {
@@ -5437,7 +5491,7 @@ mod tests {
             .find(|query| query.form() == QueryForm::FollowRelationships)
             .unwrap();
         assert_eq!(
-            graph_certainty_codes(graph)
+            graph_certainty_codes(&compiler, graph)
                 .unwrap()
                 .into_iter()
                 .collect::<BTreeSet<_>>(),
@@ -5618,7 +5672,7 @@ mod tests {
             .iter()
             .find(|query| query.form() == QueryForm::CombineResults)
             .unwrap();
-        assert!(graph_operator_plan(relational, query).is_err());
+        assert!(graph_operator_plan(&ontology_compiler().unwrap(), relational, query).is_err());
 
         let mut follow_plan = graph_plan(&typed, QueryForm::FollowRelationships);
         follow_plan.semantics = GraphSemantics::Follow {
@@ -5777,9 +5831,13 @@ mod tests {
                     | QueryForm::SummarizeFacts
                     | QueryForm::RetrieveSourceContext
             ) {
-                assert!(graph_operator_plan(block, query).is_err());
+                assert!(graph_operator_plan(&ontology_compiler().unwrap(), block, query).is_err());
             } else {
-                let plan = graph_operator_plan(block, query).unwrap();
+                let compiler = ontology_compiler().unwrap();
+                let mut bound_block = block.clone();
+                bound_block.resolved_phrases =
+                    resolve_query_phrases(&compiler, query, &bound_block.source_pointer).unwrap();
+                let plan = graph_operator_plan(&compiler, &bound_block, query).unwrap();
                 assert_eq!(plan.form, block.form);
                 assert_eq!(plan.output_role, block.output_role);
                 assert_eq!(plan.canonical_order, block.canonical_order);
@@ -5930,7 +5988,7 @@ mod tests {
             .find(|query| query.form() == QueryForm::FindPaths)
             .unwrap();
         assert!(
-            graph_operator_plan(block, query)
+            graph_operator_plan(&ontology_compiler().unwrap(), block, query)
                 .unwrap_err()
                 .to_string()
                 .contains("requires an explicit maximum_length")

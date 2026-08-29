@@ -1,7 +1,7 @@
-// @generated from codefabric.schema.contract-ir b3:25a6ea39378b583dd2cc566cfa66f7c0a5d1d6ab02b59d8fd3af7aa67e1dc66b; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:133bc5a886584b79fa96f5b8ab5e6062ad41c5b08314745e7da88a803d3355f3; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_SCHEMA_CONTRACT_DIGEST: &str =
-    "b3:25a6ea39378b583dd2cc566cfa66f7c0a5d1d6ab02b59d8fd3af7aa67e1dc66b";
+    "b3:133bc5a886584b79fa96f5b8ab5e6062ad41c5b08314745e7da88a803d3355f3";
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
 const GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY: bool = true;
@@ -12271,7 +12271,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "ontology_activation_request",
-        sqlite_ddl: "CREATE TABLE ontology_activation_request (\n  request_key TEXT NOT NULL,\n  workspace_id BLOB NOT NULL,\n  candidate_identity TEXT NOT NULL,\n  decision_identity TEXT NOT NULL,\n  request_digest TEXT NOT NULL,\n  expected_predecessor_identity TEXT,\n  expected_pointer_generation INTEGER NOT NULL,\n  state TEXT NOT NULL,\n  created_at INTEGER NOT NULL,\n  completed_at INTEGER,\n  PRIMARY KEY (request_key)\n) STRICT;\n",
+        sqlite_ddl: "CREATE TABLE ontology_activation_request (\n  request_key TEXT NOT NULL,\n  workspace_id BLOB NOT NULL,\n  candidate_identity TEXT NOT NULL,\n  decision_identity TEXT NOT NULL,\n  request_digest TEXT NOT NULL,\n  submission_digest TEXT NOT NULL,\n  expected_predecessor_identity TEXT,\n  expected_pointer_generation INTEGER NOT NULL,\n  state TEXT NOT NULL,\n  created_at INTEGER NOT NULL,\n  completed_at INTEGER,\n  PRIMARY KEY (request_key)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "request_key",
@@ -12303,6 +12303,13 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
             },
             GeneratedOperationalColumn {
                 name: "request_digest",
+                sqlite_type: OperationalSqliteType::Text,
+                logical_type: LogicalType::Utf8,
+                id_domain: None,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "submission_digest",
                 sqlite_type: OperationalSqliteType::Text,
                 logical_type: LogicalType::Utf8,
                 id_domain: None,
@@ -13108,6 +13115,7 @@ const GENERATED_CONTROL_PROJECTION_SPECS: &[ControlProjectionSpec] = &[
 
 const GENERATED_SERVING_RESOURCE_PROFILE: ServingResourceProfile = ServingResourceProfile {
     batch_size: 65_536,
+    max_execution_millis: 30000,
     max_output_rows: 100_000,
     max_output_bytes: 67_108_864,
     max_output_batches: 1_024,

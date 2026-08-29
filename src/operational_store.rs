@@ -21,7 +21,7 @@ use crate::model_generated::semantic_lane_fragments::{
 use crate::registries::{ServingActivationState, WorkspaceRegistryLifecycle};
 use crate::snapshot::ServingSnapshotManifest;
 
-const SCHEMA_VERSION: u32 = 14;
+const SCHEMA_VERSION: u32 = 15;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str =
     include_str!("../contracts/generated/model/schema/operational-store.sql");
@@ -224,6 +224,7 @@ impl OntologyOwnerDecision {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OntologyActivationRequest {
     pub request_key: String,
+    pub submission_digest: String,
     pub candidate_identity: String,
     pub decision_identity: String,
     pub expected_predecessor_identity: Option<String>,
@@ -333,6 +334,7 @@ fn ontology_activation_request_digest(
     request: &OntologyActivationRequest,
 ) -> Result<String, OperationalStoreError> {
     if request.request_key.is_empty()
+        || request.submission_digest.is_empty()
         || request.candidate_identity.is_empty()
         || request.decision_identity.is_empty()
         || request.expected_pointer_generation < 0
@@ -343,6 +345,7 @@ fn ontology_activation_request_digest(
     }
     let bytes = crate::contracts::jcs::canonicalize_value(&serde_json::json!({
         "request_key": request.request_key,
+        "submission_digest": request.submission_digest,
         "candidate_identity": request.candidate_identity,
         "decision_identity": request.decision_identity,
         "expected_predecessor_identity": request.expected_predecessor_identity,
@@ -986,6 +989,15 @@ impl OperationalStore {
         OperationalReaderFactory {
             database_path: self.database_path.clone(),
         }
+    }
+
+    /// Private durable artifact root colocated with the operational database.
+    #[must_use]
+    pub(crate) fn artifact_root(&self) -> PathBuf {
+        self.database_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
     }
 
     /// Read back the exact durability and safety pragmas.
@@ -2148,6 +2160,7 @@ impl OperationalStore {
         &mut self,
         workspace_id: [u8; 16],
         publication_id: [u8; 16],
+        submission_digest: &str,
         administrative_key: &[u8],
         request_key: &str,
     ) -> Result<Option<OntologyActivationOutcome>, OperationalStoreError> {
@@ -2155,6 +2168,7 @@ impl OperationalStore {
             .connection
             .query_row(
                 "SELECT request.workspace_id, request.candidate_identity,
+                        request.submission_digest,
                         candidate.publication_id
                  FROM ontology_activation_request AS request
                  JOIN ontology_candidate AS candidate
@@ -2165,19 +2179,24 @@ impl OperationalStore {
                     Ok((
                         row.get::<_, Vec<u8>>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Vec<u8>>(3)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((recorded_workspace, candidate_identity, recorded_publication)) = existing else {
+        let Some((recorded_workspace, candidate_identity, recorded_digest, recorded_publication)) =
+            existing
+        else {
             return Ok(None);
         };
         if recorded_workspace.as_slice() != workspace_id
             || recorded_publication.as_slice() != publication_id
+            || recorded_digest != submission_digest
         {
             return Err(OperationalStoreError::OntologyActivation(
-                "completed request key belongs to different workspace or publication".into(),
+                "completed request key belongs to different submitted bytes, workspace, or publication"
+                    .into(),
             ));
         }
         self.activate_proved_ontology_candidate(
@@ -2185,6 +2204,7 @@ impl OperationalStore {
             &candidate_identity,
             administrative_key,
             request_key,
+            submission_digest,
             0,
         )
         .map(Some)
@@ -2203,6 +2223,7 @@ impl OperationalStore {
         candidate_identity: &str,
         administrative_key: &[u8],
         request_key: &str,
+        submission_digest: &str,
         requested_at: i64,
     ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
         let owner = self.authenticate_workspace_owner(workspace_id, administrative_key)?;
@@ -2210,6 +2231,7 @@ impl OperationalStore {
             .connection
             .query_row(
                 "SELECT request.candidate_identity, request.decision_identity,
+                   request.submission_digest,
                    request.expected_predecessor_identity, request.expected_pointer_generation,
                    request.created_at, decision.owner_identity, decision.policy_identity,
                    decision.decision_bytes, decision.accepted_at
@@ -2222,13 +2244,14 @@ impl OperationalStore {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                         row.get::<_, i64>(4)?,
-                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(5)?,
                         row.get::<_, String>(6)?,
-                        row.get::<_, Vec<u8>>(7)?,
-                        row.get::<_, i64>(8)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, Vec<u8>>(8)?,
+                        row.get::<_, i64>(9)?,
                     ))
                 },
             )
@@ -2236,6 +2259,7 @@ impl OperationalStore {
         if let Some((
             recorded_candidate,
             decision_identity,
+            recorded_submission_digest,
             expected_predecessor_identity,
             expected_pointer_generation,
             created_at,
@@ -2245,7 +2269,10 @@ impl OperationalStore {
             accepted_at,
         )) = existing
         {
-            if recorded_candidate != candidate_identity || owner_identity != owner.owner_identity {
+            if recorded_candidate != candidate_identity
+                || recorded_submission_digest != submission_digest
+                || owner_identity != owner.owner_identity
+            {
                 return Err(OperationalStoreError::OntologyActivation(
                     "activation request key belongs to another candidate or owner".into(),
                 ));
@@ -2260,6 +2287,7 @@ impl OperationalStore {
             };
             let request = OntologyActivationRequest {
                 request_key: request_key.into(),
+                submission_digest: recorded_submission_digest,
                 candidate_identity: recorded_candidate,
                 decision_identity: decision.decision_identity.clone(),
                 expected_predecessor_identity,
@@ -2291,6 +2319,7 @@ impl OperationalStore {
             candidate_identity,
             decision.identity(),
             request_key,
+            submission_digest,
             requested_at,
         )?;
         self.activate_ontology_candidate_with_owner(&request, None, &decision, &owner)
@@ -2309,12 +2338,13 @@ impl OperationalStore {
         candidate_identity: &str,
         decision_identity: &str,
         request_key: &str,
+        submission_digest: &str,
         requested_at: i64,
     ) -> Result<OntologyActivationRequest, OperationalStoreError> {
         let replay = self
             .connection
             .query_row(
-                "SELECT workspace_id, candidate_identity, decision_identity,
+                "SELECT workspace_id, candidate_identity, decision_identity, submission_digest,
                    expected_predecessor_identity, expected_pointer_generation, created_at
                  FROM ontology_activation_request WHERE request_key=?1",
                 [request_key],
@@ -2323,9 +2353,10 @@ impl OperationalStore {
                         row.get::<_, Vec<u8>>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                         row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
                     ))
                 },
             )
@@ -2334,6 +2365,7 @@ impl OperationalStore {
             recorded_workspace,
             recorded_candidate,
             recorded_decision,
+            recorded_submission_digest,
             expected_predecessor_identity,
             expected_pointer_generation,
             recorded_at,
@@ -2342,6 +2374,7 @@ impl OperationalStore {
             if recorded_workspace != workspace_id
                 || recorded_candidate != candidate_identity
                 || recorded_decision != decision_identity
+                || recorded_submission_digest != submission_digest
             {
                 return Err(OperationalStoreError::OntologyActivation(
                     "activation request key is already bound to different identities".into(),
@@ -2349,6 +2382,7 @@ impl OperationalStore {
             }
             return Ok(OntologyActivationRequest {
                 request_key: request_key.into(),
+                submission_digest: recorded_submission_digest,
                 candidate_identity: recorded_candidate,
                 decision_identity: recorded_decision,
                 expected_predecessor_identity,
@@ -2386,6 +2420,7 @@ impl OperationalStore {
         }
         Ok(OntologyActivationRequest {
             request_key: request_key.into(),
+            submission_digest: submission_digest.into(),
             candidate_identity: candidate_identity.into(),
             decision_identity: decision_identity.into(),
             expected_predecessor_identity,
@@ -2551,15 +2586,16 @@ impl OperationalStore {
         transaction.execute(
             "INSERT INTO ontology_activation_request(
                request_key, workspace_id, candidate_identity, decision_identity,
-               request_digest, expected_predecessor_identity, expected_pointer_generation,
+               request_digest, submission_digest, expected_predecessor_identity, expected_pointer_generation,
                state, created_at, completed_at
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,'COMMITTING',?8,NULL)",
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'COMMITTING',?9,NULL)",
             params![
                 request.request_key,
                 candidate.workspace_id,
                 request.candidate_identity,
                 request.decision_identity,
                 request_digest,
+                request.submission_digest,
                 request.expected_predecessor_identity,
                 request.expected_pointer_generation,
                 request.requested_at,
@@ -2948,7 +2984,7 @@ impl OperationalStore {
                 migrate_v11_to_v12(&transaction)?;
             }
             11 => migrate_v11_to_v12(&transaction)?,
-            12 | 13 => {}
+            12 | 13 | 14 => {}
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -2958,6 +2994,7 @@ impl OperationalStore {
         if version != 0 {
             migrate_v12_to_v13(&transaction)?;
             migrate_v13_to_v14(&transaction)?;
+            migrate_v14_to_v15(&transaction)?;
         }
         if fault == Some(StoreFaultPoint::MigrationBeforeCommit) {
             return Err(OperationalStoreError::InjectedFault(
@@ -3447,6 +3484,24 @@ fn migrate_v13_to_v14(transaction: &Transaction<'_>) -> Result<(), OperationalSt
     Ok(())
 }
 
+fn migrate_v14_to_v15(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    if table_has_column(
+        transaction,
+        "ontology_activation_request",
+        "submission_digest",
+    )? {
+        return Ok(());
+    }
+    transaction.execute_batch(
+        "ALTER TABLE ontology_activation_request
+           ADD COLUMN submission_digest TEXT NOT NULL DEFAULT '';
+         UPDATE ontology_activation_request
+           SET submission_digest=request_digest
+           WHERE submission_digest='';",
+    )?;
+    Ok(())
+}
+
 fn table_exists(transaction: &Transaction<'_>, table: &str) -> Result<bool, OperationalStoreError> {
     transaction
         .query_row(
@@ -3473,6 +3528,42 @@ fn table_has_column(
 }
 
 impl OperationalReaderFactory {
+    /// Private durable artifact root colocated with the operational database.
+    #[must_use]
+    pub(crate) fn artifact_root(&self) -> PathBuf {
+        self.database_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    }
+
+    /// Resolve the package selected by an immutable serving epoch.
+    ///
+    /// # Errors
+    ///
+    /// Returns a read or cardinality error; an absent epoch remains `None` for explicit legacy
+    /// compatibility handling by the caller.
+    pub(crate) fn ontology_epoch_package_identity(
+        &self,
+        epoch_identity: &str,
+    ) -> Result<Option<String>, OperationalStoreError> {
+        self.open()?
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT candidate.package_identity
+                         FROM ontology_serving_epoch AS epoch
+                         JOIN ontology_candidate AS candidate
+                           ON candidate.candidate_identity=epoch.candidate_identity
+                         WHERE epoch.epoch_identity=?1",
+                        [epoch_identity],
+                        |row| row.get(0),
+                    )
+                    .optional()
+            })
+            .map_err(Into::into)
+    }
+
     /// Open a separate read-only, query-only connection.
     ///
     /// # Errors
@@ -3814,7 +3905,7 @@ mod tests {
         let runner = CandidateClosureRunner::new_for_epoch(
             build_ontology_program_package(&OntologyPackagingProfile::default()).unwrap(),
             candidate_publication(workspace_id, marker, delta_version),
-            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1").unwrap(),
+            GovernedSession::new(SessionConfig::new()).unwrap(),
             predecessor,
             99_999,
         )
@@ -3855,6 +3946,9 @@ mod tests {
     ) -> OntologyActivationRequest {
         OntologyActivationRequest {
             request_key: request_key.into(),
+            submission_digest: crate::integrity::framed_digest(
+                report.candidate_identity().as_bytes(),
+            ),
             candidate_identity: report.candidate_identity().into(),
             decision_identity: decision.identity().into(),
             expected_predecessor_identity: predecessor,
@@ -4538,6 +4632,14 @@ mod tests {
         let replay = reopened.activate_ontology_candidate(&request).unwrap();
         assert!(replay.idempotent_replay);
         assert_eq!(replay.epoch_identity, recovered.epoch_identity);
+        let mut changed_submission = request.clone();
+        changed_submission.submission_digest =
+            crate::integrity::framed_digest(b"different-submitted-candidate-bytes");
+        assert!(matches!(
+            reopened.activate_ontology_candidate(&changed_submission),
+            Err(OperationalStoreError::OntologyActivation(detail))
+                if detail.contains("request-key collision")
+        ));
         drop(reopened);
 
         let mut restarted = OperationalStore::open(&path).unwrap();
@@ -4697,6 +4799,7 @@ mod tests {
                 report.candidate_identity(),
                 decision.identity(),
                 "admin-owner-route",
+                &crate::integrity::framed_digest(report.candidate_identity().as_bytes()),
                 2_500,
             )
             .unwrap();
@@ -4710,6 +4813,7 @@ mod tests {
                 report.candidate_identity(),
                 decision.identity(),
                 "admin-owner-route",
+                &crate::integrity::framed_digest(report.candidate_identity().as_bytes()),
                 9_999,
             )
             .unwrap();
@@ -4745,6 +4849,7 @@ mod tests {
                 first.candidate_identity(),
                 first_decision.identity(),
                 "activate-first",
+                &crate::integrity::framed_digest(first.candidate_identity().as_bytes()),
                 2_600,
             )
             .unwrap();
@@ -4770,6 +4875,7 @@ mod tests {
                 successor.candidate_identity(),
                 successor_decision.identity(),
                 "activate-successor-winner",
+                &crate::integrity::framed_digest(successor.candidate_identity().as_bytes()),
                 2_700,
             )
             .unwrap();
@@ -4799,6 +4905,7 @@ mod tests {
                 rollback.candidate_identity(),
                 rollback_decision.identity(),
                 "activate-forward-rollback",
+                &crate::integrity::framed_digest(rollback.candidate_identity().as_bytes()),
                 2_800,
             )
             .unwrap();

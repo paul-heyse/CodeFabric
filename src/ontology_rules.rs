@@ -122,8 +122,7 @@ mod tests {
     async fn execute(batches: &BTreeMap<i16, RecordBatch>) -> Result<(), String> {
         let package = build_ontology_program_package(&OntologyPackagingProfile::default())
             .expect("program package");
-        let session = GovernedSession::new(SessionConfig::new(), "policy:test:ontology-program")
-            .expect("governed session");
+        let session = GovernedSession::new(SessionConfig::new()).expect("governed session");
         execute_ontology_program(batches, &package, &session)
             .await
             .map_err(|error| error.to_string())

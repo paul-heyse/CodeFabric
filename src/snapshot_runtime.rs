@@ -351,7 +351,7 @@ impl ServingSnapshotRuntime {
     /// workspaces, or an injected crash seam.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)] // AC-G-26 fixes one auditable transaction order.
-    pub(crate) fn commit_fact_snapshot(
+    fn commit_fact_snapshot(
         &self,
         store: &mut OperationalStore,
         candidate: Arc<ServingSnapshotCandidate>,
@@ -891,6 +891,116 @@ impl SnapshotLeaseManager {
                 ontology_epoch_identity,
                 result_authority: Some(result_authority),
             },
+            snapshot: candidate,
+        })
+    }
+
+    /// Rehydrate one crash-orphaned durable lease against the exact reconstructed snapshot and
+    /// retained ontology package.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an absent/expired/foreign active lease, snapshot or authority mismatch, missing
+    /// executable package, or failed ownership transition.
+    pub fn rehydrate(
+        &self,
+        store: &mut OperationalStore,
+        candidate: Arc<ServingSnapshotCandidate>,
+        lease_id: [u8; 16],
+        now: u64,
+    ) -> Result<SnapshotLeaseGuard, SnapshotRuntimeError> {
+        let workspace_id = candidate.manifest.raw_workspace_id()?;
+        let snapshot_id = candidate.manifest.raw_snapshot_id()?;
+        let publication_id = candidate.manifest.raw_publication_id()?;
+        let mut record = Self::list(store, workspace_id)?
+            .into_iter()
+            .find(|record| record.lease_id == lease_id)
+            .ok_or_else(|| SnapshotRuntimeError::Lease("durable lease is absent".into()))?;
+        if record.snapshot_id != snapshot_id
+            || record.publication_id != publication_id
+            || record.expires_at < now
+            || !matches!(
+                record.state,
+                SnapshotLeaseState::Active | SnapshotLeaseState::Orphaned
+            )
+            || (record.state == SnapshotLeaseState::Active
+                && record.process_instance_id != self.process_instance_id)
+        {
+            return Err(SnapshotRuntimeError::Lease(
+                "durable lease cannot be rehydrated by this process".into(),
+            ));
+        }
+        let reconstructed_authority = candidate
+            .manifest
+            .body
+            .result_authority
+            .clone()
+            .unwrap_or_else(|| legacy_result_authority_pin(&candidate));
+        if record.result_authority.as_ref() != Some(&reconstructed_authority) {
+            return Err(SnapshotRuntimeError::Lease(
+                "durable lease authority differs from the reconstructed snapshot".into(),
+            ));
+        }
+        if candidate.manifest.body.result_authority.is_some() {
+            let epoch = record.ontology_epoch_identity.as_deref().ok_or_else(|| {
+                SnapshotRuntimeError::Lease("governed lease has no ontology epoch".into())
+            })?;
+            let readers = store.reader_factory();
+            let package_identity =
+                readers
+                    .ontology_epoch_package_identity(epoch)?
+                    .ok_or_else(|| {
+                        SnapshotRuntimeError::Lease(
+                            "governed lease epoch has no executable package".into(),
+                        )
+                    })?;
+            let package = crate::ontology_program::load_installed_ontology_program_package(
+                &readers.artifact_root(),
+                &package_identity,
+            )
+            .map_err(|error| SnapshotRuntimeError::Lease(error.to_string()))?;
+            let policy = crate::domain_conformance::DomainOperationPolicy::from_package(&package)
+                .map_err(|error| SnapshotRuntimeError::Lease(error.to_string()))?;
+            let authority = record
+                .result_authority
+                .as_ref()
+                .expect("checked governed pin");
+            if authority.program_identity != package.manifest.logical_program_identity
+                || authority.policy_identity != policy.result_policy_identity()
+                || authority.function_catalog_identity
+                    != package.manifest.member_identities["program.calculation_contract"]
+            {
+                return Err(SnapshotRuntimeError::Lease(
+                    "retained package does not reconstruct the lease authority".into(),
+                ));
+            }
+        }
+        let now_sql = sql_u64(now)?;
+        let changed = store.write_transaction(|transaction| {
+            Ok::<_, SnapshotRuntimeError>(transaction.execute(
+                "UPDATE snapshot_lease SET state_code=?2, process_instance_id=?3,
+                 last_heartbeat_at=?4, orphaned_at=NULL
+                 WHERE lease_id=?1 AND state_code IN (?5, ?6)",
+                params![
+                    lease_id.as_slice(),
+                    i64::from(SnapshotLeaseState::Active as u16),
+                    self.process_instance_id.as_slice(),
+                    now_sql,
+                    i64::from(SnapshotLeaseState::Active as u16),
+                    i64::from(SnapshotLeaseState::Orphaned as u16),
+                ],
+            )?)
+        })?;
+        if changed != 1 {
+            return Err(SnapshotRuntimeError::Lease(
+                "durable lease ownership transition lost its compare-and-swap".into(),
+            ));
+        }
+        record.state = SnapshotLeaseState::Active;
+        record.process_instance_id = self.process_instance_id;
+        record.last_heartbeat_at = now;
+        Ok(SnapshotLeaseGuard {
+            record,
             snapshot: candidate,
         })
     }
@@ -1539,7 +1649,7 @@ mod tests {
         let runner = CandidateClosureRunner::new_for_epoch(
             build_ontology_program_package(&OntologyPackagingProfile::default()).unwrap(),
             publication,
-            GovernedSession::new(SessionConfig::new(), "policy.ontology.v1").unwrap(),
+            GovernedSession::new(SessionConfig::new()).unwrap(),
             predecessor,
             100_000,
         )
@@ -2089,6 +2199,15 @@ mod tests {
         );
 
         let report = ontology_report(None).await;
+        let retained_package = crate::ontology_program::build_ontology_program_package(
+            &crate::ontology_program::OntologyPackagingProfile::default(),
+        )
+        .unwrap();
+        crate::ontology_program::install_ontology_program_package(
+            &store.artifact_root(),
+            &retained_package,
+        )
+        .unwrap();
         store
             .persist_proved_ontology_candidate(&report, 12)
             .unwrap();
@@ -2106,6 +2225,7 @@ mod tests {
                 report.candidate_identity(),
                 decision.identity(),
                 "lease-authority-activation",
+                &crate::integrity::framed_digest(report.candidate_identity().as_bytes()),
                 13,
             )
             .unwrap();
@@ -2186,8 +2306,15 @@ mod tests {
         assert_eq!(old_result.row_count, new_result.row_count);
         assert_ne!(old_result.checksum, new_result.checksum);
 
+        let old_lease_id = old_lease.record().lease_id;
+        let old_snapshot = old_lease.snapshot();
+        let new_lease_id = new_lease.record().lease_id;
+        let new_snapshot = new_lease.snapshot();
+        drop(old_lease);
+        drop(new_lease);
+
         drop(store);
-        let reopened = OperationalStore::open(&database_path).unwrap();
+        let mut reopened = OperationalStore::open(&database_path).unwrap();
         let leases = SnapshotLeaseManager::list(&reopened, WORKSPACE).unwrap();
         assert_eq!(leases.len(), 2);
         assert_eq!(
@@ -2214,5 +2341,46 @@ mod tests {
                     && pin.exact_table_set_identity == authority.exact_table_set_identity
             })
         }));
+        let restarted = SnapshotLeaseManager::new([0x73; 16]);
+        assert_eq!(
+            restarted.orphan_after_restart(&mut reopened, 30).unwrap(),
+            2
+        );
+        let rehydrated_old = restarted
+            .rehydrate(&mut reopened, old_snapshot, old_lease_id, 31)
+            .expect("rehydrate legacy lease after restart");
+        let rehydrated_new = restarted
+            .rehydrate(&mut reopened, new_snapshot, new_lease_id, 31)
+            .expect("rehydrate retained-package lease after restart");
+        assert_eq!(
+            rehydrated_old.result_authority().unwrap().checksum_version,
+            "ResultChecksumV1"
+        );
+        assert_eq!(
+            rehydrated_new
+                .result_authority()
+                .unwrap()
+                .result_authority_identity,
+            authority.result_authority_identity
+        );
+        let package_manifest = reopened
+            .artifact_root()
+            .join("ontology-programs")
+            .join(
+                retained_package
+                    .manifest
+                    .package_identity
+                    .trim_start_matches("b3:"),
+            )
+            .join("manifest.json");
+        let missing_manifest = package_manifest.with_extension("missing");
+        std::fs::rename(&package_manifest, &missing_manifest).unwrap();
+        assert!(
+            restarted
+                .rehydrate(&mut reopened, rehydrated_new.snapshot(), new_lease_id, 32)
+                .is_err(),
+            "missing retained package must reject lease rehydration"
+        );
+        std::fs::rename(missing_manifest, package_manifest).unwrap();
     }
 }

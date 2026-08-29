@@ -32,3 +32,40 @@ snapshots:
       style: primary
       start: 53
       end: 175
+  ? |
+    fn execute(operation: DecodedProgramOperation) {
+        match operation.rule_id.as_str() {
+            "ontology.property_value_one_of" => property(),
+            _ => unsupported(),
+        }
+    }
+  : labels:
+    - source: |-
+        match operation.rule_id.as_str() {
+                "ontology.property_value_one_of" => property(),
+                _ => unsupported(),
+            }
+      style: primary
+      start: 53
+      end: 177
+  ? |
+    pub async fn seal_sql(sql: &str) -> GovernedPlan { todo!() }
+  : labels:
+    - source: 'pub async fn seal_sql(sql: &str) -> GovernedPlan { todo!() }'
+      style: primary
+      start: 0
+      end: 60
+  ? |
+    pub fn seal_plan(plan: LogicalPlan) -> GovernedPlan { plan.into() }
+  : labels:
+    - source: 'pub fn seal_plan(plan: LogicalPlan) -> GovernedPlan { plan.into() }'
+      style: primary
+      start: 0
+      end: 67
+  ? |
+    pub(crate) fn commit_fact_snapshot() {}
+  : labels:
+    - source: pub(crate) fn commit_fact_snapshot() {}
+      style: primary
+      start: 0
+      end: 39
