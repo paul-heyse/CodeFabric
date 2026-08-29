@@ -5503,7 +5503,7 @@ mod tests {
             .unwrap();
         assert!(validate_plan_allowlist(&scalar_variable, &domain_policy()).is_err());
         let approved_scalar = session
-            .query("SELECT lower(name) FROM entities")
+            .query("SELECT coalesce(name, '') FROM entities")
             .await
             .unwrap();
         assert_eq!(approved_scalar.artifact.output_row_count, 1);
