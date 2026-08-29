@@ -86,7 +86,7 @@ ontology-program-packaging-check:
 ontology-calculation-catalog-check:
     cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_native_profile|calculation_catalog_bijection)/)' --no-tests=fail
 
-[doc("Mutate compiled operators and phrase operands and prove governed DataFusion outcomes change")]
+[doc("Mutate normalized plan operators, relation/field operands, calculations, diagnostics, and phrase operands and prove governed DataFusion outcomes change")]
 [group('test')]
 ontology-program-causality-check:
     cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_causality_matrix|phrase_binding_fail_closed)/)' --no-tests=fail
@@ -101,10 +101,10 @@ ontology-gate-result-checksum-check:
 ontology-gate-execution-artifact-check:
     cargo nextest run --locked --lib -E 'test(/ontology_gate_(single_execution_metric_closure|artifact_identity_separation)/)' --no-tests=fail
 
-[doc("Prove deterministic bounded candidate failures leave durable authority unchanged")]
+[doc("Prove memory, output, deadline, cancellation, spill cleanup, and checksum bounds leave durable authority unchanged")]
 [group('test')]
 ontology-runtime-resource-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_candidate_resource_failure_no_mutation/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/ontology_(candidate_resource_failure_no_mutation|governed_runtime_deadline_cancellation_memory_cleanup)/)' --no-tests=fail
 
 [doc("Prove sealed DataFusion ingress, exhaustive pinned variants, and Arrow ID-domain boundaries")]
 [group('gate')]
@@ -129,14 +129,15 @@ ontology-decision-integrity-check:
 [doc("Prove ontology activation rollback, lost-response reconciliation, and restart idempotency")]
 [group('gate')]
 ontology-activation-recovery-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency|activation_concurrency_forward_rollback)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail
 
-[doc("Prove the sole identity-only workspace admin route resolves durable ontology authority")]
+[doc("Prove the sole authenticated workspace admin route compiles, proves, stages, decides, and atomically activates a submission")]
 [group('gate')]
 ontology-activation-route-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_admin_activation_owner_route/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail
 
-[doc("Prove legacy and target leases retain their explicit versioned result authority")]
+[doc("Execute identical results through persisted legacy V1 and target V2 lease authorities across restart")]
 [group('gate')]
 result-authority-lease-check:
     cargo nextest run --locked --lib -E 'test(/ontology_result_authority_lease_matrix|odf_result_checksum_v2_continuity/)' --no-tests=fail

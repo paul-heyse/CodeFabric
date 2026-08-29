@@ -705,10 +705,10 @@ pub fn ontology_dimension_batches() -> Result<BTreeMap<i16, RecordBatch>, Fabric
     result.insert(29, batch(29, rows)?);
 
     let mut rows = Vec::new();
-    for rule in compiler.operations.values() {
+    for rule in compiler.rules.values() {
         let mut row = vec![
-            Cell::utf8(&rule.operation_id),
-            Cell::utf8(&rule.operation_kind),
+            Cell::utf8(&rule.rule_id),
+            Cell::utf8("relational_program"),
             Cell::Hash32(framed(&rule.input_contract)?),
             Cell::Hash32(framed(&rule.expected_result_contract)?),
             Cell::utf8(&rule.determinism_class),

@@ -10,24 +10,20 @@ use datafusion::optimizer::analyzer::AnalyzerRule;
 /// Generated-state projection used by the total analyzer transition lattice.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DomainState {
-    Untracked,
-    Exact(String),
-    Predicate,
+    Domain(String),
+    Neutral,
+    Bottom,
+    Opaque,
 }
 
 /// Effect class assigned to every pinned expression form.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DomainEffect {
+    None,
     Preserve,
-    Compare,
-    Predicate,
-    Aggregate,
-    Window,
-    Subquery,
-    Set,
-    Cast,
-    Function,
-    RejectUnresolved,
+    ConsumeSameDomain,
+    Produce,
+    ExplicitErase,
 }
 
 /// Compile-time census for the pinned DataFusion 55 expression enum.
@@ -120,6 +116,11 @@ impl AnalyzerRule for DomainConformanceRule {
         plan.apply(|node| {
             validate_plan_variant(node)?;
             validate_set_alignment(node)?;
+            for field in node.schema().fields() {
+                let _ = field_state(field.as_ref())?;
+                crate::schema_registry::validate_logical_extension_field(field.as_ref())
+                    .map_err(|error| DataFusionError::Plan(error.to_string()))?;
+            }
             for expression in node.expressions() {
                 expression.apply(|nested| {
                     validate_expression(node, nested)?;
@@ -146,6 +147,7 @@ pub(crate) fn analyze_governed_plan(plan: LogicalPlan) -> Result<LogicalPlan> {
 
 #[allow(clippy::too_many_lines)] // Exhaustive DataFusion Expr coverage is intentionally centralized.
 fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
+    let effect = domain_effect(expression);
     #[allow(deprecated)]
     match expression {
         Expr::Alias(_)
@@ -157,9 +159,9 @@ fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
         | Expr::Exists(_)
         | Expr::ScalarSubquery(_) => {}
         Expr::BinaryExpr(binary) => {
-            let left = expression_domain(plan, &binary.left)?;
-            let right = expression_domain(plan, &binary.right)?;
-            if left.is_some() || right.is_some() {
+            let left = expression_state(plan, &binary.left)?;
+            let right = expression_state(plan, &binary.right)?;
+            if is_domain_bearing(&left) || is_domain_bearing(&right) {
                 if !matches!(
                     binary.op,
                     Operator::Eq
@@ -176,28 +178,26 @@ fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
                         binary.op
                     ));
                 }
-                require_same_domain(left, right, "binary comparison")?;
+                require_compatible_states(left, right, "binary comparison")?;
             }
         }
         Expr::InList(in_list) => {
-            let value_domain = expression_domain(plan, &in_list.expr)?;
-            if value_domain.is_some() {
-                for candidate in &in_list.list {
-                    require_same_domain(
-                        value_domain,
-                        expression_domain(plan, candidate)?,
-                        "IN-list member",
-                    )?;
-                }
+            let value_state = expression_state(plan, &in_list.expr)?;
+            for candidate in &in_list.list {
+                require_compatible_states(
+                    value_state.clone(),
+                    expression_state(plan, candidate)?,
+                    "IN-list member",
+                )?;
             }
         }
         Expr::Cast(cast) => {
-            if let Some(domain) = expression_domain(plan, &cast.expr)? {
+            if let DomainState::Domain(domain) = expression_state(plan, &cast.expr)? {
                 return domain_error(format!("explicit cast erases logical ID domain {domain}"));
             }
         }
         Expr::TryCast(cast) => {
-            if let Some(domain) = expression_domain(plan, &cast.expr)? {
+            if let DomainState::Domain(domain) = expression_state(plan, &cast.expr)? {
                 return domain_error(format!("try-cast erases logical ID domain {domain}"));
             }
         }
@@ -217,97 +217,114 @@ fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
         | Expr::IsNotTrue(value)
         | Expr::IsNotFalse(value)
         | Expr::IsNotUnknown(value) => {
-            let _ = expression_domain(plan, value)?;
+            ensure_not_opaque(expression_state(plan, value)?, "boolean/null predicate")?;
         }
         Expr::Negative(value) => {
             reject_domain_arguments(plan, [value.as_ref()], "numeric negation")?;
         }
         Expr::Between(between) => {
-            let domain = expression_domain(plan, &between.expr)?;
-            require_same_domain(
-                domain,
-                expression_domain(plan, &between.low)?,
+            let state = expression_state(plan, &between.expr)?;
+            require_compatible_states(
+                state.clone(),
+                expression_state(plan, &between.low)?,
                 "BETWEEN low",
             )?;
-            require_same_domain(
-                domain,
-                expression_domain(plan, &between.high)?,
+            require_compatible_states(
+                state,
+                expression_state(plan, &between.high)?,
                 "BETWEEN high",
             )?;
         }
         Expr::Case(case) => {
-            let mut values = Vec::new();
             if let Some(value) = &case.expr {
-                values.push(value.as_ref());
+                let state = expression_state(plan, value)?;
+                for (when, _) in &case.when_then_expr {
+                    require_compatible_states(
+                        state.clone(),
+                        expression_state(plan, when)?,
+                        "simple CASE match",
+                    )?;
+                }
+            } else {
+                for (when, _) in &case.when_then_expr {
+                    match expression_state(plan, when)? {
+                        DomainState::Neutral | DomainState::Bottom => {}
+                        state => {
+                            return domain_error(format!(
+                                "searched CASE predicate is not neutral: {state:?}"
+                            ));
+                        }
+                    }
+                }
             }
-            for (when, then) in &case.when_then_expr {
-                values.push(when.as_ref());
-                values.push(then.as_ref());
-            }
-            if let Some(value) = &case.else_expr {
-                values.push(value.as_ref());
-            }
-            reject_domain_arguments(plan, values, "CASE")?;
+            ensure_not_opaque(expression_state(plan, expression)?, "CASE result")?;
         }
         Expr::ScalarFunction(function) => {
-            reject_domain_arguments(plan, function.args.iter(), "scalar function")?;
+            ensure_not_opaque(
+                expression_state(plan, expression)?,
+                &format!("scalar function {}", function.func.name()),
+            )?;
         }
         Expr::AggregateFunction(function) => {
             let has_domain_argument = function
                 .params
                 .args
                 .iter()
-                .map(|argument| expression_domain(plan, argument))
+                .map(|argument| expression_state(plan, argument))
                 .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .any(|domain| domain.is_some());
-            if has_domain_argument && function.func.name() != "count" {
+                .any(|state| is_domain_bearing(&state));
+            if has_domain_argument
+                && !matches!(
+                    function.func.name(),
+                    "count" | "min" | "max" | "first_value" | "last_value"
+                )
+            {
                 return domain_error(format!(
                     "aggregate function {} has no generated ID-domain transition",
                     function.func.name()
                 ));
             }
             if let Some(filter) = &function.params.filter {
-                let _ = expression_domain(plan, filter)?;
+                ensure_not_opaque(expression_state(plan, filter)?, "aggregate filter")?;
             }
-            reject_domain_arguments(
-                plan,
-                function.params.order_by.iter().map(|sort| &sort.expr),
-                "aggregate ordering",
-            )?;
+            for sort in &function.params.order_by {
+                ensure_not_opaque(expression_state(plan, &sort.expr)?, "aggregate ordering")?;
+            }
         }
         Expr::WindowFunction(function) => {
-            reject_domain_arguments(plan, function.params.args.iter(), "window function")?;
-            reject_domain_arguments(
-                plan,
-                function.params.partition_by.iter(),
-                "window partition",
+            ensure_not_opaque(
+                expression_state(plan, expression)?,
+                &format!("window function {}", function.fun.name()),
             )?;
-            reject_domain_arguments(
-                plan,
-                function.params.order_by.iter().map(|sort| &sort.expr),
-                "window ordering",
-            )?;
+            for partition in &function.params.partition_by {
+                ensure_not_opaque(expression_state(plan, partition)?, "window partition")?;
+            }
+            for sort in &function.params.order_by {
+                ensure_not_opaque(expression_state(plan, &sort.expr)?, "window ordering")?;
+            }
         }
         Expr::InSubquery(subquery) => {
-            if expression_domain(plan, &subquery.expr)?.is_some() {
-                return domain_error(
-                    "ID-domain IN-subquery requires an explicit generated binding",
-                );
-            }
+            require_compatible_states(
+                expression_state(plan, &subquery.expr)?,
+                subquery_output_state(&subquery.subquery.subquery)?,
+                "IN-subquery",
+            )?;
         }
         Expr::SetComparison(comparison) => {
-            if expression_domain(plan, &comparison.expr)?.is_some() {
-                return domain_error(
-                    "ID-domain set comparison requires an explicit generated binding",
-                );
-            }
+            require_compatible_states(
+                expression_state(plan, &comparison.expr)?,
+                subquery_output_state(&comparison.subquery.subquery)?,
+                "set comparison",
+            )?;
         }
         Expr::Wildcard { .. } => {
             return domain_error("unresolved wildcard reached the application analyzer");
         }
         Expr::GroupingSet(grouping) => {
-            reject_domain_arguments(plan, grouping.distinct_expr(), "grouping set")?;
+            for value in grouping.distinct_expr() {
+                ensure_not_opaque(expression_state(plan, value)?, "grouping set")?;
+            }
         }
         Expr::Placeholder(_) => {
             return domain_error("unresolved prepared-statement placeholder reached analyzer");
@@ -322,7 +339,249 @@ fn validate_expression(plan: &LogicalPlan, expression: &Expr) -> Result<()> {
             reject_domain_arguments(plan, [lambda.body.as_ref()], "lambda")?;
         }
     }
+    let state = expression_state(plan, expression)?;
+    match effect {
+        DomainEffect::ConsumeSameDomain | DomainEffect::Produce => {
+            ensure_not_opaque(state, "generated domain-effect transition")?;
+        }
+        DomainEffect::None | DomainEffect::Preserve | DomainEffect::ExplicitErase => {}
+    }
     Ok(())
+}
+
+#[allow(deprecated)]
+const fn domain_effect(expression: &Expr) -> DomainEffect {
+    match expression {
+        Expr::Alias(_)
+        | Expr::Column(_)
+        | Expr::Literal(_, _)
+        | Expr::OuterReferenceColumn(_, _)
+        | Expr::LambdaVariable(_) => DomainEffect::Preserve,
+        Expr::BinaryExpr(_)
+        | Expr::Between(_)
+        | Expr::InList(_)
+        | Expr::InSubquery(_)
+        | Expr::SetComparison(_)
+        | Expr::Case(_) => DomainEffect::ConsumeSameDomain,
+        Expr::ScalarSubquery(_)
+        | Expr::ScalarFunction(_)
+        | Expr::AggregateFunction(_)
+        | Expr::WindowFunction(_)
+        | Expr::Unnest(_)
+        | Expr::HigherOrderFunction(_)
+        | Expr::Lambda(_) => DomainEffect::Produce,
+        Expr::Cast(_) | Expr::TryCast(_) => DomainEffect::ExplicitErase,
+        Expr::ScalarVariable(_, _)
+        | Expr::Like(_)
+        | Expr::SimilarTo(_)
+        | Expr::Not(_)
+        | Expr::IsNotNull(_)
+        | Expr::IsNull(_)
+        | Expr::IsTrue(_)
+        | Expr::IsFalse(_)
+        | Expr::IsUnknown(_)
+        | Expr::IsNotTrue(_)
+        | Expr::IsNotFalse(_)
+        | Expr::IsNotUnknown(_)
+        | Expr::Negative(_)
+        | Expr::Exists(_)
+        | Expr::Wildcard { .. }
+        | Expr::GroupingSet(_)
+        | Expr::Placeholder(_) => DomainEffect::None,
+    }
+}
+
+fn ensure_not_opaque(state: DomainState, operation: &str) -> Result<()> {
+    if state == DomainState::Opaque {
+        return domain_error(format!(
+            "{operation} produces an opaque value from domain-bearing input"
+        ));
+    }
+    Ok(())
+}
+
+const fn is_domain_bearing(state: &DomainState) -> bool {
+    matches!(state, DomainState::Domain(_) | DomainState::Opaque)
+}
+
+fn join_states(left: DomainState, right: DomainState) -> DomainState {
+    match (left, right) {
+        (DomainState::Opaque, _) | (_, DomainState::Opaque) => DomainState::Opaque,
+        (DomainState::Bottom, state) | (state, DomainState::Bottom) => state,
+        (DomainState::Neutral, DomainState::Neutral) => DomainState::Neutral,
+        (DomainState::Domain(left), DomainState::Domain(right)) if left == right => {
+            DomainState::Domain(left)
+        }
+        (DomainState::Neutral, DomainState::Domain(_))
+        | (DomainState::Domain(_), DomainState::Neutral)
+        | (DomainState::Domain(_), DomainState::Domain(_)) => DomainState::Opaque,
+    }
+}
+
+fn require_compatible_states(left: DomainState, right: DomainState, operation: &str) -> Result<()> {
+    if let (DomainState::Domain(left_domain), DomainState::Domain(right_domain)) = (&left, &right)
+        && governed_comparison_domains(left_domain, right_domain)
+    {
+        return Ok(());
+    }
+    match join_states(left.clone(), right.clone()) {
+        DomainState::Opaque => domain_error(format!(
+            "{operation} combines incompatible states {left:?} and {right:?}"
+        )),
+        DomainState::Bottom | DomainState::Neutral | DomainState::Domain(_) => Ok(()),
+    }
+}
+
+/// The ontology's `type` identity is a governed subtype of the canonical `entity` identity.
+/// This relation is deliberately comparison-only: projections, CASE/coalesce, set operations,
+/// and casts retain the stricter exact-domain lattice and therefore cannot erase the subtype.
+fn governed_comparison_domains(left: &str, right: &str) -> bool {
+    left == right || matches!((left, right), ("type", "entity") | ("entity", "type"))
+}
+
+fn subquery_output_state(plan: &LogicalPlan) -> Result<DomainState> {
+    let fields = plan.schema().fields();
+    if fields.len() != 1 {
+        return domain_error("scalar/set subquery must expose exactly one field");
+    }
+    field_state(fields[0].as_ref())
+}
+
+#[allow(clippy::too_many_lines)] // Exhaustive state algebra mirrors the pinned Expr census.
+fn expression_state(plan: &LogicalPlan, expression: &Expr) -> Result<DomainState> {
+    #[allow(deprecated)]
+    match expression {
+        Expr::Alias(alias) => expression_state(plan, &alias.expr),
+        Expr::Column(_) | Expr::OuterReferenceColumn(_, _) => expression_domain(plan, expression)
+            .map(|domain| {
+                domain.map_or(DomainState::Neutral, |value| {
+                    DomainState::Domain(value.into())
+                })
+            }),
+        Expr::Literal(value, metadata) => {
+            if value.is_null() {
+                Ok(DomainState::Bottom)
+            } else if let Some(name) = metadata.as_ref().and_then(|metadata| {
+                metadata
+                    .inner()
+                    .get(arrow_schema::extension::EXTENSION_TYPE_NAME_KEY)
+            }) {
+                extension_domain(name).map(|domain| {
+                    domain.map_or(DomainState::Neutral, |value| {
+                        DomainState::Domain(value.into())
+                    })
+                })
+            } else {
+                Ok(DomainState::Neutral)
+            }
+        }
+        Expr::Cast(cast) => match expression_state(plan, &cast.expr)? {
+            DomainState::Domain(_) | DomainState::Opaque => Ok(DomainState::Opaque),
+            DomainState::Bottom => Ok(DomainState::Bottom),
+            DomainState::Neutral => Ok(DomainState::Neutral),
+        },
+        Expr::TryCast(cast) => match expression_state(plan, &cast.expr)? {
+            DomainState::Domain(_) | DomainState::Opaque => Ok(DomainState::Opaque),
+            DomainState::Bottom => Ok(DomainState::Bottom),
+            DomainState::Neutral => Ok(DomainState::Neutral),
+        },
+        Expr::Case(case) => {
+            let mut state = DomainState::Bottom;
+            for (_, then) in &case.when_then_expr {
+                state = join_states(state, expression_state(plan, then)?);
+            }
+            if let Some(otherwise) = &case.else_expr {
+                state = join_states(state, expression_state(plan, otherwise)?);
+            }
+            Ok(state)
+        }
+        Expr::ScalarFunction(function) => {
+            let states = function
+                .args
+                .iter()
+                .map(|argument| expression_state(plan, argument))
+                .collect::<Result<Vec<_>>>()?;
+            if matches!(function.func.name(), "coalesce" | "nullif") {
+                Ok(states.into_iter().fold(DomainState::Bottom, join_states))
+            } else if states
+                .iter()
+                .any(|state| matches!(state, DomainState::Domain(_) | DomainState::Opaque))
+            {
+                Ok(DomainState::Opaque)
+            } else {
+                Ok(DomainState::Neutral)
+            }
+        }
+        Expr::AggregateFunction(function) => {
+            let first = function
+                .params
+                .args
+                .first()
+                .map_or(Ok(DomainState::Neutral), |argument| {
+                    expression_state(plan, argument)
+                })?;
+            if function.func.name() == "count" {
+                Ok(DomainState::Neutral)
+            } else if matches!(
+                function.func.name(),
+                "min" | "max" | "first_value" | "last_value"
+            ) {
+                Ok(first)
+            } else if matches!(first, DomainState::Domain(_) | DomainState::Opaque) {
+                Ok(DomainState::Opaque)
+            } else {
+                Ok(DomainState::Neutral)
+            }
+        }
+        Expr::WindowFunction(function) => {
+            let first = function
+                .params
+                .args
+                .first()
+                .map_or(Ok(DomainState::Neutral), |argument| {
+                    expression_state(plan, argument)
+                })?;
+            if matches!(
+                function.fun.name(),
+                "min" | "max" | "first_value" | "last_value"
+            ) {
+                Ok(first)
+            } else if matches!(first, DomainState::Domain(_) | DomainState::Opaque) {
+                Ok(DomainState::Opaque)
+            } else {
+                Ok(DomainState::Neutral)
+            }
+        }
+        Expr::ScalarSubquery(subquery) => subquery_output_state(&subquery.subquery),
+        Expr::BinaryExpr(_)
+        | Expr::Like(_)
+        | Expr::SimilarTo(_)
+        | Expr::Not(_)
+        | Expr::IsNotNull(_)
+        | Expr::IsNull(_)
+        | Expr::IsTrue(_)
+        | Expr::IsFalse(_)
+        | Expr::IsUnknown(_)
+        | Expr::IsNotTrue(_)
+        | Expr::IsNotFalse(_)
+        | Expr::IsNotUnknown(_)
+        | Expr::Negative(_)
+        | Expr::Between(_)
+        | Expr::InList(_)
+        | Expr::Exists(_)
+        | Expr::InSubquery(_)
+        | Expr::SetComparison(_)
+        | Expr::GroupingSet(_) => Ok(DomainState::Neutral),
+        Expr::ScalarVariable(_, _)
+        | Expr::Placeholder(_)
+        | Expr::Unnest(_)
+        | Expr::HigherOrderFunction(_)
+        | Expr::Lambda(_)
+        | Expr::LambdaVariable(_) => Ok(DomainState::Opaque),
+        Expr::Wildcard { .. } => {
+            domain_error("unresolved wildcard is forbidden after governed resolution")
+        }
+    }
 }
 
 fn reject_domain_arguments<'a>(
@@ -331,10 +590,18 @@ fn reject_domain_arguments<'a>(
     operation: &str,
 ) -> Result<()> {
     for expression in expressions {
-        if let Some(domain) = expression_domain(plan, expression)? {
-            return domain_error(format!(
-                "{operation} has no generated transition for ID domain {domain}"
-            ));
+        match expression_state(plan, expression)? {
+            DomainState::Domain(domain) => {
+                return domain_error(format!(
+                    "{operation} has no generated transition for ID domain {domain}"
+                ));
+            }
+            DomainState::Opaque => {
+                return domain_error(format!(
+                    "{operation} has an opaque nested-domain transition"
+                ));
+            }
+            DomainState::Neutral | DomainState::Bottom => {}
         }
     }
     Ok(())
@@ -437,6 +704,14 @@ fn field_domain(field: &Field) -> Result<Option<&str>> {
         .map_or(Ok(None), extension_domain)
 }
 
+fn field_state(field: &Field) -> Result<DomainState> {
+    field_domain(field).map(|domain| {
+        domain.map_or(DomainState::Neutral, |value| {
+            DomainState::Domain(value.to_owned())
+        })
+    })
+}
+
 fn extension_domain(extension_name: &str) -> Result<Option<&str>> {
     if let Some(domain) = crate::schema_registry::id_domain_for_extension_name(extension_name) {
         return Ok(Some(domain));
@@ -482,6 +757,11 @@ fn validate_set_alignment(plan: &LogicalPlan) -> Result<()> {
             require_same_domain(
                 field_domain(left.as_ref())?,
                 field_domain(right.as_ref())?,
+                &format!("set-operation column {index}"),
+            )?;
+            require_compatible_states(
+                field_state(left.as_ref())?,
+                field_state(right.as_ref())?,
                 &format!("set-operation column {index}"),
             )?;
         }
@@ -542,6 +822,12 @@ mod tests {
             .into_expr()
     }
 
+    fn domain_literal(domain: &str, value: u8) -> datafusion::logical_expr::Expr {
+        DomainTypedLiteral::new(domain, [value; 16])
+            .expect("registered domain")
+            .into_expr()
+    }
+
     #[test]
     fn odf_domain_conformant_plans_execute() {
         let plan = LogicalPlanBuilder::from(workspace_plan())
@@ -572,6 +858,23 @@ mod tests {
             .build()
             .expect("IN-list plan build");
         assert!(analyze(in_list).is_err());
+    }
+
+    #[test]
+    fn odf_governed_type_entity_comparison_only() {
+        let comparison = LogicalPlanBuilder::from(workspace_plan())
+            .filter(domain_literal("type", 3).eq(domain_literal("entity", 3)))
+            .expect("subdomain comparison plan")
+            .build()
+            .expect("subdomain comparison plan build");
+        analyze(comparison).expect("type/entity ontology comparison");
+
+        let unrelated = LogicalPlanBuilder::from(workspace_plan())
+            .filter(domain_literal("type", 3).eq(repository_literal(3)))
+            .expect("unrelated comparison plan")
+            .build()
+            .expect("unrelated comparison plan build");
+        assert!(analyze(unrelated).is_err());
     }
 
     #[test]

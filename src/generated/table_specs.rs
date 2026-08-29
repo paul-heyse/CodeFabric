@@ -1,7 +1,7 @@
-// @generated from codefabric.schema.contract-ir b3:4d524d6389ffcdd3b6f55485b43ffbd1c1994b3371aabcfb1d693e7ac01a68f2; schema-contract-driver-v1; do not edit.
+// @generated from codefabric.schema.contract-ir b3:25a6ea39378b583dd2cc566cfa66f7c0a5d1d6ab02b59d8fd3af7aa67e1dc66b; schema-contract-driver-v1; do not edit.
 
 pub const GENERATED_SCHEMA_CONTRACT_DIGEST: &str =
-    "b3:4d524d6389ffcdd3b6f55485b43ffbd1c1994b3371aabcfb1d693e7ac01a68f2";
+    "b3:25a6ea39378b583dd2cc566cfa66f7c0a5d1d6ab02b59d8fd3af7aa67e1dc66b";
 pub const GENERATED_ONTOLOGY_VERSION: &str = "1.3";
 pub const GENERATED_COMPATIBILITY_MODE: &str = "suite-major-1";
 const GENERATED_REQUIRE_SCHEMA_DIGEST_EQUALITY: bool = true;
@@ -11840,7 +11840,7 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
     },
     GeneratedOperationalTableSpec {
         name: "ontology_candidate",
-        sqlite_ddl: "CREATE TABLE ontology_candidate (\n  candidate_identity TEXT NOT NULL,\n  workspace_id BLOB NOT NULL,\n  state TEXT NOT NULL,\n  manifest_bytes BLOB NOT NULL,\n  manifest_digest TEXT NOT NULL,\n  program_identity TEXT NOT NULL,\n  package_identity TEXT NOT NULL,\n  config_identity TEXT NOT NULL,\n  policy_identity TEXT NOT NULL,\n  exact_table_set_identity TEXT NOT NULL,\n  predecessor_epoch_identity TEXT,\n  rollback_retain_until INTEGER NOT NULL,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL,\n  PRIMARY KEY (candidate_identity)\n) STRICT;\n",
+        sqlite_ddl: "CREATE TABLE ontology_candidate (\n  candidate_identity TEXT NOT NULL,\n  workspace_id BLOB NOT NULL,\n  state TEXT NOT NULL,\n  manifest_bytes BLOB NOT NULL,\n  manifest_digest TEXT NOT NULL,\n  program_identity TEXT NOT NULL,\n  package_identity TEXT NOT NULL,\n  config_identity TEXT NOT NULL,\n  policy_identity TEXT NOT NULL,\n  exact_table_set_identity TEXT NOT NULL,\n  publication_id BLOB NOT NULL,\n  serving_snapshot_id BLOB,\n  observed_durable_pointer_generation INTEGER NOT NULL,\n  predecessor_epoch_identity TEXT,\n  rollback_retain_until INTEGER NOT NULL,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL,\n  PRIMARY KEY (candidate_identity)\n) STRICT;\n",
         columns: &[
             GeneratedOperationalColumn {
                 name: "candidate_identity",
@@ -11909,6 +11909,27 @@ const GENERATED_OPERATIONAL_TABLE_SPECS: &[GeneratedOperationalTableSpec] = &[
                 name: "exact_table_set_identity",
                 sqlite_type: OperationalSqliteType::Text,
                 logical_type: LogicalType::Utf8,
+                id_domain: None,
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "publication_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                logical_type: LogicalType::Id16,
+                id_domain: Some("publication"),
+                nullable: false,
+            },
+            GeneratedOperationalColumn {
+                name: "serving_snapshot_id",
+                sqlite_type: OperationalSqliteType::Blob,
+                logical_type: LogicalType::Id16,
+                id_domain: Some("serving_snapshot"),
+                nullable: true,
+            },
+            GeneratedOperationalColumn {
+                name: "observed_durable_pointer_generation",
+                sqlite_type: OperationalSqliteType::Integer,
+                logical_type: LogicalType::Int64,
                 id_domain: None,
                 nullable: false,
             },

@@ -588,12 +588,12 @@
     {
       "class": "property",
       "path": "rules/ontology-global-result-version-forbidden.yml",
-      "source_digest": "b3:3e312b03b64480f6e84e4b9177bb39250bf9506cc24709ecf49f7f4f36ff7384"
+      "source_digest": "b3:a5ef83b24f85d0b28a03a3762cf1d56fa857213a01374d0787655d881cd46b68"
     },
     {
       "class": "property",
       "path": "rules/ontology-operation-dispatch-generic.yml",
-      "source_digest": "b3:440cef1af5d1b1b6eb3583d4cc5b6b22259f091be43c36b1fa7e75ac4418d31c"
+      "source_digest": "b3:e632c105b92d299f3f76c2f6d476e17adb2514956614fa7ce8e91d89b31f8af1"
     },
     {
       "class": "property",

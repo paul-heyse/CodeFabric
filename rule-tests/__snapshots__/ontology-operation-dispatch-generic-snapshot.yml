@@ -1,6 +1,22 @@
 id: ontology-operation-dispatch-generic
 snapshots:
   ? |
+    fn execute(lowered: LoweredValidationOperation) {
+        match lowered.native {
+            NativeValidationOperation::ExternalReferential => external(),
+            NativeValidationOperation::PropertyValueOneOf => property(),
+        }
+    }
+  : labels:
+    - source: |-
+        match lowered.native {
+                NativeValidationOperation::ExternalReferential => external(),
+                NativeValidationOperation::PropertyValueOneOf => property(),
+            }
+      style: primary
+      start: 54
+      end: 221
+  ? |
     fn execute(operation: DecodedProgramOperation) {
         match operation.operation_kind.as_str() {
             "property_value_one_of" => property(),

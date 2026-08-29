@@ -20,6 +20,7 @@ pub struct GateResourceEnvelope {
     pub max_output_bytes: usize,
     pub max_output_batches: usize,
     pub max_checksum_encoding_bytes: usize,
+    pub max_execution_millis: u64,
 }
 
 impl GateResourceEnvelope {
@@ -32,6 +33,7 @@ impl GateResourceEnvelope {
             &self.max_output_bytes.to_be_bytes(),
             &self.max_output_batches.to_be_bytes(),
             &self.max_checksum_encoding_bytes.to_be_bytes(),
+            &self.max_execution_millis.to_be_bytes(),
         ])
     }
 }
@@ -43,6 +45,7 @@ impl Default for GateResourceEnvelope {
             max_output_bytes: 16 * 1_024 * 1_024,
             max_output_batches: 128,
             max_checksum_encoding_bytes: 16 * 1_024 * 1_024,
+            max_execution_millis: 30_000,
         }
     }
 }
@@ -58,6 +61,12 @@ pub enum GateResourceFailure {
     Batches { limit: usize, observed: usize },
     #[error("ONTOLOGY_GATE_COUNTER_OVERFLOW:{0}")]
     Counter(&'static str),
+    #[error("ONTOLOGY_GATE_DEADLINE_EXCEEDED:{limit_millis}ms")]
+    Deadline { limit_millis: u64 },
+    #[error("ONTOLOGY_GATE_CANCELLED")]
+    Cancelled,
+    #[error("ONTOLOGY_GATE_MEMORY_LIMIT:{limit_bytes}")]
+    Memory { limit_bytes: usize },
 }
 
 /// Gate runner failure. No variant carries activation or pointer authority.

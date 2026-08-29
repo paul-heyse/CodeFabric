@@ -11,27 +11,16 @@ use crate::ontology_program::{
     OntologyProgramError, OntologyProgramPackage, validate_ontology_program_package,
 };
 
-/// One normalized authored operation decoded from the Arrow package.
+/// One authored rule bound to its normalized relational program and calculation contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DecodedProgramOperation {
-    pub operation_id: String,
-    pub operation_kind: String,
-    pub operands: Vec<DecodedProgramOperand>,
+pub struct DecodedRuleBinding {
+    pub rule_id: String,
     pub calculation_id: String,
     pub policy_id: String,
     pub input_contract: String,
     pub expected_result_contract: String,
     pub determinism_class: String,
     pub diagnostic_code: String,
-}
-
-/// One ordered, typed relation/column operand.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DecodedProgramOperand {
-    pub ordinal: u16,
-    pub relation_ref: String,
-    pub column_ref: String,
-    pub logical_type: String,
 }
 
 /// One fail-closed semantic phrase binding compiled through the same calculation catalog.
@@ -70,28 +59,6 @@ pub struct DecodedCalculation {
     pub engine: String,
     pub native_operation: String,
     pub return_contract: String,
-}
-
-/// Closed DataFusion-native validation operation selected only by the generic lowerer.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum NativeValidationOperation {
-    ExternalReferential,
-    GovernedCodeAntiJoin,
-    PrimaryKeyUniquenessAggregate,
-    OntologyMembershipAntiJoin,
-    RelationFamilyConformanceJoin,
-    RelationCardinalityAggregate,
-    RelationOwnerConformanceJoin,
-    RelationSelfEdgeJoin,
-    PropertyValueOneOf,
-    SourceSpanAllOrNone,
-}
-
-/// One decoded operation paired with its exhaustively lowered native calculation.
-#[derive(Clone, Copy, Debug)]
-pub struct LoweredValidationOperation<'a> {
-    pub operation: &'a DecodedProgramOperation,
-    pub native: NativeValidationOperation,
 }
 
 /// Typed decoder/lowering failures.
@@ -155,68 +122,47 @@ fn one_batch<'a>(
 
 fn decode_rules(
     package: &OntologyProgramPackage,
-) -> Result<BTreeMap<String, DecodedProgramOperation>, OntologyProgramCompileError> {
-    let batch = one_batch(package, "program.rule_operation")?;
-    let operation_ids = utf8(batch, "operation_id")?;
-    let operation_kinds = utf8(batch, "operation_kind")?;
-    let ordinals = uint16(batch, "operand_ordinal")?;
-    let relations = utf8(batch, "relation_ref")?;
-    let columns = utf8(batch, "column_ref")?;
-    let logical_types = utf8(batch, "logical_type")?;
+) -> Result<BTreeMap<String, DecodedRuleBinding>, OntologyProgramCompileError> {
+    let batch = one_batch(package, "program.rule_binding")?;
+    let rule_ids = utf8(batch, "rule_id")?;
     let calculations = utf8(batch, "calculation_id")?;
     let policies = utf8(batch, "policy_id")?;
     let inputs = utf8(batch, "input_contract")?;
     let outputs = utf8(batch, "expected_result_contract")?;
     let determinism = utf8(batch, "determinism_class")?;
     let diagnostics = utf8(batch, "diagnostic_code")?;
-    let mut operations: BTreeMap<String, DecodedProgramOperation> = BTreeMap::new();
+    let mut rules = BTreeMap::new();
     for row in 0..batch.num_rows() {
-        let operation_id = operation_ids.value(row);
-        let operation =
-            operations
-                .entry(operation_id.into())
-                .or_insert_with(|| DecodedProgramOperation {
-                    operation_id: operation_id.into(),
-                    operation_kind: operation_kinds.value(row).into(),
-                    operands: Vec::new(),
-                    calculation_id: calculations.value(row).into(),
-                    policy_id: policies.value(row).into(),
-                    input_contract: inputs.value(row).into(),
-                    expected_result_contract: outputs.value(row).into(),
-                    determinism_class: determinism.value(row).into(),
-                    diagnostic_code: diagnostics.value(row).into(),
-                });
-        if operation.operation_kind != operation_kinds.value(row)
-            || operation.calculation_id != calculations.value(row)
-            || operation.policy_id != policies.value(row)
-            || usize::from(ordinals.value(row)) != operation.operands.len()
+        let rule = DecodedRuleBinding {
+            rule_id: rule_ids.value(row).into(),
+            calculation_id: calculations.value(row).into(),
+            policy_id: policies.value(row).into(),
+            input_contract: inputs.value(row).into(),
+            expected_result_contract: outputs.value(row).into(),
+            determinism_class: determinism.value(row).into(),
+            diagnostic_code: diagnostics.value(row).into(),
+        };
+        if rule.rule_id.is_empty()
+            || rule.calculation_id.is_empty()
+            || rule.policy_id.is_empty()
+            || rule.input_contract.is_empty()
+            || rule.expected_result_contract.is_empty()
+            || rule.determinism_class.is_empty()
+            || rule.diagnostic_code.is_empty()
+            || rules.insert(rule.rule_id.clone(), rule).is_some()
         {
             return Err(OntologyProgramCompileError::Decode(format!(
-                "{operation_id} has inconsistent or unordered rows"
+                "rule binding row {row} is empty or duplicated"
             )));
         }
-        operation.operands.push(DecodedProgramOperand {
-            ordinal: ordinals.value(row),
-            relation_ref: relations.value(row).into(),
-            column_ref: columns.value(row).into(),
-            logical_type: logical_types.value(row).into(),
-        });
     }
-    if operations
-        .values()
-        .any(|operation| operation.operands.is_empty())
-    {
-        return Err(OntologyProgramCompileError::Decode(
-            "operand-free executable operation".into(),
-        ));
-    }
-    Ok(operations)
+    Ok(rules)
 }
 
 fn decode_phrases(
     package: &OntologyProgramPackage,
 ) -> Result<BTreeMap<String, DecodedPhraseBinding>, OntologyProgramCompileError> {
-    let batch = one_batch(package, "program.phrase_operation")?;
+    let batch = one_batch(package, "program.phrase_binding")?;
     let ids = utf8(batch, "phrase_id")?;
     let texts = utf8(batch, "canonical_text")?;
     let columns = utf8(batch, "column_ref")?;
@@ -387,7 +333,7 @@ fn decode_query_projections(
 fn decode_calculations(
     package: &OntologyProgramPackage,
 ) -> Result<BTreeMap<String, DecodedCalculation>, OntologyProgramCompileError> {
-    let batch = one_batch(package, "program.calculation_catalog")?;
+    let batch = one_batch(package, "program.calculation_contract")?;
     let ids = utf8(batch, "calculation_id")?;
     let engines = utf8(batch, "engine")?;
     let operations = utf8(batch, "native_operation")?;
@@ -417,7 +363,8 @@ fn decode_calculations(
 #[derive(Clone, Debug)]
 pub struct OntologyProgramCompiler {
     pub package_identity: String,
-    pub operations: BTreeMap<String, DecodedProgramOperation>,
+    pub rules: BTreeMap<String, DecodedRuleBinding>,
+    pub relational_program: crate::ontology_relational_program::OntologyRelationalProgram,
     pub phrases: BTreeMap<String, DecodedPhraseBinding>,
     pub query_phrases: BTreeMap<String, DecodedQueryPhrase>,
     pub query_projection_codes: BTreeMap<(String, String), Vec<i32>>,
@@ -482,18 +429,26 @@ impl OntologyProgramCompiler {
     /// non-native engines, malformed operands, or unsupported current-profile calculations.
     pub fn decode(package: &OntologyProgramPackage) -> Result<Self, OntologyProgramCompileError> {
         validate_ontology_program_package(package)?;
-        let operations = decode_rules(package)?;
+        let rules = decode_rules(package)?;
+        let relational_program =
+            crate::ontology_relational_program::OntologyRelationalProgram::decode(package)?;
         let phrases = decode_phrases(package)?;
         let query_phrases = decode_query_phrases(package)?;
         let query_projection_codes = decode_query_projections(package)?;
         let calculations = decode_calculations(package)?;
-        let referenced = operations
+        let referenced = rules
             .values()
-            .map(|operation| operation.calculation_id.as_str())
+            .map(|rule| rule.calculation_id.as_str())
             .chain(
                 phrases
                     .values()
                     .map(|phrase| phrase.calculation_id.as_str()),
+            )
+            .chain(
+                relational_program
+                    .programs()
+                    .values()
+                    .map(|program| program.calculation_id.as_str()),
             )
             .collect::<BTreeSet<_>>();
         let available = calculations
@@ -506,21 +461,7 @@ impl OntologyProgramCompiler {
                 referenced.difference(&available).collect::<Vec<_>>()
             )));
         }
-        let supported = BTreeSet::from([
-            "eq",
-            "in_list",
-            "foreign_key_anti_join",
-            "governed_code_anti_join",
-            "primary_key_uniqueness_aggregate",
-            "id_domain_conformance",
-            "ontology_membership_anti_join",
-            "relation_family_conformance_join",
-            "relation_cardinality_aggregate",
-            "relation_owner_conformance_join",
-            "relation_self_edge_join",
-            "property_value_one_of",
-            "source_span_all_or_none",
-        ]);
+        let supported = BTreeSet::from(["eq", "in_list", "relational_program"]);
         if let Some(calculation) = calculations
             .values()
             .find(|calculation| !supported.contains(calculation.native_operation.as_str()))
@@ -529,9 +470,49 @@ impl OntologyProgramCompiler {
                 calculation.native_operation.clone(),
             ));
         }
+        for program in relational_program.programs().values().filter(|program| {
+            matches!(
+                program.execution_phase.as_str(),
+                "candidate_validation" | "semantic_analysis"
+            )
+        }) {
+            let rule = rules.get(&program.rule_id).ok_or_else(|| {
+                OntologyProgramCompileError::Decode(format!(
+                    "program {} has no authored rule binding {}",
+                    program.program_id, program.rule_id
+                ))
+            })?;
+            let calculation = calculations.get(&program.calculation_id).ok_or_else(|| {
+                OntologyProgramCompileError::Decode(format!(
+                    "program {} has no calculation {}",
+                    program.program_id, program.calculation_id
+                ))
+            })?;
+            if rule.calculation_id != program.calculation_id
+                || rule.policy_id != program.policy_id
+                || rule.expected_result_contract != program.expected_result_contract
+                || rule.diagnostic_code != program.diagnostic_code
+                || calculation.native_operation != "relational_program"
+            {
+                return Err(OntologyProgramCompileError::Decode(format!(
+                    "program {} drifts from its rule/calculation authority: calculation={:?}/{:?}, policy={:?}/{:?}, result={:?}/{:?}, diagnostic={:?}/{:?}, native={:?}",
+                    program.program_id,
+                    program.calculation_id,
+                    rule.calculation_id,
+                    program.policy_id,
+                    rule.policy_id,
+                    program.expected_result_contract,
+                    rule.expected_result_contract,
+                    program.diagnostic_code,
+                    rule.diagnostic_code,
+                    calculation.native_operation,
+                )));
+            }
+        }
         Ok(Self {
             package_identity: package.manifest.package_identity.clone(),
-            operations,
+            rules,
+            relational_program,
             phrases,
             query_phrases,
             query_projection_codes,
@@ -583,88 +564,110 @@ impl OntologyProgramCompiler {
             .ok_or_else(|| OntologyProgramCompileError::Phrase(text.into()))?;
         self.lower_decoded_phrase(phrase, Some(qualifier))
     }
-
-    /// Exhaustively lower every validation operation through the calculation catalog.
-    ///
-    /// # Errors
-    ///
-    /// Rejects missing, mismatched, or non-native calculation bindings.
-    pub fn validation_operations(
-        &self,
-    ) -> Result<Vec<LoweredValidationOperation<'_>>, OntologyProgramCompileError> {
-        self.operations
-            .values()
-            .map(|operation| {
-                let calculation = self
-                    .calculations
-                    .get(&operation.calculation_id)
-                    .ok_or_else(|| {
-                        OntologyProgramCompileError::Unsupported(operation.calculation_id.clone())
-                    })?;
-                if calculation.engine != "datafusion-native"
-                    || calculation.native_operation != operation.operation_kind
-                    || calculation.return_contract != operation.expected_result_contract
-                    || operation.expected_result_contract.is_empty()
-                    || operation.input_contract.is_empty()
-                    || operation.determinism_class.is_empty()
-                {
-                    return Err(OntologyProgramCompileError::Decode(format!(
-                        "{} is not bound to its typed native calculation and contracts",
-                        operation.operation_id
-                    )));
-                }
-                let native = match calculation.native_operation.as_str() {
-                    "foreign_key_anti_join" | "id_domain_conformance" => {
-                        NativeValidationOperation::ExternalReferential
-                    }
-                    "governed_code_anti_join" => NativeValidationOperation::GovernedCodeAntiJoin,
-                    "primary_key_uniqueness_aggregate" => {
-                        NativeValidationOperation::PrimaryKeyUniquenessAggregate
-                    }
-                    "ontology_membership_anti_join" => {
-                        NativeValidationOperation::OntologyMembershipAntiJoin
-                    }
-                    "relation_family_conformance_join" => {
-                        NativeValidationOperation::RelationFamilyConformanceJoin
-                    }
-                    "relation_cardinality_aggregate" => {
-                        NativeValidationOperation::RelationCardinalityAggregate
-                    }
-                    "relation_owner_conformance_join" => {
-                        NativeValidationOperation::RelationOwnerConformanceJoin
-                    }
-                    "relation_self_edge_join" => NativeValidationOperation::RelationSelfEdgeJoin,
-                    "property_value_one_of" => NativeValidationOperation::PropertyValueOneOf,
-                    "source_span_all_or_none" => NativeValidationOperation::SourceSpanAllOrNone,
-                    unsupported => {
-                        return Err(OntologyProgramCompileError::Unsupported(unsupported.into()));
-                    }
-                };
-                Ok(LoweredValidationOperation { operation, native })
-            })
-            .collect()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use arrow_array::{ArrayRef, Int16Array, Int32Array, RecordBatch, UInt64Array};
+    use arrow_array::{
+        Array as _, ArrayRef, Int16Array, Int32Array, RecordBatch, StringArray, UInt64Array,
+    };
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::datasource::{MemTable, provider_as_source};
     use datafusion::logical_expr::LogicalPlanBuilder;
     use datafusion::prelude::SessionConfig;
 
-    use super::OntologyProgramCompiler;
+    use super::{OntologyProgramCompileError, OntologyProgramCompiler};
     use crate::governed_session::GovernedSession;
     use crate::ontology_gate::{GateResourceEnvelope, OntologyGateOutcome};
-    use crate::ontology_program::{OntologyPackagingProfile, build_ontology_program_package};
+    use crate::ontology_program::{
+        OntologyPackagingProfile, OntologyProgramPackage, build_ontology_program_package,
+        replace_program_utf8_cell,
+    };
 
     fn compiler() -> OntologyProgramCompiler {
         let package = build_ontology_program_package(&OntologyPackagingProfile::default())
             .expect("program package");
         OntologyProgramCompiler::decode(&package).expect("program compiler")
+    }
+
+    fn empty_candidate_providers()
+    -> std::collections::BTreeMap<String, Arc<dyn datafusion::catalog::TableProvider>> {
+        let batches = crate::schema_registry::table_specs()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.table_code,
+                    RecordBatch::new_empty(Arc::clone(&spec.arrow_schema)),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        crate::ontology_relational_program::candidate_batch_providers(&batches)
+            .expect("schema-faithful providers")
+    }
+
+    fn compiled_candidate_plans(
+        compiler: &OntologyProgramCompiler,
+    ) -> Result<std::collections::BTreeMap<String, String>, OntologyProgramCompileError> {
+        let providers = empty_candidate_providers();
+        compiler
+            .relational_program
+            .programs()
+            .values()
+            .filter(|program| program.execution_phase == "candidate_validation")
+            .map(|program| {
+                Ok((
+                    program.program_id.clone(),
+                    compiler
+                        .relational_program
+                        .compile(&program.program_id, &providers)?
+                        .display_indent()
+                        .to_string(),
+                ))
+            })
+            .collect()
+    }
+
+    fn utf8_row(
+        package: &OntologyProgramPackage,
+        relation: &str,
+        column: &str,
+        predicate: impl Fn(&str) -> bool,
+    ) -> usize {
+        let batch = &package.members[relation].batches[0];
+        let values = batch
+            .column_by_name(column)
+            .and_then(|value| value.as_any().downcast_ref::<StringArray>())
+            .expect("Utf8 program column");
+        (0..values.len())
+            .find(|&row| !values.is_null(row) && predicate(values.value(row)))
+            .unwrap_or_else(|| panic!("no matching {relation}.{column} row"))
+    }
+
+    fn assert_resealed_mutation_causal(
+        base: &OntologyProgramPackage,
+        base_plans: &std::collections::BTreeMap<String, String>,
+        relation: &str,
+        column: &str,
+        row: usize,
+        replacement: &str,
+    ) {
+        let mut mutated = base.clone();
+        replace_program_utf8_cell(&mut mutated, relation, column, row, replacement)
+            .expect("resealed causal mutant");
+        assert_ne!(
+            mutated.manifest.package_identity, base.manifest.package_identity,
+            "{relation}.{column} did not affect package authority"
+        );
+        if let Ok(compiler) = OntologyProgramCompiler::decode(&mutated)
+            && let Ok(mutated_plans) = compiled_candidate_plans(&compiler)
+        {
+            assert_ne!(
+                &mutated_plans, base_plans,
+                "{relation}.{column} mutation did not change or reject planning"
+            );
+        }
     }
 
     async fn execute_phrase_once(
@@ -735,7 +738,7 @@ mod tests {
     #[tokio::test]
     async fn ontology_compiled_program_native_profile() {
         let compiler = compiler();
-        assert_eq!(compiler.operations.len(), 11);
+        assert_eq!(compiler.rules.len(), 11);
         assert!(compiler.phrases.len() >= 3);
         assert!(compiler.phrases.values().all(|phrase| {
             !phrase.column_ref.is_empty()
@@ -772,16 +775,98 @@ mod tests {
             .await;
             assert_eq!(selected.batches[0].num_rows(), 1);
         }
-        assert!(compiler.operations.values().all(|operation| {
-            !operation.operation_kind.is_empty()
-                && !operation.policy_id.is_empty()
-                && !operation.expected_result_contract.is_empty()
-                && operation
-                    .operands
-                    .iter()
-                    .enumerate()
-                    .all(|(index, operand)| usize::from(operand.ordinal) == index)
+        assert!(compiler.rules.values().all(|rule| {
+            !rule.rule_id.is_empty()
+                && !rule.policy_id.is_empty()
+                && !rule.expected_result_contract.is_empty()
+                && !rule.input_contract.is_empty()
         }));
+
+        let base = build_ontology_program_package(&OntologyPackagingProfile::default())
+            .expect("causal package");
+        let base_compiler = OntologyProgramCompiler::decode(&base).expect("base compiler");
+        let base_plans = compiled_candidate_plans(&base_compiler).expect("base plans");
+
+        let binary_row = utf8_row(&base, "program.binary_expr", "operator", |value| {
+            value == "eq"
+        });
+        let mut changed = base.clone();
+        replace_program_utf8_cell(
+            &mut changed,
+            "program.binary_expr",
+            "operator",
+            binary_row,
+            "neq",
+        )
+        .expect("resealed operator mutation");
+        let changed_compiler = OntologyProgramCompiler::decode(&changed).expect("changed compiler");
+        assert_ne!(
+            base_plans,
+            compiled_candidate_plans(&changed_compiler).expect("changed plans"),
+            "binary operator mutation did not change any governed plan"
+        );
+
+        let program_row = utf8_row(
+            &base,
+            "program.program_contract",
+            "execution_phase",
+            |value| value == "candidate_validation",
+        );
+        for (column, replacement) in [
+            ("rule_id", "ontology.unknown.v1"),
+            ("root_node_id", "plan.unknown"),
+            ("calculation_id", "calculation.unknown.v1"),
+            ("policy_id", "policy.unknown.v1"),
+            ("expected_result_contract", "unknown-result.v1"),
+            ("diagnostic_code", "UNKNOWN_DIAGNOSTIC"),
+        ] {
+            assert_resealed_mutation_causal(
+                &base,
+                &base_plans,
+                "program.program_contract",
+                column,
+                program_row,
+                replacement,
+            );
+        }
+
+        for (relation, column, replacement) in [
+            ("program.scan_node", "relation_ref", "table:32767"),
+            ("program.scan_node", "relation_alias", "unknown_scan_alias"),
+            ("program.filter_node", "predicate_expr_id", "expr.unknown"),
+            ("program.join_node", "join_type", "unsupported_join"),
+            ("program.column_expr", "column_name", "unknown_column"),
+            (
+                "program.column_expr",
+                "relation_alias",
+                "unknown_column_alias",
+            ),
+            ("program.binary_expr", "operator", "unsupported_binary"),
+            ("program.call_expr", "function_name", "unsupported_call"),
+            ("program.cast_expr", "target_type", "unsupported_type"),
+            ("program.plan_edge", "child_node_id", "plan.unknown"),
+            ("program.expression_edge", "child_expr_id", "expr.unknown"),
+            ("program.expression_edge", "role", "unsupported_role"),
+        ] {
+            assert_resealed_mutation_causal(&base, &base_plans, relation, column, 0, replacement);
+        }
+
+        let literal_row = utf8_row(&base, "program.literal_expr", "value", |_| true);
+        let mut literal_changed = base.clone();
+        replace_program_utf8_cell(
+            &mut literal_changed,
+            "program.literal_expr",
+            "value",
+            literal_row,
+            "causal-mutant",
+        )
+        .expect("resealed literal mutation");
+        let literal_result = OntologyProgramCompiler::decode(&literal_changed)
+            .and_then(|compiler| compiled_candidate_plans(&compiler));
+        assert!(
+            literal_result.is_err() || literal_result.expect("literal result") != base_plans,
+            "literal mutation did not affect planning"
+        );
     }
 
     #[test]
@@ -796,14 +881,21 @@ mod tests {
     fn ontology_calculation_catalog_bijection() {
         let compiler = compiler();
         let referenced = compiler
-            .operations
+            .rules
             .values()
-            .map(|operation| operation.calculation_id.as_str())
+            .map(|rule| rule.calculation_id.as_str())
             .chain(
                 compiler
                     .phrases
                     .values()
                     .map(|phrase| phrase.calculation_id.as_str()),
+            )
+            .chain(
+                compiler
+                    .relational_program
+                    .programs()
+                    .values()
+                    .map(|program| program.calculation_id.as_str()),
             )
             .collect::<std::collections::BTreeSet<_>>();
         let available = compiler

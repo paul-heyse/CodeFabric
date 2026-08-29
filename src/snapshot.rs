@@ -130,6 +130,19 @@ pub struct ResultAuthorityPin {
     pub exact_table_set_identity: String,
 }
 
+/// Canonical READY-snapshot bytes passed only between the trusted proof coordinator and the
+/// durable activation kernel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StagedServingSnapshot {
+    pub snapshot_id: [u8; 16],
+    pub workspace_id: [u8; 16],
+    pub publication_id: [u8; 16],
+    pub manifest_body: Vec<u8>,
+    pub manifest_json: Vec<u8>,
+    pub manifest_digest: [u8; 32],
+    pub result_authority: Option<ResultAuthorityPin>,
+}
+
 /// Immutable AC-G-19 manifest body; mutable activation observations are absent.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

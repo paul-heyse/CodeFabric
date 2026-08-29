@@ -242,6 +242,22 @@ impl ServingSnapshotCandidate {
     pub fn source_blob_digests(&self) -> &[[u8; 32]] {
         &self.source_blob_digests
     }
+
+    pub(crate) fn staged_record(
+        &self,
+    ) -> Result<crate::snapshot::StagedServingSnapshot, SnapshotRuntimeError> {
+        self.manifest.validate()?;
+        Ok(crate::snapshot::StagedServingSnapshot {
+            snapshot_id: self.manifest.raw_snapshot_id()?,
+            workspace_id: self.manifest.raw_workspace_id()?,
+            publication_id: self.manifest.raw_publication_id()?,
+            manifest_body: self.manifest.body.canonical_body()?,
+            manifest_json: serde_json::to_vec(&self.manifest)
+                .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))?,
+            manifest_digest: self.manifest.raw_manifest_digest()?,
+            result_authority: self.manifest.body.result_authority.clone(),
+        })
+    }
 }
 
 /// Process-local active snapshot pointer backed by durable `SQLite` activation state.
@@ -256,6 +272,76 @@ impl ServingSnapshotRuntime {
         self.active.load_full()
     }
 
+    /// Activate an ordinary fact snapshot only when it preserves the currently active ontology
+    /// and result authority. This route cannot introduce or replace semantic authority.
+    ///
+    /// # Errors
+    ///
+    /// Rejects any authority change, missing authority after ontology activation, or ordinary
+    /// snapshot pointer failure.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_ordinary_fact_snapshot(
+        &self,
+        store: &mut OperationalStore,
+        candidate: Arc<ServingSnapshotCandidate>,
+        expected_predecessor: Option<[u8; 16]>,
+        expected_active_pointer_generation: u64,
+        observed_durable_pointer_generation: u64,
+        now: u64,
+        fault: Option<SnapshotActivationFaultPoint>,
+    ) -> Result<Vec<SnapshotActivationStage>, SnapshotActivationError> {
+        let workspace_id = candidate.manifest.raw_workspace_id().map_err(|source| {
+            ErrorEnvelope::new(
+                Phase::SnapshotActivation,
+                "INTERNAL_INVARIANT_VIOLATION",
+                vec![SnapshotActivationStage::CandidateValidated],
+                SnapshotRuntimeError::Manifest(source),
+            )
+        })?;
+        let active = store
+            .active_ontology_authority(workspace_id)
+            .map_err(|source| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotActivation,
+                    "INTERNAL_INVARIANT_VIOLATION",
+                    vec![SnapshotActivationStage::CandidateValidated],
+                    SnapshotRuntimeError::Store(source),
+                )
+            })?;
+        let preserves_authority = match (active, &candidate.manifest.body.result_authority) {
+            (None, None) => true,
+            (Some(active), Some(pin)) => {
+                pin.result_authority_identity == active.result_authority_identity
+                    && pin.program_identity == active.program_identity
+                    && pin.function_catalog_identity == active.function_catalog_identity
+                    && pin.policy_identity == active.policy_identity
+                    && pin.query_form_identity == active.query_form_identity
+                    && pin.checksum_version == active.checksum_version
+                    && pin.exact_table_set_identity == active.exact_table_set_identity
+            }
+            _ => false,
+        };
+        if !preserves_authority {
+            return Err(ErrorEnvelope::new(
+                Phase::SnapshotActivation,
+                "CURRENT_POINTER_CONFLICT",
+                vec![SnapshotActivationStage::CandidateValidated],
+                SnapshotRuntimeError::PointerConflict(
+                    "ordinary fact activation cannot change ontology/result authority".into(),
+                ),
+            ));
+        }
+        self.commit_fact_snapshot(
+            store,
+            candidate,
+            expected_predecessor,
+            expected_active_pointer_generation,
+            observed_durable_pointer_generation,
+            now,
+            fault,
+        )
+    }
+
     /// Atomically activate after the durable pointer transaction commits.
     ///
     /// # Errors
@@ -264,8 +350,7 @@ impl ServingSnapshotRuntime {
     /// workspaces, or an injected crash seam.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)] // AC-G-26 fixes one auditable transaction order.
-    #[doc(hidden)]
-    pub fn commit_fact_snapshot(
+    pub(crate) fn commit_fact_snapshot(
         &self,
         store: &mut OperationalStore,
         candidate: Arc<ServingSnapshotCandidate>,
@@ -541,6 +626,63 @@ fn result_authority_pin(authority: ActiveOntologyAuthority) -> ResultAuthorityPi
     }
 }
 
+fn legacy_result_authority_pin(candidate: &ServingSnapshotCandidate) -> ResultAuthorityPin {
+    let manifest = candidate.manifest();
+    let body = &manifest.body;
+    let program_identity = crate::integrity::framed_digest(
+        format!(
+            "legacy-program.v1\0{}\0{}\0{}",
+            body.bundles.ontology_bundle_id,
+            body.bundles.schema_bundle_id,
+            body.bundles.query_language_bundle_id
+        )
+        .as_bytes(),
+    );
+    let function_catalog_identity = crate::integrity::framed_digest(
+        format!(
+            "legacy-function-catalog.v1\0{}\0{}",
+            body.bundles.query_language_bundle_id, body.bundles.model_pack_bundle_id
+        )
+        .as_bytes(),
+    );
+    let policy_identity = crate::integrity::framed_digest(
+        format!(
+            "legacy-result-policy.v1\0{}\0{}",
+            body.limits_profile_digest, body.manifest_version
+        )
+        .as_bytes(),
+    );
+    let query_form_identity = crate::integrity::framed_digest(
+        format!(
+            "legacy-query-form.v1\0{}",
+            body.bundles.query_language_bundle_id
+        )
+        .as_bytes(),
+    );
+    let exact_table_set_identity = crate::integrity::framed_digest(
+        format!(
+            "legacy-exact-table-set.v1\0{}\0{}",
+            manifest.manifest_digest, body.base_publication.publication_id
+        )
+        .as_bytes(),
+    );
+    let result_authority_identity = crate::integrity::framed_digest(
+        format!(
+            "legacy-result-authority.v1\0{program_identity}\0{function_catalog_identity}\0{policy_identity}\0{query_form_identity}\0{exact_table_set_identity}\0ResultChecksumV1"
+        )
+        .as_bytes(),
+    );
+    ResultAuthorityPin {
+        result_authority_identity,
+        program_identity,
+        function_catalog_identity,
+        policy_identity,
+        query_form_identity,
+        checksum_version: "ResultChecksumV1".into(),
+        exact_table_set_identity,
+    }
+}
+
 /// In-process lease guard retaining the exact immutable snapshot graph.
 #[derive(Debug)]
 pub struct SnapshotLeaseGuard {
@@ -601,12 +743,27 @@ impl SnapshotLeaseManager {
         let snapshot_id = candidate.manifest.raw_snapshot_id()?;
         let publication_id = candidate.manifest.raw_publication_id()?;
         let active_authority = store.active_ontology_authority(workspace_id)?;
-        let ontology_epoch_identity = active_authority
+        let mut ontology_epoch_identity = active_authority
             .as_ref()
             .map(|authority| authority.epoch_identity.clone());
-        let result_authority = active_authority.map(result_authority_pin);
+        let result_authority = active_authority
+            .map(result_authority_pin)
+            .unwrap_or_else(|| legacy_result_authority_pin(candidate.as_ref()));
+        if ontology_epoch_identity.is_none() {
+            ontology_epoch_identity = Some(crate::integrity::framed_digest(
+                format!(
+                    "legacy-ontology-epoch.v1\0{}\0{}",
+                    workspace_id
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>(),
+                    result_authority.result_authority_identity
+                )
+                .as_bytes(),
+            ));
+        }
         if let Some(manifest_authority) = candidate.manifest.body.result_authority.as_ref()
-            && result_authority.as_ref() != Some(manifest_authority)
+            && &result_authority != manifest_authority
         {
             return Err(SnapshotRuntimeError::Lease(
                 "snapshot result authority does not match the active ontology epoch".into(),
@@ -647,6 +804,25 @@ impl SnapshotLeaseManager {
                 ));
             }
             transaction.execute(
+                "INSERT INTO ontology_result_authority(
+                   result_authority_identity, workspace_id, program_identity,
+                   function_catalog_identity, policy_identity, query_form_identity,
+                   checksum_version, exact_table_set_identity, created_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+                 ON CONFLICT(result_authority_identity) DO NOTHING",
+                params![
+                    result_authority.result_authority_identity,
+                    workspace_id.as_slice(),
+                    result_authority.program_identity,
+                    result_authority.function_catalog_identity,
+                    result_authority.policy_identity,
+                    result_authority.query_form_identity,
+                    result_authority.checksum_version,
+                    result_authority.exact_table_set_identity,
+                    sql_u64(now)?,
+                ],
+            )?;
+            transaction.execute(
                 "INSERT INTO snapshot_lease(lease_id, lease_kind_code, workspace_id,
                  snapshot_id, base_publication_id, required_delta_versions_bytes,
                  requires_overlay, agent_instance_id, created_at, last_heartbeat_at,
@@ -671,9 +847,7 @@ impl SnapshotLeaseManager {
                     artifact_expires_at.map(sql_u64).transpose()?,
                     source_lease_id.as_ref().map(<[u8; 16]>::as_slice),
                     ontology_epoch_identity.as_deref(),
-                    result_authority
-                        .as_ref()
-                        .map(|authority| authority.result_authority_identity.as_str()),
+                    result_authority.result_authority_identity.as_str(),
                 ],
             )?;
             let updated = transaction.execute(
@@ -708,7 +882,7 @@ impl SnapshotLeaseManager {
                 process_instance_id: self.process_instance_id,
                 source_blob_lease_id: source_lease_id,
                 ontology_epoch_identity,
-                result_authority,
+                result_authority: Some(result_authority),
             },
             snapshot: candidate,
         })
@@ -1214,6 +1388,7 @@ mod tests {
         SnapshotBundles, SnapshotContextRecord, SnapshotContexts, SnapshotIndexes, SnapshotOverlay,
         SnapshotSource,
     };
+    use arrow_array::{ArrayRef, Int64Array, RecordBatch};
     use datafusion::prelude::SessionConfig;
     use rusqlite::params;
     use tempfile::tempdir;
@@ -1354,17 +1529,29 @@ mod tests {
                 },
             )]),
         };
-        CandidateClosureRunner::new_for_epoch(
+        let runner = CandidateClosureRunner::new_for_epoch(
             build_ontology_program_package(&OntologyPackagingProfile::default()).unwrap(),
             publication,
             GovernedSession::new(SessionConfig::new(), "policy.ontology.v1").unwrap(),
             predecessor,
             100_000,
         )
-        .unwrap()
-        .execute(&GateResourceEnvelope::default())
-        .await
-        .unwrap()
+        .unwrap();
+        let batches = crate::schema_registry::table_specs()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.table_code,
+                    RecordBatch::new_empty(Arc::clone(&spec.arrow_schema)),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let providers = crate::ontology_relational_program::candidate_batch_providers(&batches)
+            .expect("schema-faithful lease providers");
+        runner
+            .execute_with_test_providers(&GateResourceEnvelope::default(), &providers)
+            .await
+            .unwrap()
     }
 
     fn candidate_with_table() -> Arc<ServingSnapshotCandidate> {
@@ -1886,13 +2073,19 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert!(old_lease.result_authority().is_none());
+        assert_eq!(
+            old_lease
+                .result_authority()
+                .expect("legacy lease has an explicit authority")
+                .checksum_version,
+            "ResultChecksumV1"
+        );
 
         let report = ontology_report(None).await;
         store
             .persist_proved_ontology_candidate(&report, 12)
             .unwrap();
-        let decision = crate::operational_store::OntologyOwnerDecision::new(
+        let decision = crate::operational_store::OntologyOwnerDecision::new_for_test(
             report.candidate_identity(),
             "owner:ontology-release",
             report.durable_evidence().policy_identity.clone(),
@@ -1956,6 +2149,35 @@ mod tests {
             old_lease.record().snapshot_id,
             new_lease.record().snapshot_id
         );
+        let query_batch = RecordBatch::try_from_iter([(
+            "value",
+            Arc::new(Int64Array::from(vec![7_i64, 3, 7])) as ArrayRef,
+        )])
+        .unwrap();
+        let old_result = crate::fabric::result_checksum_for_version(
+            &old_lease.result_authority().unwrap().checksum_version,
+            query_batch.schema().as_ref(),
+            std::slice::from_ref(&query_batch),
+            1_048_576,
+        )
+        .unwrap();
+        let new_result = crate::fabric::result_checksum_for_version(
+            &new_lease.result_authority().unwrap().checksum_version,
+            query_batch.schema().as_ref(),
+            std::slice::from_ref(&query_batch),
+            1_048_576,
+        )
+        .unwrap();
+        let (
+            crate::fabric::VersionedResultChecksum::V1(old_result),
+            crate::fabric::VersionedResultChecksum::V2(new_result),
+        ) = (old_result, new_result)
+        else {
+            panic!("lease-pinned checksum dispatch selected the wrong encoder");
+        };
+        assert_eq!(old_result.canonical_schema, new_result.canonical_schema);
+        assert_eq!(old_result.row_count, new_result.row_count);
+        assert_ne!(old_result.checksum, new_result.checksum);
 
         drop(store);
         let reopened = OperationalStore::open(&database_path).unwrap();
@@ -1966,7 +2188,15 @@ mod tests {
                 .iter()
                 .filter(|lease| lease.result_authority.is_some())
                 .count(),
-            1
+            2
+        );
+        assert_eq!(
+            leases
+                .iter()
+                .filter_map(|lease| lease.result_authority.as_ref())
+                .map(|pin| pin.checksum_version.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["ResultChecksumV1", "ResultChecksumV2"])
         );
         assert!(leases.iter().any(|lease| {
             lease.result_authority.as_ref().is_some_and(|pin| {

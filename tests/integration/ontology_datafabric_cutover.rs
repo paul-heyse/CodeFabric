@@ -9,20 +9,15 @@ use codefabric::fabric::{
     EmptySnapshotOverlay, PublicationOutcome, PublicationPins, PublicationRequest,
     SnapshotProviderCatalog, WorkspaceFabric, bootstrap_workspace,
 };
-use codefabric::governed_session::GovernedSession;
 use codefabric::identity::{
     IdentityDomain, SOURCE_CONTEXT_ID, context_set_identity, encode_public_id,
 };
-use codefabric::ontology_candidate::{CandidateClosureReport, CandidateClosureRunner};
-use codefabric::ontology_gate::GateResourceEnvelope;
+use codefabric::ontology_activation::OntologyCandidateSubmission;
 use codefabric::ontology_program::{
-    InstalledOntologyProgramPackage, OntologyPackagingProfile, OntologyProgramPackage,
-    build_ontology_program_package, install_ontology_program_package,
-    verify_installed_ontology_program_package,
+    InstalledOntologyProgramPackage, OntologyPackagingProfile, build_ontology_program_package,
+    install_ontology_program_package, verify_installed_ontology_program_package,
 };
-use codefabric::operational_store::{
-    ActiveOntologyAuthority, OntologyOwnerDecision, OperationalStore,
-};
+use codefabric::operational_store::{ActiveOntologyAuthority, OperationalStore};
 use codefabric::registries::SnapshotLeaseKind;
 use codefabric::snapshot::{
     ResultAuthorityPin, ServingSnapshotManifestBody, SnapshotBasePublication, SnapshotBundles,
@@ -33,7 +28,6 @@ use codefabric::snapshot_runtime::{
 };
 use codefabric::source_image::{SourceCapturePolicy, SourceImageStore};
 use codefabric::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
-use datafusion::prelude::SessionConfig;
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -144,7 +138,7 @@ fn start_daemon(config: &std::path::Path, discovery: &std::path::Path) -> Daemon
         .args(["serve", "--config"])
         .arg(config)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn ontology cutover daemon");
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -161,21 +155,19 @@ fn start_daemon(config: &std::path::Path, discovery: &std::path::Path) -> Daemon
 fn activation_command(
     discovery: &std::path::Path,
     workspace_id: &str,
-    candidate_identity: &str,
-    decision_identity: &str,
+    submission_path: &std::path::Path,
+    administrative_key: &[u8],
     request_key: &str,
 ) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_codefabric"));
+    let administrative_key_hex = administrative_key
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     command
-        .args([
-            "workspace",
-            "activate-candidate",
-            workspace_id,
-            candidate_identity,
-            decision_identity,
-            request_key,
-            "--discovery",
-        ])
+        .args(["workspace", "activate-candidate", workspace_id])
+        .arg(submission_path)
+        .args([&administrative_key_hex, request_key, "--discovery"])
         .arg(discovery)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -348,43 +340,30 @@ async fn serving_candidate(
     )
 }
 
-async fn proved_candidate(
-    package: OntologyProgramPackage,
+fn write_candidate_submission(
+    root: &std::path::Path,
+    name: &str,
     publication: PublicationOutcome,
-    predecessor: Option<String>,
-) -> (CandidateClosureReport, bool) {
-    let runner = CandidateClosureRunner::new_for_epoch(
-        package,
+    registration_revision: u64,
+) -> std::path::PathBuf {
+    let submission = OntologyCandidateSubmission {
+        manifest_body: snapshot_body(
+            publication.scope.workspace_id,
+            registration_revision,
+            &publication,
+            None,
+        ),
         publication,
-        GovernedSession::new(SessionConfig::new(), "policy.ontology.v1")
-            .expect("governed candidate session"),
-        predecessor,
-        1_000_000,
+        source_blob_digests: Vec::new(),
+        rollback_retain_until: 1_000_000,
+    };
+    let path = root.join(format!("{name}.candidate.json"));
+    fs::write(
+        &path,
+        serde_json::to_vec(&submission).expect("encode candidate submission"),
     )
-    .expect("candidate closure runner");
-    let catalog = runner
-        .open_frozen_catalog()
-        .await
-        .expect("read exact real Delta candidate catalog");
-    let exact_delta_readback = catalog.provider_records().len() > 10
-        && catalog
-            .provider_records()
-            .all(|record| record.manifest.table_uri.starts_with("file://"));
-    let report = runner
-        .execute(&GateResourceEnvelope::default())
-        .await
-        .expect("prove sealed candidate");
-    (report, exact_delta_readback)
-}
-
-fn decision(report: &CandidateClosureReport, accepted_at: i64) -> OntologyOwnerDecision {
-    OntologyOwnerDecision::new(
-        report.candidate_identity(),
-        "owner:ontology-cutover",
-        report.policy_identity(),
-        accepted_at,
-    )
-    .expect("owner decision")
+    .expect("write candidate submission");
+    path
 }
 
 #[allow(clippy::too_many_lines)] // One end-to-end process scenario preserves causal ordering.
@@ -435,7 +414,7 @@ async fn run_scenario() -> IntegrationEvidence {
     )
     .await;
     serving_runtime
-        .commit_fact_snapshot(
+        .commit_ordinary_fact_snapshot(
             &mut store,
             Arc::clone(&legacy),
             None,
@@ -464,17 +443,25 @@ async fn run_scenario() -> IntegrationEvidence {
             None,
         )
         .expect("legacy lease");
-    assert!(old_lease.result_authority().is_none());
+    assert_eq!(
+        old_lease
+            .result_authority()
+            .expect("legacy lease authority")
+            .checksum_version,
+        "ResultChecksumV1"
+    );
 
-    let (target_report, exact_delta_readback) =
-        proved_candidate(package.clone(), initial_publication.clone(), None).await;
-    let target_decision = decision(&target_report, 20);
-    store
-        .persist_proved_ontology_candidate(&target_report, 19)
-        .expect("persist target candidate");
-    store
-        .record_ontology_owner_decision(&target_decision)
-        .expect("persist target decision");
+    let exact_delta_readback = initial_publication.tables.len() > 10
+        && initial_publication
+            .tables
+            .values()
+            .all(|record| record.table_uri.starts_with("file://"));
+    let target_submission = write_candidate_submission(
+        root.path(),
+        "target",
+        initial_publication.clone(),
+        workspace.registration_revision,
+    );
     drop(fabric);
     drop(store);
 
@@ -483,8 +470,8 @@ async fn run_scenario() -> IntegrationEvidence {
         activation_command(
             &discovery,
             &workspace_text,
-            target_report.candidate_identity(),
-            &format!("b3:{}", "f".repeat(64)),
+            &target_submission,
+            b"not-the-workspace-owner-key",
             "cutover-invalid-decision",
         )
         .output()
@@ -495,8 +482,8 @@ async fn run_scenario() -> IntegrationEvidence {
     let first = activation_command(
         &discovery,
         &workspace_text,
-        target_report.candidate_identity(),
-        target_decision.identity(),
+        &target_submission,
+        &workspace.administrative_key,
         "cutover-race-a",
     )
     .spawn()
@@ -504,8 +491,8 @@ async fn run_scenario() -> IntegrationEvidence {
     let second = activation_command(
         &discovery,
         &workspace_text,
-        target_report.candidate_identity(),
-        target_decision.identity(),
+        &target_submission,
+        &workspace.administrative_key,
         "cutover-race-b",
     )
     .spawn()
@@ -514,7 +501,10 @@ async fn run_scenario() -> IntegrationEvidence {
     let second_response = response(second.wait_with_output().expect("second CAS output"));
     let first_won = first_response["accepted"] == true;
     let second_won = second_response["accepted"] == true;
-    assert_ne!(first_won, second_won, "exactly one CAS contender must win");
+    assert_ne!(
+        first_won, second_won,
+        "exactly one CAS contender must win: first={first_response} second={second_response}"
+    );
     let winning_request = if first_won {
         "cutover-race-a"
     } else {
@@ -523,6 +513,52 @@ async fn run_scenario() -> IntegrationEvidence {
     daemon.stop();
 
     let store = OperationalStore::open(&database_path).expect("inspect target activation");
+    let pointer_snapshot_evidence = store
+        .reader_factory()
+        .open()
+        .expect("pointer evidence reader")
+        .with_connection(|connection| {
+            let active_snapshot = connection.query_row(
+                "SELECT hex(snapshot_id) FROM active_snapshot WHERE workspace_id=?1",
+                [workspace.workspace_id.as_slice()],
+                |row| row.get::<_, String>(0),
+            )?;
+            let candidate_snapshot = connection.query_row(
+                "SELECT hex(candidate.serving_snapshot_id)
+                 FROM ontology_active_pointer AS pointer
+                 JOIN ontology_candidate AS candidate
+                   ON candidate.candidate_identity=pointer.candidate_identity
+                 WHERE pointer.workspace_id=?1",
+                [workspace.workspace_id.as_slice()],
+                |row| row.get::<_, String>(0),
+            )?;
+            let mut statement = connection.prepare(
+                "SELECT candidate.candidate_identity, candidate.state,
+                        hex(candidate.serving_snapshot_id),
+                        COALESCE(request.request_key, '<none>')
+                 FROM ontology_candidate AS candidate
+                 LEFT JOIN ontology_activation_request AS request
+                   ON request.candidate_identity=candidate.candidate_identity
+                 ORDER BY candidate.created_at, candidate.candidate_identity",
+            )?;
+            let candidates = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok::<_, rusqlite::Error>((active_snapshot, candidate_snapshot, candidates))
+        })
+        .expect("pointer evidence");
+    assert_eq!(
+        pointer_snapshot_evidence.0, pointer_snapshot_evidence.1,
+        "ontology and serving pointers diverged: {:?}",
+        pointer_snapshot_evidence.2
+    );
     let (request_count, acceptance_count) = store
         .reader_factory()
         .open()
@@ -542,14 +578,19 @@ async fn run_scenario() -> IntegrationEvidence {
         .expect("activation counts");
     assert_eq!((request_count, acceptance_count), (1, 1));
     drop(store);
+    let reopened_probe = OperationalStore::open(&database_path).expect("pre-daemon reopen probe");
+    reopened_probe
+        .validate_ontology_activation_recovery()
+        .expect("activation closure survives a direct reopen");
+    drop(reopened_probe);
 
     let restarted = start_daemon(&config, &discovery);
     let replay = response(
         activation_command(
             &discovery,
             &workspace_text,
-            target_report.candidate_identity(),
-            target_decision.identity(),
+            &target_submission,
+            &workspace.administrative_key,
             winning_request,
         )
         .output()
@@ -573,23 +614,11 @@ async fn run_scenario() -> IntegrationEvidence {
         Some(authority_pin(&target_authority)),
     )
     .await;
-    serving_runtime
-        .commit_fact_snapshot(
-            &mut store,
-            Arc::clone(&target),
-            Some(
-                legacy
-                    .manifest()
-                    .raw_snapshot_id()
-                    .expect("legacy snapshot ID"),
-            ),
-            1,
-            u64::try_from(initial_publication.pointer.pointer_generation)
-                .expect("publication generation"),
-            30,
-            None,
-        )
-        .expect("activate target serving snapshot");
+    assert!(
+        serving_runtime
+            .recover(&store, Arc::clone(&target))
+            .expect("recover atomically activated target snapshot")
+    );
     let target_lease = lease_manager
         .acquire(
             &mut store,
@@ -631,7 +660,7 @@ async fn run_scenario() -> IntegrationEvidence {
     )
     .await;
     serving_runtime
-        .commit_fact_snapshot(
+        .commit_ordinary_fact_snapshot(
             &mut store,
             Arc::clone(&continuity),
             Some(
@@ -648,19 +677,12 @@ async fn run_scenario() -> IntegrationEvidence {
         )
         .expect("activate post-publication snapshot with unchanged authority");
 
-    let (rollback_report, _) = proved_candidate(
-        package.clone(),
+    let rollback_submission = write_candidate_submission(
+        root.path(),
+        "rollback",
         post_publication.clone(),
-        Some(target_authority.epoch_identity.clone()),
-    )
-    .await;
-    let rollback_decision = decision(&rollback_report, 50);
-    store
-        .persist_proved_ontology_candidate(&rollback_report, 49)
-        .expect("persist forward rollback candidate");
-    store
-        .record_ontology_owner_decision(&rollback_decision)
-        .expect("persist forward rollback decision");
+        workspace.registration_revision,
+    );
     drop(fabric);
     drop(store);
 
@@ -669,14 +691,17 @@ async fn run_scenario() -> IntegrationEvidence {
         activation_command(
             &discovery,
             &workspace_text,
-            rollback_report.candidate_identity(),
-            rollback_decision.identity(),
+            &rollback_submission,
+            &workspace.administrative_key,
             "cutover-forward-rollback",
         )
         .output()
         .expect("forward rollback command"),
     );
-    assert_eq!(rollback_response["accepted"], true);
+    assert_eq!(
+        rollback_response["accepted"], true,
+        "forward rollback response: {rollback_response}"
+    );
     rollback_daemon.stop();
 
     let mut store = OperationalStore::open(&database_path).expect("final restart recovery");
@@ -687,22 +712,23 @@ async fn run_scenario() -> IntegrationEvidence {
         .active_ontology_authority(workspace.workspace_id)
         .expect("rollback authority")
         .expect("rollback authority active");
-    assert_eq!(
-        continuity
-            .manifest()
-            .body
-            .result_authority
-            .as_ref()
-            .expect("continuity result authority")
-            .result_authority_identity,
-        rollback_authority.result_authority_identity,
-        "a forward ontology epoch with unchanged semantics reuses the exact serving manifest"
+    let rollback = serving_candidate(
+        workspace.workspace_id,
+        workspace.registration_revision,
+        &post_publication,
+        Some(authority_pin(&rollback_authority)),
+    )
+    .await;
+    assert!(
+        serving_runtime
+            .recover(&store, Arc::clone(&rollback))
+            .expect("recover atomically activated rollback snapshot")
     );
     let rollback_lease = lease_manager
         .acquire(
             &mut store,
             &mut source_images,
-            Arc::clone(&continuity),
+            Arc::clone(&rollback),
             SnapshotLeaseKind::ResourceRead,
             None,
             61,
@@ -715,7 +741,7 @@ async fn run_scenario() -> IntegrationEvidence {
             .result_authority()
             .expect("rollback authority pin")
             .result_authority_identity,
-        target_authority.result_authority_identity
+        rollback_authority.result_authority_identity
     );
     assert_ne!(
         rollback_lease.record().ontology_epoch_identity,
@@ -738,9 +764,26 @@ async fn run_scenario() -> IntegrationEvidence {
     let reopened = OperationalStore::open(&database_path).expect("lease restart readback");
     let leases = SnapshotLeaseManager::list(&reopened, workspace.workspace_id)
         .expect("old/new lease restart reconstruction");
-    let legacy_count = leases
+    let legacy_lease_preserved = leases.iter().any(|lease| {
+        lease.lease_id == old_lease.record().lease_id
+            && lease.ontology_epoch_identity == old_lease.record().ontology_epoch_identity
+            && lease.result_authority.as_ref().is_some_and(|authority| {
+                authority.checksum_version == "ResultChecksumV1"
+                    && authority.result_authority_identity
+                        == old_lease
+                            .result_authority()
+                            .expect("legacy lease authority")
+                            .result_authority_identity
+            })
+    });
+    let v2_count = leases
         .iter()
-        .filter(|lease| lease.result_authority.is_none())
+        .filter(|lease| {
+            lease
+                .result_authority
+                .as_ref()
+                .is_some_and(|authority| authority.checksum_version == "ResultChecksumV2")
+        })
         .count();
     let versioned_authorities = leases
         .iter()
@@ -751,8 +794,11 @@ async fn run_scenario() -> IntegrationEvidence {
         .iter()
         .filter_map(|lease| lease.ontology_epoch_identity.as_deref())
         .collect::<std::collections::BTreeSet<_>>();
-    let old_new_leases_survived_restart = legacy_count == 1
+    let old_new_leases_survived_restart = leases.len() == 3
+        && legacy_lease_preserved
+        && v2_count == 2
         && versioned_authorities.contains(target_authority.result_authority_identity.as_str())
+        && versioned_authorities.contains(rollback_authority.result_authority_identity.as_str())
         && ontology_epochs.contains(target_authority.epoch_identity.as_str())
         && ontology_epochs.contains(rollback_authority.epoch_identity.as_str());
     verify_installed_ontology_program_package(&installation, &package)

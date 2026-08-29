@@ -278,6 +278,7 @@ def test_ontology_datafabric_successor_authority() -> None:
     bundle = ROOT / "contracts/generated/model/ontology/ontology-program-bundle.arrow"
     adapter = _text("src/generated/ontology_program_bundle.rs")
     runtime = _text("src/ontology_program.rs")
+    relational_runtime = _text("src/ontology_relational_program.rs")
     semantic = _text("src/semantic_query.rs")
     assert bundle.is_file() and bundle.stat().st_size > 0
     assert (
@@ -285,6 +286,35 @@ def test_ontology_datafabric_successor_authority() -> None:
         in adapter
     )
     assert "program.query_phrase" in runtime or "OntologyProgramCompiler" in semantic
+    for relation in (
+        "program.program_contract",
+        "program.scan_node",
+        "program.filter_node",
+        "program.project_node",
+        "program.join_node",
+        "program.aggregate_node",
+        "program.set_node",
+        "program.column_expr",
+        "program.literal_expr",
+        "program.binary_expr",
+        "program.call_expr",
+        "program.cast_expr",
+        "program.plan_edge",
+        "program.expression_edge",
+    ):
+        assert relation in relational_runtime
+    candidate = _text("src/ontology_candidate.rs")
+    activation = _text("src/ontology_activation.rs")
+    daemon = _text("src/daemon.rs")
+    assert ".compile(&program.program_id, providers)" in candidate
+    assert "let catalog = self.open_frozen_catalog().await?" in candidate
+    assert re.search(
+        r"#\[cfg\(test\)\]\s+pub\(crate\) async fn execute_with_test_providers",
+        candidate,
+    )
+    assert "submit_and_activate" in activation
+    assert "OntologyActivationCoordinator::submit_and_activate" in daemon
+    assert "legacy_result_authority_pin" in _text("src/snapshot_runtime.rs")
     assert "SEMANTIC_OPERATION_" + "SPECS" not in semantic
     assert not (ROOT / "src/compiled_ontology.rs").exists()
     assert not (ROOT / "src/generated/compiled_ontology.rs").exists()

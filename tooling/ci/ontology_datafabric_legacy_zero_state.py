@@ -48,6 +48,12 @@ def _forbidden_patterns() -> tuple[re.Pattern[str], ...]:
         "probe-" + "suite",
         "SEMANTIC_OPERATION_" + "SPECS",
         "SemanticOperation" + "Spec",
+        "NativeValidation" + "Operation",
+        "DecodedProgram" + "Operation",
+        "LoweredValidation" + "Operation",
+        "program.rule_" + "operation",
+        "program.phrase_" + "operation",
+        "program.calculation_" + "catalog",
     )
     return tuple(
         re.compile(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])")

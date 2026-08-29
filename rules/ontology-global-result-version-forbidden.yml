@@ -5,6 +5,10 @@ message: Serving result/checksum version must come from the lease-pinned ontolog
 files:
   - src/**/*.rs
 rule:
-  all:
-    - kind: identifier
-    - regex: '^RESULT_CHECKSUM_VERSION$'
+  any:
+    - all:
+        - kind: identifier
+        - regex: '^RESULT_CHECKSUM_VERSION$'
+    - pattern: $AUTHORITY.map_or("ResultChecksumV2", $$$REST)
+    - pattern: $AUTHORITY.unwrap_or("ResultChecksumV2")
+    - pattern: $AUTHORITY.unwrap_or_else(|| "ResultChecksumV2")

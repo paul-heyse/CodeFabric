@@ -4,8 +4,37 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use arrow_array::{Array as _, Int16Array, RecordBatch, StringArray};
 use datafusion::prelude::SessionContext;
+#[cfg(feature = "daemon")]
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "daemon")]
+use thiserror::Error;
 
 use crate::fabric::FabricError;
+#[cfg(feature = "daemon")]
+use crate::fabric::PublicationOutcome;
+#[cfg(feature = "daemon")]
+use crate::ontology_candidate::{CandidateClosureError, CandidateClosureRunner};
+#[cfg(feature = "daemon")]
+use crate::ontology_gate::GateResourceEnvelope;
+#[cfg(feature = "daemon")]
+use crate::operational_store::{OperationalStore, OperationalStoreError};
+#[cfg(feature = "daemon")]
+use crate::snapshot::{ResultAuthorityPin, ServingSnapshotManifestBody};
+#[cfg(feature = "daemon")]
+use crate::snapshot_runtime::{ServingSnapshotCandidate, SnapshotRuntimeError};
+
+/// Untrusted candidate material accepted by the private administrative boundary. The daemon
+/// derives program, policy, predecessor, proof, decision, pointer, and result authority itself.
+#[cfg(feature = "daemon")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OntologyCandidateSubmission {
+    pub publication: PublicationOutcome,
+    pub manifest_body: ServingSnapshotManifestBody,
+    #[serde(default)]
+    pub source_blob_digests: Vec<[u8; 32]>,
+    pub rollback_retain_until: i64,
+}
 
 /// One ontology relation discovered from table-contract rows and resolved through the lease.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,6 +52,167 @@ pub struct OntologyCatalogResolution {
     pub relations: BTreeMap<i16, ResolvedOntologyRelation>,
     pub delivered_result_schema_digest: String,
     pub delivered_result_checksum_version: String,
+}
+
+/// Opaque outcome from the only production proof-and-stage route.
+#[cfg(feature = "daemon")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProvedOntologyCandidate {
+    candidate_identity: String,
+    serving_snapshot_id: [u8; 16],
+}
+
+#[cfg(feature = "daemon")]
+impl ProvedOntologyCandidate {
+    #[must_use]
+    pub fn candidate_identity(&self) -> &str {
+        &self.candidate_identity
+    }
+
+    #[must_use]
+    pub const fn serving_snapshot_id(&self) -> [u8; 16] {
+        self.serving_snapshot_id
+    }
+}
+
+/// Failures before owner acceptance. None of these paths can advance a durable pointer.
+#[cfg(feature = "daemon")]
+#[derive(Debug, Error)]
+pub enum OntologyCandidateStageError {
+    #[error(transparent)]
+    Candidate(#[from] CandidateClosureError),
+    #[error(transparent)]
+    Snapshot(#[from] SnapshotRuntimeError),
+    #[error(transparent)]
+    Store(#[from] OperationalStoreError),
+    #[error(transparent)]
+    Program(#[from] crate::ontology_program::OntologyProgramError),
+    #[error(transparent)]
+    Session(#[from] crate::governed_session::GovernedSessionError),
+}
+
+/// Trusted production coordinator for bounded proof and durable READY staging.
+#[cfg(feature = "daemon")]
+pub struct OntologyActivationCoordinator;
+
+#[cfg(feature = "daemon")]
+impl OntologyActivationCoordinator {
+    /// Authenticate, compile, prove, stage, decide, and atomically activate one submission.
+    /// The caller supplies no candidate identity, predecessor, policy, receipts, decision, epoch,
+    /// result authority, or pointer generation.
+    pub async fn submit_and_activate(
+        store: &mut OperationalStore,
+        workspace_id: [u8; 16],
+        submission: OntologyCandidateSubmission,
+        administrative_key: &[u8],
+        request_key: &str,
+        requested_at: i64,
+    ) -> Result<crate::operational_store::OntologyActivationOutcome, OntologyCandidateStageError>
+    {
+        store.verify_workspace_owner_key(workspace_id, administrative_key)?;
+        if submission.publication.scope.workspace_id != workspace_id {
+            return Err(OperationalStoreError::OntologyActivation(
+                "candidate submission belongs to another workspace".into(),
+            )
+            .into());
+        }
+        if let Some(outcome) = store.replay_completed_ontology_activation(
+            workspace_id,
+            submission.publication.publication_id,
+            administrative_key,
+            request_key,
+        )? {
+            return Ok(outcome);
+        }
+        let active = store.active_ontology_authority(workspace_id)?;
+        if let Some(authority) = &active {
+            let active_candidate = store
+                .ontology_candidate(&authority.candidate_identity)?
+                .ok_or_else(|| {
+                    OperationalStoreError::OntologyActivation(
+                        "active ontology authority has no candidate projection".into(),
+                    )
+                })?;
+            if active_candidate.publication_id == submission.publication.publication_id {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "candidate publication is already bound to the active ontology epoch".into(),
+                )
+                .into());
+            }
+        }
+        let predecessor = active.map(|authority| authority.epoch_identity);
+        let package = crate::ontology_program::build_ontology_program_package(
+            &crate::ontology_program::OntologyPackagingProfile::default(),
+        )?;
+        let session = crate::governed_session::GovernedSession::new(
+            datafusion::prelude::SessionConfig::new(),
+            "policy.ontology.v1",
+        )?;
+        let runner = CandidateClosureRunner::new_for_epoch(
+            package,
+            submission.publication,
+            session,
+            predecessor,
+            submission.rollback_retain_until,
+        )?;
+        let proved = Self::prove_and_stage(
+            store,
+            &runner,
+            &GateResourceEnvelope::default(),
+            submission.manifest_body,
+            &submission.source_blob_digests,
+            requested_at,
+        )
+        .await?;
+        store
+            .activate_proved_ontology_candidate(
+                workspace_id,
+                proved.candidate_identity(),
+                administrative_key,
+                request_key,
+                requested_at,
+            )
+            .map_err(Into::into)
+    }
+
+    /// Execute the candidate's exact-Delta relational program, derive the immutable result pin,
+    /// construct the serving snapshot from the same provider graph, and persist PROVED + READY
+    /// together. Owner acceptance and pointer movement remain a later short admin transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns without a pointer mutation on program, resource, provider, manifest, or storage
+    /// failure.
+    pub async fn prove_and_stage(
+        store: &mut OperationalStore,
+        runner: &CandidateClosureRunner,
+        limits: &GateResourceEnvelope,
+        mut manifest_body: ServingSnapshotManifestBody,
+        source_blob_digests: &[[u8; 32]],
+        persisted_at: i64,
+    ) -> Result<ProvedOntologyCandidate, OntologyCandidateStageError> {
+        let report = runner.execute(limits).await?;
+        let evidence = report.durable_evidence();
+        manifest_body.manifest_version = "2.0".into();
+        manifest_body.result_authority = Some(ResultAuthorityPin {
+            result_authority_identity: evidence.result_authority_identity.clone(),
+            program_identity: evidence.program_identity.clone(),
+            function_catalog_identity: evidence.function_catalog_identity.clone(),
+            policy_identity: evidence.result_policy_identity.clone(),
+            query_form_identity: evidence.query_form_identity.clone(),
+            checksum_version: evidence.checksum_version.clone(),
+            exact_table_set_identity: evidence.exact_table_set_identity.clone(),
+        });
+        let catalog = std::sync::Arc::new(runner.open_frozen_catalog().await?);
+        let snapshot =
+            ServingSnapshotCandidate::build(manifest_body, catalog, source_blob_digests)?;
+        let staged = snapshot.staged_record()?;
+        store.persist_proved_ontology_candidate_with_snapshot(&report, &staged, persisted_at)?;
+        Ok(ProvedOntologyCandidate {
+            candidate_identity: report.candidate_identity().into(),
+            serving_snapshot_id: staged.snapshot_id,
+        })
+    }
 }
 
 /// Discover ontology relations from the catalog's own `table_contract` rows. No fixed relation

@@ -25,6 +25,8 @@ use super::incremental::{CacheLookup, render_with_cache};
 use super::model_control::StableId;
 use super::repository_model::read_stable;
 
+mod ontology_graph;
+
 const SCHEMA_IR_PATH: &str = "contracts/schema/schema-contract-ir.json";
 const QUERY_FORM_CONTRACT_PATH: &str = "contracts/query/query-form-contract.json";
 const RUST_QUERY_FORM_BINDINGS_PATH: &str = "src/generated/model_query_forms.rs";
@@ -3594,28 +3596,6 @@ fn encode_ontology_member(batch: &RecordBatch) -> Result<Vec<u8>, SchemaDriverEr
     Ok(bytes)
 }
 
-fn ontology_operation_name(operation: OntologyRuleOperationKind) -> &'static str {
-    match operation {
-        OntologyRuleOperationKind::ForeignKeyAntiJoin => "foreign_key_anti_join",
-        OntologyRuleOperationKind::GovernedCodeAntiJoin => "governed_code_anti_join",
-        OntologyRuleOperationKind::PrimaryKeyUniquenessAggregate => {
-            "primary_key_uniqueness_aggregate"
-        }
-        OntologyRuleOperationKind::IdDomainConformance => "id_domain_conformance",
-        OntologyRuleOperationKind::OntologyMembershipAntiJoin => "ontology_membership_anti_join",
-        OntologyRuleOperationKind::RelationFamilyConformanceJoin => {
-            "relation_family_conformance_join"
-        }
-        OntologyRuleOperationKind::RelationCardinalityAggregate => "relation_cardinality_aggregate",
-        OntologyRuleOperationKind::RelationOwnerConformanceJoin => {
-            "relation_owner_conformance_join"
-        }
-        OntologyRuleOperationKind::RelationSelfEdgeJoin => "relation_self_edge_join",
-        OntologyRuleOperationKind::PropertyValueOneOf => "property_value_one_of",
-        OntologyRuleOperationKind::SourceSpanAllOrNone => "source_span_all_or_none",
-    }
-}
-
 fn ontology_program_members(
     compiled: &CompiledOntology,
 ) -> Result<BTreeMap<String, Vec<u8>>, SchemaDriverError> {
@@ -4037,22 +4017,9 @@ fn ontology_program_members(
     );
 
     let rules = &compiled.schema.ontology_rule_contracts;
-    let rule_rows = rules
-        .iter()
-        .flat_map(|rule| {
-            rule.ordered_operands
-                .iter()
-                .map(move |operand| (rule, operand))
-        })
-        .collect::<Vec<_>>();
     let batch = RecordBatch::try_new(
         std::sync::Arc::new(Schema::new(vec![
-            Field::new("operation_id", DataType::Utf8, false),
-            Field::new("operation_kind", DataType::Utf8, false),
-            Field::new("operand_ordinal", DataType::UInt16, false),
-            Field::new("relation_ref", DataType::Utf8, false),
-            Field::new("column_ref", DataType::Utf8, false),
-            Field::new("logical_type", DataType::Utf8, false),
+            Field::new("rule_id", DataType::Utf8, false),
             Field::new("calculation_id", DataType::Utf8, false),
             Field::new("policy_id", DataType::Utf8, false),
             Field::new("input_contract", DataType::Utf8, false),
@@ -4062,50 +4029,44 @@ fn ontology_program_members(
         ])),
         vec![
             std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.0.rule_id.as_str()),
+                rules.iter().map(|rule| rule.rule_id.as_str()),
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows
-                    .iter()
-                    .map(|row| ontology_operation_name(row.0.operation_kind)),
-            )),
-            std::sync::Arc::new(UInt16Array::from_iter_values(
-                rule_rows.iter().map(|row| row.1.ordinal),
+                rules.iter().map(|rule| rule.calculation_id.as_str()),
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.1.relation_ref.as_str()),
+                rules.iter().map(|rule| rule.policy_id.as_str()),
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.1.column_ref.as_str()),
+                rules.iter().map(|rule| rule.input_contract.as_str()),
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.1.logical_type.as_str()),
+                rules.iter().map(|rule| rule.output_contract.as_str()),
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.0.calculation_id.as_str()),
+                rules.iter().map(|rule| rule.determinism_class.as_str()),
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.0.policy_id.as_str()),
-            )),
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.0.input_contract.as_str()),
-            )),
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.0.output_contract.as_str()),
-            )),
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.0.determinism_class.as_str()),
-            )),
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_rows.iter().map(|row| row.0.diagnostic_code.as_str()),
+                rules.iter().map(|rule| rule.diagnostic_code.as_str()),
             )),
         ],
     )
     .map_err(|error| ontology_artifact_error(error.to_string()))?;
     members.insert(
-        "program.rule_operation".to_owned(),
+        "program.rule_binding".to_owned(),
         encode_ontology_member(&batch)?,
     );
+
+    for (relation_id, batch) in ontology_graph::program_graph_batches(&compiled.schema)? {
+        if members
+            .insert(relation_id.clone(), encode_ontology_member(&batch)?)
+            .is_some()
+        {
+            return Err(ontology_artifact_error(format!(
+                "duplicate ontology-program relation {relation_id}"
+            )));
+        }
+    }
 
     let phrase_rows = compiled
         .semantic_operations
@@ -4182,7 +4143,7 @@ fn ontology_program_members(
     )
     .map_err(|error| ontology_artifact_error(error.to_string()))?;
     members.insert(
-        "program.phrase_operation".to_owned(),
+        "program.phrase_binding".to_owned(),
         encode_ontology_member(&batch)?,
     );
 
@@ -4360,10 +4321,7 @@ fn ontology_program_members(
     for rule in rules {
         calculations.insert(
             rule.calculation_id.as_str(),
-            (
-                ontology_operation_name(rule.operation_kind),
-                rule.output_contract.as_str(),
-            ),
+            ("relational_program", rule.output_contract.as_str()),
         );
     }
     for operation in &compiled.semantic_operations {
@@ -4381,13 +4339,26 @@ fn ontology_program_members(
         std::sync::Arc::new(Schema::new(vec![
             Field::new("calculation_id", DataType::Utf8, false),
             Field::new("engine", DataType::Utf8, false),
+            Field::new("function_family", DataType::Utf8, false),
             Field::new("native_operation", DataType::Utf8, false),
             Field::new("return_contract", DataType::Utf8, false),
+            Field::new("coercion_policy", DataType::Utf8, false),
+            Field::new("null_policy", DataType::Utf8, false),
+            Field::new("volatility", DataType::Utf8, false),
+            Field::new("strictness", DataType::Utf8, false),
+            Field::new("determinism", DataType::Utf8, false),
+            Field::new("resource_class", DataType::Utf8, false),
+            Field::new("implementation_identity", DataType::Utf8, false),
+            Field::new("diagnostic_contract", DataType::Utf8, false),
         ])),
         vec![
             std::sync::Arc::new(StringArray::from_iter_values(calculations.keys().copied())),
             std::sync::Arc::new(StringArray::from(vec![
                 "datafusion-native";
+                calculations.len()
+            ])),
+            std::sync::Arc::new(StringArray::from(vec![
+                "scalar-or-relational";
                 calculations.len()
             ])),
             std::sync::Arc::new(StringArray::from_iter_values(
@@ -4396,11 +4367,25 @@ fn ontology_program_members(
             std::sync::Arc::new(StringArray::from_iter_values(
                 calculations.values().map(|value| value.1),
             )),
+            std::sync::Arc::new(StringArray::from(vec!["exact"; calculations.len()])),
+            std::sync::Arc::new(StringArray::from(vec!["contractual"; calculations.len()])),
+            std::sync::Arc::new(StringArray::from(vec!["immutable"; calculations.len()])),
+            std::sync::Arc::new(StringArray::from(vec!["strict"; calculations.len()])),
+            std::sync::Arc::new(StringArray::from(vec!["deterministic"; calculations.len()])),
+            std::sync::Arc::new(StringArray::from(vec!["bounded"; calculations.len()])),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                calculations
+                    .values()
+                    .map(|value| format!("datafusion55.builtin.{}", value.0)),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                calculations.keys().map(|id| format!("diagnostic:{id}")),
+            )),
         ],
     )
     .map_err(|error| ontology_artifact_error(error.to_string()))?;
     members.insert(
-        "program.calculation_catalog".to_owned(),
+        "program.calculation_contract".to_owned(),
         encode_ontology_member(&batch)?,
     );
 

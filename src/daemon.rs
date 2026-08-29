@@ -24,6 +24,9 @@ use crate::coordinator::{
 use crate::fabric::{CommonRepositoryRecord, FabricError, bootstrap_workspace_with_repository};
 use crate::golden_corpus::{CorpusError, core_source_v1_coverage, current_released_corpus_root};
 use crate::identity::{IdentityDomain, encode_public_id};
+use crate::ontology_activation::{
+    OntologyActivationCoordinator, OntologyCandidateStageError, OntologyCandidateSubmission,
+};
 use crate::operational_store::{OperationalReaderFactory, OperationalStore, OperationalStoreError};
 use crate::query_service::{
     ProductionQueryService, QueryAuthorization, QueryTransportError, ResultArtifactStore,
@@ -273,8 +276,8 @@ pub enum WorkspaceAdminCommand {
     },
     ActivateCandidate {
         workspace_id: [u8; 16],
-        candidate_identity: String,
-        decision_identity: String,
+        submission: OntologyCandidateSubmission,
+        administrative_key: Vec<u8>,
         request_key: String,
     },
     Remove {
@@ -628,25 +631,32 @@ async fn execute_workspace_command(
         match command {
             WorkspaceAdminCommand::ActivateCandidate {
                 workspace_id,
-                candidate_identity,
-                decision_identity,
+                submission,
+                administrative_key,
                 request_key,
             } => {
                 let requested_at = now_millis()
                     .ok()
                     .and_then(|value| i64::try_from(value).ok())
                     .unwrap_or(i64::MAX);
-                store
-                    .resolve_ontology_activation_request(
-                        workspace_id,
-                        &candidate_identity,
-                        &decision_identity,
-                        &request_key,
-                        requested_at,
-                    )
-                    .and_then(|request| store.activate_ontology_candidate(&request))
-                    .map(|_| Vec::new())
-                    .map_err(|error| ontology_activation_error_code(&error).to_owned())
+                OntologyActivationCoordinator::submit_and_activate(
+                    &mut store,
+                    workspace_id,
+                    submission,
+                    &administrative_key,
+                    &request_key,
+                    requested_at,
+                )
+                .await
+                .map(|_| Vec::new())
+                .map_err(|error| {
+                    tracing::warn!(
+                        error = %error,
+                        error_code = ontology_submission_error_code(&error),
+                        "ontology candidate submission rejected"
+                    );
+                    ontology_submission_error_code(&error).to_owned()
+                })
             }
             other => execute_workspace_command_inner(&mut store, other)
                 .map_err(|error| workspace_error_code(&error).to_owned()),
@@ -864,6 +874,16 @@ const fn ontology_activation_error_code(error: &OperationalStoreError) -> &'stat
             "ONTOLOGY_ACTIVATION_TRANSACTION_INVALID"
         }
         _ => "INTERNAL",
+    }
+}
+
+const fn ontology_submission_error_code(error: &OntologyCandidateStageError) -> &'static str {
+    match error {
+        OntologyCandidateStageError::Store(error) => ontology_activation_error_code(error),
+        OntologyCandidateStageError::Candidate(_)
+        | OntologyCandidateStageError::Snapshot(_)
+        | OntologyCandidateStageError::Program(_)
+        | OntologyCandidateStageError::Session(_) => "ONTOLOGY_CANDIDATE_PROOF_INVALID",
     }
 }
 
@@ -1162,15 +1182,11 @@ pub(crate) async fn serve_with_query_backend(
         "await-workers",
         query_result.and(coordinator_result),
     )?;
-    let durable_close = if drained {
-        operational_store
-            .lock()
-            .await
-            .checkpoint()
-            .map_err(|error| error.to_string())
-    } else {
-        Ok(())
-    };
+    let durable_close = operational_store
+        .lock()
+        .await
+        .checkpoint()
+        .map_err(|error| error.to_string());
     record_shutdown_step(&mut steps, "close-durable-stores", durable_close)?;
     drop(operational_store);
     let retire_endpoints = fs::remove_file(&config.static_config.socket_endpoint).and_then(|()| {

@@ -5,7 +5,7 @@ use std::io::{Read as _, Seek as _, SeekFrom};
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::unix::fs::MetadataExt as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, fstat, open, openat, statat};
@@ -251,6 +251,49 @@ pub struct StableFileMetadata {
 pub struct StableFileRead {
     pub bytes: Vec<u8>,
     pub metadata: StableFileMetadata,
+}
+
+/// Read one untrusted administrative control artifact through a no-follow, regular-file,
+/// bounded, duplicate-read fence. Unlike workspace source ingress, this boundary has no
+/// registered root to authorize; it therefore returns bytes only and never a source identity.
+///
+/// # Errors
+///
+/// Returns an access, byte-limit, I/O, or concurrent-change failure.
+pub fn read_control_artifact(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, StableReadError> {
+    let descriptor = open(
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|_| SecurePathError::SourceAccessDenied)?;
+    let file_stat = fstat(&descriptor).map_err(|_| SecurePathError::OperatingSystem)?;
+    if !FileType::from_raw_mode(file_stat.st_mode).is_file() {
+        return Err(SecurePathError::SourceAccessDenied.into());
+    }
+    let mut file = std::fs::File::from(descriptor);
+    let before = stable_metadata(&file)?;
+    if before.size > maximum_bytes {
+        return Err(StableReadError::SizeLimitExceeded {
+            observed: before.size,
+            limit: maximum_bytes,
+        });
+    }
+    let capacity =
+        usize::try_from(before.size).map_err(|_| StableReadError::SizeLimitExceeded {
+            observed: before.size,
+            limit: maximum_bytes,
+        })?;
+    let first = read_bounded(&mut file, capacity)?;
+    let middle = stable_metadata(&file)?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| SecurePathError::OperatingSystem)?;
+    let second = read_bounded(&mut file, capacity)?;
+    let after = stable_metadata(&file)?;
+    if before != middle || middle != after || first != second {
+        return Err(StableReadError::ChangedDuringRead);
+    }
+    Ok(first)
 }
 
 /// Entry kind observed without following a directory-entry symlink.
@@ -869,6 +912,27 @@ mod tests {
         let path = root.revalidate_git_path(&git_path).unwrap();
         assert_eq!(path.raw_relative_path_bytes, b"source.rs");
         assert!(decode_public_id(IdentityDomain::Workspace, None, &record.public_id()).is_ok());
+    }
+
+    #[test]
+    fn control_artifact_read_is_bounded_and_nofollow() {
+        let directory = tempfile::tempdir().unwrap();
+        let candidate = directory.path().join("candidate.json");
+        fs::write(&candidate, br#"{"candidate":true}"#).unwrap();
+        assert_eq!(
+            read_control_artifact(&candidate, 1_024).unwrap(),
+            br#"{"candidate":true}"#
+        );
+        assert!(matches!(
+            read_control_artifact(&candidate, 4),
+            Err(StableReadError::SizeLimitExceeded { .. })
+        ));
+        let link = directory.path().join("candidate-link.json");
+        symlink(&candidate, &link).unwrap();
+        assert!(matches!(
+            read_control_artifact(&link, 1_024),
+            Err(StableReadError::Secure(SecurePathError::SourceAccessDenied))
+        ));
     }
 
     #[test]

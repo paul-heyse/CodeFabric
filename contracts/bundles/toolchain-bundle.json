@@ -4,13 +4,13 @@
   "artifacts": [
     {
       "artifact_id": "codefabric.toolchain.identity",
-      "canonical_digest": "b3:9556dbebfb7cbb13227633efe2145dd5c389ecdd17f2de19da437a71196867bb",
+      "canonical_digest": "b3:74f7a7eaa97c746d338facce2ce8b68449a76be309d61392a26d03bab7247ee6",
       "feature_bits": [],
       "required": true,
       "version": "1.0"
     }
   ],
-  "bundle_digest": "b3:a04058e8e5f24eae6a937555362b870c9671f8c84ef03740d4c4113f922b1ae1",
+  "bundle_digest": "b3:9bcb5bd6ffe96e902cd4eeac2d7df5ef0bcfe062bf1e2ae8cdda045e3a9ac90f",
   "bundle_kind": "toolchain",
   "bundle_major": 1,
   "bundle_version": "1.0",

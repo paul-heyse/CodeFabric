@@ -93,6 +93,8 @@ pub mod ontology_plane;
 #[cfg(feature = "data-fabric")]
 pub mod ontology_program;
 #[cfg(feature = "data-fabric")]
+pub mod ontology_relational_program;
+#[cfg(feature = "data-fabric")]
 pub mod ontology_rules;
 #[cfg(feature = "data-fabric")]
 pub mod operational_store;

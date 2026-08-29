@@ -6,7 +6,11 @@ use codefabric::daemon::{
     AdminCommand, AdminResponse, WorkspaceAdminCommand, administer, administer_workspace,
 };
 use codefabric::identity::{IdentityDomain, decode_public_id};
+use codefabric::ontology_activation::OntologyCandidateSubmission;
+use codefabric::secure_path::read_control_artifact;
 use codefabric::workspace_registry::{RelinkProof, RemovalPolicy};
+
+const MAXIMUM_ONTOLOGY_SUBMISSION_BYTES: u64 = 16 * 1024 * 1024;
 
 fn default_discovery_path() -> PathBuf {
     if let Some(path) = std::env::var_os("CODEFABRIC_DAEMON_DISCOVERY") {
@@ -130,18 +134,25 @@ fn workspace_command(arguments: &[String]) -> Result<WorkspaceAdminCommand, Stri
             "activate-candidate",
             [
                 workspace_id,
-                candidate_identity,
-                decision_identity,
+                submission_path,
+                administrative_key_hex,
                 request_key,
             ],
-        ) if !candidate_identity.is_empty()
-            && !decision_identity.is_empty()
+        ) if !submission_path.is_empty()
+            && !administrative_key_hex.is_empty()
             && !request_key.is_empty() =>
         {
+            let submission_bytes = read_control_artifact(
+                std::path::Path::new(submission_path),
+                MAXIMUM_ONTOLOGY_SUBMISSION_BYTES,
+            )
+            .map_err(|error| format!("cannot read candidate submission: {error}"))?;
+            let submission: OntologyCandidateSubmission = serde_json::from_slice(&submission_bytes)
+                .map_err(|error| format!("invalid candidate submission JSON: {error}"))?;
             Ok(WorkspaceAdminCommand::ActivateCandidate {
                 workspace_id: workspace_id_value(workspace_id)?,
-                candidate_identity: candidate_identity.clone(),
-                decision_identity: decision_identity.clone(),
+                submission,
+                administrative_key: decode_hex_bytes(administrative_key_hex)?,
                 request_key: request_key.clone(),
             })
         }
@@ -175,4 +186,23 @@ fn workspace_id_value(value: &str) -> Result<[u8; 16], String> {
     };
     decode_public_id(IdentityDomain::Workspace, None, &public)
         .map_err(|error| format!("invalid workspace ID: {error}"))
+}
+
+fn decode_hex_bytes(value: &str) -> Result<Vec<u8>, String> {
+    if value.is_empty() || !value.len().is_multiple_of(2) {
+        return Err("administrative key must be non-empty even-length hexadecimal".into());
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = (pair[0] as char)
+                .to_digit(16)
+                .ok_or("administrative key contains non-hexadecimal bytes")?;
+            let low = (pair[1] as char)
+                .to_digit(16)
+                .ok_or("administrative key contains non-hexadecimal bytes")?;
+            Ok(u8::try_from((high << 4) | low).expect("hexadecimal byte fits u8"))
+        })
+        .collect()
 }

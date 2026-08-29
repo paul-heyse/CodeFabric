@@ -2,58 +2,221 @@
   "artifact_id": "codefabric.governance.gate-filter-census",
   "schema_version": 1,
   "selectors": [
-    {"recipe": "ontology-program-compiler-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(semantic_parity|model_rebuild)/)' --no-tests=fail"},
-    {"recipe": "ontology-program-packaging-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(digest_acyclicity|ipc_reproducibility)/)' --no-tests=fail"},
-    {"recipe": "ontology-calculation-catalog-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_native_profile|calculation_catalog_bijection)/)' --no-tests=fail"},
-    {"recipe": "ontology-program-causality-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_causality_matrix|phrase_binding_fail_closed)/)' --no-tests=fail"},
-    {"recipe": "ontology-gate-result-checksum-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_gate_checksum_canonical_kats/)' --no-tests=fail"},
-    {"recipe": "ontology-gate-execution-artifact-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_gate_(single_execution_metric_closure|artifact_identity_separation)/)' --no-tests=fail"},
-    {"recipe": "ontology-runtime-resource-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_candidate_resource_failure_no_mutation/)' --no-tests=fail"},
-    {"recipe": "id-domain-plan-enforcement-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)/)' --no-tests=fail"},
-    {"recipe": "ontology-candidate-receipt-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|semantic_closure_corruption_matrix|self_description_additive_relation|program_execution_receipt_bijection)/)' --no-tests=fail"},
-    {"recipe": "ontology-candidate-delta-binding-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_candidate_delta_(binding_exact_version|catalog_reopen)/)' --no-tests=fail"},
-    {"recipe": "ontology-decision-integrity-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(candidate_receipt_binding_matrix|decision_observation_separation|activation_state_transaction_atomicity)/)' --no-tests=fail"},
-    {"recipe": "ontology-activation-recovery-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency|activation_concurrency_forward_rollback)/)' --no-tests=fail"},
-    {"recipe": "ontology-activation-route-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_admin_activation_owner_route/)' --no-tests=fail"},
-    {"recipe": "result-authority-lease-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_result_authority_lease_matrix|odf_result_checksum_v2_continuity/)' --no-tests=fail"},
-    {"recipe": "ontology-datafabric-integration-check", "command": "cargo nextest run --locked --test integration -E 'test(/ontology_datafabric_(end_to_end_cutover|predecessor_failure_atomicity|old_new_lease_restart|post_cutover_fact_publication)/)' --no-tests=fail"},
-    {"recipe": "ontology-plan-artifact-boundary-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(plan_artifact_receipt_boundary|gate_artifact_identity_separation|program_execution_receipt_bijection)/)' --no-tests=fail"},
-    {"recipe": "wave2-integration-check", "command": "cargo nextest run --locked -E 'test(/wp1[2-8]/)' --no-tests=fail"},
-    {"recipe": "wave3-integration-check", "command": "cargo nextest run --locked -E 'test(/wp(19|2[0-6])/)' --no-tests=fail"},
-    {"recipe": "publication-referential-integrity-check", "command": "cargo nextest run --locked --lib -E 'test(/wp74_/)' --no-tests=fail"},
-    {"recipe": "data-fabric-upgrade-check", "command": "cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|wp05_|wp06_(behavioral|structural|negative)|delta_43a0cf10_|data_fabric_(old_write_new_read|new_write_old_read)_compatibility|data_fabric_(target_stack_release|old_live_authority|current_reference_routing|gate_b_empty))/)' --no-tests=fail"},
-    {"recipe": "data-fabric-upgrade-check", "command": "cargo nextest run --locked --lib -E 'test(/(datafusion_55_|delta_43a0cf10_|wp03_operational|wp05_|wp2[12]_)/)' --no-tests=fail"},
-    {"recipe": "provider-statistics-contract-check", "command": "cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract)/)' --no-tests=fail"},
-    {"recipe": "provider-protocol-check", "command": "cargo nextest run --locked --lib -E 'test(/wp59_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail"},
-    {"recipe": "semantic-sandbox-host-matrix-check", "command": "cargo nextest run --locked --lib -E 'test(/semantic_sandbox_current_host_escape_matrix/)' --no-tests=fail"},
-    {"recipe": "wave4-integration-check", "command": "cargo nextest run --locked -E 'test(/wp(27|28|29|30|31|32|33)/)' --no-tests=fail"},
-    {"recipe": "wave5-integration-check", "command": "cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|65)|qry_v13_graph_forms_conformance|semantic_query_(mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail"},
-    {"recipe": "query-daemon-activation-check", "command": "cargo nextest run --locked -E 'test(/wp63_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail"},
-    {"recipe": "semantic-query-conformance-check", "command": "cargo nextest run --locked --lib -E 'test(/(qry_v13_(form_contract_conformance|relational_forms_conformance|graph_forms_conformance)|semantic_query_(relational_plan_visibility|relational_policy_and_absence|relational_operational_gate|mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance|wp39_operational_acceptance)/)' --no-tests=fail"},
-    {"recipe": "query-form-contract-check", "command": "cargo nextest run --locked --lib -E 'test(/(qry_v13_form_contract_conformance|query_form_projection_parity|qry_v13_connecting_path_schema_falsification|query_form_contract_operational_gate)/)' --no-tests=fail"},
-    {"recipe": "semantic-query-relational-conformance-check", "command": "cargo nextest run --locked --lib -E 'test(/(qry_v13_relational_forms_conformance|semantic_query_relational_plan_visibility|semantic_query_relational_policy_and_absence|semantic_query_relational_operational_gate)/)' --no-tests=fail"},
-    {"recipe": "query-determinism-check", "command": "cargo nextest run --locked --lib -E 'test(/(wp64_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|wp64_production_replay_is_partition_and_batch_independent)/)' --no-tests=fail"},
-    {"recipe": "query-artifact-single-execution-check", "command": "cargo nextest run --locked --lib -E 'test(/(query_failure_artifact_closure|query_terminal_journal_authority|query_artifact_no_diagnostic_reexecution|query_artifact_failure_operational_gate)/)' --no-tests=fail"},
-    {"recipe": "query-legacy-zero-state-check", "command": "cargo nextest run --locked --lib -E 'test(/(wp62_negative_zero_state|wp75_negative_zero_state|wp64_negative_zero_state)/)' --no-tests=fail"},
-    {"recipe": "gate-b-candidate-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_vertical_slice_produces_all_eleven_planes|gate_b_vertical_slice_adversarial|gate_b_candidate_independent_oracle_contract|gate_b_candidate_operational_gate)/)' --no-tests=fail"},
-    {"recipe": "functional-golden-contract-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(functional_golden_claim_schema_conformance|functional_golden_source_anchor_closure|functional_golden_negative_claim_requires_complete_universe|functional_golden_duplicate_key_rejected|functional_golden_contract_operational_gate)/)' --no-tests=fail"},
-    {"recipe": "gate-b-rejected-candidate-zero-state-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_rejected_candidate_zero_state)' --no-tests=fail"},
-    {"recipe": "functional-golden-independence-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(reference_query_evaluator_laws|functional_golden_comparator_falsification|functional_golden_expectation_write_isolation|functional_golden_independence_operational_gate|reference_bag_multiplicity_law|reference_coverage_monotonicity_law)/)' --no-tests=fail"},
-    {"recipe": "gate-b-public-vertical-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_public_vertical_conformance|golden_scenario_semantic_transition_contracts|gate_b_public_vertical_operational_gate)/)' --no-tests=fail"},
-    {"recipe": "gate-b-causal-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_causal_intervention_matrix|gate_b_named_fixture_query_causality)/)' --no-tests=fail"},
-    {"recipe": "gate-b-delivery-equivalence-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_delivery_surface_semantic_equivalence)' --no-tests=fail"},
-    {"recipe": "gate-b-projection-registry-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_projection_registry_closure)' --no-tests=fail"},
-    {"recipe": "semantic-oracle-mutants-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(semantic_oracle_required_mutants_are_killed|semantic_oracle_rejects_unregistered_or_surviving_mutant)/)' --no-tests=fail"},
-    {"recipe": "gate-b-review-bundle-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_human_review_bundle_contract)' --no-tests=fail"},
-    {"recipe": "gate-b-functional-candidate-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_functional_candidate_is_expectation_independent)' --no-tests=fail"},
-    {"recipe": "rebuild-equivalence-check", "command": "CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked --lib -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance)/)' --no-tests=fail"},
-    {"recipe": "wave6-integration-check", "command": "cargo nextest run --locked -E 'test(/(wp(23|24|25|26|4[1-8])|wp66_)/)' --no-tests=fail"},
-    {"recipe": "git-parity-check", "command": "cargo nextest run --locked --test integration -E 'test(/(wp(49|50|51|52|53)|wp72_operational_acceptance)/)' --no-tests=fail"},
-    {"recipe": "wp72-acceptance-check", "command": "CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance|wp72_operational_acceptance)/)' --no-tests=fail"},
-    {"recipe": "wave8-integration-check", "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(py_context_(discovery_conformance|manifest_identity_parity|guess_rejection_falsification|invalidation_operational_gate)|py_scope_binding_fixture_conformance|ruff_semantic_isolation_parity|py_unresolved_reference_unknown_falsification|py_scope_binding_owner_replacement_gate|py_import_export_fixture_conformance|py_import_syntax_semantic_distinction_parity|py_dynamic_export_unknown_falsification|py_module_fact_replacement_gate|py_callable_call_site_fixture_conformance|py_call_site_first_class_parity|py_dynamic_splat_unknown_argument_falsification|py_callable_contract_replacement_gate|py_cfg_fixture_conformance|py_cfg_wellformedness_parity|py_cfg_exceptional_edge_falsification|py_cfg_owner_invalidation_gate|py_defuse_fixture_conformance|py_semantic_profile_partial_parity|py_parse_error_capability_gap_falsification|wave8_integration_operational_gate)$/)' --no-tests=fail"},
-    {"recipe": "vacuum-dry-run-check", "command": "cargo nextest run --locked -E 'test(/(wp24_negative_zero_state|wp66_negative_zero_state)/)' --no-tests=fail"},
-    {"recipe": "id-domain-extension-check", "command": "cargo nextest run --locked --lib -E 'test(/odf_(id_domain_lowering_conformance|domain_conformant_plans_execute|cross_domain_plan_rejection|all_plan_ingresses_domain_checked)/)' --no-tests=fail"},
-    {"recipe": "ontology-relational-closure-check", "command": "cargo nextest run --locked --lib -E 'test(/odf_(ontology_referential_zero|ontology_violation_rejection|property_value_one_of_gate|span_decision_conformance|span_incoherence_rejection)/)' --no-tests=fail"},
-    {"recipe": "ontology-self-description-check", "command": "cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|self_description_additive_relation)/)' --no-tests=fail"}
+    {
+      "recipe": "ontology-program-compiler-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(semantic_parity|model_rebuild)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-program-packaging-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(digest_acyclicity|ipc_reproducibility)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-calculation-catalog-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_native_profile|calculation_catalog_bijection)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-program-causality-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_causality_matrix|phrase_binding_fail_closed)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-gate-result-checksum-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_gate_checksum_canonical_kats/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-gate-execution-artifact-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_gate_(single_execution_metric_closure|artifact_identity_separation)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-runtime-resource-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(candidate_resource_failure_no_mutation|governed_runtime_deadline_cancellation_memory_cleanup)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "id-domain-plan-enforcement-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-candidate-receipt-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|semantic_closure_corruption_matrix|self_description_additive_relation|program_execution_receipt_bijection)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-candidate-delta-binding-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_candidate_delta_(binding_exact_version|catalog_reopen)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-decision-integrity-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(candidate_receipt_binding_matrix|decision_observation_separation|activation_state_transaction_atomicity)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-activation-recovery-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-activation-recovery-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-activation-route-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail"
+    },
+    {
+      "recipe": "result-authority-lease-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_result_authority_lease_matrix|odf_result_checksum_v2_continuity/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-datafabric-integration-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(/ontology_datafabric_(end_to_end_cutover|predecessor_failure_atomicity|old_new_lease_restart|post_cutover_fact_publication)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-plan-artifact-boundary-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(plan_artifact_receipt_boundary|gate_artifact_identity_separation|program_execution_receipt_bijection)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "wave2-integration-check",
+      "command": "cargo nextest run --locked -E 'test(/wp1[2-8]/)' --no-tests=fail"
+    },
+    {
+      "recipe": "wave3-integration-check",
+      "command": "cargo nextest run --locked -E 'test(/wp(19|2[0-6])/)' --no-tests=fail"
+    },
+    {
+      "recipe": "publication-referential-integrity-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/wp74_/)' --no-tests=fail"
+    },
+    {
+      "recipe": "data-fabric-upgrade-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|wp05_|wp06_(behavioral|structural|negative)|delta_43a0cf10_|data_fabric_(old_write_new_read|new_write_old_read)_compatibility|data_fabric_(target_stack_release|old_live_authority|current_reference_routing|gate_b_empty))/)' --no-tests=fail"
+    },
+    {
+      "recipe": "data-fabric-upgrade-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(datafusion_55_|delta_43a0cf10_|wp03_operational|wp05_|wp2[12]_)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "provider-statistics-contract-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "provider-protocol-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/wp59_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "semantic-sandbox-host-matrix-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/semantic_sandbox_current_host_escape_matrix/)' --no-tests=fail"
+    },
+    {
+      "recipe": "wave4-integration-check",
+      "command": "cargo nextest run --locked -E 'test(/wp(27|28|29|30|31|32|33)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "wave5-integration-check",
+      "command": "cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|65)|qry_v13_graph_forms_conformance|semantic_query_(mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "query-daemon-activation-check",
+      "command": "cargo nextest run --locked -E 'test(/wp63_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "semantic-query-conformance-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(qry_v13_(form_contract_conformance|relational_forms_conformance|graph_forms_conformance)|semantic_query_(relational_plan_visibility|relational_policy_and_absence|relational_operational_gate|mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance|wp39_operational_acceptance)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "query-form-contract-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(qry_v13_form_contract_conformance|query_form_projection_parity|qry_v13_connecting_path_schema_falsification|query_form_contract_operational_gate)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "semantic-query-relational-conformance-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(qry_v13_relational_forms_conformance|semantic_query_relational_plan_visibility|semantic_query_relational_policy_and_absence|semantic_query_relational_operational_gate)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "query-determinism-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp64_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|wp64_production_replay_is_partition_and_batch_independent)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "query-artifact-single-execution-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(query_failure_artifact_closure|query_terminal_journal_authority|query_artifact_no_diagnostic_reexecution|query_artifact_failure_operational_gate)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "query-legacy-zero-state-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp62_negative_zero_state|wp75_negative_zero_state|wp64_negative_zero_state)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-candidate-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_vertical_slice_produces_all_eleven_planes|gate_b_vertical_slice_adversarial|gate_b_candidate_independent_oracle_contract|gate_b_candidate_operational_gate)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "functional-golden-contract-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(functional_golden_claim_schema_conformance|functional_golden_source_anchor_closure|functional_golden_negative_claim_requires_complete_universe|functional_golden_duplicate_key_rejected|functional_golden_contract_operational_gate)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-rejected-candidate-zero-state-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_rejected_candidate_zero_state)' --no-tests=fail"
+    },
+    {
+      "recipe": "functional-golden-independence-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(reference_query_evaluator_laws|functional_golden_comparator_falsification|functional_golden_expectation_write_isolation|functional_golden_independence_operational_gate|reference_bag_multiplicity_law|reference_coverage_monotonicity_law)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-public-vertical-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_public_vertical_conformance|golden_scenario_semantic_transition_contracts|gate_b_public_vertical_operational_gate)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-causal-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_causal_intervention_matrix|gate_b_named_fixture_query_causality)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-delivery-equivalence-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_delivery_surface_semantic_equivalence)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-projection-registry-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_projection_registry_closure)' --no-tests=fail"
+    },
+    {
+      "recipe": "semantic-oracle-mutants-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(semantic_oracle_required_mutants_are_killed|semantic_oracle_rejects_unregistered_or_surviving_mutant)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-review-bundle-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_human_review_bundle_contract)' --no-tests=fail"
+    },
+    {
+      "recipe": "gate-b-functional-candidate-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_functional_candidate_is_expectation_independent)' --no-tests=fail"
+    },
+    {
+      "recipe": "rebuild-equivalence-check",
+      "command": "CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked --lib -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "wave6-integration-check",
+      "command": "cargo nextest run --locked -E 'test(/(wp(23|24|25|26|4[1-8])|wp66_)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "git-parity-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(/(wp(49|50|51|52|53)|wp72_operational_acceptance)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "wp72-acceptance-check",
+      "command": "CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance|wp72_operational_acceptance)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "wave8-integration-check",
+      "command": "cargo nextest run --locked --lib --no-fail-fast -E 'test(/(py_context_(discovery_conformance|manifest_identity_parity|guess_rejection_falsification|invalidation_operational_gate)|py_scope_binding_fixture_conformance|ruff_semantic_isolation_parity|py_unresolved_reference_unknown_falsification|py_scope_binding_owner_replacement_gate|py_import_export_fixture_conformance|py_import_syntax_semantic_distinction_parity|py_dynamic_export_unknown_falsification|py_module_fact_replacement_gate|py_callable_call_site_fixture_conformance|py_call_site_first_class_parity|py_dynamic_splat_unknown_argument_falsification|py_callable_contract_replacement_gate|py_cfg_fixture_conformance|py_cfg_wellformedness_parity|py_cfg_exceptional_edge_falsification|py_cfg_owner_invalidation_gate|py_defuse_fixture_conformance|py_semantic_profile_partial_parity|py_parse_error_capability_gap_falsification|wave8_integration_operational_gate)$/)' --no-tests=fail"
+    },
+    {
+      "recipe": "vacuum-dry-run-check",
+      "command": "cargo nextest run --locked -E 'test(/(wp24_negative_zero_state|wp66_negative_zero_state)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "id-domain-extension-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/odf_(id_domain_lowering_conformance|domain_conformant_plans_execute|cross_domain_plan_rejection|all_plan_ingresses_domain_checked)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-relational-closure-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/odf_(ontology_referential_zero|ontology_violation_rejection|property_value_one_of_gate|span_decision_conformance|span_incoherence_rejection)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "ontology-self-description-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|self_description_additive_relation)/)' --no-tests=fail"
+    }
   ]
 }

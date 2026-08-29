@@ -18,9 +18,10 @@ use crate::fabric::{MutationJournal, MutationPhaseSpec, PreparedMutation};
 use crate::model_generated::semantic_lane_fragments::{
     SEMANTIC_INGEST_CONTRACTS, SEMANTIC_INVALIDATION_CONTRACTS,
 };
+use crate::registries::{ServingActivationState, WorkspaceRegistryLifecycle};
 use crate::snapshot::ServingSnapshotManifest;
 
-const SCHEMA_VERSION: u32 = 13;
+const SCHEMA_VERSION: u32 = 14;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const OPERATIONAL_DDL: &str =
     include_str!("../contracts/generated/model/schema/operational-store.sql");
@@ -135,6 +136,9 @@ pub struct OntologyCandidateProjection {
     pub config_identity: String,
     pub policy_identity: String,
     pub exact_table_set_identity: String,
+    pub publication_id: [u8; 16],
+    pub serving_snapshot_id: Option<[u8; 16]>,
+    pub observed_durable_pointer_generation: i64,
     pub predecessor_epoch_identity: Option<String>,
     pub rollback_retain_until: i64,
 }
@@ -150,20 +154,22 @@ pub struct OntologyOwnerDecision {
     accepted_at: i64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AuthenticatedWorkspaceOwner {
+    workspace_id: [u8; 16],
+    owner_identity: String,
+    administrative_key: Vec<u8>,
+}
+
 impl OntologyOwnerDecision {
-    /// Construct a canonical owner decision after the caller has authenticated the owner.
-    ///
-    /// # Errors
-    ///
-    /// Rejects empty identities or canonicalization failures.
-    pub fn new(
+    fn for_authenticated_owner(
         candidate_identity: impl Into<String>,
-        owner_identity: impl Into<String>,
+        owner: &AuthenticatedWorkspaceOwner,
         policy_identity: impl Into<String>,
         accepted_at: i64,
     ) -> Result<Self, OperationalStoreError> {
         let candidate_identity = candidate_identity.into();
-        let owner_identity = owner_identity.into();
+        let owner_identity = owner.owner_identity.clone();
         let policy_identity = policy_identity.into();
         if candidate_identity.is_empty() || owner_identity.is_empty() || policy_identity.is_empty()
         {
@@ -187,6 +193,25 @@ impl OntologyOwnerDecision {
             decision_bytes,
             accepted_at,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        candidate_identity: impl Into<String>,
+        owner_identity: impl Into<String>,
+        policy_identity: impl Into<String>,
+        accepted_at: i64,
+    ) -> Result<Self, OperationalStoreError> {
+        Self::for_authenticated_owner(
+            candidate_identity,
+            &AuthenticatedWorkspaceOwner {
+                workspace_id: [0; 16],
+                owner_identity: owner_identity.into(),
+                administrative_key: b"test-only-owner-authority".to_vec(),
+            },
+            policy_identity,
+            accepted_at,
+        )
     }
 
     #[must_use]
@@ -266,9 +291,32 @@ fn ontology_candidate_from_row(
         config_identity: row.get(6)?,
         policy_identity: row.get(7)?,
         exact_table_set_identity: row.get(8)?,
-        predecessor_epoch_identity: row.get(9)?,
-        rollback_retain_until: row.get(10)?,
+        publication_id: id16_from_sql(row.get(9)?, "candidate publication_id")?,
+        serving_snapshot_id: optional_id16_from_sql(row.get(10)?, "candidate snapshot_id")?,
+        observed_durable_pointer_generation: row.get(11)?,
+        predecessor_epoch_identity: row.get(12)?,
+        rollback_retain_until: row.get(13)?,
     })
+}
+
+fn id16_from_sql(bytes: Vec<u8>, field: &str) -> rusqlite::Result<[u8; 16]> {
+    bytes.try_into().map_err(|value: Vec<u8>| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Blob,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{field} has {} bytes instead of 16", value.len()),
+            )),
+        )
+    })
+}
+
+fn optional_id16_from_sql(
+    bytes: Option<Vec<u8>>,
+    field: &str,
+) -> rusqlite::Result<Option<[u8; 16]>> {
+    bytes.map(|value| id16_from_sql(value, field)).transpose()
 }
 
 fn framed_digest_parts(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
@@ -312,7 +360,9 @@ fn candidate_for_activation(
         .query_row(
             "SELECT candidate_identity, workspace_id, state, manifest_digest,
                program_identity, package_identity, config_identity, policy_identity,
-               exact_table_set_identity, predecessor_epoch_identity, rollback_retain_until
+               exact_table_set_identity, publication_id, serving_snapshot_id,
+               observed_durable_pointer_generation, predecessor_epoch_identity,
+               rollback_retain_until
              FROM ontology_candidate WHERE candidate_identity=?1",
             [candidate_identity],
             ontology_candidate_from_row,
@@ -333,6 +383,136 @@ fn current_ontology_pointer(
         )
         .optional()
         .map_err(Into::into)
+}
+
+fn activate_staged_serving_snapshot(
+    transaction: &Transaction<'_>,
+    candidate: &OntologyCandidateProjection,
+    activated_at: i64,
+) -> Result<(), OperationalStoreError> {
+    let snapshot_id = candidate.serving_snapshot_id.ok_or_else(|| {
+        OperationalStoreError::OntologyActivation(
+            "proved ontology candidate has no staged serving snapshot".into(),
+        )
+    })?;
+    let (snapshot_workspace, publication_id, state_code): (Vec<u8>, Vec<u8>, i64) = transaction
+        .query_row(
+            "SELECT workspace_id, publication_id, state_code FROM serving_snapshot_manifest
+             WHERE snapshot_id=?1",
+            [snapshot_id.as_slice()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+    if snapshot_workspace != candidate.workspace_id
+        || publication_id != candidate.publication_id
+        || candidate.observed_durable_pointer_generation < 0
+    {
+        return Err(OperationalStoreError::OntologyActivation(
+            "staged serving snapshot does not match the proved candidate".into(),
+        ));
+    }
+    let current = transaction
+        .query_row(
+            "SELECT snapshot_id, active_pointer_generation FROM active_snapshot
+             WHERE workspace_id=?1",
+            [candidate.workspace_id.as_slice()],
+            |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    if state_code == i64::from(ServingActivationState::Active as u16) {
+        if current
+            .as_ref()
+            .is_some_and(|(active_snapshot, _)| active_snapshot.as_slice() == snapshot_id)
+        {
+            return Ok(());
+        }
+        return Err(OperationalStoreError::OntologyActivation(
+            "candidate snapshot is ACTIVE without owning the serving pointer".into(),
+        ));
+    }
+    if state_code != i64::from(ServingActivationState::Ready as u16) {
+        return Err(OperationalStoreError::OntologyActivation(
+            "candidate snapshot is neither reusable ACTIVE nor staged READY".into(),
+        ));
+    }
+    let next_generation = current.as_ref().map_or(Ok(1_i64), |(_, generation)| {
+        generation.checked_add(1).ok_or_else(|| {
+            OperationalStoreError::OntologyActivation("serving pointer generation overflow".into())
+        })
+    })?;
+    if let Some((prior_snapshot, _)) = &current {
+        let retired = transaction.execute(
+            "UPDATE serving_snapshot_manifest SET state_code=?2, retired_at=?3
+             WHERE snapshot_id=?1 AND state_code=?4",
+            params![
+                prior_snapshot,
+                i64::from(ServingActivationState::Retired as u16),
+                activated_at,
+                i64::from(ServingActivationState::Active as u16),
+            ],
+        )?;
+        if retired != 1 {
+            return Err(OperationalStoreError::OntologyActivation(
+                "serving predecessor is not ACTIVE".into(),
+            ));
+        }
+    }
+    let activated = transaction.execute(
+        "UPDATE serving_snapshot_manifest SET state_code=?2, activated_at=?3
+         WHERE snapshot_id=?1 AND state_code=?4",
+        params![
+            snapshot_id.as_slice(),
+            i64::from(ServingActivationState::Active as u16),
+            activated_at,
+            i64::from(ServingActivationState::Ready as u16),
+        ],
+    )?;
+    if activated != 1 {
+        return Err(OperationalStoreError::OntologyActivation(
+            "staged serving snapshot did not transition READY to ACTIVE".into(),
+        ));
+    }
+    transaction.execute(
+        "INSERT INTO active_snapshot(workspace_id, snapshot_id, created_at, activated_at,
+         observed_durable_pointer_generation, active_pointer_generation, lease_count)
+         VALUES (?1,?2,?3,?3,?4,?5,0)
+         ON CONFLICT(workspace_id) DO UPDATE SET snapshot_id=excluded.snapshot_id,
+         created_at=excluded.created_at, activated_at=excluded.activated_at,
+         observed_durable_pointer_generation=excluded.observed_durable_pointer_generation,
+         active_pointer_generation=excluded.active_pointer_generation, lease_count=0",
+        params![
+            candidate.workspace_id,
+            snapshot_id.as_slice(),
+            activated_at,
+            candidate.observed_durable_pointer_generation,
+            next_generation,
+        ],
+    )?;
+    transaction.execute(
+        "UPDATE worktree_state SET active_snapshot_id=?2, updated_at=?3 WHERE workspace_id=?1",
+        params![
+            candidate.workspace_id,
+            snapshot_id.as_slice(),
+            activated_at.to_string(),
+        ],
+    )?;
+    if current.is_none() {
+        let ready = transaction.execute(
+            "UPDATE workspace_registration SET status_code=?2, updated_at=?3
+             WHERE workspace_id=?1 AND status_code=?4",
+            params![
+                candidate.workspace_id,
+                i64::from(WorkspaceRegistryLifecycle::Ready as u16),
+                activated_at.to_string(),
+                i64::from(WorkspaceRegistryLifecycle::Bootstrapping as u16,),
+            ],
+        )?;
+        if ready != 1 {
+            return Err(OperationalStoreError::OntologyActivation(
+                "first semantic activation requires a BOOTSTRAPPING workspace".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn activation_replay(
@@ -1158,6 +1338,11 @@ impl OperationalStore {
                ON request.request_key=acceptance.request_key
               AND request.workspace_id=pointer.workspace_id
               AND request.candidate_identity=pointer.candidate_identity
+             LEFT JOIN active_snapshot AS snapshot
+               ON snapshot.workspace_id=pointer.workspace_id
+             LEFT JOIN serving_snapshot_manifest AS snapshot_manifest
+               ON snapshot_manifest.snapshot_id=snapshot.snapshot_id
+              AND snapshot_manifest.workspace_id=pointer.workspace_id
              WHERE candidate.candidate_identity IS NULL
                 OR candidate.state <> 'ACTIVE'
                 OR epoch.epoch_identity IS NULL
@@ -1167,10 +1352,86 @@ impl OperationalStore {
                 OR authority.exact_table_set_identity <> candidate.exact_table_set_identity
                 OR acceptance.candidate_identity IS NULL
                 OR request.request_key IS NULL
-                OR request.state <> 'COMPLETED'",
-            [],
+                OR request.state <> 'COMPLETED'
+                OR snapshot.snapshot_id IS NULL
+                OR snapshot_manifest.snapshot_id IS NULL
+                OR snapshot_manifest.state_code <> ?1",
+            [i64::from(ServingActivationState::Active as u16)],
             |row| row.get::<_, i64>(0),
         )?;
+        let mut invalid_snapshot_authorities = 0_i64;
+        if invalid_pointers == 0 {
+            let mut statement = self.connection.prepare(
+                "SELECT pointer.workspace_id, snapshot_manifest.manifest_json_bytes,
+                        authority.result_authority_identity, authority.program_identity,
+                        authority.function_catalog_identity, authority.policy_identity,
+                        authority.query_form_identity, authority.checksum_version,
+                        authority.exact_table_set_identity
+                 FROM ontology_active_pointer AS pointer
+                 JOIN ontology_serving_epoch AS epoch
+                   ON epoch.epoch_identity=pointer.epoch_identity
+                  AND epoch.workspace_id=pointer.workspace_id
+                  AND epoch.candidate_identity=pointer.candidate_identity
+                 JOIN ontology_result_authority AS authority
+                   ON authority.result_authority_identity=epoch.result_authority_identity
+                  AND authority.workspace_id=pointer.workspace_id
+                 JOIN active_snapshot AS snapshot
+                   ON snapshot.workspace_id=pointer.workspace_id
+                 JOIN serving_snapshot_manifest AS snapshot_manifest
+                   ON snapshot_manifest.snapshot_id=snapshot.snapshot_id
+                  AND snapshot_manifest.workspace_id=pointer.workspace_id",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                ))
+            })?;
+            for row in rows {
+                let (
+                    workspace_id,
+                    manifest_json,
+                    result_authority_identity,
+                    program_identity,
+                    function_catalog_identity,
+                    policy_identity,
+                    query_form_identity,
+                    checksum_version,
+                    exact_table_set_identity,
+                ) = row?;
+                let manifest: ServingSnapshotManifest = match serde_json::from_slice(&manifest_json)
+                {
+                    Ok(manifest) => manifest,
+                    Err(_) => {
+                        invalid_snapshot_authorities += 1;
+                        continue;
+                    }
+                };
+                let workspace_matches = manifest
+                    .raw_workspace_id()
+                    .is_ok_and(|manifest_workspace| manifest_workspace.as_slice() == workspace_id);
+                let authority_matches =
+                    manifest.body.result_authority.as_ref().is_some_and(|pin| {
+                        pin.result_authority_identity == result_authority_identity
+                            && pin.program_identity == program_identity
+                            && pin.function_catalog_identity == function_catalog_identity
+                            && pin.policy_identity == policy_identity
+                            && pin.query_form_identity == query_form_identity
+                            && pin.checksum_version == checksum_version
+                            && pin.exact_table_set_identity == exact_table_set_identity
+                    });
+                if !workspace_matches || manifest.validate().is_err() || !authority_matches {
+                    invalid_snapshot_authorities += 1;
+                }
+            }
+        }
         let detached_active_candidates = self.connection.query_row(
             "SELECT COUNT(*) FROM ontology_candidate AS candidate
              WHERE candidate.state='ACTIVE'
@@ -1194,11 +1455,65 @@ impl OperationalStore {
             [],
             |row| row.get::<_, i64>(0),
         )?;
-        if invalid_pointers != 0 || detached_active_candidates != 0 || detached_active_epochs != 0 {
+        if invalid_pointers != 0
+            || invalid_snapshot_authorities != 0
+            || detached_active_candidates != 0
+            || detached_active_epochs != 0
+        {
+            let pointer_detail = self
+                .connection
+                .query_row(
+                    "SELECT printf(
+                       'candidate_state=%s;epoch_state=%s;predecessor_equal=%d;authority=%s;authority_exact=%d;acceptance=%s;request_state=%s;candidate_snapshot=%s;active_snapshot=%s;snapshot_join=%s;manifest=%s;publication_equal=%d;manifest_state=%d',
+                       COALESCE(candidate.state, '<missing>'),
+                       COALESCE(epoch.state, '<missing>'),
+                       epoch.predecessor_epoch_identity IS pointer.predecessor_epoch_identity,
+                       COALESCE(authority.result_authority_identity, '<missing>'),
+                       COALESCE(authority.exact_table_set_identity = candidate.exact_table_set_identity, 0),
+                       COALESCE(acceptance.candidate_identity, '<missing>'),
+                       COALESCE(request.state, '<missing>'),
+                       COALESCE(NULLIF(hex(candidate.serving_snapshot_id), ''), '<missing>'),
+                       COALESCE(NULLIF((SELECT hex(active.snapshot_id) FROM active_snapshot AS active WHERE active.workspace_id=pointer.workspace_id), ''), '<missing>'),
+                       COALESCE(NULLIF(hex(snapshot.snapshot_id), ''), '<missing>'),
+                       COALESCE(NULLIF(hex(snapshot_manifest.snapshot_id), ''), '<missing>'),
+                       COALESCE(snapshot_manifest.publication_id = candidate.publication_id, 0),
+                       COALESCE(snapshot_manifest.state_code, -1))
+                     FROM ontology_active_pointer AS pointer
+                     LEFT JOIN ontology_candidate AS candidate
+                       ON candidate.candidate_identity=pointer.candidate_identity
+                      AND candidate.workspace_id=pointer.workspace_id
+                     LEFT JOIN ontology_serving_epoch AS epoch
+                       ON epoch.epoch_identity=pointer.epoch_identity
+                      AND epoch.workspace_id=pointer.workspace_id
+                      AND epoch.candidate_identity=pointer.candidate_identity
+                     LEFT JOIN ontology_result_authority AS authority
+                       ON authority.result_authority_identity=epoch.result_authority_identity
+                      AND authority.workspace_id=pointer.workspace_id
+                     LEFT JOIN ontology_acceptance AS acceptance
+                       ON acceptance.candidate_identity=pointer.candidate_identity
+                      AND acceptance.workspace_id=pointer.workspace_id
+                      AND acceptance.pointer_generation=pointer.pointer_generation
+                     LEFT JOIN ontology_activation_request AS request
+                       ON request.request_key=acceptance.request_key
+                      AND request.workspace_id=pointer.workspace_id
+                      AND request.candidate_identity=pointer.candidate_identity
+                     LEFT JOIN active_snapshot AS snapshot
+                       ON snapshot.workspace_id=pointer.workspace_id
+                     LEFT JOIN serving_snapshot_manifest AS snapshot_manifest
+                       ON snapshot_manifest.snapshot_id=snapshot.snapshot_id
+                      AND snapshot_manifest.workspace_id=pointer.workspace_id
+                     LIMIT 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .unwrap_or_else(|| "no-active-pointer".into());
             return Err(OperationalStoreError::OntologyActivation(format!(
                 "restart activation closure is invalid: invalid_pointers={invalid_pointers}, \
+                 invalid_snapshot_authorities={invalid_snapshot_authorities}, \
                  detached_active_candidates={detached_active_candidates}, \
-                 detached_active_epochs={detached_active_epochs}"
+                 detached_active_epochs={detached_active_epochs}; database={}; {pointer_detail}",
+                self.database_path.display()
             )));
         }
         Ok(())
@@ -1374,9 +1689,28 @@ impl OperationalStore {
     ///
     /// Rejects identity drift, non-canonical evidence, incomplete bindings, or `SQLite` errors.
     #[allow(clippy::too_many_lines)] // Candidate proof persistence is intentionally atomic.
-    pub fn persist_proved_ontology_candidate(
+    #[cfg(test)]
+    pub(crate) fn persist_proved_ontology_candidate(
         &mut self,
         report: &crate::ontology_candidate::CandidateClosureReport,
+        persisted_at: i64,
+    ) -> Result<(), OperationalStoreError> {
+        self.persist_proved_ontology_candidate_inner(report, None, persisted_at)
+    }
+
+    pub(crate) fn persist_proved_ontology_candidate_with_snapshot(
+        &mut self,
+        report: &crate::ontology_candidate::CandidateClosureReport,
+        snapshot: &crate::snapshot::StagedServingSnapshot,
+        persisted_at: i64,
+    ) -> Result<(), OperationalStoreError> {
+        self.persist_proved_ontology_candidate_inner(report, Some(snapshot), persisted_at)
+    }
+
+    fn persist_proved_ontology_candidate_inner(
+        &mut self,
+        report: &crate::ontology_candidate::CandidateClosureReport,
+        snapshot: Option<&crate::snapshot::StagedServingSnapshot>,
         persisted_at: i64,
     ) -> Result<(), OperationalStoreError> {
         let evidence = report.durable_evidence();
@@ -1388,6 +1722,27 @@ impl OperationalStore {
             return Err(OperationalStoreError::OntologyActivation(
                 "trusted candidate evidence is incomplete or inconsistent".into(),
             ));
+        }
+        if let Some(snapshot) = snapshot {
+            let authority = snapshot.result_authority.as_ref().ok_or_else(|| {
+                OperationalStoreError::OntologyActivation(
+                    "staged serving snapshot has no candidate result-authority pin".into(),
+                )
+            })?;
+            if snapshot.workspace_id != evidence.workspace_id
+                || snapshot.publication_id != evidence.publication_id
+                || authority.result_authority_identity != evidence.result_authority_identity
+                || authority.program_identity != evidence.program_identity
+                || authority.function_catalog_identity != evidence.function_catalog_identity
+                || authority.policy_identity != evidence.result_policy_identity
+                || authority.query_form_identity != evidence.query_form_identity
+                || authority.checksum_version != evidence.checksum_version
+                || authority.exact_table_set_identity != evidence.exact_table_set_identity
+            {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "staged serving snapshot differs from proved candidate authority".into(),
+                ));
+            }
         }
         self.write_transaction(|transaction| {
             let existing = transaction
@@ -1416,9 +1771,10 @@ impl OperationalStore {
                 "INSERT INTO ontology_candidate(
                    candidate_identity, workspace_id, state, manifest_bytes, manifest_digest,
                    program_identity, package_identity, config_identity, policy_identity,
-                   exact_table_set_identity, predecessor_epoch_identity, rollback_retain_until,
-                   created_at, updated_at
-                 ) VALUES (?1,?2,'BUILDING',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12)",
+                   exact_table_set_identity, publication_id, serving_snapshot_id,
+                   observed_durable_pointer_generation, predecessor_epoch_identity,
+                   rollback_retain_until, created_at, updated_at
+                 ) VALUES (?1,?2,'BUILDING',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15)",
                 params![
                     evidence.candidate_identity,
                     evidence.workspace_id.as_slice(),
@@ -1429,11 +1785,76 @@ impl OperationalStore {
                     evidence.config_identity,
                     evidence.policy_identity,
                     evidence.exact_table_set_identity,
+                    evidence.publication_id.as_slice(),
+                    snapshot.map(|value| value.snapshot_id.as_slice()),
+                    evidence.observed_durable_pointer_generation,
                     evidence.predecessor_epoch_identity,
                     evidence.rollback_retain_until,
                     persisted_at,
                 ],
             )?;
+            if let Some(snapshot) = snapshot {
+                let existing_snapshot = transaction
+                    .query_row(
+                        "SELECT workspace_id, publication_id, state_code,
+                                manifest_body_bytes, manifest_json_bytes, manifest_digest
+                         FROM serving_snapshot_manifest WHERE snapshot_id=?1",
+                        [snapshot.snapshot_id.as_slice()],
+                        |row| {
+                            Ok((
+                                row.get::<_, Vec<u8>>(0)?,
+                                row.get::<_, Vec<u8>>(1)?,
+                                row.get::<_, i64>(2)?,
+                                row.get::<_, Vec<u8>>(3)?,
+                                row.get::<_, Vec<u8>>(4)?,
+                                row.get::<_, Vec<u8>>(5)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                if let Some((
+                    workspace_id,
+                    publication_id,
+                    state_code,
+                    manifest_body,
+                    manifest_json,
+                    manifest_digest,
+                )) = existing_snapshot
+                {
+                    if workspace_id.as_slice() != snapshot.workspace_id
+                        || publication_id.as_slice() != snapshot.publication_id
+                        || manifest_body != snapshot.manifest_body
+                        || manifest_json != snapshot.manifest_json
+                        || manifest_digest.as_slice() != snapshot.manifest_digest
+                        || !matches!(
+                            state_code,
+                            value if value == i64::from(ServingActivationState::Ready as u16)
+                                || value == i64::from(ServingActivationState::Active as u16)
+                        )
+                    {
+                        return Err(OperationalStoreError::OntologyActivation(
+                            "content-addressed serving snapshot identity collision".into(),
+                        ));
+                    }
+                } else {
+                    transaction.execute(
+                        "INSERT INTO serving_snapshot_manifest(snapshot_id, workspace_id,
+                         publication_id, state_code, manifest_body_bytes, manifest_json_bytes,
+                         manifest_digest, created_at, activated_at, retired_at)
+                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,NULL)",
+                        params![
+                            snapshot.snapshot_id.as_slice(),
+                            snapshot.workspace_id.as_slice(),
+                            snapshot.publication_id.as_slice(),
+                            i64::from(ServingActivationState::Ready as u16),
+                            snapshot.manifest_body,
+                            snapshot.manifest_json,
+                            snapshot.manifest_digest.as_slice(),
+                            persisted_at,
+                        ],
+                    )?;
+                }
+            }
             for table in &evidence.exact_tables {
                 let delta_version = i64::try_from(table.delta_version).map_err(|_| {
                     OperationalStoreError::OntologyActivation(format!(
@@ -1582,7 +2003,8 @@ impl OperationalStore {
     /// # Errors
     ///
     /// Rejects identity drift, a non-PROVED candidate, conflicting replay, or persistence errors.
-    pub fn record_ontology_owner_decision(
+    #[cfg(test)]
+    pub(crate) fn record_ontology_owner_decision(
         &mut self,
         decision: &OntologyOwnerDecision,
     ) -> Result<(), OperationalStoreError> {
@@ -1665,11 +2087,212 @@ impl OperationalStore {
     /// # Errors
     ///
     /// Rejects invalid proof, decision, predecessor, generation, or transaction state.
-    pub fn activate_ontology_candidate(
+    #[cfg(test)]
+    pub(crate) fn activate_ontology_candidate(
         &mut self,
         request: &OntologyActivationRequest,
     ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
         self.activate_ontology_candidate_with_fault(request, None)
+    }
+
+    fn authenticate_workspace_owner(
+        &self,
+        workspace_id: [u8; 16],
+        administrative_key: &[u8],
+    ) -> Result<AuthenticatedWorkspaceOwner, OperationalStoreError> {
+        let (stored_key, authorization_fingerprint, authorization_revision): (
+            Vec<u8>,
+            Vec<u8>,
+            i64,
+        ) = self.connection.query_row(
+            "SELECT administrative_key, authorization_fingerprint, authorization_revision
+                 FROM workspace_registration WHERE workspace_id=?1",
+            [workspace_id.as_slice()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if administrative_key.is_empty() || stored_key != administrative_key {
+            return Err(OperationalStoreError::OntologyActivation(
+                "workspace owner authentication failed".into(),
+            ));
+        }
+        let owner_identity = framed_digest_parts([
+            b"workspace-owner-authority.v1".as_slice(),
+            workspace_id.as_slice(),
+            authorization_fingerprint.as_slice(),
+            authorization_revision.to_be_bytes().as_slice(),
+            stored_key.as_slice(),
+        ]);
+        Ok(AuthenticatedWorkspaceOwner {
+            workspace_id,
+            owner_identity,
+            administrative_key: stored_key,
+        })
+    }
+
+    /// Pre-authenticate a candidate submission before any expensive proof work or durable
+    /// candidate staging. Activation revalidates the same authority inside its transaction.
+    pub(crate) fn verify_workspace_owner_key(
+        &self,
+        workspace_id: [u8; 16],
+        administrative_key: &[u8],
+    ) -> Result<(), OperationalStoreError> {
+        self.authenticate_workspace_owner(workspace_id, administrative_key)
+            .map(|_| ())
+    }
+
+    /// Replay a completed owner request before repeating candidate proof. The immutable
+    /// publication identity prevents a reused request key from naming different exact Delta
+    /// state; the stored candidate and owner transaction remain the response authority.
+    pub(crate) fn replay_completed_ontology_activation(
+        &mut self,
+        workspace_id: [u8; 16],
+        publication_id: [u8; 16],
+        administrative_key: &[u8],
+        request_key: &str,
+    ) -> Result<Option<OntologyActivationOutcome>, OperationalStoreError> {
+        let existing = self
+            .connection
+            .query_row(
+                "SELECT request.workspace_id, request.candidate_identity,
+                        candidate.publication_id
+                 FROM ontology_activation_request AS request
+                 JOIN ontology_candidate AS candidate
+                   ON candidate.candidate_identity=request.candidate_identity
+                 WHERE request.request_key=?1 AND request.state='COMPLETED'",
+                [request_key],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((recorded_workspace, candidate_identity, recorded_publication)) = existing else {
+            return Ok(None);
+        };
+        if recorded_workspace.as_slice() != workspace_id
+            || recorded_publication.as_slice() != publication_id
+        {
+            return Err(OperationalStoreError::OntologyActivation(
+                "completed request key belongs to different workspace or publication".into(),
+            ));
+        }
+        self.activate_proved_ontology_candidate(
+            workspace_id,
+            &candidate_identity,
+            administrative_key,
+            request_key,
+            0,
+        )
+        .map(Some)
+    }
+
+    /// Authenticate the workspace owner and atomically accept a previously proved candidate.
+    /// Callers supply no decision identity, receipts, policy, result authority, or pointer data.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid owner authority, absent/non-PROVED candidates, request-key collisions,
+    /// stale predecessors, incomplete receipts, missing staged snapshots, or persistence errors.
+    pub fn activate_proved_ontology_candidate(
+        &mut self,
+        workspace_id: [u8; 16],
+        candidate_identity: &str,
+        administrative_key: &[u8],
+        request_key: &str,
+        requested_at: i64,
+    ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
+        let owner = self.authenticate_workspace_owner(workspace_id, administrative_key)?;
+        let existing = self
+            .connection
+            .query_row(
+                "SELECT request.candidate_identity, request.decision_identity,
+                   request.expected_predecessor_identity, request.expected_pointer_generation,
+                   request.created_at, decision.owner_identity, decision.policy_identity,
+                   decision.decision_bytes, decision.accepted_at
+                 FROM ontology_activation_request AS request
+                 JOIN ontology_owner_decision AS decision
+                   ON decision.decision_identity=request.decision_identity
+                 WHERE request.request_key=?1 AND request.workspace_id=?2",
+                params![request_key, workspace_id.as_slice()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Vec<u8>>(7)?,
+                        row.get::<_, i64>(8)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((
+            recorded_candidate,
+            decision_identity,
+            expected_predecessor_identity,
+            expected_pointer_generation,
+            created_at,
+            owner_identity,
+            policy_identity,
+            decision_bytes,
+            accepted_at,
+        )) = existing
+        {
+            if recorded_candidate != candidate_identity || owner_identity != owner.owner_identity {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "activation request key belongs to another candidate or owner".into(),
+                ));
+            }
+            let decision = OntologyOwnerDecision {
+                decision_identity,
+                candidate_identity: recorded_candidate.clone(),
+                owner_identity,
+                policy_identity,
+                decision_bytes,
+                accepted_at,
+            };
+            let request = OntologyActivationRequest {
+                request_key: request_key.into(),
+                candidate_identity: recorded_candidate,
+                decision_identity: decision.decision_identity.clone(),
+                expected_predecessor_identity,
+                expected_pointer_generation,
+                requested_at: created_at,
+            };
+            return self.activate_ontology_candidate_with_owner(&request, None, &decision, &owner);
+        }
+        let candidate = self
+            .ontology_candidate(candidate_identity)?
+            .ok_or_else(|| {
+                OperationalStoreError::OntologyActivation(format!(
+                    "candidate {candidate_identity} is absent"
+                ))
+            })?;
+        if candidate.workspace_id != workspace_id || candidate.state != "PROVED" {
+            return Err(OperationalStoreError::OntologyActivation(
+                "admin route requires a workspace-owned PROVED candidate".into(),
+            ));
+        }
+        let decision = OntologyOwnerDecision::for_authenticated_owner(
+            candidate_identity,
+            &owner,
+            &candidate.policy_identity,
+            requested_at,
+        )?;
+        let request = self.resolve_ontology_activation_request(
+            workspace_id,
+            candidate_identity,
+            decision.identity(),
+            request_key,
+            requested_at,
+        )?;
+        self.activate_ontology_candidate_with_owner(&request, None, &decision, &owner)
     }
 
     /// Resolve an identity-only admin command to the current durable predecessor and CAS
@@ -1679,7 +2302,7 @@ impl OperationalStore {
     ///
     /// Rejects malformed identities, conflicting replay, missing candidates or decisions,
     /// predecessor drift, and persistence errors.
-    pub fn resolve_ontology_activation_request(
+    pub(crate) fn resolve_ontology_activation_request(
         &self,
         workspace_id: [u8; 16],
         candidate_identity: &str,
@@ -1771,15 +2394,67 @@ impl OperationalStore {
     }
 
     #[allow(clippy::too_many_lines)] // The CAS transition and its fault seams share one transaction.
+    #[cfg(test)]
     fn activate_ontology_candidate_with_fault(
         &mut self,
         request: &OntologyActivationRequest,
         fault: Option<StoreFaultPoint>,
     ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
+        self.activate_ontology_candidate_transaction(request, fault, None)
+    }
+
+    fn activate_ontology_candidate_with_owner(
+        &mut self,
+        request: &OntologyActivationRequest,
+        fault: Option<StoreFaultPoint>,
+        decision: &OntologyOwnerDecision,
+        owner: &AuthenticatedWorkspaceOwner,
+    ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
+        self.activate_ontology_candidate_transaction(request, fault, Some((decision, owner)))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn activate_ontology_candidate_transaction(
+        &mut self,
+        request: &OntologyActivationRequest,
+        fault: Option<StoreFaultPoint>,
+        owner_decision: Option<(&OntologyOwnerDecision, &AuthenticatedWorkspaceOwner)>,
+    ) -> Result<OntologyActivationOutcome, OperationalStoreError> {
         let request_digest = ontology_activation_request_digest(request)?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some((decision, owner)) = owner_decision {
+            let (stored_key, authorization_fingerprint, authorization_revision): (
+                Vec<u8>,
+                Vec<u8>,
+                i64,
+            ) = transaction.query_row(
+                "SELECT administrative_key, authorization_fingerprint,
+                       authorization_revision FROM workspace_registration WHERE workspace_id=?1",
+                [owner.workspace_id.as_slice()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            let current_owner_identity = framed_digest_parts([
+                b"workspace-owner-authority.v1".as_slice(),
+                owner.workspace_id.as_slice(),
+                authorization_fingerprint.as_slice(),
+                authorization_revision.to_be_bytes().as_slice(),
+                stored_key.as_slice(),
+            ]);
+            if stored_key != owner.administrative_key
+                || current_owner_identity != owner.owner_identity
+                || decision.owner_identity != owner.owner_identity
+                || decision.candidate_identity != request.candidate_identity
+                || decision.decision_identity != request.decision_identity
+                || crate::integrity::framed_digest(&decision.decision_bytes)
+                    != decision.decision_identity
+            {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "owner authority changed before the activation transaction".into(),
+                ));
+            }
+        }
         if let Some(outcome) = activation_replay(&transaction, request, &request_digest)? {
             transaction.commit()?;
             return Ok(outcome);
@@ -1795,6 +2470,29 @@ impl OperationalStore {
             return Err(OperationalStoreError::OntologyActivation(
                 "candidate predecessor binding differs from the request".into(),
             ));
+        }
+        if let Some((decision, _)) = owner_decision {
+            if decision.policy_identity != candidate.policy_identity {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "authenticated decision policy differs from the proved candidate".into(),
+                ));
+            }
+            transaction.execute(
+                "INSERT INTO ontology_owner_decision(
+                   decision_identity, workspace_id, candidate_identity, owner_identity,
+                   policy_identity, decision_bytes, accepted_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7)
+                 ON CONFLICT(candidate_identity) DO NOTHING",
+                params![
+                    decision.decision_identity,
+                    candidate.workspace_id,
+                    decision.candidate_identity,
+                    decision.owner_identity,
+                    decision.policy_identity,
+                    decision.decision_bytes,
+                    decision.accepted_at,
+                ],
+            )?;
         }
         let (owner_candidate, decision_policy) = transaction
             .query_row(
@@ -1966,6 +2664,22 @@ impl OperationalStore {
                 "ontology pointer CAS lost".into(),
             ));
         }
+        if owner_decision.is_some() {
+            activate_staged_serving_snapshot(&transaction, &candidate, request.requested_at)?;
+            let active_snapshot: Vec<u8> = transaction.query_row(
+                "SELECT snapshot_id FROM active_snapshot WHERE workspace_id=?1",
+                [candidate.workspace_id.as_slice()],
+                |row| row.get(0),
+            )?;
+            if candidate
+                .serving_snapshot_id
+                .is_none_or(|expected| active_snapshot.as_slice() != expected)
+            {
+                return Err(OperationalStoreError::OntologyActivation(
+                    "serving pointer did not adopt the accepted candidate snapshot".into(),
+                ));
+            }
+        }
         transaction.execute(
             "UPDATE ontology_candidate SET state='ACTIVE', updated_at=?2
              WHERE candidate_identity=?1 AND state='ACCEPTED'",
@@ -2054,8 +2768,10 @@ impl OperationalStore {
         self.connection
             .query_row(
                 "SELECT candidate_identity, workspace_id, state, manifest_digest,
-                   program_identity, package_identity, config_identity, policy_identity,
-                   exact_table_set_identity, predecessor_epoch_identity, rollback_retain_until
+               program_identity, package_identity, config_identity, policy_identity,
+                   exact_table_set_identity, publication_id, serving_snapshot_id,
+                   observed_durable_pointer_generation, predecessor_epoch_identity,
+                   rollback_retain_until
                  FROM ontology_candidate WHERE candidate_identity=?1",
                 [candidate_identity],
                 ontology_candidate_from_row,
@@ -2231,7 +2947,7 @@ impl OperationalStore {
                 migrate_v11_to_v12(&transaction)?;
             }
             11 => migrate_v11_to_v12(&transaction)?,
-            12 => {}
+            12 | 13 => {}
             _ => {
                 return Err(OperationalStoreError::DdlLineage(format!(
                     "no migration is registered from schema {version}"
@@ -2240,6 +2956,7 @@ impl OperationalStore {
         }
         if version != 0 {
             migrate_v12_to_v13(&transaction)?;
+            migrate_v13_to_v14(&transaction)?;
         }
         if fault == Some(StoreFaultPoint::MigrationBeforeCommit) {
             return Err(OperationalStoreError::InjectedFault(
@@ -2705,6 +3422,30 @@ fn migrate_v12_to_v13(transaction: &Transaction<'_>) -> Result<(), OperationalSt
     Ok(())
 }
 
+fn migrate_v13_to_v14(transaction: &Transaction<'_>) -> Result<(), OperationalStoreError> {
+    if table_has_column(transaction, "ontology_candidate", "serving_snapshot_id")? {
+        return Ok(());
+    }
+    transaction
+        .execute_batch("ALTER TABLE ontology_candidate RENAME TO ontology_candidate_v13;")?;
+    transaction.execute_batch(&generated_table_ddl("ontology_candidate")?)?;
+    transaction.execute_batch(
+        "INSERT INTO ontology_candidate(
+           candidate_identity, workspace_id, state, manifest_bytes, manifest_digest,
+           program_identity, package_identity, config_identity, policy_identity,
+           exact_table_set_identity, publication_id, serving_snapshot_id,
+           observed_durable_pointer_generation, predecessor_epoch_identity,
+           rollback_retain_until, created_at, updated_at)
+         SELECT candidate_identity, workspace_id, state, manifest_bytes, manifest_digest,
+           program_identity, package_identity, config_identity, policy_identity,
+           exact_table_set_identity, zeroblob(16), NULL, 0, predecessor_epoch_identity,
+           rollback_retain_until, created_at, updated_at
+         FROM ontology_candidate_v13;
+         DROP TABLE ontology_candidate_v13;",
+    )?;
+    Ok(())
+}
+
 fn table_exists(transaction: &Transaction<'_>, table: &str) -> Result<bool, OperationalStoreError> {
     transaction
         .query_row(
@@ -3004,7 +3745,9 @@ fn generated_column_shapes() -> Result<GeneratedColumnShapes, OperationalStoreEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::record_batch::RecordBatch;
     use datafusion::prelude::SessionConfig;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     use crate::fabric::{
@@ -3067,21 +3810,33 @@ mod tests {
         delta_version: u64,
         predecessor: Option<String>,
     ) -> CandidateClosureReport {
-        CandidateClosureRunner::new_for_epoch(
+        let runner = CandidateClosureRunner::new_for_epoch(
             build_ontology_program_package(&OntologyPackagingProfile::default()).unwrap(),
             candidate_publication(workspace_id, marker, delta_version),
             GovernedSession::new(SessionConfig::new(), "policy.ontology.v1").unwrap(),
             predecessor,
             99_999,
         )
-        .unwrap()
-        .execute(&GateResourceEnvelope::default())
-        .await
-        .unwrap()
+        .unwrap();
+        let batches = crate::schema_registry::table_specs()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.table_code,
+                    RecordBatch::new_empty(Arc::clone(&spec.arrow_schema)),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let providers = crate::ontology_relational_program::candidate_batch_providers(&batches)
+            .expect("empty exact-schema providers");
+        runner
+            .execute_with_test_providers(&GateResourceEnvelope::default(), &providers)
+            .await
+            .unwrap()
     }
 
     fn owner_decision(report: &CandidateClosureReport, accepted_at: i64) -> OntologyOwnerDecision {
-        OntologyOwnerDecision::new(
+        OntologyOwnerDecision::new_for_test(
             report.candidate_identity(),
             "owner:ontology-release",
             report.durable_evidence().policy_identity.clone(),
@@ -3813,7 +4568,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ontology_activation_restart_idempotency() {
+    async fn ontology_activation_recovery_rejects_missing_snapshot() {
         let (_directory, path) = database();
         let report = proved_candidate([0x79; 16], 0x7a, 31, None).await;
         let decision = owner_decision(&report, 2_400);
@@ -3835,7 +4590,12 @@ mod tests {
         ));
         drop(store);
         let mut reopened = OperationalStore::open(&path).unwrap();
-        reopened.validate_ontology_activation_recovery().unwrap();
+        assert!(matches!(
+            reopened.validate_ontology_activation_recovery(),
+            Err(OperationalStoreError::OntologyActivation(message))
+                if message.contains("candidate_snapshot=<missing>")
+                    && message.contains("active_snapshot=<missing>")
+        ));
         let recovered = reopened.reconcile_ontology_activation(&request).unwrap();
         assert!(recovered.idempotent_replay);
         assert_eq!(recovered.pointer_generation, 1);
@@ -3869,31 +4629,6 @@ mod tests {
         let report = proved_candidate(workspace, 0x7c, 37, None).await;
         let decision = owner_decision(&report, 2_500);
         let mut store = OperationalStore::open(&path).unwrap();
-        let command = crate::daemon::WorkspaceAdminCommand::ActivateCandidate {
-            workspace_id: workspace,
-            candidate_identity: report.candidate_identity().into(),
-            decision_identity: decision.identity().into(),
-            request_key: "admin-owner-route".into(),
-        };
-        let command_value = serde_json::to_value(&command).unwrap();
-        assert_eq!(
-            command_value
-                .as_object()
-                .unwrap()
-                .keys()
-                .cloned()
-                .collect::<BTreeSet<_>>(),
-            BTreeSet::from([
-                "candidate_identity".into(),
-                "command".into(),
-                "decision_identity".into(),
-                "request_key".into(),
-                "workspace_id".into(),
-            ])
-        );
-        let mut forged = command_value;
-        forged["policy_identity"] = serde_json::Value::String("caller-forbidden".into());
-        assert!(serde_json::from_value::<crate::daemon::WorkspaceAdminCommand>(forged).is_err());
         store
             .persist_proved_ontology_candidate(&report, 1_500)
             .unwrap();

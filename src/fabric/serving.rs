@@ -878,16 +878,10 @@ impl ServingQuerySession {
             })?;
         let snapshot = self.lease.snapshot();
         let manifest = snapshot.manifest();
-        let result_authority = self
-            .lease
-            .result_authority()
-            .cloned()
-            .or_else(|| manifest.body.result_authority.clone());
-        let result_checksum_version = result_authority
-            .as_ref()
-            .map_or("ResultChecksumV2", |authority| {
-                authority.checksum_version.as_str()
-            });
+        let result_authority = self.lease.result_authority().cloned().ok_or_else(|| {
+            ServingQueryError::Configuration("snapshot lease has no pinned result authority".into())
+        })?;
+        let result_checksum_version = result_authority.checksum_version.as_str();
         let result = super::result_checksum::result_checksum_for_version(
             result_checksum_version,
             physical.schema().as_ref(),
@@ -992,7 +986,7 @@ impl ServingQuerySession {
             output_partition_count,
             output_row_count,
             result_checksum_version: result_checksum_version.to_owned(),
-            result_authority,
+            result_authority: Some(result_authority),
             canonical_output_schema_digest: crate::integrity::framed_digest(&canonical_schema),
             result_checksum,
             reproducibility: Reproducibility {

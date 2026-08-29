@@ -428,7 +428,7 @@
       "artifact_id": "codefabric.bundles.query-language-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/query-language-bundle.json",
-      "canonical_digest": "b3:edc884b0595442bd96de7b07f0d546323f277fa367910326badabf11fa65bc74",
+      "canonical_digest": "b3:27c56708eab9ba0d5baea7816d051686f1145ddc503e6acb185152e6d050e29d",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -442,7 +442,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:8fff84c635ed6d7c9262de5d957cf6b610370d39b66becc9a2f6cce72a71c832",
+      "source_digest": "b3:b932eb0b5c192fb57adef495d9502e22f523087565e26e037ebdc138dcbd22f7",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -451,7 +451,7 @@
       "artifact_id": "codefabric.bundles.schema-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/schema-bundle.json",
-      "canonical_digest": "b3:6ed317d85c22406eb57f981c6697fc2837ea18a3dd7d446a4199a637586f7284",
+      "canonical_digest": "b3:4da14a8c2d4481fb10a63ad0c6db52e4b0b7ca5432a23408c01afb0902c54001",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -465,7 +465,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:d9fcc6b1cc5e8dc6be9fe601143af347fc73aef171ceabc74b8195fc4b7df0fb",
+      "source_digest": "b3:db6d12c0c4cc757e19e47d11dacb299cbd13ccfa39a88c646ba103cfabf2ae8e",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -474,7 +474,7 @@
       "artifact_id": "codefabric.bundles.tool-contract-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/tool-contract-bundle.json",
-      "canonical_digest": "b3:8d803979bac0865a031d7cb0385ebe236cf7cd9f453bc8629b1209f8143d1014",
+      "canonical_digest": "b3:6183ab5cd4118448f3559064e268fbed1330814a68fbc6f66baa45ca9c80d898",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -488,7 +488,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:c1d3f8eeb79701a98b121ce722ca2f918a2e2a1c019377ad3bd0ce422d45adb2",
+      "source_digest": "b3:8187ae608731f98c860e51c9dab98e15df78c0ed2ff6598490a5fdb46089314c",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -497,7 +497,7 @@
       "artifact_id": "codefabric.bundles.toolchain-bundle",
       "artifact_kind": "bundle-manifest",
       "authority_path": "contracts/bundles/toolchain-bundle.json",
-      "canonical_digest": "b3:c8da7c77d7db2fc4b536b2aed3afe2fa0ca6ef088c108c083550511cb2e8ff03",
+      "canonical_digest": "b3:2045d9abc9b6304046b9600b9804b064839d645107c2e9faa14839da382c4c2e",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -511,7 +511,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:c2c4e759012b40f8519bc6f66fe77036076f4a4e4ea52914326eb7665e1fdde4",
+      "source_digest": "b3:2ed2a575b64fb7ad76ebf24a58f88f49c9b6236505983dd1999e8d517fdfd423",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1056,7 +1056,7 @@
       "artifact_id": "codefabric.registry.error-registry",
       "artifact_kind": "registry",
       "authority_path": "contracts/registry/error-registry.yaml",
-      "canonical_digest": "b3:7f0e35251163baeffe5fd74fcaf490a6730462f536dc675e297b64e736ac97e6",
+      "canonical_digest": "b3:ea4a998796aadb9ea2c2e02ca4bcf803df94a9589e57e8aefd1e11dc9f0e0c6a",
       "compatible_suite_major": 1,
       "compilation_unit": "registry-cbef",
       "owner": "contracts",
@@ -1072,7 +1072,7 @@
         "max_outputs": 12,
         "max_source_bytes": 8388608
       },
-      "source_digest": "b3:9c24f05caeefa03eb41244016ae6a3c768eb514543b30f540b57e24865742e97",
+      "source_digest": "b3:12779ac20adfc73f0052be11e30317667b89e01e9b4d5364fcbd5b3485963997",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -1581,7 +1581,7 @@
       "artifact_id": "codefabric.schema.analysis-context.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/schema/analysis-context.schema.json",
-      "canonical_digest": "b3:642fc65bc34dc882538fa654dfa7d9be89f81f18e090af3005db569842285773",
+      "canonical_digest": "b3:f8e3b0117098749b989a1b830c68499a9f8d9a12b163cde6ba230b272fc373c8",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
       "owner": "contracts",
@@ -1597,7 +1597,7 @@
         "max_outputs": 25,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:a9f5326e457c9002631d93e36480ba80829380eb9a392d589f98b014ade4edb0",
+      "source_digest": "b3:42a56fa558a0bfca9cf3496427f095571733ebf4f844a2fb03aa582513381380",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1606,7 +1606,7 @@
       "artifact_id": "codefabric.schema.contract-ir",
       "artifact_kind": "manifest",
       "authority_path": "contracts/schema/schema-contract-ir.json",
-      "canonical_digest": "b3:eeec27fa527f9aaaa486da9b872b55d94d2d9d56bd2984005344ebe8ca695d38",
+      "canonical_digest": "b3:92251fb51772ac3540446685cdbb778de941e28dfeeb6a896234755825a068fd",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
       "owner": "contracts",
@@ -1622,7 +1622,7 @@
         "max_outputs": 25,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:83b7cd860b49a8c79fb5d89dda38ea5deaf4eaa57087cee000d04cb86a92a83f",
+      "source_digest": "b3:99896ad7e25378499bb2134c2173684d19df54ded37344b2e547767c1ee728ad",
       "source_role": "authority",
       "status": "released",
       "version": "1.0"
@@ -1656,7 +1656,7 @@
       "artifact_id": "codefabric.schema.cpg-semantic-query-response.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/schema/cpg-semantic-query-response.schema.json",
-      "canonical_digest": "b3:b1eee438168e348e6de81060c6349dcc667bfc409ebf6f2a0fb0c6504c7c94d9",
+      "canonical_digest": "b3:b43a43db2ca1563fad0a519fd820f527110c4085c8fc2c3bea3e91767b5e8892",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
       "owner": "contracts",
@@ -1672,7 +1672,7 @@
         "max_outputs": 25,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:5f857bb089c07f68fedc5327bab528b8408e9882306b698ca6d460e31b574f5c",
+      "source_digest": "b3:303c6da7a090724ed4c2a0f0986316f5e85426f1f59f5c5493822d77feb2c984",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1681,7 +1681,7 @@
       "artifact_id": "codefabric.schema.public-snapshot-metadata.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/schema/public-snapshot-metadata.schema.json",
-      "canonical_digest": "b3:36435225e177374b8e9eded9d56744c2af4904020b480d3a539aa2d5ee415274",
+      "canonical_digest": "b3:27cb566ddb5cb4c9f021a79d44c0e3664f756e98faf4418a884614d0962dc292",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
       "owner": "contracts",
@@ -1697,7 +1697,7 @@
         "max_outputs": 25,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:eb344b07ee7309c0fca5e1e3d5f6afd16d41c99f3543943074998787930d528c",
+      "source_digest": "b3:d6b212ae80191ce39223053fe07fce2db06186e5bd8f2f7b65d5b6a778423545",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1706,7 +1706,7 @@
       "artifact_id": "codefabric.schema.public-status.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/schema/public-status.schema.json",
-      "canonical_digest": "b3:b62fe2f4c45cb8d4aba452b8da5059e80a8099ce41917b81b4860ef6ffea3173",
+      "canonical_digest": "b3:30a95c1bafcb7ceeefd90adb2f38e368af59e2a1afe5c8eb65f68b3540f0ca0f",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
       "owner": "contracts",
@@ -1722,7 +1722,7 @@
         "max_outputs": 25,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:183a9d3aa3505d44f4cccf73cd284024e3f489ae7e3d63394fc8d234513fdf5f",
+      "source_digest": "b3:59c9ab33021f59c6c3f6d30664d99d27de1167f3c98c3b6357e627926e3a768c",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1731,7 +1731,7 @@
       "artifact_id": "codefabric.schema.serving-snapshot.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/schema/serving-snapshot.schema.json",
-      "canonical_digest": "b3:1e6bebeb62685275d060e03b80eece2562f83bb6c13762a524b6ce8b9784b8f2",
+      "canonical_digest": "b3:45c6be7c92abcee8e5a4f612e84cadf15971418838b60b8f03b5be53d84a3588",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
       "owner": "contracts",
@@ -1747,7 +1747,7 @@
         "max_outputs": 25,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:062fa6c46c7789d6f59d76aa4e13014b843e95828c2737cace4236ed8e882f3e",
+      "source_digest": "b3:3595483e7feecd3faab0b63f67d73bf053dc5b4c7b4125987078ebe067fd8a24",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1756,7 +1756,7 @@
       "artifact_id": "codefabric.schema.source-context.schema",
       "artifact_kind": "json-schema",
       "authority_path": "contracts/schema/source-context.schema.json",
-      "canonical_digest": "b3:a4b863453a3ddf6564bd356f286e612482654ce824c3db8724c2de26c50f17f1",
+      "canonical_digest": "b3:3bbd01e296049e173a176de159298937fc565f8cb4f6840265700e9cb96cf94b",
       "compatible_suite_major": 1,
       "compilation_unit": "schemas",
       "owner": "contracts",
@@ -1772,7 +1772,7 @@
         "max_outputs": 25,
         "max_source_bytes": 16777216
       },
-      "source_digest": "b3:3128a4ca76c1f0a3b8d91f5d481ac73ff2efecf6650278b4dda4a98286b64b49",
+      "source_digest": "b3:41104ef51def6942615ba4c8f73a852185bbcdd1bafaa99d89e6a2822f0c9524",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -1873,7 +1873,7 @@
       "artifact_id": "codefabric.toolchain.identity",
       "artifact_kind": "manifest",
       "authority_path": "contracts/toolchain/toolchain-identity.json",
-      "canonical_digest": "b3:9556dbebfb7cbb13227633efe2145dd5c389ecdd17f2de19da437a71196867bb",
+      "canonical_digest": "b3:74f7a7eaa97c746d338facce2ce8b68449a76be309d61392a26d03bab7247ee6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "contracts",
@@ -1887,7 +1887,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:4146adbbb23369bf73bcf6a97eabb2841a885015c8595cc7e3112050d2a886a8",
+      "source_digest": "b3:055fb92307e04036961cf36ec0f7628d1cfc49346f24ebab57146cedb89f64e8",
       "source_role": "derived",
       "status": "released",
       "version": "1.0"
@@ -4587,7 +4587,7 @@
       "artifact_id": "evidence:rules-ontology-global-result-version-forbidden",
       "artifact_kind": "evidence",
       "authority_path": "rules/ontology-global-result-version-forbidden.yml",
-      "canonical_digest": "b3:9cf0e6002eb486528733e065a54ec62a049db67068b3fbb45a13e8f25620efff",
+      "canonical_digest": "b3:d90834bd58d0171be059d0bd9fcd2133663690e0a7d9b6b846499891472382b6",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rules",
@@ -4601,7 +4601,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:3e312b03b64480f6e84e4b9177bb39250bf9506cc24709ecf49f7f4f36ff7384",
+      "source_digest": "b3:a5ef83b24f85d0b28a03a3762cf1d56fa857213a01374d0787655d881cd46b68",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -4610,7 +4610,7 @@
       "artifact_id": "evidence:rules-ontology-operation-dispatch-generic",
       "artifact_kind": "evidence",
       "authority_path": "rules/ontology-operation-dispatch-generic.yml",
-      "canonical_digest": "b3:4f979112aac3d6df8c15d364b73e1e4583b0e98e130818ef1b769fe4c62c4c76",
+      "canonical_digest": "b3:5e6a2b9cda2199c1df5accda88834f8ce62f2efb06a8cff9fa892cb942a6b250",
       "compatible_suite_major": 1,
       "compilation_unit": "governance",
       "owner": "ast-grep-rules",
@@ -4624,7 +4624,7 @@
       "resource_profile": {
         "profile": "aggregate-governance-bounded-v1"
       },
-      "source_digest": "b3:440cef1af5d1b1b6eb3583d4cc5b6b22259f091be43c36b1fa7e75ac4418d31c",
+      "source_digest": "b3:e632c105b92d299f3f76c2f6d476e17adb2514956614fa7ce8e91d89b31f8af1",
       "source_role": "evidence-authority",
       "status": "accepted",
       "version": "1.0"
@@ -4909,7 +4909,7 @@
   "compatible_suite_major": 1,
   "families": [
     {
-      "action_key": "b3:09ca686495ad374bfd56a2c6e535a0814aa7447e004a11e2585f08c9bcf760ac",
+      "action_key": "b3:9aa0a4eeb55c57453dae416993d828e1e5e4f0023dbe9d9aa26fa6102b36f9b6",
       "family": "registry-cbef",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_registries.py",
@@ -4945,7 +4945,7 @@
       }
     },
     {
-      "action_key": "b3:aeab03d3ede2342f8a712467b67caf32c9e107d71111e9702c9d3a6eee25f542",
+      "action_key": "b3:5b368c80e72f031c19a78b9c24c185f90f738676f2d81bd84d5b299138edb090",
       "family": "schemas",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json",
@@ -4986,7 +4986,7 @@
       }
     },
     {
-      "action_key": "b3:159e46933056b9e99df1e070d59e4a3efa180c4c2aed6ace0754cc061039638e",
+      "action_key": "b3:e5827952ca46765f5822f5ddb90604b462d10f861fa7a63dcc8415148a8f052f",
       "family": "adapter",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/adapter-fingerprints.json",
@@ -5019,7 +5019,7 @@
       }
     },
     {
-      "action_key": "b3:394fba5643cb18cc13e70d6ac8c8ee184e8731ccd26af14dc49b3b75e0898c9e",
+      "action_key": "b3:ac39be0c055cf287089716362e52d557c7daf617444acb77f3ffecdab01f5fd0",
       "family": "proto",
       "outputs": [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.py",

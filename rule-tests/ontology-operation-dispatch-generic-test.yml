@@ -1,5 +1,5 @@
 id: ontology-operation-dispatch-generic
-valid:
+invalid:
   - |
       fn execute(lowered: LoweredValidationOperation) {
           match lowered.native {
@@ -7,7 +7,6 @@ valid:
               NativeValidationOperation::PropertyValueOneOf => property(),
           }
       }
-invalid:
   - |
       fn execute(operation: DecodedProgramOperation) {
           match operation.operation_kind.as_str() {

@@ -3,8 +3,8 @@
   "plan_path": "docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v3_2026-08-28.md",
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
-  "status": "complete",
-  "current_packet": null,
+  "status": "executing",
+  "current_packet": "WP19",
   "packets": {
     "WP18": {
       "status": "complete",
@@ -17,14 +17,14 @@
       "blockers": []
     },
     "WP19": {
-      "status": "complete",
+      "status": "in_progress",
       "proving_commit": "b5622ac7c2a59406420505e75fcddf7c939cb80f",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP20": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "6211d72ffe0e5badde51aaeebb45d5295f20bed4",
       "deviations": [],
       "failed_approaches": [
@@ -33,49 +33,49 @@
       "blockers": []
     },
     "WP21": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "d060948cf05f9c323f863773f7bedf7c7f6f6c51",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP22": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "a65bb54e7f19c551d34fc2cd519351b8767fa270",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP23": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "36c072590c808ce720bbbc7ab6c60a1c8fe1a716",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP24": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "605137e1248a6ddfaf8d6b740560ff7d82c7acfa",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP25": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "2bee352baf16e95b0e686e98361d12949c058cf1",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP26": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "d311e872b0d63419a7ba9d88547c65f9c7796b18",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP27": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "a5d7c1d86013f336de599d3b5c26ac92e9b60a2e",
       "deviations": [],
       "failed_approaches": [],
@@ -84,28 +84,28 @@
   },
   "milestones": {
     "M05": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "b5622ac7c2a59406420505e75fcddf7c939cb80f",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M06": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "36c072590c808ce720bbbc7ab6c60a1c8fe1a716",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M07": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "2bee352baf16e95b0e686e98361d12949c058cf1",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M08": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "a5d7c1d86013f336de599d3b5c26ac92e9b60a2e",
       "deviations": [],
       "failed_approaches": [],
@@ -114,28 +114,28 @@
   },
   "decommission_batches": {
     "DB07": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "a5d7c1d86013f336de599d3b5c26ac92e9b60a2e",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB08": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "a5d7c1d86013f336de599d3b5c26ac92e9b60a2e",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB09": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "a5d7c1d86013f336de599d3b5c26ac92e9b60a2e",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB10": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "a5d7c1d86013f336de599d3b5c26ac92e9b60a2e",
       "deviations": [],
       "failed_approaches": [],
@@ -157,7 +157,36 @@
     }
   },
   "baseline_failures": [],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    {
+      "finding": "IR-001",
+      "summary": "Replace flat operation metadata and NativeValidationOperation dispatch with normalized Arrow plan/expression relations and one causal DataFusion lowerer."
+    },
+    {
+      "finding": "IR-002",
+      "summary": "Execute bootstrap-discovered closure programs against the candidate's exact Delta providers rather than comparing self-derived identity strings."
+    },
+    {
+      "finding": "IR-003",
+      "summary": "Unify production proof, authenticated owner decision, ontology authority, serving pointer, and recovery behind one administrative activation route."
+    },
+    {
+      "finding": "IR-004",
+      "summary": "Implement the accepted Domain/Neutral/Bottom/Opaque lattice and generated domain effects across the pinned DataFusion expression and plan variants."
+    },
+    {
+      "finding": "IR-005",
+      "summary": "Build governed RuntimeEnv instances with memory, deadline, cancellation, spill, cleanup, and terminal-output bounds."
+    },
+    {
+      "finding": "IR-006",
+      "summary": "Resolve legacy and target result authorities explicitly per lease and remove the ambient V2 serving fallback."
+    },
+    {
+      "finding": "IR-007",
+      "summary": "Replace metadata-presence and retired-name checks with causal production oracles and semantic zero-state governance."
+    }
+  ],
   "plan_deviations": [
     {
       "kind": "owner_authorized_execution_and_proving_commits",
@@ -182,8 +211,12 @@
       "kind": "committed_predecessor_candidate_adopted",
       "packet": "WP18",
       "summary": "Execution adopts the now-committed v2 implementation and master-document relocation as migration substrate, while retaining v3 acceptance checks as the only completion authority."
+    },
+    {
+      "kind": "implementation_review_remediation",
+      "summary": "The independent v3 implementation review returned changes-required. WP19-WP27, M05-M08, and DB07-DB10 are reopened until IR-001 through IR-007 are causally re-proved at fresh commits."
     }
   ],
-  "next_action": "Request an independent implementation review against the accepted design, immutable v3 plan, implementation lineage, and final certification evidence.",
-  "updated_at": "2026-08-28T23:16:41Z"
+  "next_action": "WP19: emit the accepted normalized Arrow plan/expression relations from authored contracts and prove package identity/reproducibility without restoring a second semantic authority.",
+  "updated_at": "2026-08-29T08:59:01Z"
 }

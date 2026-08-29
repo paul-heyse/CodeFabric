@@ -12,6 +12,7 @@ use datafusion::common::ScalarValue;
 use datafusion::logical_expr::{Expr, JoinType, col, lit};
 use datafusion::prelude::SessionConfig;
 use deltalake::protocol::SaveMode;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::mutation::{
@@ -40,7 +41,8 @@ const PUBLICATION_REFERENTIAL_INTEGRITY: &str = "PUBLICATION_REFERENTIAL_INTEGRI
 const CANDIDATE_REFERENCE_COVERAGE: &str = "COMPLETE_CANDIDATE_EFFECTIVE_SNAPSHOT";
 
 /// Closed row selection bound to one publication and every derived serving snapshot.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublicationScope {
     pub workspace_id: [u8; 16],
     pub source_generation: i64,
@@ -90,7 +92,8 @@ pub struct OwnerPublicationWrite {
 }
 
 /// Exact immutable data-table entry in a publication manifest.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublicationTableRecord {
     pub publication_id: [u8; 16],
     pub workspace_id: [u8; 16],
@@ -107,7 +110,8 @@ pub struct PublicationTableRecord {
 }
 
 /// One durable base pointer for the workspace-local Delta namespace.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CurrentPublicationRecord {
     pub workspace_id: [u8; 16],
     pub publication_id: [u8; 16],
@@ -116,12 +120,52 @@ pub struct CurrentPublicationRecord {
 }
 
 /// Coherent result returned only after pointer read-back succeeds.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublicationOutcome {
     pub publication_id: [u8; 16],
     pub scope: PublicationScope,
     pub pointer: CurrentPublicationRecord,
+    #[serde(with = "publication_table_map")]
     pub tables: BTreeMap<i16, PublicationTableRecord>,
+}
+
+mod publication_table_map {
+    use std::collections::BTreeMap;
+
+    use serde::de::Error as _;
+    use serde::{Deserialize as _, Deserializer, Serialize as _, Serializer};
+
+    use super::PublicationTableRecord;
+
+    pub fn serialize<S>(
+        records: &BTreeMap<i16, PublicationTableRecord>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        records.values().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<BTreeMap<i16, PublicationTableRecord>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let records = Vec::<PublicationTableRecord>::deserialize(deserializer)?;
+        let mut indexed = BTreeMap::new();
+        for record in records {
+            let table_code = record.table_code;
+            if indexed.insert(table_code, record).is_some() {
+                return Err(D::Error::custom(format!(
+                    "duplicate publication table code {table_code}"
+                )));
+            }
+        }
+        Ok(indexed)
+    }
 }
 
 /// Registered cross-table failure over the complete candidate publication relation.

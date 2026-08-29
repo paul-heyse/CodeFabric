@@ -1,6 +1,9 @@
 //! Sealed DataFusion ingress for candidate gates and serving execution.
 
+use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrow_array::RecordBatch;
 use arrow_schema::ArrowError;
@@ -8,7 +11,8 @@ use datafusion::catalog::TableProvider;
 use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
 use datafusion::execution::SessionStateBuilder;
-use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::execution::memory_pool::{FairSpillPool, TrackConsumersPool};
+use datafusion::execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
 use datafusion::logical_expr::registry::MemoryExtensionTypeRegistry;
 use datafusion::logical_expr::{Expr, LogicalPlan};
 use datafusion::physical_plan::{SendableRecordBatchStream, execute_stream};
@@ -51,6 +55,68 @@ pub struct GovernedSession {
     session_identity: String,
     config_identity: String,
     policy_identity: String,
+    runtime_profile: GovernedRuntimeProfile,
+    spill_directory: PathBuf,
+}
+
+static SESSION_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Versioned bounded runtime profile shared by candidate program execution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GovernedRuntimeProfile {
+    pub profile_version: &'static str,
+    pub memory_limit_bytes: usize,
+    pub max_spill_bytes: u64,
+    pub batch_size: usize,
+    pub target_partitions: usize,
+    pub max_execution_millis: u64,
+    pub tracked_consumer_count: NonZeroUsize,
+}
+
+impl Default for GovernedRuntimeProfile {
+    fn default() -> Self {
+        Self {
+            profile_version: "governed-runtime.v1",
+            memory_limit_bytes: 32 * 1_024 * 1_024,
+            max_spill_bytes: 64 * 1_024 * 1_024,
+            batch_size: 65_536,
+            target_partitions: 2,
+            max_execution_millis: 30_000,
+            tracked_consumer_count: NonZeroUsize::new(16).expect("non-zero constant"),
+        }
+    }
+}
+
+impl GovernedRuntimeProfile {
+    #[must_use]
+    pub fn identity(&self) -> String {
+        framed([
+            self.profile_version.as_bytes(),
+            &self.memory_limit_bytes.to_be_bytes(),
+            &self.max_spill_bytes.to_be_bytes(),
+            &self.batch_size.to_be_bytes(),
+            &self.target_partitions.to_be_bytes(),
+            &self.max_execution_millis.to_be_bytes(),
+            &self.tracked_consumer_count.get().to_be_bytes(),
+            b"drop-task-stream-on-cancel.v1",
+            b"remove-private-spill-directory-on-drop.v1",
+        ])
+    }
+
+    fn validate(&self) -> Result<(), GovernedSessionError> {
+        if self.profile_version.is_empty()
+            || self.memory_limit_bytes == 0
+            || self.max_spill_bytes == 0
+            || self.batch_size == 0
+            || self.target_partitions == 0
+            || self.max_execution_millis == 0
+        {
+            return Err(GovernedSessionError::Ingress(
+                "governed runtime profile contains a zero/empty limit".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Exact-provider read request admitted by the internal DataFusion adapter.
@@ -167,22 +233,58 @@ impl GovernedSession {
         config: SessionConfig,
         policy_identity: impl Into<String>,
     ) -> Result<Self, GovernedSessionError> {
+        Self::new_with_runtime(config, policy_identity, GovernedRuntimeProfile::default())
+    }
+
+    /// Construct a session with an explicit versioned memory, spill, batch, partition, and
+    /// deadline profile.
+    pub fn new_with_runtime(
+        config: SessionConfig,
+        policy_identity: impl Into<String>,
+        runtime_profile: GovernedRuntimeProfile,
+    ) -> Result<Self, GovernedSessionError> {
+        runtime_profile.validate()?;
         let policy_identity = policy_identity.into();
         if policy_identity.trim().is_empty() {
             return Err(GovernedSessionError::Ingress(
                 "policy identity is empty".into(),
             ));
         }
+        let config = config
+            .with_batch_size(runtime_profile.batch_size)
+            .with_target_partitions(runtime_profile.target_partitions);
         let config_identity = framed([
             b"governed-datafusion-config.v1".as_slice(),
             format!("{config:?}").as_bytes(),
+            runtime_profile.identity().as_bytes(),
         ]);
+        let spill_directory = std::env::temp_dir().join(format!(
+            "codefabric-governed-{}-{}",
+            std::process::id(),
+            SESSION_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&spill_directory).map_err(|error| {
+            GovernedSessionError::Ingress(format!(
+                "cannot create governed spill directory {}: {error}",
+                spill_directory.display()
+            ))
+        })?;
+        let runtime = RuntimeEnvBuilder::new()
+            .with_memory_pool(Arc::new(TrackConsumersPool::new(
+                FairSpillPool::new(runtime_profile.memory_limit_bytes),
+                runtime_profile.tracked_consumer_count,
+            )))
+            .with_temp_file_path(&spill_directory)
+            .with_max_temp_directory_size(runtime_profile.max_spill_bytes)
+            .build()
+            .map_err(GovernedSessionError::DataFusion)?;
         let extension_types = MemoryExtensionTypeRegistry::new_with_types(
             crate::schema_registry::extension_type_registrations(),
         )?;
         let state = SessionStateBuilder::new()
             .with_default_features()
             .with_config(config)
+            .with_runtime_env(Arc::new(runtime))
             .with_extension_type_registry(Arc::new(extension_types))
             .with_analyzer_rule(Arc::new(
                 crate::domain_conformance::DomainConformanceRule::new(),
@@ -200,6 +302,8 @@ impl GovernedSession {
             session_identity,
             config_identity,
             policy_identity,
+            runtime_profile,
+            spill_directory,
         })
     }
 
@@ -218,6 +322,16 @@ impl GovernedSession {
         &self.policy_identity
     }
 
+    #[must_use]
+    pub fn runtime_profile(&self) -> &GovernedRuntimeProfile {
+        &self.runtime_profile
+    }
+
+    #[must_use]
+    pub fn spill_directory(&self) -> &std::path::Path {
+        &self.spill_directory
+    }
+
     /// Construct an in-memory relational input inside this sealed session.
     pub(crate) fn frame(
         &self,
@@ -228,18 +342,6 @@ impl GovernedSession {
             Arc::clone(&schema),
             vec![vec![batch.clone()]],
         )?))?)
-    }
-
-    /// Seal, execute once, and report whether a bounded violation frame has any rows.
-    pub(crate) async fn rejects_any(
-        &self,
-        frame: DataFrame,
-        action_id: &str,
-    ) -> Result<bool, GovernedSessionError> {
-        let outcome = self
-            .execute_frame(frame.limit(0, Some(1))?, action_id)
-            .await?;
-        Ok(outcome.receipt.gate_checksum.row_count != 0)
     }
 
     /// Seal and execute one relational validation frame through the once-only gate action.
@@ -317,6 +419,28 @@ impl GovernedSession {
         action_id: &str,
         limits: &GateResourceEnvelope,
     ) -> Result<OntologyGateOutcome, GovernedSessionError> {
+        self.execute_gate_with_cancellation(
+            governed,
+            execution_id,
+            candidate_id,
+            action_id,
+            limits,
+            &crate::cancellation::Cancellation::default(),
+        )
+        .await
+    }
+
+    /// Execute one sealed gate with cooperative cancellation. Cancellation or timeout drops the
+    /// sole DataFusion stream future, which is the pinned engine's task-cancellation boundary.
+    pub async fn execute_gate_with_cancellation(
+        &self,
+        governed: &GovernedPlan,
+        execution_id: &str,
+        candidate_id: &str,
+        action_id: &str,
+        limits: &GateResourceEnvelope,
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> Result<OntologyGateOutcome, GovernedSessionError> {
         if governed.session_identity != self.session_identity
             || governed.policy_identity != self.policy_identity
         {
@@ -324,15 +448,66 @@ impl GovernedSession {
                 "governed plan belongs to another session or policy".into(),
             ));
         }
-        Ok(execute_ontology_gate_once(
+        let deadline = limits
+            .max_execution_millis
+            .min(self.runtime_profile.max_execution_millis);
+        if cancellation.is_cancelled() {
+            return Err(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Cancelled,
+            )
+            .into());
+        }
+        if deadline == 0 {
+            return Err(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Deadline { limit_millis: 0 },
+            )
+            .into());
+        }
+        let execution = execute_ontology_gate_once(
             &self.context,
             &governed.plan,
             execution_id,
             candidate_id,
             action_id,
             limits,
-        )
-        .await?)
+        );
+        tokio::pin!(execution);
+        let cancel = async {
+            loop {
+                if cancellation.is_cancelled() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        };
+        tokio::pin!(cancel);
+        tokio::select! {
+            outcome = &mut execution => match outcome {
+                Err(crate::ontology_gate::OntologyGateError::DataFusion(
+                    DataFusionError::ResourcesExhausted(_),
+                )) => Err(crate::ontology_gate::OntologyGateError::Resource(
+                    crate::ontology_gate::GateResourceFailure::Memory {
+                        limit_bytes: self.runtime_profile.memory_limit_bytes,
+                    },
+                ).into()),
+                outcome => Ok(outcome?),
+            },
+            () = &mut cancel => Err(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Cancelled,
+            ).into()),
+            () = tokio::time::sleep(std::time::Duration::from_millis(deadline)) => Err(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Deadline {
+                    limit_millis: deadline,
+                },
+            )
+            .into()),
+        }
+    }
+}
+
+impl Drop for GovernedSession {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.spill_directory);
     }
 }
 
@@ -346,15 +521,17 @@ mod tests {
     use arrow_ipc::reader::StreamReader;
     use arrow_ipc::writer::StreamWriter;
     use datafusion::datasource::{MemTable, provider_as_source};
+    use datafusion::execution::memory_pool::MemoryConsumer;
     use datafusion::logical_expr::{LogicalPlanBuilder, col};
     use datafusion::prelude::SessionConfig;
     use parquet::arrow::ArrowWriter;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
-    use super::GovernedSession;
+    use super::{GovernedRuntimeProfile, GovernedSession, GovernedSessionError};
     use crate::domain_conformance::{
         DATAFUSION_EXPR_VARIANT_CENSUS, DATAFUSION_LOGICAL_PLAN_VARIANT_CENSUS,
     };
+    use crate::ontology_gate::GateResourceEnvelope;
     use crate::schema_registry::{DomainTypedLiteral, table_spec};
 
     fn session() -> GovernedSession {
@@ -488,5 +665,85 @@ mod tests {
         assert_eq!(parquet_batch.schema().field(0), schema.field(0));
         crate::schema_registry::validate_logical_extension_field(parquet_batch.schema().field(0))
             .expect("Parquet extension boundary");
+    }
+
+    #[tokio::test]
+    async fn ontology_governed_runtime_deadline_cancellation_memory_cleanup() {
+        let profile = GovernedRuntimeProfile {
+            profile_version: "governed-runtime.test.v1",
+            memory_limit_bytes: 1_024,
+            max_spill_bytes: 4_096,
+            batch_size: 64,
+            target_partitions: 1,
+            max_execution_millis: 1_000,
+            tracked_consumer_count: std::num::NonZeroUsize::new(4).expect("non-zero"),
+        };
+        let session = GovernedSession::new_with_runtime(
+            SessionConfig::new(),
+            "policy.runtime.test.v1",
+            profile.clone(),
+        )
+        .expect("bounded governed session");
+        assert_eq!(session.runtime_profile(), &profile);
+
+        let task_context = session.context.task_ctx();
+        let pool = task_context.memory_pool();
+        let reservation = MemoryConsumer::new("ontology-runtime-limit-probe").register(pool);
+        let memory_error = reservation
+            .try_grow(profile.memory_limit_bytes + 1)
+            .expect_err("unspillable reservation exceeds governed memory");
+        assert!(memory_error.to_string().contains("Resources exhausted"));
+
+        let governed = session
+            .seal_plan(workspace_plan())
+            .expect("sealed test plan");
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        cancellation.cancel();
+        let cancelled = session
+            .execute_gate_with_cancellation(
+                &governed,
+                "cancelled-execution",
+                "candidate-runtime",
+                "runtime-cancel",
+                &GateResourceEnvelope::default(),
+                &cancellation,
+            )
+            .await
+            .expect_err("pre-cancelled execution");
+        assert!(matches!(
+            cancelled,
+            GovernedSessionError::Gate(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Cancelled
+            ))
+        ));
+
+        let deadline = session
+            .execute_gate(
+                &governed,
+                "deadline-execution",
+                "candidate-runtime",
+                "runtime-deadline",
+                &GateResourceEnvelope {
+                    max_execution_millis: 0,
+                    ..GateResourceEnvelope::default()
+                },
+            )
+            .await
+            .expect_err("zero deadline");
+        assert!(matches!(
+            deadline,
+            GovernedSessionError::Gate(crate::ontology_gate::OntologyGateError::Resource(
+                crate::ontology_gate::GateResourceFailure::Deadline { limit_millis: 0 }
+            ))
+        ));
+
+        let spill_directory = session.spill_directory().to_path_buf();
+        std::fs::write(spill_directory.join("orphaned-spill-probe"), b"spill")
+            .expect("write spill cleanup probe");
+        drop(session);
+        assert!(
+            !spill_directory.exists(),
+            "session drop must remove spill authority"
+        );
     }
 }

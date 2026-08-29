@@ -1865,6 +1865,8 @@ pub fn validate_error_records(records: &[PublicError]) -> Result<(), String> {
             "ONTOLOGY_GATE_BYTE_LIMIT",
             "ONTOLOGY_GATE_BATCH_LIMIT",
             "ONTOLOGY_GATE_COUNTER_OVERFLOW",
+            "ONTOLOGY_GATE_DEADLINE_EXCEEDED",
+            "ONTOLOGY_GATE_MEMORY_LIMIT",
             "ONTOLOGY_PROGRAM_RESOURCE_LIMIT",
             "REQUIRED_FEATURE_UNSUPPORTED",
             "SCHEMA_DIGEST_MISMATCH",

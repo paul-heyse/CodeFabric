@@ -1,11 +1,19 @@
 id: ontology-operation-dispatch-generic
 language: Rust
 severity: error
-message: Ontology validators must consume the generic lowerer's closed native operation.
+message: Ontology validation must be lowered only from the normalized relational program graph.
 files:
-  - src/ontology_rules.rs
-  - src/fabric/publication.rs
+  - src/**/*.rs
 rule:
   any:
     - pattern: match $OP.operation_kind.as_str() { $$$ARMS }
     - pattern: match $OP.calculation_id.as_str() { $$$ARMS }
+    - pattern: match $OP.native { $$$ARMS }
+    - pattern: match $OP.native_operation { $$$ARMS }
+    - pattern: pub fn commit_fact_snapshot($$$ARGS) { $$$BODY }
+    - all:
+        - kind: identifier
+        - regex: '^(?:NativeValidationOperation|DecodedProgramOperation|LoweredValidationOperation)$'
+    - all:
+        - kind: identifier
+        - regex: '^validate_(?:primary_keys|foreign_keys|governed_codes|relation_family|relation_membership|relation_cardinality|relation_owner|relation_self_edge|property_one_of|source_spans)$'

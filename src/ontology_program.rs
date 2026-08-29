@@ -35,7 +35,9 @@ impl Default for OntologyPackagingProfile {
     fn default() -> Self {
         Self {
             profile_id: "arrow-ipc-stream.canonical.v1".into(),
-            max_rows_per_batch: 1_024,
+            // The normalized expression-edge relation is intentionally dense; 4K keeps every
+            // current homogeneous relation in one canonical batch while retaining a hard bound.
+            max_rows_per_batch: 4_096,
         }
     }
 }
@@ -863,9 +865,140 @@ pub fn validate_ontology_program_package(
 pub(crate) fn reseal_ontology_program_package(
     package: &mut OntologyProgramPackage,
 ) -> Result<(), OntologyProgramError> {
+    refresh_bootstrap_member(package)?;
     package.manifest =
         manifest_for_members(&package.manifest.packaging_profile_id, &package.members);
     validate_ontology_program_package(package)
+}
+
+#[cfg(test)]
+pub(crate) fn replace_program_utf8_cell(
+    package: &mut OntologyProgramPackage,
+    relation: &str,
+    column: &str,
+    row: usize,
+    replacement: &str,
+) -> Result<(), OntologyProgramError> {
+    let member = package
+        .members
+        .get_mut(relation)
+        .ok_or_else(|| OntologyProgramError::Contract(format!("missing {relation}")))?;
+    if member.batches.len() != 1 {
+        return Err(OntologyProgramError::Contract(format!(
+            "{relation} is not a canonical single-batch member"
+        )));
+    }
+    let batch = &member.batches[0];
+    let column_index = batch
+        .schema()
+        .index_of(column)
+        .map_err(OntologyProgramError::Arrow)?;
+    let source = batch.columns()[column_index]
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| {
+            OntologyProgramError::Contract(format!("{relation}.{column} is not Utf8"))
+        })?;
+    if row >= source.len() {
+        return Err(OntologyProgramError::Contract(format!(
+            "{relation}.{column}[{row}] is outside the member"
+        )));
+    }
+    let values = (0..source.len())
+        .map(|index| {
+            if index == row {
+                Some(replacement)
+            } else if source.is_null(index) {
+                None
+            } else {
+                Some(source.value(index))
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut columns = batch.columns().to_vec();
+    columns[column_index] = std::sync::Arc::new(StringArray::from(values));
+    let replacement_batch = RecordBatch::try_new(std::sync::Arc::clone(&member.schema), columns)?;
+    replace_member_batch(member, replacement_batch)?;
+    reseal_ontology_program_package(package)
+}
+
+#[cfg(test)]
+fn refresh_bootstrap_member(
+    package: &mut OntologyProgramPackage,
+) -> Result<(), OntologyProgramError> {
+    let content_rows = package
+        .members
+        .iter()
+        .filter(|(relation, _)| relation.as_str() != "program.bootstrap")
+        .map(|(relation, member)| {
+            (
+                relation.clone(),
+                format!(
+                    "b3:{}",
+                    blake3::hash(format!("{:?}", member.schema).as_bytes()).to_hex()
+                ),
+                format!("b3:{}", blake3::hash(&member.ipc_bytes).to_hex()),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut content_set = blake3::Hasher::new();
+    content_set.update(b"codefabric.ontology-program.content-set.v1\0");
+    for (relation, schema_identity, content_identity) in &content_rows {
+        for value in [relation, schema_identity, content_identity] {
+            content_set.update(&(value.len() as u64).to_be_bytes());
+            content_set.update(value.as_bytes());
+        }
+    }
+    let content_set_identity = format!("b3:{}", content_set.finalize().to_hex());
+    let bootstrap = package
+        .members
+        .get_mut("program.bootstrap")
+        .ok_or_else(|| OntologyProgramError::Contract("missing program.bootstrap".into()))?;
+    let batch = RecordBatch::try_new(
+        std::sync::Arc::clone(&bootstrap.schema),
+        vec![
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.0.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.0.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from(vec![
+                "program_relation";
+                content_rows.len()
+            ])),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.1.as_str()),
+            )),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                content_rows.iter().map(|row| row.2.as_str()),
+            )),
+            std::sync::Arc::new(BooleanArray::from(vec![true; content_rows.len()])),
+            std::sync::Arc::new(StringArray::from(vec![
+                content_set_identity.as_str();
+                content_rows.len()
+            ])),
+        ],
+    )?;
+    replace_member_batch(bootstrap, batch)
+}
+
+#[cfg(test)]
+fn replace_member_batch(
+    member: &mut OntologyProgramMember,
+    batch: RecordBatch,
+) -> Result<(), OntologyProgramError> {
+    let mut ipc_bytes = Vec::new();
+    {
+        let mut writer =
+            arrow_ipc::writer::StreamWriter::try_new(&mut ipc_bytes, member.schema.as_ref())?;
+        writer.write(&batch)?;
+        writer.finish()?;
+    }
+    member.batches = vec![batch];
+    member.ipc_bytes = ipc_bytes;
+    member.member_identity = framed([member.relation_id.as_bytes(), member.ipc_bytes.as_slice()]);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -880,24 +1013,35 @@ mod tests {
     fn ontology_program_bundle_semantic_parity() {
         let package = build_ontology_program_package(&OntologyPackagingProfile::default())
             .expect("compiled package");
-        assert_eq!(package.members.len(), 16);
-        let rules = &package.members["program.rule_operation"];
+        for relation in [
+            "program.program_contract",
+            "program.scan_node",
+            "program.filter_node",
+            "program.project_node",
+            "program.join_node",
+            "program.aggregate_node",
+            "program.set_node",
+            "program.column_expr",
+            "program.literal_expr",
+            "program.binary_expr",
+            "program.call_expr",
+            "program.case_expr",
+            "program.cast_expr",
+            "program.plan_edge",
+            "program.expression_edge",
+        ] {
+            assert!(package.members.contains_key(relation), "missing {relation}");
+        }
+        let rules = &package.members["program.rule_binding"];
         let compiler = OntologyProgramCompiler::decode(&package).expect("decoded program");
-        assert_eq!(
-            rules.batches[0].num_rows(),
-            compiler
-                .operations
-                .values()
-                .map(|rule| rule.operands.len())
-                .sum::<usize>()
-        );
+        assert_eq!(rules.batches[0].num_rows(), compiler.rules.values().count());
         assert!(
             compiler
-                .operations
+                .rules
                 .values()
                 .all(|rule| !rule.calculation_id.is_empty()
                     && !rule.policy_id.is_empty()
-                    && !rule.operands.is_empty())
+                    && !rule.input_contract.is_empty())
         );
     }
 
@@ -949,7 +1093,8 @@ mod tests {
     fn ontology_program_bundle_model_rebuild() {
         let package = build_ontology_program_package(&OntologyPackagingProfile::default())
             .expect("compiled package");
-        let calculation_rows = package.members["program.calculation_catalog"].batches[0].num_rows();
+        let calculation_rows =
+            package.members["program.calculation_contract"].batches[0].num_rows();
         let compiler = OntologyProgramCompiler::decode(&package).expect("decoded program");
         assert_eq!(calculation_rows, compiler.calculations.len());
         assert!(
