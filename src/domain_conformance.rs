@@ -267,9 +267,9 @@ impl DomainOperationPolicy {
         match transition.output {
             DomainStateKind::Domain => match input {
                 DomainState::Domain(domain) => Ok(DomainState::Domain(domain)),
-                _ => domain_error(format!(
-                    "{variant} declares a DOMAIN output without a domain-bearing input"
-                )),
+                DomainState::Neutral | DomainState::Bottom | DomainState::Opaque => domain_error(
+                    format!("{variant} declares a DOMAIN output without a domain-bearing input"),
+                ),
             },
             DomainStateKind::Neutral => Ok(DomainState::Neutral),
             DomainStateKind::Bottom => Ok(DomainState::Bottom),
@@ -721,7 +721,7 @@ fn subquery_output_state(plan: &LogicalPlan) -> Result<DomainState> {
     field_state(fields[0].as_ref())
 }
 
-#[allow(clippy::too_many_lines)] // Exhaustive state algebra mirrors the pinned Expr census.
+#[allow(clippy::too_many_lines, deprecated)] // Exhaustive state algebra mirrors the pinned Expr census.
 fn expression_state(
     policy: &DomainOperationPolicy,
     plan: &LogicalPlan,
@@ -732,10 +732,42 @@ fn expression_state(
         Expr::ScalarFunction(function) => Some(function.func.name()),
         Expr::AggregateFunction(function) => Some(function.func.name()),
         Expr::WindowFunction(function) => Some(function.fun.name()),
-        _ => None,
+        Expr::Alias(_)
+        | Expr::Column(_)
+        | Expr::ScalarVariable(_, _)
+        | Expr::Literal(_, _)
+        | Expr::BinaryExpr(_)
+        | Expr::Like(_)
+        | Expr::SimilarTo(_)
+        | Expr::Not(_)
+        | Expr::IsNotNull(_)
+        | Expr::IsNull(_)
+        | Expr::IsTrue(_)
+        | Expr::IsFalse(_)
+        | Expr::IsUnknown(_)
+        | Expr::IsNotTrue(_)
+        | Expr::IsNotFalse(_)
+        | Expr::IsNotUnknown(_)
+        | Expr::Negative(_)
+        | Expr::Between(_)
+        | Expr::Case(_)
+        | Expr::Cast(_)
+        | Expr::TryCast(_)
+        | Expr::InList(_)
+        | Expr::Exists(_)
+        | Expr::InSubquery(_)
+        | Expr::SetComparison(_)
+        | Expr::ScalarSubquery(_)
+        | Expr::Wildcard { .. }
+        | Expr::GroupingSet(_)
+        | Expr::Placeholder(_)
+        | Expr::OuterReferenceColumn(_, _)
+        | Expr::Unnest(_)
+        | Expr::HigherOrderFunction(_)
+        | Expr::Lambda(_)
+        | Expr::LambdaVariable(_) => None,
     };
     let effect = policy.operation_effect(variant, function_name)?;
-    #[allow(deprecated)]
     let input = match expression {
         Expr::Alias(alias) => expression_state(policy, plan, &alias.expr),
         Expr::Column(_) | Expr::OuterReferenceColumn(_, _) => expression_domain(plan, expression)

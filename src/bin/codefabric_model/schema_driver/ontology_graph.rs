@@ -1447,8 +1447,12 @@ mod tests {
         batches: BTreeMap<String, arrow_array::RecordBatch>,
     ) -> codefabric::ontology_program::OntologyProgramPackage {
         use codefabric::ontology_program::{
-            OntologyProgramManifest, OntologyProgramMember, OntologyProgramPackage,
+            OntologyPackagingProfile, OntologyProgramManifest, OntologyProgramMember,
+            OntologyProgramPackage, build_ontology_program_package,
         };
+
+        let retained = build_ontology_program_package(&OntologyPackagingProfile::default())
+            .expect("retained assurance authority");
 
         let members = batches
             .into_iter()
@@ -1475,9 +1479,11 @@ mod tests {
                 logical_program_identity: "test:logical".into(),
                 packaging_profile_id: "test:memory".into(),
                 member_identities,
+                runtime_artifact_identities: retained.manifest.runtime_artifact_identities,
                 package_identity: "test:package".into(),
             },
             members,
+            runtime_artifacts: retained.runtime_artifacts,
         }
     }
 
@@ -1485,9 +1491,17 @@ mod tests {
     async fn execute_rows(
         plan: datafusion::logical_expr::LogicalPlan,
     ) -> Result<usize, Box<dyn std::error::Error>> {
-        let context = datafusion::prelude::SessionContext::new();
-        let batches = context.execute_logical_plan(plan).await?.collect().await?;
-        Ok(batches.iter().map(arrow_array::RecordBatch::num_rows).sum())
+        let package = codefabric::ontology_program::build_ontology_program_package(
+            &codefabric::ontology_program::OntologyPackagingProfile::default(),
+        )?;
+        let outcome =
+            codefabric::governed_session::execute_model_compiler_assurance_plan(&package, plan)
+                .await?;
+        Ok(outcome
+            .batches
+            .iter()
+            .map(arrow_array::RecordBatch::num_rows)
+            .sum())
     }
 
     #[cfg(feature = "data-fabric")]

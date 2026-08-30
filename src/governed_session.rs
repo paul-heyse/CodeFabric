@@ -640,11 +640,36 @@ impl GovernedSession {
     }
 }
 
+/// Execute a model-compiler causality plan through the same sealed analyzer and once-only gate
+/// used by candidate validation. This feature-scoped assurance seam lets the compiler prove that
+/// regenerated relational rows change DataFusion behavior without exposing a raw session.
+///
+/// # Errors
+///
+/// Rejects an invalid retained package or plan, a domain-policy violation, execution failure, or
+/// any governed resource/checksum failure.
+#[cfg(feature = "model-compiler")]
+pub async fn execute_model_compiler_assurance_plan(
+    package: &crate::ontology_program::OntologyProgramPackage,
+    plan: LogicalPlan,
+) -> Result<OntologyGateOutcome, GovernedSessionError> {
+    let session = GovernedSession::for_epoch_package(SessionConfig::new(), package)?;
+    let governed = session.seal_plan(plan)?;
+    session
+        .execute_gate(
+            &governed,
+            "model-compiler:causality",
+            "candidate:model-compiler-assurance",
+            "authored-relational-program",
+            &GateResourceEnvelope::default(),
+        )
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
     use std::io::{Seek as _, SeekFrom, Write as _};
-    use std::os::unix::ffi::OsStringExt as _;
     use std::sync::Arc;
 
     use arrow_array::{ArrayRef, FixedSizeBinaryArray, RecordBatch};
@@ -763,11 +788,8 @@ mod tests {
         writer.flush().expect("flush spill bytes");
         let spill_path = spill.path().expect("filesystem spill path");
         assert!(spill_path.exists());
-        std::fs::write(
-            ready_path,
-            session.spill_directory().as_os_str().as_encoded_bytes(),
-        )
-        .expect("publish spill child readiness");
+        std::os::unix::fs::symlink(session.spill_directory(), ready_path)
+            .expect("publish spill child readiness");
         loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
@@ -801,9 +823,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(ready.exists(), "spill child readiness deadline");
-        let spill_directory = std::path::PathBuf::from(std::ffi::OsString::from_vec(
-            std::fs::read(&ready).expect("read spill path"),
-        ));
+        let spill_directory = std::fs::read_link(&ready).expect("read spill path");
         assert!(spill_directory.exists());
         child.kill().expect("force spill child death");
         child.wait().expect("reap spill child");

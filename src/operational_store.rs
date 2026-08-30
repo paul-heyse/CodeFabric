@@ -1179,6 +1179,7 @@ impl OperationalStore {
 
     /// Persist an already classified ordinary snapshot and advance the serving pointer through
     /// the same private CAS kernel used by ontology activation.
+    #[cfg(feature = "daemon")]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn commit_classified_ordinary_serving_pointer(
         &mut self,
