@@ -1242,7 +1242,8 @@ fn ontology_datafabric_old_new_lease_restart() {
     let evidence = evidence();
     assert!(evidence.restart_retry_was_idempotent);
     assert!(evidence.old_new_leases_survived_restart);
-    assert_eq!(evidence.forward_rollback_generation, 2);
+    // Target, variant, and forward-rollback activations each advance the governed pointer.
+    assert_eq!(evidence.forward_rollback_generation, 3);
 }
 
 #[test]
