@@ -1736,6 +1736,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One production-wrapper probe preserves every structured scan field.
     async fn exact_statistics_and_structured_scan_survive_governance_wrapper() {
         let spec = table_spec(1).unwrap();
         let mut columns = spec

@@ -780,9 +780,10 @@ mod tests {
             if ready.exists() {
                 break;
             }
-            if child.try_wait().expect("poll spill child").is_some() {
-                panic!("spill child exited before publishing readiness");
-            }
+            assert!(
+                child.try_wait().expect("poll spill child").is_none(),
+                "spill child exited before publishing readiness"
+            );
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(ready.exists(), "spill child readiness deadline");

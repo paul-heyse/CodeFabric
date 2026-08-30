@@ -826,7 +826,12 @@ async fn serve_activation_request(
         &request_key,
         &cancellation,
     );
-    let Some(response) = await_owned_activation(&mut stream, &cancellation, activation).await
+    let Some(response) = Box::pin(await_owned_activation(
+        &mut stream,
+        &cancellation,
+        activation,
+    ))
+    .await
     else {
         tracing::info!(
             request_key,
