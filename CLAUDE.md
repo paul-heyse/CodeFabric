@@ -36,20 +36,22 @@ failure and must not be attributed to your change.
 ## Shell
 
 Every Bash call is a fresh non-interactive shell that inherits nothing from the previous one,
-and direnv's prompt hook never touches it. For the stable root, use one of:
+and direnv's prompt hook never touches it. Repository recipes handle that boundary themselves:
 
 ```bash
-direnv exec . <cmd>              # full .envrc environment, non-interactively
-. scripts/bootstrap.sh && <cmd>  # within a single compound command
+just <recipe>
 ```
 
-Invoke uv with the adapter domain explicitly (for example,
-`uv run --project codefabric-cpg-mcp --frozen <cmd>`); there is no root uv project.
+Do not source `scripts/bootstrap.sh` or invoke `direnv exec` for routine commands. The
+bootstrap script only verifies/reports state. Just removes inherited Python, Conda, direnv,
+and Rust overrides; selects the correct Rustup toolchain; and invokes uv with the absolute
+adapter project and repository-local cache. There is no root uv project.
 
-`direnv` needs `direnv allow` once, and is for interactive shells only. Secrets — notably
-`CODEFABRIC_CPG_CAPABILITY_TOKEN` — live in `.envrc.local`, which `.envrc` sources and
-`.gitignore` excludes. Widening a search's ignore stack (`rg -uu`, `ast-grep --no-ignore`)
-reaches that file, so scope it to a path rather than making it a default.
+`direnv` needs `direnv allow` once and supplies interactive convenience only; root `.envrc`
+does not sync or activate the adapter. Secrets — notably `CODEFABRIC_CPG_CAPABILITY_TOKEN`
+— live in `.envrc.local`, which `.envrc` sources and `.gitignore` excludes. Widening a
+search's ignore stack (`rg -uu`, `ast-grep --no-ignore`) reaches that file, so scope it to a
+path rather than making it a default.
 
 ## Skills
 

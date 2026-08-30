@@ -336,11 +336,15 @@ instead of an error.
 
 ### sccache is a hard prerequisite
 
-`.cargo/config.toml` commits `rustc-wrapper = "sccache"`. This is the deliberate side of
-repo-spec §13.1's caveat: making the wrapper visible in version control beats an
-undocumented shell environment, at the cost that **cargo fails outright without sccache
-installed**. `just doctor` checks for it; `just cache-stats` reports the hit rate, because
-§13.2 is explicit that you watch the rate rather than assume caching helps.
+`.cargo/config.toml` commits `scripts/sccache-wrapper.sh` as `rustc-wrapper`. The wrapper
+requires the repository's supervised per-user sccache service; an unavailable service
+fails immediately with `just setup-sccache` rather than silently compiling uncached.
+`just doctor` verifies the current version, generated configuration, UDS endpoint, and
+storage contract while reporting cumulative error/timeout telemetry. `just
+sccache-canary` proves only transport/storage liveness with a repeated cacheable `rlib`
+compile. `just sccache-effectiveness` is the opt-in Cargo-shaped cold-target/warm-cache
+measurement; `just cache-stats` reports advanced statistics. A cumulative hit percentage
+alone is not performance evidence.
 
 Nothing host-specific belongs in that file — no `-C target-cpu=native`, no absolute paths,
 no one machine's linker.
@@ -351,14 +355,30 @@ interaction. A large `target/` is not evidence that a release artifact is large.
 
 The cache and artifact topology is deliberate:
 
-- sccache remains host-global; the repository does not set `SCCACHE_DIR`;
+- local sccache uses a launchd/systemd-user supervised UDS service with a dedicated 40 GiB
+  cache on local SSD; setup compares generated files and does not restart a healthy,
+  unchanged daemon;
+- client-side mode performs cache reads in the compiler process, so the Codex sandbox only
+  needs read access to the cache plus access to the single service socket;
+- sccache 0.17.0 does **not** apply `SCCACHE_BASEDIRS` to Rust keys. Distinct absolute
+  worktree roots may therefore miss for workspace crates; keep independent target trees
+  and do not claim cross-worktree Rust path normalization;
 - stable root and stable Pyrefly-sidecar builds share the repository `target/`;
 - the dated-nightly extractor uses `target/extractor/`;
 - Miri/udeps use `target/nightly-assurance/`;
 - cargo-fuzz uses `target/fuzz/<nightly-host>/` and explicitly selects the native host.
 
-CI sets `CARGO_INCREMENTAL=0` so its sccache backend receives cacheable compiler outputs.
-Local builds retain Cargo incremental compilation.
+Incremental policy is workflow-specific. Just establishes `CARGO_INCREMENTAL=0` for
+compile-producing build/test/gate paths, as does CI. Local `root-check`, `root-clippy`,
+`extractor-check`, and `sidecar-check` explicitly restore rustc incremental compilation;
+they also bypass sccache because 0.17.0 rejects incremental Rust invocations instead of
+passing them through, while ordinary check units omit `link` anyway. The committed wrapper
+recognizes Cargo's incremental compiler shape and routes only that incompatible invocation
+directly to the real rustc, so raw Cargo retains safe profile defaults; named recipes remain
+the supported reproducible command surface. `just build-shared` and `just
+build-incremental` expose the apples-to-apples build comparison. The wrapper remains
+mandatory in compile-producing routine workflows; no-wrapper paths are explicit check,
+controlled measurement, or diagnosis commands.
 
 ### One continuous checker
 
@@ -376,21 +396,26 @@ and exports `.bacon-locations` for editor/agent consumption — an agent
 must confirm that file matches the current source generation before reading an empty list
 as success (§15.2).
 
-### Shell environment — the trap that matters for agents
+### Shell environment — recipes are the boundary
 
-`direnv` applies `.envrc` in **interactive shells only**. Agent harnesses typically run
-each command in a fresh non-interactive shell that inherits nothing. Invoke tools without
-assuming an activated environment:
+Every supported Just recipe must work from a fresh non-interactive shell without `direnv`,
+sourcing a bootstrap script, activating Python, or manually choosing a Rust toolchain.
+`scripts/repo-shell.sh` removes inherited Python/Conda/direnv/Rust overrides, puts the
+repository Cargo router and Rustup first, and places uv's cache under `target/uv-cache`.
+Stable Cargo resolves through `rustup run stable`; extractor Cargo resolves through
+`rustup run nightly-2026-08-18`.
 
-```bash
-direnv exec . <cmd>              # full .envrc environment, non-interactively
-. scripts/bootstrap.sh && <cmd>  # within one compound command
-```
+Workstation shell startup also reorders `~/.cargo/bin` ahead of Homebrew in login and
+non-login zsh/Bash. This is a convenience, not gate authority: the repository Cargo router
+still pins both Cargo and rustc/rustdoc to the selected Rustup toolchain so inherited PATH
+ordering cannot mix installations.
 
-`scripts/bootstrap.sh` is the shared mechanism: sourcing it applies the adapter's
-domain-local virtual environment and repository paths; running it checks all four domains.
-`--quiet` is silent when healthy; `--context` emits a compact block for agent context
-injection. Python commands are always domain-explicit; there is no root uv environment.
+Root `.envrc` only exports `CF_ROOT`, the repository uv-cache location, and convenient
+tool paths; it does not run `uv sync` or activate the adapter. Use the idempotent
+`just setup` (or `just setup-adapter`) explicitly. `scripts/bootstrap.sh` is a verifier and
+context reporter: sourcing it intentionally changes nothing; `--quiet` is silent when
+healthy and `--context` emits the agent report. Python commands remain domain-explicit;
+there is no root uv project.
 
 ---
 

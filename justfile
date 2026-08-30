@@ -13,7 +13,7 @@
 #      set that answers the risk question in the section 60 change-risk table, then
 #      escalate. Running every deep tool after every edit is an anti-pattern.
 
-set shell := ["bash", "-euo", "pipefail", "-c"]
+set shell := ["./scripts/repo-shell.sh"]
 
 # Variadic recipes forward their arguments with "$@" rather than {{ args }}.
 # Without this, just re-expands the interpolated string and a quoted argument
@@ -32,6 +32,25 @@ default:
 doctor:
     ./scripts/bootstrap.sh
 
+[doc("Idempotently prepare the adapter and supervised compiler cache")]
+[group('environment')]
+setup: setup-adapter setup-sccache
+
+[doc("Prove a contaminated caller cannot alter repository Python or Rust resolution")]
+[group('environment')]
+environment-contract-check:
+    ./scripts/environment_contract_check.sh
+
+[doc("Synchronize the locked adapter environment without activating it")]
+[group('environment')]
+setup-adapter:
+    uv sync --frozen --project "$CF_ROOT/codefabric-cpg-mcp"
+
+[doc("Idempotently ensure the mandatory per-user sccache service")]
+[group('environment')]
+setup-sccache:
+    ./scripts/sccache-service.sh install
+
 [doc("Run the routine gate once and cache its verdict under target/")]
 [group('environment')]
 baseline:
@@ -49,17 +68,42 @@ metadata:
     cargo metadata --format-version 1 --no-deps
 
 # sccache is a committed build prerequisite (.cargo/config.toml). Spec section 13.2:
-# watch the hit rate rather than assuming the wrapper helps.
+# measure representative cache effectiveness rather than assuming the wrapper helps.
 
-[doc("sccache hit rate and cache state")]
+[doc("Advanced sccache statistics for the supervised CodeFabric service")]
 [group('environment')]
 cache-stats:
-    sccache --show-stats
+    ./scripts/sccache-service.sh stats
+
+[doc("Validate current sccache version, configuration, endpoint, and storage")]
+[group('environment')]
+sccache-doctor:
+    ./scripts/sccache-service.sh doctor
+
+[doc("Prove sccache transport/storage with a repeated sandbox-compatible Rust compile")]
+[group('environment')]
+sccache-canary:
+    ./scripts/sccache-service.sh canary
+
+[doc("Measure two cold-target Cargo builds against the preserved local cache")]
+[group('perf')]
+sccache-effectiveness mode="client" *args:
+    ./scripts/sccache-effectiveness.sh "{{ mode }}" "$@"
+
+[doc("Build with non-incremental compiler outputs reusable through sccache")]
+[group('perf')]
+build-shared *args:
+    CARGO_INCREMENTAL=0 cargo build --locked "$@"
+
+[doc("Build with rustc incremental compilation and no wrapper for comparison")]
+[group('perf')]
+build-incremental *args:
+    RUSTC_WRAPPER= CARGO_INCREMENTAL=1 cargo build --locked "$@"
 
 [doc("Zero sccache statistics before a measurement run")]
 [group('environment')]
 cache-zero-stats:
-    sccache --zero-stats
+    ./scripts/sccache-service.sh zero-stats
 
 [doc("Navigate docs/authoritative_design by section without reading whole specs")]
 [group('environment')]
@@ -69,7 +113,7 @@ spec-outline *args:
 [doc("Prove the exact eight-master design suite, generated identities, navigation, and sole live authority root")]
 [group('contracts')]
 authoritative-design-conformance-check:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_authoritative_design_conformance.py
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_authoritative_design_conformance.py
 
 [doc("Compile every authored ontology operation into the normalized Arrow program package")]
 [group('contracts')]
@@ -151,8 +195,8 @@ ontology-datafabric-integration-check:
 [doc("Prove successor-only ontology authority across the hidden live envelope and retired command surface")]
 [group('gate')]
 ontology-datafabric-legacy-zero-state-check:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/ontology_datafabric_legacy_zero_state.py
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'ontology_datafabric_successor_authority or ontology_datafabric_legacy_zero_state or ontology_datafabric_retired_command_absence or ontology_datafabric_release_certification'
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/ontology_datafabric_legacy_zero_state.py
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'ontology_datafabric_successor_authority or ontology_datafabric_legacy_zero_state or ontology_datafabric_retired_command_absence or ontology_datafabric_release_certification'
     cargo check --all-targets
     just gate-filter-census
 
@@ -178,14 +222,14 @@ root-fmt:
 [doc("Type-check default local and featureless stable-domain surfaces")]
 [group('static')]
 root-check:
-    cargo check --all-targets
-    cargo check --all-targets --no-default-features
+    ./scripts/cargo-check-mode.sh cargo check --all-targets
+    ./scripts/cargo-check-mode.sh cargo check --all-targets --no-default-features
 
 [doc("Clippy on default local and featureless stable-domain surfaces")]
 [group('static')]
 root-clippy:
-    cargo clippy --all-targets -- -D warnings
-    cargo clippy --all-targets --no-default-features -- -D warnings
+    ./scripts/cargo-check-mode.sh cargo clippy --all-targets -- -D warnings
+    ./scripts/cargo-check-mode.sh cargo clippy --all-targets --no-default-features -- -D warnings
 
 [doc("Spelling and identifier hygiene")]
 [group('static')]
@@ -267,7 +311,7 @@ wave4-integration-check:
 wave5-integration-check:
     cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|65)|qry_v13_graph_forms_conformance|semantic_query_(mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
     cd rustc-extractor && cargo test --locked wp35
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests
 
 [doc("Prove daemon activation, authenticated UDS reachability, CORE_SOURCE_V1 status, and joined cancellation")]
 [group('test')]
@@ -283,7 +327,7 @@ semantic-query-conformance-check:
 [group('test')]
 query-form-contract-check:
     cargo nextest run --locked --lib -E 'test(/(qry_v13_form_contract_conformance|query_form_projection_parity|qry_v13_connecting_path_schema_falsification|query_form_contract_operational_gate)/)' --no-tests=fail
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py -k query_form_python_projection_parity
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_proto.py -k query_form_python_projection_parity
     just model-repro-check
 
 [doc("Prove the five governed relational QRY forms compile and execute as native DataFusion plans")]
@@ -319,7 +363,7 @@ gate-b-check: gate-b-owner-acceptance-check wave5-integration-check wave6-integr
 [group('test')]
 gate-b-owner-acceptance-check:
     cargo run --locked --bin codefabric-gate-b-candidate -- verify-release .
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP76 --plan docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v3_2026-08-25.md
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP76 --plan docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v3_2026-08-25.md
 
 [doc("Execute the production Gate B vertical and verify functional-candidate isolation")]
 [group('test')]
@@ -327,10 +371,10 @@ gate-b-candidate-check:
     cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
     CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
     cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_vertical_slice_produces_all_eleven_planes|gate_b_vertical_slice_adversarial|gate_b_candidate_independent_oracle_contract|gate_b_candidate_operational_gate)/)' --no-tests=fail
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest -q codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_adapter_contracts.py
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_adapter_contracts.py
     @if rg -n 'fn run_scenario|async fn run_(pyrefly|rustc)|functional_candidate_projection|normalize_gate_b_planes' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local scenario, provider, or comparison authority remains' >&2; exit 1; fi
     @if test -d tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; fi
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP06 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP06 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
 
 [doc("Validate strict, human-authored Gate B semantic claims, anchors, scenarios, and proof universes")]
 [group('test')]
@@ -428,7 +472,7 @@ git-parity-check:
 [doc("Run the complete WP72 true-rebuild, comparator, Git parity, and process-closure oracle set")]
 [group('test')]
 wp72-acceptance-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP05 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP05 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
     cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
     CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
     CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance|wp72_operational_acceptance)/)' --no-tests=fail
@@ -572,8 +616,8 @@ governance-scan: public-error-closure-check
 [doc("Reject public Rust error prefixes outside the generated error registry")]
 [group('gate')]
 public-error-closure-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_error_registry_closure.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/error_registry_closure.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_error_registry_closure.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/error_registry_closure.py
 
 [doc("The routine stable-root gate")]
 [group('gate')]
@@ -589,8 +633,8 @@ extractor-fmt:
 [doc("Compile and lint the dated-nightly rustc extractor")]
 [group('extractor')]
 extractor-check:
-    cd rustc-extractor && cargo check --all-targets --locked
-    cd rustc-extractor && cargo clippy --all-targets --locked -- -D warnings
+    cd rustc-extractor && cargo-check-mode.sh cargo check --all-targets --locked
+    cd rustc-extractor && cargo-check-mode.sh cargo clippy --all-targets --locked -- -D warnings
 
 [doc("Test the dated-nightly rustc extractor")]
 [group('extractor')]
@@ -602,7 +646,8 @@ extractor-test:
 extractor-identity:
     #!/usr/bin/env bash
     set -euo pipefail
-    (cd rustc-extractor && cargo build --locked)
+    repo_root="$(pwd)"
+    (cd rustc-extractor && "$repo_root/scripts/cargo" build --locked)
     temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/codefabric-extractor-identity.XXXXXX")"
     trap 'rm -rf "$temporary_root"' EXIT
     ./scripts/run_rustc_extractor.sh --identity >"$temporary_root/stdout" 2>"$temporary_root/stderr"
@@ -621,8 +666,8 @@ sidecar-fmt:
 [doc("Compile and lint the stable Pyrefly sidecar")]
 [group('sidecar')]
 sidecar-check:
-    cd pyrefly-sidecar && cargo check --all-targets --locked
-    cd pyrefly-sidecar && cargo clippy --all-targets --locked -- -D warnings
+    cd pyrefly-sidecar && cargo-check-mode.sh cargo check --all-targets --locked
+    cd pyrefly-sidecar && cargo-check-mode.sh cargo clippy --all-targets --locked -- -D warnings
 
 [doc("Test the stable Pyrefly sidecar")]
 [group('sidecar')]
@@ -642,23 +687,23 @@ sidecar-ci-fast: sidecar-fmt sidecar-check sidecar-test
 [doc("Check adapter Ruff formatting and lint")]
 [group('adapter')]
 adapter-lint:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check codefabric-cpg-mcp
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check codefabric-cpg-mcp
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff format --check codefabric-cpg-mcp
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff check codefabric-cpg-mcp
 
 [doc("Type-check the configured adapter source and test trees")]
 [group('adapter')]
 adapter-type:
-    cd codefabric-cpg-mcp && env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen pyrefly check
+    cd codefabric-cpg-mcp && uv run --frozen pyrefly check
 
 [doc("Test the locked FastMCP adapter")]
 [group('adapter')]
 adapter-test:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests
 
 [doc("Test locked-command STDIO startup, shutdown, and protocol silence")]
 [group('adapter')]
 adapter-stdio-test:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_stdio.py
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_stdio.py
 
 [doc("Build and import the adapter wheel with its canonical artifact-index resource")]
 [group('adapter')]
@@ -674,32 +719,32 @@ adapter-ci-fast: adapter-lint adapter-type adapter-test
 [doc("Check formatting and lint for the model compiler and plan-governance helpers")]
 [group('gate')]
 model-tooling-lint:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff format --check tooling/model tooling/ci
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp ruff check tooling/model tooling/ci
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff format --check tooling/model tooling/ci
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff check tooling/model tooling/ci
 
 [doc("Validate active plan, review, and schema-2 execution-state contracts")]
 [group('gate')]
 artifacts-check: model-tooling-lint
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_artifact_contracts.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py artifacts-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_artifact_contracts.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py artifacts-check
 
 [doc("Validate model-control ownership and single-active-program design contracts")]
 [group('gate')]
 model-design-contract-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_model_design_contracts.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/model_design_contracts.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_model_design_contracts.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/model_design_contracts.py
 
 [doc("Validate P1-P25 normative ownership and DP-001-DP-124 packet traceability")]
 [group('gate')]
 design-principle-traceability-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_design_principle_alignment.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py traceability-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_design_principle_alignment.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/design_principle_alignment.py traceability-check
 
 [doc("Reject unregistered semantic properties and stale storage mappings before publication")]
 [group('gate')]
 property-registry-closure-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_property_registry_closure.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/property_registry_closure.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_property_registry_closure.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/property_registry_closure.py
 
 [doc("Validate governed DB01-DB03 semantic-provider candidates and reviewed transition allows")]
 [group('gate')]
@@ -709,50 +754,50 @@ semantic-provider-legacy-zero-state-check scope="all":
 [doc("Validate the closed semantic-provider fault seam census")]
 [group('gate')]
 semantic-fault-point-check:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/ci/semantic_provider_contracts.py faults
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/semantic_provider_contracts.py faults
 
 [doc("Validate bounded semantic-provider telemetry, containment, and shared dispatch")]
 [group('gate')]
 semantic-observability-contract-check:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/ci/semantic_provider_contracts.py observability
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/semantic_provider_contracts.py observability
 
 [doc("Run reproducible non-normative semantic substrate warm/cold workloads")]
 [group('perf')]
 semantic-profile-bench:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT uv run --frozen --project codefabric-cpg-mcp python tooling/benchmarks/semantic_profile_bench.py
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/benchmarks/semantic_profile_bench.py
 
 [doc("Execute all current design-principle detectors, or one DP-NNN detector")]
 [group('gate')]
 alignment-detector-check detector_id="":
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py detector-check "{{detector_id}}"
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/design_principle_alignment.py detector-check "{{detector_id}}"
 
 [doc("Reject any dirty, deleted, or untracked path without an explicit owner disposition")]
 [group('gate')]
 audit-baseline-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/design_principle_alignment.py baseline-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/design_principle_alignment.py baseline-check
 
 [doc("Validate governed oracle criteria, substantive definitions, and zero-match-safe selectors")]
 [group('gate')]
 oracle-substance-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_plan_assurance.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py oracle-substance-check
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py current-packet-oracle-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_plan_assurance.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py oracle-substance-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py current-packet-oracle-check
 
 [doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
 [group('gate')]
 plan-dependency-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py dependency-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py dependency-check
 
 [doc("Validate committed name-coupled nextest selectors and zero-selection failure semantics")]
 [group('gate')]
 gate-filter-census:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python scripts/gate_filter_census.py check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python scripts/gate_filter_census.py check
 
 [doc("Prove per-domain ID extensions, lowering, analyzer coverage, and retired generic typing")]
 [group('gate')]
 id-domain-extension-check:
     cargo nextest run --locked --lib -E 'test(/odf_(id_domain_lowering_conformance|domain_conformant_plans_execute|cross_domain_plan_rejection|all_plan_ingresses_domain_checked)/)' --no-tests=fail
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'id_domain'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'id_domain'
 
 [doc("Execute compiled ontology FK, membership, conformance, cardinality, and one-of gates")]
 [group('gate')]
@@ -762,13 +807,13 @@ ontology-relational-closure-check:
 [doc("Validate normalized ontology parity, relational closure, and serving decoration")]
 [group('gate')]
 ontology-dimension-check: ontology-relational-closure-check
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP09 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP10 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP09 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP10 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
 
 [doc("Validate logical structure classification and the selected flat source-span lowering")]
 [group('gate')]
 structure-classification-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check WP12 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP12 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
 
 [doc("Resolve the complete ontology plane dynamically from a leased catalog")]
 [group('gate')]
@@ -778,29 +823,29 @@ ontology-self-description-check:
 [doc("Execute every released negative fixture and cited assurance registry")]
 [group('gate')]
 released-fixture-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_released_fixture_verifier.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/released_fixture_verifier.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_released_fixture_verifier.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/released_fixture_verifier.py
 
 [doc("Validate purpose-classified hash APIs and the semantic fingerprint registry")]
 [group('gate')]
 digest-domain-contract-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp pytest tooling/ci/test_digest_domain_contracts.py
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/digest_domain_contracts.py check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_digest_domain_contracts.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/digest_domain_contracts.py check
 
 [doc("Execute exactly four substantive acceptance oracles for one implementation packet")]
 [group('test')]
 packet-oracle-check packet:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/plan_assurance.py packet-oracle-check "{{packet}}"
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check "{{packet}}"
 
 [doc("Derive active-plan input freshness and proving-commit trust")]
 [group('gate')]
 plan-status:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py plan-status
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py plan-status
 
 [doc("Reject Cargo target outputs in the index or reachable HEAD history")]
 [group('gate')]
 tracked-target-zero-state-check:
-    @env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py tracked-target-zero-state-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py tracked-target-zero-state-check
 
 [doc("Prove family duplicate policy and its expected-failure fixture")]
 [group('gate')]
@@ -834,6 +879,10 @@ governance: governance-scan model-design-contract-check model-assurance-check mo
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
 ci-fast: root-ci-fast extractor-ci-fast sidecar-ci-fast adapter-ci-fast governance
+
+[doc("Fresh-shell regression: environment, cache, extractor, adapter, and stable-root tests")]
+[group('gate')]
+environment-regression: environment-contract-check sccache-canary doctor extractor-check adapter-lint adapter-test root-test
 
 [doc("ci-fast plus policy, the ci nextest profile, and snapshot review state")]
 [group('gate')]
@@ -1001,7 +1050,7 @@ profile-build:
 [doc("MUTATES: create validated execution state before switching the active-plan pointer")]
 [group('mutating')]
 plan-activate plan:
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/ci/artifact_contracts.py activate-plan --plan "{{plan}}"
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py activate-plan --plan "{{plan}}"
 
 [doc("MUTATES: rewrite Rust formatting in place")]
 [group('mutating')]
@@ -1017,7 +1066,7 @@ model-sync:
 [doc("MUTATES: emit fixture candidates to an isolated review directory")]
 [group('mutating')]
 fixture-candidates output_dir="target/fixture-candidates":
-    env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT PYTHONPATH=. uv run --frozen --project codefabric-cpg-mcp python tooling/model/fixture_candidates.py --output-dir "{{output_dir}}"
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/model/fixture_candidates.py --output-dir "{{output_dir}}"
 
 [doc("MUTATES DISPOSABLE STATE: emit the released-artifact census review candidate under target/")]
 [group('mutating')]

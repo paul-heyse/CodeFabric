@@ -21,6 +21,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_CLIENT_SIDE: "1"
 
 jobs:
   changes:
@@ -67,6 +68,8 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy, llvm-tools-preview
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.17.0"
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - name: Install root gate tools
         run: |
@@ -132,6 +135,8 @@ jobs:
           toolchain: nightly-2026-08-18
           components: rustc-dev, rust-src, llvm-tools
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.17.0"
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -197,6 +202,8 @@ jobs:
           toolchain: nightly-2026-08-18
           components: rustc-dev, rust-src, llvm-tools
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.17.0"
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - name: Install command runner
         run: cargo binstall --no-confirm just@1.58.0
@@ -223,6 +230,8 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.17.0"
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - name: Install sidecar gate tools
         run: |

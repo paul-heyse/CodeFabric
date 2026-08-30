@@ -52,23 +52,40 @@ dependency isolation are build-domain requirements, not semantic source organiza
 
 ```bash
 just doctor      # toolchains, domain presence, required tools, and direnv state
+just setup       # locked adapter environment + supervised sccache service
 just --list      # the operational API
 just ci-fast     # current routine gate
 ```
 
 The repository requires `just`, `sccache`, `cargo-nextest`, `typos`, `rg`, `ast-grep`,
 `jq`, and `uv`. Dependency gates additionally use `cargo-deny`, `cargo-audit`,
-`cargo-shear`, and `cargo-machete`. `sccache` is a committed `rustc-wrapper`, so Cargo
-fails rather than silently running without it.
+`cargo-shear`, and `cargo-machete`. `sccache` is a committed wrapper backed by a
+supervised per-user service, so Cargo fails with a setup instruction rather than silently
+running uncached. `just sccache-canary` proves a repeated Rust compile is a real cache hit.
+It is a transport/storage liveness probe, not a repository performance claim; use the
+opt-in `just sccache-effectiveness` for two Cargo-shaped cold-target builds.
 
-Stable root and Pyrefly-sidecar builds share the repository `target/` and the host-global
-sccache. Dated-nightly extractor, nightly assurance, and sanitizer/fuzz artifacts use
-separate target subdirectories. CI disables Cargo incremental compilation for better
-sccache reuse; local incremental compilation remains enabled.
+Stable root and Pyrefly-sidecar builds share the repository `target/`. Dated-nightly
+extractor, nightly assurance, and sanitizer/fuzz artifacts use separate target
+subdirectories. Compile-producing Just recipes and CI set `CARGO_INCREMENTAL=0` so sccache
+can reuse complete compiler outputs. Local check and Clippy recipes retain rustc
+incremental feedback and explicitly bypass sccache because ordinary `cargo check` units
+are not a cache-hit workload and sccache 0.17.0 rejects incremental Rust invocations.
+The committed wrapper likewise routes Cargo's incremental compiler shape directly to the
+real rustc so an ordinary local Cargo profile does not fail; named Just recipes remain the
+reproducible command contract.
+Released sccache 0.17.0 remains sensitive to absolute Rust checkout paths, so parallel
+worktrees keep independent target trees and do not claim `SCCACHE_BASEDIRS` normalization.
 
-`direnv` is optional and only affects interactive shells. It syncs the adapter's locked
-environment and never creates a root Python project. Non-interactive callers should use
-`direnv exec . <cmd>` or source `scripts/bootstrap.sh` within the command.
+Every Just recipe establishes its own clean environment: repository-local uv cache,
+domain-explicit Python project, Rustup-owned Cargo, and no inherited virtualenv, Conda,
+direnv, toolchain-wrapper, or target-directory overrides. Use `just <recipe>` directly
+from interactive and non-interactive shells. Root `direnv` is optional convenience only;
+it does not sync or activate Python. `scripts/bootstrap.sh` verifies and reports state but
+does not mutate the caller's environment.
+
+The workstation cache is a supervised, disk-only 40 GiB cache. CodeFabric does not add a
+remote cache or distributed compilation layer for the single-developer workstation.
 
 ## Common commands
 

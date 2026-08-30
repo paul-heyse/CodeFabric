@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
 #
-# CodeFabric environment bootstrap. Works under bash and zsh, in interactive and
-# non-interactive shells.
+# CodeFabric environment verifier and session-context reporter.
 #
-#   source scripts/bootstrap.sh      apply the environment to the current shell
 #   ./scripts/bootstrap.sh           check the environment and print a report
 #   ./scripts/bootstrap.sh --quiet   print only problems; silent when healthy
 #   ./scripts/bootstrap.sh --context compact one-block summary for agent context
 #   ./scripts/bootstrap.sh --baseline run the gate and cache the verdict for --context
 #
-# Why this exists alongside .envrc: direnv only hooks interactive shells, and
-# LLM agent harnesses typically run each command in a fresh non-interactive
-# shell that inherits nothing from the previous one. This file is the mechanism
-# both can share -- .envrc applies it for humans, agents source it per-command
-# or invoke tools through `direnv exec .`.
+# It deliberately does not activate Python, alter PATH, or select a persistent Rust
+# toolchain. `just` recipes use scripts/repo-shell.sh and are self-contained in fresh
+# non-interactive shells; .envrc only adds interactive conveniences.
 
 # ---------------------------------------------------------------- detect mode
 
@@ -31,21 +27,8 @@ else
   _cf_self="${BASH_SOURCE[0]:-$0}"
 fi
 CF_ROOT="$(cd "$(dirname "$_cf_self")/.." && pwd)"
-
-# --------------------------------------------------------------- environment
-
-cf_apply_env() {
-  export CF_ROOT
-  if [ -f "${CF_ROOT}/codefabric-cpg-mcp/pyproject.toml" ]; then
-    export CF_ADAPTER_ROOT="${CF_ROOT}/codefabric-cpg-mcp"
-    export UV_PROJECT_ENVIRONMENT="${CF_ADAPTER_ROOT}/.venv"
-    export VIRTUAL_ENV="${UV_PROJECT_ENVIRONMENT}"
-    case ":${PATH}:" in
-      *":${VIRTUAL_ENV}/bin:"*) ;;
-      *) export PATH="${VIRTUAL_ENV}/bin:${PATH}" ;;
-    esac
-  fi
-}
+CF_ADAPTER_ROOT="${CF_ROOT}/codefabric-cpg-mcp"
+CF_UV_CACHE_DIR="${CF_ROOT}/target/uv-cache"
 
 # ------------------------------------------------------------------- checks
 
@@ -54,8 +37,8 @@ cf_apply_env() {
 CF_STABLE_COMPONENTS="rustfmt clippy rust-src llvm-tools"
 
 # Tools the repository contract depends on. sccache is required because
-# .cargo/config.toml commits `rustc-wrapper = "sccache"` (repo spec section 13.1), so a
-# missing sccache breaks every cargo invocation rather than merely slowing it.
+# .cargo/config.toml commits the repository sccache wrapper (repo spec section 13.1), so
+# a missing or unhealthy supervised service breaks Cargo rather than silently slowing it.
 CF_REQUIRED_TOOLS="just sccache cargo-nextest typos rg ast-grep jq uv"
 CF_GATE_TOOLS="cargo-deny cargo-audit cargo-shear cargo-machete"
 
@@ -73,9 +56,9 @@ cf_check() {
 
   # --- Rust: stable is the working toolchain ------------------------------
   if command -v rustup >/dev/null 2>&1; then
-    v="$(rustup show active-toolchain 2>/dev/null | head -1)"
+    v="$(cd "$CF_ROOT" && rustup show active-toolchain 2>/dev/null | head -1)"
     case "$v" in
-      stable*) _cf_pass "active toolchain ${v%% *} ($(rustc --version 2>/dev/null | awk '{print $2}'))" ;;
+      stable*) _cf_pass "active toolchain ${v%% *} ($(rustup run stable rustc --version 2>/dev/null | awk '{print $2}'))" ;;
       "") _cf_fail "no active toolchain resolved -- is rust-toolchain.toml readable?" ;;
       *) _cf_warns "active toolchain is ${v%% *}; rust-toolchain.toml pins stable" ;;
     esac
@@ -98,6 +81,13 @@ cf_check() {
     else
       _cf_say "  note  no nightly toolchain -- WP02 will install the dated extractor pin"
     fi
+
+    local stable_cargo extractor_rustc
+    stable_cargo="$(rustup which cargo --toolchain stable 2>/dev/null)"
+    extractor_rustc="$(rustup which rustc --toolchain nightly-2026-08-18 2>/dev/null)"
+    if [ -n "$stable_cargo" ] && [ -n "$extractor_rustc" ]; then
+      _cf_say "  note  Rust executables: stable cargo=${stable_cargo}; extractor rustc=${extractor_rustc}"
+    fi
   else
     _cf_fail "rustup not on PATH -- the Rust core cannot be built"
   fi
@@ -106,7 +96,7 @@ cf_check() {
   _cf_pass "stable domain: root Cargo package"
   if [ -f "${CF_ROOT}/rustc-extractor/Cargo.toml" ]; then
     local extractor_rust
-    extractor_rust="$(cd "${CF_ROOT}/rustc-extractor" && rustc --version 2>/dev/null)"
+    extractor_rust="$(rustup run nightly-2026-08-18 rustc --version 2>/dev/null)"
     case "$extractor_rust" in
       *nightly*2026*) _cf_pass "rustc extractor domain: ${extractor_rust}" ;;
       *) _cf_fail "rustc extractor toolchain did not resolve its dated nightly" ;;
@@ -125,9 +115,14 @@ cf_check() {
   fi
   if [ -f "${CF_ROOT}/codefabric-cpg-mcp/pyproject.toml" ]; then
     local adapter_python
-    adapter_python="$(uv run --frozen --project "${CF_ROOT}/codefabric-cpg-mcp" python --version 2>/dev/null)"
+    adapter_python="$(env -u VIRTUAL_ENV -u UV_PROJECT_ENVIRONMENT -u PYTHONPATH \
+      UV_CACHE_DIR="$CF_UV_CACHE_DIR" uv run --frozen --project "$CF_ADAPTER_ROOT" \
+      python --version 2>/dev/null)"
     case "$adapter_python" in
-      "Python 3.14.7") _cf_pass "FastMCP adapter domain: ${adapter_python}" ;;
+      "Python 3.14.7")
+        _cf_pass "FastMCP adapter domain: ${adapter_python}"
+        _cf_say "  note  uv project=${CF_ADAPTER_ROOT}; cache=${CF_UV_CACHE_DIR}"
+        ;;
       *) _cf_fail "FastMCP adapter did not resolve locked Python 3.14.7" ;;
     esac
   else
@@ -164,12 +159,45 @@ cf_check() {
     _cf_pass "gate tools present: ${CF_GATE_TOOLS// /, }"
   fi
 
-  # sccache is enabled by a committed wrapper; report whether it is actually earning its
-  # place rather than assuming it is (repo spec section 13.2).
-  if command -v sccache >/dev/null 2>&1; then
-    local rate
-    rate="$(sccache --show-stats 2>/dev/null | awk -F'  +' '/Cache hits rate/ {print $2; exit}')"
-    [ -n "$rate" ] && _cf_say "  note  sccache hit rate ${rate}  ('just cache-stats' for detail)"
+  # Validate current service health, then report cumulative lookup and non-cacheable
+  # telemetry without presenting a hit percentage as repository performance proof.
+  if [ -x "${CF_ROOT}/scripts/sccache-service.sh" ]; then
+    local sccache_health sccache_json rust_hits rust_misses rust_rate non_cacheable_calls
+    if sccache_health="$("${CF_ROOT}/scripts/sccache-service.sh" doctor 2>&1)"; then
+      _cf_pass "$sccache_health"
+      sccache_json="$("${CF_ROOT}/scripts/sccache-service.sh" stats-json 2>/dev/null)"
+      rust_hits="$(printf '%s' "$sccache_json" | jq -r '.stats.cache_hits.counts.Rust // 0')"
+      rust_misses="$(printf '%s' "$sccache_json" | jq -r '.stats.cache_misses.counts.Rust // 0')"
+      non_cacheable_calls="$(printf '%s' "$sccache_json" | jq -r '.stats.requests_not_cacheable // 0')"
+      if [ $((rust_hits + rust_misses)) -gt 0 ]; then
+        rust_rate="$(awk -v h="$rust_hits" -v m="$rust_misses" 'BEGIN { printf "%.2f", 100*h/(h+m) }')"
+        _cf_say "  note  sccache cumulative Rust lookups ${rust_hits} hit / ${rust_misses} miss (${rust_rate}% among lookups); non-cacheable calls ${non_cacheable_calls}"
+      else
+        _cf_say "  note  sccache cumulative Rust lookups pending; non-cacheable calls ${non_cacheable_calls}"
+      fi
+      _cf_say "  note  use 'just sccache-effectiveness' for Cargo-shaped performance evidence"
+    else
+      _cf_fail "$sccache_health"
+    fi
+  fi
+
+  # Randomly named test sockets cannot be safely allowlisted. Confirm the three
+  # exact, non-mutating recipes that are permitted to leave the Codex sandbox.
+  if command -v codex >/dev/null 2>&1 && [ -f "${CF_ROOT}/.codex/rules/codefabric.rules" ]; then
+    local uds_recipe uds_decision uds_rules_ok=1
+    for uds_recipe in adapter-test root-test ci-fast environment-regression; do
+      uds_decision="$(codex execpolicy check \
+        --rules "${CF_ROOT}/.codex/rules/codefabric.rules" \
+        -- just "$uds_recipe" 2>/dev/null | jq -r '.decision // ""')"
+      [ "$uds_decision" = allow ] || uds_rules_ok=0
+    done
+    if [ "$uds_rules_ok" = 1 ]; then
+      _cf_pass "Codex UDS rules apply only to: adapter-test, root-test, ci-fast, environment-regression"
+    else
+      _cf_fail "Codex UDS test rules are missing or do not resolve to allow"
+    fi
+  else
+    _cf_say "  note  Codex UDS rules not checked (Codex CLI unavailable)"
   fi
 
   # --- Research tooling (see _shared/code-intelligence.md) ----------------
@@ -278,7 +306,7 @@ _cf_ctx_gates() {
   n="$(command -v just >/dev/null 2>&1 && just --justfile "${CF_ROOT}/justfile" --summary 2>/dev/null | wc -w | tr -d ' ')"
   printf 'GATES  just --list is the operational API (%s recipes); prefer a recipe to raw flags\n' "${n:-?}"
   cat <<'EOF'
-  ci-fast  all four domains + governance: run BEFORE editing, record failures
+  ci-fast  all four domains + governance: run when the change risk warrants the aggregate
   root-check  default local + featureless stable root   root-test  nextest + doctests
   stable-graph-check  exact pins/features/local-vs-S3 activation boundary
   [mutating] root-fmt-write proto-gen typos-write snapshots-accept deps-fix
@@ -289,7 +317,7 @@ _cf_ctx_traps() {
   cat <<'EOF'
 TRAPS  cargo nextest does not run doctests -- `just root-test` covers both
   --all-features is not a feature matrix -- use `just features-each`
-  sccache is a hard prerequisite: .cargo/config.toml commits rustc-wrapper
+  sccache is mandatory for compile-producing recipes; check/incremental modes are explicit
   adapter commands own codefabric-cpg-mcp/.venv; never reuse the root as a Python project
 SEARCH  .claude/ is hidden: rg --hidden -g '!.git/**'
   docs/library_ref/ is large prose: exclude with -g '!docs/library_ref/**'
@@ -381,6 +409,10 @@ cf_baseline() {
   log="${CF_ROOT}/target/agent/baseline.log"
   ( cd "$CF_ROOT" && just ci-fast ) >"$log" 2>&1
   rc=$?
+  if [ "$rc" -ge 128 ]; then
+    printf 'baseline cancelled (exit %s); no verdict was recorded\n' "$rc" >&2
+    return "$rc"
+  fi
   [ "$rc" = 0 ] && verdict=green || verdict=red
   head="$(git -C "$CF_ROOT" rev-parse --short HEAD 2>/dev/null)"
   # A baseline is only evidence about the tree it ran against, so fingerprint the
@@ -408,7 +440,6 @@ EOF
 # ---------------------------------------------------------------- dispatch
 
 if [ "$_cf_sourced" = 1 ]; then
-  cf_apply_env
   unset _cf_sourced _cf_self
   return 0 2>/dev/null || true
 else
@@ -426,7 +457,6 @@ else
       ;;
   esac
 
-  cf_apply_env
   cf_check
 
   if [ "$CF_MODE" = baseline ]; then
@@ -437,9 +467,8 @@ else
   if [ "$CF_MODE" = context ]; then
     printf 'CodeFabric session context (%s)\nENVIRONMENT  %d ok, %d warn, %d fail\n%s' \
       "$CF_ROOT" "$_cf_ok" "$_cf_warn" "$_cf_bad" "$_cf_lines"
-    printf 'SHELL  every agent command is a fresh non-interactive shell; direnv never\n'
-    printf '  applies. Run `direnv exec . <cmd>` or source this script\n'
-    printf '  within one compound command.\n'
+    printf 'SHELL  repository recipes are self-contained in fresh non-interactive shells\n'
+    printf '  use `just <recipe>` directly; do not source bootstrap or invoke direnv routinely\n'
     cf_context_extras
     exit 0
   fi

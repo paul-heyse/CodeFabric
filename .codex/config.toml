@@ -1,8 +1,8 @@
 # CodeFabric — project-scoped Codex configuration.
 #
-# This layer is deliberately minimal. It configures what belongs to the
-# repository (skills, the environment hook) and leaves model choice, sandbox
-# mode, and approval policy to your ~/.codex/config.toml.
+# This layer configures repository-owned environment filtering, least-privilege local
+# service access, command rules, skills, and the environment hook. Model choice and
+# approval posture remain user preferences in ~/.codex/config.toml.
 #
 # Project config is only read for TRUSTED projects. If nothing here appears to
 # take effect, check that ~/.codex/config.toml contains:
@@ -10,8 +10,49 @@
 #   [projects."/Users/paulheyse/CodeFabric"]
 #   trust_level = "trusted"
 #
-# Verified against codex-cli 0.148.0. See .codex/README.md for what was tested
+# Verified against codex-cli 0.151.0. See .codex/README.md for what was tested
 # and how to re-test after a Codex upgrade.
+
+default_permissions = "codefabric"
+
+[features]
+network_proxy = true
+
+# Each Codex command begins with a small, predictable inherited environment. The Just
+# execution boundary repeats the cleanup so commands remain correct outside Codex too.
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
+
+[shell_environment_policy.filters]
+"VIRTUAL_ENV" = "exclude"
+"UV_PROJECT_ENVIRONMENT" = "exclude"
+"PYTHONPATH" = "exclude"
+"CONDA_*" = "exclude"
+"DIRENV_*" = "exclude"
+"RUSTUP_TOOLCHAIN" = "exclude"
+"RUSTC_WRAPPER" = "exclude"
+"CARGO_TARGET_DIR" = "exclude"
+"CARGO_INCREMENTAL" = "exclude"
+"CODEFABRIC_CPG_CAPABILITY_TOKEN" = "exclude"
+
+# The local cache daemon is the only Unix socket available to general sandboxed
+# commands. Cache reads are required by sccache 0.17 client-side StorageGetPath;
+# writes remain owned by the supervised host daemon.
+[permissions.codefabric]
+description = "CodeFabric workspace plus its supervised compiler cache."
+extends = ":workspace"
+
+[permissions.codefabric.filesystem]
+"~/Library/Caches/CodeFabric/sccache" = "read"
+"~/.cache/codefabric/sccache" = "read"
+
+[permissions.codefabric.network.unix_sockets]
+"/private/tmp/codefabric-sccache/server.sock" = "allow"
+"/tmp/codefabric-sccache/server.sock" = "allow"
+
+[permissions.codefabric.network]
+enabled = true
 
 # ---------------------------------------------------------------------------
 # Skills

@@ -1167,6 +1167,12 @@ It also does not update a project's `Cargo.lock`; `cargo update` is the separate
 
 sccache is a compiler wrapper that stores reusable compilation outputs in a local, remote, or multi-level cache. It supports Rust and several native compiler families.
 
+> **Rust 0.17.0 detail authority:** this synopsis predates
+> `sccache_for_Rust_Advanced_Configuration.md`. For current Rust cacheability, incremental
+> policy, client-side validation, and worktree behavior, use that comprehensive reference.
+> In particular, ordinary `cargo check` is not a canonical cache workload and released
+> 0.17.0 does not apply `SCCACHE_BASEDIRS` to Rust cache keys.
+
 Official reference: [sccache][SCCACHE].
 
 ## 13.1 Why it matters for agent throughput

@@ -1,0 +1,60 @@
+# Only these non-mutating test gates may run outside the sandbox. They exercise
+# repository-owned Unix sockets; never allow the bare `just` prefix.
+
+prefix_rule(
+    pattern = ["just", "adapter-test"],
+    decision = "allow",
+    justification = "The locked adapter protocol tests bind temporary Unix sockets.",
+    match = [
+        "just adapter-test",
+    ],
+    not_match = [
+        "just",
+        "just adapter-stdio-test",
+        "just setup",
+        "just proto-gen",
+        "just --justfile /tmp/other.just adapter-test",
+    ],
+)
+
+prefix_rule(
+    pattern = ["just", "root-test"],
+    decision = "allow",
+    justification = "The non-mutating Rust test aggregate includes local UDS behavior.",
+    match = [
+        "just root-test",
+    ],
+    not_match = [
+        "just root-test-rust",
+        "just root-fmt-write",
+    ],
+)
+
+prefix_rule(
+    pattern = ["just", "ci-fast"],
+    decision = "allow",
+    justification = "The non-mutating four-domain routine gate includes UDS tests.",
+    match = [
+        "just ci-fast",
+    ],
+    not_match = [
+        "just ci-pr",
+        "just proto-gen",
+        "just deps-fix",
+    ],
+)
+
+prefix_rule(
+    pattern = ["just", "environment-regression"],
+    decision = "allow",
+    justification = "The non-mutating fresh-shell regression includes the adapter and Rust UDS tests.",
+    match = [
+        "just environment-regression",
+    ],
+    not_match = [
+        "just environment-contract-check",
+        "just setup",
+        "just ci-pr",
+        "just proto-gen",
+    ],
+)

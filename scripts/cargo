@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Repository Cargo router: stable everywhere except the dated-nightly extractor
+# and explicit `cargo +toolchain ...` assurance commands.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+rustup_bin="$HOME/.cargo/bin/rustup"
+if [ ! -x "$rustup_bin" ]; then
+  rustup_bin="$(command -v rustup || true)"
+fi
+if [ -z "$rustup_bin" ]; then
+  printf 'CodeFabric: rustup is required; run `just doctor` for details.\n' >&2
+  exit 127
+fi
+
+unset RUSTUP_TOOLCHAIN RUSTC RUSTDOC
+
+toolchain="stable"
+toolchain_explicit=0
+if [[ "${1:-}" == +* ]]; then
+  toolchain="${1#+}"
+  toolchain_explicit=1
+  shift
+fi
+
+case "$PWD/" in
+  "$repo_root/rustc-extractor/"*)
+    [ "$toolchain_explicit" = 1 ] || toolchain="nightly-2026-08-18"
+    ;;
+esac
+
+previous=""
+for argument in "$@"; do
+  manifest=""
+  if [ "$previous" = "--manifest-path" ]; then
+    manifest="$argument"
+  elif [[ "$argument" == --manifest-path=* ]]; then
+    manifest="${argument#--manifest-path=}"
+  fi
+  case "$manifest" in
+    rustc-extractor/* | */rustc-extractor/*)
+      [ "$toolchain_explicit" = 1 ] || toolchain="nightly-2026-08-18"
+      ;;
+  esac
+  previous="$argument"
+done
+
+# `rustup run` selects Cargo but an ambient Homebrew-first PATH can still make Cargo find
+# Homebrew rustc. Pin the compiler executables explicitly while leaving the Rustup-aware
+# repository router first on PATH. Nested `cargo +toolchain` probes then return through
+# this script, clear these inherited pins, and select their own compiler correctly.
+export RUSTC="$("$rustup_bin" which rustc --toolchain "$toolchain")"
+export RUSTDOC="$("$rustup_bin" which rustdoc --toolchain "$toolchain")"
+export PATH="$repo_root/scripts:$HOME/.cargo/bin:$PATH"
+
+exec "$rustup_bin" run "$toolchain" cargo "$@"
