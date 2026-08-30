@@ -41,7 +41,7 @@ pub const DATAFUSION_EXPR_VARIANT_CENSUS: &[&str] = &[
     "LambdaVariable",
 ];
 
-/// Derive the canonical content identity for one authored rule operation and its operands.
+/// Derive one unambiguous record identity for an authored ontology graph row.
 ///
 /// The encoding is explicitly length-framed so concatenation cannot create an ambiguous
 /// preimage. Operand order remains semantic and is therefore included verbatim.
@@ -50,10 +50,13 @@ pub const DATAFUSION_EXPR_VARIANT_CENSUS: &[&str] = &[
 ///
 /// Panics only if a component length cannot be represented as `u64`, which is impossible on the
 /// supported 64-bit targets.
-pub fn rule_semantics_identity<'a>(
-    operation_kind: &str,
-    operands: impl IntoIterator<Item = (u16, &'a str, &'a str, &'a str)>,
-) -> String {
+pub fn ontology_semantics_record<S>(
+    record_kind: &str,
+    fields: impl IntoIterator<Item = S>,
+) -> String
+where
+    S: AsRef<str>,
+{
     let mut material = Vec::new();
     let append = |material: &mut Vec<u8>, part: &[u8]| {
         material.extend_from_slice(
@@ -63,35 +66,45 @@ pub fn rule_semantics_identity<'a>(
         );
         material.extend_from_slice(part);
     };
-    append(&mut material, operation_kind.as_bytes());
-    for (ordinal, relation_ref, column_ref, logical_type) in operands {
-        append(&mut material, &ordinal.to_be_bytes());
-        append(&mut material, relation_ref.as_bytes());
-        append(&mut material, column_ref.as_bytes());
-        append(&mut material, logical_type.as_bytes());
+    append(&mut material, record_kind.as_bytes());
+    for field in fields {
+        append(&mut material, field.as_ref().as_bytes());
+    }
+    format!("b3:{}", blake3::hash(&material).to_hex())
+}
+
+/// Derive the canonical content identity of one rule's complete authored graph.
+///
+/// Record identities are sorted because plan and operand ordinals carry semantic order. Source
+/// array ordering is deliberately non-semantic, so formatting-only row movement cannot alter the
+/// compiled program identity.
+pub fn rule_semantics_identity<'a>(records: impl IntoIterator<Item = &'a str>) -> String {
+    let mut records = records.into_iter().collect::<Vec<_>>();
+    records.sort_unstable();
+    let mut material = Vec::new();
+    for record in records {
+        material.extend_from_slice(
+            &u64::try_from(record.len())
+                .expect("rule semantics record length")
+                .to_be_bytes(),
+        );
+        material.extend_from_slice(record.as_bytes());
     }
     format!("b3:{}", blake3::hash(&material).to_hex())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::rule_semantics_identity;
+    use super::{ontology_semantics_record, rule_semantics_identity};
 
     #[test]
     fn rule_identity_is_ordered_and_unambiguous() {
-        let left = rule_semantics_identity(
-            "JOIN",
-            [(0, "ab", "c", "relation"), (1, "d", "e", "column")],
-        );
-        let reordered = rule_semantics_identity(
-            "JOIN",
-            [(1, "d", "e", "column"), (0, "ab", "c", "relation")],
-        );
-        let regrouped = rule_semantics_identity(
-            "JOIN",
-            [(0, "a", "bc", "relation"), (1, "d", "e", "column")],
-        );
-        assert_ne!(left, reordered);
+        let left_record = ontology_semantics_record("JOIN", ["ab", "c", "relation"]);
+        let regrouped_record = ontology_semantics_record("JOIN", ["a", "bc", "relation"]);
+        let left = rule_semantics_identity([left_record.as_str(), "b3:second"]);
+        let reordered = rule_semantics_identity(["b3:second", left_record.as_str()]);
+        let regrouped = rule_semantics_identity([regrouped_record.as_str(), "b3:second"]);
+        assert_eq!(left, reordered);
         assert_ne!(left, regrouped);
     }
 }

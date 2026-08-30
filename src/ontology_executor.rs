@@ -16,7 +16,6 @@ use crate::ontology_program::{
 pub struct DecodedRuleBinding {
     pub rule_id: String,
     pub operation_kind: String,
-    pub ordered_operands: Vec<DecodedRuleOperand>,
     pub semantics_identity: String,
     pub calculation_id: String,
     pub policy_id: String,
@@ -24,15 +23,6 @@ pub struct DecodedRuleBinding {
     pub expected_result_contract: String,
     pub determinism_class: String,
     pub diagnostic_code: String,
-}
-
-/// One ordered authored operand that contributes to rule semantics and package identity.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DecodedRuleOperand {
-    pub ordinal: u16,
-    pub relation_ref: String,
-    pub column_ref: String,
-    pub logical_type: String,
 }
 
 /// One fail-closed semantic phrase binding compiled through the same calculation catalog.
@@ -160,7 +150,6 @@ fn decode_rules(
         let rule = DecodedRuleBinding {
             rule_id: rule_ids.value(row).into(),
             operation_kind: operation_kinds.value(row).into(),
-            ordered_operands: Vec::new(),
             semantics_identity: semantics_identities.value(row).into(),
             calculation_id: calculations.value(row).into(),
             policy_id: policies.value(row).into(),
@@ -170,7 +159,7 @@ fn decode_rules(
             diagnostic_code: diagnostics.value(row).into(),
         };
         if rule.rule_id.is_empty()
-            || rule.operation_kind.is_empty()
+            || rule.operation_kind != "RELATIONAL_GRAPH"
             || rule.semantics_identity.is_empty()
             || rule.calculation_id.is_empty()
             || rule.policy_id.is_empty()
@@ -182,63 +171,6 @@ fn decode_rules(
         {
             return Err(OntologyProgramCompileError::Decode(format!(
                 "rule binding row {row} is empty or duplicated"
-            )));
-        }
-    }
-    let operands = one_batch(package, "program.rule_operand")?;
-    let operand_rule_ids = utf8(operands, "rule_id")?;
-    let ordinals = uint16(operands, "ordinal")?;
-    let relation_refs = utf8(operands, "relation_ref")?;
-    let column_refs = utf8(operands, "column_ref")?;
-    let logical_types = utf8(operands, "logical_type")?;
-    for row in 0..operands.num_rows() {
-        let rule_id = operand_rule_ids.value(row);
-        let rule = rules.get_mut(rule_id).ok_or_else(|| {
-            OntologyProgramCompileError::Decode(format!(
-                "rule operand row {row} references unknown rule {rule_id}"
-            ))
-        })?;
-        if usize::from(ordinals.value(row)) != rule.ordered_operands.len()
-            || relation_refs.value(row).is_empty()
-            || column_refs.value(row).is_empty()
-            || !matches!(
-                logical_types.value(row),
-                "relation" | "column" | "scalar" | "contract"
-            )
-        {
-            return Err(OntologyProgramCompileError::Decode(format!(
-                "rule operand row {row} is empty, out of order, or unsupported"
-            )));
-        }
-        rule.ordered_operands.push(DecodedRuleOperand {
-            ordinal: ordinals.value(row),
-            relation_ref: relation_refs.value(row).into(),
-            column_ref: column_refs.value(row).into(),
-            logical_type: logical_types.value(row).into(),
-        });
-    }
-    for rule in rules.values() {
-        if rule.ordered_operands.is_empty() {
-            return Err(OntologyProgramCompileError::Decode(format!(
-                "rule {} has no authored operands",
-                rule.rule_id
-            )));
-        }
-        let expected_identity = crate::ontology_contract::rule_semantics_identity(
-            &rule.operation_kind,
-            rule.ordered_operands.iter().map(|operand| {
-                (
-                    operand.ordinal,
-                    operand.relation_ref.as_str(),
-                    operand.column_ref.as_str(),
-                    operand.logical_type.as_str(),
-                )
-            }),
-        );
-        if rule.semantics_identity != expected_identity {
-            return Err(OntologyProgramCompileError::Decode(format!(
-                "rule {} semantics identity differs from its operation and operands",
-                rule.rule_id
             )));
         }
     }
@@ -477,6 +409,20 @@ pub struct OntologyProgramCompiler {
     pub calculations: BTreeMap<String, DecodedCalculation>,
 }
 
+fn validate_calculation_bijection(
+    referenced: &BTreeSet<&str>,
+    available: &BTreeSet<&str>,
+) -> Result<(), OntologyProgramCompileError> {
+    if referenced != available {
+        return Err(OntologyProgramCompileError::Decode(format!(
+            "calculation catalog is not bijective; dangling={:?}, unused={:?}",
+            referenced.difference(available).collect::<Vec<_>>(),
+            available.difference(referenced).collect::<Vec<_>>()
+        )));
+    }
+    Ok(())
+}
+
 impl OntologyProgramCompiler {
     fn lower_decoded_phrase(
         &self,
@@ -562,13 +508,7 @@ impl OntologyProgramCompiler {
             .keys()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        if referenced != available {
-            return Err(OntologyProgramCompileError::Decode(format!(
-                "calculation catalog is not bijective; dangling={:?}, unused={:?}",
-                referenced.difference(&available).collect::<Vec<_>>(),
-                available.difference(&referenced).collect::<Vec<_>>()
-            )));
-        }
+        validate_calculation_bijection(&referenced, &available)?;
         let supported = BTreeSet::from(["eq", "in_list", "relational_program"]);
         if let Some(calculation) = calculations
             .values()
@@ -690,7 +630,9 @@ mod tests {
     use datafusion::logical_expr::LogicalPlanBuilder;
     use datafusion::prelude::SessionConfig;
 
-    use super::{OntologyProgramCompileError, OntologyProgramCompiler};
+    use super::{
+        OntologyProgramCompileError, OntologyProgramCompiler, validate_calculation_bijection,
+    };
     use crate::governed_session::GovernedSession;
     use crate::ontology_gate::{GateResourceEnvelope, OntologyGateOutcome};
     use crate::ontology_program::{
@@ -957,19 +899,6 @@ mod tests {
                 rule_row,
                 "b3:authored-semantics-mutant",
             ),
-            ("program.rule_operand", "relation_ref", 0, "table:32767"),
-            (
-                "program.rule_operand",
-                "column_ref",
-                0,
-                "missing_authored_column",
-            ),
-            (
-                "program.rule_operand",
-                "logical_type",
-                0,
-                "unsupported_logical_type",
-            ),
         ] {
             assert_resealed_mutation_causal(&base, &base_plans, relation, column, row, replacement);
         }
@@ -1086,5 +1015,15 @@ mod tests {
             .map(String::as_str)
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(referenced, available);
+    }
+
+    #[test]
+    fn ontology_calculation_catalog_rejects_unused_rows() {
+        let referenced = std::collections::BTreeSet::from(["calculation.used"]);
+        let available =
+            std::collections::BTreeSet::from(["calculation.used", "calculation.unused"]);
+        let error = validate_calculation_bijection(&referenced, &available)
+            .expect_err("unused calculation row");
+        assert!(error.to_string().contains("calculation.unused"));
     }
 }

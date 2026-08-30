@@ -512,46 +512,10 @@ struct StructureGroupContract {
     validation_rule_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum OntologyRuleOperationKind {
-    ForeignKeyAntiJoin,
-    GovernedCodeAntiJoin,
-    PrimaryKeyUniquenessAggregate,
-    IdDomainConformance,
-    OntologyMembershipAntiJoin,
-    RelationFamilyConformanceJoin,
-    RelationCardinalityAggregate,
-    RelationOwnerConformanceJoin,
-    RelationSelfEdgeJoin,
-    PropertyValueOneOf,
-    SourceSpanAllOrNone,
-}
-
-impl OntologyRuleOperationKind {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::ForeignKeyAntiJoin => "FOREIGN_KEY_ANTI_JOIN",
-            Self::GovernedCodeAntiJoin => "GOVERNED_CODE_ANTI_JOIN",
-            Self::PrimaryKeyUniquenessAggregate => "PRIMARY_KEY_UNIQUENESS_AGGREGATE",
-            Self::IdDomainConformance => "ID_DOMAIN_CONFORMANCE",
-            Self::OntologyMembershipAntiJoin => "ONTOLOGY_MEMBERSHIP_ANTI_JOIN",
-            Self::RelationFamilyConformanceJoin => "RELATION_FAMILY_CONFORMANCE_JOIN",
-            Self::RelationCardinalityAggregate => "RELATION_CARDINALITY_AGGREGATE",
-            Self::RelationOwnerConformanceJoin => "RELATION_OWNER_CONFORMANCE_JOIN",
-            Self::RelationSelfEdgeJoin => "RELATION_SELF_EDGE_JOIN",
-            Self::PropertyValueOneOf => "PROPERTY_VALUE_ONE_OF",
-            Self::SourceSpanAllOrNone => "SOURCE_SPAN_ALL_OR_NONE",
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OntologyRuleContract {
     rule_id: String,
-    operation_kind: OntologyRuleOperationKind,
-    ordered_operands: Vec<OntologyRuleOperandContract>,
     calculation_id: String,
     policy_id: String,
     input_contract: String,
@@ -562,11 +526,143 @@ struct OntologyRuleContract {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OntologyRuleOperandContract {
+struct OntologyProgramGraphContract {
+    programs: Vec<OntologyProgramContract>,
+    operations: Vec<OntologyProgramOperationContract>,
+    operands: Vec<OntologyProgramOperandContract>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OntologyProgramContract {
+    program_id: String,
+    rule_id: String,
+    root_operation_id: Option<String>,
+    execution_phase: OntologyExecutionPhase,
+    subject_table_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OntologyExecutionPhase {
+    CandidateValidation,
+    SemanticAnalysis,
+}
+
+impl OntologyExecutionPhase {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::CandidateValidation => "candidate_validation",
+            Self::SemanticAnalysis => "semantic_analysis",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "operation_kind",
+    rename_all = "SCREAMING_SNAKE_CASE",
+    deny_unknown_fields
+)]
+enum OntologyProgramOperationContract {
+    Scan {
+        operation_id: String,
+        relation_ref: String,
+        relation_alias: String,
+    },
+    Filter {
+        operation_id: String,
+    },
+    Join {
+        operation_id: String,
+        join_type: String,
+    },
+    Aggregate {
+        operation_id: String,
+    },
+    Set {
+        operation_id: String,
+        set_operation: String,
+    },
+    Column {
+        operation_id: String,
+        relation_alias: String,
+        column_name: String,
+    },
+    Literal {
+        operation_id: String,
+        logical_type: String,
+        value: Option<String>,
+        is_null: bool,
+    },
+    Binary {
+        operation_id: String,
+        operator: String,
+    },
+    Call {
+        operation_id: String,
+        function_name: String,
+    },
+    Cast {
+        operation_id: String,
+        target_type: String,
+    },
+}
+
+impl OntologyProgramOperationContract {
+    fn operation_id(&self) -> &str {
+        match self {
+            Self::Scan { operation_id, .. }
+            | Self::Filter { operation_id }
+            | Self::Join { operation_id, .. }
+            | Self::Aggregate { operation_id }
+            | Self::Set { operation_id, .. }
+            | Self::Column { operation_id, .. }
+            | Self::Literal { operation_id, .. }
+            | Self::Binary { operation_id, .. }
+            | Self::Call { operation_id, .. }
+            | Self::Cast { operation_id, .. } => operation_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OntologyProgramOperandContract {
+    parent_operation_id: String,
+    child_operation_id: String,
+    role: OntologyProgramOperandRole,
     ordinal: u16,
-    relation_ref: String,
-    column_ref: String,
-    logical_type: String,
+    #[serde(default)]
+    output_alias: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum OntologyProgramOperandRole {
+    Input,
+    Predicate,
+    Condition,
+    Left,
+    Right,
+    Argument,
+    Group,
+    Aggregate,
+}
+
+impl OntologyProgramOperandRole {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Predicate => "predicate",
+            Self::Condition => "condition",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Argument => "argument",
+            Self::Group => "group",
+            Self::Aggregate => "aggregate",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -888,6 +984,7 @@ struct SchemaContractIr {
     structure_groups: Vec<StructureGroupContract>,
     domain_operation_policy: DomainOperationPolicyAuthority,
     ontology_rule_contracts: Vec<OntologyRuleContract>,
+    ontology_program_graph: OntologyProgramGraphContract,
     tables: Vec<TableContract>,
     table_scopes: Vec<TableScopeContract>,
     operational_tables: Vec<OperationalTableContract>,
@@ -1379,25 +1476,10 @@ impl SchemaContractIr {
                 }
             }
         }
-        let required_rule_operations = BTreeSet::from([
-            OntologyRuleOperationKind::ForeignKeyAntiJoin,
-            OntologyRuleOperationKind::GovernedCodeAntiJoin,
-            OntologyRuleOperationKind::PrimaryKeyUniquenessAggregate,
-            OntologyRuleOperationKind::IdDomainConformance,
-            OntologyRuleOperationKind::OntologyMembershipAntiJoin,
-            OntologyRuleOperationKind::RelationFamilyConformanceJoin,
-            OntologyRuleOperationKind::RelationCardinalityAggregate,
-            OntologyRuleOperationKind::RelationOwnerConformanceJoin,
-            OntologyRuleOperationKind::RelationSelfEdgeJoin,
-            OntologyRuleOperationKind::PropertyValueOneOf,
-            OntologyRuleOperationKind::SourceSpanAllOrNone,
-        ]);
         let mut rule_ids = BTreeSet::new();
-        let mut rule_operations = BTreeSet::new();
         for (rule_index, rule) in self.ontology_rule_contracts.iter().enumerate() {
             let path = format!("$.ontology_rule_contracts[{rule_index}]");
             if rule.rule_id.trim().is_empty()
-                || rule.ordered_operands.is_empty()
                 || rule.calculation_id.trim().is_empty()
                 || rule.policy_id.trim().is_empty()
                 || rule.input_contract.trim().is_empty()
@@ -1405,33 +1487,11 @@ impl SchemaContractIr {
                 || rule.determinism_class != "DETERMINISTIC"
                 || rule.diagnostic_code.trim().is_empty()
                 || !rule_ids.insert(rule.rule_id.as_str())
-                || !rule_operations.insert(rule.operation_kind)
             {
                 return invalid(&path, "invalid or duplicate typed ontology rule");
             }
-            for (operand_index, operand) in rule.ordered_operands.iter().enumerate() {
-                let operand_path = format!("{path}.ordered_operands[{operand_index}]");
-                if usize::from(operand.ordinal) != operand_index
-                    || operand.relation_ref.trim().is_empty()
-                    || operand.column_ref.trim().is_empty()
-                    || !matches!(
-                        operand.logical_type.as_str(),
-                        "relation" | "column" | "scalar" | "contract"
-                    )
-                {
-                    return invalid(
-                        &operand_path,
-                        "operand order, reference, or logical type is invalid",
-                    );
-                }
-            }
         }
-        if rule_operations != required_rule_operations {
-            return invalid(
-                "$.ontology_rule_contracts",
-                "typed ontology-rule operation census is incomplete",
-            );
-        }
+        ontology_graph::validate_authored_graph(self)?;
         if self.structure_groups.iter().any(|group| {
             group
                 .validation_rule_id
@@ -4162,6 +4222,10 @@ fn ontology_program_members(
     );
 
     let rules = &compiled.schema.ontology_rule_contracts;
+    let rule_semantics_identities = rules
+        .iter()
+        .map(|rule| ontology_graph::rule_semantics_identity(&compiled.schema, rule))
+        .collect::<Result<Vec<_>, _>>()?;
     let batch = RecordBatch::try_new(
         std::sync::Arc::new(Schema::new(vec![
             Field::new("rule_id", DataType::Utf8, false),
@@ -4179,21 +4243,11 @@ fn ontology_program_members(
                 rules.iter().map(|rule| rule.rule_id.as_str()),
             )),
             std::sync::Arc::new(StringArray::from_iter_values(
-                rules.iter().map(|rule| rule.operation_kind.as_str()),
+                rules.iter().map(|_| "RELATIONAL_GRAPH"),
             )),
-            std::sync::Arc::new(StringArray::from_iter_values(rules.iter().map(|rule| {
-                codefabric::ontology_contract::rule_semantics_identity(
-                    rule.operation_kind.as_str(),
-                    rule.ordered_operands.iter().map(|operand| {
-                        (
-                            operand.ordinal,
-                            operand.relation_ref.as_str(),
-                            operand.column_ref.as_str(),
-                            operand.logical_type.as_str(),
-                        )
-                    }),
-                )
-            }))),
+            std::sync::Arc::new(StringArray::from_iter_values(
+                rule_semantics_identities.iter().map(String::as_str),
+            )),
             std::sync::Arc::new(StringArray::from_iter_values(
                 rules.iter().map(|rule| rule.calculation_id.as_str()),
             )),
@@ -4217,46 +4271,6 @@ fn ontology_program_members(
     .map_err(|error| ontology_artifact_error(error.to_string()))?;
     members.insert(
         "program.rule_binding".to_owned(),
-        encode_ontology_member(&batch)?,
-    );
-
-    let rule_operands = rules
-        .iter()
-        .flat_map(|rule| {
-            rule.ordered_operands
-                .iter()
-                .map(move |operand| (rule.rule_id.as_str(), operand))
-        })
-        .collect::<Vec<_>>();
-    let batch = RecordBatch::try_new(
-        std::sync::Arc::new(Schema::new(vec![
-            Field::new("rule_id", DataType::Utf8, false),
-            Field::new("ordinal", DataType::UInt16, false),
-            Field::new("relation_ref", DataType::Utf8, false),
-            Field::new("column_ref", DataType::Utf8, false),
-            Field::new("logical_type", DataType::Utf8, false),
-        ])),
-        vec![
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_operands.iter().map(|row| row.0),
-            )),
-            std::sync::Arc::new(UInt16Array::from_iter_values(
-                rule_operands.iter().map(|row| row.1.ordinal),
-            )),
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_operands.iter().map(|row| row.1.relation_ref.as_str()),
-            )),
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_operands.iter().map(|row| row.1.column_ref.as_str()),
-            )),
-            std::sync::Arc::new(StringArray::from_iter_values(
-                rule_operands.iter().map(|row| row.1.logical_type.as_str()),
-            )),
-        ],
-    )
-    .map_err(|error| ontology_artifact_error(error.to_string()))?;
-    members.insert(
-        "program.rule_operand".to_owned(),
         encode_ontology_member(&batch)?,
     );
 

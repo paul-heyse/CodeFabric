@@ -21,6 +21,18 @@ const MAX_PROGRAM_NODES: usize = 65_536;
 const MAX_PROGRAM_EXPRESSIONS: usize = 262_144;
 const MAX_PROGRAM_GRAPH_DEPTH: usize = 256;
 
+fn validate_graph_counts(
+    node_count: usize,
+    expression_count: usize,
+) -> Result<(), OntologyProgramCompileError> {
+    if node_count > MAX_PROGRAM_NODES || expression_count > MAX_PROGRAM_EXPRESSIONS {
+        return Err(OntologyProgramCompileError::Decode(format!(
+            "program graph exceeds node/expression bounds {MAX_PROGRAM_NODES}/{MAX_PROGRAM_EXPRESSIONS}"
+        )));
+    }
+    Ok(())
+}
+
 /// One executable program root and its acceptance contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramContract {
@@ -33,6 +45,7 @@ pub struct ProgramContract {
     pub expected_result_contract: String,
     pub diagnostic_code: String,
     pub rule_semantics_identity: String,
+    pub subject_table_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -173,6 +186,7 @@ impl OntologyRelationalProgram {
         let expected = utf8(contract, "expected_result_contract")?;
         let diagnostics = utf8(contract, "diagnostic_code")?;
         let rule_semantics_identities = utf8(contract, "rule_semantics_identity")?;
+        let subject_table_ids = utf8(contract, "subject_table_id")?;
         let mut programs = BTreeMap::new();
         for row in 0..contract.num_rows() {
             let program = ProgramContract {
@@ -185,6 +199,7 @@ impl OntologyRelationalProgram {
                 expected_result_contract: expected.value(row).to_owned(),
                 diagnostic_code: diagnostics.value(row).to_owned(),
                 rule_semantics_identity: rule_semantics_identities.value(row).to_owned(),
+                subject_table_id: subject_table_ids.value(row).to_owned(),
             };
             if program.rule_id.is_empty()
                 || program.calculation_id.is_empty()
@@ -192,6 +207,7 @@ impl OntologyRelationalProgram {
                 || program.expected_result_contract.is_empty()
                 || program.diagnostic_code.is_empty()
                 || program.rule_semantics_identity.is_empty()
+                || program.subject_table_id.is_empty()
             {
                 return Err(OntologyProgramCompileError::Decode(format!(
                     "{} has an incomplete program contract",
@@ -436,12 +452,7 @@ impl OntologyRelationalProgram {
     }
 
     fn validate_graph(&self) -> Result<(), OntologyProgramCompileError> {
-        if self.nodes.len() > MAX_PROGRAM_NODES || self.expressions.len() > MAX_PROGRAM_EXPRESSIONS
-        {
-            return Err(OntologyProgramCompileError::Decode(format!(
-                "program graph exceeds node/expression bounds {MAX_PROGRAM_NODES}/{MAX_PROGRAM_EXPRESSIONS}"
-            )));
-        }
+        validate_graph_counts(self.nodes.len(), self.expressions.len())?;
         for (parent, edges) in &self.plan_edges {
             if !self.nodes.contains_key(parent)
                 || edges
@@ -604,9 +615,15 @@ impl OntologyRelationalProgram {
                     edge.role
                 )));
             }
-            if edge.output_alias.as_deref().is_some_and(str::is_empty) {
+            let requires_alias = matches!(edge.role.as_str(), "projection" | "group" | "aggregate");
+            let has_alias = edge
+                .output_alias
+                .as_deref()
+                .is_some_and(|alias| !alias.is_empty());
+            if requires_alias != has_alias {
                 return Err(OntologyProgramCompileError::Decode(format!(
-                    "plan node {node_id} has an empty output alias"
+                    "plan node {node_id} violates the exact output-alias contract for {}",
+                    edge.role
                 )));
             }
             expression_roots.insert(edge.child_expr_id.clone());
@@ -1091,7 +1108,224 @@ mod tests {
     use arrow_array::{Int64Array, RecordBatch};
     use arrow_schema::{DataType, Field, Schema};
 
-    use super::candidate_batch_providers;
+    use super::{
+        ExpressionEdge, ExpressionNode, MAX_PROGRAM_EXPRESSIONS, MAX_PROGRAM_GRAPH_DEPTH,
+        MAX_PROGRAM_NODES, OntologyRelationalProgram, PlanEdge, PlanNode, ProgramContract,
+        ScanNode, candidate_batch_providers, validate_graph_counts,
+    };
+
+    fn graph_fixture() -> OntologyRelationalProgram {
+        OntologyRelationalProgram {
+            programs: BTreeMap::from([(
+                "program".into(),
+                ProgramContract {
+                    program_id: "program".into(),
+                    rule_id: "rule".into(),
+                    root_node_id: "project".into(),
+                    execution_phase: "candidate_validation".into(),
+                    calculation_id: "calculation".into(),
+                    policy_id: "policy".into(),
+                    expected_result_contract: "rows".into(),
+                    diagnostic_code: "DIAGNOSTIC".into(),
+                    rule_semantics_identity: "b3:fixture".into(),
+                    subject_table_id: "fixture".into(),
+                },
+            )]),
+            nodes: BTreeMap::from([
+                (
+                    "scan".into(),
+                    PlanNode::Scan(ScanNode {
+                        relation_ref: "table:1".into(),
+                        relation_alias: "source".into(),
+                    }),
+                ),
+                ("project".into(), PlanNode::Project),
+            ]),
+            expressions: BTreeMap::from([
+                (
+                    "binary".into(),
+                    ExpressionNode::Binary {
+                        operator: "eq".into(),
+                    },
+                ),
+                (
+                    "column".into(),
+                    ExpressionNode::Column {
+                        relation_alias: "source".into(),
+                        column_name: "value".into(),
+                    },
+                ),
+                (
+                    "literal".into(),
+                    ExpressionNode::Literal {
+                        logical_type: "int64".into(),
+                        value: Some("1".into()),
+                        is_null: false,
+                    },
+                ),
+            ]),
+            plan_edges: BTreeMap::from([(
+                "project".into(),
+                vec![PlanEdge {
+                    child_node_id: "scan".into(),
+                    input_ordinal: 0,
+                }],
+            )]),
+            expression_edges: BTreeMap::from([
+                (
+                    "project".into(),
+                    vec![ExpressionEdge {
+                        child_expr_id: "binary".into(),
+                        role: "projection".into(),
+                        operand_ordinal: 0,
+                        output_alias: Some("value_matches".into()),
+                    }],
+                ),
+                (
+                    "binary".into(),
+                    vec![
+                        ExpressionEdge {
+                            child_expr_id: "column".into(),
+                            role: "left".into(),
+                            operand_ordinal: 0,
+                            output_alias: None,
+                        },
+                        ExpressionEdge {
+                            child_expr_id: "literal".into(),
+                            role: "right".into(),
+                            operand_ordinal: 0,
+                            output_alias: None,
+                        },
+                    ],
+                ),
+            ]),
+        }
+    }
+
+    #[test]
+    fn graph_fixture_matrix_rejects_alias_dead_row_and_extra_role_mutants() {
+        let base = graph_fixture();
+        base.validate_graph().expect("valid graph fixture");
+
+        let mut missing_alias = base.clone();
+        missing_alias.expression_edges.get_mut("project").unwrap()[0].output_alias = None;
+        assert!(missing_alias.validate_graph().is_err());
+
+        let mut extra_alias = base.clone();
+        extra_alias.expression_edges.get_mut("binary").unwrap()[0].output_alias =
+            Some("illegal".into());
+        assert!(extra_alias.validate_graph().is_err());
+
+        let mut dead_plan = base.clone();
+        dead_plan.nodes.insert(
+            "dead".into(),
+            PlanNode::Scan(ScanNode {
+                relation_ref: "table:2".into(),
+                relation_alias: "dead".into(),
+            }),
+        );
+        assert!(dead_plan.validate_graph().is_err());
+
+        let mut dead_expression = base.clone();
+        dead_expression.expressions.insert(
+            "dead".into(),
+            ExpressionNode::Literal {
+                logical_type: "int64".into(),
+                value: Some("2".into()),
+                is_null: false,
+            },
+        );
+        assert!(dead_expression.validate_graph().is_err());
+
+        let mut extra_role = base.clone();
+        extra_role
+            .expression_edges
+            .get_mut("binary")
+            .unwrap()
+            .push(ExpressionEdge {
+                child_expr_id: "literal".into(),
+                role: "argument".into(),
+                operand_ordinal: 0,
+                output_alias: None,
+            });
+        assert!(extra_role.validate_graph().is_err());
+
+        let mut shared_dag = base;
+        shared_dag.expression_edges.get_mut("binary").unwrap()[1].child_expr_id = "column".into();
+        shared_dag.expressions.remove("literal");
+        shared_dag.validate_graph().expect("shared expression DAG");
+    }
+
+    #[test]
+    fn graph_count_and_depth_bounds_accept_exact_and_reject_overlimit() {
+        validate_graph_counts(MAX_PROGRAM_NODES, MAX_PROGRAM_EXPRESSIONS)
+            .expect("exact count bounds");
+        assert!(validate_graph_counts(MAX_PROGRAM_NODES + 1, 0).is_err());
+        assert!(validate_graph_counts(0, MAX_PROGRAM_EXPRESSIONS + 1).is_err());
+
+        fn cast_chain(depth: usize) -> OntologyRelationalProgram {
+            let mut graph = graph_fixture();
+            graph.expressions.clear();
+            graph.expression_edges.clear();
+            graph.expressions.insert(
+                format!("cast:0"),
+                ExpressionNode::Cast {
+                    target_type: "int64".into(),
+                },
+            );
+            graph.expression_edges.insert(
+                "project".into(),
+                vec![ExpressionEdge {
+                    child_expr_id: "cast:0".into(),
+                    role: "projection".into(),
+                    operand_ordinal: 0,
+                    output_alias: Some("value".into()),
+                }],
+            );
+            for index in 0..depth {
+                let child = if index == depth - 1 {
+                    "literal".into()
+                } else {
+                    format!("cast:{}", index + 1)
+                };
+                graph.expression_edges.insert(
+                    format!("cast:{index}"),
+                    vec![ExpressionEdge {
+                        child_expr_id: child,
+                        role: "argument".into(),
+                        operand_ordinal: 0,
+                        output_alias: None,
+                    }],
+                );
+                if index + 1 < depth {
+                    graph.expressions.insert(
+                        format!("cast:{}", index + 1),
+                        ExpressionNode::Cast {
+                            target_type: "int64".into(),
+                        },
+                    );
+                }
+            }
+            graph.expressions.insert(
+                "literal".into(),
+                ExpressionNode::Literal {
+                    logical_type: "int64".into(),
+                    value: Some("1".into()),
+                    is_null: false,
+                },
+            );
+            graph
+        }
+
+        cast_chain(MAX_PROGRAM_GRAPH_DEPTH)
+            .validate_graph()
+            .expect("exact depth bound");
+        assert!(
+            cast_chain(MAX_PROGRAM_GRAPH_DEPTH + 1)
+                .validate_graph()
+                .is_err()
+        );
+    }
 
     #[test]
     fn semantic_provider_normalizes_only_table_metadata() {

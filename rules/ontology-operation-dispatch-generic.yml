@@ -11,12 +11,16 @@ rule:
     - pattern: match $OP.calculation_id.as_str() { $$$ARMS }
     - pattern: match $OP.native { $$$ARMS }
     - pattern: match $OP.native_operation { $$$ARMS }
+    - pattern: $RULES.iter().find(|$RULE| $RULE.operation_kind == $KIND)
+    - pattern: $RULES.iter().find(|$RULE| $RULE.operation_kind.as_str() == $KIND)
+    - pattern: $RULES.iter().find(|$RULE| $RULE.rule_id == $ID)
+    - pattern: $RULES.iter().find(|$RULE| $RULE.rule_id.as_str() == $ID)
     - pattern: pub fn commit_fact_snapshot($$$ARGS) { $$$BODY }
     - pattern: pub(crate) fn commit_fact_snapshot($$$ARGS) { $$$BODY }
     - pattern: pub(super) fn commit_fact_snapshot($$$ARGS) { $$$BODY }
     - all:
         - kind: identifier
-        - regex: '^(?:NativeValidationOperation|DecodedProgramOperation|LoweredValidationOperation)$'
+        - regex: '^(?:OntologyRuleOperationKind|NativeValidationOperation|DecodedProgramOperation|LoweredValidationOperation)$'
     - all:
         - kind: identifier
         - regex: '^validate_(?:primary_keys|foreign_keys|governed_codes|relation_family|relation_membership|relation_cardinality|relation_owner|relation_self_edge|property_one_of|source_spans)$'

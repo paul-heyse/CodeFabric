@@ -195,9 +195,30 @@ def test_odf_nested_ontology_membership_zero() -> None:
 
 
 def test_odf_compiled_rule_contract_census() -> None:
-    contracts = _ir()["ontology_rule_contracts"]
-    assert len(contracts) == 11
-    assert len({contract["operation_kind"] for contract in contracts}) == 11
+    ir = _ir()
+    contracts = ir["ontology_rule_contracts"]
+    graph = ir["ontology_program_graph"]
+    rule_ids = {contract["rule_id"] for contract in contracts}
+    operation_ids = {
+        operation["operation_id"] for operation in graph["operations"]
+    }
+    assert contracts and graph["programs"] and graph["operations"]
+    assert all(
+        "operation_kind" not in contract and "ordered_operands" not in contract
+        for contract in contracts
+    )
+    assert {program["rule_id"] for program in graph["programs"]} == rule_ids
+    assert len(operation_ids) == len(graph["operations"])
+    assert {
+        program["root_operation_id"]
+        for program in graph["programs"]
+        if program["execution_phase"] == "candidate_validation"
+    } <= operation_ids
+    assert all(
+        operand["parent_operation_id"] in operation_ids
+        and operand["child_operation_id"] in operation_ids
+        for operand in graph["operands"]
+    )
 
 
 def test_odf_logical_structure_classification_invariance() -> None:
