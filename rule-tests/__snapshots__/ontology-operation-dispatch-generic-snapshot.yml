@@ -1,6 +1,16 @@
 id: ontology-operation-dispatch-generic
 snapshots:
   ? |
+    fn build(ir: &SchemaIr) {
+        let rule = rule(ir, OntologyRuleOperationKind::ForeignKeyAntiJoin);
+        compile(rule);
+    }
+  : labels:
+    - source: OntologyRuleOperationKind
+      style: primary
+      start: 50
+      end: 75
+  ? |
     fn execute(lowered: LoweredValidationOperation) {
         match lowered.native {
             NativeValidationOperation::ExternalReferential => external(),
@@ -48,6 +58,15 @@ snapshots:
       style: primary
       start: 53
       end: 177
+  ? |
+    fn lookup(rules: &[Rule], operation: OntologyRuleOperationKind) -> Option<&Rule> {
+        rules.iter().find(|rule| rule.operation_kind == operation)
+    }
+  : labels:
+    - source: rules.iter().find(|rule| rule.operation_kind == operation)
+      style: primary
+      start: 87
+      end: 145
   ? |
     pub async fn seal_sql(sql: &str) -> GovernedPlan { todo!() }
   : labels:
