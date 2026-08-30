@@ -652,22 +652,19 @@ async fn create_or_open(
         .await?)
 }
 
-fn constraints_for(spec: &TableSpec) -> BTreeMap<String, String> {
-    let names = spec
-        .arrow_schema
+fn constraints_for_schema(schema: &Schema) -> BTreeMap<String, String> {
+    let names = schema
         .fields()
         .iter()
         .map(|field| field.name().as_str())
         .collect::<Vec<_>>();
     let mut constraints = BTreeMap::new();
     if names.contains(&"start_byte") && names.contains(&"end_byte") {
-        let start_nullable = spec
-            .arrow_schema
+        let start_nullable = schema
             .field_with_name("start_byte")
             .expect("generated start-byte field")
             .is_nullable();
-        let end_nullable = spec
-            .arrow_schema
+        let end_nullable = schema
             .field_with_name("end_byte")
             .expect("generated end-byte field")
             .is_nullable();
@@ -690,6 +687,10 @@ fn constraints_for(spec: &TableSpec) -> BTreeMap<String, String> {
         constraints.insert(format!("{name}_nonnegative"), format!("{name} >= 0"));
     }
     constraints
+}
+
+fn constraints_for(spec: &TableSpec) -> BTreeMap<String, String> {
+    constraints_for_schema(&spec.arrow_schema)
 }
 
 async fn install_constraints(
@@ -715,6 +716,122 @@ async fn install_constraints(
 fn validate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), FabricError> {
     authenticate_open_table(table, spec)?;
     validate_constraint_configuration(table.snapshot()?.metadata().configuration(), spec)
+}
+
+/// Retained provider contract used when an older executable epoch is reconstructed by a newer
+/// binary. Every field is decoded from the content-addressed epoch package.
+pub(super) struct RetainedProviderTableSpec<'a> {
+    pub name: &'a str,
+    pub schema_digest: &'a str,
+    pub arrow_schema: &'a Schema,
+    pub partition_columns: &'a [String],
+    pub zorder_columns: &'a [String],
+    pub dependencies: &'a [i16],
+    pub allow_type_widening: bool,
+    pub column_mapping_mode: &'a str,
+}
+
+pub(super) fn validate_open_table_retained(
+    table: &DeltaTable,
+    spec: &RetainedProviderTableSpec<'_>,
+) -> Result<(), FabricError> {
+    let state = table.snapshot()?;
+    let metadata = state.metadata();
+    let configuration = metadata.configuration();
+    validate_contract_identity(
+        spec.name,
+        configuration.get(SCHEMA_DIGEST_KEY).map(String::as_str),
+        spec.schema_digest,
+        state.table_config().column_mapping_mode.is_some(),
+    )?;
+    if spec.column_mapping_mode != "none"
+        || configuration
+            .get("delta.enableChangeDataFeed")
+            .map(String::as_str)
+            != Some("false")
+        || configuration.get(TYPE_WIDENING_KEY).map(String::as_str)
+            != Some(if spec.allow_type_widening {
+                "true"
+            } else {
+                "false"
+            })
+        || configuration
+            .get("delta.enableDeletionVectors")
+            .map(String::as_str)
+            != Some("false")
+    {
+        return Err(FabricError::TableInvariant {
+            table: spec.name.into(),
+            detail: "retained CDF, deletion-vector, widening, or mapping posture drifted".into(),
+        });
+    }
+    let expected_zorder = spec.zorder_columns.join(",");
+    let expected_dependencies = spec
+        .dependencies
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    if configuration.get(ZORDER_COLUMNS_KEY).map(String::as_str) != Some(&expected_zorder)
+        || configuration
+            .get(TABLE_DEPENDENCIES_KEY)
+            .map(String::as_str)
+            != Some(&expected_dependencies)
+        || metadata.partition_columns() != spec.partition_columns
+    {
+        return Err(FabricError::TableInvariant {
+            table: spec.name.into(),
+            detail: "retained partition, Z-order, or dependency contract drifted".into(),
+        });
+    }
+    validate_protocol_feature_posture(
+        spec.name,
+        state
+            .protocol()
+            .reader_features()
+            .map(|features| features.iter().map(ToString::to_string).collect::<Vec<_>>()),
+        state
+            .protocol()
+            .writer_features()
+            .map(|features| features.iter().map(ToString::to_string).collect::<Vec<_>>()),
+    )?;
+    for (key, value) in spec.arrow_schema.metadata() {
+        if configuration.get(key) != Some(value) {
+            return Err(FabricError::TableInvariant {
+                table: spec.name.into(),
+                detail: format!("retained schema metadata key {key} drifted"),
+            });
+        }
+    }
+    let opened: Schema = state.schema().as_ref().try_into_arrow()?;
+    if opened.fields().len() != spec.arrow_schema.fields().len()
+        || spec
+            .arrow_schema
+            .fields()
+            .iter()
+            .zip(opened.fields())
+            .any(|(expected, actual)| !delta_field_storage_compatible(expected, actual))
+    {
+        return Err(FabricError::TableInvariant {
+            table: spec.name.into(),
+            detail: "Delta StructType differs from retained Arrow fields".into(),
+        });
+    }
+    let actual_constraints = configuration
+        .iter()
+        .filter_map(|(key, value)| {
+            key.strip_prefix("delta.constraints.")
+                .map(|name| (name.to_owned(), value.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let expected_constraints = constraints_for_schema(spec.arrow_schema);
+    if actual_constraints != expected_constraints {
+        return Err(FabricError::TableInvariant {
+            table: spec.name.into(),
+            detail: "Delta constraints differ from retained schema semantics".into(),
+        });
+    }
+    Ok(())
 }
 
 fn authenticate_open_table(table: &DeltaTable, spec: &TableSpec) -> Result<(), FabricError> {
@@ -878,6 +995,15 @@ pub(super) async fn exact_provider(
     spec: &TableSpec,
     profile: DeltaAccessProfile,
 ) -> Result<Arc<dyn TableProvider>, FabricError> {
+    exact_provider_retained(table, spec.name, &spec.arrow_schema, profile).await
+}
+
+pub(super) async fn exact_provider_retained(
+    table: &DeltaTable,
+    table_name: &str,
+    arrow_schema: &Schema,
+    profile: DeltaAccessProfile,
+) -> Result<Arc<dyn TableProvider>, FabricError> {
     if profile != DeltaAccessProfile::QueryServing || profile.skip_stats() {
         return Err(FabricError::SnapshotProviderIntegrity(
             "DataFusion providers require the QUERY_SERVING statistics profile".into(),
@@ -896,24 +1022,24 @@ pub(super) async fn exact_provider(
     let session = provider_session_state(config);
     let inner = table.table_provider().with_session(session).await?;
     let provider_schema = inner.schema();
-    if provider_schema.fields().len() != spec.arrow_schema.fields().len()
-        || spec
-            .arrow_schema
+    if provider_schema.fields().len() != arrow_schema.fields().len()
+        || arrow_schema
             .fields()
             .iter()
             .zip(provider_schema.fields())
             .any(|(expected, actual)| !delta_field_storage_compatible(expected, actual))
     {
         return Err(FabricError::TableInvariant {
-            table: spec.name.into(),
-            detail: "DataFusion provider physical schema differs from generated TableSpec".into(),
+            table: table_name.into(),
+            detail: "DataFusion provider physical schema differs from retained table contract"
+                .into(),
         });
     }
     Ok(Arc::new(Id16ContractProvider {
         inner,
         // DataFusion physical plans intentionally carry no table-level metadata. Field
         // metadata remains attached because it is the executable Id16 contract.
-        schema: Arc::new(Schema::new(spec.arrow_schema.fields().clone())),
+        schema: Arc::new(Schema::new(arrow_schema.fields().clone())),
     }))
 }
 

@@ -400,6 +400,7 @@ fn decode_enum_values(
 #[derive(Clone, Debug)]
 pub struct OntologyProgramCompiler {
     pub package_identity: String,
+    runtime_authority: crate::ontology_program::EpochRuntimeAuthority,
     pub rules: BTreeMap<String, DecodedRuleBinding>,
     pub relational_program: crate::ontology_relational_program::OntologyRelationalProgram,
     pub phrases: BTreeMap<String, DecodedPhraseBinding>,
@@ -481,6 +482,7 @@ impl OntologyProgramCompiler {
     /// non-native engines, malformed operands, or unsupported current-profile calculations.
     pub fn decode(package: &OntologyProgramPackage) -> Result<Self, OntologyProgramCompileError> {
         validate_ontology_program_package(package)?;
+        let runtime_authority = crate::ontology_program::EpochRuntimeAuthority::decode(package)?;
         let rules = decode_rules(package)?;
         let relational_program =
             crate::ontology_relational_program::OntologyRelationalProgram::decode(package)?;
@@ -562,6 +564,7 @@ impl OntologyProgramCompiler {
         }
         Ok(Self {
             package_identity: package.manifest.package_identity.clone(),
+            runtime_authority,
             rules,
             relational_program,
             phrases,
@@ -570,6 +573,21 @@ impl OntologyProgramCompiler {
             enum_values,
             calculations,
         })
+    }
+
+    #[must_use]
+    pub(crate) fn result_schema(&self, identity: &str) -> Option<arrow_schema::SchemaRef> {
+        self.runtime_authority.result_schema(identity)
+    }
+
+    #[must_use]
+    pub(crate) fn project_result_schema(
+        &self,
+        identity: &str,
+        names: &[&str],
+    ) -> Option<arrow_schema::SchemaRef> {
+        self.runtime_authority
+            .project_result_schema(identity, names)
     }
 
     /// Lower one governed phrase to ordinary typed DataFusion expressions.

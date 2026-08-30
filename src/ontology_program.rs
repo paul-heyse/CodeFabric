@@ -22,8 +22,25 @@ mod generated_bundle {
     include!("generated/ontology_program_bundle.rs");
 }
 
-/// Stable ontology-program package format.
-pub const ONTOLOGY_PROGRAM_PACKAGE_VERSION: &str = "ontology-program-package.v1";
+/// Stable executable epoch-package format. V2 adds retained result/public/wire authorities.
+pub const ONTOLOGY_PROGRAM_PACKAGE_VERSION: &str = "ontology-program-package.v2";
+
+pub(crate) const RESULT_CONTRACT_SET_ARTIFACT: &str = "result-contract-set.json";
+pub(crate) const TABLE_CONTRACT_SET_ARTIFACT: &str = "table-contract-set.json";
+pub(crate) const SCHEMA_GENERATION_ARTIFACT: &str = "schema-generation.json";
+pub(crate) const PUBLIC_SCHEMA_SET_ARTIFACT: &str = "public-schema-set.json";
+pub(crate) const PUBLIC_WIRE_ARTIFACT: &str = "public-wire.pb";
+pub(crate) const EXTENSION_REGISTRY_ARTIFACT: &str = "extension-registry.json";
+pub(crate) const CHECKSUM_CONTRACT_ARTIFACT: &str = "checksum-contract.json";
+const REQUIRED_RUNTIME_ARTIFACTS: [&str; 7] = [
+    RESULT_CONTRACT_SET_ARTIFACT,
+    TABLE_CONTRACT_SET_ARTIFACT,
+    SCHEMA_GENERATION_ARTIFACT,
+    PUBLIC_SCHEMA_SET_ARTIFACT,
+    PUBLIC_WIRE_ARTIFACT,
+    EXTENSION_REGISTRY_ARTIFACT,
+    CHECKSUM_CONTRACT_ARTIFACT,
+];
 
 /// Packaging choices that may change physical bytes without changing logical program meaning.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,6 +79,7 @@ pub struct OntologyProgramManifest {
     pub logical_program_identity: String,
     pub packaging_profile_id: String,
     pub member_identities: BTreeMap<String, String>,
+    pub runtime_artifact_identities: BTreeMap<String, String>,
     pub package_identity: String,
 }
 
@@ -70,6 +88,32 @@ pub struct OntologyProgramManifest {
 pub struct OntologyProgramPackage {
     pub manifest: OntologyProgramManifest,
     pub members: BTreeMap<String, OntologyProgramMember>,
+    pub runtime_artifacts: BTreeMap<String, Vec<u8>>,
+}
+
+/// Fully decoded runtime authority retained by an executable serving epoch.
+#[derive(Clone, Debug)]
+pub(crate) struct EpochRuntimeAuthority {
+    result_schemas: crate::schema_registry::EpochResultSchemaRegistry,
+    table_specs: crate::schema_registry::EpochTableSpecRegistry,
+    extension_registry_bytes: Vec<u8>,
+    checksum_version: String,
+    identity: String,
+    public_wire_file_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublicSchemaSetArtifact {
+    artifact_version: String,
+    schemas: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChecksumContractArtifact {
+    artifact_version: String,
+    selected_version: String,
 }
 
 /// Durable content-addressed installation of one validated ontology program package.
@@ -91,6 +135,15 @@ struct PackageArtifactMember {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PackageRuntimeArtifact {
+    artifact_id: String,
+    file: String,
+    artifact_identity: String,
+    byte_length: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PackageArtifactManifest {
     package_version: String,
     bootstrap_schema_identity: String,
@@ -98,8 +151,10 @@ struct PackageArtifactManifest {
     logical_program_identity: String,
     packaging_profile_id: String,
     member_identities: BTreeMap<String, String>,
+    runtime_artifact_identities: BTreeMap<String, String>,
     package_identity: String,
     members: Vec<PackageArtifactMember>,
+    runtime_artifacts: Vec<PackageRuntimeArtifact>,
 }
 
 impl InstalledOntologyProgramPackage {
@@ -230,6 +285,7 @@ pub(crate) struct OntologyProgramVocabulary {
 fn manifest_for_members(
     profile_id: &str,
     members: &BTreeMap<String, OntologyProgramMember>,
+    runtime_artifacts: &BTreeMap<String, Vec<u8>>,
 ) -> OntologyProgramManifest {
     let bootstrap_schema_identity = framed(
         members
@@ -253,6 +309,10 @@ fn manifest_for_members(
         .iter()
         .map(|(name, member)| (name.clone(), member.member_identity.clone()))
         .collect::<BTreeMap<_, _>>();
+    let runtime_artifact_identities = runtime_artifacts
+        .iter()
+        .map(|(name, bytes)| (name.clone(), framed([name.as_bytes(), bytes.as_slice()])))
+        .collect::<BTreeMap<_, _>>();
     let package_identity = framed(
         [
             ONTOLOGY_PROGRAM_PACKAGE_VERSION.as_bytes().to_vec(),
@@ -264,6 +324,11 @@ fn manifest_for_members(
             member_identities
                 .iter()
                 .map(|(name, digest)| format!("{name}:{digest}").into_bytes()),
+        )
+        .chain(
+            runtime_artifact_identities
+                .iter()
+                .map(|(name, digest)| format!("runtime:{name}:{digest}").into_bytes()),
         ),
     );
     OntologyProgramManifest {
@@ -273,7 +338,292 @@ fn manifest_for_members(
         logical_program_identity,
         packaging_profile_id: profile_id.to_owned(),
         member_identities,
+        runtime_artifact_identities,
         package_identity,
+    }
+}
+
+fn canonical_public_schema_set() -> Result<Vec<u8>, OntologyProgramError> {
+    let schemas = [
+        (
+            "cpg-semantic-query-request.schema.json",
+            include_bytes!("../contracts/schema/cpg-semantic-query-request.schema.json").as_slice(),
+        ),
+        (
+            "cpg-semantic-query-response.schema.json",
+            include_bytes!("../contracts/schema/cpg-semantic-query-response.schema.json")
+                .as_slice(),
+        ),
+        (
+            "public-snapshot-metadata.schema.json",
+            include_bytes!("../contracts/schema/public-snapshot-metadata.schema.json").as_slice(),
+        ),
+        (
+            "public-status.schema.json",
+            include_bytes!("../contracts/schema/public-status.schema.json").as_slice(),
+        ),
+        (
+            "source-context.schema.json",
+            include_bytes!("../contracts/schema/source-context.schema.json").as_slice(),
+        ),
+    ];
+    let values = schemas
+        .into_iter()
+        .map(|(name, bytes)| {
+            serde_json::from_slice::<serde_json::Value>(bytes)
+                .map(|value| (name, value))
+                .map_err(|error| {
+                    OntologyProgramError::Artifact(format!(
+                        "public schema {name} is not JSON: {error}"
+                    ))
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+        "artifact_version": "epoch-public-schema-set.v1",
+        "schemas": values,
+    }))
+    .map_err(|error| OntologyProgramError::Artifact(error.to_string()))
+}
+
+fn build_runtime_artifacts(
+    checksum_version: &str,
+) -> Result<BTreeMap<String, Vec<u8>>, OntologyProgramError> {
+    let checksum_contract = crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+        "artifact_version": "epoch-result-checksum-contract.v1",
+        "selected_version": checksum_version,
+    }))
+    .map_err(|error| OntologyProgramError::Artifact(error.to_string()))?;
+    Ok(BTreeMap::from([
+        (
+            RESULT_CONTRACT_SET_ARTIFACT.into(),
+            crate::schema_registry::epoch_result_contract_set_bytes()?,
+        ),
+        (
+            TABLE_CONTRACT_SET_ARTIFACT.into(),
+            crate::schema_registry::epoch_table_contract_set_bytes()?,
+        ),
+        (
+            SCHEMA_GENERATION_ARTIFACT.into(),
+            include_bytes!("../contracts/schema/schema-contract-ir.json").to_vec(),
+        ),
+        (
+            PUBLIC_SCHEMA_SET_ARTIFACT.into(),
+            canonical_public_schema_set()?,
+        ),
+        (
+            PUBLIC_WIRE_ARTIFACT.into(),
+            include_bytes!("../tooling/proto/production-descriptor.pb").to_vec(),
+        ),
+        (
+            EXTENSION_REGISTRY_ARTIFACT.into(),
+            crate::schema_registry::epoch_extension_registry_bytes()?,
+        ),
+        (CHECKSUM_CONTRACT_ARTIFACT.into(), checksum_contract),
+    ]))
+}
+
+fn protobuf_file_descriptor_count(bytes: &[u8]) -> Result<usize, OntologyProgramError> {
+    fn varint(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
+        let mut value = 0_u64;
+        for shift in (0..=63).step_by(7) {
+            let byte = *bytes.get(*cursor)?;
+            *cursor += 1;
+            value |= u64::from(byte & 0x7f) << shift;
+            if byte & 0x80 == 0 {
+                return Some(value);
+            }
+        }
+        None
+    }
+    let mut cursor = 0;
+    let mut files = 0;
+    while cursor < bytes.len() {
+        let key = varint(bytes, &mut cursor).ok_or_else(|| {
+            OntologyProgramError::Artifact("public wire descriptor has an invalid tag".into())
+        })?;
+        let field = key >> 3;
+        match key & 7 {
+            0 => {
+                varint(bytes, &mut cursor).ok_or_else(|| {
+                    OntologyProgramError::Artifact(
+                        "public wire descriptor has an invalid varint".into(),
+                    )
+                })?;
+            }
+            1 => {
+                cursor = cursor.checked_add(8).ok_or_else(|| {
+                    OntologyProgramError::Artifact("public wire descriptor offset overflow".into())
+                })?;
+            }
+            2 => {
+                let length = usize::try_from(varint(bytes, &mut cursor).ok_or_else(|| {
+                    OntologyProgramError::Artifact(
+                        "public wire descriptor has an invalid length".into(),
+                    )
+                })?)
+                .map_err(|_| {
+                    OntologyProgramError::Artifact(
+                        "public wire descriptor length exceeds the platform".into(),
+                    )
+                })?;
+                cursor = cursor.checked_add(length).ok_or_else(|| {
+                    OntologyProgramError::Artifact("public wire descriptor offset overflow".into())
+                })?;
+                if field == 1 {
+                    files += 1;
+                }
+            }
+            5 => {
+                cursor = cursor.checked_add(4).ok_or_else(|| {
+                    OntologyProgramError::Artifact("public wire descriptor offset overflow".into())
+                })?;
+            }
+            _ => {
+                return Err(OntologyProgramError::Artifact(
+                    "public wire descriptor uses an unsupported protobuf wire type".into(),
+                ));
+            }
+        }
+        if cursor > bytes.len() {
+            return Err(OntologyProgramError::Artifact(
+                "public wire descriptor is truncated".into(),
+            ));
+        }
+    }
+    if files == 0 {
+        return Err(OntologyProgramError::Artifact(
+            "public wire descriptor contains no files".into(),
+        ));
+    }
+    Ok(files)
+}
+
+impl EpochRuntimeAuthority {
+    /// Decode every runtime authority from retained package bytes, never generated globals.
+    pub(crate) fn decode(package: &OntologyProgramPackage) -> Result<Self, OntologyProgramError> {
+        let artifact = |name: &'static str| {
+            package.runtime_artifacts.get(name).ok_or_else(|| {
+                OntologyProgramError::Artifact(format!(
+                    "retained runtime artifact {name} is absent"
+                ))
+            })
+        };
+        let result_schemas = crate::schema_registry::EpochResultSchemaRegistry::decode(artifact(
+            RESULT_CONTRACT_SET_ARTIFACT,
+        )?)?;
+        let table_specs = crate::schema_registry::EpochTableSpecRegistry::decode(artifact(
+            TABLE_CONTRACT_SET_ARTIFACT,
+        )?)?;
+        let extension_registry_bytes = artifact(EXTENSION_REGISTRY_ARTIFACT)?.clone();
+        crate::schema_registry::epoch_extension_type_registrations(&extension_registry_bytes)?;
+        let schema_generation: serde_json::Value =
+            serde_json::from_slice(artifact(SCHEMA_GENERATION_ARTIFACT)?).map_err(|error| {
+                OntologyProgramError::Artifact(format!(
+                    "retained schema-generation IR is invalid: {error}"
+                ))
+            })?;
+        if schema_generation.get("canonical_digest").is_none() {
+            return Err(OntologyProgramError::Artifact(
+                "retained schema-generation IR has no source identity".into(),
+            ));
+        }
+        let public_schemas: PublicSchemaSetArtifact =
+            serde_json::from_slice(artifact(PUBLIC_SCHEMA_SET_ARTIFACT)?).map_err(|error| {
+                OntologyProgramError::Artifact(format!(
+                    "retained public schemas are invalid: {error}"
+                ))
+            })?;
+        if public_schemas.artifact_version != "epoch-public-schema-set.v1"
+            || !public_schemas
+                .schemas
+                .contains_key("cpg-semantic-query-response.schema.json")
+            || public_schemas.schemas.values().any(|schema| {
+                schema
+                    .get("$schema")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none()
+                    || schema
+                        .get("type")
+                        .and_then(serde_json::Value::as_str)
+                        .is_none()
+            })
+        {
+            return Err(OntologyProgramError::Artifact(
+                "retained public schema set is incomplete".into(),
+            ));
+        }
+        let public_wire_file_count =
+            protobuf_file_descriptor_count(artifact(PUBLIC_WIRE_ARTIFACT)?)?;
+        let checksum: ChecksumContractArtifact =
+            serde_json::from_slice(artifact(CHECKSUM_CONTRACT_ARTIFACT)?).map_err(|error| {
+                OntologyProgramError::Artifact(format!(
+                    "retained checksum contract is invalid: {error}"
+                ))
+            })?;
+        if checksum.artifact_version != "epoch-result-checksum-contract.v1"
+            || checksum.selected_version != result_checksum_version(package)?
+        {
+            return Err(OntologyProgramError::Artifact(
+                "retained checksum contract differs from the executable program".into(),
+            ));
+        }
+        let identity = framed(
+            package
+                .manifest
+                .runtime_artifact_identities
+                .iter()
+                .map(|(name, digest)| format!("{name}:{digest}").into_bytes()),
+        );
+        Ok(Self {
+            result_schemas,
+            table_specs,
+            extension_registry_bytes,
+            checksum_version: checksum.selected_version,
+            identity,
+            public_wire_file_count,
+        })
+    }
+
+    pub(crate) fn extension_type_registrations(
+        &self,
+    ) -> Result<Vec<datafusion::logical_expr::registry::ExtensionTypeRegistrationRef>, ArrowError>
+    {
+        crate::schema_registry::epoch_extension_type_registrations(&self.extension_registry_bytes)
+    }
+
+    #[must_use]
+    pub(crate) fn result_schema(&self, identity: &str) -> Option<SchemaRef> {
+        self.result_schemas.result_schema(identity)
+    }
+
+    #[must_use]
+    pub(crate) fn project_result_schema(
+        &self,
+        identity: &str,
+        names: &[&str],
+    ) -> Option<SchemaRef> {
+        self.result_schemas.project_result_schema(identity, names)
+    }
+
+    #[must_use]
+    pub(crate) const fn table_specs(&self) -> &crate::schema_registry::EpochTableSpecRegistry {
+        &self.table_specs
+    }
+
+    #[must_use]
+    pub(crate) fn checksum_version(&self) -> &str {
+        &self.checksum_version
+    }
+
+    #[must_use]
+    pub(crate) fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    #[must_use]
+    pub(crate) const fn public_wire_file_count(&self) -> usize {
+        self.public_wire_file_count
     }
 }
 
@@ -330,6 +680,18 @@ fn package_artifact_manifest(
             })
         })
         .collect::<Vec<_>>();
+    let runtime_artifacts = package
+        .runtime_artifacts
+        .iter()
+        .map(|(artifact_id, bytes)| {
+            serde_json::json!({
+                "artifact_id": artifact_id,
+                "file": artifact_id,
+                "artifact_identity": package.manifest.runtime_artifact_identities[artifact_id],
+                "byte_length": bytes.len(),
+            })
+        })
+        .collect::<Vec<_>>();
     crate::contracts::jcs::canonicalize_value(&serde_json::json!({
         "package_version": package.manifest.package_version,
         "bootstrap_schema_identity": package.manifest.bootstrap_schema_identity,
@@ -337,8 +699,10 @@ fn package_artifact_manifest(
         "logical_program_identity": package.manifest.logical_program_identity,
         "packaging_profile_id": package.manifest.packaging_profile_id,
         "member_identities": package.manifest.member_identities,
+        "runtime_artifact_identities": package.manifest.runtime_artifact_identities,
         "package_identity": package.manifest.package_identity,
         "members": members,
+        "runtime_artifacts": runtime_artifacts,
     }))
     .map_err(|error| OntologyProgramError::Artifact(error.to_string()))
 }
@@ -403,6 +767,22 @@ pub fn verify_installed_ontology_program_package(
         {
             return Err(OntologyProgramError::Artifact(format!(
                 "installed member {relation_id} differs"
+            )));
+        }
+    }
+    for (artifact_id, bytes) in &package.runtime_artifacts {
+        let path = installation.root.join(artifact_id);
+        let installed = fs::read(&path).map_err(|source| artifact_io(&path, source))?;
+        let expected_identity = framed([artifact_id.as_bytes(), installed.as_slice()]);
+        if installed != *bytes
+            || package
+                .manifest
+                .runtime_artifact_identities
+                .get(artifact_id)
+                != Some(&expected_identity)
+        {
+            return Err(OntologyProgramError::Artifact(format!(
+                "installed runtime artifact {artifact_id} differs"
             )));
         }
     }
@@ -476,6 +856,9 @@ pub fn install_ontology_program_package(
                 )));
             }
             write_private_file(&staged.member_path(relation_id), &member.ipc_bytes)?;
+        }
+        for (artifact_id, bytes) in &package.runtime_artifacts {
+            write_private_file(&staged.root.join(artifact_id), bytes)?;
         }
         write_private_file(&staged.manifest_path, &package_artifact_manifest(package)?)?;
         sync_artifact_directory(&stage)?;
@@ -557,6 +940,33 @@ pub fn load_installed_ontology_program_package(
             ));
         }
     }
+    let mut runtime_artifacts = BTreeMap::new();
+    for retained in artifact.runtime_artifacts {
+        if !REQUIRED_RUNTIME_ARTIFACTS.contains(&retained.artifact_id.as_str())
+            || retained.file != retained.artifact_id
+            || artifact
+                .runtime_artifact_identities
+                .get(&retained.artifact_id)
+                != Some(&retained.artifact_identity)
+        {
+            return Err(OntologyProgramError::Artifact(
+                "installed package contains an unsafe runtime artifact address".into(),
+            ));
+        }
+        let path = root.join(&retained.file);
+        let bytes = fs::read(&path).map_err(|source| artifact_io(&path, source))?;
+        if bytes.len() != retained.byte_length
+            || framed([retained.artifact_id.as_bytes(), bytes.as_slice()])
+                != retained.artifact_identity
+            || runtime_artifacts
+                .insert(retained.artifact_id, bytes)
+                .is_some()
+        {
+            return Err(OntologyProgramError::Artifact(
+                "installed runtime artifact differs from its manifest".into(),
+            ));
+        }
+    }
     let package = OntologyProgramPackage {
         manifest: OntologyProgramManifest {
             package_version: artifact.package_version,
@@ -565,9 +975,11 @@ pub fn load_installed_ontology_program_package(
             logical_program_identity: artifact.logical_program_identity,
             packaging_profile_id: artifact.packaging_profile_id,
             member_identities: artifact.member_identities,
+            runtime_artifact_identities: artifact.runtime_artifact_identities,
             package_identity: artifact.package_identity,
         },
         members,
+        runtime_artifacts,
     };
     validate_ontology_program_package(&package)?;
     Ok(package)
@@ -920,9 +1332,28 @@ pub fn build_ontology_program_package(
         ));
     }
     let members = generated_program_members(profile.max_rows_per_batch)?;
-
-    let manifest = manifest_for_members(&profile.profile_id, &members);
-    let package = OntologyProgramPackage { manifest, members };
+    let result_bindings = members
+        .get("program.result_binding")
+        .ok_or_else(|| OntologyProgramError::Contract("program.result_binding is absent".into()))?;
+    let versions = strings(&result_bindings.batches[0], "checksum_algorithm_version")?;
+    let checksum_versions = (0..result_bindings.batches[0].num_rows())
+        .map(|row| versions.value(row))
+        .collect::<BTreeSet<_>>();
+    if checksum_versions.len() != 1 {
+        return Err(OntologyProgramError::Contract(
+            "result bindings do not select exactly one checksum algorithm".into(),
+        ));
+    }
+    let checksum_version = checksum_versions.iter().next().copied().ok_or_else(|| {
+        OntologyProgramError::Contract("result bindings do not select a checksum algorithm".into())
+    })?;
+    let runtime_artifacts = build_runtime_artifacts(checksum_version)?;
+    let manifest = manifest_for_members(&profile.profile_id, &members, &runtime_artifacts);
+    let package = OntologyProgramPackage {
+        manifest,
+        members,
+        runtime_artifacts,
+    };
     validate_ontology_program_package(&package)?;
     Ok(package)
 }
@@ -942,6 +1373,23 @@ pub fn validate_ontology_program_package(
             "member census differs from manifest".into(),
         ));
     }
+    if package
+        .runtime_artifacts
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>()
+        != REQUIRED_RUNTIME_ARTIFACTS.into_iter().collect()
+        || package.runtime_artifacts.keys().collect::<BTreeSet<_>>()
+            != package
+                .manifest
+                .runtime_artifact_identities
+                .keys()
+                .collect()
+    {
+        return Err(OntologyProgramError::Contract(
+            "runtime authority artifact census differs from manifest".into(),
+        ));
+    }
     for (name, member) in &package.members {
         let expected = framed([name.as_bytes(), member.ipc_bytes.as_slice()]);
         if member.relation_id != *name
@@ -958,7 +1406,23 @@ pub fn validate_ontology_program_package(
             )));
         }
     }
-    let expected = manifest_for_members(&package.manifest.packaging_profile_id, &package.members);
+    for (name, bytes) in &package.runtime_artifacts {
+        let expected = framed([name.as_bytes(), bytes.as_slice()]);
+        if package.manifest.runtime_artifact_identities.get(name) != Some(&expected) {
+            return Err(OntologyProgramError::Digest(name.clone()));
+        }
+    }
+    crate::schema_registry::EpochResultSchemaRegistry::decode(
+        &package.runtime_artifacts[RESULT_CONTRACT_SET_ARTIFACT],
+    )?;
+    crate::schema_registry::epoch_extension_type_registrations(
+        &package.runtime_artifacts[EXTENSION_REGISTRY_ARTIFACT],
+    )?;
+    let expected = manifest_for_members(
+        &package.manifest.packaging_profile_id,
+        &package.members,
+        &package.runtime_artifacts,
+    );
     if package.manifest != expected {
         return Err(OntologyProgramError::Digest(
             "package manifest identity closure".into(),
@@ -967,13 +1431,22 @@ pub fn validate_ontology_program_package(
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) fn reseal_ontology_program_package(
+/// Recompute the complete package identity after a trusted compiler changes program/runtime
+/// members. This grants no activation authority; installation and owner acceptance remain
+/// separate authenticated steps.
+///
+/// # Errors
+///
+/// Rejects an incomplete or internally inconsistent resealed package.
+pub fn reseal_ontology_program_package(
     package: &mut OntologyProgramPackage,
 ) -> Result<(), OntologyProgramError> {
     refresh_bootstrap_member(package)?;
-    package.manifest =
-        manifest_for_members(&package.manifest.packaging_profile_id, &package.members);
+    package.manifest = manifest_for_members(
+        &package.manifest.packaging_profile_id,
+        &package.members,
+        &package.runtime_artifacts,
+    );
     validate_ontology_program_package(package)
 }
 
@@ -1079,7 +1552,6 @@ pub(crate) fn replace_program_bool_cell(
     reseal_ontology_program_package(package)
 }
 
-#[cfg(test)]
 fn refresh_bootstrap_member(
     package: &mut OntologyProgramPackage,
 ) -> Result<(), OntologyProgramError> {
@@ -1140,7 +1612,6 @@ fn refresh_bootstrap_member(
     replace_member_batch(bootstrap, batch)
 }
 
-#[cfg(test)]
 fn replace_member_batch(
     member: &mut OntologyProgramMember,
     batch: RecordBatch,
@@ -1163,9 +1634,11 @@ mod tests {
     use arrow_array::{Array as _, StringArray};
 
     use super::{
-        CandidateProgramBinding, OntologyPackagingProfile, build_ontology_program_package,
+        CandidateProgramBinding, EpochRuntimeAuthority, OntologyPackagingProfile,
+        RESULT_CONTRACT_SET_ARTIFACT, build_ontology_program_package,
         install_ontology_program_package, load_installed_ontology_program_package,
-        replace_program_utf8_cell, validate_ontology_program_package,
+        replace_program_utf8_cell, reseal_ontology_program_package, result_checksum_version,
+        validate_ontology_program_package,
     };
     use crate::ontology_executor::OntologyProgramCompiler;
 
@@ -1328,6 +1801,20 @@ mod tests {
             .join("ontology-programs")
             .join(second.manifest.package_identity.trim_start_matches("b3:"));
         let manifest_path = second_root.join("manifest.json");
+        let result_contract_path = second_root.join(RESULT_CONTRACT_SET_ARTIFACT);
+        let result_contract_bytes =
+            std::fs::read(&result_contract_path).expect("read retained result-contract artifact");
+        let mut corrupted_result_contract = result_contract_bytes.clone();
+        corrupted_result_contract.push(b'\n');
+        std::fs::write(&result_contract_path, corrupted_result_contract)
+            .expect("corrupt retained result-contract artifact");
+        assert!(
+            load_installed_ontology_program_package(root.path(), &second.manifest.package_identity)
+                .is_err(),
+            "retained runtime artifact tamper must fail before session construction"
+        );
+        std::fs::write(&result_contract_path, result_contract_bytes)
+            .expect("restore retained result-contract artifact");
         std::fs::write(&manifest_path, b"{}\n").expect("corrupt retained manifest");
         assert!(
             load_installed_ontology_program_package(root.path(), &second.manifest.package_identity)
@@ -1341,6 +1828,61 @@ mod tests {
             )
             .is_err(),
             "missing retained package must fail closed"
+        );
+    }
+
+    #[test]
+    fn epoch_runtime_schema_variant_is_decoded_and_result_authority_bound() {
+        let base = build_ontology_program_package(&OntologyPackagingProfile::default())
+            .expect("base epoch package");
+        let mut variant = base.clone();
+        let bytes = variant
+            .runtime_artifacts
+            .get_mut(RESULT_CONTRACT_SET_ARTIFACT)
+            .expect("result contracts");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(bytes).expect("decode retained schemas");
+        value["schemas"]["result.find_entities.v2"]["metadata"]
+            .as_object_mut()
+            .expect("schema metadata")
+            .insert(
+                "epoch-test".into(),
+                serde_json::Value::String("variant".into()),
+            );
+        *bytes = crate::contracts::jcs::canonicalize_value(&value)
+            .expect("canonical retained schema variant");
+        reseal_ontology_program_package(&mut variant).expect("reseal variant");
+
+        let base_runtime = EpochRuntimeAuthority::decode(&base).expect("base runtime");
+        let variant_runtime = EpochRuntimeAuthority::decode(&variant).expect("variant runtime");
+        assert_ne!(base_runtime.identity(), variant_runtime.identity());
+        let compiler = OntologyProgramCompiler::decode(&variant).expect("variant compiler");
+        assert_eq!(
+            compiler
+                .result_schema("result.find_entities.v2")
+                .expect("retained variant result schema")
+                .metadata()
+                .get("epoch-test")
+                .map(String::as_str),
+            Some("variant")
+        );
+        let pin = |runtime: &EpochRuntimeAuthority| crate::snapshot::ResultAuthorityPin {
+            result_authority_identity: String::new(),
+            package_identity: base.manifest.package_identity.clone(),
+            epoch_runtime_authority_identity: runtime.identity().to_owned(),
+            program_identity: base.manifest.logical_program_identity.clone(),
+            function_catalog_identity:
+                base.manifest.member_identities["program.calculation_contract"].clone(),
+            policy_identity: "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
+            query_form_identity: base.manifest.member_identities["program.phrase_binding"].clone(),
+            checksum_version: result_checksum_version(&base).expect("checksum"),
+            exact_table_set_identity:
+                "b3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+        };
+        assert_ne!(
+            crate::snapshot::governed_result_authority_identity(&pin(&base_runtime)),
+            crate::snapshot::governed_result_authority_identity(&pin(&variant_runtime))
         );
     }
 }

@@ -338,6 +338,20 @@ impl GovernedSession {
         Self::new_with_runtime(config, package, GovernedRuntimeProfile::default())
     }
 
+    /// Construct a proof session from an authenticated executable epoch package. The returned
+    /// session remains sealed; callers receive no plan-registration or mutation capability.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a package whose retained policy/runtime authority is invalid or a session config
+    /// that cannot be closed under the generated governance policy.
+    pub fn for_epoch_package(
+        config: SessionConfig,
+        package: &crate::ontology_program::OntologyProgramPackage,
+    ) -> Result<Self, GovernedSessionError> {
+        Self::new_for_package(config, package)
+    }
+
     /// Construct a session with an explicit versioned memory, spill, batch, partition, and
     /// deadline profile.
     ///

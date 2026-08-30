@@ -33,6 +33,10 @@ use crate::snapshot_runtime::{ServingSnapshotCandidate, SnapshotRuntimeError};
 pub struct OntologyCandidateSubmission {
     pub publication: PublicationOutcome,
     pub manifest_body: ServingSnapshotManifestBody,
+    /// Optional retained epoch whose authenticated package is to be activated forward again.
+    /// The server resolves this identity; callers cannot supply package bytes or a package ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_program_epoch_identity: Option<String>,
     #[serde(default)]
     pub source_blob_digests: Vec<[u8; 32]>,
     pub rollback_retain_until: i64,
@@ -189,13 +193,27 @@ impl OntologyActivationCoordinator {
             }
         }
         let predecessor = active.map(|authority| authority.epoch_identity);
-        let package = crate::ontology_program::build_ontology_program_package(
-            &crate::ontology_program::OntologyPackagingProfile::default(),
-        )?;
-        crate::ontology_program::install_ontology_program_package(
-            &store.artifact_root(),
-            &package,
-        )?;
+        let package =
+            if let Some(epoch_identity) = submission.retained_program_epoch_identity.as_deref() {
+                let package_identity = store.resolve_retained_epoch_package_identity(
+                    workspace_id,
+                    epoch_identity,
+                    requested_at,
+                )?;
+                crate::ontology_program::load_installed_ontology_program_package(
+                    &store.artifact_root(),
+                    &package_identity,
+                )?
+            } else {
+                let package = crate::ontology_program::build_ontology_program_package(
+                    &crate::ontology_program::OntologyPackagingProfile::default(),
+                )?;
+                crate::ontology_program::install_ontology_program_package(
+                    &store.artifact_root(),
+                    &package,
+                )?;
+                package
+            };
         let session = crate::governed_session::GovernedSession::new_for_package(
             datafusion::prelude::SessionConfig::new(),
             &package,
@@ -347,6 +365,8 @@ async fn staged_snapshot(
     manifest_body.manifest_version = "2.0".into();
     manifest_body.result_authority = Some(ResultAuthorityPin {
         result_authority_identity: evidence.result_authority_identity.clone(),
+        package_identity: evidence.package_identity.clone(),
+        epoch_runtime_authority_identity: evidence.epoch_runtime_authority_identity.clone(),
         program_identity: evidence.program_identity.clone(),
         function_catalog_identity: evidence.function_catalog_identity.clone(),
         policy_identity: evidence.result_policy_identity.clone(),

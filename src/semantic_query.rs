@@ -1509,7 +1509,10 @@ fn dependency_identity(role: ResultRole) -> Result<&'static str, SemanticQueryEr
     }
 }
 
-fn dependency_schema(role: ResultRole) -> Result<SchemaRef, SemanticQueryError> {
+fn dependency_schema(
+    compiler: &OntologyProgramCompiler,
+    role: ResultRole,
+) -> Result<SchemaRef, SemanticQueryError> {
     let result_schema_id = match role {
         ResultRole::Entities => "result.find_entities.v2",
         ResultRole::Facts => "result.retrieve_facts.v2",
@@ -1526,26 +1529,31 @@ fn dependency_schema(role: ResultRole) -> Result<SchemaRef, SemanticQueryError> 
             ));
         }
     };
-    crate::schema_registry::project_result_schema(
-        result_schema_id,
-        &[
-            dependency_identity(role)?,
-            "origin_query_id",
-            "certainty_code",
-        ],
-    )
-    .ok_or_else(|| {
-        phase_error(
-            "QUERY_RESULT_SCHEMA_MISSING",
-            "logical_compile",
-            "",
-            format!("compiled dependency projection {result_schema_id} is absent"),
+    compiler
+        .project_result_schema(
+            result_schema_id,
+            &[
+                dependency_identity(role)?,
+                "origin_query_id",
+                "certainty_code",
+            ],
         )
-    })
+        .ok_or_else(|| {
+            phase_error(
+                "QUERY_RESULT_SCHEMA_MISSING",
+                "logical_compile",
+                "",
+                format!("compiled dependency projection {result_schema_id} is absent"),
+            )
+        })
 }
 
-fn empty_dependency_plan(name: &str, role: ResultRole) -> Result<LogicalPlan, SemanticQueryError> {
-    let schema = dependency_schema(role)?;
+fn empty_dependency_plan(
+    compiler: &OntologyProgramCompiler,
+    name: &str,
+    role: ResultRole,
+) -> Result<LogicalPlan, SemanticQueryError> {
+    let schema = dependency_schema(compiler, role)?;
     let empty = RecordBatch::new_empty(Arc::clone(&schema));
     let provider = Arc::new(MemTable::try_new(schema, vec![vec![empty]])?);
     Ok(LogicalPlanBuilder::scan(
@@ -1618,6 +1626,7 @@ fn combine_plans(
 }
 
 fn compile_combine_template(
+    compiler: &OntologyProgramCompiler,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<(LogicalPlan, RelationalRuntime), SemanticQueryError> {
@@ -1673,7 +1682,9 @@ fn compile_combine_template(
     )?;
     let identity_column = dependency_identity(identity_role)?;
     let plans = (0..inputs.len())
-        .map(|index| empty_dependency_plan(&format!("query_input_{index}"), identity_role))
+        .map(|index| {
+            empty_dependency_plan(compiler, &format!("query_input_{index}"), identity_role)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let combined = combine_plans(plans, operation, identity_column)?;
     let builder = LogicalPlanBuilder::from(combined).project(vec![
@@ -1691,6 +1702,7 @@ fn compile_combine_template(
 }
 
 fn compile_summary_template(
+    compiler: &OntologyProgramCompiler,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<(LogicalPlan, RelationalRuntime), SemanticQueryError> {
@@ -1713,7 +1725,7 @@ fn compile_summary_template(
         .copied()
         .unwrap_or(ResultRole::Facts);
     let identity = dependency_identity(role)?;
-    let input = empty_dependency_plan("query_input_summary", role)?;
+    let input = empty_dependency_plan(compiler, "query_input_summary", role)?;
     let summary_name = summaries.first().ok_or_else(|| {
         phase_error(
             "QUERY_SUMMARY_REQUIRED",
@@ -1743,6 +1755,7 @@ fn compile_summary_template(
 }
 
 fn compile_source_context_template(
+    compiler: &OntologyProgramCompiler,
     typed: &TypedQueryBlock,
     query: &SemanticQueryClause,
 ) -> Result<(LogicalPlan, RelationalRuntime), SemanticQueryError> {
@@ -1785,7 +1798,8 @@ fn compile_source_context_template(
             ));
         }
     };
-    let schema = crate::schema_registry::result_schema("result.retrieve_source_context.v2")
+    let schema = compiler
+        .result_schema("result.retrieve_source_context.v2")
         .ok_or_else(|| {
             phase_error(
                 "QUERY_RESULT_SCHEMA_MISSING",
@@ -1835,15 +1849,15 @@ async fn lower_relational_block(
             RelationalRuntime::Snapshot,
         ),
         QueryForm::CombineResults => {
-            let (plan, runtime) = compile_combine_template(typed, query)?;
+            let (plan, runtime) = compile_combine_template(compiler, typed, query)?;
             (plan, Vec::new(), "group_key", runtime)
         }
         QueryForm::SummarizeFacts => {
-            let (plan, runtime) = compile_summary_template(typed, query)?;
+            let (plan, runtime) = compile_summary_template(compiler, typed, query)?;
             (plan, Vec::new(), "group_key", runtime)
         }
         QueryForm::RetrieveSourceContext => {
-            let (plan, runtime) = compile_source_context_template(typed, query)?;
+            let (plan, runtime) = compile_source_context_template(compiler, typed, query)?;
             (
                 plan,
                 vec!["entities", "relations", "properties", "files"],
@@ -1969,7 +1983,10 @@ fn graph_certainty_codes(
     Ok(codes.into_iter().collect())
 }
 
-fn graph_output_schema(form: QueryForm) -> Result<SchemaRef, SemanticQueryError> {
+fn graph_output_schema(
+    compiler: &OntologyProgramCompiler,
+    form: QueryForm,
+) -> Result<SchemaRef, SemanticQueryError> {
     let result_schema_id = match form {
         QueryForm::FollowRelationships => "result.follow_relationships.v2",
         QueryForm::FindPaths => "result.find_paths.v2",
@@ -1983,7 +2000,7 @@ fn graph_output_schema(form: QueryForm) -> Result<SchemaRef, SemanticQueryError>
             ));
         }
     };
-    crate::schema_registry::result_schema(result_schema_id).ok_or_else(|| {
+    compiler.result_schema(result_schema_id).ok_or_else(|| {
         phase_error(
             "QUERY_RESULT_SCHEMA_MISSING",
             "logical_compile",
@@ -2107,7 +2124,7 @@ fn graph_operator_plan(
         certainty_codes: graph_certainty_codes(compiler, query)?,
         input_roles: typed.input_roles.clone(),
         output_role: typed.output_role,
-        output_schema: graph_output_schema(typed.form)?,
+        output_schema: graph_output_schema(compiler, typed.form)?,
         canonical_order: typed.canonical_order.clone(),
         maximum_results: typed.limit.first,
         maximum_depth,
@@ -5262,7 +5279,8 @@ mod tests {
             .iter()
             .find(|query| query.form() == QueryForm::CombineResults)
             .unwrap();
-        let error = compile_combine_template(block, query).unwrap_err();
+        let error =
+            compile_combine_template(&ontology_compiler().unwrap(), block, query).unwrap_err();
         assert!(error.to_string().contains("QUERY_IDENTITY_DOMAIN_MISMATCH"));
 
         let mut uncovered: serde_json::Value =

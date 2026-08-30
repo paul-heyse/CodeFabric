@@ -122,12 +122,43 @@ pub struct SnapshotBundles {
 #[serde(deny_unknown_fields)]
 pub struct ResultAuthorityPin {
     pub result_authority_identity: String,
+    pub package_identity: String,
+    pub epoch_runtime_authority_identity: String,
     pub program_identity: String,
     pub function_catalog_identity: String,
     pub policy_identity: String,
     pub query_form_identity: String,
     pub checksum_version: String,
     pub exact_table_set_identity: String,
+}
+
+impl ResultAuthorityPin {
+    /// Rebind the data-dependent portion of a governed result authority to one exact provider
+    /// set. Program, function, policy, query-form, and checksum authority remain unchanged.
+    pub(crate) fn rebind_exact_table_set(&mut self, exact_table_set_identity: String) {
+        self.exact_table_set_identity = exact_table_set_identity;
+        self.result_authority_identity = governed_result_authority_identity(self);
+    }
+}
+
+/// Recompute the content identity used by every governed result-authority producer.
+pub(crate) fn governed_result_authority_identity(authority: &ResultAuthorityPin) -> String {
+    let mut bytes = Vec::new();
+    for part in [
+        b"ontology-result-authority.v1".as_slice(),
+        authority.package_identity.as_bytes(),
+        authority.epoch_runtime_authority_identity.as_bytes(),
+        authority.program_identity.as_bytes(),
+        authority.function_catalog_identity.as_bytes(),
+        authority.policy_identity.as_bytes(),
+        authority.query_form_identity.as_bytes(),
+        authority.checksum_version.as_bytes(),
+        authority.exact_table_set_identity.as_bytes(),
+    ] {
+        bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(part);
+    }
+    crate::integrity::framed_digest(&bytes)
 }
 
 /// Canonical READY-snapshot bytes passed only between the trusted proof coordinator and the
@@ -826,6 +857,20 @@ impl ServingSnapshotManifestBody {
                         digest(
                             &authority.result_authority_identity,
                             "result_authority.result_authority_identity",
+                        )?,
+                    ),
+                    (
+                        "package_identity",
+                        digest(
+                            &authority.package_identity,
+                            "result_authority.package_identity",
+                        )?,
+                    ),
+                    (
+                        "epoch_runtime_authority_identity",
+                        digest(
+                            &authority.epoch_runtime_authority_identity,
+                            "result_authority.epoch_runtime_authority_identity",
                         )?,
                     ),
                     (

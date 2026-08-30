@@ -16,11 +16,10 @@ use crate::fabric::SnapshotProviderCatalog;
 use crate::identity::{
     IdentityDomain, decode_public_id, encode_public_id, random_registration_nonce,
 };
-use crate::operational_store::{ActiveOntologyAuthority, OperationalStore, OperationalStoreError};
-use crate::registries::{
-    Phase, ServingActivationState, SnapshotLeaseKind, SnapshotLeaseState,
-    WorkspaceRegistryLifecycle,
-};
+use crate::operational_store::{OperationalStore, OperationalStoreError};
+#[cfg(test)]
+use crate::registries::WorkspaceRegistryLifecycle;
+use crate::registries::{Phase, ServingActivationState, SnapshotLeaseKind, SnapshotLeaseState};
 use crate::snapshot::{
     ResultAuthorityPin, ServingSnapshotManifest, ServingSnapshotManifestBody,
     SnapshotBasePublication, SnapshotBaseTable, SnapshotManifestError,
@@ -78,6 +77,29 @@ pub enum SnapshotActivationStage {
 
 /// Phase-carrying activation failure with every stage attempted before the failure.
 pub type SnapshotActivationError = ErrorEnvelope<SnapshotRuntimeError, SnapshotActivationStage>;
+
+/// Nonconstructible proof that the durable predecessor classified a candidate as an ordinary
+/// fact publication under the currently active retained semantic package.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OrdinarySnapshotActivationPermit {
+    workspace: [u8; 16],
+    snapshot: [u8; 16],
+    predecessor_snapshot: Option<[u8; 16]>,
+}
+
+impl OrdinarySnapshotActivationPermit {
+    pub(crate) const fn workspace(&self) -> [u8; 16] {
+        self.workspace
+    }
+
+    pub(crate) const fn snapshot(&self) -> [u8; 16] {
+        self.snapshot
+    }
+
+    pub(crate) const fn predecessor_snapshot(&self) -> Option<[u8; 16]> {
+        self.predecessor_snapshot
+    }
+}
 
 fn snapshot_runtime_public_code(error: &SnapshotRuntimeError) -> &'static str {
     match error {
@@ -140,6 +162,9 @@ impl ServingSnapshotCandidate {
         body.overlay.overlay_digest = framed_digest(providers.overlay_checksum());
         body.overlay.total_memory_bytes = providers.overlay_memory_bytes();
         body.overlay.tables = providers.overlay_tables().to_vec();
+        if let Some(authority) = body.result_authority.as_mut() {
+            authority.rebind_exact_table_set(providers.exact_table_set_identity());
+        }
         let mut unique_blobs = source_blob_digests.to_vec();
         unique_blobs.sort_unstable();
         unique_blobs.dedup();
@@ -191,6 +216,15 @@ impl ServingSnapshotCandidate {
         if manifest.body.base_publication.tables.len() != providers.provider_records().len() {
             return Err(SnapshotRuntimeError::Candidate(
                 "manifest table census differs from frozen catalog".into(),
+            ));
+        }
+        if let Some(authority) = manifest.body.result_authority.as_ref()
+            && (authority.exact_table_set_identity != providers.exact_table_set_identity()
+                || authority.result_authority_identity
+                    != crate::snapshot::governed_result_authority_identity(authority))
+        {
+            return Err(SnapshotRuntimeError::Candidate(
+                "result authority is not bound to the frozen exact provider set".into(),
             ));
         }
         for table in &manifest.body.base_publication.tables {
@@ -259,6 +293,208 @@ impl ServingSnapshotCandidate {
             result_authority: self.manifest.body.result_authority.clone(),
         })
     }
+
+    /// Reconstruct one immutable provider graph solely from its durable manifest and exact
+    /// Delta versions. No caller-retained provider or candidate object participates.
+    ///
+    /// # Errors
+    ///
+    /// Rejects absent or altered manifest bytes, in-memory overlays, malformed exact tuples,
+    /// unavailable Delta versions, or provider/schema/content drift.
+    #[allow(clippy::too_many_lines)] // Reconstruction authenticates the complete durable provider closure.
+    pub async fn reconstruct_durable(
+        store: &OperationalStore,
+        snapshot_id: [u8; 16],
+    ) -> Result<Arc<Self>, SnapshotRuntimeError> {
+        let (manifest_json, manifest_body, manifest_digest) = store
+            .reader_factory()
+            .open()?
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT manifest_json_bytes, manifest_body_bytes, manifest_digest
+                         FROM serving_snapshot_manifest WHERE snapshot_id=?1",
+                        [snapshot_id.as_slice()],
+                        |row| {
+                            Ok((
+                                row.get::<_, Vec<u8>>(0)?,
+                                row.get::<_, Vec<u8>>(1)?,
+                                row.get::<_, Vec<u8>>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()
+            })?
+            .ok_or_else(|| SnapshotRuntimeError::Candidate("durable snapshot is absent".into()))?;
+        let manifest: ServingSnapshotManifest = serde_json::from_slice(&manifest_json)
+            .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))?;
+        manifest.validate()?;
+        if manifest.raw_snapshot_id()? != snapshot_id
+            || manifest.body.canonical_body()? != manifest_body
+            || manifest.raw_manifest_digest()?.as_slice() != manifest_digest
+        {
+            return Err(SnapshotRuntimeError::Candidate(
+                "durable snapshot manifest bytes or identity differ".into(),
+            ));
+        }
+        if manifest.body.overlay.overlay_generation != 0 || !manifest.body.overlay.tables.is_empty()
+        {
+            return Err(SnapshotRuntimeError::Candidate(
+                "durable reconstruction requires a consolidated generation-zero overlay".into(),
+            ));
+        }
+        let workspace_id = manifest.raw_workspace_id()?;
+        let publication_id = manifest.raw_publication_id()?;
+        let analysis_context_ids = manifest.raw_analysis_context_ids()?;
+        let analysis_context_set_id = decode_public_id(
+            IdentityDomain::ContextSet,
+            None,
+            &manifest.body.contexts.context_set_id,
+        )?;
+        let source_generation = i64::try_from(manifest.body.source.source_generation)
+            .map_err(|_| SnapshotRuntimeError::Candidate("source generation exceeds i64".into()))?;
+        let retained_runtime = manifest
+            .body
+            .result_authority
+            .as_ref()
+            .map(|pin| {
+                crate::ontology_program::load_installed_ontology_program_package(
+                    &store.artifact_root(),
+                    &pin.package_identity,
+                )
+                .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))
+                .and_then(|package| {
+                    if package.manifest.package_identity != pin.package_identity {
+                        return Err(SnapshotRuntimeError::Candidate(
+                            "retained package identity differs from the snapshot pin".into(),
+                        ));
+                    }
+                    let runtime = crate::ontology_program::EpochRuntimeAuthority::decode(&package)
+                        .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))?;
+                    if runtime.identity() != pin.epoch_runtime_authority_identity {
+                        return Err(SnapshotRuntimeError::Candidate(
+                            "retained runtime identity differs from the snapshot pin".into(),
+                        ));
+                    }
+                    Ok(runtime)
+                })
+            })
+            .transpose()?;
+        let mut tables = std::collections::BTreeMap::new();
+        for table in &manifest.body.base_publication.tables {
+            let table_code = i16::try_from(table.table_code)
+                .map_err(|_| SnapshotRuntimeError::Candidate("table code exceeds i16".into()))?;
+            let required = if let Some(runtime) = &retained_runtime {
+                runtime
+                    .table_specs()
+                    .spec(table_code)
+                    .ok_or_else(|| {
+                        SnapshotRuntimeError::Candidate(format!(
+                            "retained epoch has no exact table {table_code}"
+                        ))
+                    })?
+                    .required_for_publication
+            } else {
+                crate::schema_registry::table_spec(table_code)
+                    .ok_or_else(|| {
+                        SnapshotRuntimeError::Candidate(format!(
+                            "unknown legacy exact table {table_code}"
+                        ))
+                    })?
+                    .required_for_publication
+            };
+            let record = crate::fabric::PublicationTableRecord {
+                publication_id,
+                workspace_id,
+                table_code,
+                table_uri: table.table_uri.clone(),
+                delta_version: table.delta_version,
+                schema_fingerprint: decode_b3_digest(
+                    &table.schema_digest,
+                    "base_publication.tables.schema_digest",
+                )?,
+                row_count: i64::try_from(table.row_count).map_err(|_| {
+                    SnapshotRuntimeError::Candidate("table row count exceeds i64".into())
+                })?,
+                // Owner count is not a semantic/provider identity and is not used to construct
+                // the exact Delta provider. The reopened provider is authenticated by schema,
+                // row count, primary key, and content digest below.
+                owner_count: 0,
+                table_checksum: decode_b3_digest(
+                    &table.effective_content_digest,
+                    "base_publication.tables.effective_content_digest",
+                )?,
+                primary_key_digest: decode_b3_digest(
+                    &table.primary_key_digest,
+                    "base_publication.tables.primary_key_digest",
+                )?,
+                required,
+                validated: true,
+            };
+            if tables.insert(table_code, record).is_some() {
+                return Err(SnapshotRuntimeError::Candidate(format!(
+                    "duplicate exact table {table_code}"
+                )));
+            }
+        }
+        let publication = crate::fabric::PublicationOutcome {
+            publication_id,
+            scope: crate::fabric::PublicationScope {
+                workspace_id,
+                source_generation,
+                analysis_context_set_id,
+                analysis_context_ids,
+            },
+            pointer: crate::fabric::CurrentPublicationRecord {
+                workspace_id,
+                publication_id,
+                pointer_generation: 0,
+                updated_at_micros: 0,
+            },
+            tables,
+        };
+        let providers = Arc::new(if let Some(runtime) = &retained_runtime {
+            SnapshotProviderCatalog::build_retained(
+                &publication,
+                &crate::fabric::EmptySnapshotOverlay,
+                runtime.table_specs(),
+            )
+            .await
+            .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))?
+        } else {
+            SnapshotProviderCatalog::build(&publication, &crate::fabric::EmptySnapshotOverlay)
+                .await
+                .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))?
+        });
+        let source_blob_digests = manifest.raw_source_blob_digests()?;
+        Ok(Arc::new(Self::validate_and_bind(
+            manifest,
+            providers,
+            &source_blob_digests,
+        )?))
+    }
+}
+
+fn decode_b3_digest(value: &str, field: &'static str) -> Result<[u8; 32], SnapshotRuntimeError> {
+    let payload = value
+        .strip_prefix("b3:")
+        .ok_or_else(|| SnapshotRuntimeError::Candidate(format!("{field} is not b3")))?;
+    if payload.len() != 64 || !payload.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(SnapshotRuntimeError::Candidate(format!(
+            "{field} has invalid digest bytes"
+        )));
+    }
+    let mut decoded = [0_u8; 32];
+    for (index, byte) in decoded.iter_mut().enumerate() {
+        let chunk = &payload.as_bytes()[index * 2..index * 2 + 2];
+        *byte = u8::from_str_radix(
+            std::str::from_utf8(chunk)
+                .map_err(|_| SnapshotRuntimeError::Candidate(format!("{field} is not UTF-8")))?,
+            16,
+        )
+        .map_err(|_| SnapshotRuntimeError::Candidate(format!("{field} is not hexadecimal")))?;
+    }
+    Ok(decoded)
 }
 
 /// Process-local active snapshot pointer backed by durable `SQLite` activation state.
@@ -291,56 +527,152 @@ impl ServingSnapshotRuntime {
         now: u64,
         fault: Option<SnapshotActivationFaultPoint>,
     ) -> Result<Vec<SnapshotActivationStage>, SnapshotActivationError> {
-        let workspace_id = candidate.manifest.raw_workspace_id().map_err(|source| {
-            ErrorEnvelope::new(
-                Phase::SnapshotActivation,
-                "INTERNAL_INVARIANT_VIOLATION",
-                vec![SnapshotActivationStage::CandidateValidated],
-                SnapshotRuntimeError::Manifest(source),
-            )
-        })?;
-        let active = store
-            .active_ontology_authority(workspace_id)
+        let permit = Self::classify_ordinary_candidate(store, &candidate, expected_predecessor)
             .map_err(|source| {
                 ErrorEnvelope::new(
                     Phase::SnapshotActivation,
-                    "INTERNAL_INVARIANT_VIOLATION",
+                    snapshot_runtime_public_code(&source),
                     vec![SnapshotActivationStage::CandidateValidated],
-                    SnapshotRuntimeError::Store(source),
+                    source,
                 )
             })?;
-        let preserves_authority = match (active, &candidate.manifest.body.result_authority) {
-            (None, None) => true,
-            (Some(active), Some(pin)) => {
-                pin.result_authority_identity == active.result_authority_identity
-                    && pin.program_identity == active.program_identity
-                    && pin.function_catalog_identity == active.function_catalog_identity
-                    && pin.policy_identity == active.policy_identity
-                    && pin.query_form_identity == active.query_form_identity
-                    && pin.checksum_version == active.checksum_version
-                    && pin.exact_table_set_identity == active.exact_table_set_identity
-            }
-            _ => false,
-        };
-        if !preserves_authority {
-            return Err(ErrorEnvelope::new(
-                Phase::SnapshotActivation,
-                "CURRENT_POINTER_CONFLICT",
-                vec![SnapshotActivationStage::CandidateValidated],
-                SnapshotRuntimeError::PointerConflict(
-                    "ordinary fact activation cannot change ontology/result authority".into(),
-                ),
-            ));
-        }
-        self.commit_fact_snapshot(
+        self.commit_permitted_fact_snapshot(
             store,
             candidate,
+            permit,
             expected_predecessor,
             expected_active_pointer_generation,
             observed_durable_pointer_generation,
             now,
             fault,
         )
+    }
+
+    /// Derive candidate class from the complete durable predecessor; callers never name it.
+    #[allow(clippy::too_many_lines)] // The classifier compares the full protected manifest and retained package.
+    fn classify_ordinary_candidate(
+        store: &OperationalStore,
+        candidate: &ServingSnapshotCandidate,
+        expected_predecessor: Option<[u8; 16]>,
+    ) -> Result<OrdinarySnapshotActivationPermit, SnapshotRuntimeError> {
+        let workspace_id = candidate.manifest.raw_workspace_id()?;
+        let snapshot_id = candidate.manifest.raw_snapshot_id()?;
+        let predecessor = store
+            .reader_factory()
+            .open()?
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT manifest.manifest_json_bytes
+                     FROM active_snapshot AS active
+                     JOIN serving_snapshot_manifest AS manifest
+                       ON manifest.snapshot_id=active.snapshot_id
+                     WHERE active.workspace_id=?1",
+                        [workspace_id.as_slice()],
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .optional()
+            })?;
+        let predecessor_manifest = predecessor
+            .map(|bytes| {
+                serde_json::from_slice::<ServingSnapshotManifest>(&bytes)
+                    .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))
+            })
+            .transpose()?;
+        let predecessor_snapshot_id = predecessor_manifest
+            .as_ref()
+            .map(ServingSnapshotManifest::raw_snapshot_id)
+            .transpose()?;
+        if predecessor_snapshot_id != expected_predecessor {
+            return Err(SnapshotRuntimeError::PointerConflict(
+                "ordinary candidate predecessor differs from the durable active manifest".into(),
+            ));
+        }
+        if let Some(predecessor) = predecessor_manifest.as_ref() {
+            let prior = &predecessor.body;
+            let next = &candidate.manifest.body;
+            if prior.manifest_version != next.manifest_version
+                || prior.workspace_id != next.workspace_id
+                || prior.repository_id != next.repository_id
+                || prior.worktree_id != next.worktree_id
+                || prior.registration_revision != next.registration_revision
+                || prior.bundles != next.bundles
+                || prior.limits_profile_digest != next.limits_profile_digest
+            {
+                return Err(SnapshotRuntimeError::PointerConflict(
+                    "manifest difference class requires governed semantic activation".into(),
+                ));
+            }
+        }
+        let active = store.active_ontology_authority(workspace_id)?;
+        match (active, candidate.manifest.body.result_authority.as_ref()) {
+            (None, None) => {}
+            (Some(active), Some(pin)) => {
+                if pin.package_identity != active.package_identity
+                    || pin.epoch_runtime_authority_identity
+                        != active.epoch_runtime_authority_identity
+                    || pin.program_identity != active.program_identity
+                    || pin.function_catalog_identity != active.function_catalog_identity
+                    || pin.policy_identity != active.policy_identity
+                    || pin.query_form_identity != active.query_form_identity
+                    || pin.checksum_version != active.checksum_version
+                    || pin.result_authority_identity
+                        != crate::snapshot::governed_result_authority_identity(pin)
+                {
+                    return Err(SnapshotRuntimeError::PointerConflict(
+                        "ordinary candidate changes retained semantic authority".into(),
+                    ));
+                }
+                let package_identity = store
+                    .reader_factory()
+                    .ontology_epoch_package_identity(&active.epoch_identity)?
+                    .ok_or_else(|| {
+                        SnapshotRuntimeError::PointerConflict(
+                            "active ontology epoch has no retained executable package".into(),
+                        )
+                    })?;
+                let package = crate::ontology_program::load_installed_ontology_program_package(
+                    &store.artifact_root(),
+                    &package_identity,
+                )
+                .map_err(|error| SnapshotRuntimeError::PointerConflict(error.to_string()))?;
+                let policy =
+                    crate::domain_conformance::DomainOperationPolicy::from_package(&package)
+                        .map_err(|error| {
+                            SnapshotRuntimeError::PointerConflict(error.to_string())
+                        })?;
+                let runtime = crate::ontology_program::EpochRuntimeAuthority::decode(&package)
+                    .map_err(|error| SnapshotRuntimeError::PointerConflict(error.to_string()))?;
+                if pin.package_identity != package.manifest.package_identity
+                    || pin.epoch_runtime_authority_identity != runtime.identity()
+                    || pin.program_identity != package.manifest.logical_program_identity
+                    || pin.function_catalog_identity
+                        != package.manifest.member_identities["program.calculation_contract"]
+                    || pin.query_form_identity
+                        != package.manifest.member_identities["program.phrase_binding"]
+                    || pin.policy_identity != policy.result_policy_identity()
+                    || pin.checksum_version
+                        != crate::ontology_program::result_checksum_version(&package).map_err(
+                            |error| SnapshotRuntimeError::PointerConflict(error.to_string()),
+                        )?
+                {
+                    return Err(SnapshotRuntimeError::PointerConflict(
+                        "ordinary candidate does not validate under the active retained package"
+                            .into(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(SnapshotRuntimeError::PointerConflict(
+                    "ordinary candidate changes ontology/result authority presence".into(),
+                ));
+            }
+        }
+        Ok(OrdinarySnapshotActivationPermit {
+            workspace: workspace_id,
+            snapshot: snapshot_id,
+            predecessor_snapshot: predecessor_snapshot_id,
+        })
     }
 
     /// Atomically activate after the durable pointer transaction commits.
@@ -351,10 +683,11 @@ impl ServingSnapshotRuntime {
     /// workspaces, or an injected crash seam.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)] // AC-G-26 fixes one auditable transaction order.
-    fn commit_fact_snapshot(
+    fn commit_permitted_fact_snapshot(
         &self,
         store: &mut OperationalStore,
         candidate: Arc<ServingSnapshotCandidate>,
+        permit: OrdinarySnapshotActivationPermit,
         expected_predecessor: Option<[u8; 16]>,
         expected_active_pointer_generation: u64,
         observed_durable_pointer_generation: u64,
@@ -362,10 +695,39 @@ impl ServingSnapshotRuntime {
         fault: Option<SnapshotActivationFaultPoint>,
     ) -> Result<Vec<SnapshotActivationStage>, SnapshotActivationError> {
         let mut trace = vec![SnapshotActivationStage::CandidateValidated];
+        if permit.workspace
+            != candidate.manifest.raw_workspace_id().map_err(|source| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotActivation,
+                    "INTERNAL_INVARIANT_VIOLATION",
+                    trace.clone(),
+                    SnapshotRuntimeError::Manifest(source),
+                )
+            })?
+            || permit.snapshot
+                != candidate.manifest.raw_snapshot_id().map_err(|source| {
+                    ErrorEnvelope::new(
+                        Phase::SnapshotActivation,
+                        "INTERNAL_INVARIANT_VIOLATION",
+                        trace.clone(),
+                        SnapshotRuntimeError::Manifest(source),
+                    )
+                })?
+            || permit.predecessor_snapshot != expected_predecessor
+        {
+            return Err(ErrorEnvelope::new(
+                Phase::SnapshotActivation,
+                "INTERNAL_INVARIANT_VIOLATION",
+                trace,
+                SnapshotRuntimeError::PointerConflict(
+                    "activation permit is not bound to this candidate transition".into(),
+                ),
+            ));
+        }
         self.activate_unphased(
             store,
             candidate,
-            expected_predecessor,
+            permit,
             expected_active_pointer_generation,
             observed_durable_pointer_generation,
             now,
@@ -382,9 +744,9 @@ impl ServingSnapshotRuntime {
         })
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_lines)]
-    fn activate_unphased(
+    fn commit_fact_snapshot(
         &self,
         store: &mut OperationalStore,
         candidate: Arc<ServingSnapshotCandidate>,
@@ -393,144 +755,91 @@ impl ServingSnapshotRuntime {
         observed_durable_pointer_generation: u64,
         now: u64,
         fault: Option<SnapshotActivationFaultPoint>,
+    ) -> Result<Vec<SnapshotActivationStage>, SnapshotActivationError> {
+        let permit = OrdinarySnapshotActivationPermit {
+            workspace: candidate.manifest.raw_workspace_id().map_err(|source| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotActivation,
+                    "INTERNAL_INVARIANT_VIOLATION",
+                    vec![SnapshotActivationStage::CandidateValidated],
+                    SnapshotRuntimeError::Manifest(source),
+                )
+            })?,
+            snapshot: candidate.manifest.raw_snapshot_id().map_err(|source| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotActivation,
+                    "INTERNAL_INVARIANT_VIOLATION",
+                    vec![SnapshotActivationStage::CandidateValidated],
+                    SnapshotRuntimeError::Manifest(source),
+                )
+            })?,
+            predecessor_snapshot: expected_predecessor,
+        };
+        self.commit_permitted_fact_snapshot(
+            store,
+            candidate,
+            permit,
+            expected_predecessor,
+            expected_active_pointer_generation,
+            observed_durable_pointer_generation,
+            now,
+            fault,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
+    fn activate_unphased(
+        &self,
+        store: &mut OperationalStore,
+        candidate: Arc<ServingSnapshotCandidate>,
+        permit: OrdinarySnapshotActivationPermit,
+        expected_active_pointer_generation: u64,
+        observed_durable_pointer_generation: u64,
+        now: u64,
+        fault: Option<SnapshotActivationFaultPoint>,
         trace: &mut Vec<SnapshotActivationStage>,
     ) -> Result<Vec<SnapshotActivationStage>, SnapshotRuntimeError> {
         candidate.manifest.validate()?;
-        let snapshot_id = candidate.manifest.raw_snapshot_id()?;
-        let workspace_id = candidate.manifest.raw_workspace_id()?;
         let publication_id = candidate.manifest.raw_publication_id()?;
         let manifest_body = candidate.manifest.body.canonical_body()?;
         let manifest_json = serde_json::to_vec(&candidate.manifest)
             .map_err(|error| SnapshotRuntimeError::Candidate(error.to_string()))?;
         let manifest_digest = candidate.manifest.raw_manifest_digest()?;
         let expected_generation = sql_u64(expected_active_pointer_generation)?;
-        let next_generation = expected_generation.checked_add(1).ok_or_else(|| {
-            SnapshotRuntimeError::PointerConflict("active pointer generation overflow".into())
-        })?;
         let observed_generation = sql_u64(observed_durable_pointer_generation)?;
         let now_sql = sql_u64(now)?;
-        store.write_transaction(|transaction| {
-            trace.push(SnapshotActivationStage::ReadyInserted);
-            transaction.execute(
-                "INSERT INTO serving_snapshot_manifest(snapshot_id, workspace_id,
-                 publication_id, state_code, manifest_body_bytes, manifest_json_bytes,
-                 manifest_digest, created_at, activated_at, retired_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)",
-                params![
-                    snapshot_id.as_slice(),
-                    workspace_id.as_slice(),
-                    publication_id.as_slice(),
-                    i64::from(ServingActivationState::Ready as u16),
-                    manifest_body,
-                    manifest_json,
-                    manifest_digest.as_slice(),
-                    now_sql,
-                ],
-            )?;
-            trace.push(SnapshotActivationStage::PredecessorVerified);
-            let current = transaction
-                .query_row(
-                    "SELECT snapshot_id, active_pointer_generation FROM active_snapshot
-                     WHERE workspace_id=?1",
-                    [workspace_id.as_slice()],
-                    |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .optional()?;
-            match (expected_predecessor, current) {
-                (None, None) if expected_generation == 0 => {}
-                (Some(expected), Some((actual, generation)))
-                    if actual.as_slice() == expected && generation == expected_generation => {}
-                _ => {
-                    return Err(SnapshotRuntimeError::PointerConflict(
-                        "predecessor or active generation changed".into(),
-                    ));
+        trace.extend([
+            SnapshotActivationStage::ReadyInserted,
+            SnapshotActivationStage::PredecessorVerified,
+            SnapshotActivationStage::PriorRetired,
+            SnapshotActivationStage::CandidateActivated,
+        ]);
+        store
+            .commit_classified_ordinary_serving_pointer(
+                &permit,
+                publication_id,
+                &manifest_body,
+                &manifest_json,
+                manifest_digest,
+                expected_generation,
+                observed_generation,
+                now_sql,
+                fault == Some(SnapshotActivationFaultPoint::BeforeSqlCommit),
+            )
+            .map_err(|error| {
+                if fault == Some(SnapshotActivationFaultPoint::BeforeSqlCommit)
+                    && error
+                        .to_string()
+                        .contains("injected ordinary serving-pointer fault")
+                {
+                    SnapshotRuntimeError::InjectedFault(
+                        SnapshotActivationFaultPoint::BeforeSqlCommit,
+                    )
+                } else {
+                    SnapshotRuntimeError::PointerConflict(error.to_string())
                 }
-            }
-            trace.push(SnapshotActivationStage::PriorRetired);
-            if let Some(predecessor) = expected_predecessor {
-                let retired = transaction.execute(
-                    "UPDATE serving_snapshot_manifest SET state_code=?2, retired_at=?3
-                     WHERE snapshot_id=?1 AND state_code=?4",
-                    params![
-                        predecessor.as_slice(),
-                        i64::from(ServingActivationState::Retired as u16),
-                        now_sql,
-                        i64::from(ServingActivationState::Active as u16),
-                    ],
-                )?;
-                if retired != 1 {
-                    return Err(SnapshotRuntimeError::PointerConflict(
-                        "predecessor manifest is not active".into(),
-                    ));
-                }
-            }
-            trace.push(SnapshotActivationStage::CandidateActivated);
-            let activated = transaction.execute(
-                "UPDATE serving_snapshot_manifest SET state_code=?2, activated_at=?3
-                 WHERE snapshot_id=?1 AND state_code=?4",
-                params![
-                    snapshot_id.as_slice(),
-                    i64::from(ServingActivationState::Active as u16),
-                    now_sql,
-                    i64::from(ServingActivationState::Ready as u16),
-                ],
-            )?;
-            if activated != 1 {
-                return Err(SnapshotRuntimeError::PointerConflict(
-                    "candidate did not transition READY to ACTIVE".into(),
-                ));
-            }
-            transaction.execute(
-                "INSERT INTO active_snapshot(workspace_id, snapshot_id, created_at,
-                 activated_at, observed_durable_pointer_generation,
-                 active_pointer_generation, lease_count)
-                 VALUES (?1, ?2, ?3, ?3, ?4, ?5, 0)
-                 ON CONFLICT(workspace_id) DO UPDATE SET snapshot_id=excluded.snapshot_id,
-                 created_at=excluded.created_at, activated_at=excluded.activated_at,
-                 observed_durable_pointer_generation=excluded.observed_durable_pointer_generation,
-                 active_pointer_generation=excluded.active_pointer_generation,
-                 lease_count=0",
-                params![
-                    workspace_id.as_slice(),
-                    snapshot_id.as_slice(),
-                    now_sql,
-                    observed_generation,
-                    next_generation,
-                ],
-            )?;
-            transaction.execute(
-                "UPDATE worktree_state SET active_snapshot_id=?2, updated_at=?3
-                 WHERE workspace_id=?1",
-                params![
-                    workspace_id.as_slice(),
-                    snapshot_id.as_slice(),
-                    now.to_string()
-                ],
-            )?;
-            if expected_predecessor.is_none() {
-                let ready = transaction.execute(
-                    "UPDATE workspace_registration SET status_code=?2, updated_at=?3
-                     WHERE workspace_id=?1 AND status_code=?4",
-                    params![
-                        workspace_id.as_slice(),
-                        i64::from(WorkspaceRegistryLifecycle::Ready as u16),
-                        now.to_string(),
-                        i64::from(WorkspaceRegistryLifecycle::Bootstrapping as u16),
-                    ],
-                )?;
-                if ready != 1 {
-                    return Err(SnapshotRuntimeError::PointerConflict(
-                        "first activation requires a BOOTSTRAPPING workspace".into(),
-                    ));
-                }
-            }
-            if fault == Some(SnapshotActivationFaultPoint::BeforeSqlCommit) {
-                return Err(SnapshotRuntimeError::InjectedFault(
-                    SnapshotActivationFaultPoint::BeforeSqlCommit,
-                ));
-            }
-            Ok::<_, SnapshotRuntimeError>(())
-        })?;
+            })?;
         trace.push(SnapshotActivationStage::DurablePointerCommitted);
         if fault == Some(SnapshotActivationFaultPoint::AfterSqlCommitBeforeMemorySwap) {
             return Err(SnapshotRuntimeError::InjectedFault(
@@ -547,7 +856,8 @@ impl ServingSnapshotRuntime {
     /// # Errors
     ///
     /// Rejects invalid candidates, malformed durable rows, or identity/byte mismatches.
-    pub fn recover(
+    #[cfg(test)]
+    fn recover_with_candidate(
         &self,
         store: &OperationalStore,
         candidate: Arc<ServingSnapshotCandidate>,
@@ -595,6 +905,55 @@ impl ServingSnapshotRuntime {
         self.active.store(Some(candidate));
         Ok(true)
     }
+
+    #[cfg(test)]
+    fn recover(
+        &self,
+        store: &OperationalStore,
+        candidate: Arc<ServingSnapshotCandidate>,
+    ) -> Result<bool, SnapshotRuntimeError> {
+        self.recover_with_candidate(store, candidate)
+    }
+
+    /// Reconstruct and install the active process-local pointer using only durable state and
+    /// exact-version Delta providers.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an absent active pointer or any manifest/provider reconstruction failure.
+    pub async fn recover_durable(
+        &self,
+        store: &OperationalStore,
+        workspace_id: [u8; 16],
+    ) -> Result<bool, SnapshotRuntimeError> {
+        let snapshot_id = store
+            .reader_factory()
+            .open()?
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT snapshot_id FROM active_snapshot WHERE workspace_id=?1",
+                        [workspace_id.as_slice()],
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .optional()
+            })?
+            .map(|bytes| {
+                bytes.try_into().map_err(|bytes: Vec<u8>| {
+                    SnapshotRuntimeError::Candidate(format!(
+                        "active snapshot id has {} bytes",
+                        bytes.len()
+                    ))
+                })
+            })
+            .transpose()?;
+        let Some(snapshot_id) = snapshot_id else {
+            return Ok(false);
+        };
+        let candidate = ServingSnapshotCandidate::reconstruct_durable(store, snapshot_id).await?;
+        self.active.store(Some(candidate));
+        Ok(true)
+    }
 }
 
 /// Read-only durable snapshot lease record.
@@ -613,18 +972,6 @@ pub struct SnapshotLeaseRecord {
     pub source_blob_lease_id: Option<[u8; 16]>,
     pub ontology_epoch_identity: Option<String>,
     pub result_authority: Option<ResultAuthorityPin>,
-}
-
-fn result_authority_pin(authority: ActiveOntologyAuthority) -> ResultAuthorityPin {
-    ResultAuthorityPin {
-        result_authority_identity: authority.result_authority_identity,
-        program_identity: authority.program_identity,
-        function_catalog_identity: authority.function_catalog_identity,
-        policy_identity: authority.policy_identity,
-        query_form_identity: authority.query_form_identity,
-        checksum_version: authority.checksum_version,
-        exact_table_set_identity: authority.exact_table_set_identity,
-    }
 }
 
 fn byte_hex(bytes: &[u8]) -> String {
@@ -681,8 +1028,18 @@ fn legacy_result_authority_pin(candidate: &ServingSnapshotCandidate) -> ResultAu
         )
         .as_bytes(),
     );
+    let epoch_runtime_authority_identity = legacy_epoch_runtime_authority_identity(body);
+    let package_identity = crate::integrity::framed_digest(
+        format!(
+            "legacy-epoch-package.v1\0{}\0{}",
+            body.bundles.ontology_bundle_id, body.bundles.schema_bundle_id
+        )
+        .as_bytes(),
+    );
     ResultAuthorityPin {
         result_authority_identity,
+        package_identity,
+        epoch_runtime_authority_identity,
         program_identity,
         function_catalog_identity,
         policy_identity,
@@ -690,6 +1047,16 @@ fn legacy_result_authority_pin(candidate: &ServingSnapshotCandidate) -> ResultAu
         checksum_version: "ResultChecksumV1".into(),
         exact_table_set_identity,
     }
+}
+
+fn legacy_epoch_runtime_authority_identity(body: &ServingSnapshotManifestBody) -> String {
+    crate::integrity::framed_digest(
+        format!(
+            "legacy-epoch-runtime-authority.v1\0{}\0{}",
+            body.bundles.schema_bundle_id, body.bundles.query_language_bundle_id
+        )
+        .as_bytes(),
+    )
 }
 
 /// In-process lease guard retaining the exact immutable snapshot graph.
@@ -755,10 +1122,29 @@ impl SnapshotLeaseManager {
         let mut ontology_epoch_identity = active_authority
             .as_ref()
             .map(|authority| authority.epoch_identity.clone());
-        let result_authority = active_authority.map_or_else(
-            || legacy_result_authority_pin(candidate.as_ref()),
-            result_authority_pin,
-        );
+        let result_authority = match (
+            active_authority.as_ref(),
+            candidate.manifest.body.result_authority.as_ref(),
+        ) {
+            (Some(active), Some(pin))
+                if pin.package_identity == active.package_identity
+                    && pin.epoch_runtime_authority_identity
+                        == active.epoch_runtime_authority_identity
+                    && pin.program_identity == active.program_identity
+                    && pin.function_catalog_identity == active.function_catalog_identity
+                    && pin.policy_identity == active.policy_identity
+                    && pin.query_form_identity == active.query_form_identity
+                    && pin.checksum_version == active.checksum_version =>
+            {
+                pin.clone()
+            }
+            (None, None) => legacy_result_authority_pin(candidate.as_ref()),
+            _ => {
+                return Err(SnapshotRuntimeError::Lease(
+                    "snapshot semantic authority does not match the active ontology epoch".into(),
+                ));
+            }
+        };
         if ontology_epoch_identity.is_none() {
             ontology_epoch_identity = Some(crate::integrity::framed_digest(
                 format!(
@@ -769,11 +1155,12 @@ impl SnapshotLeaseManager {
                 .as_bytes(),
             ));
         }
-        if let Some(manifest_authority) = candidate.manifest.body.result_authority.as_ref()
-            && &result_authority != manifest_authority
+        if candidate.manifest.body.result_authority.is_some()
+            && result_authority.exact_table_set_identity
+                != candidate.providers.exact_table_set_identity()
         {
             return Err(SnapshotRuntimeError::Lease(
-                "snapshot result authority does not match the active ontology epoch".into(),
+                "snapshot result authority does not match its exact provider set".into(),
             ));
         }
         let expires_at = now
@@ -902,7 +1289,8 @@ impl SnapshotLeaseManager {
     ///
     /// Rejects an absent/expired/foreign active lease, snapshot or authority mismatch, missing
     /// executable package, or failed ownership transition.
-    pub fn rehydrate(
+    #[allow(clippy::too_many_lines)] // Rehydration authenticates every durable lease/epoch/provider binding.
+    fn rehydrate_with_candidate(
         &self,
         store: &mut OperationalStore,
         candidate: Arc<ServingSnapshotCandidate>,
@@ -961,13 +1349,24 @@ impl SnapshotLeaseManager {
             .map_err(|error| SnapshotRuntimeError::Lease(error.to_string()))?;
             let policy = crate::domain_conformance::DomainOperationPolicy::from_package(&package)
                 .map_err(|error| SnapshotRuntimeError::Lease(error.to_string()))?;
+            let runtime = crate::ontology_program::EpochRuntimeAuthority::decode(&package)
+                .map_err(|error| SnapshotRuntimeError::Lease(error.to_string()))?;
             let authority = record.result_authority.as_ref().ok_or_else(|| {
                 SnapshotRuntimeError::Lease("governed lease has no result authority".into())
             })?;
-            if authority.program_identity != package.manifest.logical_program_identity
+            if authority.package_identity != package.manifest.package_identity
+                || authority.epoch_runtime_authority_identity != runtime.identity()
+                || authority.program_identity != package.manifest.logical_program_identity
                 || authority.policy_identity != policy.result_policy_identity()
                 || authority.function_catalog_identity
                     != package.manifest.member_identities["program.calculation_contract"]
+                || authority.query_form_identity
+                    != package.manifest.member_identities["program.phrase_binding"]
+                || authority.checksum_version != runtime.checksum_version()
+                || authority.exact_table_set_identity
+                    != candidate.providers().exact_table_set_identity()
+                || authority.result_authority_identity
+                    != crate::snapshot::governed_result_authority_identity(authority)
             {
                 return Err(SnapshotRuntimeError::Lease(
                     "retained package does not reconstruct the lease authority".into(),
@@ -1002,6 +1401,52 @@ impl SnapshotLeaseManager {
             record,
             snapshot: candidate,
         })
+    }
+
+    #[cfg(test)]
+    fn rehydrate(
+        &self,
+        store: &mut OperationalStore,
+        candidate: Arc<ServingSnapshotCandidate>,
+        lease_id: [u8; 16],
+        now: u64,
+    ) -> Result<SnapshotLeaseGuard, SnapshotRuntimeError> {
+        self.rehydrate_with_candidate(store, candidate, lease_id, now)
+    }
+
+    /// Rehydrate a durable lease without accepting caller-retained snapshot/provider state.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an absent lease, missing retained snapshot/package, exact-version reopen drift,
+    /// or lease ownership conflict.
+    pub async fn rehydrate_durable(
+        &self,
+        store: &mut OperationalStore,
+        lease_id: [u8; 16],
+        now: u64,
+    ) -> Result<SnapshotLeaseGuard, SnapshotRuntimeError> {
+        let record = store
+            .reader_factory()
+            .open()?
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT snapshot_id FROM snapshot_lease WHERE lease_id=?1",
+                        [lease_id.as_slice()],
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .optional()
+            })?
+            .ok_or_else(|| SnapshotRuntimeError::Lease("durable lease is absent".into()))?;
+        let snapshot_id: [u8; 16] = record.try_into().map_err(|record: Vec<u8>| {
+            SnapshotRuntimeError::Lease(format!(
+                "durable lease snapshot id has {} bytes",
+                record.len()
+            ))
+        })?;
+        let candidate = ServingSnapshotCandidate::reconstruct_durable(store, snapshot_id).await?;
+        self.rehydrate_with_candidate(store, candidate, lease_id, now)
     }
 
     /// Heartbeat an ACTIVE lease, extending its expiry.
@@ -1244,10 +1689,13 @@ impl SnapshotLeaseManager {
                  lease.ontology_epoch_identity, authority.result_authority_identity,
                  authority.program_identity, authority.function_catalog_identity,
                  authority.policy_identity, authority.query_form_identity,
-                 authority.checksum_version, authority.exact_table_set_identity
+                 authority.checksum_version, authority.exact_table_set_identity,
+                 manifest.manifest_json_bytes
                  FROM snapshot_lease AS lease
                  LEFT JOIN ontology_result_authority AS authority
                    ON authority.result_authority_identity=lease.result_authority_identity
+                 JOIN serving_snapshot_manifest AS manifest
+                   ON manifest.snapshot_id=lease.snapshot_id
                  WHERE lease.workspace_id=?1 ORDER BY lease.lease_id",
                 )?;
                 statement
@@ -1259,8 +1707,39 @@ impl SnapshotLeaseManager {
                         let result_authority_identity = row.get::<_, Option<String>>(12)?;
                         let result_authority = result_authority_identity
                             .map(|result_authority_identity| {
+                                let manifest: ServingSnapshotManifest = serde_json::from_slice(
+                                    &row.get::<_, Vec<u8>>(19)?,
+                                )
+                                .map_err(|error| {
+                                    rusqlite::Error::FromSqlConversionFailure(
+                                        19,
+                                        rusqlite::types::Type::Blob,
+                                        Box::new(error),
+                                    )
+                                })?;
+                                let epoch_runtime_authority_identity =
+                                    manifest.body.result_authority.as_ref().map_or_else(
+                                        || legacy_epoch_runtime_authority_identity(&manifest.body),
+                                        |pin| pin.epoch_runtime_authority_identity.clone(),
+                                    );
+                                let package_identity =
+                                    manifest.body.result_authority.as_ref().map_or_else(
+                                        || {
+                                            crate::integrity::framed_digest(
+                                                format!(
+                                                    "legacy-epoch-package.v1\0{}\0{}",
+                                                    manifest.body.bundles.ontology_bundle_id,
+                                                    manifest.body.bundles.schema_bundle_id
+                                                )
+                                                .as_bytes(),
+                                            )
+                                        },
+                                        |pin| pin.package_identity.clone(),
+                                    );
                                 Ok::<_, rusqlite::Error>(ResultAuthorityPin {
                                     result_authority_identity,
+                                    package_identity,
+                                    epoch_runtime_authority_identity,
                                     program_identity: row.get(13)?,
                                     function_catalog_identity: row.get(14)?,
                                     policy_identity: row.get(15)?,
@@ -1616,34 +2095,29 @@ mod tests {
 
     async fn ontology_report(
         predecessor: Option<String>,
-    ) -> crate::ontology_candidate::CandidateClosureReport {
-        let publication_id = [0x61; 16];
+    ) -> (
+        crate::ontology_candidate::CandidateClosureReport,
+        Arc<SnapshotProviderCatalog>,
+    ) {
+        let publication_id = PUBLICATION;
+        let catalog = Arc::new(SnapshotProviderCatalog::single_for_snapshot_tests(
+            publication_id,
+            WORKSPACE,
+            1,
+            OVERLAY,
+            2,
+            vec![CONTEXT],
+        ));
         let publication = crate::fabric::PublicationOutcome {
             publication_id,
-            scope: publication_scope(1),
+            scope: catalog.scope().clone(),
             pointer: crate::fabric::CurrentPublicationRecord {
                 workspace_id: WORKSPACE,
                 publication_id,
                 pointer_generation: 1,
                 updated_at_micros: 100,
             },
-            tables: BTreeMap::from([(
-                1,
-                crate::fabric::PublicationTableRecord {
-                    publication_id,
-                    workspace_id: WORKSPACE,
-                    table_code: 1,
-                    table_uri: "file:///ontology-authority/workspace".into(),
-                    delta_version: 7,
-                    schema_fingerprint: [0x62; 32],
-                    row_count: 1,
-                    owner_count: 1,
-                    table_checksum: [0x63; 32],
-                    primary_key_digest: [0x64; 32],
-                    required: true,
-                    validated: true,
-                },
-            )]),
+            tables: BTreeMap::from([(1, catalog.provider_record(1).unwrap().manifest.clone())]),
         };
         let runner = CandidateClosureRunner::new_for_epoch(
             build_ontology_program_package(&OntologyPackagingProfile::default()).unwrap(),
@@ -1664,10 +2138,11 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
         let providers = crate::ontology_relational_program::candidate_batch_providers(&batches)
             .expect("schema-faithful lease providers");
-        runner
+        let report = runner
             .execute_with_test_providers(&GateResourceEnvelope::default(), &providers)
             .await
-            .unwrap()
+            .unwrap();
+        (report, catalog)
     }
 
     fn candidate_with_table() -> Arc<ServingSnapshotCandidate> {
@@ -2197,7 +2672,7 @@ mod tests {
             "ResultChecksumV1"
         );
 
-        let report = ontology_report(None).await;
+        let (report, target_catalog) = ontology_report(None).await;
         let retained_package = crate::ontology_program::build_ontology_program_package(
             &crate::ontology_program::OntologyPackagingProfile::default(),
         )
@@ -2207,8 +2682,26 @@ mod tests {
             &retained_package,
         )
         .unwrap();
+        let evidence = report.durable_evidence();
+        let authority = ResultAuthorityPin {
+            result_authority_identity: evidence.result_authority_identity.clone(),
+            package_identity: evidence.package_identity.clone(),
+            epoch_runtime_authority_identity: evidence.epoch_runtime_authority_identity.clone(),
+            program_identity: evidence.program_identity.clone(),
+            function_catalog_identity: evidence.function_catalog_identity.clone(),
+            policy_identity: evidence.result_policy_identity.clone(),
+            query_form_identity: evidence.query_form_identity.clone(),
+            checksum_version: evidence.checksum_version.clone(),
+            exact_table_set_identity: evidence.exact_table_set_identity.clone(),
+        };
+        let mut target_body = body(2);
+        target_body.manifest_version = "2.0".into();
+        target_body.result_authority = Some(authority.clone());
+        let target =
+            Arc::new(ServingSnapshotCandidate::build(target_body, target_catalog, &[]).unwrap());
+        let staged = target.staged_record().unwrap();
         store
-            .persist_proved_ontology_candidate(&report, 12)
+            .persist_proved_ontology_candidate_with_snapshot(&report, &staged, 12)
             .unwrap();
         let decision = crate::operational_store::OntologyOwnerDecision::new_for_test(
             report.candidate_identity(),
@@ -2229,30 +2722,6 @@ mod tests {
             )
             .unwrap();
         store.activate_ontology_candidate(&request).unwrap();
-        let authority = store.active_ontology_authority(WORKSPACE).unwrap().unwrap();
-
-        let mut target_body = body(2);
-        target_body.manifest_version = "2.0".into();
-        target_body.result_authority = Some(result_authority_pin(authority.clone()));
-        let target_catalog = Arc::new(SnapshotProviderCatalog::empty_for_snapshot_tests(
-            PUBLICATION,
-            0,
-            OVERLAY,
-            publication_scope(2),
-        ));
-        let target =
-            Arc::new(ServingSnapshotCandidate::build(target_body, target_catalog, &[]).unwrap());
-        runtime
-            .commit_fact_snapshot(
-                &mut store,
-                Arc::clone(&target),
-                Some(legacy.manifest().raw_snapshot_id().unwrap()),
-                1,
-                2,
-                20,
-                None,
-            )
-            .unwrap();
         let new_lease = manager
             .acquire(
                 &mut store,
@@ -2269,6 +2738,11 @@ mod tests {
         assert_eq!(
             new_authority.result_authority_identity,
             authority.result_authority_identity
+        );
+        assert_eq!(new_authority.program_identity, authority.program_identity);
+        assert_eq!(
+            new_authority.exact_table_set_identity,
+            new_lease.snapshot().providers().exact_table_set_identity()
         );
         assert_eq!(new_authority.checksum_version, "ResultChecksumV2");
         assert_ne!(
@@ -2308,6 +2782,11 @@ mod tests {
         let old_lease_id = old_lease.record().lease_id;
         let old_snapshot = old_lease.snapshot();
         let new_lease_id = new_lease.record().lease_id;
+        let expected_new_result_identity = new_lease
+            .result_authority()
+            .unwrap()
+            .result_authority_identity
+            .clone();
         let new_snapshot = new_lease.snapshot();
         drop(old_lease);
         drop(new_lease);
@@ -2337,7 +2816,9 @@ mod tests {
                     && pin.function_catalog_identity == authority.function_catalog_identity
                     && pin.policy_identity == authority.policy_identity
                     && pin.query_form_identity == authority.query_form_identity
-                    && pin.exact_table_set_identity == authority.exact_table_set_identity
+                    && pin.checksum_version == "ResultChecksumV2"
+                    && pin.exact_table_set_identity
+                        == new_snapshot.providers().exact_table_set_identity()
             })
         }));
         let restarted = SnapshotLeaseManager::new([0x73; 16]);
@@ -2360,7 +2841,7 @@ mod tests {
                 .result_authority()
                 .unwrap()
                 .result_authority_identity,
-            authority.result_authority_identity
+            expected_new_result_identity
         );
         let package_manifest = reopened
             .artifact_root()

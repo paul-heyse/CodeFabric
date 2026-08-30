@@ -6,13 +6,15 @@ use std::sync::Arc;
 
 use super::{
     FabricError, LocalProviderFactory, LocalProviderRequest, PublicationOutcome, PublicationScope,
-    PublicationTableRecord, exact_provider, validate_open_table,
+    PublicationTableRecord, RetainedProviderTableSpec, exact_provider, exact_provider_retained,
+    validate_open_table, validate_open_table_retained,
 };
 #[cfg(test)]
 use crate::fabric::batch_checksum;
 use crate::fabric::publication::scope_filter;
 use crate::schema_registry::{
-    PublicationPinRole, TableSpec, table_scope_spec, table_spec, table_specs,
+    DomainTypedLiteral, EpochTableSpec, EpochTableSpecRegistry, PublicationPinRole, TableSpec,
+    id_domain_for_extension_name, table_scope_spec, table_spec, table_specs,
 };
 use crate::snapshot::SnapshotOverlayTable;
 #[cfg(test)]
@@ -31,7 +33,7 @@ use datafusion::datasource::{ViewTable, provider_as_source};
 use datafusion::execution::memory_pool::{FairSpillPool, MemoryConsumer, TrackConsumersPool};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::LogicalPlanBuilder;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType};
+use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType, col, lit};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionConfig;
 use deltalake::{DeltaTable, DeltaTableBuilder};
@@ -725,6 +727,156 @@ impl SnapshotProviderCatalog {
             })
     }
 
+    /// Reconstruct providers using only table contracts decoded from a retained executable epoch.
+    #[allow(clippy::result_large_err)]
+    pub(crate) async fn build_retained(
+        publication: &PublicationOutcome,
+        overlay: &dyn SnapshotOverlayProviderFactory,
+        specs: &EpochTableSpecRegistry,
+    ) -> Result<Self, SnapshotConstructionError> {
+        let mut trace = vec![SnapshotConstructionStage::ResolveVersions];
+        Self::build_retained_unphased(publication, overlay, specs, &mut trace)
+            .await
+            .map_err(|source| {
+                ErrorEnvelope::new(
+                    Phase::SnapshotConstruction,
+                    fabric_public_code(&source),
+                    trace,
+                    source,
+                )
+            })
+    }
+
+    #[allow(clippy::too_many_lines)] // Retained reconstruction authenticates the complete executable provider contract.
+    async fn build_retained_unphased(
+        publication: &PublicationOutcome,
+        overlay: &dyn SnapshotOverlayProviderFactory,
+        specs: &EpochTableSpecRegistry,
+        trace: &mut Vec<SnapshotConstructionStage>,
+    ) -> Result<Self, FabricError> {
+        if overlay.generation() != 0 || !overlay.table_manifests().is_empty() {
+            return Err(FabricError::SnapshotProviderIntegrity(
+                "retained reconstruction requires a generation-zero overlay".into(),
+            ));
+        }
+        validate_publication_scope(publication)?;
+        if publication.tables.keys().copied().collect::<BTreeSet<_>>()
+            != specs.table_codes().collect::<BTreeSet<_>>()
+        {
+            return Err(FabricError::SnapshotProviderIntegrity(
+                "publication census differs from the retained epoch table contract".into(),
+            ));
+        }
+        trace.push(SnapshotConstructionStage::ConstructProviders);
+        let mut wrapped = BTreeMap::new();
+        for (&table_code, manifest) in &publication.tables {
+            let spec = specs.spec(table_code).ok_or_else(|| {
+                FabricError::SnapshotProviderIntegrity(format!(
+                    "retained epoch has no table contract {table_code}"
+                ))
+            })?;
+            if manifest.publication_id != publication.publication_id
+                || manifest.workspace_id != publication.scope.workspace_id
+                || manifest.table_code != table_code
+                || manifest.required != spec.required_for_publication
+                || !manifest.validated
+            {
+                return Err(FabricError::SnapshotProviderIntegrity(format!(
+                    "{} retained manifest binding differs",
+                    spec.name
+                )));
+            }
+            let handle = DeltaHandleFactory::open(
+                &manifest.table_uri,
+                Some(manifest.delta_version),
+                DeltaAccessProfile::QueryServing,
+            )
+            .await?;
+            let authority = retained_provider_authority(spec);
+            validate_open_table_retained(&handle.table, &authority)?;
+            let provider = exact_provider_retained(
+                &handle.table,
+                &spec.name,
+                &spec.arrow_schema,
+                handle.profile(),
+            )
+            .await?;
+            let exact_statistics = provider.statistics();
+            let provider = scoped_provider_retained(spec, &publication.scope, provider)?;
+            let statistics = authenticate_retained_statistics(
+                &spec.name,
+                &spec.arrow_schema,
+                manifest.row_count,
+                exact_statistics,
+            )?;
+            let constraints = retained_constraints(spec, manifest)?;
+            let provider: Arc<dyn TableProvider> = Arc::new(EffectiveStatisticsProvider {
+                inner: provider,
+                statistics,
+                constraints,
+            });
+            let record = SnapshotProviderRecord {
+                manifest: manifest.clone(),
+                access_profile: DeltaAccessProfile::QueryServing,
+                primary_key_digest: manifest.primary_key_digest,
+                effective_content_digest: manifest.table_checksum,
+                effective_row_count: manifest.row_count,
+                effective_owner_count: manifest.owner_count,
+                provider,
+            };
+            validate_retained_provider_record(&record, spec)?;
+            wrapped.insert(table_code, record);
+        }
+        trace.push(SnapshotConstructionStage::WrapOverlay);
+        trace.push(SnapshotConstructionStage::Validate);
+        let mut base_tables = BTreeMap::new();
+        let mut ontology_tables = BTreeMap::new();
+        for (&table_code, record) in &wrapped {
+            let spec = specs
+                .spec(table_code)
+                .expect("retained census was validated");
+            if (11..=30).contains(&table_code) {
+                ontology_tables.insert(spec.name.clone(), record.provider());
+            } else {
+                base_tables.insert(spec.name.clone(), record.provider());
+            }
+        }
+        trace.push(SnapshotConstructionStage::Freeze);
+        let provider_count = wrapped.len();
+        Ok(Self {
+            publication_id: publication.publication_id,
+            scope: publication.scope.clone(),
+            overlay_generation: overlay.generation(),
+            overlay_checksum: overlay.checksum(),
+            overlay_memory_bytes: overlay.memory_bytes(),
+            overlay_tables: overlay.table_manifests().into(),
+            providers: wrapped,
+            catalog: Arc::new(FrozenCatalogProvider {
+                schemas: BTreeMap::from([
+                    (
+                        BASE_CATALOG_SCHEMA.to_owned(),
+                        Arc::new(FrozenSchemaProvider {
+                            tables: base_tables,
+                        }),
+                    ),
+                    (
+                        ONTOLOGY_CATALOG_SCHEMA.to_owned(),
+                        Arc::new(FrozenSchemaProvider {
+                            tables: ontology_tables,
+                        }),
+                    ),
+                ]),
+            }),
+            trace: trace.clone(),
+            metrics: SnapshotConstructionMetrics {
+                provider_count,
+                exact_version_count: provider_count,
+                overlay_generation: 0,
+                validation_scan_count: 0,
+            },
+        })
+    }
+
     #[allow(clippy::too_many_lines)] // One phased constructor preserves the atomic provider graph.
     async fn build_unphased(
         publication: &PublicationOutcome,
@@ -899,6 +1051,33 @@ impl SnapshotProviderCatalog {
         self.providers.values()
     }
 
+    /// Content identity of the exact Delta provider tuples behind this catalog.
+    ///
+    /// This deliberately excludes the publication locator while including table code, URI,
+    /// exact version, schema, and immutable table checksum. It is byte-identical to the
+    /// candidate-proof exact-table identity.
+    #[must_use]
+    pub fn exact_table_set_identity(&self) -> String {
+        let mut outer = Vec::new();
+        for record in self.providers.values() {
+            let mut binding = Vec::new();
+            for part in [
+                record.manifest.table_code.to_be_bytes().as_slice(),
+                record.manifest.table_uri.as_bytes(),
+                record.manifest.delta_version.to_be_bytes().as_slice(),
+                record.manifest.schema_fingerprint.as_slice(),
+                record.manifest.table_checksum.as_slice(),
+            ] {
+                binding.extend_from_slice(&(part.len() as u64).to_be_bytes());
+                binding.extend_from_slice(part);
+            }
+            let identity = crate::integrity::framed_digest(&binding);
+            outer.extend_from_slice(&(identity.len() as u64).to_be_bytes());
+            outer.extend_from_slice(identity.as_bytes());
+        }
+        crate::integrity::framed_digest(&outer)
+    }
+
     /// Digest the exact effective table contents while excluding base/publication locators.
     #[must_use]
     pub fn effective_state_digest(&self) -> [u8; 32] {
@@ -922,6 +1101,209 @@ impl SnapshotProviderCatalog {
     pub fn catalog(&self) -> Arc<dyn CatalogProvider> {
         Arc::clone(&self.catalog) as Arc<dyn CatalogProvider>
     }
+}
+
+fn retained_provider_authority(spec: &EpochTableSpec) -> RetainedProviderTableSpec<'_> {
+    RetainedProviderTableSpec {
+        name: &spec.name,
+        schema_digest: &spec.schema_digest,
+        arrow_schema: &spec.arrow_schema,
+        partition_columns: &spec.partition_columns,
+        zorder_columns: &spec.zorder_columns,
+        dependencies: &spec.dependencies,
+        allow_type_widening: spec.allow_type_widening,
+        column_mapping_mode: &spec.column_mapping_mode,
+    }
+}
+
+fn retained_constraints(
+    spec: &EpochTableSpec,
+    manifest: &PublicationTableRecord,
+) -> Result<Option<Constraints>, FabricError> {
+    if !manifest.validated || spec.primary_key.is_empty() {
+        return Ok(None);
+    }
+    let indices = spec
+        .primary_key
+        .iter()
+        .map(|name| {
+            let index = spec.arrow_schema.index_of(name)?;
+            if spec.arrow_schema.field(index).is_nullable() {
+                return Err(arrow_schema::ArrowError::SchemaError(format!(
+                    "retained primary-key field {name} is nullable"
+                )));
+            }
+            Ok(index)
+        })
+        .collect::<Result<Vec<_>, arrow_schema::ArrowError>>()?;
+    Ok(Some(Constraints::new_unverified(vec![
+        Constraint::PrimaryKey(indices),
+    ])))
+}
+
+fn retained_scope_literal(
+    spec: &EpochTableSpec,
+    column: &str,
+    value: [u8; 16],
+) -> Result<Expr, FabricError> {
+    let field = spec.arrow_schema.field_with_name(column)?;
+    let extension_name = field.extension_type_name().ok_or_else(|| {
+        FabricError::SnapshotProviderIntegrity(format!(
+            "retained scope field {column} has no logical ID domain"
+        ))
+    })?;
+    let domain = id_domain_for_extension_name(extension_name).ok_or_else(|| {
+        FabricError::SnapshotProviderIntegrity(format!(
+            "retained scope field {column} has an unknown logical ID domain"
+        ))
+    })?;
+    DomainTypedLiteral::new(domain, value)
+        .map(DomainTypedLiteral::into_expr)
+        .map_err(|error| FabricError::SnapshotProviderIntegrity(error.to_string()))
+}
+
+fn retained_scope_filter(
+    spec: &EpochTableSpec,
+    scope: &PublicationScope,
+) -> Result<Option<Expr>, FabricError> {
+    let mut predicates = Vec::new();
+    if let Some(column) = spec.workspace_column.as_deref() {
+        predicates.push(col(column).eq(retained_scope_literal(spec, column, scope.workspace_id)?));
+    }
+    if let Some(column) = spec.source_generation_column.as_deref() {
+        predicates.push(col(column).eq(lit(scope.source_generation)));
+    }
+    if let Some(column) = spec.analysis_context_set_column.as_deref() {
+        predicates.push(col(column).eq(retained_scope_literal(
+            spec,
+            column,
+            scope.analysis_context_set_id,
+        )?));
+    }
+    if let Some(column) = spec.analysis_context_column.as_deref() {
+        let contexts = scope.analysis_context_ids.iter().try_fold(
+            None,
+            |combined, context| -> Result<Option<Expr>, FabricError> {
+                let predicate = col(column).eq(retained_scope_literal(spec, column, *context)?);
+                Ok(Some(combined.map_or(predicate.clone(), |prior: Expr| {
+                    prior.or(predicate)
+                })))
+            },
+        )?;
+        if let Some(contexts) = contexts {
+            predicates.push(contexts);
+        }
+    }
+    Ok(predicates.into_iter().reduce(Expr::and))
+}
+
+fn scoped_provider_retained(
+    spec: &EpochTableSpec,
+    scope: &PublicationScope,
+    provider: Arc<dyn TableProvider>,
+) -> Result<Arc<dyn TableProvider>, FabricError> {
+    let Some(filter) = retained_scope_filter(spec, scope)? else {
+        return Ok(provider);
+    };
+    let plan = LogicalPlanBuilder::scan(&spec.name, provider_as_source(provider), None)?
+        .filter(filter)?
+        .build()?;
+    Ok(Arc::new(ViewTable::new(plan, None)))
+}
+
+fn authenticate_retained_statistics(
+    table_name: &str,
+    schema: &arrow_schema::Schema,
+    row_count: i64,
+    exact: Option<Statistics>,
+) -> Result<Statistics, FabricError> {
+    let row_count = usize::try_from(row_count).map_err(|_| {
+        FabricError::SnapshotProviderIntegrity(format!(
+            "{table_name} authenticated row count is negative or exceeds usize"
+        ))
+    })?;
+    let Some(mut exact) = exact else {
+        return Ok(Statistics {
+            num_rows: Precision::Exact(row_count),
+            total_byte_size: Precision::Absent,
+            column_statistics: schema
+                .fields()
+                .iter()
+                .map(|field| ColumnStatistics {
+                    null_count: if field.is_nullable() {
+                        Precision::Absent
+                    } else {
+                        Precision::Exact(0)
+                    },
+                    ..ColumnStatistics::default()
+                })
+                .collect(),
+        });
+    };
+    match exact.num_rows {
+        Precision::Exact(value) | Precision::Inexact(value) if value == row_count => {}
+        Precision::Absent => exact.num_rows = Precision::Exact(row_count),
+        _ => {
+            return Err(FabricError::SnapshotProviderIntegrity(format!(
+                "{table_name} Delta statistics row count differs from retained publication"
+            )));
+        }
+    }
+    if exact.column_statistics.len() != schema.fields().len() {
+        return Err(FabricError::SnapshotProviderIntegrity(format!(
+            "{table_name} Delta statistics column census differs from retained schema"
+        )));
+    }
+    for (field, column) in schema.fields().iter().zip(&mut exact.column_statistics) {
+        if !field.is_nullable() && column.null_count == Precision::Absent {
+            column.null_count = Precision::Exact(0);
+        }
+    }
+    Ok(exact)
+}
+
+fn retained_schema_fingerprint(spec: &EpochTableSpec) -> Result<[u8; 32], FabricError> {
+    let hex = spec
+        .schema_digest
+        .strip_prefix("b3:")
+        .filter(|value| value.len() == 64)
+        .ok_or_else(|| {
+            FabricError::SnapshotProviderIntegrity(format!(
+                "{} retained schema digest framing is invalid",
+                spec.name
+            ))
+        })?;
+    let mut digest = [0; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).map_err(|_| {
+            FabricError::SnapshotProviderIntegrity(format!(
+                "{} retained schema digest is not hexadecimal",
+                spec.name
+            ))
+        })?;
+    }
+    Ok(digest)
+}
+
+fn validate_retained_provider_record(
+    record: &SnapshotProviderRecord,
+    spec: &EpochTableSpec,
+) -> Result<(), FabricError> {
+    if record.access_profile != DeltaAccessProfile::QueryServing
+        || record.access_profile.skip_stats()
+        || record.provider.schema().fields() != spec.arrow_schema.fields()
+        || record.manifest.schema_fingerprint != retained_schema_fingerprint(spec)?
+        || record.effective_content_digest != record.manifest.table_checksum
+        || record.primary_key_digest != record.manifest.primary_key_digest
+        || record.effective_row_count != record.manifest.row_count
+        || record.effective_owner_count != record.manifest.owner_count
+    {
+        return Err(FabricError::SnapshotProviderIntegrity(format!(
+            "{} provider differs from retained epoch authority",
+            spec.name
+        )));
+    }
+    Ok(())
 }
 
 fn publication_validated_constraints(
@@ -974,29 +1356,7 @@ fn scoped_provider(
 }
 
 fn validate_publication_census(publication: &PublicationOutcome) -> Result<(), FabricError> {
-    if publication.pointer.publication_id != publication.publication_id {
-        return Err(FabricError::SnapshotProviderIntegrity(
-            "publication outcome and current pointer identities differ".into(),
-        ));
-    }
-    if publication.scope.workspace_id != publication.pointer.workspace_id
-        || publication.scope.analysis_context_ids.is_empty()
-        || !publication
-            .scope
-            .analysis_context_ids
-            .windows(2)
-            .all(|pair| pair[0] < pair[1])
-        || crate::identity::context_set_identity(
-            publication.scope.workspace_id,
-            &publication.scope.analysis_context_ids,
-        )
-        .map_err(|error| FabricError::SnapshotProviderIntegrity(error.to_string()))?
-        .id != publication.scope.analysis_context_set_id
-    {
-        return Err(FabricError::SnapshotProviderIntegrity(
-            "publication scope identity is invalid".into(),
-        ));
-    }
+    validate_publication_scope(publication)?;
     let expected = table_specs()
         .iter()
         .filter(|spec| spec.publication_pin_role == PublicationPinRole::PinnedData)
@@ -1020,6 +1380,33 @@ fn validate_publication_census(publication: &PublicationOutcome) -> Result<(), F
                 spec.name
             )));
         }
+    }
+    Ok(())
+}
+
+fn validate_publication_scope(publication: &PublicationOutcome) -> Result<(), FabricError> {
+    if publication.pointer.publication_id != publication.publication_id {
+        return Err(FabricError::SnapshotProviderIntegrity(
+            "publication outcome and current pointer identities differ".into(),
+        ));
+    }
+    if publication.scope.workspace_id != publication.pointer.workspace_id
+        || publication.scope.analysis_context_ids.is_empty()
+        || !publication
+            .scope
+            .analysis_context_ids
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        || crate::identity::context_set_identity(
+            publication.scope.workspace_id,
+            &publication.scope.analysis_context_ids,
+        )
+        .map_err(|error| FabricError::SnapshotProviderIntegrity(error.to_string()))?
+        .id != publication.scope.analysis_context_set_id
+    {
+        return Err(FabricError::SnapshotProviderIntegrity(
+            "publication scope identity is invalid".into(),
+        ));
     }
     Ok(())
 }

@@ -1,6 +1,6 @@
 //! Generated Arrow schema registry for durable, overlay, and operational surfaces.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
 
 use arrow_schema::extension::ExtensionType;
@@ -10,6 +10,7 @@ use datafusion::common::metadata::FieldMetadata;
 use datafusion::common::types::DFExtensionType;
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::registry::{ExtensionTypeRegistration, ExtensionTypeRegistrationRef};
+use serde::{Deserialize, Serialize};
 
 /// Generated descriptor for one application-owned ID logical type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -221,6 +222,108 @@ pub const fn id_domains() -> &'static [GeneratedIdDomainSpec] {
 #[must_use]
 pub fn extension_type_registrations() -> Vec<ExtensionTypeRegistrationRef> {
     generated_id_domain_registrations()
+}
+
+const EPOCH_EXTENSION_REGISTRY_VERSION: &str = "epoch-extension-registry.v1";
+const EPOCH_RESULT_CONTRACT_SET_VERSION: &str = "epoch-result-contract-set.v1";
+const EPOCH_TABLE_CONTRACT_SET_VERSION: &str = "epoch-table-contract-set.v1";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EpochExtensionSpec {
+    extension_name: String,
+    storage_width: i32,
+    metadata: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EpochExtensionRegistryArtifact {
+    artifact_version: String,
+    extensions: Vec<EpochExtensionSpec>,
+}
+
+/// Canonical bytes for the complete logical-extension registry owned by one executable epoch.
+pub(crate) fn epoch_extension_registry_bytes() -> Result<Vec<u8>, ArrowError> {
+    let mut extensions = id_domains()
+        .iter()
+        .map(|domain| EpochExtensionSpec {
+            extension_name: domain.extension_name.to_owned(),
+            storage_width: 16,
+            metadata: format!(
+                "{{\"domain\":\"{}\",\"preimage_recipe_id\":\"{}\",\"preimage_version\":\"{}\"}}",
+                domain.domain_slug, domain.preimage_recipe_id, domain.preimage_version
+            ),
+        })
+        .collect::<Vec<_>>();
+    extensions.push(EpochExtensionSpec {
+        extension_name: Hash32Extension::NAME.into(),
+        storage_width: 32,
+        metadata: Hash32Extension::METADATA_V1.into(),
+    });
+    crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+        "artifact_version": EPOCH_EXTENSION_REGISTRY_VERSION,
+        "extensions": extensions,
+    }))
+    .map_err(|error| ArrowError::JsonError(error.to_string()))
+}
+
+/// Rebuild DataFusion extension factories only from retained, digest-authenticated epoch bytes.
+pub(crate) fn epoch_extension_type_registrations(
+    bytes: &[u8],
+) -> Result<Vec<ExtensionTypeRegistrationRef>, ArrowError> {
+    let artifact: EpochExtensionRegistryArtifact =
+        serde_json::from_slice(bytes).map_err(|error| ArrowError::JsonError(error.to_string()))?;
+    let canonical = crate::contracts::jcs::canonicalize_value(
+        &serde_json::to_value(&artifact)
+            .map_err(|error| ArrowError::JsonError(error.to_string()))?,
+    )
+    .map_err(|error| ArrowError::JsonError(error.to_string()))?;
+    if artifact.artifact_version != EPOCH_EXTENSION_REGISTRY_VERSION
+        || artifact.extensions.is_empty()
+        || canonical != bytes
+    {
+        return Err(ArrowError::InvalidArgumentError(
+            "retained extension registry is noncanonical or has another version".into(),
+        ));
+    }
+    let mut names = std::collections::BTreeSet::new();
+    artifact
+        .extensions
+        .into_iter()
+        .map(|spec| {
+            if spec.extension_name.is_empty()
+                || !names.insert(spec.extension_name.clone())
+                || !matches!(spec.storage_width, 16 | 32)
+                || spec.metadata.is_empty()
+            {
+                return Err(ArrowError::InvalidArgumentError(
+                    "retained extension registry has an invalid or repeated entry".into(),
+                ));
+            }
+            let name = spec.extension_name;
+            let registered_name = name.clone();
+            let expected_metadata = spec.metadata;
+            let storage_width = spec.storage_width;
+            Ok(ExtensionTypeRegistration::new_arc(
+                name,
+                move |storage_type, metadata| {
+                    if storage_type != &DataType::FixedSizeBinary(storage_width)
+                        || metadata != Some(expected_metadata.as_str())
+                    {
+                        return Err(ArrowError::InvalidArgumentError(format!(
+                            "{registered_name} differs from retained epoch extension semantics"
+                        ))
+                        .into());
+                    }
+                    Ok(Arc::new(DataFusionCodeFabricExtension {
+                        storage_type: storage_type.clone(),
+                        metadata: expected_metadata.clone(),
+                    }))
+                },
+            ))
+        })
+        .collect()
 }
 
 /// Resolve a generated extension name to its application ID domain.
@@ -821,6 +924,253 @@ pub fn result_schema(result_schema_id: &str) -> Option<SchemaRef> {
                 metadata,
             ))
         })
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EpochResultContractSetArtifact {
+    artifact_version: String,
+    schema_generation_identity: String,
+    schemas: BTreeMap<String, Schema>,
+}
+
+/// Runtime result schemas decoded from the exact retained epoch artifact.
+#[derive(Clone, Debug)]
+pub(crate) struct EpochResultSchemaRegistry {
+    schemas: BTreeMap<String, SchemaRef>,
+}
+
+impl EpochResultSchemaRegistry {
+    /// Authenticate and decode canonical retained result-contract bytes.
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, ArrowError> {
+        let artifact: EpochResultContractSetArtifact = serde_json::from_slice(bytes)
+            .map_err(|error| ArrowError::JsonError(error.to_string()))?;
+        let canonical = crate::contracts::jcs::canonicalize_value(
+            &serde_json::to_value(&artifact)
+                .map_err(|error| ArrowError::JsonError(error.to_string()))?,
+        )
+        .map_err(|error| ArrowError::JsonError(error.to_string()))?;
+        if artifact.artifact_version != EPOCH_RESULT_CONTRACT_SET_VERSION
+            || artifact.schema_generation_identity.is_empty()
+            || artifact.schemas.is_empty()
+            || canonical != bytes
+        {
+            return Err(ArrowError::InvalidArgumentError(
+                "retained result-contract set is noncanonical, empty, or has another version"
+                    .into(),
+            ));
+        }
+        for (schema_id, schema) in &artifact.schemas {
+            if schema_id.is_empty()
+                || schema.metadata().get("com.codefabric.cpg.result_schema_id") != Some(schema_id)
+            {
+                return Err(ArrowError::InvalidArgumentError(
+                    "retained result schema identity differs from its schema metadata".into(),
+                ));
+            }
+        }
+        Ok(Self {
+            schemas: artifact
+                .schemas
+                .into_iter()
+                .map(|(identity, schema)| (identity, Arc::new(schema)))
+                .collect(),
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn result_schema(&self, result_schema_id: &str) -> Option<SchemaRef> {
+        self.schemas.get(result_schema_id).map(Arc::clone)
+    }
+
+    #[must_use]
+    pub(crate) fn project_result_schema(
+        &self,
+        result_schema_id: &str,
+        names: &[&str],
+    ) -> Option<SchemaRef> {
+        let schema = self.schemas.get(result_schema_id)?;
+        let fields = names
+            .iter()
+            .map(|name| schema.field_with_name(name).ok().cloned())
+            .collect::<Option<Vec<_>>>()?;
+        Some(Arc::new(Schema::new_with_metadata(
+            fields,
+            HashMap::from([(
+                "com.codefabric.cpg.projected_result_schema_id".to_owned(),
+                result_schema_id.to_owned(),
+            )]),
+        )))
+    }
+}
+
+/// Canonical retained Arrow result-contract schemas and their schema-generation identity.
+pub(crate) fn epoch_result_contract_set_bytes() -> Result<Vec<u8>, ArrowError> {
+    let schemas = result_schema_contracts()
+        .iter()
+        .map(|contract| {
+            result_schema(contract.result_schema_id)
+                .map(|schema| {
+                    (
+                        contract.result_schema_id.to_owned(),
+                        schema.as_ref().clone(),
+                    )
+                })
+                .ok_or_else(|| {
+                    ArrowError::SchemaError(format!(
+                        "generated result schema {} is absent",
+                        contract.result_schema_id
+                    ))
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+        "artifact_version": EPOCH_RESULT_CONTRACT_SET_VERSION,
+        "schema_generation_identity": schema_contract_digest(),
+        "schemas": schemas,
+    }))
+    .map_err(|error| ArrowError::JsonError(error.to_string()))
+}
+
+/// Executable table/provider contract retained with one ontology epoch.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EpochTableSpec {
+    pub table_code: i16,
+    pub name: String,
+    pub schema_digest: String,
+    pub arrow_schema: Schema,
+    pub primary_key: Vec<String>,
+    pub partition_columns: Vec<String>,
+    pub zorder_columns: Vec<String>,
+    pub dependencies: Vec<i16>,
+    pub required_for_publication: bool,
+    pub allow_type_widening: bool,
+    pub column_mapping_mode: String,
+    pub workspace_column: Option<String>,
+    pub analysis_context_column: Option<String>,
+    pub source_generation_column: Option<String>,
+    pub analysis_context_set_column: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EpochTableContractSetArtifact {
+    artifact_version: String,
+    schema_generation_identity: String,
+    tables: BTreeMap<i16, EpochTableSpec>,
+}
+
+/// Runtime table/provider contracts decoded solely from retained epoch bytes.
+#[derive(Clone, Debug)]
+pub(crate) struct EpochTableSpecRegistry {
+    specs: BTreeMap<i16, EpochTableSpec>,
+}
+
+impl EpochTableSpecRegistry {
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, ArrowError> {
+        let artifact: EpochTableContractSetArtifact = serde_json::from_slice(bytes)
+            .map_err(|error| ArrowError::JsonError(error.to_string()))?;
+        let canonical = crate::contracts::jcs::canonicalize_value(
+            &serde_json::to_value(&artifact)
+                .map_err(|error| ArrowError::JsonError(error.to_string()))?,
+        )
+        .map_err(|error| ArrowError::JsonError(error.to_string()))?;
+        if artifact.artifact_version != EPOCH_TABLE_CONTRACT_SET_VERSION
+            || artifact.schema_generation_identity.is_empty()
+            || artifact.tables.is_empty()
+            || canonical != bytes
+        {
+            return Err(ArrowError::InvalidArgumentError(
+                "retained table-contract set is noncanonical, empty, or has another version".into(),
+            ));
+        }
+        for (&table_code, spec) in &artifact.tables {
+            let decoded_schema_digest =
+                crate::fabric::delta_schema_digest(&Arc::new(spec.arrow_schema.clone()))
+                    .map_err(|error| ArrowError::SchemaError(error.to_string()))?;
+            if spec.table_code != table_code
+                || spec.name.is_empty()
+                || !spec.schema_digest.starts_with("b3:")
+                || decoded_schema_digest != spec.schema_digest
+                || spec
+                    .primary_key
+                    .iter()
+                    .any(|name| spec.arrow_schema.field_with_name(name).is_err())
+            {
+                return Err(ArrowError::InvalidArgumentError(
+                    "retained table contract has inconsistent identity, schema, or primary key"
+                        .into(),
+                ));
+            }
+        }
+        Ok(Self {
+            specs: artifact.tables,
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn spec(&self, table_code: i16) -> Option<&EpochTableSpec> {
+        self.specs.get(&table_code)
+    }
+
+    #[must_use]
+    pub(crate) fn table_codes(&self) -> impl ExactSizeIterator<Item = i16> + '_ {
+        self.specs.keys().copied()
+    }
+}
+
+/// Canonical provider/table contracts required to reconstruct exact-version serving catalogs.
+pub(crate) fn epoch_table_contract_set_bytes() -> Result<Vec<u8>, ArrowError> {
+    let tables = table_specs()
+        .iter()
+        .filter(|spec| spec.publication_pin_role == PublicationPinRole::PinnedData)
+        .map(|spec| {
+            let scope = table_scope_spec(spec.table_code);
+            (
+                spec.table_code,
+                EpochTableSpec {
+                    table_code: spec.table_code,
+                    name: spec.name.to_owned(),
+                    schema_digest: spec.schema_digest.clone(),
+                    arrow_schema: spec.arrow_schema.as_ref().clone(),
+                    primary_key: spec.primary_key.iter().map(ToString::to_string).collect(),
+                    partition_columns: spec
+                        .partition_columns
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                    zorder_columns: spec
+                        .zorder_columns
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                    dependencies: spec.dependencies.to_vec(),
+                    required_for_publication: spec.required_for_publication,
+                    allow_type_widening: schema_evolution_policy().allow_type_widening,
+                    column_mapping_mode: schema_evolution_policy().column_mapping_mode.to_owned(),
+                    workspace_column: scope
+                        .and_then(|value| value.workspace_column)
+                        .map(ToString::to_string),
+                    analysis_context_column: scope
+                        .and_then(|value| value.analysis_context_column)
+                        .map(ToString::to_string),
+                    source_generation_column: scope
+                        .and_then(|value| value.source_generation_column)
+                        .map(ToString::to_string),
+                    analysis_context_set_column: scope
+                        .and_then(|value| value.analysis_context_set_column)
+                        .map(ToString::to_string),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+        "artifact_version": EPOCH_TABLE_CONTRACT_SET_VERSION,
+        "schema_generation_identity": schema_contract_digest(),
+        "tables": tables,
+    }))
+    .map_err(|error| ArrowError::JsonError(error.to_string()))
 }
 
 /// Project an internal dependency schema from fields owned by one generated result contract.

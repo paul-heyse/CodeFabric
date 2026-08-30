@@ -159,6 +159,7 @@ pub(crate) struct DurableCandidateEvidence {
     pub config_identity: String,
     pub policy_identity: String,
     pub result_policy_identity: String,
+    pub epoch_runtime_authority_identity: String,
     pub exact_table_set_identity: String,
     pub publication_id: [u8; 16],
     pub observed_durable_pointer_generation: i64,
@@ -647,9 +648,11 @@ impl CandidateClosureRunner {
     pub async fn open_frozen_catalog(
         &self,
     ) -> Result<crate::fabric::SnapshotProviderCatalog, CandidateClosureError> {
-        crate::fabric::SnapshotProviderCatalog::build(
+        let runtime = crate::ontology_program::EpochRuntimeAuthority::decode(&self.package)?;
+        crate::fabric::SnapshotProviderCatalog::build_retained(
             &self.publication,
             &crate::fabric::EmptySnapshotOverlay,
+            runtime.table_specs(),
         )
         .await
         .map_err(|error| CandidateClosureError::Invalid(error.to_string()))
@@ -867,6 +870,29 @@ impl CandidateClosureRunner {
                 content_identity: binding.table_checksum,
             })
             .collect::<Vec<_>>();
+        let function_catalog_identity =
+            self.package.manifest.member_identities["program.calculation_contract"].clone();
+        let query_form_identity =
+            self.package.manifest.member_identities["program.phrase_binding"].clone();
+        let checksum_version = crate::ontology_program::result_checksum_version(&self.package)?;
+        let result_policy_identity = self.session.result_policy_identity();
+        let epoch_runtime_authority_identity =
+            crate::ontology_program::EpochRuntimeAuthority::decode(&self.package)?
+                .identity()
+                .to_owned();
+        let result_authority_identity = crate::snapshot::governed_result_authority_identity(
+            &crate::snapshot::ResultAuthorityPin {
+                result_authority_identity: String::new(),
+                package_identity: self.package.manifest.package_identity.clone(),
+                epoch_runtime_authority_identity: epoch_runtime_authority_identity.clone(),
+                program_identity: self.package.manifest.logical_program_identity.clone(),
+                function_catalog_identity: function_catalog_identity.clone(),
+                policy_identity: result_policy_identity.clone(),
+                query_form_identity: query_form_identity.clone(),
+                checksum_version: checksum_version.clone(),
+                exact_table_set_identity: self.exact_tables.identity().to_owned(),
+            },
+        );
         let manifest_bytes = canonical_value_bytes(&serde_json::json!({
             "candidate_identity": self.candidate_identity,
             "workspace_id": self.publication.scope.workspace_id,
@@ -875,32 +901,19 @@ impl CandidateClosureRunner {
             "session_identity": self.session.session_identity(),
             "config_identity": self.session.config_identity(),
             "policy_identity": self.session.policy_identity(),
-            "result_policy_identity": self.session.result_policy_identity(),
+            "result_policy_identity": result_policy_identity,
+            "epoch_runtime_authority_identity": epoch_runtime_authority_identity,
+            "result_authority_identity": result_authority_identity,
             "exact_table_set_identity": self.exact_tables.identity(),
-            "function_catalog_identity": self.package.manifest.member_identities["program.calculation_contract"],
-            "query_form_identity": self.package.manifest.member_identities["program.phrase_binding"],
-            "checksum_version": crate::ontology_program::result_checksum_version(&self.package)?,
+            "function_catalog_identity": function_catalog_identity,
+            "query_form_identity": query_form_identity,
+            "checksum_version": checksum_version,
             "predecessor_epoch_identity": self.predecessor_epoch_identity,
             "rollback_retain_until": self.rollback_retain_until,
             "receipt_set_identity": receipt_set_identity,
             "operation_count": programs.len(),
             "bootstrap_relation_count": self.requirements.len(),
         }))?;
-        let function_catalog_identity =
-            self.package.manifest.member_identities["program.calculation_contract"].clone();
-        let query_form_identity =
-            self.package.manifest.member_identities["program.phrase_binding"].clone();
-        let checksum_version = crate::ontology_program::result_checksum_version(&self.package)?;
-        let result_policy_identity = self.session.result_policy_identity();
-        let result_authority_identity = framed([
-            b"ontology-result-authority.v1".as_slice(),
-            self.package.manifest.logical_program_identity.as_bytes(),
-            function_catalog_identity.as_bytes(),
-            result_policy_identity.as_bytes(),
-            query_form_identity.as_bytes(),
-            checksum_version.as_bytes(),
-            self.exact_tables.identity().as_bytes(),
-        ]);
         let durable = DurableCandidateEvidence {
             candidate_identity: self.candidate_identity.clone(),
             workspace_id: self.publication.scope.workspace_id,
@@ -911,6 +924,7 @@ impl CandidateClosureRunner {
             config_identity: self.session.config_identity().to_owned(),
             policy_identity: self.session.policy_identity().to_owned(),
             result_policy_identity,
+            epoch_runtime_authority_identity,
             exact_table_set_identity: self.exact_tables.identity().to_owned(),
             publication_id: self.publication.publication_id,
             observed_durable_pointer_generation: self.publication.pointer.pointer_generation,

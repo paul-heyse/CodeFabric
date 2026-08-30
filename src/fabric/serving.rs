@@ -452,6 +452,7 @@ pub struct ServingQuerySession {
     lease: SnapshotLeaseGuard,
     context: SessionContext,
     ontology_compiler: Arc<crate::ontology_executor::OntologyProgramCompiler>,
+    epoch_runtime_authority: Arc<crate::ontology_program::EpochRuntimeAuthority>,
     domain_policy: Arc<crate::domain_conformance::DomainOperationPolicy>,
     evidence: RwLock<ServingRuntimeEvidence>,
     _control_reservation: Arc<MemoryReservation>,
@@ -529,9 +530,6 @@ impl ServingQuerySession {
             .set_bool("datafusion.execution.parquet.reorder_filters", false)
             .with_repartition_joins(true)
             .with_repartition_aggregations(true);
-        let extension_types = MemoryExtensionTypeRegistry::new_with_types(
-            crate::schema_registry::extension_type_registrations(),
-        )?;
         let epoch_identity = lease
             .record()
             .ontology_epoch_identity
@@ -560,6 +558,13 @@ impl ServingQuerySession {
                 "ontology epoch has no retained executable package artifact".into(),
             ));
         };
+        let epoch_runtime_authority = Arc::new(
+            crate::ontology_program::EpochRuntimeAuthority::decode(&package)
+                .map_err(|error| ServingQueryError::Configuration(error.to_string()))?,
+        );
+        let extension_types = MemoryExtensionTypeRegistry::new_with_types(
+            epoch_runtime_authority.extension_type_registrations()?,
+        )?;
         let policy = Arc::new(
             crate::domain_conformance::DomainOperationPolicy::from_package(&package)
                 .map_err(ServingQueryError::from)?,
@@ -573,15 +578,20 @@ impl ServingQuerySession {
         })?;
         let governed_epoch = lease.snapshot().manifest().body.result_authority.is_some();
         if governed_epoch
-            && (pinned_policy.policy_identity != policy.result_policy_identity()
+            && (pinned_policy.package_identity != package.manifest.package_identity
+                || pinned_policy.epoch_runtime_authority_identity
+                    != epoch_runtime_authority.identity()
+                || pinned_policy.policy_identity != policy.result_policy_identity()
                 || pinned_policy.program_identity != package.manifest.logical_program_identity
                 || pinned_policy.function_catalog_identity
                     != package.manifest.member_identities["program.calculation_contract"]
                 || pinned_policy.query_form_identity
                     != package.manifest.member_identities["program.phrase_binding"]
-                || pinned_policy.checksum_version
-                    != crate::ontology_program::result_checksum_version(&package)
-                        .map_err(|error| ServingQueryError::Configuration(error.to_string()))?)
+                || pinned_policy.checksum_version != epoch_runtime_authority.checksum_version()
+                || pinned_policy.exact_table_set_identity
+                    != lease.snapshot().providers().exact_table_set_identity()
+                || pinned_policy.result_authority_identity
+                    != crate::snapshot::governed_result_authority_identity(pinned_policy))
         {
             return Err(ServingQueryError::Configuration(
                 "lease authority cannot be reconstructed from the resolved ontology package".into(),
@@ -656,6 +666,7 @@ impl ServingQuerySession {
             lease,
             context,
             ontology_compiler,
+            epoch_runtime_authority,
             domain_policy: policy,
             evidence: RwLock::new(evidence),
             _control_reservation: Arc::new(control_reservation),
@@ -685,6 +696,24 @@ impl ServingQuerySession {
         self.lease.record().snapshot_id
     }
 
+    /// Runtime-artifact identity decoded from the retained package selected by this lease.
+    #[must_use]
+    pub fn retained_epoch_runtime_identity(&self) -> &str {
+        self.epoch_runtime_authority.identity()
+    }
+
+    /// Result schema decoded from retained epoch bytes (used by the semantic compiler too).
+    #[must_use]
+    pub fn retained_result_schema(&self, identity: &str) -> Option<arrow_schema::SchemaRef> {
+        self.epoch_runtime_authority.result_schema(identity)
+    }
+
+    /// Checksum contract decoded from the retained epoch rather than current generated code.
+    #[must_use]
+    pub fn retained_checksum_version(&self) -> &str {
+        self.epoch_runtime_authority.checksum_version()
+    }
+
     /// Immutable manifest that supplies the client-visible snapshot projection.
     #[must_use]
     pub fn snapshot_manifest(&self) -> crate::snapshot::ServingSnapshotManifest {
@@ -701,7 +730,18 @@ impl ServingQuerySession {
 
     /// Stable digest of every execution setting that may affect physical realization.
     pub(crate) fn execution_config_digest(&self) -> Result<String, ServingQueryError> {
-        execution_config_digest(&self.limits)
+        let config = execution_config_digest(&self.limits)?;
+        Ok(crate::integrity::framed_digest(
+            &[
+                config.as_bytes(),
+                self.epoch_runtime_authority.identity().as_bytes(),
+                &self
+                    .epoch_runtime_authority
+                    .public_wire_file_count()
+                    .to_be_bytes(),
+            ]
+            .concat(),
+        ))
     }
 
     /// Plan, verify, execute, and describe one read-only SQL query.

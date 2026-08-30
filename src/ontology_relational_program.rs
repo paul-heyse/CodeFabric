@@ -1258,17 +1258,12 @@ mod tests {
 
     #[test]
     fn graph_count_and_depth_bounds_accept_exact_and_reject_overlimit() {
-        validate_graph_counts(MAX_PROGRAM_NODES, MAX_PROGRAM_EXPRESSIONS)
-            .expect("exact count bounds");
-        assert!(validate_graph_counts(MAX_PROGRAM_NODES + 1, 0).is_err());
-        assert!(validate_graph_counts(0, MAX_PROGRAM_EXPRESSIONS + 1).is_err());
-
         fn cast_chain(depth: usize) -> OntologyRelationalProgram {
             let mut graph = graph_fixture();
             graph.expressions.clear();
             graph.expression_edges.clear();
             graph.expressions.insert(
-                format!("cast:0"),
+                "cast:0".to_string(),
                 ExpressionNode::Cast {
                     target_type: "int64".into(),
                 },
@@ -1316,6 +1311,11 @@ mod tests {
             );
             graph
         }
+
+        validate_graph_counts(MAX_PROGRAM_NODES, MAX_PROGRAM_EXPRESSIONS)
+            .expect("exact count bounds");
+        assert!(validate_graph_counts(MAX_PROGRAM_NODES + 1, 0).is_err());
+        assert!(validate_graph_counts(0, MAX_PROGRAM_EXPRESSIONS + 1).is_err());
 
         cast_chain(MAX_PROGRAM_GRAPH_DEPTH)
             .validate_graph()

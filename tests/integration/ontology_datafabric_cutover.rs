@@ -8,17 +8,24 @@ use std::time::{Duration, Instant};
 
 use codefabric::fabric::{
     EmptySnapshotOverlay, PublicationOutcome, PublicationPins, PublicationRequest,
-    SnapshotProviderCatalog, WorkspaceFabric, bootstrap_workspace,
+    ServingQuerySession, ServingRuntimeConfig, SnapshotProviderCatalog, WorkspaceFabric,
+    bootstrap_workspace,
 };
+use codefabric::governed_session::GovernedSession;
 use codefabric::identity::{
     IdentityDomain, SOURCE_CONTEXT_ID, context_set_identity, encode_public_id,
 };
-use codefabric::ontology_activation::OntologyCandidateSubmission;
+use codefabric::ontology_activation::{OntologyActivationCoordinator, OntologyCandidateSubmission};
+use codefabric::ontology_candidate::CandidateClosureRunner;
+use codefabric::ontology_gate::GateResourceEnvelope;
 use codefabric::ontology_program::{
     InstalledOntologyProgramPackage, OntologyPackagingProfile, build_ontology_program_package,
-    install_ontology_program_package, verify_installed_ontology_program_package,
+    install_ontology_program_package, reseal_ontology_program_package,
+    verify_installed_ontology_program_package,
 };
-use codefabric::operational_store::{ActiveOntologyAuthority, OperationalStore};
+use codefabric::operational_store::{
+    ActiveOntologyAuthority, OperationalStore, OperationalStoreError,
+};
 use codefabric::registries::SnapshotLeaseKind;
 use codefabric::snapshot::{
     ResultAuthorityPin, ServingSnapshotManifestBody, SnapshotBasePublication, SnapshotBundles,
@@ -29,6 +36,7 @@ use codefabric::snapshot_runtime::{
 };
 use codefabric::source_image::{SourceCapturePolicy, SourceImageStore};
 use codefabric::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
+use datafusion::prelude::SessionConfig;
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -192,6 +200,8 @@ fn response(output: Output) -> Value {
 fn authority_pin(authority: &ActiveOntologyAuthority) -> ResultAuthorityPin {
     ResultAuthorityPin {
         result_authority_identity: authority.result_authority_identity.clone(),
+        package_identity: authority.package_identity.clone(),
+        epoch_runtime_authority_identity: authority.epoch_runtime_authority_identity.clone(),
         program_identity: authority.program_identity.clone(),
         function_catalog_identity: authority.function_catalog_identity.clone(),
         policy_identity: authority.policy_identity.clone(),
@@ -199,6 +209,36 @@ fn authority_pin(authority: &ActiveOntologyAuthority) -> ResultAuthorityPin {
         checksum_version: authority.checksum_version.clone(),
         exact_table_set_identity: authority.exact_table_set_identity.clone(),
     }
+}
+
+fn result_schema_variant(
+    mut package: codefabric::ontology_program::OntologyProgramPackage,
+) -> codefabric::ontology_program::OntologyProgramPackage {
+    let artifact = package
+        .runtime_artifacts
+        .get_mut("result-contract-set.json")
+        .expect("result-contract runtime artifact");
+    let mut value: Value = serde_json::from_slice(artifact).expect("decode result contracts");
+    value["schemas"]["result.find_entities.v2"]["metadata"]
+        .as_object_mut()
+        .expect("result schema metadata")
+        .insert(
+            "com.codefabric.cpg.epoch_variant".into(),
+            Value::String("synthetic-v2".into()),
+        );
+    *artifact = codefabric::contracts::jcs::canonicalize_value(&value)
+        .expect("canonical variant result contracts");
+    let table_artifact = package
+        .runtime_artifacts
+        .get_mut("table-contract-set.json")
+        .expect("retained table contracts");
+    let mut table_value: Value =
+        serde_json::from_slice(table_artifact).expect("decode retained table contracts");
+    table_value["tables"]["1"]["primary_key"] = serde_json::json!([]);
+    *table_artifact = codefabric::contracts::jcs::canonicalize_value(&table_value)
+        .expect("canonical variant table contracts");
+    reseal_ontology_program_package(&mut package).expect("reseal runtime-authority variant");
+    package
 }
 
 async fn publication_request(
@@ -349,6 +389,7 @@ fn write_candidate_submission(
     name: &str,
     publication: PublicationOutcome,
     registration_revision: u64,
+    retained_program_epoch_identity: Option<String>,
 ) -> std::path::PathBuf {
     let submission = OntologyCandidateSubmission {
         manifest_body: snapshot_body(
@@ -358,8 +399,11 @@ fn write_candidate_submission(
             None,
         ),
         publication,
+        retained_program_epoch_identity,
         source_blob_digests: Vec::new(),
-        rollback_retain_until: 1_000_000,
+        // Year 2100 in Unix milliseconds; retained across daemon restarts while remaining a
+        // canonical JSON safe integer for cross-language submission hashing.
+        rollback_retain_until: 4_102_444_800_000,
     };
     let path = root.join(format!("{name}.candidate.json"));
     fs::write(
@@ -465,6 +509,7 @@ async fn run_scenario() -> IntegrationEvidence {
         "target",
         initial_publication.clone(),
         workspace.registration_revision,
+        None,
     );
     let competitor_submission = root.path().join("target-competitor.candidate.json");
     let mut competitor: OntologyCandidateSubmission =
@@ -687,16 +732,18 @@ async fn run_scenario() -> IntegrationEvidence {
         .active_ontology_authority(workspace.workspace_id)
         .expect("target authority read")
         .expect("target authority active");
-    let target = serving_candidate(
-        workspace.workspace_id,
-        workspace.registration_revision,
-        &initial_publication,
-        Some(authority_pin(&target_authority)),
-    )
-    .await;
+    let target_snapshot_id = store
+        .ontology_candidate(&target_authority.candidate_identity)
+        .expect("target candidate read")
+        .and_then(|candidate| candidate.serving_snapshot_id)
+        .expect("target candidate snapshot identity");
+    let target = ServingSnapshotCandidate::reconstruct_durable(&store, target_snapshot_id)
+        .await
+        .expect("reconstruct target solely from durable exact-version authority");
     assert!(
         serving_runtime
-            .recover(&store, Arc::clone(&target))
+            .recover_durable(&store, workspace.workspace_id)
+            .await
             .expect("recover atomically activated target snapshot")
     );
     let target_lease = lease_manager
@@ -757,11 +804,108 @@ async fn run_scenario() -> IntegrationEvidence {
         )
         .expect("activate post-publication snapshot with unchanged authority");
 
+    let variant_package = result_schema_variant(package.clone());
+    let variant_installation = install_ontology_program_package(&state_root, &variant_package)
+        .expect("install result-schema variant epoch");
+    let variant_session =
+        GovernedSession::for_epoch_package(SessionConfig::new(), &variant_package)
+            .expect("sealed variant proof session");
+    let variant_runner = CandidateClosureRunner::new_for_epoch(
+        variant_package.clone(),
+        post_publication.clone(),
+        variant_session,
+        Some(target_authority.epoch_identity.clone()),
+        1_000_000,
+    )
+    .expect("variant candidate runner");
+    let variant_proved = OntologyActivationCoordinator::prove_and_stage(
+        &mut store,
+        &variant_runner,
+        &GateResourceEnvelope::default(),
+        snapshot_body(
+            workspace.workspace_id,
+            workspace.registration_revision,
+            &post_publication,
+            None,
+        ),
+        &[],
+        50,
+    )
+    .await
+    .expect("prove variant epoch");
+    let variant_outcome = store
+        .activate_proved_ontology_candidate(
+            workspace.workspace_id,
+            variant_proved.candidate_identity(),
+            &workspace.administrative_key,
+            "cutover-result-schema-variant",
+            &digest(0xb1),
+            51,
+        )
+        .expect("activate variant epoch through owner route");
+    let variant_authority = store
+        .active_ontology_authority(workspace.workspace_id)
+        .expect("variant authority")
+        .expect("variant epoch active");
+    assert_eq!(
+        variant_authority.epoch_identity,
+        variant_outcome.epoch_identity
+    );
+    assert_ne!(
+        variant_authority.epoch_runtime_authority_identity,
+        target_authority.epoch_runtime_authority_identity
+    );
+    let variant_snapshot_id = store
+        .ontology_candidate(&variant_authority.candidate_identity)
+        .expect("variant candidate")
+        .and_then(|candidate| candidate.serving_snapshot_id)
+        .expect("variant snapshot");
+    let variant = ServingSnapshotCandidate::reconstruct_durable(&store, variant_snapshot_id)
+        .await
+        .expect("reconstruct variant exact providers");
+    assert!(
+        target
+            .providers()
+            .provider(1)
+            .expect("target workspace provider")
+            .constraints()
+            .is_some(),
+        "base epoch retains the generated workspace primary key"
+    );
+    assert!(
+        variant
+            .providers()
+            .provider(1)
+            .expect("variant workspace provider")
+            .constraints()
+            .is_none(),
+        "variant provider reconstruction must use its retained table contract, not current globals"
+    );
+    let variant_lease = lease_manager
+        .acquire(
+            &mut store,
+            &mut source_images,
+            Arc::clone(&variant),
+            SnapshotLeaseKind::ResourceRead,
+            None,
+            52,
+            Duration::from_secs(10_000),
+            None,
+        )
+        .expect("variant retained lease");
+
+    let rollback_publication_request =
+        publication_request(&fabric, workspace.workspace_id, 0x53, 3).await;
+    let rollback_publication = fabric
+        .publish(&mut store, &rollback_publication_request, &[])
+        .await
+        .expect("publish distinct forward-rollback data candidate");
     let rollback_submission = write_candidate_submission(
         root.path(),
         "rollback",
-        post_publication.clone(),
+        rollback_publication,
         workspace.registration_revision,
+        Some(target_authority.epoch_identity.clone()),
     );
     drop(fabric);
     drop(store);
@@ -792,16 +936,18 @@ async fn run_scenario() -> IntegrationEvidence {
         .active_ontology_authority(workspace.workspace_id)
         .expect("rollback authority")
         .expect("rollback authority active");
-    let rollback = serving_candidate(
-        workspace.workspace_id,
-        workspace.registration_revision,
-        &post_publication,
-        Some(authority_pin(&rollback_authority)),
-    )
-    .await;
+    let rollback_snapshot_id = store
+        .ontology_candidate(&rollback_authority.candidate_identity)
+        .expect("rollback candidate read")
+        .and_then(|candidate| candidate.serving_snapshot_id)
+        .expect("rollback candidate snapshot identity");
+    let rollback = ServingSnapshotCandidate::reconstruct_durable(&store, rollback_snapshot_id)
+        .await
+        .expect("reconstruct rollback solely from durable exact-version authority");
     assert!(
         serving_runtime
-            .recover(&store, Arc::clone(&rollback))
+            .recover_durable(&store, workspace.workspace_id)
+            .await
             .expect("recover atomically activated rollback snapshot")
     );
     let rollback_lease = lease_manager
@@ -827,6 +973,153 @@ async fn run_scenario() -> IntegrationEvidence {
         rollback_lease.record().ontology_epoch_identity,
         target_lease.record().ontology_epoch_identity
     );
+    let old_lease_id = old_lease.record().lease_id;
+    let target_lease_id = target_lease.record().lease_id;
+    let variant_lease_id = variant_lease.record().lease_id;
+    let rollback_lease_id = rollback_lease.record().lease_id;
+    let old_snapshot_id = old_lease.record().snapshot_id;
+    let target_snapshot_id = target_lease.record().snapshot_id;
+    let variant_snapshot_id = variant_lease.record().snapshot_id;
+    let rollback_snapshot_id = rollback_lease.record().snapshot_id;
+    drop(old_lease);
+    drop(target_lease);
+    drop(variant_lease);
+    drop(rollback_lease);
+    let restarted_lease_manager = SnapshotLeaseManager::new([0x62; 16]);
+    assert_eq!(
+        restarted_lease_manager
+            .orphan_after_restart(&mut store, 62)
+            .expect("orphan prior-process leases"),
+        4
+    );
+    let old_lease = restarted_lease_manager
+        .rehydrate_durable(&mut store, old_lease_id, 63)
+        .await
+        .expect("rehydrate predecessor lease without retained Arc");
+    let target_lease = restarted_lease_manager
+        .rehydrate_durable(&mut store, target_lease_id, 63)
+        .await
+        .expect("rehydrate target lease without retained Arc");
+    let variant_lease = restarted_lease_manager
+        .rehydrate_durable(&mut store, variant_lease_id, 63)
+        .await
+        .expect("rehydrate variant lease without retained Arc");
+    let rollback_lease = restarted_lease_manager
+        .rehydrate_durable(&mut store, rollback_lease_id, 63)
+        .await
+        .expect("rehydrate rollback lease without retained Arc");
+    let old_epoch = old_lease.record().ontology_epoch_identity.clone();
+    let old_result_identity = old_lease
+        .result_authority()
+        .expect("rehydrated predecessor authority")
+        .result_authority_identity
+        .clone();
+    let target_epoch = target_lease.record().ontology_epoch_identity.clone();
+    let variant_epoch = variant_lease.record().ontology_epoch_identity.clone();
+    let rollback_epoch = rollback_lease.record().ontology_epoch_identity.clone();
+    let operational = store.reader_factory();
+    let old_session = ServingQuerySession::from_lease(
+        old_lease,
+        &operational,
+        ServingRuntimeConfig::new(
+            64 * 1024 * 1024,
+            64 * 1024 * 1024,
+            root.path().join("restart-old-spill"),
+            1,
+        )
+        .expect("old runtime profile"),
+    )
+    .expect("reconstruct executable predecessor session after restart");
+    let target_session = ServingQuerySession::from_lease(
+        target_lease,
+        &operational,
+        ServingRuntimeConfig::new(
+            64 * 1024 * 1024,
+            64 * 1024 * 1024,
+            root.path().join("restart-target-spill"),
+            1,
+        )
+        .expect("target runtime profile"),
+    )
+    .expect("reconstruct executable target session after restart");
+    let variant_session = ServingQuerySession::from_lease(
+        variant_lease,
+        &operational,
+        ServingRuntimeConfig::new(
+            64 * 1024 * 1024,
+            64 * 1024 * 1024,
+            root.path().join("restart-variant-spill"),
+            1,
+        )
+        .expect("variant runtime profile"),
+    )
+    .expect("reconstruct executable variant session after restart");
+    let rollback_session = ServingQuerySession::from_lease(
+        rollback_lease,
+        &operational,
+        ServingRuntimeConfig::new(
+            64 * 1024 * 1024,
+            64 * 1024 * 1024,
+            root.path().join("restart-rollback-spill"),
+            1,
+        )
+        .expect("rollback runtime profile"),
+    )
+    .expect("reconstruct executable rollback session after restart");
+    assert_eq!(old_session.snapshot_id(), old_snapshot_id);
+    assert_eq!(target_session.snapshot_id(), target_snapshot_id);
+    assert_eq!(variant_session.snapshot_id(), variant_snapshot_id);
+    assert_eq!(rollback_session.snapshot_id(), rollback_snapshot_id);
+    assert_eq!(
+        target_session.retained_epoch_runtime_identity(),
+        target_authority.epoch_runtime_authority_identity
+    );
+    assert_eq!(
+        variant_session.retained_epoch_runtime_identity(),
+        variant_authority.epoch_runtime_authority_identity
+    );
+    assert_eq!(
+        rollback_session.retained_epoch_runtime_identity(),
+        target_authority.epoch_runtime_authority_identity,
+        "forward rollback must select the retained predecessor runtime artifact"
+    );
+    assert!(
+        target_session
+            .retained_result_schema("result.find_entities.v2")
+            .expect("target retained schema")
+            .metadata()
+            .get("com.codefabric.cpg.epoch_variant")
+            .is_none()
+    );
+    assert_eq!(
+        variant_session
+            .retained_result_schema("result.find_entities.v2")
+            .expect("variant retained schema")
+            .metadata()
+            .get("com.codefabric.cpg.epoch_variant")
+            .map(String::as_str),
+        Some("synthetic-v2")
+    );
+    assert!(
+        rollback_session
+            .retained_result_schema("result.find_entities.v2")
+            .expect("rollback retained schema")
+            .metadata()
+            .get("com.codefabric.cpg.epoch_variant")
+            .is_none()
+    );
+    assert_eq!(
+        target_session.retained_checksum_version(),
+        target_authority.checksum_version
+    );
+    assert_eq!(
+        variant_session.retained_checksum_version(),
+        variant_authority.checksum_version
+    );
+    assert_eq!(
+        rollback_session.retained_checksum_version(),
+        target_authority.checksum_version
+    );
     let active_generation = store
         .reader_factory()
         .open()
@@ -841,19 +1134,15 @@ async fn run_scenario() -> IntegrationEvidence {
         .expect("rollback pointer generation");
     drop(store);
 
-    let reopened = OperationalStore::open(&database_path).expect("lease restart readback");
+    let mut reopened = OperationalStore::open(&database_path).expect("lease restart readback");
     let leases = SnapshotLeaseManager::list(&reopened, workspace.workspace_id)
         .expect("old/new lease restart reconstruction");
     let legacy_lease_preserved = leases.iter().any(|lease| {
-        lease.lease_id == old_lease.record().lease_id
-            && lease.ontology_epoch_identity == old_lease.record().ontology_epoch_identity
+        lease.lease_id == old_lease_id
+            && lease.ontology_epoch_identity == old_epoch
             && lease.result_authority.as_ref().is_some_and(|authority| {
                 authority.checksum_version == "ResultChecksumV1"
-                    && authority.result_authority_identity
-                        == old_lease
-                            .result_authority()
-                            .expect("legacy lease authority")
-                            .result_authority_identity
+                    && authority.result_authority_identity == old_result_identity
             })
     });
     let v2_count = leases
@@ -874,15 +1163,42 @@ async fn run_scenario() -> IntegrationEvidence {
         .iter()
         .filter_map(|lease| lease.ontology_epoch_identity.as_deref())
         .collect::<std::collections::BTreeSet<_>>();
-    let old_new_leases_survived_restart = leases.len() == 3
+    let old_new_leases_survived_restart = leases.len() == 4
         && legacy_lease_preserved
-        && v2_count == 2
+        && v2_count == 3
         && versioned_authorities.contains(target_authority.result_authority_identity.as_str())
+        && versioned_authorities.contains(variant_authority.result_authority_identity.as_str())
         && versioned_authorities.contains(rollback_authority.result_authority_identity.as_str())
-        && ontology_epochs.contains(target_authority.epoch_identity.as_str())
-        && ontology_epochs.contains(rollback_authority.epoch_identity.as_str());
+        && target_epoch
+            .as_deref()
+            .is_some_and(|epoch| ontology_epochs.contains(epoch))
+        && variant_epoch
+            .as_deref()
+            .is_some_and(|epoch| ontology_epochs.contains(epoch))
+        && rollback_epoch
+            .as_deref()
+            .is_some_and(|epoch| ontology_epochs.contains(epoch));
     verify_installed_ontology_program_package(&installation, &package)
         .expect("retained package survives cutover and rollback");
+    verify_installed_ontology_program_package(&variant_installation, &variant_package)
+        .expect("variant retained package survives cutover and rollback");
+    reopened
+        .write_transaction(|transaction| -> Result<(), OperationalStoreError> {
+            transaction.execute(
+                "UPDATE ontology_result_authority SET checksum_version=?2
+                 WHERE result_authority_identity=?1",
+                rusqlite::params![
+                    rollback_authority.result_authority_identity,
+                    "ResultChecksumTampered"
+                ],
+            )?;
+            Ok(())
+        })
+        .expect("inject persisted result-authority row drift");
+    assert!(
+        reopened.validate_ontology_activation_recovery().is_err(),
+        "restart integrity audit must reject result-authority row/manifest drift"
+    );
 
     IntegrationEvidence {
         exact_delta_readback,

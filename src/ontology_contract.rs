@@ -78,6 +78,11 @@ where
 /// Record identities are sorted because plan and operand ordinals carry semantic order. Source
 /// array ordering is deliberately non-semantic, so formatting-only row movement cannot alter the
 /// compiled program identity.
+///
+/// # Panics
+///
+/// Panics only when one record length cannot be represented by `u64`, which cannot occur on the
+/// supported 64-bit targets.
 pub fn rule_semantics_identity<'a>(records: impl IntoIterator<Item = &'a str>) -> String {
     let mut records = records.into_iter().collect::<Vec<_>>();
     records.sort_unstable();
