@@ -199,9 +199,7 @@ def test_odf_compiled_rule_contract_census() -> None:
     contracts = ir["ontology_rule_contracts"]
     graph = ir["ontology_program_graph"]
     rule_ids = {contract["rule_id"] for contract in contracts}
-    operation_ids = {
-        operation["operation_id"] for operation in graph["operations"]
-    }
+    operation_ids = {operation["operation_id"] for operation in graph["operations"]}
     assert contracts and graph["programs"] and graph["operations"]
     assert all(
         "operation_kind" not in contract and "ordered_operands" not in contract
